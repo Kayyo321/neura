@@ -1,6 +1,7 @@
 #include "task_analysis.hpp"
 
 #include "host_binding.hpp"
+#include "kernel_signature.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -269,6 +270,10 @@ std::optional<TaskAnalysis::Reason> TaskAnalysis::direct(const IrNode& node) con
 std::optional<TaskAnalysis::Reason> TaskAnalysis::isolated_reason(const IrNode& node) const {
     switch (node.op) {
     case IrOp::ExternalCall:
+        // A kernel runs inside the NVM like a heap operation: it reads its
+        // arguments and writes only the storage it is given, so a task or an
+        // isolated item may call it (docs/runtime/Kernels.md).
+        if (valid(node.symbol) && kernel_bound(symbol(node.symbol))) return std::nullopt;
         return Reason{"issues a host request", node.span, no_symbol};
     case IrOp::Spawn:
     case IrOp::TaskScope:

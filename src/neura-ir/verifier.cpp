@@ -414,6 +414,14 @@ private:
             case AttributeId::KernelBinding:
                 if (attribute.value.items[0].text.empty())
                     report(entry.span, "a kernel binding of " + name(id) + " needs a kernel name");
+                // Only a bodyless function runs its kernel; on one with a body
+                // the attribute has no effect. A .nir file cannot bind a kernel
+                // outside the trusted library any more than source can.
+                if (!entry.has_body &&
+                    (!entry.external || entry.host_binding || !entry.generics.empty() || !valid(entry.owner) ||
+                     symbol(entry.owner).kind != SymbolKind::Module || !valid(source_file(program_, id)) ||
+                     symbol(source_file(program_, id)).library_path.empty()))
+                    report(entry.span, "invalid standard library kernel binding of " + name(id));
                 break;
             default:
                 break;

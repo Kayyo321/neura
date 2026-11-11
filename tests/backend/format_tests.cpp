@@ -67,7 +67,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(6), Kind::Unsupported, "format version 1.6 is not supported");
+    expect_rejected(version_bytes(7), Kind::Unsupported, "format version 1.7 is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -133,6 +133,78 @@ NEURA_TEST(format, message_trap_requires_version_1_2_and_text) {
     auto& exit = image.functions.front().blocks.front().exits.front();
     exit.arguments = {{nvr::ValueKind::Constant, 2, 0}};
     expect_invalid(image, "a message trap requires one text argument");
+}
+
+NEURA_TEST(format, kernel_exits_and_table) {
+    // Types: 0 void, 1 bool, 2 int32, 3 text, 4 text[], 5 uint8, 6 uint8[list], 7 uint32, 8 uint64.
+    // The entry allocates an empty byte list, calls neura.digest.crc32 on it, and returns 0.
+    nvr::Image image;
+    image.types = {{nvr::TypeKind::Void}, {nvr::TypeKind::Bool}, {nvr::TypeKind::Signed, 32},
+                   {nvr::TypeKind::Text}, {nvr::TypeKind::Array, 0, 3}, {nvr::TypeKind::Unsigned, 8},
+                   {nvr::TypeKind::List, 0, 5}, {nvr::TypeKind::Unsigned, 32}, {nvr::TypeKind::Unsigned, 64}};
+    image.constants = {{2, {0, 0, 0, 0}}, {3, {'x'}}};
+    image.graphs = {nvr::Graph{}};
+    image.kernels = {{"neura.digest.crc32", 1, {6}, 7}};
+    const auto exit_of = [](nvr::ExitKind kind) {
+        nvr::Exit exit;
+        exit.kind = kind;
+        return exit;
+    };
+    auto allocate = exit_of(nvr::ExitKind::State);
+    allocate.operation = nvr::StateOp::AllocateCollection;
+    allocate.immediate = 6;
+    allocate.result_slot = 1;
+    allocate.resume = 1;
+    auto kernel = exit_of(nvr::ExitKind::State);
+    kernel.operation = nvr::StateOp::Kernel;
+    kernel.immediate = 0;
+    kernel.arguments = {{nvr::ValueKind::Slot, 6, 1}};
+    kernel.result_slot = 2;
+    kernel.resume = 2;
+    auto done = exit_of(nvr::ExitKind::Return);
+    done.arguments = {{nvr::ValueKind::Constant, 2, 0}};
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 2;
+    entry.frame_types = {4, 6, 7};
+    for (const auto& exit : {allocate, kernel, done}) {
+        nvr::Block block;
+        block.exits = {exit};
+        entry.blocks.push_back(block);
+    }
+    image.functions = {entry};
+
+    auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{6}, "a kernel exit makes the writer emit NVR 1.6");
+    check(nvr::load(bytes) == [&] { auto model = image; model.minor_version = 6; return model; }(),
+          "KERN and the kernel exit decode to their model");
+    const auto assembly = decompiler::disassemble(nvr::load(bytes));
+    check(assembly.find("kernel 0 \"neura.digest.crc32\" version 1 parameters [ 6 ] result 7") != std::string::npos &&
+          assembly.find("exit state kernel immediate 0") != std::string::npos, "assembly names the kernel records");
+    check(nvr::encode(decompiler::assemble(assembly)) == bytes, "kernel assembly reproduces the image bytes");
+    check(decompiler::decompile(nvr::load(bytes)).text.find("kernel \"neura.digest.crc32\" v1(") != std::string::npos,
+          "the decompiler names the kernel as an opaque operation");
+    check(nvr::encode(hello_model())[6] == 0 && nvr::load(nvr::encode(hello_model())).kernels.empty(),
+          "an image without kernels stays at its version and has no KERN section");
+
+    bytes[6] = 5;
+    expect_rejected(bytes, Kind::Malformed, "uses NVR 1.6 features but declares 1.5");
+    const auto changed = [&](auto mutate, Kind kind, std::string_view reason) {
+        auto other = image;
+        mutate(other);
+        expect_rejected(nvr::encode(other), kind, reason);
+    };
+    changed([](auto& i) { i.kernels[0].name = "neura.digest.md5"; }, Kind::Unsupported,
+            "this runtime has no kernel neura.digest.md5 version 1");
+    changed([](auto& i) { i.kernels[0].abi_version = 9; }, Kind::Unsupported, "no kernel neura.digest.crc32 version 9");
+    changed([](auto& i) { i.kernels[0].parameter_types = {3}; }, Kind::Invalid, "the signature does not match");
+    changed([](auto& i) { i.kernels[0].result_type = 8; }, Kind::Invalid, "the signature does not match");
+    changed([](auto& i) { i.kernels.push_back(i.kernels[0]); }, Kind::Invalid, "duplicate kernel");
+    changed([](auto& i) { i.functions[0].blocks[1].exits[0].immediate = 1; }, Kind::Invalid, "kernel 1 is out of range");
+    changed([](auto& i) { i.functions[0].blocks[1].exits[0].arguments = {{nvr::ValueKind::Constant, 3, 1}}; },
+            Kind::Invalid, "argument 0: type 3 is not assignable to type 6");
+    changed([](auto& i) { i.functions[0].blocks[1].exits[0].result_slot = 1; }, Kind::Invalid, "");
+    changed([](auto& i) { i.kernels.clear(); }, Kind::Malformed, "missing required section KERN");
 }
 
 NEURA_TEST(format, scheduler_exits_and_transferable_layouts) {
@@ -425,9 +497,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 6;
+    newer_minor.minor = 7;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.6 is not supported; this loader accepts 1.0 through 1.5");
+                    "format version 1.7 is not supported; this loader accepts 1.0 through 1.6");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");

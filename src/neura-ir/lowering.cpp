@@ -2,6 +2,7 @@
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
+#include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
 #include "integer.hpp"
 #include "ir.hpp"
@@ -1360,6 +1361,27 @@ void Lowering::resolve(SymbolId id) {
                 throw Diagnostic(decl.span, "a host result needs exactly Ok or Ok(T), and Error(uint32)");
             symbol(id).external = true;
             symbol(id).host_binding = IrHostBinding{decl.host_binding->first, decl.host_binding->second};
+        }
+        if (decl.kernel_binding) {
+            // A built-in C kernel implements the function (Kernels.md,
+            // "Binding a kernel"). Like a host binding it is trusted library
+            // code only, but a call is a runtime state operation, not a host
+            // request: it needs no import, no capability, and no trace entry.
+            const auto file = source_file(program_, id);
+            if (file == no_symbol || symbol(file).library_path.empty() ||
+                symbol(symbol(id).owner).kind != SymbolKind::Module)
+                throw Diagnostic(decl.span, "kernel bindings are only allowed in standard library modules")
+                    .with_code("E0780");
+            if (!decl.generics.empty() || decl.override_member ||
+                std::ranges::any_of(decl.parameters, &Parameter::variadic) ||
+                !host_service_name(decl.kernel_binding->first))
+                throw Diagnostic(decl.span, "a kernel binding needs a non-generic function and a qualified kernel name")
+                    .with_code("E0781");
+            const auto& [kernel, version] = *decl.kernel_binding;
+            if (const auto problem = kernel_signature_problem(program_, symbol(id), kernel, version))
+                throw Diagnostic(decl.span, *problem).with_code(kernel_known(kernel, version) ? "E0781" : "E0782");
+            symbol(id).external = true;
+            set_attribute(symbol(id), AttributeId::KernelBinding, kernel_binding_payload(kernel, version));
         }
         if (decl.scheduler_binding) {
             // The NVM scheduler implements the function (Concurrency.md

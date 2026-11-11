@@ -238,6 +238,16 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             o.u32(import.error_type);
         });
     });
+    if (!image.kernels.empty()) {
+        add("KERN", true, [&](Output& out) {
+            vector(out, image.kernels, [](Output& o, const KernelEntry& kernel) {
+                o.text(kernel.name);
+                o.u32(kernel.abi_version);
+                indices(o, kernel.parameter_types);
+                o.u32(kernel.result_type);
+            });
+        });
+    }
     add("LAYO", true, [&](Output& out) {
         vector(out, image.layouts, [&](Output& o, const Layout& layout) {
             o.u32(layout.parent);
@@ -296,7 +306,27 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 
 } // namespace
 
+bool concurrent_image(const Image& image) {
+    if (image.transferable_layouts) return true;
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::Scheduler || exit.poll) return true;
+            }
+        }
+    }
+    return false;
+}
+
 std::uint16_t required_minor_version(const Image& image) {
+    if (!image.kernels.empty()) return 6;
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::Kernel) return 6;
+            }
+        }
+    }
     if (image.transferable_layouts) return 5;
     std::uint16_t version = (!image.callbacks.empty() || image.native_library) ? 4 : 0;
     if (std::ranges::any_of(image.layouts, [](const Layout& layout) { return !layout.interfaces.empty(); }))
@@ -339,9 +369,9 @@ std::vector<std::uint8_t> encode(const Image& image) {
         throw std::invalid_argument("the image records an unsupported minor version");
     }
     const auto minor = std::max(image.minor_version, required_minor_version(image));
-    // required_minor_version reports 5 for a scheduler exit or a poll, which
-    // the loader accepts only together with the table.
-    if (minor >= 5 && !image.transferable_layouts && required_minor_version(image) >= 5) {
+    // A scheduler exit or a poll needs the table; the loader accepts it only
+    // together with the table.
+    if (!image.transferable_layouts && concurrent_image(image)) {
         throw std::invalid_argument("an image with tasks or polls needs its transferable-layout table");
     }
     const auto parts = sections(image, minor);

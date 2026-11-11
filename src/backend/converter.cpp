@@ -9,6 +9,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/integer.hpp"
+#include "neura-ir/kernel_signature.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
@@ -162,6 +163,7 @@ private:
     Operand value_member(IrOp op, const IrType& type, std::vector<Operand> operands, const Span& span);
     Operand external_call(const IrNode& node);
     Operand bound_host_call(const IrNode& node);
+    Operand kernel_call(const IrNode& node);
     Operand allocate(const IrNode& node);
     Operand aggregate(const IrNode& node);
     Operand aggregate_value(const IrType& type, SymbolId variant, std::vector<Operand> fields,
@@ -242,6 +244,8 @@ public:
     // The import that an external function is bound to, or nothing when the
     // function has no runtime binding.
     std::optional<std::uint32_t> external_import(SymbolId function, const Span& where);
+    // The KERN entry of a kernel-bound function (NVR 1.6).
+    std::uint32_t kernel_entry(SymbolId function, const Span& where);
     std::uint32_t function(const FunctionOrigin& origin);
     FunctionOrigin constructor(SymbolId cls, SymbolId selected = no_symbol) const;
     FunctionOrigin value_function(IrOp op, const IrType& type, const Span& span);
@@ -310,6 +314,7 @@ private:
     std::map<SymbolId, std::uint32_t> globals_;
     std::map<std::string, std::uint32_t> graphs_;
     std::map<std::pair<std::string, std::uint32_t>, std::uint32_t> imports_;
+    std::map<std::pair<std::string, std::uint32_t>, std::uint32_t> kernels_;
     std::map<FunctionOrigin, std::uint32_t> functions_;
     std::vector<FunctionOrigin> origins_;
     std::size_t next_function_ = 0;
@@ -644,6 +649,31 @@ std::optional<std::uint32_t> Converter::external_import(SymbolId function, const
     const auto index = static_cast<std::uint32_t>(image_.imports.size());
     image_.imports.push_back(std::move(import));
     imports_.emplace(key, index);
+    return index;
+}
+
+std::uint32_t Converter::kernel_entry(SymbolId function, const Span& where) {
+    // A kernel call is a state operation on its KERN entry: the kernel's
+    // name and ABI version with the Neura signature, which lowering checked
+    // against the kernel table (docs/runtime/Kernels.md).
+    const auto& item = symbol(function);
+    const auto binding = kernel_binding(item).value();
+    nvr::KernelEntry entry;
+    entry.name = binding.first;
+    entry.abi_version = binding.second;
+    for (const auto parameter : item.parameters) {
+        entry.parameter_types.push_back(type_of(symbol(parameter).type, where));
+    }
+    entry.result_type = type_of(item.type, where);
+    const auto key = std::pair{entry.name, entry.abi_version};
+    if (const auto found = kernels_.find(key); found != kernels_.end()) {
+        if (image_.kernels[found->second] != entry)
+            throw Diagnostic(where, "conflicting signatures for kernel '" + entry.name + "'");
+        return found->second;
+    }
+    const auto index = static_cast<std::uint32_t>(image_.kernels.size());
+    image_.kernels.push_back(std::move(entry));
+    kernels_.emplace(key, index);
     return index;
 }
 
@@ -2792,9 +2822,19 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
 
 Operand FunctionCompiler::external_call(const IrNode& node) {
     if (c_.symbol(node.symbol).host_binding) return bound_host_call(node);
+    if (kernel_bound(c_.symbol(node.symbol))) return kernel_call(node);
     const auto& target = c_.symbol(node.symbol);
     throw Diagnostic(node.span, "external function '" + c_.symbol(target.owner).name + "." + target.name +
                                     "' has no runtime binding");
+}
+
+// A kernel call stays a state operation: its arguments and result cross the
+// circuit boundary like those of a heap operation, and the runtime computes
+// the result with the kernel instead of a graph.
+Operand FunctionCompiler::kernel_call(const IrNode& node) {
+    auto arguments = sequence(node.operands);
+    const auto entry = c_.kernel_entry(node.symbol, node.span);
+    return state(nvr::StateOp::Kernel, entry, std::move(arguments), c_.type_of(node.type, node.span), node.span);
 }
 
 Operand FunctionCompiler::bound_host_call(const IrNode& node) {

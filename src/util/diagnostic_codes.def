@@ -18,5 +18,9 @@
 NEURA_DIAGNOSTIC(E0201, "expected a semicolon")
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
 NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
+NEURA_DIAGNOSTIC(E0780, "kernel binding outside the standard library")
+NEURA_DIAGNOSTIC(E0781, "kernel binding does not match its kernel")
+NEURA_DIAGNOSTIC(E0782, "unknown kernel or kernel ABI version")
+NEURA_DIAGNOSTIC(E0783, "malformed kernel binding")
 
 #undef NEURA_DIAGNOSTIC
