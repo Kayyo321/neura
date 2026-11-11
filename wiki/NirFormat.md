@@ -1,4 +1,7 @@
+<!-- Generated from docs/NirFormat.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # NeuraIR file format
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 A `.nir` file holds a NeuraIR program as lowered, before optimization. `neura emit-ir <file.nra>... -o <file.nir>` writes one, and `neura build <file.nir> -o <file.nvr>` builds from it with the same verification, optimization, and conversion as a build from source. Source can also [import modules from it](Modules#prebuilt-neurair-modules). The reader and writer are in [`src/neura-ir/nir_format.cpp`](https://github.com/Kayyo321/neura/blob/main/src/neura-ir/nir_format.cpp).
 
@@ -78,7 +81,7 @@ Structural callable types have an absent `symbol` and carry their parameter type
 
 ### Revision 1.9: tasks
 
-Version 1.9 adds three operations for [concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) and a poll flag. All three operations are in the table above.
+Version 1.9 adds three operations for [concurrency](Concurrency) and a poll flag. All three operations are in the table above.
 
 | Operation | Region | Fields |
 | --- | --- | --- |

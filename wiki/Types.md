@@ -1,11 +1,12 @@
+<!-- Generated from docs/lang/Types.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Types
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-
 Types describe values used in declarations, parameters, and return values.
 Bindings and function parameters put the type after the name.
 
+<!-- example: check -->
 ```neura
 let count: int32 = 1;
 let advance = func(count: int32) -> int32 {
@@ -15,7 +16,7 @@ let advance = func(count: int32) -> int32 {
 
 ## Built-in types
 
-The built-in types are listed below. [Numbers](https://github.com/Kayyo321/neura/wiki/Numbers) specifies the numeric types' representation, literals, arithmetic, overflow, rounding, and conversions.
+The built-in types are listed below. [Numbers](Numbers) specifies the numeric types' representation, literals, arithmetic, overflow, rounding, and conversions.
 
 | Type | Purpose |
 | --- | --- |
@@ -33,7 +34,7 @@ The built-in types are listed below. [Numbers](https://github.com/Kayyo321/neura
 
 Low-precision formats such as FP8 and packed integer formats are not part of the language. Every numeric operation is computed by neuron circuits, so no type depends on hardware support.
 
-Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](https://github.com/Kayyo321/neura/wiki/Collections) for their syntax and safety rules.
+Arrays and lists are built-in collection types, written `string[]` and `string[list]` respectively. Arrays have a fixed length; lists can grow and shrink. Suffixes can be combined for nested collections. See [Arrays and lists](Collections) for their syntax and safety rules.
 
 ### Text primitives
 
@@ -41,8 +42,9 @@ String equality compares UTF-8 bytes. `text.byte_length` returns the byte count 
 
 ### Primitive companions
 
-Booleans, sized integers and floats, and strings have [standard library companions](https://github.com/Kayyo321/neura/wiki/Stdlib-Design#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
+Booleans, sized integers and floats, and strings have [standard library companions](Stdlib-Design#7-primitive-companion-modules). A primitive-qualified call such as `int32.parse("42")` looks up an exported function in that companion. A call on a value passes it as the first argument to a function whose first parameter has the same primitive type.
 
+<!-- example: check -->
 ```neura
 let score: int16 = -7;
 let magnitude = score.abs();
@@ -55,6 +57,7 @@ Aliases use the companion of their resolved type. Built-in members take preceden
 
 Prefix a Boolean, integer, float, or string type with `&` to declare a non-null alias to mutable storage of that exact type. An ordinary read through the alias yields the stored primitive value. Assigning through the alias changes the stored value and leaves the alias pointing at the same storage.
 
+<!-- example: check -->
 ```neura
 let increment = func(value: &int) {
     value += 1;
@@ -82,6 +85,7 @@ A tuple has one or more ordered elements, each with its own static type. Write
 expected. Tuple types may appear in bindings, fields, function signatures, type
 arguments, and collection element types.
 
+<!-- example: check -->
 ```neura
 let measure = func() -> [int, float] {
     return [42, 0.5];
@@ -106,6 +110,7 @@ tuple retains the behavior of the referenced value.
 
 A type definition can give an existing type another name. These overlays describe the role of a value without introducing a separate representation or a distinct type.
 
+<!-- example: check -->
 ```neura
 let Types = module (
     export let UserId = int32;
@@ -125,6 +130,7 @@ Overlays can refer to other overlays. See `examples/types/overlay.nra` for more 
 A class defines a type with fields and methods. Mark members `export` to expose them and use `new` to create an instance.
 Inside an instance method, constructor, or field initializer, `instance` names the current receiver if no ordinary binding supplies that name.
 
+<!-- example: check -->
 ```neura
 let LogEntry = class (
     export let level: string;
@@ -143,13 +149,19 @@ entry.level = "INFO";
 
 Class inheritance parallels module inheritance: put a colon and the base class after `class`.
 
+<!-- example: check -->
 ```neura
+let LogEntry = class (
+    export let level: string;
+    export let message: string;
+);
+
 let NamedEntry = class:LogEntry (
     export let name: string;
 );
 ```
 
-The derived class extends the base class's interface. A derived instance can be passed where its base type is expected, and an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See [Polymorphism](https://github.com/Kayyo321/neura/wiki/Polymorphism) for interfaces and generics and [Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle) for construction and cleanup.
+The derived class extends the base class's interface. A derived instance can be passed where its base type is expected, and an overridden method dispatches to the implementation for the actual instance. Declare an override with `let.override` or `const.override`. See [Polymorphism](Polymorphism) for interfaces and generics and [Object lifecycle](ObjectLifecycle) for construction and cleanup.
 
 ### Static members
 
@@ -157,6 +169,7 @@ Add `static` before `let` or `const` in a class or interface. Static fields
 belong to the declaring type. Static functions and nested types do not need
 an enclosing instance.
 
+<!-- example: check -->
 ```neura
 let Limits = class (
     export static const Max = 100;
@@ -246,6 +259,7 @@ names that instance in expressions and its type in annotations. The program
 initializes the instance before entry, and every alias refers to the same
 state.
 
+<!-- example: check -->
 ```neura
 export let counter = singleton (
     let index = 0;
@@ -259,14 +273,20 @@ members. Construction of a nested singleton at startup follows its
 declaration position. Reading that singleton alone is a passive use of the
 enclosing class. A singleton may implement interfaces. It cannot be
 subclassed, constructed with `new`, or destroyed. See
-[Object lifecycle](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle#singleton-lifecycle) for its
+[Object lifecycle](ObjectLifecycle#singleton-lifecycle) for its
 initialization rules.
 
 ### Umbrella class and nil
 
 `class` is a type in annotation, parameter, result, and type argument positions. Every class instance can be stored in it. An interface reference can also be passed as `class`. The runtime keeps the concrete identity and dispatches methods to the instance's implementation.
 
+<!-- example: check -->
 ```neura
+let LogEntry = class (
+    export let level: string;
+    export let message: string;
+);
+
 let entry: class = new LogEntry();
 let missing: LogEntry = nil;
 
@@ -286,6 +306,7 @@ if (entry is LogEntry) {
 
 A class can declare a zero-argument conversion method with `let.as Target = func -> Target`. Each target appears at most once per class and must exactly match the method's declared return type. `or as` gives another conversion the same visibility. Separate declarations can choose visibility independently.
 
+<!-- example: check -->
 ```neura
 let Reading = class (
     let value: int16 = 0;
@@ -312,6 +333,7 @@ Function arguments can use one visible conversion when their type is otherwise i
 
 An enum declares a closed set of named variants. Variants are written qualified by the enum's name.
 
+<!-- example: check -->
 ```neura
 export let Light = enum (Red, Yellow, Green);
 
@@ -327,6 +349,7 @@ An enum can annotate bindings, fields, parameters, results, collection elements,
 
 Generic enums declare parameters after `enum`. Qualify a value constructor with an explicit instance, such as `Optional<int>.Some(4)` or `Optional<int>.None`. Patterns such as `Optional.Some(value)` get their payload types from the subject. A type overlay for a concrete instance can also qualify constructors and patterns.
 
+<!-- example: check -->
 ```neura
 let Optional = enum<T> (None, Some(T));
 let IntOptional = Optional<int>;
@@ -338,6 +361,7 @@ constructor evaluates its fields in written order, even when named arguments
 are reordered. The payload belongs to the selected variant and is read through
 a match. An enum with payloads has no built-in equality or numeric cast.
 
+<!-- example: check -->
 ```neura
 let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
 
@@ -366,7 +390,7 @@ patterns, guards, and derives are open language decisions.
 
 ## Scope-bound and transferable types
 
-[Tasks](https://github.com/Kayyo321/neura/wiki/CoreLanguage#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#5-isolation-between-tasks) specifies them with the runtime.
+[Tasks](CoreLanguage#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](Concurrency#5-isolation-between-tasks) specifies them with the runtime.
 
 ### Scope-bound types
 
@@ -400,11 +424,12 @@ A value given to another task through `spawn` (the callee value, a method's rece
 | A primitive reference, `MemorySegment`, and every native handle | No |
 | `Task<T>` and `Scope` | No; they are scope-bound |
 
+<!-- example: check -->
 ```neura
 let total = func(items: int[]) -> int => items.length;
 ```
 
-`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
+`spawn total(items)` is rejected at `items` with `a value of type int32[] is not transferable, so it cannot be given to a spawned task`. A channel opened as `channels.open<result.Result<int>>(1)` is rejected with `a value of type Result<int32> is not transferable, so it cannot be a channel's element type`. An error is sent as its transferable copy, `Std.Core.Error.PortableError` ([Standard library](StandardLibrary)). A task returns its result to the task that joins it whatever the result's type, because nothing else can reach what the finished task built.
 
 ### Task-safe calls
 
@@ -416,12 +441,12 @@ A value check is not enough: a function can reach shared mutable state without b
 
 For a virtual call or a call through a function value, the compiler takes the union over every override and over every function value of that type that code which can run creates (the program's own functions, initializers, and what they reach), so it can reject a call because of an implementation that never runs. Narrow the type, or pass the needed value as an argument. The diagnostic lists the chain of calls from the `spawn` to the offending operation. `neura check --task-safety` prints the verdict for every function of the program. The task that runs `main` is not restricted.
 
-Under the last rule a program cannot both use tasks and use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination for any scheduler operation, not only a `spawn`: a scope, a channel, a timer, a guard, a select, or a parallel map. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#12-multicore-parallelmap) gives the rule.
+Under the last rule a program cannot both use tasks and use `Std.DynamicForeign` or `import:c(...)`. The compiler rejects the combination for any scheduler operation, not only a `spawn`: a scope, a channel, a timer, a guard, a select, or a parallel map. A parallel map's worker must also issue no host request, use no scheduler operation, and not use an object's identity; [Concurrency](Concurrency#12-multicore-parallelmap) gives the rule.
 
 ## Inference, conversions, equality, and absence
 
-The proposed initial inference rule is local: an initialized binding without an annotation takes the initializer's type when that type is unambiguous. Public APIs should use explicit parameter and return types. Integer literal default types, inference across generic calls, and ambiguous literals need a precise specification. Empty collection literals require an expected type as described in [Collections](https://github.com/Kayyo321/neura/wiki/Collections).
+The proposed initial inference rule is local: an initialized binding without an annotation takes the initializer's type when that type is unambiguous. Public APIs should use explicit parameter and return types. Integer literal default types, inference across generic calls, and ambiguous literals need a precise specification. Empty collection literals require an expected type as described in [Collections](Collections).
 
-There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](https://github.com/Kayyo321/neura/wiki/Numbers#conversions). Floating-point equality follows IEEE 754. Equality for classes, collections, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
+There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers#conversions). Floating-point equality follows IEEE 754. Equality for classes, collections, and strings needs a defined contract; do not assume structural equality or identity equality for these values. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
 
-Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Generic syntax and its limitations are described in [Polymorphism](https://github.com/Kayyo321/neura/wiki/Polymorphism).
+Nullability, optional values, and their syntax are open. No implicit null value or null check should be assumed. Generic syntax and its limitations are described in [Polymorphism](Polymorphism).

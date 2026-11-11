@@ -10,7 +10,7 @@ Neura is a statically typed language whose compiler translates programs into det
 
 ## Language reference
 
-The reference covers [core syntax and control flow](CoreLanguage), [numbers](Numbers), [types](Types), [modules and imports](Modules), [collections](Collections), [object lifecycle](ObjectLifecycle), [polymorphism](Polymorphism), [errors](Errors), [testing](Testing), [resources and concurrency](ResourcesConcurrency), [foreign interop](ForeignInterop), and [project structure](ProjectStructure).
+The reference covers [core syntax and control flow](CoreLanguage), [numbers](Numbers), [types](Types), [modules and imports](Modules), [collections](Collections), [object lifecycle](ObjectLifecycle), [polymorphism](Polymorphism), [errors](Errors), [testing](Testing), [resources and concurrency](ResourcesConcurrency), [concurrency](Concurrency), [GPU execution](GpuExecution), [foreign interop](ForeignInterop), and [project structure](ProjectStructure). [Native executables](Standalone) covers packaging a program as a native executable.
 
 ## Standard library
 
@@ -18,7 +18,7 @@ Start with the [standard library overview](StandardLibrary), then use the [libra
 
 ## Compiler and execution
 
-The [project design](Project) describes stage boundaries and the execution model. The [backend](Backend) explains circuit conversion, while [NeuraIR optimization](IrOptimization) describes transformations and their correctness requirements. For artifact and runtime details, see [NeuraIR format](NirFormat), [NVR format](NVR), and the [Neura Virtual Machine](NVM). The [decompiler](Decompiler) documentation explains how artifacts can be inspected and reconstructed.
+The [project design](Project) describes stage boundaries and the execution model. The [backend](Backend) explains circuit conversion, while [NeuraIR optimization](IrOptimization) describes transformations and their correctness requirements. For artifact and runtime details, see [NeuraIR format](NirFormat), [NVR format](NVR), and the [Neura Virtual Machine](NVM). The [decompiler](Decompiler) documentation explains how artifacts can be inspected and reconstructed. Contributors should read the [coding style](CodingStyle) and [continuous integration](ContinuousIntegration) pages.
 
 ## Reading this documentation
 

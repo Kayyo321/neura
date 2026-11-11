@@ -1,0 +1,238 @@
+#!/usr/bin/env python3
+"""Generate the wiki's mirrored pages from the documentation in `docs/`.
+
+`docs/` is the single source for every wiki page that presents a document of
+the repository. For each entry of `GENERATED` this script writes
+`wiki/<name>.md` from the docs page by:
+
+  * putting a generated-file comment on the first line,
+  * adding the navigation header the wiki pages share, under the title,
+  * rewriting each link: a link to a docs page that has a wiki page becomes a
+    bare wiki link (`Name#anchor`); a link to any other file or directory of
+    the repository becomes a `https://github.com/<repository>/blob/main/<path>`
+    (or `tree/main`) URL. Same-page `#anchor` links and links to other hosts
+    are unchanged, and so is everything inside a code span or fenced block.
+
+`HAND_WRITTEN` lists the wiki pages that are maintained by hand, plus the
+`Stdlib-<Area>-<Module>.md` module pages, which `update-stdlib-wiki-api.py`
+refreshes. A wiki page that is neither generated nor hand-written is an error.
+
+By default the script writes the pages. `--check` writes nothing, and exits 1
+when a generated page differs from what would be written, a generated page is
+missing, or `wiki/` holds an unlisted page. `--root` names another checkout.
+"""
+
+from __future__ import annotations
+
+import argparse
+import re
+import sys
+from pathlib import Path
+from urllib.parse import unquote, urlsplit
+
+REPOSITORY = "Kayyo321/neura"
+DEFAULT_BRANCH = "main"
+
+# docs path (relative to the repository root) -> wiki page name.
+GENERATED: dict[str, str] = {
+    "docs/Backend.md": "Backend",
+    "docs/ContinuousIntegration.md": "ContinuousIntegration",
+    "docs/RepositorySettings.md": "RepositorySettings",
+    "docs/Decompiler.md": "Decompiler",
+    "docs/IrOptimization.md": "IrOptimization",
+    "docs/NirFormat.md": "NirFormat",
+    "docs/Project.md": "Project",
+    "docs/Release.md": "Release",
+    "docs/lang/Collections.md": "Collections",
+    "docs/lang/Concurrency.md": "Concurrency",
+    "docs/lang/CoreLanguage.md": "CoreLanguage",
+    "docs/lang/Errors.md": "Errors",
+    "docs/lang/ForeignInterop.md": "ForeignInterop",
+    "docs/lang/GpuExecution.md": "GpuExecution",
+    "docs/lang/Modules.md": "Modules",
+    "docs/lang/Numbers.md": "Numbers",
+    "docs/lang/ObjectLifecycle.md": "ObjectLifecycle",
+    "docs/lang/Overview.md": "Overview",
+    "docs/lang/Polymorphism.md": "Polymorphism",
+    "docs/lang/ProjectStructure.md": "ProjectStructure",
+    "docs/lang/ResourcesConcurrency.md": "ResourcesConcurrency",
+    "docs/lang/Standalone.md": "Standalone",
+    "docs/lang/StandardLibrary.md": "StandardLibrary",
+    "docs/lang/Status.md": "Status",
+    "docs/lang/Stdlib.md": "Stdlib-Design",
+    "docs/lang/Testing.md": "Testing",
+    "docs/lang/Tooling.md": "Tooling",
+    "docs/lang/Tutorial.md": "Tutorial",
+    "docs/lang/Types.md": "Types",
+    "docs/runtime/NVM.md": "NVM",
+    "docs/runtime/NVR.md": "NVR",
+    "docs/style/CodingStyle.md": "CodingStyle",
+}
+
+# Docs pages that deliberately have no wiki page.
+REPOSITORY_ONLY = ("docs/Wiki.md",)
+
+# Wiki pages written by hand. The standard-library module pages, which
+# `update-stdlib-wiki-api.py` maintains, are matched by MODULE_PAGE.
+HAND_WRITTEN = frozenset({"Home", "_Sidebar", "Neurons-and-Circuits", "Stdlib"})
+MODULE_PAGE = re.compile(r"^Stdlib-[A-Z][A-Za-z0-9]*(?:-[A-Z][A-Za-z0-9]*)?$")
+
+# The generated-file comment, and the header under each title.
+COMMENT = "<!-- Generated from {path} by scripts/generate-wiki.py. Edit that file, not this one. -->"
+NAVIGATION = (
+    "[Wiki home](https://github.com/Kayyo321/neura/wiki) · "
+    "[Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · "
+    "[Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)"
+)
+
+FENCE = re.compile(r"^ {0,3}(`{3,}|~{3,})")
+INLINE_CODE = re.compile(r"(`+)(.+?)\1")
+INLINE_LINK = re.compile(r"!?\[(?:[^\[\]]|\[[^\[\]]*\])*\]\(\s*(<[^>]*>|[^\s)]+)(?:\s+(?:\"[^\"]*\"|'[^']*'))?\s*\)")
+REFERENCE_DEFINITION = re.compile(r"(?m)^ {0,3}\[[^\]]+\]:\s*(<[^>]*>|\S+)")
+HTML_REFERENCE = re.compile(r"""<(?:a|img)\b[^>]*?\b(?:href|src)\s*=\s*["']([^"']+)["']""", re.IGNORECASE)
+
+
+def is_hand_written(name: str) -> bool:
+    return name in HAND_WRITTEN or bool(MODULE_PAGE.match(name))
+
+
+def rewrite_target(target: str, source: str, root: Path, repository: str) -> str:
+    """The wiki spelling of one link target found in the docs page `source`."""
+    angle = target.startswith("<") and target.endswith(">")
+    inner = target[1:-1] if angle else target
+    parts = urlsplit(inner)
+    if parts.scheme or parts.netloc or not parts.path:
+        return target
+    base = (root / source).parent
+    resolved = Path(base, unquote(parts.path))
+    try:
+        relative = resolved.resolve().relative_to(root.resolve()).as_posix()
+    except ValueError:
+        return target
+    fragment = f"#{parts.fragment}" if parts.fragment else ""
+    if relative in GENERATED:
+        result = GENERATED[relative] + fragment
+    elif relative.startswith("wiki/") and relative.endswith(".md") and "/" not in relative[5:]:
+        result = relative[5:-3] + fragment
+    else:
+        kind = "tree" if resolved.is_dir() else "blob"
+        result = f"https://github.com/{repository}/{kind}/{DEFAULT_BRANCH}/{relative}{fragment}"
+    return f"<{result}>" if angle else result
+
+
+def rewrite_prose(prose: str, source: str, root: Path, repository: str) -> str:
+    """Prose with its links rewritten; code spans are left alone.
+
+    The prose is rewritten as a whole, not line by line, because the text of a
+    link may continue onto the next line.
+    """
+    masked = INLINE_CODE.sub(lambda match: "\0" * len(match.group(0)), prose)
+    spans: list[tuple[int, int]] = []
+    for pattern in (REFERENCE_DEFINITION, INLINE_LINK, HTML_REFERENCE):
+        spans.extend(match.span(1) for match in pattern.finditer(masked))
+    for start, end in sorted(spans, reverse=True):
+        prose = prose[:start] + rewrite_target(prose[start:end], source, root, repository) + prose[end:]
+    return prose
+
+
+def rewrite_links(text: str, source: str, root: Path, repository: str) -> str:
+    """The text with links rewritten for the wiki; fenced blocks are untouched."""
+    output: list[str] = []
+    prose: list[str] = []
+    fence = None
+
+    def flush() -> None:
+        if prose:
+            output.append(rewrite_prose("\n".join(prose), source, root, repository))
+            prose.clear()
+
+    for line in text.split("\n"):
+        match = FENCE.match(line)
+        if fence is None:
+            if match:
+                flush()
+                fence = match.group(1)
+                output.append(line)
+            else:
+                prose.append(line)
+            continue
+        output.append(line)
+        if match and match.group(1)[0] == fence[0] and len(match.group(1)) >= len(fence) \
+                and line.strip() == match.group(1):
+            fence = None
+    flush()
+    return "\n".join(output)
+
+
+def generate(source: str, text: str, root: Path, repository: str = REPOSITORY) -> str:
+    """The wiki page for the docs page `source` with the given text."""
+    body = text.lstrip("\n")
+    title, _, rest = body.partition("\n")
+    if not title.startswith("# "):
+        raise ValueError(f"{source}: the first line is not a `# ` title")
+    rest = rewrite_links(rest.lstrip("\n"), source, root, repository).rstrip("\n")
+    return f"{COMMENT.format(path=source)}\n{title}\n\n{NAVIGATION}\n\n{rest}\n"
+
+
+def check_names(root: Path, pages: set[str]) -> list[str]:
+    """Problems with the set of docs and wiki pages, independent of content."""
+    problems = []
+    for path in sorted(GENERATED):
+        if not (root / path).is_file():
+            problems.append(f"{path}: listed in GENERATED but does not exist")
+    docs = {p.relative_to(root).as_posix() for p in (root / "docs").rglob("*.md")}
+    for path in sorted(docs - set(GENERATED) - set(REPOSITORY_ONLY)):
+        problems.append(f"{path}: has no wiki page; add it to GENERATED or REPOSITORY_ONLY in scripts/generate-wiki.py")
+    generated = set(GENERATED.values())
+    for name in sorted(pages - generated):
+        if not is_hand_written(name):
+            problems.append(f"wiki/{name}.md: neither generated from docs/ nor listed as hand-written "
+                            "in scripts/generate-wiki.py")
+    for name in sorted(generated & HAND_WRITTEN):
+        problems.append(f"wiki/{name}.md: is both generated and hand-written")
+    for name in sorted(HAND_WRITTEN - pages):
+        problems.append(f"wiki/{name}.md: listed as hand-written but does not exist")
+    return problems
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
+    parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent,
+                        help="the repository checkout (default: this script's repository)")
+    parser.add_argument("--repository", default=REPOSITORY,
+                        help=f"the GitHub repository, as owner/name, that rewritten links name (default: {REPOSITORY})")
+    parser.add_argument("--check", action="store_true",
+                        help="write nothing; exit 1 if a generated page is stale or the set of wiki pages is wrong")
+    arguments = parser.parse_args()
+
+    root = arguments.root.resolve()
+    wiki = root / "wiki"
+    pages = {p.stem for p in wiki.glob("*.md")} if wiki.is_dir() else set()
+    problems = check_names(root, pages)
+    changed = 0
+    for path, name in sorted(GENERATED.items()):
+        if not (root / path).is_file():
+            continue
+        expected = generate(path, (root / path).read_text(encoding="utf-8"), root, arguments.repository)
+        target = wiki / f"{name}.md"
+        current = target.read_text(encoding="utf-8") if target.is_file() else None
+        if current == expected:
+            continue
+        changed += 1
+        if arguments.check:
+            state = "is missing" if current is None else "is stale"
+            problems.append(f"wiki/{name}.md: {state}; run `python3 scripts/generate-wiki.py`")
+        else:
+            wiki.mkdir(exist_ok=True)
+            target.write_text(expected, encoding="utf-8", newline="\n")
+            print(f"wrote wiki/{name}.md")
+
+    for problem in problems:
+        print(problem)
+    verb = "stale or missing" if arguments.check else "written"
+    print(f"{len(GENERATED)} generated pages, {changed} {verb}; {len(problems)} problems.")
+    return 1 if problems else 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

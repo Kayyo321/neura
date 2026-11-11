@@ -1,4 +1,7 @@
+<!-- Generated from docs/Project.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Neura project design
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 Neura is a statically typed, high-level language with a compiler and decompiler for deterministic neuron circuits. A Neura program defines a computation. The compiler translates that computation into a graph of neuron primitives, with weights and biases assigned directly from the program. An executor evaluates the graph with its declared inputs and state. A decompiler reads the generated artifact and reconstructs a representation that a developer can inspect and verify.
 
@@ -38,7 +41,7 @@ own field initializers. A singleton lowers to one object allocation during
 startup and a global reference shared by every use. Both use the existing
 circuit state interfaces for global and object access.
 
-Tasks ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md)) change each stage's contract as follows, and the language rules stay in the stage that owns them.
+Tasks ([Concurrency](Concurrency)) change each stage's contract as follows, and the language rules stay in the stage that owns them.
 
 | Stage | Contract for tasks | Hands on |
 | --- | --- | --- |
@@ -50,9 +53,9 @@ Tasks ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concu
 | IRtoNeuronConversion | Turns each scheduler operation into a typed exit, makes `return`, `break`, and `continue` leave the scopes they cross, puts each poll on the exit that makes the call or takes the back edge, and marks transferable layouts. | NVR 1.5 with the `TRNS` table |
 | Output | The scheduler exit, the poll bit, and `TRNS`; an image without tasks keeps its earlier version and bytes. | An image a compatible runtime runs without source |
 
-The NVM runs the tasks of an image on one deterministic scheduler. Scheduler state (task records, queues, channel buffers, timers, guards) is NVM state reached through exits, like the heap; graph profile 1 does not change, and no scheduler operation is a host service. The decompiler reads scheduler exits and polls as decoded records ([Decompiler](https://github.com/Kayyo321/neura/wiki/Decompiler#tasks-and-scheduler-operations)). Host services that declare it overlap: the calling task parks and the completion is delivered at a later scheduling point. A recorded run replays with every scheduling decision ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#traces-of-images-with-tasks)). A test tool may substitute the choice among runnable tasks and the clock; every such choice is a legal schedule of the same image ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#the-scheduler)).
+The NVM runs the tasks of an image on one deterministic scheduler. Scheduler state (task records, queues, channel buffers, timers, guards) is NVM state reached through exits, like the heap; graph profile 1 does not change, and no scheduler operation is a host service. The decompiler reads scheduler exits and polls as decoded records ([Decompiler](Decompiler#tasks-and-scheduler-operations)). Host services that declare it overlap: the calling task parks and the completion is delivered at a later scheduling point. A recorded run replays with every scheduling decision ([NVM](NVM#traces-of-images-with-tasks)). A test tool may substitute the choice among runnable tasks and the clock; every such choice is a legal schedule of the same image ([NVM](NVM#the-scheduler)).
 
-A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop#c-imports)).
+A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](ForeignInterop#c-imports)).
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
 
@@ -76,6 +79,7 @@ An exact integer target can encode a fixed-width value as a vector of bits and i
 
 ### Example from source to circuit
 
+<!-- example: check -->
 ```neura
 let both = func(left: bool, right: bool) -> bool {
     return left && right;
@@ -111,7 +115,7 @@ The execution contract defines initial state, how and when state commits, how co
 
 The [Neura Virtual Machine](NVM) evaluates feedforward neuron graphs and follows their selected exits. It owns frames, state storage, and host service dispatch. The compiled graph makes arithmetic, comparison, and branch decisions. Heap operations and host effects use explicit requests with typed inputs and continuations. Graph evaluation may run on a GPU, and independent executions may advance in rounds with the same results and host effect order as the reference executor running them serially.
 
-The NVM traces initialized reference roots at allocation safepoints and reclaims unreachable objects, collections, text, and closure environments, including cycles. It skips nil and keeps live handles stable. Explicit destruction and host resource cleanup remain under program control. Trusted standard library sources declare host services with versioned signatures and typed continuations. The runner binds those imports to providers before execution. Native C code is one such provider: [`Std.DynamicForeign`](https://github.com/Kayyo321/neura/wiki/ForeignInterop) reaches it through `neura.ffi.*` requests under an explicit capability, so native code never enters the circuit and its results replay like any other host response. Native C code is one such provider: [`Std.DynamicForeign`](https://github.com/Kayyo321/neura/wiki/ForeignInterop) reaches it through `neura.ffi.*` requests under an explicit capability, so native code never enters the circuit and its results replay like any other host response.
+The NVM traces initialized reference roots at allocation safepoints and reclaims unreachable objects, collections, text, and closure environments, including cycles. It skips nil and keeps live handles stable. Explicit destruction and host resource cleanup remain under program control. Trusted standard library sources declare host services with versioned signatures and typed continuations. The runner binds those imports to providers before execution. Native C code is one such provider: [`Std.DynamicForeign`](ForeignInterop) reaches it through `neura.ffi.*` requests under an explicit capability, so native code never enters the circuit and its results replay like any other host response.
 
 IRtoNeuronConversion, the NVR writer and loader, and a reference NVM are implemented for the whole language of this release: Booleans, integers, IEEE floating point, enums, control flow including loops, calls, generics after specialization, module dispatch, classes with dynamic dispatch, arrays, lists, text, program initialization, console output, and test assertions. [Neuron conversion and execution](Backend) lists the supported operations. It also describes the circuits and their measured costs, the semantics the compiler fixes where the language is open, and the tests that compare compiled graphs with the IR reference evaluator.
 

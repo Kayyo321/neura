@@ -1,14 +1,15 @@
+<!-- Generated from docs/lang/CoreLanguage.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Core language
 
 [Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
-
-This page defines the initial core. See [Feature status](https://github.com/Kayyo321/neura/wiki/Status) for the frontend’s coverage and open semantic decisions.
+This page defines the initial core. See [Feature status](Status) for the frontend’s coverage and open semantic decisions.
 
 ## Source and bindings
 
 Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let` or `const`, with an optional type annotation. `let` permits reassignment; `const` prevents reassignment, not mutation through a reference. A binding must be initialized before it is read. The exact Unicode identifier and escape rules remain open.
 
+<!-- example: check -->
 ```neura
 let count: int32 = 0;
 const Limit: int32 = 3;
@@ -21,6 +22,7 @@ Bindings are visible from their declaration to the end of their enclosing block;
 
 Start each line of a documentation comment with `///` and place it immediately above the definition it describes. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
 
+<!-- example: check -->
 ```neura
 /// @brief Doubles an integer.
 /// @param value The input to double.
@@ -47,8 +49,9 @@ The filter represents modules as namespaces and uses named placeholders for Neur
 
 Function parameters use `name: Type`. Arguments are evaluated left to right. A function with no parameters may omit `()`, and a `void` function may omit `-> void`. A block body uses `return` to exit the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through.
 
-A [primitive reference parameter](https://github.com/Kayyo321/neura/wiki/Types#primitive-references) such as `value: &int` receives an alias to the caller's storage. Its argument uses the ordinary expression spelling, such as `increment(count)`.
+A [primitive reference parameter](Types#primitive-references) such as `value: &int` receives an alias to the caller's storage. Its argument uses the ordinary expression spelling, such as `increment(count)`.
 
+<!-- example: check -->
 ```neura
 let sum_to = func(limit: int32) -> int32 {
     let total: int32 = 0;
@@ -73,7 +76,10 @@ let reset = func {
 
 Join alternatives with `or func` in one file, module, or class declaration. Each alternative has its own parameters, result, and body. They share the binding name and visibility.
 
+<!-- example: check -->
 ```neura
+let console = import:Std.Io.Console;
+
 let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
@@ -89,16 +95,17 @@ The compiler first filters by argument count. With several candidates of the sam
 2. An assignable type, such as a class upcast. A more specific parameter type wins between assignable alternatives.
 3. Binding a primitive reference to an ordinary mutable place with the same primitive type.
 4. A contextual literal match. Numeric and nested collection literals must fit the candidate's types. For `nil`, a more specific reference type wins.
-5. One visible [object cast](https://github.com/Kayyo321/neura/wiki/Types#object-casts) to the parameter type.
+5. One visible [object cast](Types#object-casts) to the parameter type.
 
 One candidate beats another if it ranks at least as high on every argument and higher on at least one. The compiler selects the unique candidate that no other candidate beats. A tie or conflicting preferences produce an ambiguity error. Declaration order and expected result type play no part. The receiver and arguments are evaluated in the usual order, with any selected cast run at its argument's position.
 
-Distinct alternatives must have distinct resolved parameter types or counts. For example, `func(value: int)` and `func(other: int32)` in one group are duplicates because `int` aliases `int32`. Alternatives require bodies and fixed arity and take no function type parameters. They may use the type parameters of an enclosing class. Call a group directly or use a lambda to select an alternative for a function value. [Constructor overloads](https://github.com/Kayyo321/neura/wiki/ObjectLifecycle#construction) use the same selection rules.
+Distinct alternatives must have distinct resolved parameter types or counts. For example, `func(value: int)` and `func(other: int32)` in one group are duplicates because `int` aliases `int32`. Alternatives require bodies and fixed arity and take no function type parameters. They may use the type parameters of an enclosing class. Call a group directly or use a lambda to select an alternative for a function value. [Constructor overloads](ObjectLifecycle#construction) use the same selection rules.
 
 ### Variadic parameters
 
 A named function can mark its final parameter `items: ...T` to accept zero or more arguments assignable to `T`. Each call evaluates its fixed arguments and then its variadic arguments in source order. The function receives a new `T[]`. Reading a named variadic function as a function value exposes its packed signature, so an indirect call supplies the final array explicitly.
 
+<!-- example: check -->
 ```neura
 let count = func(items: ...int) -> int => items.length;
 let three = count(10, 20, 30);
@@ -112,6 +119,7 @@ A bare `items: ...` packs mixed types into an array of `Std.Core.Variadic.Argume
 
 A lambda is a function expression with typed parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
 
+<!-- example: check -->
 ```neura
 let make_adder = func(offset: int) -> func(int) -> int {
     return func(value: int) -> int {
@@ -133,18 +141,27 @@ Signatures, captures, and local types in a closure can mention the type paramete
 
 Neura supports pre-test, post-test, infinite, three-part, and for-each loops. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.
 
+<!-- example: check -->
 ```neura
-do {
-    total += current++;
-} while (current <= limit);
+let console = import:Std.Io.Console;
 
-for (let i: int32 = 0; i < limit; i++) {
-    total += i;
-}
+let sum_to = func(limit: int32, names: string[list]) -> int32 {
+    let total: int32 = 0;
+    let current: int32 = 0;
 
-for (let name in names) {
-    console.print_line(name);
-}
+    do {
+        total += current++;
+    } while (current <= limit);
+
+    for (let i: int32 = 0; i < limit; i++) {
+        total += i;
+    }
+
+    for (let name in names) {
+        console.print_line(name);
+    }
+    return total;
+};
 ```
 
 **Post-test and infinite loops.** `do { body } while (condition);` runs the body at least once. The Boolean condition is evaluated after the body falls through or executes `continue`. The body's local bindings are scoped to the body. A `break` or `return` skips the condition. With no trailing `while` clause, `do { body }` repeats indefinitely until a `break`, a `return`, or a trap.
@@ -158,13 +175,13 @@ for (let name in names) {
 - Assigning to an element by index during the loop is allowed. A later iteration sees the new value.
 - For a list, the loop captures the list's *structural version* when it starts. Every successful `append` or `remove_at` on the list, through any alias, changes the version. Before each advance, including the one that would end the loop, the loop compares the current version with the captured one. If they differ, the run traps at the `for` statement with trap reason 5 ("collection modified during iteration"). A removal followed by an append therefore traps even though the length is unchanged. Arrays cannot change length, so a for-each over an array needs no check.
 
-These loop forms lower to NeuraIR's loop and branch operations. See [Backend](https://github.com/Kayyo321/neura/wiki/Backend#loops).
+These loop forms lower to NeuraIR's loop and branch operations. See [Backend](Backend#loops).
 
 For an `Iterable<T>`, the loop evaluates its source once and calls `iterator()` once. It calls the iterator's `has_next()` before each advance, and calls `next()` to get each element. A `continue` returns to `has_next()`. A `break` or `return` leaves without another call. A library iterator enforces its collection's modification rules in these methods.
 
 ## Tasks, scopes, and select
 
-A call can run as a *task*: an independently suspendable call that shares no mutable state with the task that started it. Three forms start tasks, wait for them, and choose between waits. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) specifies them together with the runtime, the library, and the status of each part.
+A call can run as a *task*: an independently suspendable call that shares no mutable state with the task that started it. Three forms start tasks, wait for them, and choose between waits. [Concurrency](Concurrency) specifies them together with the runtime, the library, and the status of each part.
 
 `scope`, `spawn`, and `select` are contextual words. The lexer produces identifiers for them, and the parser reads them as these forms only in the positions below. Everywhere else they are ordinary names, so `let scope = 3;`, `spawn(x)`, and a module member named `select` keep their meaning.
 
@@ -185,7 +202,7 @@ A `scope` statement is allowed only in a function body: a function, a method, or
 
 ### Scope
 
-`scope { ... }` runs an ordinary block with one added rule. Every exit from it, whether by reaching the end, `return`, `break`, or `continue`, first waits until every task spawned in the block, and every task those tasks spawned, has finished. A `return` evaluates its expression before it waits. Waiting does not cancel a task. Scopes nest, and a task belongs to the nearest enclosing scope of its `spawn`. No task outlives its scope, so none outlives `main`. A runtime failure in any task ends the run at once without waiting ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)).
+`scope { ... }` runs an ordinary block with one added rule. Every exit from it, whether by reaching the end, `return`, `break`, or `continue`, first waits until every task spawned in the block, and every task those tasks spawned, has finished. A `return` evaluates its expression before it waits. Waiting does not cancel a task. Scopes nest, and a task belongs to the nearest enclosing scope of its `spawn`. No task outlives its scope, so none outlives `main`. A runtime failure in any task ends the run at once without waiting ([Errors](Errors)).
 
 `scope (name) { ... }` also binds `name`, a constant of type `Std.Concurrent.Scope`, in the block. Its `cancel()` requests cancellation of the scope's tasks, `is_cancelled()` reports it, and `cancel_after`, `cancel_at`, and `deadline()` set and read a deadline. Cancellation is cooperative: it wakes a task that is parked on a channel operation, a timer, or a cancellable host request with a `Cancelled` result, and a running task learns of it by asking `Std.Concurrent.Cancellation.requested()`. Nothing interrupts a running task, and `join` is never cancelled.
 
@@ -193,11 +210,14 @@ A `scope` statement is allowed only in a function body: a function, a method, or
 
 `spawn call` starts a task and gives the parent a `Std.Concurrent.Task<T>`, where `T` is the call's result type. A call of a `void` function gives `Task<Unit>`, with `Unit` and its single value `Unit.Value` from `Std.Core`. The operand must begin with a name and be a call of a function, a method, or a function value: `fetch(id)`, `client.fetch(id)`, `Jobs.twice(21)`, or `handler(request)`. A lambda is bound to a name first. The `spawn` must be inside a `scope` of the same function body; a `spawn` in a lambda written inside the scope is not.
 
-The parent evaluates the callee, a method's receiver, and then the arguments from left to right, as it would for the call itself, including overload resolution, casts, and variadic packing. It then creates the task, appends it to the queue of runnable tasks, and continues. `spawn` does not switch tasks: the child first runs when the parent next waits, or when its turn of language operations ends ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#102-the-reference-scheduler)). A `spawn` used as a statement produces no handle.
+The parent evaluates the callee, a method's receiver, and then the arguments from left to right, as it would for the call itself, including overload resolution, casts, and variadic packing. It then creates the task, appends it to the queue of runnable tasks, and continues. `spawn` does not switch tasks: the child first runs when the parent next waits, or when its turn of language operations ends ([Concurrency](Concurrency#102-the-reference-scheduler)). A `spawn` used as a statement produces no handle.
 
 `task.join()` waits until the task has finished and returns its result; joining again returns the same value. `task.is_finished()` does not wait. A scope can exit without joining, and the result is then discarded. A task reports an expected failure as an ordinary returned value, such as a `Result`, and `join` hands it to the caller.
 
+<!-- example: check -->
 ```neura
+let console = import:Std.Io.Console;
+
 let say = func(text: string) -> int {
     console.print_line(text);
     return text.byte_length;
@@ -225,7 +245,12 @@ At the default quantum, `report()` prints `parent continues`, then `left task` a
 - When no arm is ready, the default arm runs if there is one. Otherwise the task waits on every arm, and the first operation that completes for it commits.
 - When the task's scope is cancelled and nothing is ready and there is no default arm, a channel or timer arm commits `Cancelled`. A `join` arm is not cancelled.
 
+<!-- example: run -->
 ```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
 let drain = func(inbox: channels.Receiver<int>, spare: channels.Receiver<int>) {
     for (let round: int = 0; round < 3; round++) {
         select {
@@ -247,15 +272,35 @@ let drain = func(inbox: channels.Receiver<int>, spare: channels.Receiver<int>) {
         }
     }
 };
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let [inbox_sender, inbox, inbox_closer] = channels.open<int>(1);
+        let [spare_sender, spare, spare_closer] = channels.open<int>(1);
+        inbox_sender.send(1);
+        spare_sender.send(2);
+        drain(inbox, spare);
+        return program.ExitCode.Ok;
+    }
+);
+```
+
+```text
+inbox 1
+spare 2
+nothing ready
 ```
 
 With one value waiting on each channel, `drain` prints `inbox 1`, `spare 2`, and `nothing ready`: the preference moves to the second arm after the first select commits.
 
 ### Scope-bound values
 
-A `Task<T>` or `Scope`, and an array, list, or tuple of them, is *scope-bound* and cannot be reachable after its scope exits. It can be held in a local declared inside the scope, including a local list, and passed as an argument to a call. It cannot be returned, stored in a field, global, or enum payload, captured by a lambda, passed to `spawn`, sent on a channel, used as a type argument, or assigned to a binding declared outside the scope. [Types](https://github.com/Kayyo321/neura/wiki/Types#scope-bound-and-transferable-types) lists the rules, the types that can cross between tasks, and the calls a task may make.
+A `Task<T>` or `Scope`, and an array, list, or tuple of them, is *scope-bound* and cannot be reachable after its scope exits. It can be held in a local declared inside the scope, including a local list, and passed as an argument to a call. It cannot be returned, stored in a field, global, or enum payload, captured by a lambda, passed to `spawn`, sent on a channel, used as a type argument, or assigned to a binding declared outside the scope. [Types](Types#scope-bound-and-transferable-types) lists the rules, the types that can cross between tasks, and the calls a task may make.
 
+<!-- example: check -->
 ```neura
+let cancellation = import:Std.Concurrent.Cancellation;
+
 let count_until_stopped = func -> int {
     let laps = 0;
     while (!cancellation.requested()) {
@@ -295,12 +340,12 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 12. `==`, `!=`, `===`
 13. `&&`
 14. `||`
-15. `..` and its optional step in [range expressions](https://github.com/Kayyo321/neura/wiki/Collections#ranges)
+15. `..` and its optional step in [range expressions](Collections#ranges)
 16. `? :`
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 
-Prefix and postfix increment and decrement require a mutable numeric binding, field, or element. They evaluate the destination once and add or subtract a one of its type. `++x` and `--x` yield the updated value. `x++` and `x--` yield the previous value. The usual arithmetic rules apply, including checked integer overflow. [Numbers](https://github.com/Kayyo321/neura/wiki/Numbers) specifies integer and floating-point arithmetic. `+` and `+=` can also concatenate strings.
+Prefix and postfix increment and decrement require a mutable numeric binding, field, or element. They evaluate the destination once and add or subtract a one of its type. `++x` and `--x` yield the updated value. `x++` and `x--` yield the previous value. The usual arithmetic rules apply, including checked integer overflow. [Numbers](Numbers) specifies integer and floating-point arithmetic. `+` and `+=` can also concatenate strings.
 
 `a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
 

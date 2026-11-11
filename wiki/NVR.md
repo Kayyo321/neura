@@ -1,8 +1,7 @@
-
-A callback record contains `name:text, interface_version:u32, function:u32`. A callback is a function the runner may call while a host request is in progress, named like an import; [NVM](https://github.com/Kayyo321/neura/wiki/NVM#callbacks) defines the protocol. The tuple of name and version is unique, the function exists and is not the entry function, and its parameters and result use host data. `CALB` is required for execution when present: a runner that does not know it rejects the image instead of running without its callbacks.
-
-The `NATV` section contains `triple:text, object:bytes, symbols:vector<text>`: the target triple the shared object was linked for, the object's bytes, and the symbols the image's C imports use, unique and in ascending byte order. A runner loads the object only when the program first asks for the embedded library, and only on a matching target; on any other target that request fails and the rest of the image runs. The object is native code: the decompiler shows it as an opaque region with its triple, size, and symbols ([Foreign interop](https://github.com/Kayyo321/neura/wiki/ForeignInterop)).
+<!-- Generated from docs/runtime/NVR.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # Neura Virtual Runtime image format
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 An NVR image is a binary executable for the [Neura Virtual Machine](NVM). The file extension is `.nvr`. The image is the output of `IRtoNeuronConversion` and serialization. Its executable records contain everything needed to evaluate the compiled program with a compatible NVM and its declared host services.
 
@@ -104,7 +103,7 @@ Resume blocks belong to the current function. For every exit that produces a res
 
 ## Scheduler operations (1.5)
 
-Tasks, scopes, channels, timers, guards, and isolated parallel items are NVM scheduler state, reached through one exit kind, like the heap is reached through state operations. Neuron graphs still compute every arithmetic result, comparison, and branch decision, including which exit follows an operation's outcome. The scheduler is not a host service: it has no import and needs no capability, and the run is determined by the image, the inputs, the limits, and the host completion trace. The language rules that produce these operations are in [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md).
+Tasks, scopes, channels, timers, guards, and isolated parallel items are NVM scheduler state, reached through one exit kind, like the heap is reached through state operations. Neuron graphs still compute every arithmetic result, comparison, and branch decision, including which exit follows an operation's outcome. The scheduler is not a host service: it has no import and needs no capability, and the run is determined by the image, the inputs, the limits, and the host completion trace. The language rules that produce these operations are in [Concurrency](Concurrency).
 
 ### The exit record and the poll bit
 
@@ -266,6 +265,10 @@ Text operations address UTF-8 bytes at the VM boundary. Constructing text checks
 ## Imports and optional source maps
 
 An import record contains `name:text, interface_version:u32, parameter_types:vector<u32>, success_type:u32, error_type:u32`. The tuple of name and interface version is unique within an image. Import names are matched byte for byte. A runner rejects a missing import, an unavailable capability, or a signature mismatch before entry. The standard stdout import is defined in the [NVM specification](NVM#host-calls-and-standard-output).
+
+A callback record contains `name:text, interface_version:u32, function:u32`. A callback is a function the runner may call while a host request is in progress, named like an import; [NVM](NVM#callbacks) defines the protocol. The tuple of name and version is unique, the function exists and is not the entry function, and its parameters and result use host data. `CALB` is required for execution when present: a runner that does not know it rejects the image instead of running without its callbacks.
+
+The `NATV` section contains `triple:text, object:bytes, symbols:vector<text>`: the target triple the shared object was linked for, the object's bytes, and the symbols the image's C imports use, unique and in ascending byte order. A runner loads the object only when the program first asks for the embedded library, and only on a matching target; on any other target that request fails and the rest of the image runs. The object is native code: the decompiler shows it as an opaque region with its triple, size, and symbols ([Foreign interop](ForeignInterop)).
 
 A source map record contains `function:u32, block:u32, path:text, line:u32, column:u32`. Lines and columns start at one. Entries are sorted by function and block and are unique for each block. Paths are display labels. NVM does not open them. Source maps can be omitted without affecting execution.
 

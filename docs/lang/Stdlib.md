@@ -1,4 +1,3 @@
-
 # Standard library implementation plan
 
 This page defines the Neura standard library's source modules, contracts, and algorithms. The language and runtime already supply the facilities in [section 3](#3-language-baseline-and-gaps). Every module and host service on this page is implemented in `stdlib/` and the runner, and tested as [section 17](#17-verification) describes; [Status](Status.md) and [Standard library](StandardLibrary.md) list what shipped. [Section 18](#18-implementation-decisions) records the decisions made where this plan left a choice open, and where the implementation departs from it.

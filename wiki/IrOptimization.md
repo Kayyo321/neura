@@ -1,4 +1,7 @@
+<!-- Generated from docs/IrOptimization.md by scripts/generate-wiki.py. Edit that file, not this one. -->
 # NeuraIR optimization
+
+[Wiki home](https://github.com/Kayyo321/neura/wiki) · [Language overview](https://github.com/Kayyo321/neura/wiki/Overview) · [Feature status and open decisions](https://github.com/Kayyo321/neura/wiki/Status)
 
 The IR optimization stage takes validated NeuraIR from the frontend and returns validated NeuraIR with the same observable behavior. It sits between lowering and neuron conversion:
 
@@ -107,7 +110,7 @@ Removes an expression statement whose expression is pure and total, such as `val
 
 ## Tasks, polls, and scheduler operations
 
-A program that uses [tasks](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) contains three more operations (`task_scope`, `spawn`, `scheduler_call`) and a `poll` flag on calls and loops ([NeuraIR format](NirFormat#revision-19-tasks)). The stage contract is that the optimized program executes the same scheduler operations and the same polls in the same order as the unoptimized one, so the schedule at every quantum is the same tick for tick. No pass removes an executed call, an executed loop back edge, a `spawn`, a task scope, or a scheduler call, duplicates one, or moves one past another. The reasons, pass by pass:
+A program that uses [tasks](Concurrency) contains three more operations (`task_scope`, `spawn`, `scheduler_call`) and a `poll` flag on calls and loops ([NeuraIR format](NirFormat#revision-19-tasks)). The stage contract is that the optimized program executes the same scheduler operations and the same polls in the same order as the unoptimized one, so the schedule at every quantum is the same tick for tick. No pass removes an executed call, an executed loop back edge, a `spawn`, a task scope, or a scheduler call, duplicates one, or moves one past another. The reasons, pass by pass:
 
 | Pass | Why it preserves tasks, polls, and scheduler operations |
 | --- | --- |
