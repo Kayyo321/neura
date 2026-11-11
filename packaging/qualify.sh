@@ -123,7 +123,7 @@ else
 fi
 
 # 6. The test runner passes the example test module.
-if clean "$home" neura test "$examples/testing/math-tests.nra" > "$work/test.log" 2>&1; then
+if clean "$home" neura test -I "$examples/guide" "$examples/testing/math-tests.nra" > "$work/test.log" 2>&1; then
     pass 6 "test runner"
 else
     fail 6 "test runner" "$(tail -n 3 "$work/test.log" | tr '\n' ' ')"
