@@ -10,7 +10,7 @@
 - "Must" states a requirement on the implementation. An option name, message, or record layout given here is fixed.
 - Two terms distinguish the image from the executable and from foreign code:
   - **Standalone image.** [Overview](Overview) and [Status](Status) call a `.nvr` image standalone because it runs without its source. It still needs a runner.
-  - **Native code.** `--deny-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop)). `--native` compiles nothing to machine code (the launcher's faster tier runs lifted blocks through its own fixed native routines, from the image's graphs and its `LIFT` hints, and generates no code); whether the packaged program may call native code is the policy's native capability, which is granted unless `--deny-native` or `--deny-all` is given.
+  - **Native code.** `--deny-native`, `Std.DynamicForeign`, and the `NATV` section concern C code that a program calls ([Foreign interop](ForeignInterop)). `--native` compiles nothing to machine code when it builds the executable. At run time the launcher's faster tiers run lifted blocks through its own fixed native routines, and regions of them as machine code that the launcher generates in memory for that run from the image's graphs and its `LIFT` hints, where its native code generator is enabled (by default on x86-64 Linux), or else through a portable interpreter ([native compilation](NVM#native-compilation)). Nothing generated is written to the executable or to disk, and generated code calls no C code a program could name; whether the packaged program may call native code is the policy's native capability, which is granted unless `--deny-native` or `--deny-all` is given.
 
 | Term | Meaning |
 | --- | --- |
@@ -37,7 +37,7 @@ Because the image is embedded unchanged, everything that inspects images keeps w
 
 **Not provided.**
 
-- Ahead-of-time compilation. `--native` does not turn neuron graphs into machine code.
+- Ahead-of-time compilation. `--native` does not turn neuron graphs into machine code; only the run-time code generator of tier 2 does, in memory, for one run.
 - Bundled data. Files a program reads at run time are not embedded. A program that needs them ships them beside the executable and is built with a file-system grant.
 - Bundled shared libraries (section 6.5).
 - Payload compression, self-update, and installers. A packaged program has no installer or updater. The `neura` tool's own install, update, and uninstall commands concern the toolchain ([Install](Install)).
@@ -48,7 +48,7 @@ Because the image is embedded unchanged, everything that inspects images keeps w
 ## 3. Rules
 
 - **Packaging.** `--native` packages an image with a launcher, and the NVM in the launcher evaluates the image's graphs (section 2).
-- **Image bytes.** The embedded image is byte for byte the image `neura build` writes for the same inputs and options. Every compiler stage runs unchanged (section 2). Its optional `LIFT` hints travel with it, so the launcher's faster tier proves and uses them as `neura run` does; `--no-lift-hints` leaves them out of the embedded image, from sources or from a built `.nvr`.
+- **Image bytes.** The embedded image is byte for byte the image `neura build` writes for the same inputs and options. Every compiler stage runs unchanged (section 2). Its optional `LIFT` hints travel with it, so the launcher's faster tiers prove and use them as `neura run` does; `--no-lift-hints` leaves them out of the embedded image, from sources or from a built `.nvr`.
 - **Build requirements.** `neura build --native` needs no compiler, linker, or other external tool. It reads an installed launcher and writes the output itself (section 7.3). A program with C imports still needs the C compiler those imports need ([C imports](Tooling#c-imports)).
 - **Container.** The container is the launcher's bytes, then the payload, then a fixed 32-byte footer at the end of the file. The launcher's bytes are not modified (section 5.1).
 - **Arguments.** Every command-line argument of a native executable belongs to the program. The launcher interprets none (section 6.2).
@@ -249,7 +249,8 @@ An operator sometimes needs to bound or record a deployed program without rebuil
 | `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, `--deny-all` | Removes the group, or every group, from the policy for this run, as the same option does for `neura run`. A group the policy does not grant stays denied. Files with a prefix list lose the list and all files with it. |
 | `--no-gpu`, `--gpu=off` | Accepted as requests for the launcher's CPU execution mode. The launcher has no GPU backend. |
 | `--stats`, `--profile` | As for `neura run`, on standard error. |
-| `--tier=0`, `--tier=1`, `--tier-stats` | Lower the execution tier, or report the tiers, as for `neura run` ([execution tiers](NVM#execution-tiers)). The variable cannot raise the tier: `--tier=1` keeps the default. The tier changes only speed, so a sealed executable that ignores the variable still honors `NEURA_TIER=0` in the environment. |
+| `--tier=0`, `--tier=1`, `--tier=2`, `--tier-stats` | Lower the execution tier, or report the tiers, as for `neura run` ([execution tiers](NVM#execution-tiers)). The variable cannot raise the tier: `--tier=2` keeps the default. The tier changes only speed, so a sealed executable that ignores the variable still honors `NEURA_TIER=0` or `NEURA_TIER=1` in the environment. |
+| `--jit=off`, `--jit=on`, `--jit=auto` | Run tier 2 regions on the interpreter, as native code (an error at start-up where the platform cannot), or as the platform's default, as for `neura run` ([native compilation](NVM#native-compilation)). Native code changes only speed, so a sealed executable still honors `NEURA_JIT` in the environment. `--deny-native` does not turn it off. |
 | `--record <file>` | Writes the run's host trace ([NVM](NVM#determinism-limits-and-observability)). |
 | `--replay <file>` | Answers every host request from the trace. No service runs, so the policy's capabilities are not used. |
 

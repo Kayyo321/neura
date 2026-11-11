@@ -17,7 +17,7 @@ Neura is a statically typed language organized around modules, classes, and expl
 - **Tags**: `#Deprecated`, `#NoDiscard`, `#Final`, `#Pure`, `#Synchronized`, and the other tags of the [catalogue](Tags) tell the compiler how to treat a declaration, and the compiler checks the ones it implements.
 - **Monitors**: a class whose methods are `#Synchronized` can be shared by tasks ([Concurrency](Concurrency#81-monitors)).
 - **Diagnostics** have codes, source snippets, labels, and suggested fixes; `neura explain <CODE>` prints the page of a code ([Tooling](Tooling#diagnostics), [Diagnostic codes](Diagnostics)).
-- **Kernels and execution tiers**: parts of the standard library run on built-in C [kernels](Kernels), and the runtime runs proven blocks natively ([execution tiers](NVM#execution-tiers)). Neither changes what a program computes.
+- **Kernels and execution tiers**: parts of the standard library run on built-in C [kernels](Kernels), and the runtime runs proven blocks as native operations and regions of them together, as machine code on x86-64 Linux ([execution tiers](NVM#execution-tiers)). Neither changes what a program computes.
 
 ## Neura at a glance
 

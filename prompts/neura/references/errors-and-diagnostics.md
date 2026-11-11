@@ -72,7 +72,7 @@ A trap prints `<image>: trap: <reason> in function F block B at file.nra:line:co
 | `--max-steps` exceeded (default 100,000,000) | `step limit exceeded: 100000000 steps` | 152 |
 | Invalid dispatch or malformed image | | 132 |
 
-Load, bind, and usage errors from `neura run` itself exit with 1. Kernel calls and execution tiers do not change any of these: a kernel traps with the same message as the Neura code it replaced, and both tiers trap at the same step.
+Load, bind, and usage errors from `neura run` itself exit with 1. Kernel calls and execution tiers do not change any of these: a kernel traps with the same message as the Neura code it replaced, and every tier, with or without native code, traps at the same step.
 
 ## Reading compiler diagnostics
 
