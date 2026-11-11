@@ -10,7 +10,9 @@ reading the library. This script regenerates it from stdlib/std/:
 For each module outside an `internal` directory it lists, in source order, the
 exported declarations (their signature up to the body), the class, interface,
 and singleton headers that give those members their context, and the members of
-interfaces, which are declared without `export`. Pass `--check` to fail when the
+interfaces, which are declared without `export`. Declarations tagged `#Hidden`
+are left out with their members, and the `#Deprecated` and `#Since` tags of a
+declaration are kept before its signature. Pass `--check` to fail when the
 committed file is out of date instead of writing it.
 """
 
@@ -55,6 +57,61 @@ INTERFACE = re.compile(r"=\s*interface\b")
 INTERFACE_MEMBER = re.compile(r"^(static\s+)?(let|const)\s+\w+\s*=\s*func\b")
 ENUM_OPEN = re.compile(r"=\s*enum(<[^>]*>)?\s*\($")
 SIGNATURE_END = re.compile(r"(=>|\{|;|\($|\)\s*;?$)")
+# Tags shown before a signature.
+LISTED_TAGS = {"Deprecated", "Since"}
+
+
+def split_tags(text):
+    """Split the tags written at the start of a line (docs/lang/Tags.md) from
+    the rest of it: (["Deprecated(as_of: \"0.2.0\")", "Since(\"0.1.0\")"], rest).
+    A group `#[A, B]` gives one entry per tag."""
+    tags = []
+    rest = text.lstrip()
+    while rest.startswith("#"):
+        depth, quote, index = 0, False, 1
+        while index < len(rest):
+            char = rest[index]
+            if quote:
+                if char == "\\":
+                    index += 1
+                elif char == '"':
+                    quote = False
+            elif char == '"':
+                quote = True
+            elif char in "([":
+                depth += 1
+            elif char in ")]":
+                depth -= 1
+            elif depth == 0 and (char.isspace() or char == "#"):
+                break
+            index += 1
+        body = rest[1:index]
+        if body.startswith("[") and body.endswith("]"):
+            depth, quote, start = 0, False, 1
+            for position in range(1, len(body) - 1):
+                char = body[position]
+                if quote:
+                    quote = char != '"' or body[position - 1] == "\\"
+                elif char == '"':
+                    quote = True
+                elif char in "([":
+                    depth += 1
+                elif char in ")]":
+                    depth -= 1
+                elif char == "," and depth == 0:
+                    tags.append(body[start:position].strip())
+                    start = position + 1
+            if body[start:-1].strip():
+                tags.append(body[start:-1].strip())
+        elif body:
+            tags.append(body)
+        rest = rest[index:].lstrip()
+    return tags, rest
+
+
+def tag_name(tag):
+    """The name of a tag as split_tags returns it."""
+    return re.match(r"[A-Za-z_]\w*", tag)[0] if re.match(r"[A-Za-z_]\w*", tag) else ""
 
 
 def module_name(path: Path) -> str:
@@ -71,14 +128,33 @@ def signatures(path: Path) -> list[str]:
     lines = path.read_text(encoding="utf-8").split("\n")
     result = []
     interface_indent = None
+    hidden_indent = None
+    pending = []
     index = 0
     while index < len(lines):
         line = lines[index]
-        text = line.strip()
         indent = len(line) - len(line.lstrip())
+        tags, text = split_tags(line)
+        text = text.strip()
+        if tags and not text:
+            # A line of tags only; they belong to the declaration below.
+            pending += tags
+            index += 1
+            continue
+        if text and not text.startswith("//"):
+            tags, pending = pending + tags, []
+        if hidden_indent is not None and text and indent <= hidden_indent:
+            hidden_indent = None
         if interface_indent is not None and text and indent <= interface_indent:
             interface_indent = None
         in_interface = interface_indent is not None and indent > interface_indent
+        if hidden_indent is not None:
+            index += 1
+            continue
+        if any(tag_name(tag) == "Hidden" for tag in tags):
+            hidden_indent = indent
+            index += 1
+            continue
         if DECLARATION.match(text) or CONTEXT.match(text) or (in_interface and INTERFACE_MEMBER.match(text)):
             if INTERFACE.search(text):
                 interface_indent = indent
@@ -102,6 +178,9 @@ def signatures(path: Path) -> list[str]:
             if "enum" not in signature and signature.count("{") > signature.count("}"):
                 signature = re.sub(r"\s*\{[^}]*$", "", signature)
             signature = signature.rstrip(";").rstrip()
+            listed = [tag for tag in tags if tag_name(tag) in LISTED_TAGS]
+            if listed:
+                signature = (f"#{listed[0]} " if len(listed) == 1 else f"#[{', '.join(listed)}] ") + signature
             depth = max(indent // 4 - 1, 0)
             result.append("  " * depth + signature)
         index += 1

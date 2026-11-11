@@ -1,6 +1,8 @@
 #include "argument_lists.hpp"
 #include "diagnostic_render.hpp"
 #include "explain.hpp"
+#include "neura-ir/tags.hpp"
+#include "util/suggest.hpp"
 #include "backend/converter.hpp"
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
@@ -92,6 +94,7 @@ void usage(std::ostream& out) {
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
            "       neura c-bindings [--linked] [c-options] <header.h>\n"
            "       neura explain <code> | --explain <code> | explain --list\n"
+           "       neura tags [<Name>]\n"
            "       neura --version | version\n"
            "       neura --help | help\n"
            "       neura doctor\n"
@@ -169,12 +172,12 @@ void usage(std::ostream& out) {
 
 enum class Command {
     Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
-    Version, Help, Doctor, Update, Uninstall, Explain
+    Version, Help, Doctor, Update, Uninstall, Explain, Tags
 };
 
 constexpr const char* commands =
     "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
-    "doctor, update, uninstall, explain, version, or help";
+    "doctor, update, uninstall, explain, tags, version, or help";
 
 neura::nvm::Capabilities granted_capabilities() {
     neura::nvm::Capabilities capabilities;
@@ -436,6 +439,16 @@ Options read_options(int argc, char** argv) {
         options.command = Command::Update;
     } else if (command == "uninstall") {
         options.command = Command::Uninstall;
+    } else if (command == "tags") {
+        // The tag catalogue (docs/lang/Tags.md), or one tag's entry.
+        options.command = Command::Tags;
+        for (int i = 2; i < argc; ++i) {
+            const std::string_view arg = argv[i];
+            if (arg.starts_with('-')) throw std::runtime_error("unknown option for tags: " + std::string(arg));
+            if (!options.explain_code.empty()) throw std::runtime_error("tags takes at most one tag name");
+            options.explain_code = arg.starts_with('#') ? arg.substr(1) : arg;
+        }
+        return options;
     } else if (command == "explain" || command == "--explain") {
         options.command = Command::Explain;
         for (int i = 2; i < argc; ++i) {
@@ -1631,6 +1644,22 @@ int dispatch(const Options& options) {
         return neura::lifecycle::update(options.executable, options.update);
     case Command::Uninstall:
         return neura::lifecycle::uninstall(options.executable, options.uninstall);
+    case Command::Tags: {
+        if (options.explain_code.empty()) {
+            neura::print_tag_catalogue(std::cout);
+            return 0;
+        }
+        if (const auto* tag = neura::find_tag(options.explain_code)) {
+            neura::print_tag(std::cout, *tag);
+            return 0;
+        }
+        std::vector<std::string> names;
+        for (const auto& tag : neura::tag_registry()) names.emplace_back(tag.name);
+        std::string message = "'" + options.explain_code + "' is not a tag";
+        if (const auto close = neura::closest_name(options.explain_code, names)) message += "; did you mean " + *close + "?";
+        else message += "; `neura tags` lists the tags";
+        throw std::runtime_error(message);
+    }
     case Command::Explain:
         if (options.explain_list) neura::cli::explain_list(std::cout);
         else neura::cli::explain(options.explain_code, std::cout);

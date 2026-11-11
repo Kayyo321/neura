@@ -21,6 +21,8 @@ constexpr Page pages[] = {
 };
 
 std::string normalized(std::string_view code) {
+    // A warning may be named as -W names it.
+    if (const auto* warning = find_warning(code)) return std::string(warning->code);
     std::string result;
     for (const char c : code) result += c >= 'a' && c <= 'z' ? static_cast<char>(c - 'a' + 'A') : c;
     if (!result.empty() && result.front() >= '0' && result.front() <= '9') result.insert(result.begin(), 'E');
@@ -43,6 +45,7 @@ void explain(std::string_view code, std::ostream& out) {
     }
     std::vector<std::string> codes;
     for (const auto& entry : diagnostic_codes) codes.emplace_back(entry.code);
+    for (const auto& entry : warning_codes) codes.emplace_back(entry.name);
     std::string message = "'" + std::string(code) + "' is not a diagnostic code";
     if (const auto close = closest_name(name, codes)) message += "; did you mean " + *close + "?";
     else message += "; `neura explain --list` lists the codes";
@@ -50,7 +53,12 @@ void explain(std::string_view code, std::ostream& out) {
 }
 
 void explain_list(std::ostream& out) {
-    for (const auto& entry : diagnostic_codes) out << entry.code << "  " << entry.title << '\n';
+    for (const auto& entry : diagnostic_codes) {
+        out << entry.code << "  " << entry.title;
+        for (const auto& warning : warning_codes)
+            if (warning.code == entry.code) out << " (-W" << warning.name << ")";
+        out << '\n';
+    }
 }
 
 } // namespace neura::cli

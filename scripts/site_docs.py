@@ -57,8 +57,11 @@ NEURA_KEYWORDS = {
     "while", "do", "for", "in", "break", "continue", "return", "true", "false", "as", "is", "nil", "enum",
     "match", "and", "or", "interface", "implements", "promote", "static", "singleton",
 }
+# A tag before a declaration (docs/lang/Tags.md), `#Name` or the opening of a
+# group `#[Name`, is marked like a keyword.
 NEURA_TOKEN = re.compile(
     r'(?P<c>//[^\n]*|/\*.*?\*/)|(?P<s>"(?:\\.|[^"\\\n])*"|\'(?:\\.|[^\'\\\n])*\')'
+    r"|(?P<t>#(?:\[\s*)?[A-Za-z_][A-Za-z0-9_]*)"
     r"|(?P<n>\b\d[\d_]*(?:\.\d+)?\b)|(?P<w>\b[A-Za-z_][A-Za-z0-9_]*\b)",
     re.DOTALL,
 )
@@ -82,7 +85,7 @@ def highlight(language: str, source: str) -> str | None:
         if kind == "w" and text not in NEURA_KEYWORDS:
             out.append(html.escape(text, quote=False))
         else:
-            out.append(f'<span class="{"k" if kind == "w" else kind}">{html.escape(text, quote=False)}</span>')
+            out.append(f'<span class="{"k" if kind in ("w", "t") else kind}">{html.escape(text, quote=False)}</span>')
         position = match.end()
     out.append(html.escape(source[position:], quote=False))
     return "".join(out)
