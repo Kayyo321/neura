@@ -50,6 +50,9 @@ def main() -> int:
         return 1
 
     tag = f"v{full}"
+    # The changelog's links are relative to the repository's root, which a
+    # release page is not; point them at the tagged files.
+    body = re.sub(r"\]\((?!https?://|#|mailto:)([^)\s]+)\)", rf"]({DOCS}/{tag}/\1)", body)
     out = []
     if prerelease:
         out.append(f"**This is a release candidate of Neura {version}, published for testing.** "
