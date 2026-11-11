@@ -1,10 +1,11 @@
 // status: 134
-// stderr: explicit program failure \(trap reason 3\): invalid state: native access denied: run with --allow-native
+// stderr: explicit program failure \(trap reason 3\): invalid state: native access denied: the native capability is not granted
+// run-options: --deny-native
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
 let arenas = import:Std.DynamicForeign.Arena;
 
-// Without --allow-native, the first native operation traps.
+// With --deny-native, the first native operation traps.
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let arena = arenas.of_confined();

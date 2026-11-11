@@ -1,0 +1,36 @@
+; A chain of nested scopes: each task opens a scope, spawns one child, and parks
+; at the scope exit, until --max-tasks ends the run. Used by backend-concurrency
+; and for the parked-task memory measurement in docs/lang/Concurrency.md 10.3.
+nvr 1.5 profile 1
+entry 0
+
+type 0 text
+type 1 array 0
+type 2 signed 32
+type 3 unsigned 32
+type 4 void
+type 5 unsigned 64
+constant 0 type 2 bytes 00000000
+transferable-layouts [ ]
+
+graph 0 inputs 0 outputs [ ]
+
+function 0 parameters 1 result 2 frame [ 1 5 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit scheduler scope-enter target 0 arguments [ ] result - resume 1 assign [ ]
+  block 1 graph 0 selector 0 inputs [ ]
+    exit scheduler spawn target 1 arguments [ ] result 1 resume 2 assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit scheduler scope-exit target 0 arguments [ ] result - resume 3 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit return arguments [ constant:2:0 ] assign [ ]
+
+function 1 parameters 0 result 4 frame [ 5 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit scheduler scope-enter target 0 arguments [ ] result - resume 1 assign [ ]
+  block 1 graph 0 selector 0 inputs [ ]
+    exit scheduler spawn target 1 arguments [ ] result 0 resume 2 assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit scheduler scope-exit target 0 arguments [ ] result - resume 3 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit return arguments [ ] assign [ ]

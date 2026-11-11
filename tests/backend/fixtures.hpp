@@ -45,6 +45,23 @@ const std::vector<CorpusImage>& image_corpus(const Environment& environment);
 struct Captured {
     nvm::RunResult result;
     std::string output;
+    std::vector<nvm::HostRequest> requests;
+};
+
+// The corpus needs only console output. Keep a copy of its requests as well
+// as the bytes written, so differential tests can compare both boundaries.
+class CapturingConsole final : public nvm::HostService {
+public:
+    explicit CapturingConsole(std::optional<std::size_t> capacity = std::nullopt);
+    const nvm::HostSignature& signature() const override;
+    nvm::HostCompletion invoke(const nvm::HostRequest& request) override;
+    const std::string& output() const { return sink_.contents(); }
+
+    std::vector<nvm::HostRequest> requests;
+
+private:
+    nvm::StringSink sink_;
+    nvm::ConsoleWriteLine console_;
 };
 
 // Runs an image with neura.console.write_line bound to an in-memory sink.

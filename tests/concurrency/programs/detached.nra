@@ -1,0 +1,23 @@
+// Tasks whose handle is discarded are released as they finish, so one
+// long-lived scope can start any number of them. The scope still waits.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let note = func(index: int) {
+    if (index % 5000 == 0) {
+        console.print_line("task " + index.to_string());
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            for (let i: int = 0; i < 20000; i++) {
+                spawn note(i);
+            }
+            console.print_line("all started");
+        }
+        console.print_line("all finished");
+        return program.ExitCode.Ok;
+    };
+);

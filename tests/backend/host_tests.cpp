@@ -641,7 +641,7 @@ NEURA_TEST(host, trace_files_round_trip) {
         fail("accepted malformed trace: " + std::string(text));
     };
     rejects("", 0, "missing the header");
-    rejects("neura-trace 3\n", 1, "unsupported trace version 3");
+    rejects("neura-trace 4\n", 1, "unsupported trace version 4");
     rejects("neura-trace 2\nrequest a.b 1 []\ncallback c.d 1 []\nok 0\noutcome completed 0\n", 4,
             "expected 'request', 'return', or 'ended'");
     rejects("neura-trace 2\nrequest a.b 1 []\ncallback c.d 1 []\n", 3, "no return");

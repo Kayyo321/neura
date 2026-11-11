@@ -1,0 +1,132 @@
+// TcpStream.with_connection closes the stream exactly once however the body
+// ends (Concurrency.md section 7, "Resources"): after a value, after an
+// error, and after the body's scope was cancelled. The listener on the other
+// side observes the close as the end of the stream. When the connection
+// cannot be opened, the body does not run. Needs the net and clock
+// capabilities.
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let listeners = import:Std.Net.TcpListener;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let streams = import:Std.Net.TcpStream;
+
+let describe = func(problem: errors.Error) -> string {
+    return match (problem) {
+        errors.Error.Io { kind, message, path } => errors.io_kind_name(kind),
+        _ => errors.message(problem),
+    };
+};
+
+// Accepts the connection and reports whether the client side closed it.
+let observe = func(label: string, listener: listeners.TcpListener) {
+    match (listener.accept()) {
+        result.Result.Err(problem) => {
+            console.print_line(label + ": accept failed: " + describe(problem));
+        },
+        result.Result.Ok(server) => {
+            server.set_read_timeout(durations.of_seconds(2));
+            match (server.read(8)) {
+                result.Result.Ok(chunk) => {
+                    if (chunk.length == 0) {
+                        console.print_line(label + ": peer saw the close");
+                    } else {
+                        console.print_line(label + ": peer received data");
+                    }
+                },
+                result.Result.Err(problem) => {
+                    console.print_line(label + ": peer saw no close: " + describe(problem));
+                },
+            }
+            server.close();
+        },
+    }
+};
+
+// Waits for data the peer never sends, so only cancellation ends it.
+let wait_for_data = func(stream: streams.TcpStream) -> result.Result<int> {
+    return match (stream.read(8)) {
+        result.Result.Ok(chunk) => result.Result<int>.Ok(chunk.length),
+        result.Result.Err(problem) => result.Result<int>.Err(problem),
+    };
+};
+
+let cancelled_run = func(port: int, out: channels.Sender<string>) {
+    match (streams.with_connection<int>("127.0.0.1", port, wait_for_data)) {
+        result.Result.Ok(count) => {
+            out.send("cancelled: finished with " + count.to_string());
+        },
+        result.Result.Err(problem) => {
+            out.send("cancelled: " + describe(problem));
+        },
+    }
+};
+
+let show = func(label: string, outcome: result.Result<int>) {
+    match (outcome) {
+        result.Result.Ok(value) => {
+            console.print_line(label + ": Ok " + value.to_string());
+        },
+        result.Result.Err(problem) => {
+            console.print_line(label + ": " + describe(problem));
+        },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        match (listeners.bind("127.0.0.1", 0)) {
+            result.Result.Err(problem) => {
+                console.print_line("bind failed: " + describe(problem));
+                return program.ExitCode.Failure;
+            },
+            result.Result.Ok(listener) => {
+                let port = listener.local_port();
+
+                show("ok", streams.with_connection<int>("127.0.0.1", port, func(stream: streams.TcpStream) -> result.Result<int> {
+                    return result.Result<int>.Ok(7);
+                }));
+                observe("ok", listener);
+
+                show("err", streams.with_connection<int>("127.0.0.1", port, func(stream: streams.TcpStream) -> result.Result<int> {
+                    return result.Result<int>.Err(errors.custom("test.failed", "the body failed"));
+                }));
+                observe("err", listener);
+
+                let replies = channels.open<string>(1);
+                scope (deadline) {
+                    deadline.cancel_after(durations.of_millis(200));
+                    spawn cancelled_run(port, replies[0]);
+                    match (replies[1].receive()) {
+                        channels.Received.Value(text) => {
+                            console.print_line(text);
+                        },
+                        _ => {
+                            console.print_line("cancelled: no result");
+                        },
+                    }
+                }
+                observe("cancelled", listener);
+
+                // A port nobody listens on: the connection is refused and the
+                // body never runs.
+                let unused = listeners.bind("127.0.0.1", 0);
+                match (unused) {
+                    result.Result.Err(_) => {},
+                    result.Result.Ok(closed) => {
+                        let dead = closed.local_port();
+                        closed.close();
+                        show("open error", streams.with_connection<int>("127.0.0.1", dead, func(stream: streams.TcpStream) -> result.Result<int> {
+                            console.print_line("body ran");
+                            return result.Result<int>.Ok(1);
+                        }));
+                    },
+                }
+                listener.close();
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

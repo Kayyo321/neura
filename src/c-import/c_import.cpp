@@ -907,7 +907,7 @@ private:
                "let c_value_layout = import:Std.DynamicForeign.ValueLayout;\n"
                "let c_variadic = import:Std.Core.Variadic;\n\n";
         out << "/// @brief The declarations of the C header " << header_.filename().generic_string()
-            << " (ForeignInterop.md, C imports). Calls need --allow-native.\n";
+            << " (ForeignInterop.md, C imports). Calls need the native capability.\n";
         out << "export let " << module_name_ << " = module (\n";
         out << "    let neura_lookup: c_lookup.SymbolLookup = nil;\n";
         out << "    let neura_library = func -> c_lookup.SymbolLookup {\n";

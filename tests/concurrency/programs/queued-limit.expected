@@ -1,0 +1,13 @@
+first channel holds 1
+first channel holds 2
+first channel holds 3
+first channel holds 4
+first channel holds 5
+first channel holds 6
+second channel holds 1, 7 buffered in all
+second channel holds 2, 8 buffered in all
+second channel holds 3, 9 buffered in all
+second channel holds 4, 10 buffered in all
+second channel holds 5, 11 buffered in all
+second channel holds 6, 12 buffered in all
+drained 42

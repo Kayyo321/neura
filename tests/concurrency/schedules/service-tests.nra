@@ -1,0 +1,110 @@
+let channels = import:Std.Concurrent.Channel;
+let durations = import:Std.Time.Duration;
+let groups = import:Std.Concurrent.WorkerGroup;
+let result = import:Std.Core.Result;
+let timers = import:Std.Concurrent.Timer;
+let test = import:Std.Test;
+
+// A small service taken through the phase 3 gate (Concurrency.md section
+// 16): a bounded queue sheds overload, a slow dependency is timed out, and
+// shutdown drains the work that was accepted. Run under --virtual-time, so
+// the 50 ms budget and the dependency's delays are exact, and under several
+// schedules, none of which may change an answer.
+let ServiceTests = module (
+    // One request: how long the dependency takes, and where the answer goes.
+    let Request = enum (Ask { id: int, delay_ms: int64, reply: channels.Sender<int> });
+
+    // What the body of a group counts: a body cannot reassign a binding it captures.
+    let Tally = class (
+        export let accepted: int = 0;
+        export let shed: int = 0;
+        export let init = func { };
+    );
+
+    const answered: int = 1;
+    const timed_out: int = 2;
+
+    // The dependency: answers after its delay unless it is cancelled first.
+    let dependency = func(delay_ms: int64) -> int => match (timers.after(durations.of_millis(delay_ms))) {
+        result.Result.Ok(timer) => match (timer.wait()) {
+            timers.TimerOutcome.Fired => answered,
+            _ => timed_out,
+        },
+        result.Result.Err(_) => timed_out,
+    };
+
+    // Gives the dependency 50 ms. The scope's deadline cancels the dependency's
+    // wait, and the join still waits for it to stop: a scope does not cancel
+    // the task that runs it, only the tasks below it.
+    let handle = func(request: Request) -> void {
+        match (request) {
+            Request.Ask { id, delay_ms, reply } => {
+                let code = timed_out;
+                scope (call) {
+                    call.cancel_after(durations.of_millis(50));
+                    let work = spawn dependency(delay_ms);
+                    code = work.join();
+                }
+                reply.send(id * 10 + code);
+            },
+        }
+    };
+
+    // The answers that are waiting, added up, and how many there are.
+    let collect = func(answers: channels.Receiver<int>) -> [int, int] {
+        let sum = 0;
+        let count = 0;
+        let more = true;
+        while (more) {
+            match (answers.try_receive()) {
+                channels.TryReceived.Value(value) => {
+                    sum += value;
+                    count += 1;
+                },
+                _ => {
+                    more = false;
+                },
+            }
+        }
+        return [sum, count];
+    };
+
+    export let test_a_slow_dependency_is_timed_out = func() -> void {
+        let [reply, answers, closer] = channels.open<int>(8);
+        groups.with_workers<Request>(2, 4, handle, func(group: groups.WorkerGroup<Request>) -> void {
+            group.submit(Request.Ask { id: 1, delay_ms: 10, reply: reply });
+            group.submit(Request.Ask { id: 2, delay_ms: 200, reply: reply });
+            group.submit(Request.Ask { id: 3, delay_ms: 20, reply: reply });
+        });
+        let [sum, count] = collect(answers);
+        test.assert_equal_int32(3, count);
+        // 11: answered. 22: timed out. 31: answered.
+        test.assert_equal_int32(11 + 22 + 31, sum);
+    };
+
+    export let test_overload_is_shed_and_shutdown_drains_the_queue = func() -> void {
+        let [reply, answers, closer] = channels.open<int>(8);
+        let tally = new Tally();
+        groups.with_workers<Request>(2, 2, handle, func(group: groups.WorkerGroup<Request>) -> void {
+            // Eight requests arrive before a worker has taken any: the
+            // queue holds two and the rest are refused at once.
+            for (let id: int = 1; id <= 8; id++) {
+                match (group.try_submit(Request.Ask { id: id, delay_ms: 5, reply: reply })) {
+                    groups.TrySubmitOutcome.Submitted => {
+                        tally.accepted += 1;
+                    },
+                    groups.TrySubmitOutcome.Full => {
+                        tally.shed += 1;
+                    },
+                    groups.TrySubmitOutcome.Closed => { },
+                }
+            }
+            // Leaving the body closes the group and waits for the queue.
+        });
+        test.assert_equal_int32(2, tally.accepted);
+        test.assert_equal_int32(6, tally.shed);
+        let [sum, count] = collect(answers);
+        test.assert_equal_int32(2, count);
+        test.assert_equal_int32(11 + 21, sum);
+    };
+);

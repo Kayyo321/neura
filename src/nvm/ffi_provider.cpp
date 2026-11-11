@@ -1,6 +1,6 @@
 // The native interface provider behind Std.DynamicForeign (ForeignInterop.md):
 // native libraries, symbol lookup, arena-owned native memory, and downcalls
-// through libffi. Every service needs the native capability (--allow-native).
+// through libffi. Every service needs the native capability, which --deny-native removes.
 //
 // Wire formats, shared with stdlib/std/dynamic-foreign/internal/native.nra:
 //
@@ -25,7 +25,7 @@
 #include <cstring>
 #include <memory>
 
-#ifndef _WIN32
+#if !defined(_WIN32) && !defined(NEURA_NO_NATIVE_INTEROP)
 #include <dlfcn.h>
 #include <ffi.h>
 #include <sys/mman.h>
@@ -73,12 +73,17 @@ std::string target_triple() {
 
 std::string native_triple() { return target_triple(); }
 
-#ifdef _WIN32
+#if defined(_WIN32) || defined(NEURA_NO_NATIVE_INTEROP)
 
 void add_ffi_services(const Adder& add, StandardServices::Tables&, const Capabilities& capabilities) {
+#ifdef NEURA_NO_NATIVE_INTEROP
+    (void)capabilities;
+    const auto unsupported = [](const HostRequest&) { return fail(host_error::unsupported); };
+#else
     const auto unsupported = [&capabilities](const HostRequest&) {
         return capabilities.native ? fail(host_error::unsupported) : denied();
     };
+#endif
     add(signature("neura.ffi.abi", {}, tuple({text(), byte_list()})), unsupported);
     add(signature("neura.ffi.arena.open", {}, int64()), unsupported);
     add(signature("neura.ffi.arena.close", {int64()}, void_type()), unsupported);

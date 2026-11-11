@@ -112,7 +112,17 @@ enum class IrOp {
     // NeuraIR 1.4. Allocate an array or list filled with one value.
     RepeatCollection,
     // NeuraIR 1.7. Materialized into shared storage before specialization.
-    ReferencePlace
+    ReferencePlace,
+    // NeuraIR 1.9 (docs/lang/Concurrency.md). TaskScope is a statement whose
+    // body runs inside a task scope: every exit from the body, including
+    // return, break, and continue, first waits for the tasks the scope owns.
+    // Its symbol is the constant local bound to the scope handle, if any.
+    // Spawn starts its operand, a function value that takes no arguments, as
+    // a task of the innermost enclosing TaskScope of the same function and
+    // yields the uint64 task identity. SchedulerCall asks the NVM scheduler
+    // for the operation its text names; the scheduler defines each
+    // operation's arguments and result.
+    TaskScope, Spawn, SchedulerCall
 };
 
 struct IrNode {
@@ -132,6 +142,11 @@ struct IrNode {
     std::vector<IrNode> body;
     std::vector<IrNode> alternative;
     std::vector<IrType> type_arguments;
+    // NeuraIR 1.9. A poll counts one language operation toward the running
+    // task's quantum: on a Loop it is counted each time the back edge is
+    // taken, and on a Call, VirtualCall, or CallClosure when the call is
+    // made. insert_polls sets it across a program that contains a Spawn.
+    bool poll = false;
 };
 
 struct IrBody {
@@ -183,6 +198,17 @@ public:
 
     std::string path;
 };
+
+// True when any body of `program` contains a Spawn.
+bool has_spawn(const IrProgram& program);
+// True when any body of `program` contains a Spawn, a TaskScope, or a
+// SchedulerCall: the program needs the checks of Concurrency.md section 5.
+bool uses_tasks(const IrProgram& program);
+// Marks a poll on every loop and call of a program that contains a Spawn
+// (Concurrency.md section 10.2). Does nothing otherwise, and running it again
+// changes nothing. Lowering runs it on the linked program, and the build runs
+// it again so that a .nir input is treated alike.
+void insert_polls(IrProgram& program);
 
 IrProgram lower(const std::vector<ParsedFile>& files);
 IrProgram lower(const std::vector<ParsedFile>& files, LinkedImports linked);

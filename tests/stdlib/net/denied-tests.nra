@@ -1,10 +1,11 @@
+// test-options: --deny-net
 let duration = import:Std.Time.Duration;
 let error = import:Std.Core.Error;
 let tcp_listener = import:Std.Net.TcpListener;
 let tcp_stream = import:Std.Net.TcpStream;
 let test = import:Std.Test;
 
-// Without --allow-net, connecting and binding fail with CapabilityDenied.
+// With --deny-net, connecting and binding fail with CapabilityDenied.
 let NetDeniedTests = module (
     export let test_connect_and_bind_are_denied = func() -> void {
         let refused = test.assert_err<tcp_stream.TcpStream>(tcp_stream.connect("127.0.0.1", 9, duration.of_seconds(1)));

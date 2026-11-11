@@ -1,0 +1,10 @@
+== a deadline wakes a parked receive
+deadline armed: true
+task: deadline set is true
+task: receive -> cancelled
+task: cancelled is true
+the scope exited
+== a timer arm gives up on a channel
+select: timer Fired
+== a ready arm is taken instead of an unfired timer
+select: got value 7

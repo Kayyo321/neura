@@ -1,0 +1,265 @@
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let tasks = import:Std.Concurrent.Tasks;
+let test = import:Std.Test;
+
+// Std.Concurrent.Tasks: results in call order, the first failure or success by completion order, the cancellation
+// of the remaining calls, and a drained scope. A call's running time is a count of loop rounds, which the
+// scheduler preempts after a quantum of polls, so a call with fewer rounds finishes first.
+let TasksTests = module (
+    let spin = func(rounds: int) -> int {
+        let n = 0;
+        for (let i: int = 0; i < rounds; i++) {
+            n += 1;
+        }
+        return n;
+    };
+
+    // Spins until cancellation is requested and returns how many rounds it ran.
+    let wait_for_cancellation = func -> int {
+        let rounds = 0;
+        while (!cancellation.requested()) {
+            rounds += 1;
+        }
+        return rounds;
+    };
+
+    // A call that spins for `rounds` rounds, records its id, and returns it.
+    let counting = func(order: channels.Sender<int>, id: int, rounds: int) -> func() -> int {
+        return func() -> int {
+            spin(rounds);
+            order.send(id);
+            return id;
+        };
+    };
+
+    // A call that spins, records its id, and returns Ok(id) or an Err whose code names the id.
+    let outcome_after = func(order: channels.Sender<int>, id: int, rounds: int, ok: bool)
+            -> func() -> result.Result<int> {
+        return func() -> result.Result<int> {
+            spin(rounds);
+            order.send(id);
+            if (ok) {
+                return result.Result<int>.Ok(id);
+            }
+            return result.Result<int>.Err(error.custom("test.call", "call " + id.to_string()));
+        };
+    };
+
+    // A call that runs until it sees the cancellation, tells the channel it saw it, and returns an Err.
+    let until_cancelled = func(report: channels.Sender<int>, id: int) -> func() -> result.Result<int> {
+        return func() -> result.Result<int> {
+            wait_for_cancellation();
+            report.send(id);
+            return result.Result<int>.Err(error.custom("test.cancelled", "call " + id.to_string() + " was cancelled"));
+        };
+    };
+
+    // A call parked on a channel that never receives a value; cancellation wakes it with Cancelled.
+    // It tells `started` just before it parks.
+    let parked = func(never: channels.Receiver<int>, started: channels.Sender<int>, report: channels.Sender<int>,
+            id: int) -> func() -> result.Result<int> {
+        return func() -> result.Result<int> {
+            started.send(id);
+            match (never.receive()) {
+                channels.Received.Cancelled => { report.send(id); },
+                _ => { report.send(-id); },
+            }
+            return result.Result<int>.Err(error.custom("test.parked", "call " + id.to_string() + " was woken"));
+        };
+    };
+
+    let drain = func(source: channels.Receiver<int>) -> int[list] {
+        let seen: int[list] = [];
+        let more = true;
+        while (more) {
+            match (source.try_receive()) {
+                channels.TryReceived.Value(value) => { seen.append(value); },
+                _ => { more = false; },
+            }
+        }
+        return seen;
+    };
+
+    let code_of = func(failure: error.Error) -> string => match (failure) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "not custom",
+    };
+
+    let message_of = func<T>(outcome: result.Result<T>) -> string => error.message(test.assert_err<T>(outcome));
+
+    export let test_all_returns_results_in_call_order = func() -> void {
+        let [order, completed, closer] = channels.open<int>(8);
+        let calls: (func() -> int)[list] = [counting(order, 0, 5000), counting(order, 1, 2500), counting(order, 2, 10)];
+        let values = tasks.all<int>(calls);
+        test.assert_equal_int32(3, values.length);
+        test.assert_equal_int32(0, values[0]);
+        test.assert_equal_int32(1, values[1]);
+        test.assert_equal_int32(2, values[2]);
+        // The calls did not finish in the order of the list: the call with the least work finished first.
+        let finished = drain(completed);
+        test.assert_equal_int32(3, finished.length);
+        test.assert_equal_int32(2, finished[0]);
+        test.assert_equal_int32(0, finished[2]);
+    };
+
+    export let test_all_without_calls_is_empty = func() -> void {
+        let none: (func() -> int)[list] = [];
+        test.assert_equal_int32(0, tasks.all<int>(none).length);
+    };
+
+    export let test_all_returns_any_result_type = func() -> void {
+        let words: (func() -> string)[list] = [func() -> string => "a", func() -> string => "b"];
+        let values = tasks.all<string>(words);
+        test.assert_equal_string("a", values[0]);
+        test.assert_equal_string("b", values[1]);
+    };
+
+    export let test_all_ok_returns_every_value_in_call_order = func() -> void {
+        let [order, completed, closer] = channels.open<int>(8);
+        let calls: (func() -> result.Result<int>)[list] = [
+            outcome_after(order, 0, 3000, true), outcome_after(order, 1, 10, true), outcome_after(order, 2, 1500, true)
+        ];
+        let values = test.assert_ok<int[list]>(tasks.all_ok<int>(calls));
+        test.assert_equal_int32(3, values.length);
+        test.assert_equal_int32(0, values[0]);
+        test.assert_equal_int32(1, values[1]);
+        test.assert_equal_int32(2, values[2]);
+        test.assert_equal_int32(3, drain(completed).length);
+    };
+
+    export let test_all_ok_without_calls_is_an_empty_ok = func() -> void {
+        let none: (func() -> result.Result<int>)[list] = [];
+        test.assert_equal_int32(0, test.assert_ok<int[list]>(tasks.all_ok<int>(none)).length);
+    };
+
+    // The Err that completes first is returned, though a call earlier in the list fails later; the call that
+    // would run until cancelled is cancelled, and it has finished before all_ok returns.
+    export let test_all_ok_returns_the_first_error_by_completion_and_cancels_the_rest = func() -> void {
+        let [order, completed, closer] = channels.open<int>(8);
+        let [seen, saw, saw_closer] = channels.open<int>(8);
+        let calls: (func() -> result.Result<int>)[list] = [
+            outcome_after(order, 0, 4000, false),
+            outcome_after(order, 1, 10, false),
+            until_cancelled(seen, 2)
+        ];
+        let outcome = tasks.all_ok<int>(calls);
+        test.assert_equal_string("call 1", message_of<int[list]>(outcome));
+        let cancelled = drain(saw);
+        test.assert_equal_int32(1, cancelled.length);
+        test.assert_equal_int32(2, cancelled[0]);
+        // The slow failing call was cancelled too and still ran to its end before the helper returned.
+        let finished = drain(completed);
+        test.assert_equal_int32(2, finished.length);
+        test.assert_equal_int32(1, finished[0]);
+        test.assert_equal_int32(0, finished[1]);
+    };
+
+    export let test_first_ok_returns_the_first_success_by_completion_and_cancels_the_rest = func() -> void {
+        let [order, completed, closer] = channels.open<int>(8);
+        let [seen, saw, saw_closer] = channels.open<int>(8);
+        let calls: (func() -> result.Result<int>)[list] = [
+            outcome_after(order, 0, 4000, true),
+            outcome_after(order, 1, 10, true),
+            until_cancelled(seen, 2)
+        ];
+        test.assert_equal_int32(1, test.assert_ok<int>(tasks.first_ok<int>(calls)));
+        let cancelled = drain(saw);
+        test.assert_equal_int32(1, cancelled.length);
+        test.assert_equal_int32(2, cancelled[0]);
+        let finished = drain(completed);
+        test.assert_equal_int32(2, finished.length);
+        test.assert_equal_int32(1, finished[0]);
+    };
+
+    export let test_first_ok_skips_failures_before_a_success = func() -> void {
+        let [order, completed, closer] = channels.open<int>(8);
+        let calls: (func() -> result.Result<int>)[list] = [
+            outcome_after(order, 0, 10, false),
+            outcome_after(order, 1, 2000, true),
+            outcome_after(order, 2, 5, false)
+        ];
+        test.assert_equal_int32(1, test.assert_ok<int>(tasks.first_ok<int>(calls)));
+        test.assert_equal_int32(3, drain(completed).length);
+    };
+
+    export let test_first_ok_returns_the_last_error_when_every_call_fails = func() -> void {
+        let [order, completed, closer] = channels.open<int>(8);
+        let calls: (func() -> result.Result<int>)[list] = [
+            outcome_after(order, 0, 3000, false),
+            outcome_after(order, 1, 10, false),
+            outcome_after(order, 2, 1500, false)
+        ];
+        let outcome = tasks.first_ok<int>(calls);
+        // Completion order is 1, 2, 0: the last error is call 0's.
+        test.assert_equal_string("call 0", message_of<int>(outcome));
+        let finished = drain(completed);
+        test.assert_equal_int32(1, finished[0]);
+        test.assert_equal_int32(0, finished[2]);
+    };
+
+    export let test_first_ok_without_calls_reports_it = func() -> void {
+        let none: (func() -> result.Result<int>)[list] = [];
+        let failure = test.assert_err<int>(tasks.first_ok<int>(none));
+        test.assert_equal_string("tasks.empty", code_of(failure));
+    };
+
+    // A call parked on a channel operation is woken by the cancellation the helper requests.
+    export let test_a_parked_call_is_woken_by_the_cancellation = func() -> void {
+        let [never, silent, silent_closer] = channels.open<int>(0);
+        let [seen, saw, saw_closer] = channels.open<int>(8);
+        let [begun, began, began_closer] = channels.open<int>(8);
+        let [order, completed, closer] = channels.open<int>(8);
+        let calls: (func() -> result.Result<int>)[list] = [
+            parked(silent, begun, seen, 7),
+            outcome_after(order, 1, 10, false)
+        ];
+        let outcome = tasks.all_ok<int>(calls);
+        test.assert_equal_string("call 1", message_of<int[list]>(outcome));
+        let cancelled = drain(saw);
+        test.assert_equal_int32(1, cancelled.length);
+        test.assert_equal_int32(7, cancelled[0]);
+        let first: (func() -> result.Result<int>)[list] = [
+            parked(silent, begun, seen, 8),
+            outcome_after(order, 2, 10, true)
+        ];
+        test.assert_equal_int32(2, test.assert_ok<int>(tasks.first_ok<int>(first)));
+        let woken = drain(saw);
+        test.assert_equal_int32(1, woken.length);
+        test.assert_equal_int32(8, woken[0]);
+        // Both parked calls had started before they were cancelled.
+        test.assert_equal_int32(2, drain(began).length);
+    };
+
+    // The helper runs inside a task whose scope is cancelled while the helper waits: its calls are cancelled,
+    // it stops waiting and reports tasks.cancelled, and it returns only after the calls have finished.
+    let run_all_ok_in_a_task = func(never: channels.Receiver<int>, started: channels.Sender<int>,
+            report: channels.Sender<int>) -> result.Result<int[list]> {
+        let calls: (func() -> result.Result<int>)[list] = [
+            parked(never, started, report, 1), parked(never, started, report, 2)
+        ];
+        return tasks.all_ok<int>(calls);
+    };
+
+    export let test_cancelling_the_caller_cancels_the_calls = func() -> void {
+        let [silent, never, never_closer] = channels.open<int>(0);
+        let [seen, saw, saw_closer] = channels.open<int>(8);
+        let [begun, began, began_closer] = channels.open<int>(8);
+        let outcome: result.Result<int[list]> = result.Result<int[list]>.Ok([]);
+        scope (outer) {
+            let helper = spawn run_all_ok_in_a_task(never, begun, seen);
+            // Wait until both calls have announced themselves; they park right after, and the helper parks
+            // waiting for a completion, before this task runs again.
+            began.receive();
+            began.receive();
+            test.assert_equal_int32(0, drain(saw).length);
+            outer.cancel();
+            outcome = helper.join();
+        }
+        test.assert_equal_string("tasks.cancelled", code_of(test.assert_err<int[list]>(outcome)));
+        let woken = drain(saw);
+        test.assert_equal_int32(2, woken.length);
+    };
+);

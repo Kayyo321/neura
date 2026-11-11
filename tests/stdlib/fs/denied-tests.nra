@@ -1,3 +1,4 @@
+// test-options: --deny-fs
 let error = import:Std.Core.Error;
 let fs = import:Std.Fs.Fs;
 let path = import:Std.Fs.Path;
@@ -5,7 +6,7 @@ let result = import:Std.Core.Result;
 let test = import:Std.Test;
 let unit = import:Std.Core.Unit;
 
-// Without --allow-fs every operation fails with CapabilityDenied.
+// With --deny-fs every operation fails with CapabilityDenied.
 let FsDeniedTests = module (
     let denied = func<T>(r: result.Result<T>) -> void {
         let failure = test.assert_err<T>(r);

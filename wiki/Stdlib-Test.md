@@ -84,7 +84,7 @@ Library trap conditions and their messages. The message text is part of the cont
 
 | First plan's promise | Now |
 | --- | --- |
-| `Closeables.use` closes the resource even when the body panics | Removed. A body cannot fail and return; it either returns or the run ends. Callers call `close` on each return path. When a run ends, by return or by trap, the host releases every file and socket. |
+| `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](Stdlib-Design#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
 | `Iterator.next` panics with `NoSuchElementError`; modification panics with `ConcurrentModificationError` | Both are traps with the messages above. The error classes for programmer mistakes are gone. |
 | `assert_panics` recovers a panic and returns its error | Removed. A test that expects a trap is a program with an expected-diagnostic file, run by the test harness as the existing trap tests under `tests/backend/traps` are ([section 17](Stdlib-Design#17-verification)). |

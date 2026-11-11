@@ -1,0 +1,28 @@
+// Counts Collatz steps for one positive int64 argument.
+let console = import:Std.Io.Console;
+let int64s = import:Std.Core.Int64;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Collatz = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (args.length != 1) {
+            return program.ExitCode.Failure;
+        }
+        let value = result.value_or<int64>(int64s.parse(args[0]), 0);
+        if (value < 1) {
+            return program.ExitCode.Failure;
+        }
+        let steps: int64 = 0;
+        while (value != 1) {
+            if (value % 2 == 0) {
+                value = value / 2;
+            } else {
+                value = value * 3 + 1;
+            }
+            steps = steps + 1;
+        }
+        console.print_line(int64s.to_string(steps));
+        return program.ExitCode.Ok;
+    };
+);

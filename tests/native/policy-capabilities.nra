@@ -1,0 +1,73 @@
+let arenas = import:Std.DynamicForeign.Arena;
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let instant = import:Std.Time.Instant;
+let lookups = import:Std.DynamicForeign.SymbolLookup;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let randoms = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let system_clock = import:Std.Time.SystemClock;
+let tcp_listener = import:Std.Net.TcpListener;
+let unit = import:Std.Core.Unit;
+
+let PolicyCapabilities = module:program.Entry (
+    let denied = func(failure: error.Error) -> string {
+        match (failure) {
+            error.Error.Io { kind, message: _, path: _ } => {
+                if (kind == error.IoErrorKind.CapabilityDenied) {
+                    return "denied";
+                }
+            },
+            _ => {},
+        }
+        trap_with_message("unexpected capability response: " + error.message(failure));
+    };
+
+    let file_text = func(name: string) -> string => match (fs.read_text(path.of(name))) {
+        result.Result.Ok(value) => value,
+        result.Result.Err(failure) => denied(failure),
+    };
+
+    let network = func() -> string {
+        match (tcp_listener.bind("127.0.0.1", 0)) {
+            result.Result.Ok(listener) => {
+                result.expect<unit.Unit>(listener.close(), "close listener");
+                return "allowed";
+            },
+            result.Result.Err(failure) => {
+                return denied(failure);
+            },
+        }
+    };
+
+    let environment = func() -> string => match (program.Environment.get("NEURA_NATIVE_POLICY_TEST")) {
+        program.Environment.Lookup.Found(value) => value,
+        program.Environment.Lookup.Missing => "missing",
+        program.Environment.Lookup.Failed(failure) => denied(failure),
+    };
+
+    let capability = func<T>(response: result.Result<T>) -> string => match (response) {
+        result.Result.Ok(_) => "allowed",
+        result.Result.Err(failure) => denied(failure),
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("fs-relative: " + file_text("relative/inside.txt"));
+        console.print_line("fs-absolute: " + file_text(args[1]));
+        console.print_line("fs-neighbor: " + file_text("relative-neighbor/outside.txt"));
+        console.print_line("net: " + network());
+        console.print_line("env: " + environment());
+        console.print_line("clock: " + capability<instant.Instant>(system_clock.create().now()));
+        console.print_line("entropy: " + capability<randoms.Random>(randoms.from_entropy()));
+
+        // The native library API traps on denial, so it goes last.
+        let arena = arenas.of_confined();
+        let library = result.expect<lookups.SymbolLookup>(lookups.library_lookup(args[0], arena), "load libmathops");
+        library.find_or_trap("add");
+        arena.close();
+        console.print_line("native: allowed");
+        return program.ExitCode.Ok;
+    };
+);

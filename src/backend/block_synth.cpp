@@ -157,6 +157,8 @@ nvr::Block BlockSynthesizer::close(std::vector<ExitSpec> exits) {
         exit.error_slot = spec.error_slot;
         exit.error_resume = spec.error_resume;
         exit.reason = spec.reason;
+        exit.scheduler = spec.scheduler;
+        exit.poll = spec.poll;
         block.exits.push_back(std::move(exit));
     }
     block.inputs = inputs_;

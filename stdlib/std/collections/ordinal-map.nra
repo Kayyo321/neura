@@ -2,7 +2,6 @@ let cell = import:Std.Core.Cell;
 let iterators = import:Std.Collections.Iterator;
 let.promote _ = import:Std.Collections.MutableMap;
 let optional = import:Std.Core.Optional;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief Maps for a fixed range of integer keys from zero through the limit minus one.
 /// A dense key list and a dense value list hold occupied entries. `position[key]` is the
@@ -21,8 +20,8 @@ export let OrdinalMap = module (
         let dense_values: V[list] = [];
         /// @brief The structural modification count shared with iterators.
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief An empty map for the keys 0 through `limit` - 1. Traps with
         /// "invalid argument: negative size".
@@ -354,14 +353,13 @@ export let OrdinalMap = module (
             return sum as uint32;
         };
 
-        /// @brief Formats entries as `{k: v, k2: v2}` in key order. The map itself as a direct value
-        /// prints "(this collection)".
+        /// @brief Formats entries as `{k: v, k2: v2}` in key order. The map prints "(this collection)" where
+        /// its own text reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let text = "{";
             let first = true;
             let limit = position.length;
@@ -377,8 +375,7 @@ export let OrdinalMap = module (
                 }
                 key += 1;
             }
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return text + "}";
         };
     );

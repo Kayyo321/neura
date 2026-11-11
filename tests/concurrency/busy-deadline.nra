@@ -1,0 +1,30 @@
+// A task that never parks still sees its deadline. It is the only task that
+// can run, so the scheduler ends its turn while a deadline is armed and the
+// clock is read (Concurrency.md section 10.2). The number of steps depends on
+// the clock, so only the output is checked.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let cancellation = import:Std.Concurrent.Cancellation;
+let durations = import:Std.Time.Duration;
+let result = import:Std.Core.Result;
+
+let spin_until_cancelled = func -> bool {
+    while (!cancellation.requested()) { }
+    return true;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope (request) {
+            match (request.cancel_after(durations.of_millis(5))) {
+                result.Result.Ok(_) => { },
+                result.Result.Err(failure) => {
+                    console.print_line("no clock");
+                },
+            }
+            let busy = spawn spin_until_cancelled();
+            console.print_line("busy task stopped: " + busy.join().to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

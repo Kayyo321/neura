@@ -1,0 +1,31 @@
+let duration = import:Std.Time.Duration;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let system_clock = import:Std.Time.SystemClock;
+
+/// @brief What the running task can ask about its own cancellation (Concurrency.md section 7). Cancellation is
+/// cooperative: a running task is never interrupted, so a loop that computes for long asks.
+/// @see [Std.Concurrent.Cancellation](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Cancellation)
+export let Cancellation = module (
+    /// @brief Whether cancellation was requested for the scope that started this task, or for any scope
+    /// above it. The root task is never cancelled.
+    export let requested = func -> bool => task_cancelled();
+
+    /// @brief The time left until the task's deadline, or None when it has none or the clock cannot be
+    /// read. The duration is negative once the deadline has passed.
+    export let remaining = func -> optional.Optional<duration.Duration> {
+        let deadline = task_deadline();
+        if (deadline == 9223372036854775807) {
+            return optional.Optional<duration.Duration>.None;
+        }
+        return match (system_clock.create().monotonic()) {
+            result.Result.Ok(now) => optional.Optional<duration.Duration>.Some(
+                duration.of_nanos(deadline - now.to_nanos())),
+            result.Result.Err(_) => optional.Optional<duration.Duration>.None,
+        };
+    };
+
+    let task_cancelled = func -> bool scheduler("task.cancelled");
+
+    let task_deadline = func -> int64 scheduler("task.deadline");
+);

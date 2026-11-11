@@ -1,0 +1,69 @@
+// What crosses a spawn and a join: text, tuples, payload enums, function
+// values, and results that are not transferable but cross a join by
+// transfer (Concurrency.md sections 5.1 and 5.3).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let errors = import:Std.Core.Error;
+let lists = import:Std.Collections.ArrayList;
+
+let Shape = enum (Dot, Circle(int), Box { width: int, height: int });
+
+let area = func(shape: Shape) -> int => match (shape) {
+    Shape.Dot => 0,
+    Shape.Circle(radius) => 3 * radius * radius,
+    Shape.Box { width, height } => width * height,
+};
+
+let describe = func(pair: [string, int]) -> string => pair[0] + "=" + pair[1].to_string();
+
+let build = func(count: int) -> lists.ArrayList<int> {
+    let items = lists.create<int>();
+    for (let i: int = 0; i < count; i++) {
+        items.add(i * i);
+    }
+    return items;
+};
+
+let checked = func(value: int) -> result.Result<int> {
+    if (value < 0) {
+        return result.Result<int>.Err(errors.custom("negative", "the value is below zero"));
+    }
+    return result.Result<int>.Ok(value * 2);
+};
+
+let apply = func(work: func(int) -> int, value: int) -> int => work(value);
+
+let quiet = func(value: int) { };
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let offset = 10;
+        let shift = func(x: int) -> int => x + offset;
+        scope {
+            let box = spawn area(Shape.Box { width: 3, height: 4 });
+            let circle = spawn area(Shape.Circle(2));
+            let text = spawn describe(["answer", 42]);
+            let built = spawn build(4);
+            let good = spawn checked(21);
+            let bad = spawn checked(-1);
+            let shifted = spawn apply(shift, 5);
+            let nothing = spawn quiet(1);
+
+            console.print_line((box.join() + circle.join()).to_string());
+            console.print_line(text.join());
+            console.print_line(built.join().get(3).to_string());
+            match (good.join()) {
+                result.Result.Ok(value) => { console.print_line("ok " + value.to_string()); },
+                result.Result.Err(_) => { console.print_line("unexpected"); },
+            }
+            match (bad.join()) {
+                result.Result.Ok(_) => { console.print_line("unexpected"); },
+                result.Result.Err(error) => { console.print_line("err " + errors.message(error)); },
+            }
+            console.print_line(shifted.join().to_string());
+            nothing.join();
+        }
+        return program.ExitCode.Ok;
+    };
+);

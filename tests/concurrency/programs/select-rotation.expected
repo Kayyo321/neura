@@ -1,0 +1,5 @@
+two ready arms, 1000 rounds: closed arm 500, buffer arm 500
+three ready arms: bcabcab
+woken by the receive arm: value 11
+woken by the send arm: Sent
+woken by the join arm: 9

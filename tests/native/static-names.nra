@@ -1,0 +1,29 @@
+// The static launcher resolves no names: it takes numeric addresses and
+// "localhost" (Standalone.md section 7.2). Nothing listens on the discard
+// port, so a host that resolves is refused and a name is Unsupported.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let streams = import:Std.Net.TcpStream;
+
+let attempt = func(label: string, host: string) {
+    match (streams.connect(host, 9, durations.of_seconds(2))) {
+        result.Result.Ok(_) => {
+            console.print_line(label + ": connected");
+        },
+        result.Result.Err(failure) => {
+            console.print_line(label + ": " + errors.message(failure));
+        },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        attempt("name", "no-such-host.invalid");
+        attempt("localhost", "localhost");
+        attempt("numeric", "127.0.0.1");
+        return program.ExitCode.Ok;
+    };
+);

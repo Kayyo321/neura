@@ -208,6 +208,9 @@ Comparison compare_function(const Compiled& compiled, Evaluator& evaluator, std:
             break;
         case Status::Unsupported:
             fail(label.str() + ": the evaluator does not model this call: " + expected.reason);
+        case Status::Exited:
+            // These fixtures call no host service, so none can end the process.
+            fail(label.str() + ": the evaluator reports a process exit in a function without host calls");
         case Status::LimitReached:
             break;
         }

@@ -1,0 +1,10 @@
+slow consumer: received sum 3645
+slow consumer: a producer waited 3 times
+slow consumer: a producer waited 6 times
+slow consumer: a producer waited 6 times
+slow consumer: 15 of 18 sends waited
+fast consumer: received sum 3645
+fast consumer: a producer waited 1 times
+fast consumer: a producer waited 2 times
+fast consumer: a producer waited 3 times
+fast consumer: 6 of 18 sends waited

@@ -1,0 +1,20 @@
+// Runs until the step limit: the SIGQUIT task dump is taken from it.
+let program = import:Std.Program;
+
+let spin = func -> int {
+    let count = 0;
+    while (true) {
+        count = count + 1;
+    }
+    return count;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            let forever = spawn spin();
+            forever.join();
+        }
+        return program.ExitCode.Ok;
+    };
+);

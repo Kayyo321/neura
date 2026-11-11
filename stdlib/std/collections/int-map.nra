@@ -2,7 +2,6 @@ let hash_core = import:Std.Collections.Internal.HashCore;
 let.promote _ = import:Std.Collections.Iterator;
 let.promote _ = import:Std.Collections.MutableMap;
 let optional = import:Std.Core.Optional;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief Insertion-ordered hash maps with int keys.
 /// Keys are compared by numeric value and hashed by their 32-bit pattern.
@@ -25,8 +24,8 @@ export let IntMap = module (
         let stored_keys: int[list] = [];
         /// @brief The values indexed by the same dense entry numbers as their keys.
         let stored_values: V[list] = [];
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Initializes a map over the empty table supplied by the module factory.
         export let init = func(seal: Seal, table: hash_core.HashCore) {
@@ -378,14 +377,13 @@ export let IntMap = module (
             return total as uint32;
         };
 
-        /// @brief Formats entries as `{k: v, k2: v2}` in iteration order. The map itself as a direct key
-        /// or value prints "(this collection)".
+        /// @brief Formats entries as `{k: v, k2: v2}` in iteration order. The map prints "(this collection)"
+        /// where its own text reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let parts: string[list] = [];
             let live = core.live;
             let entry = 0;
@@ -395,8 +393,7 @@ export let IntMap = module (
                 }
                 entry += 1;
             }
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return braced(parts);
         };
 

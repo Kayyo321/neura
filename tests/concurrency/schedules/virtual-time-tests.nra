@@ -1,0 +1,40 @@
+let clocks = import:Std.Time.SystemClock;
+let durations = import:Std.Time.Duration;
+let result = import:Std.Core.Result;
+let timers = import:Std.Concurrent.Timer;
+let test = import:Std.Test;
+
+// Under --virtual-time these take no real time and are exact; without it
+// each would wait two hours.
+let VirtualTimeTests = module (
+    let nanos = func(reading: result.Result<durations.Duration>) -> int64 => match (reading) {
+        result.Result.Ok(elapsed) => elapsed.to_nanos(),
+        result.Result.Err(_) => -1,
+    };
+
+    export let test_a_two_hour_timer_fires = func() -> void {
+        let clock = clocks.create();
+        let before = nanos(clock.monotonic());
+        match (timers.after(durations.of_hours(2))) {
+            result.Result.Ok(timer) => {
+                test.assert_equal_string("Fired", timer.wait().to_string());
+            },
+            result.Result.Err(_) => {
+                test.assert(false);
+            },
+        }
+        test.assert_equal_int64(7200000000000, nanos(clock.monotonic()) - before);
+    };
+
+    export let test_a_two_hour_sleep_moves_the_clock_exactly = func() -> void {
+        let clock = clocks.create();
+        let before = nanos(clock.monotonic());
+        clock.sleep(durations.of_hours(2));
+        test.assert_equal_int64(7200000000000, nanos(clock.monotonic()) - before);
+    };
+
+    // Each test starts its own clock at zero.
+    export let test_the_clock_starts_at_zero = func() -> void {
+        test.assert_equal_int64(0, nanos(clocks.create().monotonic()));
+    };
+);

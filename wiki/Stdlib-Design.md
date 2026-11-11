@@ -173,7 +173,7 @@ None of these blocks anything. Each replaces a loop of storage operations with o
 | `Std.Log` | `Logger` | [14.1](#141-stdlog) |
 | `Std.Test` | Assertions | [14.2](#142-stdtest) |
 | `Std.DynamicForeign` | `Arena`, `MemorySegment`, `MemoryLayout`, `ValueLayout`, `FunctionDescriptor`, `SymbolLookup`, `Linker`, `MethodHandle`, `ForeignValue` | [Foreign interop](ForeignInterop) |
-| `Std.Concurrent` | Reserved; not designed | [15.1](#151-deferred-and-excluded) |
+| `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` | [19](#19-stdconcurrent), [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#9-stdconcurrent) |
 
 `Std.Program`, `Std.Io.Console`, and `Std.Test` replace the built-in `SysIo` and `Test` modules, which are deleted ([section 4.6](#46-retiring-sysio-and-test)).
 
@@ -196,7 +196,7 @@ A module may import only modules above it. Cycles are forbidden.
 3. `Std.Text`
 4. `Std.Math`
 5. `Std.Text.Regex`, `Std.Encoding`, `Std.Digest`, `Std.Random`, `Std.Time`
-6. `Std.Io`, `Std.Program`
+6. `Std.Io`, `Std.Program`, `Std.Concurrent`
 7. `Std.Fs`, `Std.Net`, `Std.DynamicForeign`
 8. `Std.Log`, `Std.Test`
 
@@ -211,25 +211,27 @@ Wrapping arithmetic, integer sign reinterpretation, vacant storage, bulk copy, a
 
 ### 4.5 Host services
 
-Every interaction with the outside world is a host service with a name, a version, typed arguments, and typed success and error results ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-calls-and-standard-output)). An error result is a `uint32` code that the library maps to an `IoErrorKind` ([section 6.3](#63-error)): 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, and every other code `Other` (the providers use 100).
+Every interaction with the outside world is a host service with a name, a version, typed arguments, and typed success and error results ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-calls-and-standard-output)). An error result is a `uint32` code that the library maps to an `IoErrorKind` ([section 6.3](#63-error)): 1 `NotFound`, 2 `PermissionDenied`, 3 `AlreadyExists`, 4 `InvalidInput`, 5 `Interrupted`, 6 `UnexpectedEnd`, 7 `NotADirectory`, 8 `IsADirectory`, 9 `DirectoryNotEmpty`, 10 `ConnectionRefused`, 11 `ConnectionReset`, 12 `TimedOut`, 13 `Unsupported`, 14 `CapabilityDenied`, 15 `Cancelled` (the answer of a cancelled version 2 request), and every other code `Other` (the providers use 100).
 
 | Service | Version | Arguments | Success | Used by |
 | --- | --- | --- | --- | --- |
 | `neura.console.write_line` | 1 | text | none | `Console.print_line`; its error code 1 maps to `Other` |
 | `neura.console.write` | 1 | stream (1 output, 2 error), bytes | count written | `Console` |
-| `neura.console.read` | 1 | maximum count | bytes; empty at end of input | `Console` |
+| `neura.console.read` | 1, 2 | maximum count | bytes; empty at end of input | `Console` (version 2); overlaps in an image with tasks |
 | `neura.fs.open`, `read`, `write`, `seek`, `close` | 1 | path and mode; file ID and count, bytes, or offset and origin | file ID, bytes, count, or position | `File` |
 | `neura.fs.stat`, `list`, `make_directory`, `remove`, `rename` | 1 | path text (two for rename); `stat` also takes a follow-links flag and `remove` a directory flag | kind, size, and modified time; list of names; none | `Fs` |
-| `neura.clock.wall`, `monotonic`, `sleep` | 1 | none, none, nanoseconds | seconds and nanoseconds; nanoseconds; none | `SystemClock` |
+| `neura.clock.wall`, `monotonic` | 1 | none | seconds and nanoseconds; nanoseconds | `SystemClock` |
+| `neura.clock.sleep` | 1, 2 | nanoseconds | none | `SystemClock` (version 2); overlaps in an image with tasks |
 | `neura.entropy.fill` | 1 | count | bytes | `Random.from_entropy` |
 | `neura.env.get` | 1 | name text | found flag and value text | `Environment` |
 | `neura.process.exit` | 1 | status | does not return | `Process.exit` |
-| `neura.net.connect`, `listen`, `local_port`, `accept`, `read`, `write`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID, port, bytes, or count | `Std.Net` |
+| `neura.net.listen`, `local_port`, `close` | 1 | [section 11.4](#114-stdnet) | socket ID or port | `Std.Net` |
+| `neura.net.connect`, `accept`, `read`, `write` | 1, 2 | [section 11.4](#114-stdnet) | socket ID, bytes, or count | `Std.Net` (version 2); overlap in an image with tasks |
 | `neura.ffi.abi`, `arena.open`, `arena.close`, `alloc`, `library.open`, `library.default`, `library.embedded`, `symbol`, `read`, `write`, `strlen`, `call` | 1 | [NVM](NVM#host-services) | layouts, IDs, addresses, bytes, or packed results | `Std.DynamicForeign` |
 
 The exact signatures are in [NVM](https://github.com/Kayyo321/neura/wiki/NVM#host-services). The retired `neura.test.assert` and `neura.test.assert_equal_int32` services are no longer registered.
 
-- **Capabilities.** `neura run` and `neura test` allow only the console group and `neura.process.exit` by default. `--allow-fs`, `--allow-net`, `--allow-env`, `--allow-clock`, `--allow-entropy`, and `--allow-native` enable groups; `--allow-fs` takes an optional list of path prefixes. A denied service still binds, and each call returns error 14.
+- **Capabilities.** `neura run` and `neura test` grant every group by default: files, network, environment, clock, entropy, and native code, as well as the console group and `neura.process.exit`. `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all` turn groups off; `--allow-*` options grant a group again, and `--allow-fs` takes an optional list of path prefixes that narrows files to them. Options apply in command-line order. A denied service still binds, and each call returns error 14. The library default of `nvm::Capabilities` is all-denied: an embedder grants each group explicitly.
 - **Replay.** The NVM library already records and replays host interactions (`nvm::record`, `nvm::replay`). `neura run --record file` and `--replay file` expose that. Tests of I/O, time, and entropy run under replay.
 - **Ordering.** `neura.fs.list` returns names sorted by their UTF-8 bytes. The host sorts.
 - Host IDs are opaque `int64` values that the library wraps in classes and never exposes.
@@ -292,7 +294,7 @@ Library trap conditions and their messages. The message text is part of the cont
 
 | First plan's promise | Now |
 | --- | --- |
-| `Closeables.use` closes the resource even when the body panics | Removed. A body cannot fail and return; it either returns or the run ends. Callers call `close` on each return path. When a run ends, by return or by trap, the host releases every file and socket. |
+| `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
 | `Iterator.next` panics with `NoSuchElementError`; modification panics with `ConcurrentModificationError` | Both are traps with the messages above. The error classes for programmer mistakes are gone. |
 | `assert_panics` recovers a panic and returns its error | Removed. A test that expects a trap is a program with an expected-diagnostic file, run by the test harness as the existing trap tests under `tests/backend/traps` are ([section 17](#17-verification)). |
@@ -330,7 +332,7 @@ A class's hash starts from 17 and combines each field's hash in declaration orde
 
 **The contract for a class that overrides the G3b members:** `equals` is an equivalence relation; equal values have equal hashes; neither traps nor modifies the value; and while an object is a key in a hash collection its hash and equality do not change. The library does not detect violations.
 
-**Self-containing collections.** A collection's text prints `(this collection)` for itself as a direct element. Deeper cycles end with the frame-limit fault.
+**Self-containing collections.** A collection's text prints `(this collection)` wherever that text reaches the collection again, so a collection that contains itself, directly or through other collections, has finite text. The marker names the collection whose text was already being built: for a list `a` holding a list `b` that holds `a`, `a.to_string()` is `[[(this collection)]]`.
 
 ### 5.3 Ordering
 
@@ -371,7 +373,13 @@ The loop form depends on the source value.
 
 - A host resource (`File`, `TcpStream`, `TcpListener`) has `close() → Result<Unit>`. Closing again does nothing and returns `Ok`. Any other operation on a closed resource returns an `Io` error of kind `Closed`. If `close` reports an error the resource is still closed.
 - **Closing is always explicit.** Reclaiming an unreachable resource object frees its storage and does nothing else: `deinit` does not run and the host ID stays open until the run ends. No library class declares `deinit`. `Fs` and `Net` each allow at most 1,024 simultaneously open IDs per run; exceeding that returns an `Io` error of kind `Other`.
-- There is no scoped helper ([section 5.1](#51-failure-model)).
+- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. The earlier decision here was "there is no scoped helper"; it is reversed, because with tasks a body can end early by cancellation and the close must still happen ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#7-cancellation-deadlines-and-resources)).
+  - If the open fails, the helper returns that error and does not call the body.
+  - The body runs in a `scope` the helper owns, so every task started in that scope has finished before the resource is closed.
+  - If the close succeeds, the helper returns the body's result unchanged. If the close fails after a body `Ok`, it returns the close error. If the close fails after a body `Err`, it returns a `Context` error whose cause is the body's error and whose message carries the close error's message: `closing the resource also failed: ` and that message from `with_open`, `close failed after the body failed: ` and that message from `with_connection`.
+  - A file is closed even when the body closed it already, which reports no error. `with_connection` connects without a time limit.
+  - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
+- **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
 - **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
@@ -401,6 +409,16 @@ These are the intended source-module contracts. Compiler support for the operati
 | `RegexFlags`, `RegexMatch`, `Regex` | By value | No | No | |
 | `StringBuilder`, `ByteBuffer` | Current byte sequence | No | No | |
 | `Sequence`, `Random`, `Logger`, stream adapters, files, sockets | Identity | No | `Sequence` once | Streams: [section 11.1](#111-stdio) |
+
+### 5.8 Task safety
+
+A function that a spawned task calls must be task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). For library code that means: no reassignable binding at module or file level, no module constant that is an object on the path of a function a task should be able to call, and no first-use static initialization. State that a function needs between calls belongs in an instance or in an argument.
+
+- **How to check.** `neura check --task-safety <files>` lists every function of the linked program with `task-safe`, `task-safe; not for a parallel map: <reason>`, or `not task-safe: <reason>`, grouped by source file. Run it on a program that imports the module.
+- **What is pinned.** The `concurrency-frontend` test runs the report over a program that links `Console`, `HashMap`, `ArrayList`, `TreeMap`, `Float64`, `Duration`, `SystemClock`, `Instant`, `Logger`, `TcpStream`, `TcpListener`, `Strings`, `Regex`, `Random`, and `Json`, and fails when a function other than console input is not task-safe.
+- **What is not task-safe.** Console input (`Console.read_line`, the source of `Console.input()`); `Crc32.of` and `update`; `Sha256.of`, `update`, and `finish`; `Hex.decode` and the four fixed-alphabet `Base64` decoders; and, in a program that calls `Console.input()`, the read functions of `BufferedReader` and `Utf8Reader`. [Standard library](https://github.com/Kayyo321/neura/wiki/StandardLibrary#task-safety) gives the reason for each and the statement for every area.
+- **Changes made for it.** A collection's text conversion keeps its self-containment flag in the instance ([section 5.2](#52-equality-hashing-and-text)). Float parsing reads no module state. The `BigInteger` and `BigDecimal` methods build the small values they need and do not read the exported constants `Zero`, `One`, and `Ten`, which stay for the root task's use.
+
 
 ## 6. `Std.Core` types
 
@@ -456,11 +474,12 @@ There is no accessor for the error alone: `match` reads it.
 | `Custom` | One `ErrorDetail` | An error defined outside the library. |
 | `Context` | `message: string`, `cause: Error` | Another error with a description of what was being attempted. |
 
-- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`. The first fourteen map from host error codes 1 through 14. `Closed` and `InvalidData` are produced by the library.
+- `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
 - **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.
 - Errors are immutable. A cause is set at construction, so chains are finite and acyclic.
+- **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
 
 The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleDetail`, and:
 
@@ -471,6 +490,8 @@ The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleD
 | `message(e: Error) → string` | `Io`: the kind's name, `: `, the message, and ` (` path `)` when the path is not empty. `Parse`: `parse error at ` offset `: ` message. `Encoding`: `invalid encoding at ` offset `: ` message. `Custom`: the detail's message. `Context`: the message, `: `, and the cause's message. |
 | `root_cause(e: Error) → Error` | Follows `Context` causes to the end. |
 | `chain(e: Error)` | A built-in list of `Error`: the error, then each cause. |
+| `to_portable(e: Error) → PortableError` | The transferable copy. A `Custom` error keeps its detail's `code()` and `message()` and loses the object, so any other member of a subclass is gone. Every other variant is copied as it is, causes included. |
+| `from_portable(p: PortableError) → Error` | The error a portable copy stands for. A `Custom` copy comes back holding a `SimpleDetail` with the same code and message, so `message(from_portable(to_portable(e)))` equals `message(e)`. |
 | `io_kind_name(kind) → string`, `parse_kind_name(kind) → string` | The variant's name, written as a `match`. |
 
 `message` uses only concatenation and integer text, so it works before T1.
@@ -1076,7 +1097,7 @@ Needs P2 for every host operation and T1 for `Path`.
 - `is_absolute()` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
 - Module function `of(text)`. Members include `join(other: string) → Path`, `parent() → Path`, `file_name()`, `stem()`, `extension()`, `components()`, `resolve_lexically() → Path`, `starts_with(other: Path) → bool`, and `relative_to(base: Path) → Path`. An absolute argument to `join` replaces the path. `parent` returns `nil` when the path has no parent. `relative_to` returns `nil` when it cannot express the path relative to the base. `file_name`, `stem`, and `extension` return `Optional<string>`. The extension is the text after the last `.` of the file name when that dot is not the first character. `components` returns a built-in list of strings. Equality, hash, ordering, and text use the normalized path.
 
-**`File`** is a class wrapping a host file ID. The module function `open(path, mode: OpenMode) → Result<File>`. `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](#55-resources)). A `File` is unbuffered.
+**`File`** is a class wrapping a host file ID. The module functions `open(path, mode: OpenMode) → Result<File>` and `with_open<T>(path, mode, body)`, the scoped helper of [section 5.5](#55-resources). `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](#55-resources)). A `File` is unbuffered.
 
 **`Fs`** module:
 
@@ -1106,9 +1127,9 @@ This module replaces `SysIo.Entry` ([section 4.6](#46-retiring-sysio-and-test)).
 
 ### 11.4 `Std.Net`
 
-Blocking TCP only. Needs P2 and T1.
+TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)). Needs P2 and T1.
 
-- `TcpStream`: the module function `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>`. Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `set_read_timeout(timeout: Duration)` (zero for none; an expired timeout fails with kind `TimedOut`), and `close()`.
+- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `set_read_timeout(timeout: Duration)` (zero for none; an expired timeout fails with kind `TimedOut`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
 - `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, `local_port() → int`, and `close()`. Port 0 asks the host for a free port.
 - A port outside 0 through 65,535 traps.
 - Service arguments: `connect` takes the host text, the port, and the timeout in nanoseconds; `listen` takes the host text and port; `accept` takes a listener ID; `read` takes a socket ID, a maximum count, and a timeout in nanoseconds (0 for none); `write` takes a socket ID and bytes; `close` takes either kind of ID.
@@ -1265,10 +1286,10 @@ This module replaces the built-in `Test` as described in [section 4.6](#46-retir
 
 | Area | Status | Reason |
 | --- | --- | --- |
-| Concurrency: threads, executors, futures, locks, atomics, concurrent collections | Deferred. `Std.Concurrent` is reserved. | The language defers concurrency ([Resources and concurrency](https://github.com/Kayyo321/neura/wiki/ResourcesConcurrency)). No library type is safe for concurrent use, and none claims to be. |
+| Concurrent collections; threads and executors that outlive a scope; free-standing locks | Not provided | `Std.Concurrent` supplies scoped tasks, channels, worker groups, `AtomicInt64`, `Semaphore`, and `Guarded<T>` ([section 19](#19-stdconcurrent)). Concurrent collections come after these, built on `Guarded<T>` or as owner tasks. No other library class is transferable, so a collection belongs to one task. |
 | Reflection, runtime class loading, serialization of arbitrary objects | Excluded | The library needs class and interface type tests, which are available without a general reflection model. |
 | Finalizers, weak references | Excluded | Reclamation runs no code, by design. |
-| Scoped cleanup, recovery from traps | Excluded | The runtime has neither, and the library is designed not to need them. |
+| Recovery from traps, cleanup when a trap ends the run | Excluded | The runtime has neither, and the library is designed not to need them. The scoped helpers of [section 5.5](#55-resources) cover every ordinary completion. |
 | Time zones, locales, localized formatting, collation | Deferred | They need large versioned data tables. |
 | Unicode normalization, non-ASCII case mapping and classification | Deferred to `Std.Text.Unicode` | Same reason. |
 | Ciphers, signatures, TLS, secure random, HTTP | Deferred | They need review beyond this plan. |
@@ -1309,6 +1330,7 @@ The library was implemented in these independent source tracks, on the compiler 
 | Collections and iteration | Implement list, deque, linked list, hash, ordinal, tree, priority, and sequence modules against their interfaces. Check deterministic order, key equality, list aliasing, nil links, and structural modifications. |
 | Pure algorithms and data formats | Implement math, seeded randomness, calendar arithmetic, JSON and other encodings, and digests. Compare the outputs with independent reference models and published vectors where applicable. |
 | Host providers and capabilities | Register concrete providers for console input, files, environment, process, time, entropy, and networking. Specify denial, lifetime, error codes, and replay before considering the source modules complete. |
+| Concurrency | Implement `Std.Concurrent` over the scheduler operations of [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md), the scoped resource helpers, `PortableError`, and the overlapping, cancellable forms of the console, clock, and network calls. Check the library's task safety with `check --task-safety`. |
 
 Within a track, establish the public contract and failure behavior, then implement, test, and document the module. A source module is supported only when the complete path through the installed compiler and NVM is verified.
 
@@ -1342,6 +1364,7 @@ These requirements apply the repository's rules in [AGENTS.md](https://github.co
 - **Contract text.** `to_string` output, hash values, trap messages, and float formatting are compared against literal expected values.
 - **Numeric vectors.** `Math` is tested against bit patterns generated once from a reference fdlibm build and checked in. Float parsing and formatting use a checked-in corpus that includes halfway values, subnormals, the largest finite values, and powers of two and ten, plus exhaustive round trips for `float16` and `bfloat16`.
 - **Host services.** Each service has a test that replays a recorded trace and a test with the capability denied.
+- **Task safety.** `concurrency-frontend` runs `check --task-safety` over a program that links the modules a service needs and allows only console input to be not task-safe ([section 5.8](#58-task-safety)).
 - **Retirement.** The change that deletes `SysIo` and `Test` includes a rejection test for a program importing each, and every existing example and test passes through the new modules.
 - **Decompiler.** A library-using image must round-trip through `disassemble` and `assemble` byte for byte, and `decompile` must run on it. No stronger recovery claim is made for library code.
 - **Cost baseline.** A small benchmark set (insert and look up 1,000 map entries, sort 1,000 integers, format 100 integers, hash 10 KB with `Sha256`) records NVM steps, neuron count, and image size in a checked-in baseline. A change that raises any figure by more than 10% says why in its pull request. The layout choices of sections 9.3 through 9.7 are re-measured with this set when an acceleration ships.
@@ -1419,7 +1442,7 @@ The library follows this plan. Where the plan left a choice open, or where the l
 
 - **Modification counts.** `ArrayList` uses its backing list's `version`; `ArrayDeque`, `LinkedList`, `PriorityQueue`, `BitSet`, and `OrdinalMap` share a `Cell<uint64>` count with their iterators. A callback or comparator that changes the collection traps with `collection modified during iteration`, and `Sorting` checks the list's version after every comparator call, also when it sorts a built-in list directly.
 - **Construction.** `new ArrayList<T>(items)` adopts the list, as `wrap` does. `PriorityQueue`'s constructor takes the items and the comparator and heapifies a copy. `ArrayDeque`, `LinkedList`, and `BitSet` also have `create` and `of`.
-- **Self-containment.** Text prints `(this collection)` for a collection that directly contains itself, through a shared depth counter (`Std.Collections.Internal.TextDepth`); deeper cycles still end with the frame-limit fault.
+- **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
 - **Equality direction.** Search members call `value.equals(element)` with the probe as the receiver.
@@ -1451,3 +1474,37 @@ The library follows this plan. Where the plan left a choice open, or where the l
 - **Host services** are tested with the capability denied, with real providers in temporary directories and on localhost, and by replaying checked-in traces.
 - **Cost baseline.** `tests/benchmarks` holds the workloads of this section's cost baseline and a few more (ArrayList, TreeMap, strings, JSON, dates); `benchmarks` compares their steps, peak heap cells, neurons, and image bytes with `baseline.txt` and checks that steps grow as expected between two sizes.
 - **Not established.** Agreement of `Math` with a reference fdlibm 5.3 build (no reference build was available); `with_capacity(2^29)` and other limits that need billions of elements were only inspected.
+
+### 18.12 Concurrency
+
+- **Lists, not arrays.** `Tasks.all`, `all_ok`, and `first_ok` take their calls as a list and return lists. The language cannot build an array whose length is known only at run time, and a function with type parameters cannot be overloaded for arrays as well.
+- **Helper errors.** `tasks.cancelled` and `tasks.empty` are the codes of the two `Custom` errors the `Tasks` helpers make themselves.
+- **A group needs a scope.** `WorkerGroup` has no `create`: a group exists only inside `with_workers`, which owns the scope its workers run in and drains the queue before it returns. The handle's constructor is exported only so that `with_workers` can be written in the library.
+- **A semaphore is a channel.** Its permits are places in a channel of `bool`, so waiting tasks are served first come, first served and a wait can be cancelled, with no scheduler operation of its own.
+- **Errors across tasks.** `Error` stays as it is and gains a transferable copy, `PortableError`; immutable classes are not transferable.
+- **Scoped helpers.** The two helpers word their combined error differently, as [section 5.5](#55-resources) gives. `Closeable.release` is exported so that a program can apply the rule to a resource of its own.
+- **Trap details.** `workers` and `capacity` (`WorkerGroup`, `Channel`), `permits` (`Semaphore`), `steps` and `heap_cells` (`Parallel`) after `invalid argument: `; `released more permits than were created` and `guard already held` after `invalid state: `.
+
+## 19. `Std.Concurrent`
+
+The modules of `Std.Concurrent` are implemented. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) specifies the language forms they serve, the memory model, the scheduler, and the limits; this section gives the library contracts. Source: `stdlib/std/concurrent/`, one module per file, importing only `Std.Core` and `Std.Time`.
+
+| Module | Contract |
+| --- | --- |
+| `Task` | `Task<T>` is what `spawn` returns. `join()` waits until the task has finished and returns its result; joining again returns the same value, and a join is never cancelled. `is_finished()` never waits. A handle is scope-bound: it cannot leave the `scope` block that started its task. |
+| `Scope` | The handle that `scope (name) { ... }` binds. `cancel()` requests cancellation of the scope's tasks and all their descendants; it is idempotent, cannot be undone, wakes their parked operations, and never interrupts a running task. `is_cancelled()` reports a request made by `cancel` or by the deadline. `cancel_after(duration)` and `cancel_at(instant)` set a deadline on the monotonic clock and return `Result<Unit>`, an `Err` of kind `CapabilityDenied` when the clock is denied. `deadline()` is the monotonic reading at which the tasks are cancelled, the earlier of the scope's own deadline and the one it inherited, as an `Optional<Duration>`. Scope-bound. |
+| `Channel` | `open<T>(capacity)` returns `[Sender<T>, Receiver<T>, Closer<T>]`, the three ends of one bounded FIFO channel of a transferable `T`. Capacity 0 is a rendezvous; a negative capacity traps with `invalid argument: capacity`. `send(value)` parks while the buffer is full and returns `SendOutcome`: `Sent`, `Closed`, or `Cancelled`. `receive()` parks while the channel is empty and open and returns `Received<T>`: `Value(T)`, `Closed`, or `Cancelled`. `try_send` (`Sent`, `Full`, `Closed`) and `try_receive` (`Value(T)`, `Empty`, `Closed`) never park. `close()` is idempotent: later sends report `Closed`, parked senders wake with `Closed` and their values are not delivered, and receivers see `Closed` once the buffer is empty. |
+| `Cancellation` | What the running task can ask about itself. `requested()` is whether cancellation was requested for the scope that started the task or for any scope above it; the root task is never cancelled. `remaining()` is the time to the task's deadline as an `Optional<Duration>`, negative once it has passed, and `None` when the task has no deadline or the clock cannot be read. |
+| `Timer` | A one-shot timer on the monotonic clock. `after(duration)` and `at(instant)` return `Result<Timer>`, an `Err` when the clock is denied. `wait()` parks until the timer has fired and returns `TimerOutcome`: `Fired`, or `Cancelled` when the task's scope is cancelled first. A `wait` can be a `select` arm, which is how a select gives up on its other arms after a time. |
+| `Tasks` | Helpers that run a list of calls as tasks and combine the results; a call is a function value of no arguments. `all<T>(calls) -> T[list]` returns the results in the order of the calls. `all_ok<T>(calls) -> Result<T[list]>` returns the values in call order when every call returns `Ok`, and otherwise the first `Err` in completion order. `first_ok<T>(calls) -> Result<T>` returns the first `Ok` in completion order, or the `Err` of the call that completed last. `all_ok` and `first_ok` cancel the calls still running, and every helper waits for all of its calls before it returns. An `Err` made by a helper has the code `tasks.cancelled` (the calling task was cancelled while it waited) or `tasks.empty` (`first_ok` of no calls). The helpers take and return lists, not arrays. |
+| `WorkerGroup` | A fixed number of workers over a bounded queue. `with_workers<T>(workers, capacity, work, body)` starts the workers, runs `body` with the group's handle, then closes the queue, lets the workers finish every queued job, and returns once they have stopped. On the handle, `submit(job)` parks while the queue is full and returns `SubmitOutcome` (`Submitted`, `Closed`, `Cancelled`); `try_submit(job)` never parks and returns `TrySubmitOutcome` (`Submitted`, `Full`, `Closed`); `close_and_drain()` closes the queue and waits for the queued jobs. Fewer than one worker traps with `invalid argument: workers`, and a negative capacity with `invalid argument: capacity`. |
+| `Parallel` | `map<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]` returns what `worker` returns for each item, in input order. Each item runs alone, in a heap of its own, under `limits(steps, heap_cells)`, both positive. The worker is task-safe, issues no host request, and uses no scheduler operation and no object identity; the compiler checks this. If items trap, the run reports the trap of the lowest index. `--parallel-workers` chooses how many threads evaluate items and changes only wall time and peak memory. |
+| `AtomicInt64` | A shared signed 64-bit integer. `create(initial)`, `load()`, `store(value)`, `add(delta)`, which returns the sum and traps on overflow leaving the value unchanged, and `compare_exchange(expected, desired)`, which reports whether it stored. All operations on one atomic form a single order consistent with each task's program order. |
+| `Semaphore` | A fixed number of permits. `create(permits)` traps with `invalid argument: permits` for a negative count. `acquire()` parks until a permit is free and returns `AcquireOutcome`: `Acquired` or `Cancelled`. `try_acquire()` returns a `bool` and never parks. `release()` returns a permit and wakes the task that has waited longest; releasing more permits than were created traps with `invalid state: released more permits than were created`. |
+| `Guarded` | Mutable state that tasks share one at a time. `create<T>(initializer)` builds the state inside the guard. `with<U>(body)` runs `body` with exclusive access and returns its result; a second task that calls `with` parks until the first returns, and that wait is not cancellable. The captures of `initializer` and `body` and the result `U` are transferable, so no reference to the state escapes. Calling `with` on a guard the task already holds traps with `invalid state: guard already held`. |
+
+- Every handle except `Task<T>` and `Scope` is transferable ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#51-transferable-types)). The compiler recognizes the handle classes by the trusted file that declares them.
+- The classes `Sender`, `Receiver`, `Task`, and `Timer` also export `select_handle()` and a `<member>_selected(code)` function. The `select` statement calls them; a program does not.
+- `Channel.State` is the identity the three ends of one channel share. A program does not construct one.
+- Tests: `stdlib-concurrent` for `Tasks` and `WorkerGroup`; the `concurrency-*` and `backend-concurrency` entries for the rest ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#15-verification)).
+- Task safety of the library as a whole is in [section 5.8](#58-task-safety).

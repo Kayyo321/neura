@@ -5,11 +5,13 @@ let hashing = import:Std.Core.Hash;
 /// @see [Std.Core.Error](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Error)
 export let Error = module (
     /// @brief Host error codes 1 through 14 map to the first fourteen kinds in order. The library produces
-    /// Closed and InvalidData itself.
+    /// Closed and InvalidData itself. Host error code 15 maps to Cancelled, the answer of a cancellable host
+    /// request (a read, write, accept, connect, or sleep in a task whose scope was cancelled) that was cancelled
+    /// before it finished. Cancelled comes last so that the kinds before it keep their order.
     export let IoErrorKind = enum (
         NotFound, PermissionDenied, AlreadyExists, InvalidInput, Interrupted, UnexpectedEnd, NotADirectory,
         IsADirectory, DirectoryNotEmpty, ConnectionRefused, ConnectionReset, TimedOut, Unsupported,
-        CapabilityDenied, Closed, InvalidData, Other
+        CapabilityDenied, Closed, InvalidData, Other, Cancelled
     );
 
     /// @brief Classifies malformed text, premature endings, and out-of-range values.
@@ -70,6 +72,18 @@ export let Error = module (
         Context { message: string, cause: Error }
     );
 
+    /// @brief A transferable copy of an Error, so that a failure can cross a channel or a spawn
+    /// (Concurrency.md section 5.1). It mirrors Error with one change: Custom, which holds an ErrorDetail
+    /// object, is flattened to the detail's code and message texts. Convert with to_portable before sending and
+    /// from_portable after receiving.
+    export let PortableError = enum (
+        Io { kind: IoErrorKind, message: string, path: string },
+        Parse { kind: ParseErrorKind, offset: int, message: string },
+        Encoding { offset: int, message: string },
+        Custom { code: string, message: string },
+        Context { message: string, cause: PortableError }
+    );
+
     /// @brief A Custom error holding a SimpleDetail.
     export let custom = func(code: string, text: string) -> Error =>
         Error.Custom(new SimpleDetail(code, text));
@@ -77,6 +91,30 @@ export let Error = module (
     /// @brief Wraps an error with a message that describes the operation that failed.
     export let context = func(cause: Error, text: string) -> Error =>
         Error.Context { message: text, cause: cause };
+
+    /// @brief The transferable copy of an error. A Custom error keeps its code and message but loses its
+    /// ErrorDetail object, so a subclass's other members are gone; every other variant is copied as it is.
+    export let to_portable = func(e: Error) -> PortableError => match (e) {
+        Error.Io { kind, message: text, path } => PortableError.Io { kind: kind, message: text, path: path },
+        Error.Parse { kind, offset, message: text } =>
+            PortableError.Parse { kind: kind, offset: offset, message: text },
+        Error.Encoding { offset, message: text } => PortableError.Encoding { offset: offset, message: text },
+        Error.Custom(detail) => PortableError.Custom { code: detail.code(), message: detail.message() },
+        Error.Context { message: text, cause } =>
+            PortableError.Context { message: text, cause: to_portable(cause) },
+    };
+
+    /// @brief The error a portable copy stands for. A Custom copy comes back holding a SimpleDetail with the
+    /// same code and message, so message(from_portable(to_portable(e))) equals message(e).
+    export let from_portable = func(p: PortableError) -> Error => match (p) {
+        PortableError.Io { kind, message: text, path } => Error.Io { kind: kind, message: text, path: path },
+        PortableError.Parse { kind, offset, message: text } =>
+            Error.Parse { kind: kind, offset: offset, message: text },
+        PortableError.Encoding { offset, message: text } => Error.Encoding { offset: offset, message: text },
+        PortableError.Custom { code, message: text } => custom(code, text),
+        PortableError.Context { message: text, cause } =>
+            Error.Context { message: text, cause: from_portable(cause) },
+    };
 
     /// @brief Returns the spelling of an I/O error category.
     export let io_kind_name = func(kind: IoErrorKind) -> string => kind.to_string();

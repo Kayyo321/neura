@@ -4,7 +4,6 @@ let optional = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let sequences = import:Std.Collections.Sequence;
 let sorting = import:Std.Collections.Sorting;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief Resizable lists backed by a built-in list. Iterators check the backing list's structural version,
 /// including changes made through `items()` or a wrapped alias.
@@ -14,8 +13,8 @@ export let ArrayList = module (
     export let ArrayList = class<T> implements MutableList<T> (
         /// @brief The list shared with the constructor input and returned by `items()`.
         let storage: T[list];
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Adopts `values` without copying, as `wrap` does.
         export let init = func(values: T[list]) {
@@ -352,17 +351,15 @@ export let ArrayList = module (
         /// @brief Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
         export let.override hash_code = func -> uint32 => storage.hash_code();
 
-        /// @brief Formats the list as `[a, b, c]`. The list itself as a direct element prints
-        /// "(this collection)".
+        /// @brief Formats the list as `[a, b, c]`. The list prints "(this collection)" where its own text
+        /// reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let text = storage.to_string();
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return text;
         };
     );

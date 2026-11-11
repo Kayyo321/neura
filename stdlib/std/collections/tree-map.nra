@@ -4,7 +4,6 @@ let.promote _ = import:Std.Collections.MutableMap;
 let optional = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let.promote _ = import:Std.Collections.SortedMap;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief Sorted maps implemented as AVL trees. The comparator defines key identity and order and
 /// takes the probe key first during lookup. Iteration follows the in-order successor without
@@ -48,8 +47,8 @@ export let TreeMap = module (
         let compare: func(K, K) -> ordering.Ordering;
         /// @brief The modification count, shared with iterators.
         let changes: cell.Cell<uint64>;
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Starts an empty tree with the comparator supplied by the factory.
         export let init = func(seal: Seal, comparator: func(K, K) -> ordering.Ordering) {
@@ -512,22 +511,20 @@ export let TreeMap = module (
             return total as uint32;
         };
 
-        /// @brief Formats entries as `{k: v, k2: v2}` in ascending order. The map itself as a direct
-        /// key or value prints "(this collection)".
+        /// @brief Formats entries as `{k: v, k2: v2}` in ascending order. The map prints "(this collection)"
+        /// where its own text reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let parts: string[list] = [];
             let node = leftmost(root);
             while (node != nil) {
                 parts.append(node.key.to_string() + ": " + node.value.to_string());
                 node = successor(node);
             }
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             let text = parts.to_string();
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };

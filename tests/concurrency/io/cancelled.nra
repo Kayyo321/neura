@@ -1,0 +1,116 @@
+// Tasks parked in a cancellable read, accept, and sleep while their scope is
+// cancelled by a deadline. Each operation ends with an Io error of kind
+// Cancelled (host error 15, Concurrency.md section 10.4) and the scope's exit
+// then returns. Needs the net and clock capabilities.
+let channels = import:Std.Concurrent.Channel;
+let console = import:Std.Io.Console;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let listeners = import:Std.Net.TcpListener;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let streams = import:Std.Net.TcpStream;
+let system_clock = import:Std.Time.SystemClock;
+let unit = import:Std.Core.Unit;
+
+let describe = func(label: string, problem: errors.Error) -> string {
+    return match (problem) {
+        errors.Error.Io { kind, message, path } => label + ": " + errors.io_kind_name(kind),
+        _ => label + ": some other error",
+    };
+};
+
+let reader = func(port: int, out: channels.Sender<string>) {
+    match (streams.connect("127.0.0.1", port, durations.of_seconds(5))) {
+        result.Result.Err(problem) => {
+            out.send(describe("read", problem));
+        },
+        result.Result.Ok(stream) => {
+            match (stream.read(16)) {
+                result.Result.Ok(chunk) => {
+                    out.send("read: got " + chunk.length.to_string() + " bytes");
+                },
+                result.Result.Err(problem) => {
+                    out.send(describe("read", problem));
+                },
+            }
+            stream.close();
+        },
+    }
+};
+
+let acceptor = func(out: channels.Sender<string>) {
+    match (listeners.bind("127.0.0.1", 0)) {
+        result.Result.Err(problem) => {
+            out.send(describe("accept", problem));
+        },
+        result.Result.Ok(listener) => {
+            match (listener.accept()) {
+                result.Result.Ok(stream) => {
+                    out.send("accept: a connection");
+                    stream.close();
+                },
+                result.Result.Err(problem) => {
+                    out.send(describe("accept", problem));
+                },
+            }
+            listener.close();
+        },
+    }
+};
+
+let sleeper = func(out: channels.Sender<string>) {
+    match (system_clock.create().sleep(durations.of_seconds(60))) {
+        result.Result.Ok(_) => {
+            out.send("sleep: finished");
+        },
+        result.Result.Err(problem) => {
+            out.send(describe("sleep", problem));
+        },
+    }
+};
+
+let show = func(results: channels.Receiver<string>) {
+    match (results.receive()) {
+        channels.Received.Value(text) => {
+            console.print_line(text);
+        },
+        _ => {
+            console.print_line("no result");
+        },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let target = listeners.bind("127.0.0.1", 0);
+        match (target) {
+            result.Result.Err(problem) => {
+                console.print_line("bind failed: " + errors.message(problem));
+                return program.ExitCode.Failure;
+            },
+            result.Result.Ok(listener) => {
+                let reads = channels.open<string>(1);
+                let accepts = channels.open<string>(1);
+                let sleeps = channels.open<string>(1);
+                scope (deadline) {
+                    match (deadline.cancel_after(durations.of_millis(200))) {
+                        result.Result.Ok(_) => {},
+                        result.Result.Err(problem) => {
+                            console.print_line("deadline failed: " + errors.message(problem));
+                        },
+                    }
+                    spawn reader(listener.local_port(), reads[0]);
+                    spawn acceptor(accepts[0]);
+                    spawn sleeper(sleeps[0]);
+                    show(reads[1]);
+                    show(accepts[1]);
+                    show(sleeps[1]);
+                }
+                console.print_line("scope closed");
+                listener.close();
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

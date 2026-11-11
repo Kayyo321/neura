@@ -1,0 +1,23 @@
+// Two tasks and two joins. At the default quantum no poll yields, so the
+// schedule can be derived by hand from Concurrency.md section 10.2: the root
+// parks at the first join and tasks 1 and 2 run in spawn order, then the
+// root, which task 1's finish woke, takes its turn.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let say = func(label: string) -> int {
+    console.print_line(label);
+    return 1;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            let first = spawn say("a");
+            let second = spawn say("b");
+            first.join();
+            second.join();
+        }
+        return program.ExitCode.Ok;
+    };
+);

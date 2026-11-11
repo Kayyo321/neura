@@ -1,0 +1,25 @@
+// A trap in any task ends the run with that trap's status; the diagnostic
+// names the task and its spawn site, and no later effect happens.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let divide = func(value: int, by: int) -> int => value / by;
+
+let relay = func(by: int) -> int {
+    scope {
+        let inner = spawn divide(10, by);
+        return inner.join();
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            let task = spawn relay(0);
+            console.print_line("before");
+            task.join();
+            console.print_line("never");
+        }
+        return program.ExitCode.Ok;
+    };
+);

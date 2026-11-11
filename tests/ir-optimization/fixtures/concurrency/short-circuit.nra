@@ -1,0 +1,47 @@
+// Short-circuit simplification with a spawned call's result: a join that
+// is never reached may go, and a join whose result is not needed to decide
+// the outcome must still happen.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let compute = func(label: string, value: int) -> int {
+    console.print_line("compute " + label);
+    return value;
+};
+
+let decide = func -> int {
+    let hits = 0;
+    scope {
+        let task = spawn compute("a", 3);
+        let other = spawn compute("b", 0);
+        if (false && task.join() > 0) {
+            hits = hits + 100;
+        }
+        if (true || task.join() > 0) {
+            hits = hits + 1;
+        }
+        if (true && other.join() > 0) {
+            hits = hits + 1000;
+        }
+        if (task.join() > 0 && false) {
+            hits = hits + 10000;
+        }
+        if (task.join() > 0 || true) {
+            hits = hits + 10;
+        }
+        if (other.join() > 0 && task.join() > 0) {
+            hits = hits + 100000;
+        }
+        if (other.join() > 0 || task.join() > 0) {
+            hits = hits + 2;
+        }
+    }
+    return hits;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("hits " + decide().to_string());
+        return program.ExitCode.Ok;
+    };
+);

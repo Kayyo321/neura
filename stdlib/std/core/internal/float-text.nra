@@ -19,14 +19,18 @@ export let FloatText = module (
     /// separates from the exact value.
     export let Parsed = enum (Failure(Error), Bits(uint64), Near(float64));
 
-    /// @brief Powers of ten that float64 holds exactly.
-    let exact_powers: float64[] = [
-        1.0, 10.0, 100.0, 1000.0, 10000.0, 100000.0, 1000000.0, 10000000.0, 100000000.0,
-        1000000000.0, 10000000000.0, 100000000000.0, 1000000000000.0, 10000000000000.0,
-        100000000000000.0, 1000000000000000.0, 10000000000000000.0, 100000000000000000.0,
-        1000000000000000000.0, 10000000000000000000.0, 100000000000000000000.0,
-        1000000000000000000000.0, 10000000000000000000000.0
-    ];
+    /// @brief Ten to the power `exponent` for 0 through 22, the powers of ten that float64 holds exactly.
+    /// Every product is exact because each of those powers is. A function, not a table, so that parsing
+    /// reads no module state and is task-safe (Concurrency.md section 5.2).
+    let exact_power = func(exponent: int) -> float64 {
+        let power = 1.0;
+        let remaining = exponent;
+        while (remaining > 0) {
+            power *= 10.0;
+            remaining -= 1;
+        }
+        return power;
+    };
 
     // Bit-level classification. -------------------------------------------
 
@@ -338,10 +342,10 @@ export let FloatText = module (
         let mantissa = value as float64;
         if (f == 52) {
             if (scale >= 0 && scale <= 22) {
-                return mantissa * exact_powers[scale as int];
+                return mantissa * exact_power(scale as int);
             }
             if (scale < 0 && scale >= -22) {
-                return mantissa / exact_powers[(-scale) as int];
+                return mantissa / exact_power((-scale) as int);
             }
             return 0.0;
         }
@@ -355,10 +359,10 @@ export let FloatText = module (
         let power = 1.0;
         let remaining = magnitude as int;
         while (remaining > 22) {
-            power *= exact_powers[22];
+            power *= exact_power(22);
             remaining -= 22;
         }
-        power *= exact_powers[remaining];
+        power *= exact_power(remaining);
         let near = mantissa * power;
         if (scale < 0) {
             near = mantissa / power;

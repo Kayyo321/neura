@@ -178,11 +178,25 @@ build_image("${TEST_DIR}/multi-file.nvr" -I "${SOURCE_DIR}/examples/modules/mult
     "${SOURCE_DIR}/examples/modules/multi-file/main.nra")
 expect_run("multi-file" "${TEST_DIR}/multi-file.nvr" "Hello, Neura!\n" 0 "")
 
+# Scoped tasks, a cancellable operation, and shared state: the same output
+# under any quantum.
+build_image("${TEST_DIR}/service.nvr" "${SOURCE_DIR}/examples/concurrency/service.nra")
+foreach(quantum IN ITEMS 1 64 1024)
+    expect_run("concurrency example, quantum ${quantum}" "${TEST_DIR}/service.nvr"
+        "tea 3, cake 5, soup -1\nfast answered; the others stopped early: true\nhome 400, about 200\n" 0 ""
+        --task-quantum ${quantum})
+endforeach()
+
 # Library examples run through drivers that import them.
 foreach(driver IN ITEMS core overlay classes collections polymorphism errors)
+    # The errors driver shows a denied read, so it runs with files denied.
+    set(driver_options)
+    if(driver STREQUAL "errors")
+        set(driver_options --deny-fs)
+    endif()
     build_image("${TEST_DIR}/${driver}-driver.nvr" ${roots} "${tests}/examples/${driver}-driver.nra")
     file(READ "${tests}/examples/${driver}-driver.out" expected)
-    expect_run("${driver} driver" "${TEST_DIR}/${driver}-driver.nvr" "${expected}" 0 "")
+    expect_run("${driver} driver" "${TEST_DIR}/${driver}-driver.nvr" "${expected}" 0 "" ${driver_options})
 endforeach()
 
 # Examples whose builds stop at a documented limitation.

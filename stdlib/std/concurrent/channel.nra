@@ -1,0 +1,144 @@
+/// @brief Typed, bounded channels: the default way for tasks to share work (Concurrency.md section 6). A channel
+/// has a sending end, a receiving end, and a closer; each is a handle that can be given to another task.
+/// @see [Std.Concurrent.Channel](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Channel)
+export let Channel = module (
+    /// @brief What a send reports. Closure and cancellation are expected events, not errors.
+    export let SendOutcome = enum (Sent, Closed, Cancelled);
+
+    /// @brief What a send that never waits reports.
+    export let TrySendOutcome = enum (Sent, Full, Closed);
+
+    /// @brief What a receive reports: the value, or why there is none.
+    export let Received = enum<T> (Value(T), Closed, Cancelled);
+
+    /// @brief What a receive that never waits reports.
+    export let TryReceived = enum<T> (Value(T), Empty, Closed);
+
+    /// @brief The identity the scheduler keeps a channel's buffer and waiters under. The three ends of one
+    /// channel share one State; the scheduler releases the channel when the State is collected.
+    export let State = class (
+        /// @brief Creates an identity that open has yet to register. Use open.
+        export let init = func { };
+    );
+
+    /// @brief The sending end of a channel of T.
+    export let Sender = class<T> (
+        let state: State;
+
+        /// @brief Wraps a channel's identity. Use open, which returns the three ends of one channel.
+        export let init = func(shared: State) {
+            state = shared;
+        };
+
+        /// @brief Sends the value. Waits while the buffer is full, or with capacity 0 until a receiver takes it.
+        export let send = func(value: T) -> SendOutcome => send_selected(raw_send<T>(state, value));
+
+        /// @brief Sends the value if that needs no waiting.
+        export let try_send = func(value: T) -> TrySendOutcome {
+            let code = raw_try_send<T>(state, value);
+            if (code == 0) {
+                return TrySendOutcome.Sent;
+            }
+            if (code == 1) {
+                return TrySendOutcome.Closed;
+            }
+            return TrySendOutcome.Full;
+        };
+
+        /// @brief What a select waits on for this end. Used by the select statement.
+        export let select_handle = func -> State => state;
+
+        /// @brief The outcome of a send that a select committed. Used by the select statement.
+        export let send_selected = func(code: uint32) -> SendOutcome {
+            if (code == 0) {
+                return SendOutcome.Sent;
+            }
+            if (code == 1) {
+                return SendOutcome.Closed;
+            }
+            return SendOutcome.Cancelled;
+        };
+    );
+
+    /// @brief The receiving end of a channel of T.
+    export let Receiver = class<T> (
+        let state: State;
+
+        /// @brief Wraps a channel's identity. Use open, which returns the three ends of one channel.
+        export let init = func(shared: State) {
+            state = shared;
+        };
+
+        /// @brief Receives the next value in the order the sends committed. Waits while the channel is empty
+        /// and open. Values already buffered are still received after the channel closes.
+        export let receive = func -> Received<T> => receive_selected(raw_receive(state));
+
+        /// @brief Receives a value if one is there.
+        export let try_receive = func -> TryReceived<T> {
+            let code = raw_try_receive(state);
+            if (code == 0) {
+                return TryReceived<T>.Value(take<T>());
+            }
+            if (code == 1) {
+                return TryReceived<T>.Closed;
+            }
+            return TryReceived<T>.Empty;
+        };
+
+        /// @brief What a select waits on for this end. Used by the select statement.
+        export let select_handle = func -> State => state;
+
+        /// @brief The outcome of a receive that a select committed. Used by the select statement.
+        export let receive_selected = func(code: uint32) -> Received<T> {
+            if (code == 0) {
+                return Received<T>.Value(take<T>());
+            }
+            if (code == 1) {
+                return Received<T>.Closed;
+            }
+            return Received<T>.Cancelled;
+        };
+    );
+
+    /// @brief Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot.
+    export let Closer = class<T> (
+        let state: State;
+
+        /// @brief Wraps a channel's identity. Use open, which returns the three ends of one channel.
+        export let init = func(shared: State) {
+            state = shared;
+        };
+
+        /// @brief Closes the channel. Closing again does nothing. Afterwards a send reports Closed; parked
+        /// senders wake with Closed and their values are not delivered; receivers see Closed once the buffer
+        /// is empty.
+        export let close = func {
+            raw_close(state);
+        };
+    );
+
+    /// @brief Opens a channel that buffers `capacity` values of the transferable type T. Capacity 0 is a
+    /// rendezvous: each send waits for its receive. A negative capacity traps.
+    export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>] {
+        if (capacity < 0) {
+            trap_with_message("invalid argument: capacity");
+        }
+        let state = new State();
+        raw_open<T>(state, capacity as int64);
+        return [new Sender<T>(state), new Receiver<T>(state), new Closer<T>(state)];
+    };
+
+    let raw_open = func<T>(state: State, capacity: int64) scheduler("channel.open");
+
+    let raw_send = func<T>(state: State, value: T) -> uint32 scheduler("channel.send");
+
+    let raw_try_send = func<T>(state: State, value: T) -> uint32 scheduler("channel.try_send");
+
+    let raw_receive = func(state: State) -> uint32 scheduler("channel.receive");
+
+    let raw_try_receive = func(state: State) -> uint32 scheduler("channel.try_receive");
+
+    let raw_close = func(state: State) scheduler("channel.close");
+
+    let take = func<T> -> T scheduler("take");
+);

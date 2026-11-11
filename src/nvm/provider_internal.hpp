@@ -6,6 +6,7 @@
 #include "providers.hpp"
 
 #include <cstdint>
+#include <climits>
 #include <functional>
 #include <map>
 #include <memory>
@@ -103,12 +104,24 @@ inline bool usable_text(const std::string& text) {
 // The poll timeout, in milliseconds, for a positive nanosecond timeout:
 // rounded up and capped; -1 waits without limit.
 int timeout_milliseconds(std::int64_t nanos);
+// Whether `descriptor` has data to read or has reached its end, without
+// waiting.
+bool readable_now(int descriptor);
 
 using Adder = std::function<void(HostSignature, FunctionService::Handler)>;
+// Adds version 1 and the cancellable version 2 of an overlapping service.
+using OverlapAdder = std::function<void(HostSignature, FunctionService::Handler, FunctionService::Begin)>;
+
+// The task clock reading `nanos` after `now`, without overflow.
+inline std::int64_t deadline_after(std::int64_t now, std::int64_t nanos) {
+    return nanos > INT64_MAX - now ? INT64_MAX - 1 : now + nanos;
+}
+inline HostCompletion cancelled_answer() { return fail(host_error::cancelled); }
 
 void add_fs_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities,
                      const std::vector<ResolvedPath>& prefixes);
-void add_net_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
+void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardServices::Tables& tables,
+                      const Capabilities& capabilities);
 void add_ffi_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
 void close_files(StandardServices::Tables& tables);
 void close_native(StandardServices::Tables& tables);

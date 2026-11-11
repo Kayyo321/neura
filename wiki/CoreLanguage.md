@@ -162,6 +162,121 @@ These loop forms lower to NeuraIR's loop and branch operations. See [Backend](ht
 
 For an `Iterable<T>`, the loop evaluates its source once and calls `iterator()` once. It calls the iterator's `has_next()` before each advance, and calls `next()` to get each element. A `continue` returns to `has_next()`. A `break` or `return` leaves without another call. A library iterator enforces its collection's modification rules in these methods.
 
+## Tasks, scopes, and select
+
+A call can run as a *task*: an independently suspendable call that shares no mutable state with the task that started it. Three forms start tasks, wait for them, and choose between waits. [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) specifies them together with the runtime, the library, and the status of each part.
+
+`scope`, `spawn`, and `select` are contextual words. The lexer produces identifiers for them, and the parser reads them as these forms only in the positions below. Everywhere else they are ordinary names, so `let scope = 3;`, `spawn(x)`, and a module member named `select` keep their meaning.
+
+```text
+scope-statement  = "scope" [ "(" identifier ")" ] block
+spawn-expression = "spawn" call
+select-statement = "select" "{" [ arm { "," arm } [ "," ] ] "}"
+arm              = ( [ ( "let" | "const" ) identifier "=" ] call | "_" ) "=>" block
+```
+
+| Word | Is a form when | Otherwise |
+| --- | --- | --- |
+| `scope` | It begins a statement and the next token is `{`, or the next tokens are `(`, one identifier, `)`, and `{`. | A name. `scope(name);` is a call, because `;` follows, and `scope = 3;` is an assignment. |
+| `spawn` | It begins an expression and the next token is an identifier. | A name. `spawn(x)` is a call of a function named `spawn`; so is `spawn (f)(x)`. |
+| `select` | It begins a statement and the next token is `{`. | A name. |
+
+A `scope` statement is allowed only in a function body: a function, a method, or a lambda. In a top-level statement or an initializer it is an error, because globals are still being initialized.
+
+### Scope
+
+`scope { ... }` runs an ordinary block with one added rule. Every exit from it, whether by reaching the end, `return`, `break`, or `continue`, first waits until every task spawned in the block, and every task those tasks spawned, has finished. A `return` evaluates its expression before it waits. Waiting does not cancel a task. Scopes nest, and a task belongs to the nearest enclosing scope of its `spawn`. No task outlives its scope, so none outlives `main`. A runtime failure in any task ends the run at once without waiting ([Errors](https://github.com/Kayyo321/neura/wiki/Errors)).
+
+`scope (name) { ... }` also binds `name`, a constant of type `Std.Concurrent.Scope`, in the block. Its `cancel()` requests cancellation of the scope's tasks, `is_cancelled()` reports it, and `cancel_after`, `cancel_at`, and `deadline()` set and read a deadline. Cancellation is cooperative: it wakes a task that is parked on a channel operation, a timer, or a cancellable host request with a `Cancelled` result, and a running task learns of it by asking `Std.Concurrent.Cancellation.requested()`. Nothing interrupts a running task, and `join` is never cancelled.
+
+### Spawn
+
+`spawn call` starts a task and gives the parent a `Std.Concurrent.Task<T>`, where `T` is the call's result type. A call of a `void` function gives `Task<Unit>`, with `Unit` and its single value `Unit.Value` from `Std.Core`. The operand must begin with a name and be a call of a function, a method, or a function value: `fetch(id)`, `client.fetch(id)`, `Jobs.twice(21)`, or `handler(request)`. A lambda is bound to a name first. The `spawn` must be inside a `scope` of the same function body; a `spawn` in a lambda written inside the scope is not.
+
+The parent evaluates the callee, a method's receiver, and then the arguments from left to right, as it would for the call itself, including overload resolution, casts, and variadic packing. It then creates the task, appends it to the queue of runnable tasks, and continues. `spawn` does not switch tasks: the child first runs when the parent next waits, or when its turn of language operations ends ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#102-the-reference-scheduler)). A `spawn` used as a statement produces no handle.
+
+`task.join()` waits until the task has finished and returns its result; joining again returns the same value. `task.is_finished()` does not wait. A scope can exit without joining, and the result is then discarded. A task reports an expected failure as an ordinary returned value, such as a `Result`, and `join` hands it to the caller.
+
+```neura
+let say = func(text: string) -> int {
+    console.print_line(text);
+    return text.byte_length;
+};
+
+let report = func -> int {
+    scope {
+        let left = spawn say("left task");
+        let right = spawn say("right task");
+        console.print_line("parent continues");
+        return left.join() + right.join();
+    }
+};
+```
+
+At the default quantum, `report()` prints `parent continues`, then `left task` and `right task`, and returns 19: the parent reaches its first wait at `left.join()`, and only then do the two tasks run, in the order they were spawned.
+
+### Select
+
+`select { ... }` waits on several operations and performs exactly one. An arm is `[let name =] operation => { block }`, or `_ => { block }`, the default arm, which may appear once. The operation is a call of `receive`, `send` (with the value as its argument), `join`, or `wait` on a channel end, a task, or a timer from `Std.Concurrent`. A `const` binding is constant, the name `_` discards the result, and the binding receives what the same call would return on its own. A select needs at least one arm that waits and is allowed in any function body.
+
+- The receiver and arguments of every arm are evaluated once, in source order, before anything is attempted. The value of an arm that does not commit is evaluated and dropped.
+- Exactly one arm commits, and only its block runs. No other arm has any effect.
+- **Rotating preference.** Each task counts the selects it has committed. A select with `n` listed arms scans from arm `count mod n` cyclically, and the first arm that is ready commits. A send arm is ready when the send would complete.
+- When no arm is ready, the default arm runs if there is one. Otherwise the task waits on every arm, and the first operation that completes for it commits.
+- When the task's scope is cancelled and nothing is ready and there is no default arm, a channel or timer arm commits `Cancelled`. A `join` arm is not cancelled.
+
+```neura
+let drain = func(inbox: channels.Receiver<int>, spare: channels.Receiver<int>) {
+    for (let round: int = 0; round < 3; round++) {
+        select {
+            let first = inbox.receive() => {
+                match (first) {
+                    channels.Received.Value(number) => { console.print_line("inbox " + number.to_string()); },
+                    _ => { console.print_line("inbox ended"); },
+                }
+            },
+            let second = spare.receive() => {
+                match (second) {
+                    channels.Received.Value(number) => { console.print_line("spare " + number.to_string()); },
+                    _ => { console.print_line("spare ended"); },
+                }
+            },
+            _ => {
+                console.print_line("nothing ready");
+            },
+        }
+    }
+};
+```
+
+With one value waiting on each channel, `drain` prints `inbox 1`, `spare 2`, and `nothing ready`: the preference moves to the second arm after the first select commits.
+
+### Scope-bound values
+
+A `Task<T>` or `Scope`, and an array, list, or tuple of them, is *scope-bound* and cannot be reachable after its scope exits. It can be held in a local declared inside the scope, including a local list, and passed as an argument to a call. It cannot be returned, stored in a field, global, or enum payload, captured by a lambda, passed to `spawn`, sent on a channel, used as a type argument, or assigned to a binding declared outside the scope. [Types](https://github.com/Kayyo321/neura/wiki/Types#scope-bound-and-transferable-types) lists the rules, the types that can cross between tasks, and the calls a task may make.
+
+```neura
+let count_until_stopped = func -> int {
+    let laps = 0;
+    while (!cancellation.requested()) {
+        laps = laps + 1;
+    }
+    return laps;
+};
+
+let stop_early = func -> bool {
+    scope (group) {
+        let counter = spawn count_until_stopped();
+        group.cancel();
+        return counter.join() >= 0;
+    }
+};
+```
+
+`count_until_stopped` loops until `Cancellation.requested()` is true. The scope's handle `group` is a scope-bound value used inside the block, and `stop_early` returns once the task has seen the request and finished. Because the task has not yet run when `group.cancel()` is called, it starts with the request already visible and returns 0.
+
+The compiler rejects, at the span of the offending expression, a `spawn` outside a `scope` of its function body, an operand that is not a call or does not begin with a name, a scope-bound value that leaves its scope, and a `scope` outside a function body. See [concurrency example](https://github.com/Kayyo321/neura/blob/main/examples/concurrency/service.nra) for a complete program.
+
 ## Expressions
 
 Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are

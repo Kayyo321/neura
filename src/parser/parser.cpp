@@ -231,6 +231,18 @@ private:
         result.generics = generic_parameters();
         const bool expression_body = function_body(result, branch_keyword);
         const bool host = !result.has_body && current().kind == TokenKind::Identifier && current().text == "host";
+        if (!result.has_body && current().kind == TokenKind::Identifier && current().text == "scheduler" &&
+            tokens_[cursor_ + 1].kind == TokenKind::Symbol && tokens_[cursor_ + 1].text == "(") {
+            advance();
+            expect("(");
+            const auto& operation = current();
+            if (operation.kind != TokenKind::String)
+                throw Diagnostic(operation.span, "expected a scheduler operation name");
+            advance();
+            expect(")");
+            result.scheduler_binding = operation.text.substr(1, operation.text.size() - 2);
+            return expression_body;
+        }
         const bool callback = result.has_body && !expression_body && current().kind == TokenKind::Identifier &&
                               current().text == "callback";
         if (host || callback) {
@@ -512,12 +524,76 @@ private:
             }
         } else if (match("for")) {
             result = for_statement();
+        } else if (at_scope_statement()) {
+            result.kind = Statement::Kind::Scope;
+            result.keyword = advance().span;
+            if (match("(")) {
+                result.bindings.push_back(identifier());
+                expect(")");
+            }
+            result.body = block();
+        } else if (at_contextual("select") && next_is(1, "{")) {
+            result.kind = Statement::Kind::Select;
+            result.keyword = advance().span;
+            expect("{");
+            while (!at_end() && !at("}")) {
+                result.select_arms.push_back(select_arm());
+                if (!match(",")) break;
+            }
+            expect("}");
         } else {
+            // `scope (a, b) {` and `scope () {` are not scope statements, so
+            // they read as a call followed by a block. Say what a scope
+            // takes instead of asking for a semicolon.
+            const bool scope_call = at_contextual("scope") && next_is(1, "(");
+            const auto parenthesis = scope_call ? tokens_[cursor_ + 1].span : Span{};
             result = simple_statement();
+            if (scope_call && at("{") && result.kind == Statement::Kind::Expression &&
+                result.expressions.front().kind == Expr::Kind::Call) {
+                throw Diagnostic(parenthesis, "a scope statement names one scope or none: scope (name) { } or scope { }");
+            }
             expect(";");
         }
         result.span = span_from(start);
         return result;
+    }
+
+    // The contextual words of Concurrency.md section 4.4 stay identifiers.
+    // Each form is recognized only where no expression can begin that way.
+    bool at_contextual(std::string_view word) const {
+        return current().kind == TokenKind::Identifier && current().text == word;
+    }
+
+    bool next_is(std::size_t offset, std::string_view symbol) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        return token.kind == TokenKind::Symbol && token.text == symbol;
+    }
+
+    bool at_scope_statement() const {
+        if (!at_contextual("scope")) return false;
+        if (next_is(1, "{")) return true;
+        return next_is(1, "(") && cursor_ + 2 < tokens_.size() &&
+               tokens_[cursor_ + 2].kind == TokenKind::Identifier && next_is(3, ")") && next_is(4, "{");
+    }
+
+    SelectArm select_arm() {
+        const auto start = cursor_;
+        SelectArm arm;
+        if (current().kind == TokenKind::Identifier && current().text == "_" && next_is(1, "=>")) {
+            advance();
+        } else {
+            if (at("let") || at("const")) {
+                arm.constant_binding = advance().text == "const";
+                arm.binding = identifier();
+                expect("=");
+            }
+            arm.operation = expression();
+        }
+        expect("=>");
+        arm.body = block();
+        arm.span = span_from(start);
+        return arm;
     }
 
     Statement parse_match(bool produces_value, std::size_t start) {
@@ -871,11 +947,13 @@ private:
                     continue;
                 }
             }
-            if (!match("(")) {
+            if (!at("(")) {
                 return result;
             }
+            const auto open = advance().span;
             auto operands = expression_list(")");
             auto call = make_expression(Expr::Kind::Call, span_from(start));
+            call.open = open;
             call.type_arguments = std::move(arguments);
             call.operands.reserve(1 + operands.size());
             call.operands.push_back(std::move(result));
@@ -965,6 +1043,17 @@ private:
         }
 
         const auto& token = current();
+        // `spawn name...`: two adjacent identifiers begin no other expression,
+        // and `spawn(x)` stays a call of a function named spawn.
+        if (at_contextual("spawn") && tokens_[cursor_ + 1].kind == TokenKind::Identifier) {
+            advance();
+            auto operand = postfix(branch_keyword);
+            if (operand.kind != Expr::Kind::Call)
+                throw Diagnostic(operand.span, "spawn requires a call, such as 'spawn work(item)'");
+            auto result = make_expression(Expr::Kind::Spawn, span_from(start), "spawn");
+            result.operands.push_back(std::move(operand));
+            return result;
+        }
         if (at("true") || at("false")) return token_expression(Expr::Kind::Boolean);
         if (at("nil")) return token_expression(Expr::Kind::Nil);
         if (token.kind == TokenKind::Identifier) return token_expression(Expr::Kind::Name);

@@ -70,6 +70,9 @@ std::string_view op_name(IrOp op) {
     case IrOp::ValueText: return "value_text";
     case IrOp::MakeClosure: return "make_closure";
     case IrOp::CallClosure: return "call_closure";
+    case IrOp::TaskScope: return "task_scope";
+    case IrOp::Spawn: return "spawn";
+    case IrOp::SchedulerCall: return "scheduler_call";
     }
     return "<invalid>";
 }
@@ -157,7 +160,13 @@ IrProgram lower_fixture(const Environment& environment, std::string_view file_na
 }
 
 std::vector<fs::path> fixture_files(const Environment& environment) {
-    return nra_files(environment.fixtures());
+    // The concurrent fixtures are entry programs for the scheduler and have
+    // their own suites (concurrency_support.hpp); the per-function sampling
+    // of the other suites does not apply to them.
+    auto files = nra_files(environment.fixtures());
+    const auto concurrent = fs::canonical(environment.fixtures() / "concurrency");
+    std::erase_if(files, [&](const fs::path& file) { return file.parent_path() == concurrent; });
+    return files;
 }
 
 std::vector<fs::path> example_files(const Environment& environment) {

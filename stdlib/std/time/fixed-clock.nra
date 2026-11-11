@@ -13,7 +13,7 @@ export let FixedClock = module (
         /// @brief The current simulated instant.
         let current: instant.Instant;
         /// @brief The monotonic reading: the total of every advance and sleep.
-        let elapsed: Duration = Zero;
+        let elapsed: Duration = of_nanos(0);
 
         /// @brief Starts at the supplied instant with a zero monotonic reading.
         export let init = func(start: instant.Instant) {

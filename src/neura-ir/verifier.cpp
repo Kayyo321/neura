@@ -4,6 +4,7 @@
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
+#include "scheduler_ops.hpp"
 #include "nominal.hpp"
 #include "integer.hpp"
 #include "reference_storage.hpp"
@@ -71,6 +72,7 @@ bool is_statement(IrOp op) {
     case IrOp::Destroy:
     case IrOp::Fail:
     case IrOp::TrapMessage:
+    case IrOp::TaskScope:
         return true;
     default:
         return false;
@@ -137,6 +139,8 @@ private:
         SymbolId function = no_symbol;
         unsigned loops = 0;
         bool scoped_value = false;
+        // Enclosing TaskScope statements of this body.
+        unsigned task_scopes = 0;
     };
 
     const IrProgram& program_;
@@ -432,6 +436,10 @@ private:
         for (const auto& argument : node.type_arguments) {
             check_type_references(argument, node.span);
         }
+        if (node.poll && node.op != IrOp::Loop && node.op != IrOp::Call && node.op != IrOp::VirtualCall &&
+            node.op != IrOp::CallClosure) {
+            report(node.span, "a poll marks an operation that is neither a loop nor a call");
+        }
     }
 
     bool expect_operands(const IrNode& node, std::size_t count, std::string_view operation) {
@@ -463,7 +471,8 @@ private:
             check_expression(node, context, true);
             return;
         }
-        if (node.op != IrOp::Block && node.op != IrOp::Branch && node.op != IrOp::Loop) {
+        if (node.op != IrOp::Block && node.op != IrOp::Branch && node.op != IrOp::Loop &&
+            node.op != IrOp::TaskScope) {
             expect_no_regions(node, "a simple statement");
         }
         if (node.type.kind != TypeKind::Void) {
@@ -505,6 +514,32 @@ private:
             }
             check_region(node.alternative, context);
             break;
+        case IrOp::TaskScope:
+            expect_operands(node, 0, "task scope");
+            if (!node.alternative.empty()) {
+                report(node.span, "a task scope has an else region");
+            }
+            if (context.function == no_symbol) {
+                report(node.span, "a task scope appears outside a function body");
+            }
+            // With a symbol, the constant uint64 local that receives the
+            // scope's identity for its handle.
+            if (node.symbol != no_symbol &&
+                (!valid(node.symbol) || symbol(node.symbol).kind != SymbolKind::Local ||
+                 symbol(node.symbol).type != IrType{TypeKind::Integer, "uint64", no_symbol, {}})) {
+                report(node.span, "a task scope's identity is a uint64 local");
+            } else if (node.symbol != no_symbol) {
+                if (initialized_[node.symbol]) report(node.span, "a task scope's identity is initialized twice");
+                initialized_[node.symbol] = true;
+            }
+            ++context.task_scopes;
+            // The identity is set on entry and visible in the body only.
+            scopes_.emplace_back();
+            if (valid(node.symbol)) scopes_.back().push_back(node.symbol);
+            check_region(node.body, context);
+            scopes_.pop_back();
+            --context.task_scopes;
+            break;
         case IrOp::Return: check_return(node, context); break;
         case IrOp::Break:
         case IrOp::Continue:
@@ -537,6 +572,115 @@ private:
             break;
         default:
             break;
+        }
+    }
+
+    // A spawn starts a function value of no arguments. Specialization turns
+    // that value into the allocation of its capture layout, whose static
+    // type is the signature layout it derives from.
+    void check_spawn(const IrNode& node, const Context& context) {
+        if (node.type != IrType{TypeKind::Integer, "uint64", no_symbol, {}}) {
+            report(node.span, "spawn result must be uint64");
+        }
+        if (context.task_scopes == 0) {
+            report(node.span, "spawn appears outside a task scope of its function body");
+        }
+        if (!expect_operands(node, 1, "spawn")) return;
+        const auto& body = node.operands.front();
+        if (body.op != IrOp::MakeClosure && body.op != IrOp::Allocate) {
+            report(node.span, "spawn requires the function value it starts as its operand");
+            return;
+        }
+        if (body.op == IrOp::MakeClosure &&
+            (!is_function_value(body.type) || body.type.arguments.size() != 1)) {
+            report(node.span, "spawn requires a function value that takes no arguments");
+        }
+        if (body.op == IrOp::MakeClosure && body.type.arguments.size() == 1 &&
+            body.type.arguments.front().kind == TypeKind::Void) {
+            report(node.span, "a spawned function value returns a value");
+        }
+    }
+
+    void check_scheduler_call(const IrNode& node) {
+        if (node.symbol != no_symbol) {
+            report(node.span, "a scheduler call names its operation in text only");
+        }
+        const IrType uint64{TypeKind::Integer, "uint64", no_symbol, {}};
+        const IrType uint32{TypeKind::Integer, "uint32", no_symbol, {}};
+        const auto value = [](const IrType& type) {
+            return type.kind != TypeKind::Void && type.kind != TypeKind::Module;
+        };
+        if (node.text == select_operation || node.text == select_with_default) {
+            // Arms in source order: a uint32 kind literal and its operands.
+            if (!node.type_arguments.empty()) report(node.span, "a select takes no type arguments");
+            if (node.type != uint64) report(node.span, "a select result must be uint64");
+            std::size_t index = 0;
+            std::size_t arms = 0;
+            while (index < node.operands.size()) {
+                const auto& kind = node.operands[index];
+                if (kind.op != IrOp::Integer || kind.type != uint32 ||
+                    (kind.text != "0" && kind.text != "1" && kind.text != "2" && kind.text != "3")) {
+                    report(kind.span, "a select arm begins with its kind, a uint32 literal from 0 to 3");
+                    return;
+                }
+                const std::size_t operands = kind.text == "1" ? 2 : 1;
+                if (index + operands >= node.operands.size()) {
+                    report(kind.span, "a select arm lacks its operands");
+                    return;
+                }
+                const auto& target = node.operands[index + 1];
+                if (kind.text == "2" ? target.type != uint64 : target.type.kind != TypeKind::Object) {
+                    report(target.span, "a select arm waits on an object, or on a uint64 task for a join");
+                }
+                if (operands == 2 && !value(node.operands[index + 2].type)) {
+                    report(node.operands[index + 2].span, "a select send arm needs a value");
+                }
+                index += 1 + operands;
+                ++arms;
+            }
+            if (arms == 0) report(node.span, "a select needs at least one arm");
+            return;
+        }
+        const auto operation = scheduler_operation(node.text);
+        if (!operation) {
+            report(node.span, "scheduler call names unknown operation '" + node.text + "'");
+            return;
+        }
+        if (node.type_arguments.size() != (operation->typed ? 1U : 0U)) {
+            report(node.span, "scheduler operation '" + node.text + "' has the wrong number of type arguments");
+        }
+        const auto matches = [&](char letter, const IrType& type) {
+            switch (letter) {
+            // A function value of no arguments, or after specialization the
+            // object of its signature layout.
+            case 'f': return type.kind == TypeKind::Object || (is_function_value(type) && type.arguments.size() == 1);
+            case 'l': return type.kind == TypeKind::List && type.arguments.size() == 1 && type.arguments.front() == uint64;
+            case 'a': return type.kind == TypeKind::Array && type.arguments.size() == 1;
+            case 'u': return type == uint64;
+            case 'i': return type == IrType{TypeKind::Integer, "int64", no_symbol, {}};
+            case 'c': return type == uint32;
+            case 'b': return type.kind == TypeKind::Bool;
+            case 'o': return type.kind == TypeKind::Object;
+            case 'v': return value(type);
+            case '0': return type.kind == TypeKind::Void;
+            default: return false;
+            }
+        };
+        if (!expect_operands(node, operation->arguments.size(), "scheduler call")) return;
+        for (std::size_t i = 0; i < node.operands.size(); ++i) {
+            if (!matches(operation->arguments[i], node.operands[i].type)) {
+                report(node.operands[i].span, "scheduler operation '" + node.text + "' argument " +
+                                               std::to_string(i + 1) + " has type " + describe(node.operands[i].type));
+            }
+        }
+        if (!matches(operation->result, node.type)) {
+            report(node.span, "scheduler operation '" + node.text + "' has result type " + describe(node.type));
+        }
+        // The function an isolated item runs is fixed where it is written.
+        if (operation->arguments.starts_with('f') && node.operands.front().op != IrOp::MakeClosure &&
+            node.operands.front().op != IrOp::Allocate) {
+            report(node.operands.front().span, "scheduler operation '" + node.text +
+                                               "' takes a function value written at the call");
         }
     }
 
@@ -810,6 +954,12 @@ private:
             break;
         case IrOp::MakeClosure:
             check_make_closure(node);
+            break;
+        case IrOp::Spawn:
+            check_spawn(node, context);
+            break;
+        case IrOp::SchedulerCall:
+            check_scheduler_call(node);
             break;
         case IrOp::CallClosure:
             check_call_closure(node);

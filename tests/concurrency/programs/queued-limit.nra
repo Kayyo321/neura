@@ -1,0 +1,41 @@
+// --max-queued-messages (Concurrency.md section 10.3) bounds the values buffered in all channels together. With
+// no limit set this program buffers twelve values in two channels, six of them from a task, and drains them.
+// Under --max-queued-messages 8 (programs.cmake) the ninth buffered value traps at the send that would exceed
+// the limit, before any state changes, with status 137.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+let fill = func(out: channels.Sender<int>) -> void {
+    for (let i: int = 1; i <= 6; i++) {
+        out.send(i);
+        console.print_line("second channel holds " + i.to_string() + ", " + (6 + i).to_string() + " buffered in all");
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let [first_out, first, first_closer] = channels.open<int>(10);
+        let [second_out, second, second_closer] = channels.open<int>(10);
+        for (let i: int = 1; i <= 6; i++) {
+            first_out.send(i);
+            console.print_line("first channel holds " + i.to_string());
+        }
+        scope {
+            spawn fill(second_out);
+        }
+        let drained = 0;
+        for (let i: int = 1; i <= 6; i++) {
+            match (first.receive()) {
+                channels.Received.Value(v) => { drained += v; },
+                _ => { },
+            }
+            match (second.receive()) {
+                channels.Received.Value(v) => { drained += v; },
+                _ => { },
+            }
+        }
+        console.print_line("drained " + drained.to_string());
+        return program.ExitCode.Ok;
+    };
+);

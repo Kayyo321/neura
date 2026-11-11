@@ -24,17 +24,17 @@ request neura.console.write_line 1 ["line"]
 error 1
 request neura.console.write_line 1 ["Other: console write failed"]
 ok 0
-request neura.console.read 1 [4096]
+request neura.console.read 2 [4096]
 ok "partial "
-request neura.console.read 1 [4096]
+request neura.console.read 2 [4096]
 error 5
 request neura.console.write_line 1 ["Interrupted: console read failed"]
 ok 0
-request neura.console.read 1 [4096]
+request neura.console.read 2 [4096]
 ok "line\n"
 request neura.console.write_line 1 ["partial line"]
 ok 0
-request neura.console.read 1 [10]
+request neura.console.read 2 [10]
 error 4
 request neura.console.write_line 1 ["InvalidInput: console read failed"]
 ok 0

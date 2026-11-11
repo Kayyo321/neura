@@ -16,26 +16,26 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 
 | Field | Type | Value |
 | --- | --- | --- |
-| `CALB` | Callback records (1.4); present only when the image has callbacks | Yes, when present |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 or 1 |
+| Minor | u16 | 0 through 5 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 through 1.4
+### Versions 1.0 through 1.5
 
-Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. The graph profile remains 1.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. The graph profile remains 1.
 
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor versions 0 through 4. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 5. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
 | --- | --- | --- |
+| `CALB` | Callback records (1.4); present only when the image has callbacks | Yes, when present |
 | `CONS` | Constant records | Yes |
 | `FUNC` | Function, frame, block, and exit records | Yes |
 | `GLOB` | Global slot declarations | Yes |
@@ -46,9 +46,10 @@ Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-versi
 | `NATV` | The embedded native library (1.4); present only when the image has C imports | Yes, when present |
 | `NAME` | Source names for tools (provenance; not interpreted by the loader) | Optional |
 | `SMAP` | Source locations for function blocks | Optional |
+| `TRNS` | Transferable layout indices (1.5) | Yes, in a 1.5 image: required for a scheduler exit or poll |
 | `TYPE` | Type records | Yes |
 
-Every section except `META` stores a vector of records. A required table with zero entries still carries a zero count. Readers must consume every byte in each recognized section.
+The listed sections other than `META` and `NATV` store vectors. A required table with zero entries still carries a zero count. Readers must consume every byte in each recognized section.
 
 ## Types, constants, and storage
 
@@ -97,8 +98,137 @@ An exit begins with `kind:u8, assignments:vector<Assignment>`. An assignment is 
 | Host call | 4 | `import:u32, arguments:vector<Value>, success_slot:u32 optional, success_block:u32, error_slot:u32 optional, error_block:u32` |
 | Trap | 5 | `reason:u32` |
 | Message trap (1.2) | 6 | `arguments:vector<Value>`, exactly one text value, implicit reason 3 |
+| Scheduler operation (1.5) | 7 | `operation:u8, target:u32, arguments:vector<Value>, result_slot:u32 optional, resume_block:u32` |
 
-Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Reason 5 (1.1) designates a list modified during for-each. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
+Resume blocks belong to the current function. For every exit that produces a result (a call, a state operation, a scheduler operation, and both continuations of a host call), a void result requires an absent slot, and a nonvoid result requires a slot to which the result is assignable. Return values and arguments must be assignable to their declared types. A trap exit has no assignments. Reason codes 1 through 4 designate source arithmetic failure, source bounds failure, explicit program failure, and invalid dispatch. Reason 5 (1.1) designates a list modified during for-each. Other codes require a format revision. Loader and runtime faults have separate diagnostics.
+
+## Scheduler operations (1.5)
+
+Tasks, scopes, channels, timers, guards, and isolated parallel items are NVM scheduler state, reached through one exit kind, like the heap is reached through state operations. Neuron graphs still compute every arithmetic result, comparison, and branch decision, including which exit follows an operation's outcome. The scheduler is not a host service: it has no import and needs no capability, and the run is determined by the image, the inputs, the limits, and the host completion trace. The language rules that produce these operations are in [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md).
+
+### The exit record and the poll bit
+
+A scheduler exit has tag 7. After its assignments it holds `operation:u8, target:u32, arguments:vector<Value>, result_slot:u32 optional, resume_block:u32`. The resume block belongs to the current function. As for every exit, the assignments and the arguments resolve against the same pre-transition state, and the result is written to the slot after the operation completes, before the resume block starts. An operation that parks the task completes later, when the scheduler wakes it.
+
+Bit 7 (`0x80`) of the tag byte of a Continue or Call exit marks a **poll**, giving the tag bytes 128 and 129 with the usual record fields. Any other exit kind rejects the bit. A poll adds no block. It counts one language operation toward the running task's quantum after the exit's transition: when the continue is taken, or when the callee's frame is pushed. When the task has counted `--task-quantum` polls (default 1,024) since it was last scheduled, and another task is runnable, it moves to the back of the runnable queue; with nothing else runnable the count restarts and the task continues. The compiler puts a poll on every call and every loop back edge of a program that spawns, so a count is per language operation and does not depend on how conversion shaped the blocks.
+
+### Operations
+
+The assembly names are the spellings `disassemble` writes and `assemble` reads. A result slot marked *optional* may be absent; for every other operation a void result requires an absent slot and any other result requires a slot of the type shown.
+
+| Code | Assembly name | Target | Arguments | Result slot |
+| --- | --- | --- | --- | --- |
+| 0 | `scope-enter` | Zero | None | Optional `uint64`: the new scope's identity, for a `Scope` handle |
+| 1 | `scope-exit` | Zero | None | Absent |
+| 2 | `spawn` | Function index | One value per parameter of the target, each of a transferable type | Optional `uint64`: the task's identity. Absent: the task has no handle and the scheduler releases it when it finishes |
+| 3 | `join` | Zero | `uint64` task identity | The child's result; absent exactly when the child's result is void |
+| 4 | `is-finished` | Zero | `uint64` task identity | `bool` |
+| 5 | `scope-cancel` | Zero | `uint64` scope identity | Absent |
+| 6 | `scope-is-cancelled` | Zero | `uint64` scope identity | `bool` |
+| 7 | `scope-set-deadline` | Zero | `uint64` scope identity, `int64` deadline | Absent |
+| 8 | `scope-deadline` | Zero | `uint64` scope identity | `int64` |
+| 9 | `task-cancelled` | Zero | None | `bool` |
+| 10 | `task-deadline` | Zero | None | `int64` |
+| 11 | `take` | Zero | None | Required, of the type of the value taken |
+| 12 | `channel-open` | Type index of the channel's element type | An object reference to open as the channel, `int64` capacity | Absent |
+| 13 | `channel-send` | Zero | The channel, a transferable value | `uint32` outcome |
+| 14 | `channel-receive` | Zero | The channel | `uint32` outcome |
+| 15 | `channel-try-send` | Zero | The channel, a transferable value | `uint32` outcome |
+| 16 | `channel-try-receive` | Zero | The channel | `uint32` outcome |
+| 17 | `channel-close` | Zero | The channel | Absent |
+| 18 | `timer-open` | Zero | An object reference to open as the timer, `int64` deadline | Absent |
+| 19 | `timer-wait` | Zero | The timer | `uint32` outcome |
+| 20 | `select` | Flags: 0, or 1 when a default arm follows the listed arms | The arms (see below) | `uint64`: the arm in the low 32 bits, its outcome in the high 32 |
+| 21 | `guard-open` | Zero | An object reference to open as the guard, the guarded value (any type) | Absent |
+| 22 | `guard-enter` | Zero | The guard | Required, of a type that accepts the guarded value |
+| 23 | `guard-exit` | Zero | The guard | Absent |
+| 24 | `parallel-start` | Function index of the item | The item's single argument, `int64` step limit, `int64` heap-cell limit | `uint64`: the item's identity |
+| 25 | `parallel-finish` | Zero | A list of `uint64` item identities | An array of the items' results |
+
+A deadline and a timer's time are readings of the monotonic clock in nanoseconds, and `int64` maximum (`9223372036854775807`) means no deadline. A channel, timer, or guard is an ordinary object that the scheduler opens: the object keeps its layout and fields, and the scheduler attaches a record to its handle, which is released when the object is collected or freed. A scope, task, or item identity is an unsigned 64-bit number with no distinct static type.
+
+**What each operation does.**
+
+- `scope-enter` starts a scope owned by the running function frame. `scope-exit` waits until every task spawned in the scope since its `scope-enter`, and every descendant of those tasks, has finished; the task is parked while any is live. A function must not return with a scope open.
+- `spawn` creates a task that starts at the target function with the arguments, and appends it to the runnable queue. The parent continues. The task belongs to the innermost open scope of the frame, and its cancellation context is that scope joined with the context the parent inherited.
+- `join` returns the child's result, parking the parent until the child has finished; joining again returns the same value. `is-finished` never waits.
+- `scope-cancel` requests cancellation of the scope's tasks and their descendants, and is idempotent. A request wakes each parked `channel-send`, `channel-receive`, `timer-wait`, and `select` of those tasks with outcome 2; it never interrupts a running task and never cancels a `join`. `task-cancelled` reports whether the running task's context is cancelled. `scope-deadline` and `task-deadline` return the earlier of the scope's own deadline and the ones it inherited, or the maximum when there is none. `scope-set-deadline` replaces the scope's own deadline; when the monotonic clock reaches it the scheduler cancels the scope.
+- `channel-open` registers the object as a channel of the element type with the capacity (0 is a rendezvous). A send completes when a receiver is parked, or when the buffer has room; otherwise `channel-send` parks the task and `channel-try-send` returns outcome 3. A receive takes the oldest buffered value, then the value of the longest-parked sender; otherwise `channel-receive` parks and `channel-try-receive` returns outcome 4. When a receive completes with outcome 0, the value waits for the running task, and the next `take` exit with a slot of an assignable type produces it exactly once. `channel-close` is idempotent: a later send reports outcome 1, buffered values are still received, a receive on an empty closed channel reports outcome 1, and senders parked at the close wake with outcome 1 and their values are dropped.
+- `timer-open` and `timer-wait` work the same way for a one-shot timer: `timer-wait` returns outcome 0 once the timer has fired and parks until then.
+- `guard-open` stores a value under exclusive access. `guard-enter` gives the value to one task at a time and parks later tasks first come, first served, and `guard-exit` passes it to the next. That wait is not cancellable.
+- `select` commits exactly one arm (below).
+- `parallel-start` and `parallel-finish` run an item to completion in its own state, with its own heap and no scheduler, under the given limits, and `parallel-finish` returns the results in the order of the list, publishing the lowest-index trap if an item trapped.
+
+**Outcome codes.** An operation that can park or find nothing to do returns a `uint32`:
+
+| Code | Name | Returned by |
+| --- | --- | --- |
+| 0 | Done | A send, receive, or timer wait that completed; the arm of a join or default that committed |
+| 1 | Closed | A send or receive on a closed channel (a receive only once the buffer is empty) |
+| 2 | Cancelled | A parked send, receive, timer wait, or select arm that cancellation woke, or one that would park when the context is already cancelled |
+| 3 | Full | `channel-try-send` on a channel with no room and no parked receiver |
+| 4 | Empty | `channel-try-receive` on a channel with nothing buffered and no parked sender |
+
+**Select arms.** The `arguments` of a select are its arms in source order. Each arm begins with a `uint32` constant (a Constant value, not a slot) that names its kind, followed by the operands of that kind:
+
+| Kind | Name | Operands |
+| --- | --- | --- |
+| 0 | Receive | The channel |
+| 1 | Send | The channel, a transferable value |
+| 2 | Join | A `uint64` task identity |
+| 3 | Timer | The timer |
+
+The scheduler scans the arms cyclically starting at the arm numbered `selects mod n`, where `selects` is the number of selects the running task has committed and `n` the number of listed arms, and commits the first arm that is ready: a receive that finds a value or a closed channel, a send that completes or finds the channel closed, a join of a finished task, or a timer that has fired. If none is ready and the flag is 1, the default arm commits with index `n`. If none is ready and the task's context is cancelled, the first non-join arm in scan order commits with outcome 2. Otherwise the task parks on every arm and the first operation to complete for it commits. A committed receive or join leaves its value for a `take`. A commit counts toward `selects` whichever arm it was.
+
+### What the loader checks and what the scheduler checks
+
+The loader checks every scheduler exit before the image runs. The scheduler checks what only the run can know.
+
+| Operation | Loader (static) | Scheduler (run time) |
+| --- | --- | --- |
+| Every operation | The operation code is below 26; the target is zero unless the operation is `spawn`, `channel-open`, `select`, or `parallel-start`; the number of arguments; the types of arguments and of the result slot; the resume block exists | A violation of the contract below is an *invalid task operation*, status 132 |
+| `scope-enter` | No arguments; the slot, if present, is `uint64` | The heap budget accepts the scope's cell |
+| `scope-exit` | No arguments, no slot | The running frame has an open scope; a function returns with none open |
+| `spawn` | The function exists; one argument per parameter, each assignable to its parameter; every argument and parameter type is transferable; the slot, if present, is `uint64` | The frame has an open scope; the live task count is below `--max-tasks` (else the task limit, 137); every object reachable through written fields of an argument has a marked layout; the heap budget accepts the task record and its frame |
+| `join` | One `uint64` argument; a slot that exists, if present | The identity is a live child of the running task (not zero, not released, not another task's); the slot is absent exactly when the child's result is void, and otherwise accepts it |
+| `is-finished` | One `uint64` argument; a `bool` slot | The identity is a live child of the running task |
+| `scope-cancel`, `scope-is-cancelled`, `scope-set-deadline`, `scope-deadline` | The arguments and slot types shown | The scope identity names an open scope that the running task owns |
+| `task-cancelled`, `task-deadline` | No arguments; the slot type shown | None |
+| `take` | No arguments; a slot that exists | A received or joined value is waiting and its type is assignable to the slot's |
+| `channel-open` | The target is a transferable, non-void type index; an object argument and an `int64` capacity | The object is not already a channel, timer, or guard; the capacity is not negative; the heap budget accepts the channel's record |
+| `channel-send`, `channel-try-send` | An object and a transferable value; a `uint32` slot | The object is an open channel; the value's type is assignable to the channel's element type; every object reachable through written fields has a marked layout; a buffered value stays within `--max-queued-messages` (else 137) and the heap budget |
+| `channel-receive`, `channel-try-receive`, `channel-close` | An object argument; a `uint32` slot, except for close | The object is an open channel |
+| `timer-open` | An object and an `int64`; no slot | The object is not already a scheduler object; the heap budget accepts the record |
+| `timer-wait` | An object; a `uint32` slot | The object is an open timer |
+| `select` | The flag is 0 or 1; every arm begins with a `uint32` constant below 4 and has the operands of its kind; at least one arm; a `uint64` slot | Before any arm commits: each channel is open, each sent value is assignable and marked, each joined task is a live child, each timer is open |
+| `guard-open` | An object and a value of any type; no slot | The object is not already a scheduler object; the heap budget accepts the record |
+| `guard-enter` | An object; a slot that exists | The object is an open guard; the slot accepts the guarded value; the task does not already hold the guard, else the program trap `invalid state: guard already held` (reason 3, status 134) |
+| `guard-exit` | An object; no slot | The running task holds the guard |
+| `parallel-start` | The function exists and takes one parameter; the argument is assignable to it; the argument and the function's result are transferable and the result is not void; two `int64` limits; a `uint64` slot | Both limits are positive; every object reachable from the argument has a marked layout and is not a channel, timer, or guard; the heap budget accepts the item. An item that issues a host request is an invalid task operation |
+| `parallel-finish` | One list of `uint64`; an array slot | Each identity names an item started and not yet finished; each result is assignable to the array's element type; an item's trap is the run's trap, with the item's index |
+
+Runtime violations of the first kind trap with the diagnostic `invalid task operation: ` and a reason, and exit with status 132. The diagnostics that name a task or spawn chain add it in parentheses. The limits use their own kinds: `task limit exceeded`, `queued message limit exceeded`, and `pending request limit exceeded`, each with status 137, and each checked before any state changes.
+
+### Transferable layouts
+
+The required `TRNS` section stores a `vector<u32>` of strictly ascending layout indices. It may be empty. The section is present exactly when the image is 1.5: the loader requires it for a scheduler exit or a poll, and the writer declares version 1.5 whenever it writes the table. A marked layout has a marked parent, if it has one, and every one of its fields has a transferable type. Booleans, integers, floating-point types, text, and bytes are transferable. An object type is transferable only when its layout is marked. Arrays and lists are never transferable, and neither is void. The compiler marks the layouts of transferable classes, payload enums, and tuples, closed under parents.
+
+At a spawn, a send, a select send arm, and a parallel item, the scheduler checks the actual layout of every object reachable from the transferred value through written fields: each must be marked, or the operation is an invalid task operation. A field that has not been written is skipped; reading it later traps as an uninitialized field, as it would without tasks. An image with a `TRNS` section, a scheduler exit, or a poll cannot carry `CALB`, `NATV`, or `neura.ffi.*` imports. An optional raw `TRNS` tag in a pre-1.5 image stays opaque.
+
+### Assembly and decompilation
+
+The assembly form of an exit is `exit scheduler NAME target T arguments [ VALUE... ] result SLOT|- resume B assign [ ... ]`, where `NAME` is the assembly name of the table above. A poll is written between the exit kind and its fields:
+
+```text
+exit scheduler scope-enter target 0 arguments [ ] result - resume 1 assign [ ]
+exit call poll target 2 arguments [ constant:0:44 constant:2:31 ] result 2 resume 2 assign [ ]
+exit scheduler spawn target 4 arguments [ slot:13:4 ] result 5 resume 6 assign [ ]
+exit scheduler scope-exit target 0 arguments [ ] result - resume 15 assign [ ]
+```
+
+The `TRNS` table is written as `transferable-layouts [ 0 1 2 ]` after the last function. The assembler rejects a poll on any exit but continue and call, and a scheduler exit or poll in an image that declares a version before 1.5. Assembling the disassembly of a valid image reproduces its bytes.
+
+`neura decompile` labels every scheduler operation and every poll `[decoded]`, because the exit record names it and nothing is inferred. It pairs a `scope-enter` with its `scope-exit` when every path to the exit agrees on the open scopes, and marks the pair `[reconstructed: scope bN.eM]`; otherwise it shows `[scope pair unresolved]`. A block whose graph computes nothing is `[decoded]`; a block that has a scheduler exit and a graph that computes values is shown as its circuit, because the effect of the exit is outside the graph model ([Decompiler](Decompiler#tasks-and-scheduler-operations)).
 
 ## State operations
 

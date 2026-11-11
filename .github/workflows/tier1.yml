@@ -56,6 +56,8 @@ jobs:
       CXX: g++-14
       # A test that needs libclang fails instead of being skipped.
       NEURA_LIBCLANG_REQUIRED: "1"
+      # native-install fails instead of leaving out its empty-root checks.
+      NEURA_USERNS_REQUIRED: "1"
     steps:
       - name: Check out the repository and its submodule
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -82,6 +84,11 @@ jobs:
             exit 1
           fi
 
+      # The runner's AppArmor profile forbids unprivileged user namespaces,
+      # which native-install uses to run a static executable in an empty root.
+      - name: Allow unprivileged user namespaces
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
       - name: Test
         run: >
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error
@@ -89,7 +96,7 @@ jobs:
 
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 95
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 114
 
       - name: Upload the test report
         if: ${{ !cancelled() }}

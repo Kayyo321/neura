@@ -7,7 +7,6 @@ let optional = import:Std.Core.Optional;
 let ordering = import:Std.Core.Ordering;
 let sequences = import:Std.Collections.Sequence;
 let sorting = import:Std.Collections.Sorting;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief A doubly linked list of separately allocated nodes (Stdlib.md section
 /// 9.5) following both the list and the deque contracts. Missing neighbors
@@ -40,8 +39,8 @@ export let LinkedList = module (
         let count: int = 0;
         /// @brief The structural modification count shared with iterators.
         let modifications: cell.Cell<uint64> = cell.of<uint64>(0);
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Advances the version observed by active iterators.
         let changed = func {
@@ -551,17 +550,15 @@ export let LinkedList = module (
             return result;
         };
 
-        /// @brief Formats the list as `[a, b, c]`. The list itself as a direct element prints
-        /// "(this collection)".
+        /// @brief Formats the list as `[a, b, c]`. The list prints "(this collection)" where its own text
+        /// reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let text = to_list().to_string();
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return text;
         };
     );

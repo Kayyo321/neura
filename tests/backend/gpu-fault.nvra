@@ -1,0 +1,31 @@
+nvr 1.0 profile 1
+entry 0
+
+type 0 text
+type 1 array 0
+type 2 signed 32
+type 3 unsigned 32
+type 4 void
+constant 0 type 0 bytes 6265666f7265 ; "before"
+constant 1 type 0 bytes 6166746572 ; "after"
+constant 2 type 2 bytes 07000000 ; 7
+constant 3 type 2 bytes 08000000 ; 8
+
+graph 0 inputs 0 outputs [ ]
+graph 1 inputs 0 outputs [ 0 ]
+  node 0 identity 0 [ ]
+
+import 0 "neura.console.write_line" version 1 parameters [ 0 ] success 4 error 3
+
+function 0 parameters 1 result 2 frame [ 1 3 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit host import 0 arguments [ constant:0:0 ] result - resume 1 error 1 error-resume 4 assign [ ]
+  block 1 graph 1 selector 0 inputs [ ]
+    exit continue resume 2 assign [ ]
+    exit return arguments [ constant:2:3 ] assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit host import 0 arguments [ constant:0:1 ] result - resume 3 error 1 error-resume 4 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit return arguments [ constant:2:2 ] assign [ ]
+  block 4 graph 0 selector 0 inputs [ ]
+    exit trap reason 3 assign [ ]

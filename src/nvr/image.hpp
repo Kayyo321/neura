@@ -8,6 +8,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace neura::nvr {
@@ -17,7 +18,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 4;
+inline constexpr std::uint16_t minor_version = 5;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -104,8 +105,55 @@ struct Assignment {
 enum class ExitKind : std::uint8_t {
     Continue = 0, Call = 1, Return = 2, State = 3, Host = 4, Trap = 5,
     // NVR 1.2. Program failure with one text argument.
-    MessageTrap = 6
+    MessageTrap = 6,
+    // NVR 1.5.
+    Scheduler = 7
 };
+
+inline constexpr std::uint8_t scheduler_poll_bit = 0x80;
+
+// Scheduler operations (docs/runtime/NVR.md, "Scheduler operations").
+enum class SchedulerOp : std::uint8_t {
+    ScopeEnter = 0, ScopeExit = 1, Spawn = 2, Join = 3, IsFinished = 4,
+    // Cancellation: a scope's signal and deadline, and the running task's context.
+    ScopeCancel = 5, ScopeIsCancelled = 6, ScopeSetDeadline = 7, ScopeDeadline = 8,
+    TaskCancelled = 9, TaskDeadline = 10,
+    // The value a receive or a selected join left for the task.
+    Take = 11,
+    ChannelOpen = 12, ChannelSend = 13, ChannelReceive = 14, ChannelTrySend = 15, ChannelTryReceive = 16,
+    ChannelClose = 17,
+    TimerOpen = 18, TimerWait = 19,
+    Select = 20,
+    // A guard owns one value; a task enters to get exclusive use of it.
+    GuardOpen = 21, GuardEnter = 22, GuardExit = 23,
+    // An isolated item of a parallel map: start it, then finish it for its
+    // result. The target of a start is the function the item runs.
+    ParallelStart = 24, ParallelFinish = 25
+};
+
+inline constexpr std::uint8_t scheduler_op_count = 26;
+
+inline constexpr std::array<std::string_view, scheduler_op_count> scheduler_op_names{
+    "scope-enter", "scope-exit", "spawn", "join", "is-finished",
+    "scope-cancel", "scope-is-cancelled", "scope-set-deadline", "scope-deadline",
+    "task-cancelled", "task-deadline", "take",
+    "channel-open", "channel-send", "channel-receive", "channel-try-send", "channel-try-receive", "channel-close",
+    "timer-open", "timer-wait", "select",
+    "guard-open", "guard-enter", "guard-exit",
+    "parallel-start", "parallel-finish",
+};
+
+// The uint32 result of an operation that can park or find nothing to do.
+enum class SchedulerOutcome : std::uint32_t { Done = 0, Closed = 1, Cancelled = 2, Full = 3, Empty = 4 };
+
+// The kinds of a select arm, each a uint32 constant that begins the arm's
+// arguments: a receive and a timer wait take the object, a send the object
+// and the value, a join the task.
+enum class SelectArm : std::uint32_t { Receive = 0, Send = 1, Join = 2, Timer = 3 };
+inline constexpr std::uint32_t select_arm_count = 4;
+
+// The deadline of a scope or task that has none.
+inline constexpr std::int64_t no_deadline = INT64_MAX;
 
 enum class StateOp : std::uint8_t {
     AllocateObject = 0, ReadTag = 1, ReadField = 2, WriteField = 3, FreeObject = 4,
@@ -132,18 +180,20 @@ enum class TrapReason : std::uint32_t {
 // default values; the writer emits only the fields listed for the kind.
 struct Exit {
     ExitKind kind = ExitKind::Continue;
+    bool poll = false;
     std::vector<Assignment> assignments;
-    // Call: function index. Host: import index.
+    SchedulerOp scheduler = SchedulerOp::ScopeEnter;
+    // Call and Spawn: function index. Host: import index.
     std::uint32_t target = 0;
     // State operation code and immediate.
     StateOp operation = StateOp::AllocateObject;
     std::uint32_t immediate = 0;
-    // Call, State, and Host arguments. Return holds its value here: one value
+    // Call, State, Host, and Scheduler arguments. Return holds its value here: one value
     // for a nonvoid function and none otherwise. MessageTrap has one text.
     std::vector<Value> arguments;
-    // Call and State result slot, Host success slot.
+    // Call, State, and Scheduler result slot, Host success slot.
     std::uint32_t result_slot = absent;
-    // Continue, Call, and State resume block, Host success block.
+    // Continue, Call, State, and Scheduler resume block, Host success block.
     std::uint32_t resume = 0;
     // Host error slot and block.
     std::uint32_t error_slot = absent;
@@ -238,6 +288,8 @@ struct Image {
     // NVR 1.4: the CALB and NATV sections, present only when used.
     std::vector<Callback> callbacks;
     std::optional<NativeLibrary> native_library;
+    // NVR 1.5. Required TRNS table for scheduler exits and polls.
+    std::optional<std::vector<std::uint32_t>> transferable_layouts;
     // The optional SMAP section. Absent when the image carries no source map.
     std::optional<std::vector<SourceLocation>> source_map;
     // Unknown optional sections in ascending tag order.

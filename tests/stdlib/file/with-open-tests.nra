@@ -1,0 +1,140 @@
+// test-options: --allow-fs=with-open-work
+let error = import:Std.Core.Error;
+let file = import:Std.Fs.File;
+let fs = import:Std.Fs.Fs;
+let path = import:Std.Fs.Path;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// File.with_open (Concurrency.md section 7, "Resources"): the open error skips the body, and the file is closed
+// once on every ordinary completion. A program cannot make the host fail a close of a real file (the host handle
+// is sealed inside Std.Fs.File, the host closes a descriptor without error, and a task image cannot be replayed
+// from a trace), so the rule for a failed close is tested where with_open gets it, in Std.Io.Closeable.release
+// (tests/stdlib/io/closeable-tests.nra), on a resource whose close fails on request.
+let WithOpenTests = module (
+    let Calls = class (
+        export let count: int = 0;
+        export let init = func { };
+        export let call = func { count = count + 1; };
+    );
+
+    // A fresh, empty directory for one test.
+    let fresh = func(name: string) -> path.Path {
+        let dir = path.of("with-open-work").join(name);
+        match (fs.remove_tree(dir)) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(_) => {},
+        }
+        test.assert_ok<unit.Unit>(fs.create_directories(dir));
+        return dir;
+    };
+
+    let finish = func(dir: path.Path) -> void {
+        test.assert_ok<unit.Unit>(fs.remove_tree(dir));
+        test.assert_ok<unit.Unit>(fs.remove_directory(path.of("with-open-work")));
+    };
+
+    let bytes_of = func(text: string) -> uint8[list] {
+        let out: uint8[list] = [];
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i = i + 1;
+        }
+        return out;
+    };
+
+    let body_failure = func -> error.Error => error.custom("test.body", "the body failed");
+
+    let code_of = func(failure: error.Error) -> string => match (failure) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "not custom",
+    };
+
+    // Asserts that the file object, kept from inside a body, was closed: every operation but close reports Closed.
+    let assert_closed = func(kept: file.File[list]) -> void {
+        test.assert_equal_int32(1, kept.length);
+        match (test.assert_err<int64>(kept[0].seek(0, file.SeekOrigin.Current))) {
+            error.Error.Io { kind, message, path } => { test.assert(kind == error.IoErrorKind.Closed); },
+            _ => { test.fail("expected a Closed error"); },
+        }
+    };
+
+    export let test_ok_returns_the_body_value_and_closes = func() -> void {
+        let dir = fresh("ok");
+        let p = dir.join("a.txt");
+        let kept: file.File[list] = [];
+        let outcome = file.with_open<int>(p, file.OpenMode.Write, func(f: file.File) -> result.Result<int> {
+            kept.append(f);
+            test.assert_ok<unit.Unit>(f.write(bytes_of("hello")));
+            return result.Result<int>.Ok(42);
+        });
+        test.assert_equal_int32(42, test.assert_ok<int>(outcome));
+        assert_closed(kept);
+        test.assert_equal_string("hello", test.assert_ok<string>(fs.read_text(p)));
+        finish(dir);
+    };
+
+    export let test_open_error_skips_the_body = func() -> void {
+        let dir = fresh("missing");
+        let calls = new Calls();
+        let outcome = file.with_open<int>(dir.join("none.txt"), file.OpenMode.Read,
+            func(f: file.File) -> result.Result<int> {
+                calls.call();
+                return result.Result<int>.Ok(1);
+            });
+        let failure = test.assert_err<int>(outcome);
+        test.assert_equal_int32(0, calls.count);
+        match (failure) {
+            error.Error.Io { kind, message, path } => {
+                test.assert(kind == error.IoErrorKind.NotFound);
+                test.assert_equal_string("with-open-work/missing/none.txt", path);
+            },
+            _ => { test.fail("expected the open error"); },
+        }
+        finish(dir);
+    };
+
+    export let test_body_error_is_returned_and_the_file_closed = func() -> void {
+        let dir = fresh("body-error");
+        let kept: file.File[list] = [];
+        let outcome = file.with_open<int>(dir.join("b.txt"), file.OpenMode.Write,
+            func(f: file.File) -> result.Result<int> {
+                kept.append(f);
+                return result.Result<int>.Err(body_failure());
+            });
+        let failure = test.assert_err<int>(outcome);
+        test.assert_equal_string("test.body", code_of(failure));
+        test.assert_equal_string("the body failed", error.message(failure));
+        assert_closed(kept);
+        finish(dir);
+    };
+
+    export let test_the_body_may_close_the_file_itself = func() -> void {
+        let dir = fresh("self-close");
+        let outcome = file.with_open<int>(dir.join("e.txt"), file.OpenMode.Write,
+            func(f: file.File) -> result.Result<int> {
+                test.assert_ok<unit.Unit>(f.close());
+                return result.Result<int>.Ok(3);
+            });
+        test.assert_equal_int32(3, test.assert_ok<int>(outcome));
+        finish(dir);
+    };
+
+    // The helper runs the body in a scope it owns; the body may open scopes of its own inside it.
+    export let test_the_body_may_open_scopes_and_tasks = func() -> void {
+        let dir = fresh("scope");
+        let outcome = file.with_open<int>(dir.join("f.txt"), file.OpenMode.Write,
+            func(f: file.File) -> result.Result<int> {
+                scope {
+                    let task = spawn double(21);
+                    return result.Result<int>.Ok(task.join());
+                }
+            });
+        test.assert_equal_int32(42, test.assert_ok<int>(outcome));
+        finish(dir);
+    };
+
+    let double = func(value: int) -> int => value * 2;
+);

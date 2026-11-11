@@ -1,0 +1,46 @@
+#version 450
+layout(local_size_x = 64) in;
+layout(std430, set = 0, binding = 0) readonly buffer Tables { uint tables[]; };
+layout(std430, set = 0, binding = 1) buffer Io { uint io[]; };
+layout(std430, set = 0, binding = 2) coherent buffer Wires { int wires[]; };
+const int WIRE_BOUND = 32767;
+void main() {
+    uint lid = gl_LocalInvocationID.x;
+    uint request = 4u * gl_WorkGroupID.x;
+    uint entry = 8u * io[request];
+    uint wire_base = io[request + 1u];
+    uint input_base = io[request + 2u];
+    uint output_base = io[request + 3u];
+    uint input_lanes = tables[entry];
+    uint node_base = tables[entry + 1u];
+    uint edge_base = tables[entry + 2u];
+    uint layer_base = tables[entry + 3u];
+    uint layer_count = tables[entry + 4u];
+    uint output_list = tables[entry + 5u];
+    uint output_count = tables[entry + 6u];
+    bool escaped = false;
+    for (uint j = lid; j < input_lanes; j += 64u) wires[wire_base + j] = int(io[input_base + j]);
+    memoryBarrierBuffer();
+    barrier();
+    for (uint layer = 0u; layer < layer_count; ++layer) {
+        uint first = tables[layer_base + layer];
+        uint last = tables[layer_base + layer + 1u];
+        for (uint p = first + lid; p < last; p += 64u) {
+            uint node = node_base + 4u * p;
+            int sum = int(tables[node]);
+            uint edge = edge_base + 2u * tables[node + 1u];
+            uint packed = tables[node + 2u];
+            uint edge_end = edge + 2u * (packed >> 1);
+            for (; edge < edge_end; edge += 2u) sum += int(tables[edge + 1u]) * wires[wire_base + tables[edge]];
+            if ((packed & 1u) != 0u) sum = max(sum, 0);
+            escaped = escaped || sum > WIRE_BOUND || sum < -WIRE_BOUND;
+            wires[wire_base + tables[node + 3u]] = sum;
+        }
+        memoryBarrierBuffer();
+        barrier();
+    }
+    for (uint k = lid; k < output_count; k += 64u) io[output_base + k] = uint(wires[wire_base + tables[output_list + k]]);
+    uint status = output_base + output_count;
+    if (escaped) atomicOr(io[status], 1u);
+    if (lid == 0u) atomicOr(io[status], 2u);
+}

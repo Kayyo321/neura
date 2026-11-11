@@ -3,6 +3,8 @@
 // production writer.
 
 #include "assembler.hpp"
+#include "decompiler/assembly.hpp"
+#include "decompiler/decompile.hpp"
 #include "fixtures.hpp"
 
 #include <functional>
@@ -65,7 +67,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(5), Kind::Unsupported, "format version 1.5 is not supported");
+    expect_rejected(version_bytes(6), Kind::Unsupported, "format version 1.6 is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -131,6 +133,140 @@ NEURA_TEST(format, message_trap_requires_version_1_2_and_text) {
     auto& exit = image.functions.front().blocks.front().exits.front();
     exit.arguments = {{nvr::ValueKind::Constant, 2, 0}};
     expect_invalid(image, "a message trap requires one text argument");
+}
+
+NEURA_TEST(format, scheduler_exits_and_transferable_layouts) {
+    auto sections = hello_sections();
+    replace(sections, "TYPE", Out().u32(8).u8(0).u8(1).u8(3).u8(32).u8(4)
+        .u8(7).u32(3).u8(2).u8(32).u8(2).u8(64).u8(6).u32(1).bytes);
+    constexpr std::uint32_t none = 0xffffffffU;
+    replace(sections, "LAYO", Out().u32(2)
+        .u32(none).u32(1).u32(1).u32(0)
+        .u32(0).u32(2).u32(1).u32(6).u32(0).bytes);
+    replace(sections, "CONS", Out().u32(2).u32(2).u32(4).u32(0).u32(7).u32(0).bytes);
+    sections.insert(sections.end() - 1, {"TRNS", 1, Out().u32(2).u32(0).u32(1).bytes});
+
+    Out functions;
+    functions.u32(2).u32(1).u32(2).u32(4).u32(4).u32(6).u32(1).u32(2).u32(8);
+    const auto block = [&](const Out& exit) { functions.u32(0).u32(0).u32(0).u32(1).raw(exit.bytes); };
+    const auto schedule = [&](std::uint8_t op, std::uint32_t target, const Bytes& args,
+                              std::uint32_t result, std::uint32_t resume) {
+        block(Out().u8(7).u32(0).u8(op).u32(target).raw(args).u32(result).u32(resume));
+    };
+    const auto nil = vector_of({value(1, 7, 1)});
+    const auto task = vector_of({value(0, 6, 1)});
+    schedule(0, 0, vector_of({}), none, 1); // Enter a scope.
+    schedule(2, 1, nil, 1, 2);             // Spawn function 1, returning a task ID.
+    schedule(4, 0, task, 2, 3);            // Query completion.
+    schedule(3, 0, task, 3, 4);            // Join, returning the child's int32.
+    schedule(1, 0, vector_of({}), none, 5); // Leave the scope.
+    block(Out().u8(0x80).u32(0).u32(6));
+    block(Out().u8(0x81).u32(0).u32(1).raw(nil).u32(3).u32(7));
+    block(Out().u8(2).u32(0).raw(value(0, 2, 3)));
+    functions.u32(1).u32(2).u32(1).u32(7).u32(1);
+    block(Out().u8(2).u32(0).raw(value(1, 2, 0)));
+    replace(sections, "FUNC", functions.bytes);
+
+    const Header concurrent{.minor = 5};
+    const auto bytes = assemble(sections, concurrent);
+    const auto image = nvr::load(bytes);
+    check(image.transferable_layouts == std::vector<std::uint32_t>{0, 1}, "TRNS decodes sorted layout indices");
+    const auto& entry = image.functions.front();
+    const auto exit = [&](std::size_t index) -> const nvr::Exit& { return entry.blocks[index].exits.front(); };
+    check(exit(0).scheduler == nvr::SchedulerOp::ScopeEnter && exit(1).scheduler == nvr::SchedulerOp::Spawn &&
+          exit(2).scheduler == nvr::SchedulerOp::IsFinished && exit(3).scheduler == nvr::SchedulerOp::Join &&
+          exit(4).scheduler == nvr::SchedulerOp::ScopeExit, "scheduler opcodes decode to their declared operations");
+    check(exit(1).target == 1 && exit(1).result_slot == 1 && exit(3).result_slot == 3, "spawn and join slots decode");
+    check(exit(5).kind == nvr::ExitKind::Continue && exit(5).poll &&
+          exit(6).kind == nvr::ExitKind::Call && exit(6).poll, "continue and call tags carry poll bits");
+    check(nvr::is_transferable(image, 7) && nvr::is_transferable(image, 3) && !nvr::is_transferable(image, 4),
+          "marked object and text types transfer while an array does not");
+    auto unversioned = image;
+    unversioned.minor_version = 0;
+    check(nvr::encode(unversioned) == bytes, "the 1.5 writer reproduces independent wire bytes");
+
+    const auto assembly = decompiler::disassemble(image);
+    check(assembly.find("exit scheduler spawn target 1") != std::string::npos &&
+          assembly.find("exit call poll") != std::string::npos &&
+          assembly.find("transferable-layouts [ 0 1 ]") != std::string::npos, "assembly names scheduler records");
+    check(decompiler::assemble(assembly) == image, "scheduler assembly preserves the complete image model");
+    const auto recovered = decompiler::decompile(image).text;
+    check(recovered.find("scope-enter [decoded] [reconstructed: scope b0.e0]") != std::string::npos &&
+          recovered.find("scope-exit [decoded] [reconstructed: scope b0.e0]") != std::string::npos &&
+          recovered.find("poll [decoded]") != std::string::npos, "decompiler pairs scopes without provenance");
+
+    const auto changed = [&](auto mutate, Kind kind, std::string_view reason) {
+        auto other = image;
+        mutate(other);
+        expect_rejected(nvr::encode(other), kind, reason);
+    };
+    expect_rejected(assemble(sections, {.minor = 4}), Kind::Malformed, "uses NVR 1.5 features but declares 1.4");
+    // The writer refuses to encode tasks without the table, so the bytes
+    // that lack it are assembled by hand.
+    auto without_table = sections;
+    std::erase_if(without_table, [](const Section& section) { return std::string_view(section.tag) == "TRNS"; });
+    expect_rejected(assemble(without_table, concurrent), Kind::Malformed, "missing required section TRNS");
+    {
+        auto other = image;
+        other.transferable_layouts.reset();
+        try {
+            nvr::encode(other);
+            fail("the writer encoded scheduler exits without the transferable-layout table");
+        } catch (const std::invalid_argument&) {
+        }
+        other = image;
+        other.functions.front().blocks.back().exits.front().poll = true;
+        try {
+            nvr::encode(other);
+            fail("the writer encoded a poll on a return exit");
+        } catch (const std::invalid_argument&) {
+        }
+    }
+    changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{1, 0}; },
+            Kind::Invalid, "strictly ascending order");
+    changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{0, 0}; },
+            Kind::Invalid, "strictly ascending order");
+    changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{0, 2}; },
+            Kind::Invalid, "layout 2 is out of range");
+    changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{1}; },
+            Kind::Invalid, "parent layout 0 is not marked");
+    changed([](auto& i) { i.layouts[1].fields[1] = 4; }, Kind::Invalid, "field 1 is not transferable");
+    changed([](auto& i) { i.transferable_layouts = std::vector<std::uint32_t>{0}; },
+            Kind::Invalid, "spawn argument is not transferable");
+    changed([](auto& i) { i.functions[0].blocks[1].exits[0].result_slot = 2; }, Kind::Invalid,
+            "result slot must have type uint64");
+    changed([](auto& i) { i.functions[0].blocks[2].exits[0].result_slot = 1; }, Kind::Invalid,
+            "result slot must have type bool");
+    changed([](auto& i) { i.functions[0].blocks[3].exits[0].arguments[0] = {nvr::ValueKind::Constant, 2, 0}; },
+            Kind::Invalid, "task operand must have type uint64");
+    {
+        // The writer refuses a poll on a scheduler exit, so set the bit in the assembled bytes: after
+        // the 36-byte function header and the 16-byte block header, byte 52 of FUNC is the first exit's tag.
+        auto polled = sections;
+        for (auto& section : polled) {
+            if (section.tag == "FUNC") section.data[52] |= 0x80;
+        }
+        expect_rejected(assemble(polled, concurrent), Kind::Malformed, "poll flag is valid only");
+    }
+    // The first code after the defined operations.
+    changed([](auto& i) {
+                i.functions[0].blocks[0].exits[0].scheduler = static_cast<nvr::SchedulerOp>(nvr::scheduler_op_count);
+            },
+            Kind::Malformed, "invalid scheduler operation 26");
+    changed([](auto& i) { i.native_library = nvr::NativeLibrary{"target", {1}, {}}; }, Kind::Malformed,
+            "concurrent images cannot contain CALB, NATV, or neura.ffi.* imports");
+    changed([](auto& i) { i.imports[0].name = "neura.ffi.fake"; }, Kind::Malformed, "concurrent images cannot");
+    sections.insert(sections.begin(), {"CALB", 1, Out().u32(0).bytes});
+    expect_rejected(assemble(sections, concurrent), Kind::Malformed, "concurrent images cannot");
+
+    auto legacy = hello_sections();
+    legacy.insert(legacy.end() - 1, {"TRNS", 0, {0x01, 0x02}});
+    const auto opaque_bytes = assemble(legacy);
+    check(nvr::encode(nvr::load(opaque_bytes)) == opaque_bytes, "a pre-1.5 optional TRNS tag stays opaque");
+    auto unresolved = image;
+    unresolved.functions[0].blocks[0].exits[0].scheduler = nvr::SchedulerOp::ScopeExit;
+    check(decompiler::decompile(unresolved).text.find("scope-exit [decoded] [scope pair unresolved]") != std::string::npos,
+          "decompiler exposes unpaired operations without inferring a scope");
 }
 
 NEURA_TEST(format, float_types_and_constants) {
@@ -289,9 +425,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 5;
+    newer_minor.minor = 6;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.5 is not supported; this loader accepts 1.0 through 1.4");
+                    "format version 1.6 is not supported; this loader accepts 1.0 through 1.5");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");

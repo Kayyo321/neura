@@ -1,0 +1,71 @@
+let duration = import:Std.Time.Duration;
+let instant = import:Std.Time.Instant;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let system_clock = import:Std.Time.SystemClock;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The handle that `scope (name) { ... }` binds (Concurrency.md section 7). It cancels the scope's tasks
+/// and sets their deadline. A handle is scope-bound: it cannot leave its block.
+/// @see [Std.Concurrent.Scope](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Scope)
+export let Scope = module (
+    /// @brief A scope's cancellation signal and deadline.
+    export let Scope = class (
+        let id: uint64;
+
+        let init = func(scope: uint64) {
+            id = scope;
+        };
+
+        /// @brief Requests cancellation of the scope's tasks and all their descendants. Idempotent, and it
+        /// cannot be undone. It wakes their parked channel operations and cancellable host requests; it never
+        /// interrupts a running task, and the scope's exit still waits for every task.
+        export let cancel = func {
+            cancel_scope(id);
+        };
+
+        /// @brief Whether cancellation of this scope was requested, by cancel or by its deadline.
+        export let is_cancelled = func -> bool => scope_cancelled(id);
+
+        /// @brief Cancels the scope once the duration has passed on the monotonic clock. Needs the clock
+        /// capability. A later call replaces this scope's own deadline; its tasks still observe the earlier
+        /// of it and any deadline they inherited.
+        export let cancel_after = func(span: duration.Duration) -> result.Result<Unit> =>
+            match (system_clock.create().monotonic()) {
+                result.Result.Ok(now) => arm(now.to_nanos() + span.to_nanos()),
+                result.Result.Err(error) => result.Result<Unit>.Err(error),
+            };
+
+        /// @brief Cancels the scope at the instant. Needs the clock capability.
+        export let cancel_at = func(moment: instant.Instant) -> result.Result<Unit> {
+            let clock = system_clock.create();
+            return match (clock.now()) {
+                result.Result.Ok(wall) => cancel_after(moment.duration_since(wall)),
+                result.Result.Err(error) => result.Result<Unit>.Err(error),
+            };
+        };
+
+        /// @brief The reading of the monotonic clock at which the scope's tasks are cancelled: the earlier of
+        /// this scope's deadline and the one it inherited, or None.
+        export let deadline = func -> optional.Optional<duration.Duration> {
+            let at = scope_deadline(id);
+            if (at == 9223372036854775807) {
+                return optional.Optional<duration.Duration>.None;
+            }
+            return optional.Optional<duration.Duration>.Some(duration.of_nanos(at));
+        };
+
+        let arm = func(at: int64) -> result.Result<Unit> {
+            set_scope_deadline(id, at);
+            return result.Result<Unit>.Ok(Unit.Value);
+        };
+    );
+
+    let cancel_scope = func(scope: uint64) scheduler("scope.cancel");
+
+    let scope_cancelled = func(scope: uint64) -> bool scheduler("scope.is_cancelled");
+
+    let set_scope_deadline = func(scope: uint64, at: int64) scheduler("scope.set_deadline");
+
+    let scope_deadline = func(scope: uint64) -> int64 scheduler("scope.deadline");
+);

@@ -1116,6 +1116,8 @@ std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& orig
         spec.error_slot = exit.error_slot;
         spec.error_resume = exit.error_resume;
         spec.reason = exit.reason;
+        spec.scheduler = exit.scheduler;
+        spec.poll = exit.poll;
         if (exit_when_true) {
             spec.when = non_trap == *exit_when_true ? when : Circuit::logical_not(when);
         }
@@ -1243,6 +1245,15 @@ LiftedBlock lift_block(const nvr::Image& image, std::uint32_t function_index, st
     }
     if (graph.nodes.empty() && model.targets().empty() && block.exits.size() <= 1) {
         lifted.evidence = Evidence::None;
+        return lifted;
+    }
+    // A poll does not change what the graph computes or which exit it
+    // selects, so a polling block lifts like any other. A scheduler exit's
+    // effect is outside the graph model and stays shown as its circuit.
+    if (std::ranges::any_of(block.exits, [](const nvr::Exit& exit) {
+            return exit.kind == nvr::ExitKind::Scheduler;
+        })) {
+        lifted.evidence = Evidence::Circuit;
         return lifted;
     }
     if (lift_dispatch(image, block, lifted)) {

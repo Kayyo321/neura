@@ -61,12 +61,13 @@ std::size_t rewrite_nodes(IrProgram& program, Rewrite rewrite) {
 }
 
 // Visits statement regions innermost first. Statement regions are bodies and
-// the regions of blocks, branches, and loops. The lazily evaluated operand of
+// the regions of blocks, branches, loops, and task scopes. The lazily evaluated operand of
 // a short-circuit operation is an expression, not a statement region.
 template <typename Rewrite>
 void statement_regions(std::vector<IrNode>& region, Rewrite& rewrite) {
     for (auto& statement : region) {
-        if (statement.op == IrOp::Block || statement.op == IrOp::Branch || statement.op == IrOp::Loop) {
+        if (statement.op == IrOp::Block || statement.op == IrOp::Branch || statement.op == IrOp::Loop ||
+            statement.op == IrOp::TaskScope) {
             statement_regions(statement.body, rewrite);
             statement_regions(statement.alternative, rewrite);
         }

@@ -22,6 +22,14 @@ constexpr std::uint8_t max_op_1_2 = static_cast<std::uint8_t>(IrOp::SelectValue)
 constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
 constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollection);
 constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
+constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
+// NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
+constexpr std::uint8_t poll_bit = 0x80;
+constexpr std::uint16_t newest_node_minor = 9;
+
+bool may_poll(IrOp op) {
+    return op == IrOp::Loop || op == IrOp::Call || op == IrOp::VirtualCall || op == IrOp::CallClosure;
+}
 
 std::uint16_t type_minor(const IrType& type) {
     if (type.kind == TypeKind::Object && type.name.starts_with('&')) return 7;
@@ -57,8 +65,10 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (op > max_op_1_4) return 7;
-        if (op > max_op_1_3 || scoped_statements(node) || class_qualified_load(node)) {
+        if (op > max_op_1_7 || node.poll) return newest_node_minor;
+        if (op > max_op_1_4) {
+            version = std::max<std::uint16_t>(version, 7);
+        } else if (op > max_op_1_3 || scoped_statements(node) || class_qualified_load(node)) {
             version = std::max<std::uint16_t>(version, 4);
         } else if (op > max_op_1_2) {
             version = std::max<std::uint16_t>(version, 3);
@@ -74,7 +84,7 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
         for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
             version = std::max(version, required_minor(*region));
         }
-        if (version == 7) return version;
+        if (version == newest_node_minor) return version;
     }
     return version;
 }
@@ -130,9 +140,10 @@ public:
             }
         }
         for (const auto& body : program.bodies) {
-            if (version >= 7) break;
+            if (version >= newest_node_minor) break;
             version = std::max(version, required_minor(body.instructions));
         }
+        polls_ = version >= 9;
         u16(version);
         count(files_.size());
         for (const auto& file : files_) {
@@ -295,7 +306,8 @@ private:
     }
 
     void node(const IrNode& value) {
-        u8(static_cast<std::uint8_t>(value.op));
+        // Only bodies carry polls, and a body with one makes the file 1.9.
+        u8(static_cast<std::uint8_t>(value.op) | (polls_ && value.poll ? poll_bit : 0));
         type(value.type);
         span(value.span);
         reference(value.symbol);
@@ -309,6 +321,7 @@ private:
     std::vector<std::string> files_;
     std::map<std::string, std::uint32_t> indices_;
     std::vector<std::uint8_t> bytes_;
+    bool polls_ = false;
 };
 
 class Reader {
@@ -328,7 +341,7 @@ public:
         }
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7};
+            max_op_1_7, max_op_1_9};
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -583,7 +596,16 @@ private:
 
     IrNode node(std::size_t depth) {
         IrNode value{};
-        value.op = static_cast<IrOp>(tag(max_op_, "operation"));
+        if (minor_ >= 9) {
+            const auto byte = u8();
+            const auto operation = static_cast<std::uint8_t>(byte & ~poll_bit);
+            if (operation > max_op_) fail("invalid operation tag " + std::to_string(byte));
+            value.op = static_cast<IrOp>(operation);
+            value.poll = (byte & poll_bit) != 0;
+            if (value.poll && !may_poll(value.op)) fail("a poll marks only a loop or a call");
+        } else {
+            value.op = static_cast<IrOp>(tag(max_op_, "operation"));
+        }
         value.type = type(depth + 1);
         value.span = span();
         value.symbol = reference();

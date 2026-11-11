@@ -38,6 +38,20 @@ own field initializers. A singleton lowers to one object allocation during
 startup and a global reference shared by every use. Both use the existing
 circuit state interfaces for global and object access.
 
+Tasks ([Concurrency](lang/Concurrency.md)) change each stage's contract as follows, and the language rules stay in the stage that owns them.
+
+| Stage | Contract for tasks | Hands on |
+| --- | --- | --- |
+| C import | None. A program that uses a scheduler operation cannot use native bindings. | |
+| Lexer | None. `scope`, `spawn`, and `select` remain identifiers. | |
+| Parser | Reads `scope`, `spawn`, and `select` as forms only in the positions the grammar gives, with spans for the keyword, the operand, and each arm. It does no typing or name resolution. | Syntax nodes for the three forms |
+| NeuraIR | Resolves `Task<T>` and `Scope`, checks that scope-bound values do not leave their scope, and, on the specialized linked program, that spawn arguments and channel messages are transferable and spawned calls are task-safe. Makes scope entry and exit, spawn, every other scheduler operation, and polls explicit (`task_scope`, `spawn`, `scheduler_call`, and a poll flag). Written as `.nir` 1.9. | No operation after this point needs a source-level rule |
+| IR optimization | Preserves every executed call, loop back edge, spawn, scope, and scheduler call, and their order. | The same scheduler operations and polls as the unoptimized program |
+| IRtoNeuronConversion | Turns each scheduler operation into a typed exit, makes `return`, `break`, and `continue` leave the scopes they cross, puts each poll on the exit that makes the call or takes the back edge, and marks transferable layouts. | NVR 1.5 with the `TRNS` table |
+| Output | The scheduler exit, the poll bit, and `TRNS`; an image without tasks keeps its earlier version and bytes. | An image a compatible runtime runs without source |
+
+The NVM runs the tasks of an image on one deterministic scheduler. Scheduler state (task records, queues, channel buffers, timers, guards) is NVM state reached through exits, like the heap; graph profile 1 does not change, and no scheduler operation is a host service. The decompiler reads scheduler exits and polls as decoded records ([Decompiler](Decompiler.md#tasks-and-scheduler-operations)). Host services that declare it overlap: the calling task parks and the completion is delivered at a later scheduling point. A recorded run replays with every scheduling decision ([NVM](runtime/NVM.md#traces-of-images-with-tasks)). A test tool may substitute the choice among runnable tasks and the clock; every such choice is a legal schedule of the same image ([NVM](runtime/NVM.md#the-scheduler)).
+
 A C header import (`import:c(...)`) runs before parsing for the importing file's imports. The C import stage reads the header with libclang and generates the source of an ordinary Neura module that calls the header's functions through `Std.DynamicForeign`; that module then enters the lexer and parser like any other. The tool links the imports' static libraries into one shared object after lowering. The shared object travels in NeuraIR and in the image's `NATV` section, and the circuit never contains native code ([Foreign interop](lang/ForeignInterop.md#c-imports)).
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
@@ -95,7 +109,7 @@ The execution contract defines initial state, how and when state commits, how co
 
 ### Runtime boundary
 
-The [Neura Virtual Machine](runtime/NVM.md) evaluates feedforward neuron graphs and follows their selected exits. It owns frames, state storage, and host service dispatch. The compiled graph makes arithmetic, comparison, and branch decisions. Heap operations and host effects use explicit requests with typed inputs and continuations.
+The [Neura Virtual Machine](runtime/NVM.md) evaluates feedforward neuron graphs and follows their selected exits. It owns frames, state storage, and host service dispatch. The compiled graph makes arithmetic, comparison, and branch decisions. Heap operations and host effects use explicit requests with typed inputs and continuations. Graph evaluation may run on a GPU, and independent executions may advance in rounds with the same results and host effect order as the reference executor running them serially.
 
 The NVM traces initialized reference roots at allocation safepoints and reclaims unreachable objects, collections, text, and closure environments, including cycles. It skips nil and keeps live handles stable. Explicit destruction and host resource cleanup remain under program control. Trusted standard library sources declare host services with versioned signatures and typed continuations. The runner binds those imports to providers before execution. Native C code is one such provider: [`Std.DynamicForeign`](lang/ForeignInterop.md) reaches it through `neura.ffi.*` requests under an explicit capability, so native code never enters the circuit and its results replay like any other host response.
 
@@ -103,7 +117,7 @@ IRtoNeuronConversion, the NVR writer and loader, and a reference NVM are impleme
 
 ## Artifact and inspection
 
-The [NVR format](runtime/NVR.md) defines the versioned executable image emitted by the output stage. It carries the graphs, weights, constants, layouts, execution metadata, and host imports required to run independently of the source. A versioned `.nir` file carries typed NeuraIR across the earlier compiler boundary.
+The [NVR format](runtime/NVR.md) defines the versioned executable image emitted by the output stage. It carries the graphs, weights, constants, layouts, execution metadata, and host imports required to run independently of the source. A versioned `.nir` file carries typed NeuraIR across the earlier compiler boundary. A native executable can carry an NVR image unchanged, and inspection reads the image from its container.
 
 Source maps are optional. Inspection tools expose graph topology and parameters, declared memory and effect operations, and source locations when available. Optimization can combine or remove source operations, and inspection can show the relationship where provenance survives. Editing weights creates a changed image whose behavior can be evaluated and checked again.
 

@@ -26,7 +26,7 @@ export let Services = module (
     export let Outcome = enum (Ok, Error(uint32));
     let Lookup = enum (Ok([bool, string]), Error(uint32));
     export let write = func(message: string) -> Outcome host("neura.console.write_line", 1);
-    // Environment access is not granted by default, so the call takes its
+    // The test runs the image with --deny-env, so the call takes its
     // error continuation with code 14 (CapabilityDenied).
     let try_environment = func(name: string) -> Lookup host("neura.env.get", 1);
     let unused = func() -> Outcome host("neura.unavailable.service", 1);
@@ -82,7 +82,7 @@ foreach(mode IN ITEMS optimized unoptimized)
         set(flags --no-optimize)
     endif()
     expect(0 "" "" build ${flags} "${TEST_DIR}/main.nir" -o "${TEST_DIR}/main.nvr")
-    expect(42 "bound host success\n" "" run "${TEST_DIR}/main.nvr")
+    expect(42 "bound host success\n" "" run --deny-env "${TEST_DIR}/main.nvr")
     expect(1 "" "" run "${TEST_DIR}/main.nvr" -- failure)
     expect(134 "" "invalid argument: exit status" run "${TEST_DIR}/main.nvr" -- invalid status)
 endforeach()

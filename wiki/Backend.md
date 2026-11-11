@@ -24,7 +24,10 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/backend/block_synth.*` | `neura_compiler` | Block assembly: inputs, checks, pending assignments, exits, and the selector. The converter and the decompiler share it. |
 | `src/backend/converter.*` | `neura_compiler` | `IRtoNeuronConversion` and the build pipeline shared by both routes. |
 | `src/nvr/` | `neura_nvr` | The image model, the writer, and the validating loader. |
-| `src/nvm/` | `neura_nvm` | Execution, host services, the console sink, and host traces. |
+| `src/nvm/` | `neura_nvm` | Execution, graph devices and layered tables, fleets, host services, the console sink, and host traces. |
+| `src/gpu/` | `neura_gpu` | Optional Vulkan graph evaluator with a dynamically loaded Vulkan loader. |
+| `src/runner/` | `neura_runner` | Shared host setup, trace handling, and run diagnostics. |
+| `src/launcher/` | `neura_launcher`, `neura_launcher_static` | CPU launchers and the executable container. |
 | `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler)). |
 
 `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
@@ -64,12 +67,20 @@ Conversion lowers an operation only where the language defines its result. Where
 | `collection`, `index`, `append`, `remove_at` | `AllocateCollection`, `ReadElement`, `WriteElement`, `AppendElement`, and `RemoveElement`. |
 | `destroy` | `ReadTag`, dispatch to a generated destructor for the runtime class, then `FreeObject`. |
 | `discard` | Evaluates the operand, including its checks, and drops the value. |
+| `task_scope` | A `scope-enter` scheduler exit (its slot receives the scope identity when the scope has a handle), the body, and a `scope-exit` exit where control falls off the end. `return`, `break`, and `continue` inside the body first evaluate their value and then emit a `scope-exit` for each scope they leave. |
+| `spawn` | A `spawn` scheduler exit that targets the `$invoke` method of the function value's capture layout and passes that object. Its slot receives the task identity, and is absent for a spawn statement. |
+| `scheduler_call` | One scheduler exit whose operation code comes from the call's text (`join`, `scope.cancel`, `channel.send`, `select`, ...), with its operands evaluated left to right and spilled to slots; `channel.open` passes its element type as the target, `parallel.start` the item's `$invoke`, and `select` its default flag. `transfer.check` is checked at compile time and emits nothing. |
+| The `poll` flag on `call`, `virtual_call`, call-closure, and `loop` | The poll bit of the call or continue exit that makes the call or takes the back edge, including the call exits of a dispatch block. It adds no block. |
 
 The build stops with a source diagnostic, before any output is written, for:
 
 - Programs without a unique entry override from `Std.Program.Entry`.
 - A module call that resolves to an interface function without a body.
 - Generic specialization that does not terminate ([Polymorphism](Polymorphism#type-arguments-and-specialization)).
+
+## Tasks
+
+An image with tasks is NVR 1.5. The converter marks the image concurrent when it emits a scheduler exit or a poll, and then writes the `TRNS` table: the layouts of transferable classes (`Std.Concurrent` handles, capture layouts, and function signature layouts whose closures are all transferable), of payload enums, and of tuples, closed under parents. Task bodies are ordinary functions: a spawned task starts in the `$invoke` method of a generated capture layout, whose fields hold the callee value, receiver, and arguments the parent evaluated. A block that only polls and continues is kept, because the poll is an effect of its exit. Because the poll rides on the exit, the number of polls a task counts follows the language operations and is the same for optimized and unoptimized builds. The runtime part (queues, quantum, limits, statuses 137, 132, and 134) is in [NVR](NVR#scheduler-operations-15) and [Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#10-runtime). The evidence is `backend-concurrency`, which builds every concurrent fixture with the real pipeline, optimized and not, runs it on the NVM, and requires the same host requests, exit status or trap class, and schedule as an independent evaluator extended with the same scheduler, a repeat on a clean state, and the same result for each member of a fleet.
 
 ## Generics
 
@@ -194,6 +205,10 @@ The loader validates every rule in NVR's "Writer and loader requirements" before
 
 The embedding API is `nvm::Execution`. `advance()` runs until the run completes, traps, or issues a host request. `complete()` supplies the response to a pending request, so a host can suspend the run between them. `nvm::run` drives a run with bound services synchronously. `nvm::bind` matches imports to an `nvm::HostRegistry` by name, version, and signature. Console output goes through an injectable `nvm::ConsoleSink`. `nvm::StringSink` captures exact bytes and can be given a capacity to simulate a failed or partial write. Traps report a kind, such as a program trap with its reason, a bounds fault, an invalid handle, or a limit, along with the function and block, and the source location when the image has a source map.
 
+The NVM library defaults to the reference evaluator. `nvm::Execution`, `nvm::run`, `nvm::record`, `nvm::replay`, and `nvm::Fleet` use a graph device only when the caller supplies one. Declined jobs use the reference evaluator. With no usable device, CLI auto and always modes fall back to the reference evaluator without a diagnostic unless `--require-gpu` is set. In that case startup fails before entry. `nvm::Fleet` advances independent executions of one validated image and offers each round as a batch to an optional device. `nvm::run_fleet` drives host requests and callbacks in member order. `neura run --each` takes argument lists from a file. The CLI supports automatic placement, an explicit Vulkan mode, and CPU-only evaluation. Its `--stats` report includes placement and fallback information. [NVM fleets](NVM#fleets) [Tooling](Tooling#run-an-image-over-argument-lists)
+
+A packaged executable starts the CPU runner with its recorded limits and capabilities. The default launcher provides native interop under its recorded capability. The static launcher supplies Unsupported for those imports, and the packager rejects images that use them. [Native executables](https://github.com/Kayyo321/neura/blob/main/docs/lang/Standalone.md)
+
 ## Tests and the limits of the evidence
 
 The [release checklist](Release) maps each feature to its tests and states which checks are exhaustive, sampled, or structural. In summary:
@@ -204,11 +219,21 @@ The [release checklist](Release) maps each feature to its tests and states which
 | `backend-floats` | Float circuits against two independent references: exhaustively over every pair of the 6- and 8-lane formats e3m2 and e4m3 against a brute-force exact rational reference and a hardware double reference; exhaustively over every float16 and bfloat16 value for negation, conversions to and from wider formats and integers; on special and pseudo-random operands for float16, bfloat16, float32, and float64 arithmetic and comparisons against hardware float and double; literal conversion against `strtod` and `strtof`. |
 | `backend-format` | Hand-assembled 1.0 and 1.1 images decode to their models and the writer reproduces their bytes; malformed images, version mismatches, and 1.1 features in 1.0 images are rejected. |
 | `backend-vm` | Execution semantics of NVM. |
+| `backend-layered` | Packed graph tables, exact CPU model evaluation over the integer circuit domains, and traps and results across the image corpus. |
+| `backend-fleet` | Step transitions and member-order equivalence across the image corpus, fleet state and limits, and all 65,536 pairs for one 8-bit function. |
+| `backend-each` | Argument-list parsing, CLI diagnostics, and serial output, statistics, and status. |
+| `backend-placement` | Cost model fits, deterministic gate accounting, placement, timing correction, and fleet equivalence with fixed models. |
+| `gpu-device` | Vulkan graph outputs over the integer circuit domains, mixed and split batches, buffer growth, and calibration. |
+| `gpu-cli` | CPU and Vulkan runs, tests, fleets, and trace replay compared through the CLI. |
+| `backend-concurrency` | The phase 1 fixtures (scopes, `spawn`, `join`, `is_finished`) from source to the NVM against an independent evaluator with the same scheduler: effects, status, and schedule, optimized and not, under several quanta and task limits; repeated runs; fleets; hand-assembled task images and their rejection. Channels, cancellation, timers, guards, overlapping host requests, and concurrent record and replay are tested on the NVM directly. `concurrency-frontend`, `concurrency-programs`, `concurrency-io`, `concurrency-schedules`, and `concurrency-parallel` check the source forms, the build routes, host I/O on the loopback interface, the test modes, and the parallel map through the CLI. |
 | `backend-nir` | `.nir` round trips, deterministic encoding, both build routes give identical images, corrupt files are rejected. |
 | `backend-conversion` | Compiled functions against the IR reference evaluator: integer, structure, and float fixtures, exhaustively over 8-bit domains where the parameters allow and on sampled float operands; whole-program stdout and initialization order against the evaluator. |
 | `backend-generics` | Instance caching, determinism, the specialization limits, and specialized functions against the evaluator exhaustively over 8-bit inputs. |
 | `backend-cli` | End-to-end builds and runs, reproducibility, isolated execution, every runnable example and driver, trap programs, unsupported builds, the test runner, and option errors. |
 | `backend-install` | The installed toolchain builds and runs Hello World from a directory without sources. |
+| `native-build`, `native-run`, `native-container` | Byte-preserving packaging, differential execution, and malformed container rejection. |
+| `native-policy`, `native-replay` | Recorded grants and limits, environment overrides, sealing, and cross-runner traces. |
+| `native-install`, `native-c-import` | Relocated launchers, static execution in a root with only the executable and procfs, and C-import target checks. |
 | `decompiler-*` | See [Decompiler](Decompiler#evidence). |
 
 These are observed agreements over the stated domains; the exhaustive checks are exhaustive only over the stated domains, and nothing here is a proof beyond them. The IR evaluator models objects, collections, floats, and initialization independently of the converter, but it shares the language rules as written in these pages, so a misreading common to both would not be caught. MSVC builds have not been verified.

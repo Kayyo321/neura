@@ -1,0 +1,49 @@
+// Under --virtual-time: a task-free sleep moves the clock exactly, and two
+// tasks with timers of one and three hours finish in timer order at once.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let clocks = import:Std.Time.SystemClock;
+let durations = import:Std.Time.Duration;
+let result = import:Std.Core.Result;
+let timers = import:Std.Concurrent.Timer;
+
+let nanos = func(reading: result.Result<durations.Duration>) -> int64 => match (reading) {
+    result.Result.Ok(elapsed) => elapsed.to_nanos(),
+    result.Result.Err(_) => -1,
+};
+
+let after = func(hours: int64, name: string, done: channels.Sender<string>) {
+    match (timers.after(durations.of_hours(hours))) {
+        result.Result.Ok(timer) => {
+            timer.wait();
+            done.send(name);
+        },
+        result.Result.Err(_) => {
+            done.send("no clock");
+        },
+    }
+};
+
+let received = func(incoming: channels.Receiver<string>) -> string => match (incoming.receive()) {
+    channels.Received.Value(name) => name,
+    _ => "nothing",
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let clock = clocks.create();
+        let before = nanos(clock.monotonic());
+        clock.sleep(durations.of_hours(2));
+        let slept = nanos(clock.monotonic()) - before;
+        let [done, incoming, closer] = channels.open<string>(2);
+        let order = "";
+        scope {
+            spawn after(3, "long", done);
+            spawn after(1, "short", done);
+            order = received(incoming) + " " + received(incoming);
+        }
+        console.print_line("slept " + slept.to_string() + " ns; the two timers fired in order: " + order);
+        return program.ExitCode.Ok;
+    };
+);

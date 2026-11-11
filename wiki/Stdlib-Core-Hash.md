@@ -65,7 +65,7 @@ A class's hash starts from 17 and combines each field's hash in declaration orde
 
 **The contract for a class that overrides the G3b members:** `equals` is an equivalence relation; equal values have equal hashes; neither traps nor modifies the value; and while an object is a key in a hash collection its hash and equality do not change. The library does not detect violations.
 
-**Self-containing collections.** A collection's text prints `(this collection)` for itself as a direct element. Deeper cycles end with the frame-limit fault.
+**Self-containing collections.** A collection's text prints `(this collection)` wherever that text reaches the collection again, so a collection that contains itself, directly or through other collections, has finite text. The marker names the collection whose text was already being built: for a list `a` holding a list `b` that holds `a`, `a.to_string()` is `[[(this collection)]]`.
 
 ### 6.1 `Optional<T>`
 

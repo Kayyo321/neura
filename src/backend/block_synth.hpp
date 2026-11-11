@@ -46,6 +46,10 @@ struct ExitSpec {
     std::uint32_t error_slot = nvr::absent;
     std::uint32_t error_resume = 0;
     std::uint32_t reason = 0;
+    // NVR 1.5: the scheduler operation of a Scheduler exit, and the poll of
+    // a Continue or Call exit.
+    nvr::SchedulerOp scheduler = nvr::SchedulerOp::ScopeEnter;
+    bool poll = false;
 };
 
 // The image tables a block refers to. The converter interns into the image it

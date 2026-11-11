@@ -1,7 +1,6 @@
 let hash_core = import:Std.Collections.Internal.HashCore;
 let.promote _ = import:Std.Collections.Iterator;
 let.promote _ = import:Std.Collections.MutableSet;
-let text_depth = import:Std.Collections.Internal.TextDepth;
 
 /// @brief Insertion-ordered hash sets with built-in or caller-supplied element operations.
 /// Removing and reinserting an element moves it to the end. At most `max(size(), 7)`
@@ -22,8 +21,8 @@ export let HashSet = module (
         let hash_of: func(T) -> uint32;
         /// @brief The equality function used with the probe as its first argument.
         let same: func(T, T) -> bool;
-        /// @brief The depth of this instance's active text conversion, or zero when inactive.
-        let printing_depth: int = 0;
+        /// @brief Whether this instance's text conversion is running.
+        let printing: bool = false;
 
         /// @brief Adopts the empty table and the key operations supplied by the module factory.
         export let init = func(seal: Seal, table: hash_core.HashCore, hash: func(T) -> uint32, equal: func(T, T) -> bool) {
@@ -228,17 +227,15 @@ export let HashSet = module (
             return total as uint32;
         };
 
-        /// @brief Formats elements as `{a, b, c}` in iteration order. The set itself as a direct element
-        /// prints "(this collection)".
+        /// @brief Formats elements as `{a, b, c}` in iteration order. The set prints "(this collection)"
+        /// where its own text reaches it again.
         export let.override to_string = func -> string {
-            if (printing_depth != 0 && printing_depth == text_depth.current()) {
+            if (printing) {
                 return "(this collection)";
             }
-            let saved = printing_depth;
-            printing_depth = text_depth.enter();
+            printing = true;
             let text = to_list().to_string();
-            text_depth.leave();
-            printing_depth = saved;
+            printing = false;
             return "{" + text.slice(1, text.byte_length - 1) + "}";
         };
 

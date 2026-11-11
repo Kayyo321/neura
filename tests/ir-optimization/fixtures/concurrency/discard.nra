@@ -1,0 +1,29 @@
+// Spawns whose handle is discarded next to spawns that are joined: the
+// scope still waits for the discarded tasks, and their numbers are used.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let tick = func(label: string, repeat: int) {
+    for (let i: int = 0; i < repeat; i++) {
+        console.print_line(label + " " + i.to_string());
+    }
+};
+
+let value = func(label: string, result: int) -> int {
+    tick(label, 2);
+    return result;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            spawn tick("detached one", 3);
+            let joined = spawn value("joined", 7);
+            spawn tick("detached two", 2);
+            console.print_line("joined " + joined.join().to_string());
+            spawn tick("detached three", 1);
+        }
+        console.print_line("after scope");
+        return program.ExitCode.Ok;
+    };
+);

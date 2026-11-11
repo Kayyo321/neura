@@ -108,6 +108,9 @@ std::string_view spelling(IrOp op) {
     case IrOp::TextEqual: return "text_equal";
     case IrOp::ReinterpretFloat: return "reinterpret_float";
     case IrOp::TrapMessage: return "trap_message";
+    case IrOp::TaskScope: return "task_scope";
+    case IrOp::Spawn: return "spawn";
+    case IrOp::SchedulerCall: return "scheduler_call";
     }
     return "<invalid>";
 }
@@ -265,6 +268,9 @@ void print_nodes(std::ostream& output, const std::vector<IrNode>& nodes, std::si
         if (!node.text.empty() || node.op == IrOp::String) {
             output << ' ';
             print_quoted(output, node.text);
+        }
+        if (node.poll) {
+            output << " poll";
         }
         output << " : ";
         print_type(output, node.type);

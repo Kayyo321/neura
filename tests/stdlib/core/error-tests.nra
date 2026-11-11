@@ -36,6 +36,15 @@ let ErrorTests = module (
         test.assert_equal_string("outer: middle: root", error.to_string(wrapped));
     };
 
+    // Cancelled is the kind of a cancelled version 2 host request (host error 15). The mapping from the
+    // code is exercised end to end by the backend concurrency tests.
+    export let test_cancelled_kind = func() -> void {
+        test.assert_equal_string("Cancelled", error.io_kind_name(error.IoErrorKind.Cancelled));
+        test.assert_equal_string("Cancelled: stream read failed (fake:7)",
+            error.message(io_error(error.IoErrorKind.Cancelled, "stream read failed", "fake:7")));
+        test.assert(error.IoErrorKind.Cancelled != error.IoErrorKind.Other);
+    };
+
     export let test_custom_detail = func() -> void {
         match (error.custom("app.code", "text")) {
             error.Error.Custom(detail) => {

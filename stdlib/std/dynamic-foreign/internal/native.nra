@@ -3,7 +3,7 @@ let uint64s = import:Std.Core.UInt64;
 
 /// @brief The host bindings of Std.DynamicForeign (ForeignInterop.md) and the byte codec for native values.
 ///
-/// Every service needs the native capability (`--allow-native`). Without it, or when a service fails, the
+/// Every service needs the native capability, which `--deny-native` removes. Without it, or when a service fails, the
 /// wrappers here trap: a native operation that cannot run is a programming or configuration error, not an
 /// expected outcome. Loading a library is the exception; its caller reports a missing library as a Result.
 export let Native = module (
@@ -56,7 +56,7 @@ export let Native = module (
     /// @brief Traps for a failed native operation, naming the capability when it was denied.
     export let fail = func(operation: string, code: uint32) {
         if (code == 14) {
-            trap_with_message("invalid state: native access denied: run with --allow-native");
+            trap_with_message("invalid state: native access denied: the native capability is not granted");
         }
         trap_with_message("invalid state: native " + operation + " failed with code " + code.to_string());
     };

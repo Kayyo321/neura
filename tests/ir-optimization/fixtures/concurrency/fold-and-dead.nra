@@ -1,0 +1,73 @@
+// Constant folding and dead-branch removal around spawns, polls, and scopes:
+// a condition that folds, a while (false) loop, and code after a return that
+// sits beside a scope. The optimizer may remove what can never run and must
+// keep every spawn, join, scope, and poll that can.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let work = func(label: string, steps: int) -> int {
+    let total = 0;
+    for (let i: int = 0; i < steps; i++) {
+        total = total + i;
+    }
+    console.print_line(label + " " + total.to_string());
+    return total;
+};
+
+let folded = func -> int {
+    let total = 0;
+    scope {
+        if (2 + 2 == 4) {
+            let kept = spawn work("kept", 3 * 2);
+            total = total + kept.join();
+        } else {
+            let dropped = spawn work("dropped", 100);
+            total = total + dropped.join();
+        }
+        if (1 > 2) {
+            spawn work("never", 1);
+        }
+        while (false) {
+            spawn work("never loop", 1);
+        }
+        let later = spawn work("later", 2 * 2);
+        total = total + later.join() + (10 - 4 * 2);
+    }
+    return total;
+};
+
+let after_return = func(flag: int) -> int {
+    scope {
+        let task = spawn work("returning", 3);
+        if (flag > 0) {
+            return task.join() + 1;
+        }
+        return task.join();
+        console.print_line("unreachable");
+    }
+};
+
+let spin_limit = func(limit: int) -> int {
+    let count = 0;
+    scope {
+        let helper = spawn work("helper", 4);
+        while (count < limit) {
+            count = count + 1;
+        }
+        count = count + helper.join();
+    }
+    while (false) {
+        console.print_line("never printed");
+    }
+    return count;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("folded " + folded().to_string());
+        console.print_line("after " + after_return(1).to_string());
+        console.print_line("after " + after_return(0).to_string());
+        console.print_line("spin " + spin_limit(5).to_string());
+        return program.ExitCode.Ok;
+    };
+);

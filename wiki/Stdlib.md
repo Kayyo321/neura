@@ -1,6 +1,6 @@
 # Standard library reference
 
-The Neura standard library contains source modules for core values, collections, text, arithmetic, time, input/output, and host services. Select a module below for its contracts, implementation decisions, source, and exported declarations. See the [standard library overview](StandardLibrary) for imports, string and console formatting, and runtime capabilities.
+The Neura standard library contains source modules for core values, collections, text, arithmetic, time, input/output, host services, and concurrency. Select a module below for its contracts, implementation decisions, source, and exported declarations. See the [standard library overview](StandardLibrary) for imports, string and console formatting, and runtime capabilities.
 
 The [full design and implementation decisions](Stdlib-Design) preserve the historical plan and its shared contracts. Current language behavior and unresolved decisions are tracked in [feature status](Status).
 
@@ -45,6 +45,24 @@ The [full design and implementation decisions](Stdlib-Design) preserve the histo
 | [`Std.Collections.TreeMap`](Stdlib-Collections-TreeMap) | [Contracts](Stdlib-Collections-TreeMap#detailed-contracts) | [Declarations](Stdlib-Collections-TreeMap#exported-declarations) |
 | [`Std.Collections.TreeSet`](Stdlib-Collections-TreeSet) | [Contracts](Stdlib-Collections-TreeSet#detailed-contracts) | [Declarations](Stdlib-Collections-TreeSet#exported-declarations) |
 
+### `Std.Concurrent`
+
+Tasks, channels, cancellation, timers, and shared-state handles. The [concurrency specification](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md) defines the language forms these modules serve, and the [overview](StandardLibrary#stdconcurrent) lists their contracts side by side.
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Concurrent.AtomicInt64`](Stdlib-Concurrent-AtomicInt64) | [Contracts](Stdlib-Concurrent-AtomicInt64#detailed-contracts) | [Declarations](Stdlib-Concurrent-AtomicInt64#exported-declarations) |
+| [`Std.Concurrent.Cancellation`](Stdlib-Concurrent-Cancellation) | [Contracts](Stdlib-Concurrent-Cancellation#detailed-contracts) | [Declarations](Stdlib-Concurrent-Cancellation#exported-declarations) |
+| [`Std.Concurrent.Channel`](Stdlib-Concurrent-Channel) | [Contracts](Stdlib-Concurrent-Channel#detailed-contracts) | [Declarations](Stdlib-Concurrent-Channel#exported-declarations) |
+| [`Std.Concurrent.Guarded`](Stdlib-Concurrent-Guarded) | [Contracts](Stdlib-Concurrent-Guarded#detailed-contracts) | [Declarations](Stdlib-Concurrent-Guarded#exported-declarations) |
+| [`Std.Concurrent.Parallel`](Stdlib-Concurrent-Parallel) | [Contracts](Stdlib-Concurrent-Parallel#detailed-contracts) | [Declarations](Stdlib-Concurrent-Parallel#exported-declarations) |
+| [`Std.Concurrent.Scope`](Stdlib-Concurrent-Scope) | [Contracts](Stdlib-Concurrent-Scope#detailed-contracts) | [Declarations](Stdlib-Concurrent-Scope#exported-declarations) |
+| [`Std.Concurrent.Semaphore`](Stdlib-Concurrent-Semaphore) | [Contracts](Stdlib-Concurrent-Semaphore#detailed-contracts) | [Declarations](Stdlib-Concurrent-Semaphore#exported-declarations) |
+| [`Std.Concurrent.Task`](Stdlib-Concurrent-Task) | [Contracts](Stdlib-Concurrent-Task#detailed-contracts) | [Declarations](Stdlib-Concurrent-Task#exported-declarations) |
+| [`Std.Concurrent.Tasks`](Stdlib-Concurrent-Tasks) | [Contracts](Stdlib-Concurrent-Tasks#detailed-contracts) | [Declarations](Stdlib-Concurrent-Tasks#exported-declarations) |
+| [`Std.Concurrent.Timer`](Stdlib-Concurrent-Timer) | [Contracts](Stdlib-Concurrent-Timer#detailed-contracts) | [Declarations](Stdlib-Concurrent-Timer#exported-declarations) |
+| [`Std.Concurrent.WorkerGroup`](Stdlib-Concurrent-WorkerGroup) | [Contracts](Stdlib-Concurrent-WorkerGroup#detailed-contracts) | [Declarations](Stdlib-Concurrent-WorkerGroup#exported-declarations) |
+
 ### `Std.Core`
 
 | Module | Detailed contracts | Exported declarations |
@@ -87,7 +105,7 @@ The [full design and implementation decisions](Stdlib-Design) preserve the histo
 
 ### `Std.DynamicForeign`
 
-Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Needs `--allow-native`.
+Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Granted by default; denied with `--deny-native`.
 
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
@@ -342,6 +360,10 @@ The original numbered sections remain available in the [complete design](Stdlib-
 ### 5.7 Conformance summary
 
 [Read this section in the design](Stdlib-Design#57-conformance-summary).
+
+### 5.8 Task safety
+
+[Read this section in the design](Stdlib-Design#58-task-safety).
 
 ## 6. `Std.Core` types
 
@@ -618,5 +640,13 @@ The original numbered sections remain available in the [complete design](Stdlib-
 ### 18.11 Verification as built
 
 [Read this section in the design](Stdlib-Design#1811-verification-as-built).
+
+### 18.12 Concurrency
+
+[Read this section in the design](Stdlib-Design#1812-concurrency).
+
+## 19. `Std.Concurrent`
+
+[Read this section in the design](Stdlib-Design#19-stdconcurrent).
 
 </details>

@@ -1,0 +1,28 @@
+== shedding overload
+offered 10 jobs: 3 taken, 7 shed
+handled job 1
+handled job 2
+handled job 3
+with_workers returned: the queued jobs were drained
+== draining on close
+submit 21 -> Submitted
+submit 22 -> Submitted
+handled job 21
+handled job 22
+handled job 23
+submit 23 -> Submitted
+submit 24 -> Submitted
+submit 25 -> Submitted
+submit 26 -> Submitted
+handled job 24
+handled job 26
+handled job 25
+close_and_drain returned
+submit after the close -> Closed
+try_submit after the close -> Closed
+== stopping on cancellation
+job 31 starts
+body: woken by the cancellation
+job 31 ends
+serve: with_workers returned
+done

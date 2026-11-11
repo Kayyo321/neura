@@ -98,7 +98,10 @@ void values(Output& out, const std::vector<Value>& items) {
 }
 
 void exit(Output& out, const Exit& item, bool returns_value) {
-    out.u8(static_cast<std::uint8_t>(item.kind));
+    if (item.poll && item.kind != ExitKind::Continue && item.kind != ExitKind::Call) {
+        throw std::invalid_argument("a poll is valid only on a continue or call exit");
+    }
+    out.u8(static_cast<std::uint8_t>(static_cast<std::uint8_t>(item.kind) | (item.poll ? scheduler_poll_bit : 0)));
     vector(out, item.assignments, [](Output& o, const Assignment& assignment) {
         o.u32(assignment.slot);
         value(o, assignment.value);
@@ -141,6 +144,13 @@ void exit(Output& out, const Exit& item, bool returns_value) {
         break;
     case ExitKind::MessageTrap:
         values(out, item.arguments);
+        break;
+    case ExitKind::Scheduler:
+        out.u8(static_cast<std::uint8_t>(item.scheduler));
+        out.u32(item.target);
+        values(out, item.arguments);
+        out.u32(item.result_slot);
+        out.u32(item.resume);
         break;
     }
 }
@@ -247,6 +257,9 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             });
         });
     }
+    if (image.transferable_layouts) {
+        add("TRNS", true, [&](Output& out) { indices(out, *image.transferable_layouts); });
+    }
     for (const auto& raw : image.other_sections) {
         for (char c : raw.tag) {
             if (c < 0x20 || c > 0x7e) {
@@ -284,14 +297,14 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 } // namespace
 
 std::uint16_t required_minor_version(const Image& image) {
-    if (!image.callbacks.empty() || image.native_library) return 4;
-    std::uint16_t version = 0;
+    if (image.transferable_layouts) return 5;
+    std::uint16_t version = (!image.callbacks.empty() || image.native_library) ? 4 : 0;
     if (std::ranges::any_of(image.layouts, [](const Layout& layout) { return !layout.interfaces.empty(); }))
-        version = 2;
+        version = std::max<std::uint16_t>(version, 2);
     if (std::ranges::any_of(image.constants, [&](const Constant& value) {
             return value.type < image.types.size() && image.types[value.type].kind == TypeKind::Object;
         })) {
-        version = 2;
+        version = std::max<std::uint16_t>(version, 2);
     }
     for (const auto& type : image.types) {
         if (type.kind == TypeKind::Float || type.kind == TypeKind::BFloat) {
@@ -302,10 +315,13 @@ std::uint16_t required_minor_version(const Image& image) {
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
-                if (exit.kind == ExitKind::State && exit.operation == StateOp::RepeatCollection) return 3;
+                if (exit.kind == ExitKind::Scheduler || exit.poll) return 5;
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::RepeatCollection) {
+                    version = std::max<std::uint16_t>(version, 3);
+                }
                 if (exit.kind == ExitKind::MessageTrap ||
                     (exit.kind == ExitKind::State && exit.operation >= StateOp::TextSlice)) {
-                    version = 2;
+                    version = std::max<std::uint16_t>(version, 2);
                 }
                 if ((exit.kind == ExitKind::State && exit.operation == StateOp::ReadVersion) ||
                     (exit.kind == ExitKind::Trap && exit.reason == static_cast<std::uint32_t>(
@@ -323,6 +339,11 @@ std::vector<std::uint8_t> encode(const Image& image) {
         throw std::invalid_argument("the image records an unsupported minor version");
     }
     const auto minor = std::max(image.minor_version, required_minor_version(image));
+    // required_minor_version reports 5 for a scheduler exit or a poll, which
+    // the loader accepts only together with the table.
+    if (minor >= 5 && !image.transferable_layouts && required_minor_version(image) >= 5) {
+        throw std::invalid_argument("an image with tasks or polls needs its transferable-layout table");
+    }
     const auto parts = sections(image, minor);
     constexpr std::uint64_t header_size = 24;
     constexpr std::uint64_t directory_record_size = 24;

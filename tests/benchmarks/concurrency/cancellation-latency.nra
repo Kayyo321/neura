@@ -1,0 +1,58 @@
+// Measurement workload for docs/lang/Concurrency.md section 16, phase 4:
+// 1,000 tasks under one scope that is then cancelled. Each task reports that
+// it has started and then either parks on a channel nobody sends to (the
+// default) or, with the argument "running", loops and asks between steps
+// whether it is cancelled. The latency is the time from the cancel event to
+// the last finish event in the trace (--trace-events with --trace-wall-time).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let cancellation = import:Std.Concurrent.Cancellation;
+let channels = import:Std.Concurrent.Channel;
+
+const tasks: int = 1000;
+
+let parked = func(ready: channels.Sender<int>, never: channels.Receiver<int>) -> int {
+    ready.send(1);
+    return match (never.receive()) {
+        channels.Received.Value(value) => value,
+        _ => 0,
+    };
+};
+
+let running = func(ready: channels.Sender<int>) -> int {
+    ready.send(1);
+    let rounds = 0;
+    while (!cancellation.requested()) {
+        rounds = rounds + 1;
+    }
+    return 0;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let spin = arguments.length > 0 && arguments[0] == "running";
+        let [ready, started, ready_closer] = channels.open<int>(64);
+        let [unused, never, never_closer] = channels.open<int>(1);
+        let stopped = 0;
+        scope (group) {
+            for (let index: int = 0; index < tasks; index++) {
+                if (spin) {
+                    spawn running(ready);
+                } else {
+                    spawn parked(ready, never);
+                }
+            }
+            for (let index: int = 0; index < tasks; index++) {
+                match (started.receive()) {
+                    channels.Received.Value(one) => {
+                        stopped = stopped + one;
+                    },
+                    _ => {},
+                }
+            }
+            group.cancel();
+        }
+        console.print_line(stopped.to_string());
+        return program.ExitCode.Ok;
+    };
+);

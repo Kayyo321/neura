@@ -75,19 +75,19 @@ The following public declarations are taken from the module source; each links t
   Decimal, by repeated division by 10^9 and nine-digit groups.
 - **BigInteger.BigInteger** · [`export let to_string_radix = func(radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L346)
   Lowercase digits. A radix outside 2 through 36 traps.
-- **BigInteger** · [`export const Zero: BigInteger = new BigInteger(0, [])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L353)
-  The integer zero.
-- **BigInteger** · [`export const One: BigInteger = new BigInteger(1, [1])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L355)
+- **BigInteger** · [`export const Zero: BigInteger = new BigInteger(0, [])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L355)
+  The methods above build their own zero and one instead of reading these constants: a constant object is module state, which a spawned task may not read (Concurrency.md section 5.2). The integer zero.
+- **BigInteger** · [`export const One: BigInteger = new BigInteger(1, [1])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L357)
   The integer one.
-- **BigInteger** · [`export const Ten: BigInteger = new BigInteger(1, [10])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L357)
+- **BigInteger** · [`export const Ten: BigInteger = new BigInteger(1, [10])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L359)
   The integer ten.
-- **BigInteger** · [`export let of_int64 = func(value: int64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L360)
+- **BigInteger** · [`export let of_int64 = func(value: int64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L362)
   Constructs a BigInteger from any int64, including the minimum signed value.
-- **BigInteger** · [`export let of_uint64 = func(value: uint64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L370)
+- **BigInteger** · [`export let of_uint64 = func(value: uint64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L372)
   Constructs a nonnegative BigInteger from an unsigned 64-bit value.
-- **BigInteger** · [`export let parse = func(text: string) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L373)
+- **BigInteger** · [`export let parse = func(text: string) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L375)
   Parses base-10 integer text or returns a parse error.
-- **BigInteger** · [`export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L377)
+- **BigInteger** · [`export let parse_radix = func(text: string, radix: int) -> Result<BigInteger>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L379)
   An optional `+` or `-`, then one or more digits of the radix in either case (Stdlib.md section 7.1), with no range failure. A radix outside 2 through 36 traps.
 <!-- END SOURCE API -->
 
@@ -198,3 +198,7 @@ An immutable decimal number stores an unscaled `BigInteger` and an `int` `scale`
 - **BigDecimal** adds `unscaled()` and `scale()`. `round(0, mode)` returns the value unchanged; a rounding carry drops one zero, as Java does. `of_float64` gives the exact value at the smallest scale. `-0.00` parses as zero. `parse` accepts an optional sign, digits with an optional point, and an optional `e` or `E` exponent; a scale outside `int` fails with `OutOfRange` at offset 0. Zero with a negative scale prints as `0`.
 - **Trap details.** `negative exponent`, `negative shift count`, `negative bit index`, `modulus not positive`, `not a finite value`, `negative precision`, `magnitude too large`, and `zero sign with a nonzero magnitude` after `invalid argument: `.
 - **Cost.** A float64 operation compiles to a large circuit, so a program that calls several `Math` functions has an image of several megabytes; `Math` is not in the cost baseline for that reason.
+
+### Task safety
+
+A function that a spawned task calls must be task-safe ([Concurrency, section 5.2](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)). Every function of this module is. The constants `Zero`, `One`, and `Ten` are objects, and a constant that is an object is module state a spawned task may not read; a task builds the value with `of_int64`. The module's own methods do not read the constants. [Task safety of the library](StandardLibrary#task-safety) lists every exception, and `neura check --task-safety` reports the answer for any function.

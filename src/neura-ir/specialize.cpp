@@ -1,4 +1,6 @@
 #include "specialize.hpp"
+
+#include "task_analysis.hpp"
 #include "nominal.hpp"
 
 #include <algorithm>
@@ -509,6 +511,20 @@ private:
         result.span = node.span;
         result.text = node.text;
         result.symbol = node.symbol;
+        result.poll = node.poll;
+        // `scope (name)` introduces the local that carries the scope's
+        // identity, and its body reads it. The instance gets its own copy
+        // before the body is rewritten, as an Initialize gives one to a
+        // declared local.
+        if (node.op == IrOp::TaskScope && node.symbol != no_symbol && context.original != no_symbol &&
+            context.symbols && program_.symbols[node.symbol].kind == SymbolKind::Local &&
+            program_.symbols[node.symbol].owner == context.original && !context.symbols->contains(node.symbol)) {
+            IrSymbol local = program_.symbols[node.symbol];
+            local.owner = context.owner;
+            local.type = type(local.type, context, local.span);
+            const auto copy = add(std::move(local));
+            (*context.symbols)[node.symbol] = copy;
+        }
         result.operands = region(node.operands, context);
         result.body = region(node.body, context);
         result.alternative = region(node.alternative, context);
@@ -628,7 +644,11 @@ private:
     void check_nodes(const std::vector<IrNode>& nodes, const std::string& where) const {
         for (const auto& node : nodes) {
             check_type(node.type, where);
-            if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
+            // A type test names its target, and a typed scheduler operation its
+            // element type, as a concrete type argument.
+            if (node.op == IrOp::SchedulerCall) {
+                for (const auto& argument : node.type_arguments) check_type(argument, where);
+            } else if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
                 throw std::logic_error("specialization left type arguments in " + where);
             }
             check_nodes(node.operands, where);
@@ -679,6 +699,11 @@ private:
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
     Specializer(program, limits).run();
+    // Polls are a property of the whole program, and the isolation rules of
+    // Concurrency.md section 5 need the concrete types that exist only now:
+    // a generic function is checked at each specialization.
+    insert_polls(program);
+    if (uses_tasks(program)) TaskAnalysis(program).check();
 }
 
 } // namespace neura

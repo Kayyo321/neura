@@ -286,11 +286,16 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
             block.selector_start = b.u32();
             block.exits = b.vector(exit_size, "exit list", [&](Reader& e) {
                 Exit exit;
-                const auto kind = e.u8();
-                if (kind > static_cast<std::uint8_t>(ExitKind::MessageTrap)) {
-                    fail(Kind::Malformed, "FUNC: invalid exit kind " + std::to_string(kind));
+                const auto tag = e.u8();
+                const auto kind = tag & ~scheduler_poll_bit;
+                if (kind > static_cast<std::uint8_t>(ExitKind::Scheduler)) {
+                    fail(Kind::Malformed, "FUNC: invalid exit kind " + std::to_string(tag));
                 }
                 exit.kind = static_cast<ExitKind>(kind);
+                exit.poll = (tag & scheduler_poll_bit) != 0;
+                if (exit.poll && exit.kind != ExitKind::Continue && exit.kind != ExitKind::Call) {
+                    fail(Kind::Malformed, "FUNC: the poll flag is valid only on continue and call exits");
+                }
                 exit.assignments = e.vector(assignment_size, "assignment list", [](Reader& a) {
                     Assignment assignment;
                     assignment.slot = a.u32();
@@ -338,6 +343,18 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
                 case ExitKind::MessageTrap:
                     exit.arguments = read_values(e, "message trap argument list");
                     break;
+                case ExitKind::Scheduler: {
+                    const auto operation = e.u8();
+                    if (operation >= scheduler_op_count) {
+                        fail(Kind::Malformed, "FUNC: invalid scheduler operation " + std::to_string(operation));
+                    }
+                    exit.scheduler = static_cast<SchedulerOp>(operation);
+                    exit.target = e.u32();
+                    exit.arguments = read_values(e, "scheduler argument list");
+                    exit.result_slot = e.u32();
+                    exit.resume = e.u32();
+                    break;
+                }
                 }
                 return exit;
             });
@@ -358,14 +375,14 @@ struct KnownSection {
     const char* tag;
     // The directory's required flag for the section.
     bool required;
-    // Whether every image carries the section. CALB and NATV (NVR 1.4) are
-    // required for execution when present, and absent when unused.
+    // Whether every image carries the section. CALB, NATV, and TRNS are
+    // required for execution when present.
     bool always = true;
 };
 
-constexpr std::array<KnownSection, 11> known_sections{{
+constexpr std::array<KnownSection, 12> known_sections{{
     {"CALB", true, false}, {"CONS", true}, {"FUNC", true}, {"GLOB", true}, {"GRPH", true}, {"IMPT", true},
-    {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"SMAP", false, false}, {"TYPE", true},
+    {"LAYO", true}, {"META", true}, {"NATV", true, false}, {"SMAP", false, false}, {"TRNS", true, false}, {"TYPE", true},
 }};
 
 const KnownSection* known(const std::array<char, 4>& tag) {
@@ -410,6 +427,7 @@ private:
     void native_library();
     void types();
     void layouts();
+    void transferable_layouts() const;
     void constants();
     void globals();
     void graphs();
@@ -420,6 +438,7 @@ private:
     void assign(std::uint32_t actual, std::uint32_t expected, const std::string& where) const;
     void result(const Function& function, std::uint32_t slot, std::uint32_t produced, const std::string& where) const;
     void state(const Function& function, const Exit& exit, const std::string& where) const;
+    void scheduler(const Function& function, const Exit& exit, const std::string& where) const;
     void continuation(const Function& function, std::uint32_t target, const std::string& where) const;
     void entry();
     void source_map();
@@ -431,6 +450,7 @@ private:
 void Validator::run() {
     types();
     layouts();
+    transferable_layouts();
     system_ = std::make_unique<TypeSystem>(image_);
     constants();
     globals();
@@ -473,6 +493,27 @@ void Validator::native_library() {
     for (std::size_t i = 1; i < library.symbols.size(); ++i) {
         if (!(library.symbols[i - 1] < library.symbols[i])) {
             invalid("native library: symbols are not unique and in ascending order");
+        }
+    }
+}
+
+void Validator::transferable_layouts() const {
+    if (!image_.transferable_layouts) return;
+    const auto& marks = *image_.transferable_layouts;
+    if (!std::ranges::is_sorted(marks) || std::ranges::adjacent_find(marks) != marks.end()) {
+        invalid("TRNS: layout indices must be in strictly ascending order");
+    }
+    for (const auto index : marks) {
+        if (index >= image_.layouts.size()) invalid("TRNS: layout " + std::to_string(index) + " is out of range");
+        const auto& layout = image_.layouts[index];
+        const auto where = "TRNS: layout " + std::to_string(index);
+        if (layout.parent != absent && !std::ranges::binary_search(marks, layout.parent)) {
+            invalid(where + ": parent layout " + std::to_string(layout.parent) + " is not marked");
+        }
+        for (std::size_t field = 0; field < layout.fields.size(); ++field) {
+            if (!is_transferable(image_, layout.fields[field])) {
+                invalid(where + ": field " + std::to_string(field) + " is not transferable");
+            }
         }
     }
 }
@@ -734,6 +775,251 @@ void Validator::continuation(const Function& function, std::uint32_t target, con
     if (target >= function.blocks.size()) {
         invalid(where + ": block " + std::to_string(target) + " is out of range");
     }
+}
+
+void Validator::scheduler(const Function& function, const Exit& exit, const std::string& where) const {
+    const auto arity = [&](std::size_t count) {
+        if (exit.arguments.size() != count) invalid(where + ": expects " + std::to_string(count) + " argument(s)");
+    };
+    const auto task_operand = [&] {
+        arity(1);
+        if (!is_unsigned(exit.arguments.front().type, 64)) invalid(where + ": task operand must have type uint64");
+    };
+    const auto require_slot_type = [&](auto predicate, const char* name) {
+        if (exit.result_slot >= function.frame_types.size() || !predicate(function.frame_types[exit.result_slot])) {
+            invalid(where + ": result slot must have type " + name);
+        }
+    };
+    if (exit.scheduler != SchedulerOp::Spawn && exit.scheduler != SchedulerOp::ChannelOpen &&
+        exit.scheduler != SchedulerOp::Select && exit.scheduler != SchedulerOp::ParallelStart && exit.target != 0) {
+        invalid(where + ": scheduler target must be zero for this operation");
+    }
+    const auto is_signed64 = [&](std::uint32_t type) {
+        return image_.types[type].kind == TypeKind::Signed && image_.types[type].width == 64;
+    };
+    const auto is_bool = [&](std::uint32_t type) { return image_.types[type].kind == TypeKind::Bool; };
+    const auto no_result = [&] {
+        if (exit.result_slot != absent) invalid(where + ": a void result requires an absent slot");
+    };
+    // A scheduler object is any object reference; the scheduler knows
+    // which objects it has opened as channels or timers.
+    const auto object_operand = [&](std::size_t index) {
+        if (index >= exit.arguments.size() || image_.types[exit.arguments[index].type].kind != TypeKind::Object) {
+            invalid(where + ": argument " + std::to_string(index) + " must be an object reference");
+        }
+    };
+    const auto typed_operand = [&](std::size_t index, auto predicate, const char* name) {
+        if (index >= exit.arguments.size() || !predicate(exit.arguments[index].type)) {
+            invalid(where + ": argument " + std::to_string(index) + " must have type " + name);
+        }
+    };
+    const auto unsigned64 = [&](std::uint32_t type) { return is_unsigned(type, 64); };
+    const auto unsigned32 = [&](std::uint32_t type) { return is_unsigned(type, 32); };
+    const auto sent_value = [&](std::size_t index) {
+        if (index >= exit.arguments.size() || !is_transferable(image_, exit.arguments[index].type)) {
+            invalid(where + ": argument " + std::to_string(index) + " is not transferable");
+        }
+    };
+    switch (exit.scheduler) {
+    case SchedulerOp::ScopeEnter:
+        arity(0);
+        // With a slot, the identity of the new scope for its handle.
+        if (exit.result_slot != absent) require_slot_type(unsigned64, "uint64");
+        break;
+    case SchedulerOp::ScopeExit:
+        arity(0);
+        no_result();
+        break;
+    case SchedulerOp::ScopeCancel:
+        arity(1);
+        typed_operand(0, unsigned64, "uint64");
+        no_result();
+        break;
+    case SchedulerOp::ScopeIsCancelled:
+        arity(1);
+        typed_operand(0, unsigned64, "uint64");
+        require_slot_type(is_bool, "bool");
+        break;
+    case SchedulerOp::ScopeSetDeadline:
+        arity(2);
+        typed_operand(0, unsigned64, "uint64");
+        typed_operand(1, is_signed64, "int64");
+        no_result();
+        break;
+    case SchedulerOp::ScopeDeadline:
+        arity(1);
+        typed_operand(0, unsigned64, "uint64");
+        require_slot_type(is_signed64, "int64");
+        break;
+    case SchedulerOp::TaskCancelled:
+        arity(0);
+        require_slot_type(is_bool, "bool");
+        break;
+    case SchedulerOp::TaskDeadline:
+        arity(0);
+        require_slot_type(is_signed64, "int64");
+        break;
+    case SchedulerOp::Take:
+        // The slot's type is checked against the value when it is taken.
+        arity(0);
+        if (exit.result_slot >= function.frame_types.size()) invalid(where + ": take needs a result slot");
+        break;
+    case SchedulerOp::ChannelOpen:
+        arity(2);
+        object_operand(0);
+        typed_operand(1, is_signed64, "int64");
+        if (exit.target >= image_.types.size() || image_.types[exit.target].kind == TypeKind::Void ||
+            !is_transferable(image_, exit.target)) {
+            invalid(where + ": the channel's element type must be a transferable type");
+        }
+        no_result();
+        break;
+    case SchedulerOp::ChannelSend:
+    case SchedulerOp::ChannelTrySend:
+        arity(2);
+        object_operand(0);
+        sent_value(1);
+        require_slot_type(unsigned32, "uint32");
+        break;
+    case SchedulerOp::ChannelReceive:
+    case SchedulerOp::ChannelTryReceive:
+    case SchedulerOp::TimerWait:
+        arity(1);
+        object_operand(0);
+        require_slot_type(unsigned32, "uint32");
+        break;
+    case SchedulerOp::ChannelClose:
+        arity(1);
+        object_operand(0);
+        no_result();
+        break;
+    case SchedulerOp::TimerOpen:
+        arity(2);
+        object_operand(0);
+        typed_operand(1, is_signed64, "int64");
+        no_result();
+        break;
+    case SchedulerOp::GuardOpen:
+        // The guarded value may have any type: it never leaves the guard
+        // except to the one task that has entered.
+        arity(2);
+        object_operand(0);
+        no_result();
+        break;
+    case SchedulerOp::GuardEnter:
+        // The slot's type is checked against the guarded value on entry.
+        arity(1);
+        object_operand(0);
+        if (exit.result_slot >= function.frame_types.size()) invalid(where + ": guard-enter needs a result slot");
+        break;
+    case SchedulerOp::GuardExit:
+        arity(1);
+        object_operand(0);
+        no_result();
+        break;
+    case SchedulerOp::ParallelStart: {
+        // The item runs the target with one transferable argument, under
+        // its own step and heap-cell limits, and yields its identity.
+        if (exit.target >= image_.functions.size()) {
+            invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
+        }
+        const auto& callee = image_.functions[exit.target];
+        arity(3);
+        if (callee.parameter_count != 1) invalid(where + ": a parallel item's function takes one argument");
+        assign(exit.arguments[0].type, callee.frame_types[0], where + " argument 0");
+        if (!is_transferable(image_, exit.arguments[0].type) || !is_transferable(image_, callee.frame_types[0])) {
+            invalid(where + ": a parallel item's argument is not transferable");
+        }
+        if (image_.types[callee.result_type].kind == TypeKind::Void || !is_transferable(image_, callee.result_type)) {
+            invalid(where + ": a parallel item's result is not a transferable value");
+        }
+        typed_operand(1, is_signed64, "int64");
+        typed_operand(2, is_signed64, "int64");
+        require_slot_type(unsigned64, "uint64");
+        break;
+    }
+    case SchedulerOp::ParallelFinish:
+        // A list of item identities in, the array of their results out. Each
+        // result is checked against the array's element type as it arrives.
+        arity(1);
+        typed_operand(0, [&](std::uint32_t type) {
+            return image_.types[type].kind == TypeKind::List && is_unsigned(image_.types[type].reference, 64);
+        }, "a list of uint64");
+        require_slot_type([&](std::uint32_t type) { return image_.types[type].kind == TypeKind::Array; }, "an array");
+        break;
+    case SchedulerOp::Select: {
+        // Flags in the target: bit 0 says a default arm follows the listed
+        // ones. Each arm is a uint32 constant kind and its operands.
+        if (exit.target > 1) invalid(where + ": select flags must be 0 or 1");
+        std::size_t index = 0;
+        std::size_t arms = 0;
+        while (index < exit.arguments.size()) {
+            const auto& kind = exit.arguments[index];
+            if (kind.kind != ValueKind::Constant || !is_unsigned(kind.type, 32)) {
+                invalid(where + ": a select arm begins with a uint32 constant");
+            }
+            std::uint32_t code = 0;
+            const auto& payload = image_.constants[kind.index].payload;
+            for (std::size_t byte = 0; byte < payload.size() && byte < 4; ++byte) {
+                code |= static_cast<std::uint32_t>(payload[byte]) << (8 * byte);
+            }
+            if (code >= select_arm_count) invalid(where + ": invalid select arm kind " + std::to_string(code));
+            switch (static_cast<SelectArm>(code)) {
+            case SelectArm::Receive:
+            case SelectArm::Timer:
+                object_operand(index + 1);
+                index += 2;
+                break;
+            case SelectArm::Send:
+                object_operand(index + 1);
+                sent_value(index + 2);
+                index += 3;
+                break;
+            case SelectArm::Join:
+                typed_operand(index + 1, unsigned64, "uint64");
+                index += 2;
+                break;
+            }
+            ++arms;
+        }
+        if (arms == 0) invalid(where + ": select needs at least one arm");
+        require_slot_type(unsigned64, "uint64");
+        break;
+    }
+    case SchedulerOp::Spawn: {
+        if (exit.target >= image_.functions.size()) {
+            invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
+        }
+        const auto& callee = image_.functions[exit.target];
+        arity(callee.parameter_count);
+        for (std::size_t i = 0; i < exit.arguments.size(); ++i) {
+            const auto actual = exit.arguments[i].type;
+            const auto expected = callee.frame_types[i];
+            const auto argument = where + " argument " + std::to_string(i);
+            assign(actual, expected, argument);
+            if (!is_transferable(image_, actual) || !is_transferable(image_, expected)) {
+                invalid(argument + ": spawn argument is not transferable");
+            }
+        }
+        // Without a slot the task has no handle: nothing can join it, and
+        // the scheduler releases it when it finishes.
+        if (exit.result_slot != absent) {
+            require_slot_type([&](std::uint32_t type) { return is_unsigned(type, 64); }, "uint64");
+        }
+        break;
+    }
+    case SchedulerOp::Join:
+        task_operand();
+        if (exit.result_slot != absent && exit.result_slot >= function.frame_types.size()) {
+            invalid(where + ": join result slot is out of range");
+        }
+        break;
+    case SchedulerOp::IsFinished:
+        task_operand();
+        require_slot_type([&](std::uint32_t type) { return image_.types[type].kind == TypeKind::Bool; }, "bool");
+        break;
+    }
+    continuation(function, exit.resume, where);
 }
 
 void Validator::state(const Function& function, const Exit& exit,
@@ -1101,6 +1387,9 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
                 invalid(exit_where + ": a message trap requires one text argument");
             }
             break;
+        case ExitKind::Scheduler:
+            scheduler(function, exit, exit_where);
+            break;
         }
     }
 }
@@ -1165,6 +1454,28 @@ void Validator::source_map() {
 }
 
 } // namespace
+
+bool is_transferable(const Image& image, std::uint32_t type) {
+    if (type >= image.types.size()) return false;
+    const auto& value = image.types[type];
+    switch (value.kind) {
+    case TypeKind::Void:
+    case TypeKind::Array:
+    case TypeKind::List:
+        return false;
+    case TypeKind::Object:
+        return image.transferable_layouts && std::ranges::binary_search(*image.transferable_layouts, value.reference);
+    case TypeKind::Bool:
+    case TypeKind::Signed:
+    case TypeKind::Unsigned:
+    case TypeKind::Float:
+    case TypeKind::BFloat:
+    case TypeKind::Text:
+    case TypeKind::Bytes:
+        return true;
+    }
+    return false;
+}
 
 TypeSystem::TypeSystem(const Image& image) : image_(&image), canonical_(image.types.size(), absent) {
     std::map<std::tuple<TypeKind, std::uint8_t, std::uint32_t>, std::uint32_t> representatives;
@@ -1302,8 +1613,9 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
             fail(Kind::Malformed, "directory: section " + name + " extends past the end of the image");
         }
         expected += entry.size;
-        const auto* section = known(entry.tag);
         const bool required = (entry.flags & 1U) != 0;
+        // Before 1.5, an optional TRNS tag was opaque and round-trips as such.
+        const auto* section = name == "TRNS" && minor < 5 && !required ? nullptr : known(entry.tag);
         if (section == nullptr) {
             if (required) {
                 fail(Kind::Unsupported, "directory: unknown required section " + name);
@@ -1403,6 +1715,9 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
             image.native_library = std::move(library);
         });
     }
+    if (sections.contains("TRNS")) {
+        section("TRNS", [&](Reader& in) { image.transferable_layouts = in.indices("transferable layout list"); });
+    }
     if (sections.contains("SMAP")) {
         section("SMAP", [&](Reader& in) {
             image.source_map = in.vector(location_size, "source map", [](Reader& r) {
@@ -1417,9 +1732,17 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
         });
     }
 
-    if (required_minor_version(image) > minor) {
-        fail(Kind::Malformed, "header: the image uses NVR 1." + std::to_string(required_minor_version(image)) +
+    const auto required_minor = required_minor_version(image);
+    if (required_minor > minor) {
+        fail(Kind::Malformed, "header: the image uses NVR 1." + std::to_string(required_minor) +
                                   " features but declares 1." + std::to_string(minor));
+    }
+    if (required_minor == 5) {
+        if (!image.transferable_layouts) fail(Kind::Malformed, "directory: missing required section TRNS");
+        if (sections.contains("CALB") || sections.contains("NATV") ||
+            std::ranges::any_of(image.imports, [](const Import& import) { return import.name.starts_with("neura.ffi."); })) {
+            fail(Kind::Malformed, "concurrent images cannot contain CALB, NATV, or neura.ffi.* imports");
+        }
     }
     Validator(image).run();
     return image;

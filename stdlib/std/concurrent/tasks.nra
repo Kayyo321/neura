@@ -1,0 +1,127 @@
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let task_handles = import:Std.Concurrent.Task;
+
+/// @brief Helpers that run a group of calls as tasks and combine their results (Concurrency.md section 4.2).
+/// Each helper opens its own scope, so it has cancelled and drained every call it started before it returns.
+/// The calls observe cancellation through Std.Concurrent.Cancellation.requested and through their parked channel
+/// operations.
+///
+/// A call is a function value that takes no arguments. Each helper takes the calls as a list, which a literal
+/// writes when the parameter's type is expected and a loop builds for a width known only at run time. A call
+/// must be task-safe and its captures transferable, as for any spawn. Results are returned in lists: the language
+/// cannot build an array whose length is known only at run time, and a function with type parameters cannot be
+/// overloaded for arrays as well.
+/// @see [Std.Concurrent.Tasks](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Tasks)
+export let Tasks = module (
+    /// @brief Runs every call as a task and returns their results in the order of the calls. Waits for all of
+    /// them; nothing is cancelled.
+    export let all = func<T>(calls: (func() -> T)[list]) -> T[list] {
+        scope {
+            let pending: task_handles.Task<T>[list] = [];
+            for (let call: func() -> T in calls) {
+                pending.append(spawn call());
+            }
+            let values: T[list] = [];
+            for (let task: task_handles.Task<T> in pending) {
+                values.append(task.join());
+            }
+            return values;
+        }
+    };
+
+    /// @brief Runs every call as a task. If all return Ok, returns their values in the order of the calls.
+    /// Otherwise returns the first Err in the order the calls completed, after cancelling the calls still
+    /// running and waiting for every one of them to finish. If the calling task is cancelled while it waits, the
+    /// calls are cancelled the same way and the result is an Err with the code tasks.cancelled.
+    export let all_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T[list]> {
+        let count = calls.length;
+        let [done, completions, closer] = channels.open<int>(count);
+        scope (group) {
+            let pending: task_handles.Task<result.Result<T>>[list] = [];
+            for (let call: func() -> result.Result<T> in calls) {
+                pending.append(spawn run_indexed<T>(call, pending.length, done));
+            }
+            let remaining = count;
+            while (remaining > 0) {
+                match (completions.receive()) {
+                    channels.Received.Value(index) => {
+                        remaining -= 1;
+                        match (pending[index].join()) {
+                            result.Result.Err(failure) => {
+                                group.cancel();
+                                return result.Result<T[list]>.Err(failure);
+                            },
+                            _ => { },
+                        }
+                    },
+                    _ => {
+                        group.cancel();
+                        return result.Result<T[list]>.Err(
+                            error.custom("tasks.cancelled", "cancelled before every call finished"));
+                    },
+                }
+            }
+            let values: T[list] = [];
+            for (let task: task_handles.Task<result.Result<T>> in pending) {
+                match (task.join()) {
+                    result.Result.Ok(value) => { values.append(value); },
+                    result.Result.Err(failure) => {
+                        return result.Result<T[list]>.Err(failure);
+                    },
+                }
+            }
+            return result.Result<T[list]>.Ok(values);
+        }
+    };
+
+    /// @brief Runs every call as a task and returns the first Ok in the order the calls completed, after
+    /// cancelling the calls still running and waiting for every one of them to finish. If every call fails,
+    /// returns the Err of the one that completed last. With no calls, or if the calling task is cancelled while
+    /// it waits, the result is an Err with the code tasks.empty or tasks.cancelled.
+    export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T> {
+        let count = calls.length;
+        if (count == 0) {
+            return result.Result<T>.Err(error.custom("tasks.empty", "no calls to run"));
+        }
+        let [done, completions, closer] = channels.open<int>(count);
+        scope (group) {
+            let pending: task_handles.Task<result.Result<T>>[list] = [];
+            for (let call: func() -> result.Result<T> in calls) {
+                pending.append(spawn run_indexed<T>(call, pending.length, done));
+            }
+            let last = error.custom("tasks.cancelled", "cancelled before any call succeeded");
+            let remaining = count;
+            while (remaining > 0) {
+                match (completions.receive()) {
+                    channels.Received.Value(index) => {
+                        remaining -= 1;
+                        match (pending[index].join()) {
+                            result.Result.Ok(value) => {
+                                group.cancel();
+                                return result.Result<T>.Ok(value);
+                            },
+                            result.Result.Err(failure) => {
+                                last = failure;
+                            },
+                        }
+                    },
+                    _ => {
+                        group.cancel();
+                        return result.Result<T>.Err(last);
+                    },
+                }
+            }
+            return result.Result<T>.Err(last);
+        }
+    };
+
+    // Runs a call and then reports its index on the channel, which has room for every call.
+    let run_indexed = func<T>(call: func() -> result.Result<T>, index: int, done: channels.Sender<int>)
+            -> result.Result<T> {
+        let outcome = call();
+        done.send(index);
+        return outcome;
+    };
+);

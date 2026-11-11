@@ -1,0 +1,83 @@
+let arenas = import:Std.DynamicForeign.Arena;
+let error = import:Std.Core.Error;
+let fs = import:Std.Fs.Fs;
+let instant = import:Std.Time.Instant;
+let path = import:Std.Fs.Path;
+let program = import:Std.Program;
+let randoms = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let system_clock = import:Std.Time.SystemClock;
+let tcp_listener = import:Std.Net.TcpListener;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// One test per host service group. A test passes when its service is granted
+// and fails when the service answers CapabilityDenied, so the same file shows
+// which groups a set of capability options grants. `fs` reads a file that does
+// not exist: a granted service answers NotFound, never CapabilityDenied. `net`
+// binds a loopback listener, which needs no network access beyond the host.
+let ServiceTests = module (
+    let not_denied = func(failure: error.Error) -> void {
+        match (failure) {
+            error.Error.Io { kind, message: _, path: _ } => {
+                test.assert_with(kind != error.IoErrorKind.CapabilityDenied, error.message(failure));
+            },
+            _ => {},
+        }
+    };
+
+    export let test_fs = func() -> void {
+        match (fs.read_text(path.of("capability-probe-does-not-exist.txt"))) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                not_denied(failure);
+            },
+        }
+    };
+
+    export let test_net = func() -> void {
+        match (tcp_listener.bind("127.0.0.1", 0)) {
+            result.Result.Ok(listener) => {
+                result.expect<unit.Unit>(listener.close(), "close listener");
+            },
+            result.Result.Err(failure) => {
+                not_denied(failure);
+                test.fail("loopback bind failed: " + error.message(failure));
+            },
+        }
+    };
+
+    export let test_env = func() -> void {
+        match (program.Environment.get("PATH")) {
+            program.Environment.Lookup.Failed(failure) => {
+                not_denied(failure);
+            },
+            _ => {},
+        }
+    };
+
+    export let test_clock = func() -> void {
+        match (system_clock.create().now()) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                not_denied(failure);
+            },
+        }
+    };
+
+    export let test_entropy = func() -> void {
+        match (randoms.from_entropy()) {
+            result.Result.Ok(_) => {},
+            result.Result.Err(failure) => {
+                not_denied(failure);
+            },
+        }
+    };
+
+    // Native operations trap on denial.
+    export let test_native = func() -> void {
+        let arena = arenas.of_confined();
+        arena.allocate(8, 8);
+        arena.close();
+    };
+);

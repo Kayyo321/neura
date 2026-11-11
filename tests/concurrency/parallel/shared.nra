@@ -1,0 +1,88 @@
+// Shared state across tasks: an atomic counter, a semaphore that bounds how
+// many tasks hold a permit, and a map behind a guard.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let atomics = import:Std.Concurrent.AtomicInt64;
+let semaphores = import:Std.Concurrent.Semaphore;
+let guards = import:Std.Concurrent.Guarded;
+let maps = import:Std.Collections.HashMap;
+
+let bump = func(counter: atomics.AtomicInt64, rounds: int) {
+    for (let i: int = 0; i < rounds; i++) {
+        counter.add(1);
+    }
+};
+
+let limited = func(permits: semaphores.Semaphore, active: atomics.AtomicInt64, peak: atomics.AtomicInt64) {
+    match (permits.acquire()) {
+        semaphores.AcquireOutcome.Acquired => { },
+        semaphores.AcquireOutcome.Cancelled => { return; },
+    }
+    let now = active.add(1);
+    if (now > peak.load()) {
+        peak.store(now);
+    }
+    for (let i: int = 0; i < 2000; i++) { }
+    active.add(-1);
+    permits.release();
+};
+
+let record = func(table: guards.Guarded<maps.HashMap<string, int>>, key: string, rounds: int) {
+    for (let i: int = 0; i < rounds; i++) {
+        table.with<bool>(func(entries: maps.HashMap<string, int>) -> bool {
+            entries.set(key, entries.get_or(key, 0) + 1);
+            return true;
+        });
+    }
+};
+
+let wait_for_permit = func(permits: semaphores.Semaphore) -> bool => match (permits.acquire()) {
+    semaphores.AcquireOutcome.Acquired => true,
+    semaphores.AcquireOutcome.Cancelled => false,
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let counter = atomics.create(0);
+        let permits = semaphores.create(2);
+        let active = atomics.create(0);
+        let peak = atomics.create(0);
+        let table = guards.create<maps.HashMap<string, int>>(func -> maps.HashMap<string, int> => maps.create<string, int>());
+        scope {
+            for (let i: int = 0; i < 4; i++) {
+                spawn bump(counter, 2500);
+                spawn limited(permits, active, peak);
+                spawn record(table, "k" + (i % 2).to_string(), 300);
+            }
+        }
+        console.print_line("counter " + counter.load().to_string());
+        console.print_line("most permits held " + peak.load().to_string());
+        let k0 = table.with<int>(func(entries: maps.HashMap<string, int>) -> int => entries.get_or("k0", 0));
+        let k1 = table.with<int>(func(entries: maps.HashMap<string, int>) -> int => entries.get_or("k1", 0));
+        console.print_line("k0 " + k0.to_string() + " k1 " + k1.to_string());
+        console.print_line("swapped " + counter.compare_exchange(10000, 7).to_string() + " " +
+                           counter.compare_exchange(10000, 8).to_string() + " now " + counter.load().to_string());
+        console.print_line("permits " + permits.try_acquire().to_string() + " " + permits.try_acquire().to_string() +
+                           " " + permits.try_acquire().to_string());
+        scope (group) {
+            let waiting = spawn wait_for_permit(permits);
+            group.cancel();
+            console.print_line("cancelled acquire " + waiting.join().to_string());
+        }
+        permits.release();
+        permits.release();
+        if (arguments.length > 0 && arguments[0] == "over-release") {
+            permits.release();
+        }
+        if (arguments.length > 0 && arguments[0] == "reenter") {
+            table.with<int>(func(entries: maps.HashMap<string, int>) -> int =>
+                table.with<int>(func(inner: maps.HashMap<string, int>) -> int => 1));
+        }
+        if (arguments.length > 0 && arguments[0] == "overflow") {
+            counter.store(9223372036854775807);
+            counter.add(1);
+        }
+        console.print_line("done");
+        return program.ExitCode.Ok;
+    };
+);

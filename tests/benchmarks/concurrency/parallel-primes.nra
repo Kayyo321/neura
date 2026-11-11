@@ -1,0 +1,54 @@
+// Measurement workload for docs/lang/Concurrency.md section 16, phase 4: a
+// parallel map over 64 CPU-bound items. With the argument "sequential" the
+// same items run in a plain loop on the root task, which is the baseline.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let parallel = import:Std.Concurrent.Parallel;
+
+// The number of primes in [start, start + 200), by trial division.
+let primes_from = func(start: int) -> int {
+    let count = 0;
+    let n = start;
+    while (n < start + 200) {
+        let prime = n > 1;
+        let d = 2;
+        while (prime && d * d <= n) {
+            if (n % d == 0) {
+                prime = false;
+            }
+            d = d + 1;
+        }
+        if (prime) {
+            count = count + 1;
+        }
+        n = n + 1;
+    }
+    return count;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let starts: int[] = [
+            1000000, 1002000, 1004000, 1006000, 1008000, 1010000, 1012000, 1014000,
+            1016000, 1018000, 1020000, 1022000, 1024000, 1026000, 1028000, 1030000,
+            1032000, 1034000, 1036000, 1038000, 1040000, 1042000, 1044000, 1046000,
+            1048000, 1050000, 1052000, 1054000, 1056000, 1058000, 1060000, 1062000,
+            1064000, 1066000, 1068000, 1070000, 1072000, 1074000, 1076000, 1078000,
+            1080000, 1082000, 1084000, 1086000, 1088000, 1090000, 1092000, 1094000,
+            1096000, 1098000, 1100000, 1102000, 1104000, 1106000, 1108000, 1110000,
+            1112000, 1114000, 1116000, 1118000, 1120000, 1122000, 1124000, 1126000
+        ];
+        let total = 0;
+        if (arguments.length > 0 && arguments[0] == "sequential") {
+            for (let start: int in starts) {
+                total = total + primes_from(start);
+            }
+        } else {
+            for (let count: int in parallel.map<int, int>(starts, primes_from, parallel.limits(100000000, 100000))) {
+                total = total + count;
+            }
+        }
+        console.print_line(total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

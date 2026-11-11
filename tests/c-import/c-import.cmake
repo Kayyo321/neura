@@ -78,11 +78,11 @@ if(NOT decompiled_stdout MATCHES "native library \"[^\"]+\", [0-9]+ bytes  \\[op
 endif()
 expect_ok(check check c-import.nra)
 
-# Without the capability the first native call traps; on another target the
+# With native code denied the first native call traps; on another target the
 # embedded library cannot load.
-neura(denied run c-import.nvr)
-if(NOT denied_status STREQUAL "134" OR NOT denied_stderr MATCHES "native access denied: run with --allow-native")
-    message(FATAL_ERROR "a run without --allow-native should trap with 134\n${denied_stderr}")
+neura(denied run --deny-native c-import.nvr)
+if(NOT denied_status STREQUAL "134" OR NOT denied_stderr MATCHES "native access denied: the native capability is not granted")
+    message(FATAL_ERROR "a run with --deny-native should trap with 134\n${denied_stderr}")
 endif()
 file(READ "${TEST_DIR}/c-import.nvra" assembly)
 string(REGEX REPLACE "native-library \"[^\"]+\"" "native-library \"riscv64-unknown-elf\"" assembly "${assembly}")

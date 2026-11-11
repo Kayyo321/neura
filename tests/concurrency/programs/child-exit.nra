@@ -1,0 +1,27 @@
+// Process.exit from any task ends the run with its status, abandoning every task.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let stop = func(status: int) {
+    console.print_line("stopping");
+    program.Process.exit(status);
+};
+
+let spin = func -> int {
+    let count = 0;
+    while (true) {
+        count = count + 1;
+    }
+    return count;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        scope {
+            let forever = spawn spin();
+            spawn stop(7);
+            forever.join();
+        }
+        return program.ExitCode.Ok;
+    };
+);

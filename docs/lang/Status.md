@@ -14,17 +14,18 @@ This release carries the language below from source through NeuraIR, optimizatio
 | Lifecycle | Constructors and constructor overloads, field initializers, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle.md) |
 | Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections.md) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors.md) |
-| Testing | `neura test` with the `Std.Test` assertions | [Testing](Testing.md) |
-| Foreign interop | `Std.DynamicForeign`: native libraries, symbol lookup, arena-owned native memory, layouts, downcalls through the platform C ABI, and upcalls, under `--allow-native`. `import:c(...)` C header imports that link static libraries into the image | [Foreign interop](ForeignInterop.md) |
-| Tooling | `check`, `docs` for `///` comments, `emit-ir`, `build`, `run` (with capabilities, `--record`, `--replay`, `--stats`, `--profile`), `test`, `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
+| Concurrency | Scoped tasks with `scope`, `spawn`, and `join`; isolation checked by the compiler (scope-bound handles, transferable values, task-safe calls); bounded channels and `select`; cooperative cancellation, deadlines, and timers; host I/O that overlaps and can be cancelled; the `Std.Concurrent` modules, with `Tasks` and `WorkerGroup`; shared state through `AtomicInt64`, `Semaphore`, and `Guarded<T>`; `Parallel.map` over isolated work on several cores; record and replay of concurrent runs; task dumps, profiles, and trace events | [Concurrency](Concurrency.md), [Core language](CoreLanguage.md#tasks-scopes-and-select) |
+| Testing | `neura test` with the `Std.Test` assertions; for concurrent code, virtual time, schedule exploration from a seed, and reproduction of a saved schedule | [Testing](Testing.md) |
+| Foreign interop | `Std.DynamicForeign`: native libraries, symbol lookup, arena-owned native memory, layouts, downcalls through the platform C ABI, and upcalls, granted by default and denied with `--deny-native`. `import:c(...)` C header imports that link static libraries into the image | [Foreign interop](ForeignInterop.md) |
+| Tooling | `check` (with `--task-safety`), `docs` for `///` comments, `emit-ir`, `build`, `build --native` and `inspect` on Linux x86-64, `run` (every host service granted by default, `--deny-*` and `--allow-*` capability options, `--record`, `--replay`, `--stats`, `--profile`, `--each`, `--trace-events`), `test` (`--schedules`, `--schedule-seed`, `--save-schedule`, `--schedule`; both with the task limits, `--task-quantum`, `--parallel-workers`, `--task-dump`, `--virtual-time`, `--gpu=auto\|always\|off`, `--no-gpu`, `--require-gpu`, `--gpu-software`, `--gpu-verify`, and `NEURA_GPU`), `disassemble`, `assemble`, `decompile` | [Tooling](Tooling.md), [Decompiler](../Decompiler.md) |
 | Standard library | The `Std` source modules of the [implementation plan](Stdlib.md), installed with the tool, and the host providers they bind; see [Standard library](StandardLibrary.md) for the module list and [section 18 of the plan](Stdlib.md#18-implementation-decisions) for decisions made while implementing it | [Standard library](StandardLibrary.md) |
 
 ## Outside this release
 
 | Area | Status |
 | --- | --- |
-| Standard library extensions | `Std.Concurrent`, time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, and `BigInteger` bitwise operations ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
-| Concurrency | Deferred: memory model, synchronization, cancellation, and ownership ([Resources and concurrency](ResourcesConcurrency.md)). |
+| Standard library extensions | Time zones, locale-sensitive sorting and formatting, general Unicode classification, ciphers and TLS, HTTP, UDP, `BigInteger` bitwise operations, and concurrent collections ([plan, section 15.1](Stdlib.md#151-deferred-and-excluded)). Collection facades that re-export every type need generic re-exports. |
+| Concurrency | Tasks in a program that uses `Std.DynamicForeign` or a C import ([decision C15](Concurrency.md#3-decisions)); running tasks on several cores (only `Parallel.map` uses more than one); overlapping file I/O; concurrent collections. Tasks are tested on Linux; Windows is unverified. Open decisions are in [Concurrency, section 18](Concurrency.md#18-decisions-and-open-questions). |
 | Foreign interop | Interop with Java and other managed runtimes. Native code runs only on Linux x86-64 in this release's tests; other platforms build the same provider but are unverified. |
 | Packages | Manifests, dependency management, and package distribution are not specified ([Project structure](ProjectStructure.md)). |
 
@@ -56,6 +57,7 @@ These remain open. The compiler rejects or does not offer the affected construct
 - A negative index traps with reason 2; a list modified during for-each traps with reason 5.
 - The entry point is the unique override of `Std.Program.Entry.main`. `Ok` is status 0, `Failure` 1, and `Status(n)` is `n` for 0 through 255; any other `n` traps. The named variants from `SeriousFailure` (2) to `FileSizeExceeded` (153) have fixed statuses ([Modules](Modules.md#program-entry)). The built-in `SysIo` and `Test` modules are retired, and importing either is an error that names its replacement.
 - An instance field without an initializer starts uninitialized, and reading it before a store faults. Static fields follow the preparation and first-use rules in [Static initialization](Types.md#static-initialization). Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle.md).
+- In an NVR 1.5 image with a `TRNS` table, live frames of every task count toward `--max-heap-cells` (one cell per frame plus one per slot), as do task records and open scopes; `--max-frames` bounds each task's depth. This settles the frame-storage decision by adding a bound rather than leaving task frames unbounded ([Concurrency, section 10.3](Concurrency.md#103-limits)). Images without tasks keep their accounting.
 - `Console.print_line` traps with reason 3 when the write fails, and a failed `Std.Test` assertion is a message trap with reason 3.
 
 ## Examples
@@ -66,7 +68,8 @@ These remain open. The compiler rejects or does not offer the affected construct
 | `guide/core.nra`, `types/overlay.nra`, `types/classes.nra`, `types/collections.nra`, `types/polymorphism.nra` | Libraries. Test drivers in `tests/backend/examples` import them, compile, and run. |
 | `types/overloads.nra` | Runnable example of function and constructor overloads, object casts, and a primitive companion call. |
 | `types/primitive-references.nra` | Library example of a constructor-bound reference field and a reference parameter. |
-| `guide/errors.nra` | A library that reads a count from a file with `Std.Fs` and `Std.Core.Int32.parse` and returns a `Result`; `tests/backend/examples/errors-driver.nra` runs it without the file capability. |
+| `guide/errors.nra` | A library that reads a count from a file with `Std.Fs` and `Std.Core.Int32.parse` and returns a `Result`; `tests/backend/examples/errors-driver.nra` runs it with `--deny-fs`. |
 | `guide/resources.nra` | Top-level statements; runs with the test driver `tests/backend/examples/resources-driver.nra`, built together with it. |
-| `foreign/native.nra` | Compiles and runs with `--allow-native`: `strlen` through `Std.DynamicForeign` and `qsort` with an upcall through `import:c("stdlib.h")`. Not run by the test suite, which covers the same calls in `tests/stdlib/dynamic-foreign` and `tests/c-import`. |
+| `foreign/native.nra` | Compiles and runs with native code granted, which is the default: `strlen` through `Std.DynamicForeign` and `qsort` with an upcall through `import:c("stdlib.h")`. Not run by the test suite, which covers the same calls in `tests/stdlib/dynamic-foreign` and `tests/c-import`. |
+| `concurrency/service.nra` | Compiles and runs with the default capabilities: state owned by a task behind a channel, a cancellable search, and a table behind a `Guarded` handle. `backend-cli` builds and runs it. |
 | `testing/math-tests.nra` | Tests with `Std.Test`; `neura test -I examples/guide examples/testing/math-tests.nra` passes. |

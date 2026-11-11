@@ -1,0 +1,45 @@
+// A wide fan-out and a deep chain: up to 12 and 9 tasks can be live at once
+// (the root included), so a lower task limit stops the run at a spawn,
+// before that spawn changes anything.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let leaf = func(label: int) -> int {
+    let total = 0;
+    for (let i: int = 0; i < 3; i++) {
+        total = total + label;
+    }
+    return total;
+};
+
+let wide = func(width: int) -> int {
+    let sum = 0;
+    scope {
+        let first = spawn leaf(1);
+        let second = spawn leaf(2);
+        let third = spawn leaf(3);
+        for (let i: int = 0; i < width; i++) {
+            spawn leaf(i);
+        }
+        sum = first.join() + second.join() + third.join();
+    }
+    return sum;
+};
+
+let chain = func(depth: int) -> int {
+    if (depth == 0) {
+        return 0;
+    }
+    scope {
+        let next = spawn chain(depth - 1);
+        return next.join() + 1;
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        console.print_line("wide " + wide(8).to_string());
+        console.print_line("chain " + chain(8).to_string());
+        return program.ExitCode.Ok;
+    };
+);
