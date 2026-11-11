@@ -198,6 +198,25 @@ bool checked_multiply(std::int64_t a, std::int64_t b, std::int64_t& result) {
     return true;
 }
 
+// Whether a * b or a + b falls outside int64; otherwise `result` holds it.
+// The compiler builtins decide exactly what checked_multiply and checked_add
+// decide: whether the true result is representable.
+bool multiply_overflows(std::int64_t a, std::int64_t b, std::int64_t& result) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_mul_overflow(a, b, &result);
+#else
+    return !checked_multiply(a, b, result);
+#endif
+}
+
+bool add_overflows(std::int64_t a, std::int64_t b, std::int64_t& result) {
+#if defined(__GNUC__) || defined(__clang__)
+    return __builtin_add_overflow(a, b, &result);
+#else
+    return !checked_add(a, b, result);
+#endif
+}
+
 std::uint64_t mask(unsigned width) {
     return width >= 64 ? ~std::uint64_t{0} : (std::uint64_t{1} << width) - 1;
 }
@@ -210,19 +229,47 @@ void validate_utf8_arguments(std::span<const std::string> arguments) {
     }
 }
 
-std::optional<std::size_t> evaluate_nodes(const nvr::Graph& graph, std::span<std::int64_t> wires) {
+// The two kernels of the reference evaluator. Both visit nodes in order and
+// each node's edges in stored order, add each product to the running sum, and
+// stop at the first product or partial sum outside int64, returning that
+// node before its activation is written. They differ only in speed:
+//
+// - Sparse skips a zero wire with a branch before multiplying, which pays
+//   off when nearly every wire is zero, as in most integer circuits.
+// - Dense multiplies every edge without a data-dependent branch, which pays
+//   off when zeros are mixed with other values, as in float circuits, where
+//   the branch above mispredicts.
+//
+// A zero wire contributes a zero product, which never overflows and leaves
+// the sum unchanged, so skipping it changes nothing but the time taken.
+// `zeros`, when given, counts the edges whose wire is zero.
+template <bool Sparse, bool Count>
+std::optional<std::size_t> evaluate_kernel(const nvr::Graph& graph, std::span<std::int64_t> wires,
+                                           std::uint64_t* zeros = nullptr) {
     for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
         const auto& node = graph.nodes[n];
         std::int64_t sum = node.bias;
         for (const auto& edge : node.edges) {
             std::int64_t product = 0;
-            if (!checked_multiply(wires[edge.source], edge.weight, product) || !checked_add(sum, product, sum)) {
-                return n;
+            if constexpr (Count) *zeros += wires[edge.source] == 0;
+            if constexpr (Sparse) {
+                // checked_multiply returns at once for a zero operand.
+                if (!checked_multiply(wires[edge.source], edge.weight, product) || !checked_add(sum, product, sum)) {
+                    return n;
+                }
+            } else {
+                if (multiply_overflows(wires[edge.source], edge.weight, product) || add_overflows(sum, product, sum)) {
+                    return n;
+                }
             }
         }
         wires[graph.input_lanes + n] = node.activation == nvr::Activation::Relu ? std::max<std::int64_t>(0, sum) : sum;
     }
     return std::nullopt;
+}
+
+std::optional<std::size_t> evaluate_nodes(const nvr::Graph& graph, std::span<std::int64_t> wires) {
+    return evaluate_kernel<true, false>(graph, wires);
 }
 
 std::span<std::int64_t> lanes(std::vector<std::int64_t>& storage, std::size_t count) {
@@ -487,16 +534,171 @@ private:
         std::uint64_t identity = 0;
     };
 
-    struct Frame {
+    // The live heap entries by handle. Handles count up from one and are
+    // never reused, so a two-level table of pages indexes them directly: a
+    // page is allocated when its first handle is assigned and released once
+    // every handle it can hold has been assigned and freed. Entries live in
+    // a pool and keep their address while live, as nodes of a map would.
+    class HeapTable {
+    public:
+        HeapEntry* find(std::uint64_t handle) const {
+            const auto page = handle >> page_bits;
+            if (page >= pages_.size() || !pages_[page]) return nullptr;
+            return pages_[page]->entries[handle & page_mask];
+        }
+
+        // Stores the entry of a handle above every handle stored before.
+        void insert(std::uint64_t handle, HeapEntry&& entry) {
+            const auto page = handle >> page_bits;
+            if (page >= pages_.size()) pages_.resize(page + 1);
+            auto& stored = pages_[page];
+            if (!stored) stored = std::make_unique<Page>();
+            auto* item = acquire();
+            *item = std::move(entry);
+            stored->entries[handle & page_mask] = item;
+            ++stored->live;
+            last_ = handle;
+        }
+
+        // Removes a stored handle.
+        void erase(std::uint64_t handle) {
+            const auto page = handle >> page_bits;
+            auto& stored = pages_[page];
+            auto& item = stored->entries[handle & page_mask];
+            release(std::exchange(item, nullptr));
+            if (--stored->live == 0 && page < ((last_ + 1) >> page_bits)) stored.reset();
+        }
+
+        // Calls `drop(handle, entry)` for each stored handle and removes the
+        // ones for which it returns true.
+        template <typename Drop>
+        void sweep(Drop&& drop) {
+            for (std::size_t page = 0; page < pages_.size(); ++page) {
+                auto& stored = pages_[page];
+                if (!stored) continue;
+                for (std::size_t index = 0; index < page_size; ++index) {
+                    auto& item = stored->entries[index];
+                    if (item && drop((static_cast<std::uint64_t>(page) << page_bits) | index, *item)) {
+                        release(std::exchange(item, nullptr));
+                        --stored->live;
+                    }
+                }
+                if (stored->live == 0 && page < ((last_ + 1) >> page_bits)) stored.reset();
+            }
+        }
+
+    private:
+        static constexpr unsigned page_bits = 8;
+        static constexpr std::size_t page_size = std::size_t{1} << page_bits;
+        static constexpr std::uint64_t page_mask = page_size - 1;
+        static constexpr std::size_t chunk_size = 256;
+
+        struct Page {
+            std::array<HeapEntry*, page_size> entries{};
+            std::size_t live = 0;
+        };
+
+        HeapEntry* acquire() {
+            if (free_.empty()) {
+                chunks_.push_back(std::make_unique<HeapEntry[]>(chunk_size));
+                auto* chunk = chunks_.back().get();
+                for (auto index = chunk_size; index-- > 0;) free_.push_back(chunk + index);
+            }
+            auto* item = free_.back();
+            free_.pop_back();
+            return item;
+        }
+
+        // Frees the entry's storage and returns it to the pool.
+        void release(HeapEntry* item) {
+            std::destroy_at(item);
+            std::construct_at(item);
+            free_.push_back(item);
+        }
+
+        std::vector<std::unique_ptr<Page>> pages_;
+        std::vector<std::unique_ptr<HeapEntry[]>> chunks_;
+        std::vector<HeapEntry*> free_;
+        std::uint64_t last_ = 0;
+    };
+
+    struct FrameHeader {
         std::uint32_t function = 0;
         std::uint32_t block = 0;
-        std::vector<std::uint64_t> slots;
-        std::vector<std::uint8_t> initialized;
         // Where the caller receives the result.
         std::uint32_t return_slot = nvr::absent;
         std::uint32_t return_block = 0;
+        // The frame's first slot in its stack's slot arena.
+        std::size_t base = 0;
         // The first frame of a callback: its return ends invoke_callback.
         bool boundary = false;
+    };
+
+    // One frame of a FrameStack: its header and its slots. Valid until a
+    // frame is pushed onto or popped from that stack. Moving the stack
+    // keeps it valid, as moving a vector keeps its elements in place.
+    struct Frame {
+        std::uint32_t& function;
+        std::uint32_t& block;
+        const std::uint32_t& return_slot;
+        const std::uint32_t& return_block;
+        bool& boundary;
+        std::uint64_t* slots;
+        std::uint8_t* initialized;
+    };
+
+    // The frames of one task, outermost first. Every frame's slots and
+    // initialized flags live in two arenas, one frame after another, so a
+    // call or return only moves the end of the arenas.
+    class FrameStack {
+    public:
+        std::size_t size() const { return headers_.size(); }
+        bool empty() const { return headers_.empty(); }
+        const FrameHeader& header(std::size_t index) const { return headers_[index]; }
+
+        Frame operator[](std::size_t index) {
+            auto& header = headers_[index];
+            return Frame{header.function, header.block, header.return_slot, header.return_block, header.boundary,
+                         slots_.data() + header.base, initialized_.data() + header.base};
+        }
+        Frame back() { return (*this)[headers_.size() - 1]; }
+        // Slot values and flags of a frame, for reading in const contexts.
+        const std::uint64_t* slots(std::size_t index) const { return slots_.data() + headers_[index].base; }
+        const std::uint8_t* initialized(std::size_t index) const {
+            return initialized_.data() + headers_[index].base;
+        }
+
+        // Pushes a frame of `slot_count` slots whose first slots hold the
+        // arguments. The other slots are zero and uninitialized.
+        void push(std::uint32_t function, std::size_t slot_count, std::span<const std::uint64_t> arguments,
+                  std::uint32_t return_slot, std::uint32_t return_block) {
+            const auto base = slots_.size();
+            headers_.push_back(FrameHeader{function, 0, return_slot, return_block, base, false});
+            // Shrinking never frees, so growth past a popped frame only
+            // value-initializes: every new slot is zero and uninitialized.
+            slots_.resize(base + slot_count);
+            initialized_.resize(base + slot_count);
+            std::ranges::copy(arguments, slots_.begin() + static_cast<std::ptrdiff_t>(base));
+            std::fill_n(initialized_.begin() + static_cast<std::ptrdiff_t>(base), arguments.size(), std::uint8_t{1});
+        }
+
+        void pop_back() {
+            const auto base = headers_.back().base;
+            headers_.pop_back();
+            slots_.resize(base);
+            initialized_.resize(base);
+        }
+
+        void clear() {
+            headers_.clear();
+            slots_.clear();
+            initialized_.clear();
+        }
+
+    private:
+        std::vector<FrameHeader> headers_;
+        std::vector<std::uint64_t> slots_;
+        std::vector<std::uint8_t> initialized_;
     };
 
     enum class TaskState {
@@ -566,7 +768,7 @@ private:
         std::uint32_t result_type = nvr::absent;
         std::uint64_t result = 0;
         TaskState state = TaskState::Running;
-        std::vector<Frame> frames;
+        FrameStack frames;
         std::vector<TaskScope> scopes;
         // What the task waits for: the task of a join, the channel or timer
         // object, or the sequence number of a host request.
@@ -747,7 +949,7 @@ private:
 
     // Writes a host response into the frame that waits for it and moves that
     // frame to the continuation the response selects.
-    void apply_completion(std::vector<Frame>& frames, const Pending& pending, const HostCompletion& completion) {
+    void apply_completion(FrameStack& frames, const Pending& pending, const HostCompletion& completion) {
         const auto& import = image_.imports[pending.import];
         if (completion.exit_status) {
             const auto status = *completion.exit_status;
@@ -771,7 +973,7 @@ private:
             std::vector<std::uint64_t> temporary_roots;
             auto remaining = limits_.max_heap_cells;
             const auto value = host_to_value(completion.value, type, temporary_roots, remaining, 0);
-            auto& frame = frames.back();
+            auto frame = frames.back();
             frame.slots[slot] = value;
             frame.initialized[slot] = 1;
         }
@@ -870,10 +1072,11 @@ private:
             }
         }
         if (!frames_.empty()) {
-            trap.function = frames_.back().function;
-            trap.block = frames_.back().block;
-            for (auto frame = frames_.rbegin() + 1; frame != frames_.rend(); ++frame) {
-                trap.callers.emplace_back(frame->function, frame->block);
+            const auto top = frames_.size() - 1;
+            trap.function = frames_.header(top).function;
+            trap.block = frames_.header(top).block;
+            for (auto index = top; index-- > 0;) {
+                trap.callers.emplace_back(frames_.header(index).function, frames_.header(index).block);
             }
         }
         throw Fault{std::move(trap)};
@@ -914,11 +1117,11 @@ private:
         if (handle == 0) {
             return;
         }
-        const auto found = heap_.find(handle);
+        auto* const found = heap_.find(handle);
         // Explicit destruction can leave stale aliases in typed roots and
         // fields. They keep their invalid-handle behavior when used.
-        if (found != heap_.end() && !found->second.marked) {
-            auto& entry = found->second;
+        if (found != nullptr && !found->marked) {
+            auto& entry = *found;
             entry.marked = true;
             if (!entry.cells.empty()) {
                 mark_work_.push_back(&entry);
@@ -955,11 +1158,14 @@ private:
         }
     }
 
-    void mark_frames(const std::vector<Frame>& frames) {
-        for (const auto& frame : frames) {
-            const auto& slots = image_.functions[frame.function].frame_types;
-            for (const auto slot : trace_plan(frame_traces_, frame.function, slots)) {
-                if (frame.initialized[slot]) mark(frame.slots[slot]);
+    void mark_frames(const FrameStack& frames) {
+        for (std::size_t index = 0; index < frames.size(); ++index) {
+            const auto function = frames.header(index).function;
+            const auto* values = frames.slots(index);
+            const auto* initialized = frames.initialized(index);
+            const auto& slots = image_.functions[function].frame_types;
+            for (const auto slot : trace_plan(frame_traces_, function, slots)) {
+                if (initialized[slot]) mark(values[slot]);
             }
         }
     }
@@ -1010,21 +1216,17 @@ private:
             mark_work_.pop_back();
             mark_children(item);
         }
-        for (auto it = heap_.begin(); it != heap_.end();) {
-            if (it->second.marked) {
-                it->second.marked = false;
-                ++it;
-            } else {
-                if (scheduler_) release_scheduler_object(it->first);
-                remove_live_cells(entry_cells(it->second));
-                it = heap_.erase(it);
+        // The sweep runs in handle order. Nothing it does depends on the
+        // order: releasing scheduler records and subtracting cells commute.
+        heap_.sweep([&](std::uint64_t handle, HeapEntry& item) {
+            if (item.marked) {
+                item.marked = false;
+                return false;
             }
-        }
-        // Drop large bucket arrays after a substantial decrease in live
-        // entries, without churning the table during steady allocation.
-        if (heap_.bucket_count() > 256 && heap_.size() < heap_.bucket_count() / 4) {
-            heap_.reserve(heap_.size());
-        }
+            if (scheduler_) release_scheduler_object(handle);
+            remove_live_cells(entry_cells(item));
+            return true;
+        });
         const auto headroom = limits_.max_heap_cells - live_cells_;
         next_collection_ = live_cells_ + std::min(headroom, std::max<std::uint64_t>(256, live_cells_ / 2));
     }
@@ -1063,18 +1265,18 @@ private:
 
     std::uint64_t insert_allocation(HeapEntry entry, std::uint64_t cells) {
         const auto handle = last_handle_ + 1;
-        heap_.emplace(handle, std::move(entry));
+        heap_.insert(handle, std::move(entry));
         last_handle_ = handle;
         add_live_cells(cells);
         return handle;
     }
 
     HeapEntry& entry(std::uint64_t handle) {
-        const auto found = heap_.find(handle);
-        if (found == heap_.end()) {
+        auto* const found = heap_.find(handle);
+        if (found == nullptr) {
             fault(TrapKind::InvalidHandle, "handle " + std::to_string(handle));
         }
-        return found->second;
+        return *found;
     }
 
     // The entry for a reference whose static type is `type_index`.
@@ -1179,20 +1381,9 @@ private:
         }
     }
 
-    Frame make_frame(std::uint32_t function, std::span<const std::uint64_t> arguments,
-                     std::uint32_t return_slot, std::uint32_t return_block) const {
-        const auto& callee = image_.functions[function];
-        Frame frame;
-        frame.function = function;
-        frame.slots.assign(callee.frame_types.size(), 0);
-        frame.initialized.assign(callee.frame_types.size(), 0);
-        for (std::size_t i = 0; i < arguments.size(); ++i) {
-            frame.slots[i] = arguments[i];
-            frame.initialized[i] = 1;
-        }
-        frame.return_slot = return_slot;
-        frame.return_block = return_block;
-        return frame;
+    void make_frame(FrameStack& frames, std::uint32_t function, std::span<const std::uint64_t> arguments,
+                    std::uint32_t return_slot, std::uint32_t return_block) const {
+        frames.push(function, image_.functions[function].frame_types.size(), arguments, return_slot, return_block);
     }
 
     std::uint64_t frame_cells(std::uint32_t function) const {
@@ -1215,7 +1406,7 @@ private:
             fault(TrapKind::FrameLimit, "calling function " + std::to_string(function));
         }
         if (scheduler_) ensure_heap_cells(frame_cells(function), "task frame of ", argument_roots(function, arguments));
-        frames_.push_back(make_frame(function, arguments, return_slot, return_block));
+        make_frame(frames_, function, arguments, return_slot, return_block);
         if (scheduler_) add_live_cells(frame_cells(function));
     }
 
@@ -1233,7 +1424,7 @@ private:
         return "function " + std::to_string(function) + " block " + std::to_string(block);
     }
 
-    static void write_result(Frame& frame, std::uint32_t slot, std::uint64_t value) {
+    static void write_result(const Frame& frame, std::uint32_t slot, std::uint64_t value) {
         if (slot != nvr::absent) {
             frame.slots[slot] = value;
             frame.initialized[slot] = 1;
@@ -1299,7 +1490,7 @@ private:
     }
 
     // The frames of a task: the machine's own while the task runs.
-    std::vector<Frame>& frames_of(std::uint64_t id, Task& task) {
+    FrameStack& frames_of(std::uint64_t id, Task& task) {
         return task.state == TaskState::Running && id == scheduler_->current ? frames_ : task.frames;
     }
 
@@ -2156,7 +2347,7 @@ private:
         using Outcome = nvr::SchedulerOutcome;
         const auto self = scheduler_->current;
         auto& task = current_task();
-        auto& frame = frames_.back();
+        auto frame = frames_.back();
         const auto block = frame.block;
         frame.block = exit.resume;
         const auto outcome = [&](Outcome value) {
@@ -2196,7 +2387,7 @@ private:
             child.spawn_function = frame.function;
             child.spawn_block = block;
             child.result_type = image_.functions[exit.target].result_type;
-            child.frames.push_back(make_frame(exit.target, arguments, nvr::absent, 0));
+            make_frame(child.frames, exit.target, arguments, nvr::absent, 0);
             child.state = TaskState::Runnable;
             child.since_tick = scheduler_->ticks;
             child.unjoinable = exit.result_slot == nvr::absent;
@@ -2484,7 +2675,7 @@ private:
         set_state(child, TaskState::Finished);
         emit(TaskEvent::Kind::Finish, id);
         // A finished task keeps only what a join needs.
-        std::vector<Frame>().swap(child.frames);
+        child.frames = FrameStack{};
         std::vector<TaskScope>().swap(child.scopes);
         child.stashed = false;
         --scheduler_->live;
@@ -2568,6 +2759,70 @@ private:
         }
     }
 
+    // What a step needs from a block beyond the image's own fields, decoded
+    // the first time the block runs: the selector width and each graph
+    // input's lane count, which starts at `first_input` in input_lanes_.
+    struct BlockPlan {
+        bool decoded = false;
+        std::uint32_t selector_lanes = 0;
+        std::size_t first_input = 0;
+    };
+
+    const BlockPlan& block_plan(std::uint32_t function, std::uint32_t block) {
+        if (function_plans_.empty()) {
+            function_plans_.reserve(image_.functions.size() + 1);
+            std::size_t total = 0;
+            for (const auto& each : image_.functions) {
+                function_plans_.push_back(total);
+                total += each.blocks.size();
+            }
+            function_plans_.push_back(total);
+            block_plans_.resize(total);
+        }
+        auto& plan = block_plans_[function_plans_[function] + block];
+        if (!plan.decoded) {
+            const auto& decoded = image_.functions[function].blocks[block];
+            plan.selector_lanes = decoded.exits.size() == 1 ? 0 : nvr::selector_lanes(decoded.exits.size());
+            plan.first_input = input_lanes_.size();
+            for (const auto& input : decoded.inputs) {
+                input_lanes_.push_back(static_cast<std::uint8_t>(nvr::lane_count(type(input.type))));
+            }
+            // commit_step resolves an exit's values into fixed buffers.
+            for (const auto& exit : decoded.exits) {
+                if (assignment_scratch_.capacity() < exit.assignments.size()) {
+                    assignment_scratch_.reserve(exit.assignments.size());
+                }
+                if (argument_scratch_.capacity() < exit.arguments.size()) {
+                    argument_scratch_.reserve(exit.arguments.size());
+                }
+            }
+            plan.decoded = true;
+        }
+        return plan;
+    }
+
+    // Runs the reference evaluator on graph `index`. Its first evaluations
+    // use the sparse kernel and count zero wires; from then on the graph
+    // keeps the kernel that suits the share of zero wires seen. Either
+    // kernel gives the same wires and the same failing node, so the choice
+    // affects only the time taken.
+    std::optional<std::size_t> evaluate_reference(std::uint32_t index, std::span<std::int64_t> wires) {
+        constexpr std::uint32_t probes = 8;
+        if (graph_kernels_.empty()) graph_kernels_.resize(image_.graphs.size());
+        auto& kernel = graph_kernels_[index];
+        const auto& graph = image_.graphs[index];
+        if (kernel.probes == probes) {
+            return kernel.dense ? evaluate_kernel<false, false>(graph, wires) : evaluate_kernel<true, false>(graph, wires);
+        }
+        if (kernel.probes++ == 0) {
+            for (const auto& node : graph.nodes) kernel.edges += node.edges.size();
+        }
+        const auto failed = evaluate_kernel<true, true>(graph, wires, &kernel.zeros);
+        // Sparse wins when at least nine wires in ten are zero.
+        if (kernel.probes == probes) kernel.dense = kernel.zeros * 10 < kernel.edges * probes * 9;
+        return failed;
+    }
+
     void require_initialized(const Frame& frame, std::uint32_t slot) const {
         if (!frame.initialized[slot]) fault(TrapKind::UninitializedSlot, "slot " + std::to_string(slot));
     }
@@ -2601,11 +2856,11 @@ private:
         return 0;
     }
 
-    std::uint32_t select(const nvr::Block& block) {
+    std::uint32_t select(const nvr::Block& block, const BlockPlan& plan) {
         if (block.exits.size() == 1) {
             return 0;
         }
-        const auto lanes = nvr::selector_lanes(block.exits.size());
+        const auto lanes = plan.selector_lanes;
         std::uint32_t index = 0;
         for (unsigned i = 0; i < lanes; ++i) {
             const auto lane = outputs_[block.selector_start + i];
@@ -2650,8 +2905,10 @@ private:
     }
 
     template <bool Prepared = false>
-    void write_inputs(const nvr::Block& block, const Frame& frame, std::span<std::int64_t> inputs) {
+    void write_inputs(const nvr::Block& block, const BlockPlan& plan, const Frame& frame,
+                      std::span<std::int64_t> inputs) {
         std::size_t lane = 0;
+        const auto* counts = input_lanes_.data() + plan.first_input;
         for (const auto& input : block.inputs) {
             std::uint64_t value;
             if constexpr (Prepared) {
@@ -2661,7 +2918,7 @@ private:
             } else {
                 value = read(input, frame);
             }
-            const auto count = nvr::lane_count(type(input.type));
+            const unsigned count = *counts++;
             for (unsigned bit = 0; bit < count; ++bit) {
                 inputs[lane++] = static_cast<std::int64_t>((value >> bit) & 1U);
             }
@@ -2673,7 +2930,7 @@ private:
             fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
         }
         ++steps_;
-        const auto& frame = frames_.back();
+        const auto frame = frames_.back();
         if (scheduler_ && limits_.profile) ++current_task().steps;
         if (limits_.profile) {
             if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
@@ -2681,6 +2938,7 @@ private:
         }
         const auto& function = image_.functions[frame.function];
         const auto& block = function.blocks[frame.block];
+        const auto& plan = block_plan(frame.function, frame.block);
         if (defer_inputs) {
             // Validated graph inputs can only read constants or slots. Check
             // every read that can trap before offering this step to a device.
@@ -2691,22 +2949,24 @@ private:
             }
         } else {
             const auto count = image_.graphs[block.graph].input_lanes;
-            write_inputs(block, frame, lanes(inputs_, count));
+            write_inputs(block, plan, frame, lanes(inputs_, count));
         }
         active_block_ = &block;
+        active_plan_ = &plan;
     }
 
     std::span<const std::int64_t> materialize_inputs() {
         const auto count = image_.graphs[active_block_->graph].input_lanes;
         auto inputs = lanes(inputs_, count);
-        write_inputs<true>(*active_block_, frames_.back(), inputs);
+        write_inputs<true>(*active_block_, *active_plan_, frames_.back(), inputs);
         return inputs;
     }
 
     std::optional<Event> finish_active_step() {
         const auto& block = *std::exchange(active_block_, nullptr);
+        const auto& plan = *active_plan_;
         try {
-            auto event = commit_step(block);
+            auto event = commit_step(block, plan);
             // A callback's return leaves its suspended caller's frames in
             // place and only completes the callback, not the enclosing run.
             if (event && event->kind == Event::Kind::Completed && frames_.empty()) set_finished(*event);
@@ -2719,15 +2979,18 @@ private:
     std::optional<Event> finish_reference_step(std::vector<std::int64_t>& scratch, bool deferred_inputs) {
         const auto& graph = image_.graphs[active_block_->graph];
         auto outputs = lanes(outputs_, graph.outputs.size());
-        std::optional<std::size_t> failed;
+        // Every graph wire is overwritten before it is read. Keep the scratch
+        // at its largest size when alternating between different graphs.
+        auto wires = lanes(scratch, std::size_t{graph.input_lanes} + graph.nodes.size());
         if (deferred_inputs) {
-            auto wires = lanes(scratch, std::size_t{graph.input_lanes} + graph.nodes.size());
-            write_inputs<true>(*active_block_, frames_.back(), wires.first(graph.input_lanes));
-            failed = evaluate_loaded_outputs(graph, wires, outputs);
+            write_inputs<true>(*active_block_, *active_plan_, frames_.back(), wires.first(graph.input_lanes));
         } else {
-            failed = evaluate_outputs(graph, std::span(inputs_).first(graph.input_lanes), scratch, outputs);
+            std::ranges::copy(std::span(inputs_).first(graph.input_lanes), wires.begin());
         }
-        if (failed) return fail_step(*failed);
+        if (const auto failed = evaluate_reference(active_block_->graph, wires)) return fail_step(*failed);
+        for (std::size_t i = 0; i < graph.outputs.size(); ++i) {
+            outputs[i] = wires[graph.outputs[i]];
+        }
         return finish_active_step();
     }
 
@@ -2743,18 +3006,21 @@ private:
         return finish_reference_step(scratch, false);
     }
 
-    std::optional<Event> commit_step(const nvr::Block& block) {
-        auto& frame = frames_.back();
-        const auto& exit = block.exits[select(block)];
+    std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
+        auto frame = frames_.back();
+        const auto& exit = block.exits[select(block, plan)];
 
         // Resolve every value against the pre-transition state, then commit.
-        std::vector<std::pair<std::uint32_t, std::uint64_t>> assignments;
-        assignments.reserve(exit.assignments.size());
+        // The buffers are reused: nothing a step does starts another step
+        // of this state before the step ends, and block_plan has reserved
+        // room for the block's widest exit.
+        auto& assignments = assignment_scratch_;
+        assignments.clear();
         for (const auto& assignment : exit.assignments) {
             assignments.emplace_back(assignment.slot, read(assignment.value, frame));
         }
-        std::vector<std::uint64_t> arguments;
-        arguments.reserve(exit.arguments.size());
+        auto& arguments = argument_scratch_;
+        arguments.clear();
         for (const auto& argument : exit.arguments) {
             arguments.push_back(read(argument, frame));
         }
@@ -2807,7 +3073,7 @@ private:
                 event.result = result;
                 return event;
             }
-            auto& caller = frames_.back();
+            auto caller = frames_.back();
             if (return_slot != nvr::absent) {
                 caller.slots[return_slot] = result;
                 caller.initialized[return_slot] = 1;
@@ -3215,7 +3481,7 @@ private:
     bool started_ = false;
     // Handles are monotonically assigned even as storage for dead entries
     // is reclaimed. The table only holds entries that have not been freed.
-    std::unordered_map<std::uint64_t, HeapEntry> heap_;
+    HeapTable heap_;
     // Build scanning plans only when a layout or frame participates in GC.
     TracePlans layout_traces_;
     TracePlans frame_traces_;
@@ -3232,17 +3498,32 @@ private:
     std::vector<std::uint64_t> const_values_;
     std::vector<std::uint64_t> globals_;
     std::vector<std::uint8_t> global_initialized_;
-    std::vector<Frame> frames_;
+    FrameStack frames_;
     std::unique_ptr<Scheduler> scheduler_;
     std::unique_ptr<Parallel> parallel_;
     // Set in the state that evaluates one parallel item.
     const ParallelItem* item_ = nullptr;
     // Function names for task dumps, when the image carries them.
     std::optional<nvr::Names> names_;
-    std::string frame_text(const Frame& frame) const;
+    std::string frame_text(const FrameHeader& frame) const;
     std::string wait_text(std::uint64_t id, const Task& task) const;
     std::string cancellation_text(const Task& task) const;
     const nvr::Block* active_block_ = nullptr;
+    const BlockPlan* active_plan_ = nullptr;
+    // Decoded blocks: the first plan of each function's blocks, the plans,
+    // and the input lane counts they index.
+    std::vector<std::size_t> function_plans_;
+    std::vector<BlockPlan> block_plans_;
+    std::vector<std::uint8_t> input_lanes_;
+    struct GraphKernel {
+        std::uint32_t probes = 0;
+        bool dense = false;
+        std::uint64_t edges = 0;
+        std::uint64_t zeros = 0;
+    };
+    std::vector<GraphKernel> graph_kernels_;
+    std::vector<std::pair<std::uint32_t, std::uint64_t>> assignment_scratch_;
+    std::vector<std::uint64_t> argument_scratch_;
     std::vector<std::int64_t> inputs_;
     std::vector<std::int64_t> outputs_;
     std::vector<std::int64_t> wires_;
@@ -3252,7 +3533,7 @@ private:
     std::uint64_t steps_ = 0;
 };
 
-std::string Execution::State::frame_text(const Frame& frame) const {
+std::string Execution::State::frame_text(const FrameHeader& frame) const {
     std::string text;
     if (names_ && frame.function < names_->functions.size() && !names_->functions[frame.function].empty()) {
         text = names_->functions[frame.function] + " at ";
@@ -3343,7 +3624,7 @@ std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
     for (const auto& [id, task] : scheduler_->tasks) {
         if (id != 0) children[task.parent].push_back(id);
     }
-    const auto stack_of = [&](std::uint64_t id, const Task& task) -> const std::vector<Frame>& {
+    const auto stack_of = [&](std::uint64_t id, const Task& task) -> const FrameStack& {
         return id == scheduler_->current && task.state == TaskState::Running ? frames_ : task.frames;
     };
     if (format == TaskDumpFormat::Json) {
@@ -3379,9 +3660,9 @@ std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
             }
             out += ",\"stack\":[";
             const auto& stack = stack_of(id, task);
-            for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
-                if (frame != stack.rbegin()) out += ',';
-                out += quoted(frame_text(*frame));
+            for (auto index = stack.size(); index-- > 0;) {
+                if (index + 1 != stack.size()) out += ',';
+                out += quoted(frame_text(stack.header(index)));
             }
             out += "]}";
         }
@@ -3401,8 +3682,8 @@ std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
                        : "spawned at " + task_location(task.spawn_function, task.spawn_block);
         out += "  " + wait_text(id, task) + '\n';
         const auto& stack = stack_of(id, task);
-        for (auto frame = stack.rbegin(); frame != stack.rend(); ++frame) {
-            out += indent + "    " + frame_text(*frame) + '\n';
+        for (auto index = stack.size(); index-- > 0;) {
+            out += indent + "    " + frame_text(stack.header(index)) + '\n';
         }
         if (const auto cancellation = cancellation_text(task); !cancellation.empty()) {
             out += indent + "    " + cancellation + '\n';
