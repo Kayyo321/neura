@@ -125,7 +125,7 @@ Each registered attribute has a stable identifier, the symbol kinds that may car
 | 3 | `accessor.set` | field | no | `s` | The field's hidden setter function |
 | 4 | `accessor.of` | function | no | `[s u1]` | On a hidden accessor function: the field it serves, and 0 for a getter or 1 for a setter |
 | 5 | `binding.last` | local, field | no | `b` | A `last` binding. True when it is declared without an initializer |
-| 6 | `class.anonymous` | class | no | `[b t p]` | An anonymous class: whether it is structural (fields only), its canonical structural signature, and the occurrence's span |
+| 6 | `class.anonymous` | class | no | `[b t p]` | An anonymous class: whether it is structural (fields only), its name (its canonical structural signature, such as `class(x: int32)`), and the occurrence's span, or for a structural class the start of its generated file ([Anonymous classes](#anonymous-classes)) |
 | 7 | `kernel.binding` | function | no | `[t u4294967295]` | A function implemented by a built-in C kernel: the kernel's name and ABI version |
 | 8 | `inline.directive` | function | no | `u2` | The optimizer's inlining directive: 0 automatic, 1 always, 2 never |
 | 9 | `synchronized` | function | no | `b` | A method that runs under its instance's guard |
@@ -143,6 +143,12 @@ The reader rejects an unknown identifier, an unknown value kind, a bool other th
 Linking a prebuilt module renumbers the symbol references, types, and span files in attributes, as it does for the symbol's own fields. Two definitions coalesce only when their attributes are equal. As with the 1.6 linkage fields, an embedded standard library definition without attributes still links against an installed one that has them. Specialization copies the attributes of every symbol it copies. A reference to a member of the generic class then names the instance's copy, which specialization creates if needed. A reference to a parameter or local of the copied function names its copy.
 
 No registered attribute changes the executable image. A build from source and a build from the `.nir` file it wrote produce the same image bytes. Adding attributes to a program does not change its image.
+
+#### Anonymous classes
+
+The frontend writes an [anonymous class](lang/Types.md#anonymous-classes) as an ordinary class symbol with `class.anonymous`. A class written with methods, a constructor, a base, or interfaces belongs to the module or file that encloses the body, is named `class(<fields>)@<file name>:<line>:<column>`, and its attribute holds false and the span of the body.
+
+A structural (fields-only) class is identified by its fields, wherever they are written, so it belongs to no source file. The frontend declares it in a generated file symbol of its own, with no library path, named `<anonymous class H>`, where `H` is 16 lowercase hexadecimal digits of the 64-bit FNV-1a hash of a canonical description of its fields: their order, names, and types, with a declared class or enum identified by the path or library path of its file and its qualified name, never by a symbol number. The file has the class as its only child, and the class's fields as the class's children, in order. Every span of the class, its fields, and its attribute is line 1, column 1, offset 0, length 0 of the generated file, and the class is named `class(<name>: <type>, ...)`. A program and the prebuilt modules it links therefore declare the same file for the same fields, and linking coalesces it like any file that two artifacts share. Tools that label source files skip a file whose name begins with `<`.
 
 #### Deferred initialization
 

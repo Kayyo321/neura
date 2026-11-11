@@ -273,6 +273,7 @@ private:
     void mark_binding_annotation(const TypeSyntax& syntax);
     IrType anonymous_class(const TypeSyntax& syntax, const Context& context);
     std::string structural_key(SymbolId cls) const;
+    std::string canonical_type(const IrType& type) const;
     bool structural_class(const IrType& type) const;
     IrNode construct(const Expr& expr, Context& context, const IrType* expected);
     IrNode construct_structural(const Expr& expr, Context& context, const IrType& object,
@@ -1124,22 +1125,14 @@ bool Lowering::assignable(const IrType& actual, const IrType& expected) const {
 void Lowering::require_type(const IrType& actual, const IrType& expected, const Span& span,
                             const ExpectedOrigin* origin) const {
     if (assignable(actual, expected)) return;
-    // Two separately compiled modules can each write the same fields.
-    const bool copies = structural_class(actual) && structural_class(expected) && describe(actual) == describe(expected);
-    auto error = copies
-        ? Diagnostic(span, "two separately compiled copies of " + describe(expected) + " are different types")
-              .with_code("E0534").label("this value has the other module's copy")
-              .note("each separately compiled module that writes a fields-only anonymous class has its own copy "
-                    "of it")
-              .help("declare the shape as a named class in one module and use that class in both")
-        : Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
-              .label("expected " + describe(expected) + ", found " + describe(actual));
+    auto error = Diagnostic(span, "expected " + describe(expected) + ", got " + describe(actual)).with_code("E0403")
+        .label("expected " + describe(expected) + ", found " + describe(actual));
     if (origin && !origin->span.file.empty()) error.label(origin->span, origin->text);
     const auto distinct = [&](const IrType& type) {
         return type.kind == TypeKind::Object && type.symbol < program_.symbols.size() && !structural_class(type) &&
                has_attribute(symbol(type.symbol), AttributeId::ClassAnonymous);
     };
-    if (!copies && (distinct(actual) || distinct(expected))) {
+    if (distinct(actual) || distinct(expected)) {
         error.note("an anonymous class with methods, a constructor, a base, or interfaces is a type of its own at "
                    "each place it is written")
             .help("declare a named class and use it in both places");
@@ -4579,9 +4572,7 @@ void Lowering::seed(LinkedImports linked) {
             entries_[group].overloads.push_back(id);
     }
     // A fields-only anonymous class from a linked module is the class that
-    // the same fields written here denote. Separately compiled modules that
-    // each wrote it keep their own copies; the first one is used here, and
-    // mixing them is E0534.
+    // the same fields written here denote.
     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
         if (structural_class(symbol(id).type) && symbol(id).type.symbol == id)
             structural_classes_.emplace(structural_key(id), id);
@@ -4728,6 +4719,32 @@ bool Lowering::structural_class(const IrType& type) const {
            found->value.items.front().kind == AttributeValueKind::Bool && found->value.items.front().integer != 0;
 }
 
+std::string Lowering::canonical_type(const IrType& type) const {
+    // A type as every compilation spells it: a declared type by the identity
+    // of its file and its qualified name, never by a symbol number.
+    std::string result = std::to_string(static_cast<int>(type.kind)) + ":";
+    if (type.symbol != no_symbol && type.symbol < program_.symbols.size() &&
+        (type.kind == TypeKind::Object || type.kind == TypeKind::Enum)) {
+        std::string qualified = symbol(type.symbol).name;
+        auto owner = symbol(type.symbol).owner;
+        for (; owner != no_symbol && symbol(owner).kind != SymbolKind::File; owner = symbol(owner).owner)
+            qualified = symbol(owner).name + "." + qualified;
+        if (owner != no_symbol) {
+            const auto& file = symbol(owner);
+            result += (file.library_path.empty() ? "file " + file.name : "library " + file.library_path) + "::";
+        }
+        result += qualified;
+    } else {
+        result += type.name;
+    }
+    if (!type.arguments.empty()) {
+        result += "<";
+        for (const auto& argument : type.arguments) result += canonical_type(argument) + ",";
+        result += ">";
+    }
+    return result;
+}
+
 std::string Lowering::structural_key(SymbolId cls) const {
     std::string result;
     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
@@ -4758,7 +4775,7 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
         if (structural) {
             if (!member.type)
                 throw Diagnostic(at, "field '" + member.name + "' of a fields-only anonymous class needs a type")
-                    .with_code("E0535")
+                    .with_code("E0534")
                     .label("'" + member.name + "' has no type annotation")
                     .note("the types of its fields are what identify a fields-only anonymous class")
                     .help("write the type after the name, as in '" + member.name + ": int'");
@@ -4772,7 +4789,7 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
                              "export ", Applicability::MachineApplicable);
             if (member.constant)
                 throw Diagnostic(at, "field '" + member.name + "' of a fields-only anonymous class cannot be const")
-                    .with_code("E0536")
+                    .with_code("E0535")
                     .label("declared with 'const'")
                     .note("'new' gives the fields of a fields-only anonymous class their values after it allocates "
                           "the object, and only a class's own field initializers can give a const field its value")
@@ -4817,14 +4834,30 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
             occurrence_classes_.emplace(&body, found->second);
             return symbol(found->second).type;
         }
-        auto file = owner;
-        while (file != no_symbol && symbol(file).kind != SymbolKind::File) file = symbol(file).owner;
-        const auto cls = add(SymbolKind::Class, name, body.span, file);
+        // The class belongs to a file of its own, named after a hash of its
+        // fields, with every span at the start of that file. Every program
+        // and prebuilt module that writes these fields then declares the
+        // same file, and linking coalesces it like any shared file.
+        std::string canonical;
+        for (const auto& [member, field_type] : resolved)
+            canonical += "let " + member->name + ":" + canonical_type(field_type) + ";";
+        std::uint64_t hash = 14695981039346656037ull;
+        for (const auto byte : canonical) {
+            hash ^= static_cast<unsigned char>(byte);
+            hash *= 1099511628211ull;
+        }
+        constexpr std::string_view digits = "0123456789abcdef";
+        std::string file_name = "<anonymous class ";
+        for (int shift = 60; shift >= 0; shift -= 4) file_name += digits[(hash >> shift) & 15];
+        file_name += ">";
+        const Span at{file_name, 1, 1, 0, 0};
+        const auto file = add(SymbolKind::File, file_name, at);
+        const auto cls = add(SymbolKind::Class, name, at, file);
         symbol(cls).type = {TypeKind::Object, name, cls, {}};
         symbol(cls).base = root_class();
         name_spans_.emplace(cls, body.name_span.value_or(body.span));
         for (const auto& [member, field_type] : resolved) {
-            const auto field = add(SymbolKind::Field, member->name, member->span, cls);
+            const auto field = add(SymbolKind::Field, member->name, at, cls);
             symbol(field).type = field_type;
             symbol(field).constant = member->constant;
             symbol(field).exported = true;
@@ -4837,7 +4870,7 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
                     .label(name_span(earlier->second), "'" + member->name + "' is first declared here")
                     .help("rename one of them");
         }
-        add_attribute(symbol(cls), AttributeId::ClassAnonymous, anonymous_class_payload(true, name, body.span));
+        add_attribute(symbol(cls), AttributeId::ClassAnonymous, anonymous_class_payload(true, name, at));
         structural_classes_.emplace(std::move(key), cls);
         occurrence_classes_.emplace(&body, cls);
         return symbol(cls).type;

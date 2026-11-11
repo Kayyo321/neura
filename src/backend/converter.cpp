@@ -1333,7 +1333,9 @@ std::string source_label(const IrProgram& program, const std::string& file) {
     }
     std::optional<fs::path> root;
     for (const auto& item : program.symbols) {
-        if (item.kind != SymbolKind::File || !item.library_path.empty()) {
+        // A generated file, such as the one of an anonymous class, is no
+        // source file and has no directory.
+        if (item.kind != SymbolKind::File || !item.library_path.empty() || item.name.starts_with('<')) {
             continue;
         }
         const auto directory = fs::path(item.name).parent_path();

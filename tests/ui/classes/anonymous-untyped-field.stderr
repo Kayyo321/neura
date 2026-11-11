@@ -1,4 +1,4 @@
-error[E0535]: field 'x' of a fields-only anonymous class needs a type
+error[E0534]: field 'x' of a fields-only anonymous class needs a type
  --> $DIR/anonymous-untyped-field.nra:2:30
   |
 2 | let point: class (export let x = 0;) = new;
@@ -7,4 +7,4 @@ error[E0535]: field 'x' of a fields-only anonymous class needs a type
   = note: the types of its fields are what identify a fields-only anonymous class
   = help: write the type after the name, as in 'x: int'
 
-For more information about this error, try `neura explain E0535`.
+For more information about this error, try `neura explain E0534`.

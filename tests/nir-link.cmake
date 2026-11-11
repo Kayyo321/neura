@@ -207,8 +207,9 @@ let second = import:"changed.nir".Second;
 reject("incompatible definitions of.*shared.nra" check "${artifacts}/conflict.nra")
 
 # A fields-only anonymous class is one class across a module and the program
-# that links its artifact (Types.md, Anonymous classes). Two separately
-# compiled modules each keep a copy, and mixing the copies is E0534.
+# that links its artifact, and across modules compiled separately that write
+# the same fields (Types.md, Anonymous classes): each declares the class in
+# the same generated file, which linking coalesces.
 file(WRITE "${source}/points.nra" [=[
 let Points = module (
     export let make = func(x: int) -> class (export let x: int; export let label: string;) {
@@ -266,7 +267,61 @@ endif()
 file(WRITE "${artifacts}/points-mixed.nra" [=[
 let points = import:"points.nir".Points;
 let other = import:"other-points.nir".OtherPoints;
-let shown = points.show(other.make());
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let Mixed = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(points.show(other.make()));
+        let mine: class (export let x: int = 2; export let label: string = "mine";) = new;
+        console.print_line(points.show(mine));
+        return program.ExitCode.Ok;
+    };
+);
 ]=])
-reject("points-mixed.nra:3:25: error\\[E0534\\]: two separately compiled copies of class[(]x: int32, label: string[)]"
-    check "${artifacts}/points-mixed.nra")
+neura(build "${artifacts}/points-mixed.nra" -o "${TEST_DIR}/points-mixed.nvr")
+neura(run "${TEST_DIR}/points-mixed.nvr")
+if(NOT output STREQUAL "other:1\nmine:2\n")
+    message(FATAL_ERROR "separately compiled anonymous classes produced:\n${output}")
+endif()
+neura(emit-ir "${artifacts}/points-mixed.nra" -o "${TEST_DIR}/points-mixed.nir")
+neura(build "${TEST_DIR}/points-mixed.nir" -o "${TEST_DIR}/points-mixed-round-trip.nvr")
+file(SHA256 "${TEST_DIR}/points-mixed.nvr" original)
+file(SHA256 "${TEST_DIR}/points-mixed-round-trip.nvr" rebuilt)
+if(NOT original STREQUAL rebuilt)
+    message(FATAL_ERROR "linked anonymous classes from two modules changed in the round trip")
+endif()
+
+# A source file compiled into two artifacts declares the classes its bodies
+# write in the same way in both, whichever file of an artifact wrote them first.
+file(WRITE "${source}/shape-user.nra" [=[
+let points = import:Points;
+let ShapeUser = module (
+    let mine: class (export let x: int = 4; export let label: string = "user";) = new;
+    export let go = func() -> string => points.show(mine);
+);
+]=])
+file(WRITE "${source}/shape-other.nra" [=[
+let points = import:Points;
+let ShapeOther = module (
+    export let go = func() -> string => "other";
+);
+]=])
+neura(emit-ir -I "${source}" "${source}/shape-user.nra" -o "${artifacts}/shape-user.nir")
+neura(emit-ir -I "${source}" "${source}/shape-other.nra" -o "${artifacts}/shape-other.nir")
+file(WRITE "${artifacts}/shape-app.nra" [=[
+let user = import:"shape-user.nir".ShapeUser;
+let other = import:"shape-other.nir".ShapeOther;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let ShapeApp = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(user.go() + " " + other.go());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+neura(build "${artifacts}/shape-app.nra" -o "${TEST_DIR}/shape-app.nvr")
+neura(run "${TEST_DIR}/shape-app.nvr")
+if(NOT output STREQUAL "user:4 other\n")
+    message(FATAL_ERROR "a shared source in two artifacts produced:\n${output}")
+endif()

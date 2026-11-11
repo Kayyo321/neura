@@ -626,8 +626,8 @@ let p: class (export let x: int = 1;) = new;
 let reset = func() { p = new; };
 ]=] "3:26" "E0533")
 check_rejection(anonymous-element-new "let items: class (export let x: int;)[] = [new];" "2:44" "E0533")
-check_rejection(anonymous-untyped "let p: class (export let x = 1;) = new;" "2:26" "E0535")
-check_rejection(anonymous-const "let p: class (export const x: int = 1;) = new;" "2:28" "E0536")
+check_rejection(anonymous-untyped "let p: class (export let x = 1;) = new;" "2:26" "E0534")
+check_rejection(anonymous-const "let p: class (export const x: int = 1;) = new;" "2:28" "E0535")
 check_rejection(anonymous-duplicate-field "let p: class (export let x: int; export let x: int;) = new;" "2:45" "E0302.*duplicate declaration of 'x'")
 check_rejection(anonymous-unknown-field "let p: class (export let x: int = 1;) = new; let y = p.y;" "2:54" "E0305.*unknown or inaccessible member 'y'")
 check_rejection(anonymous-arguments "let p: class (export let x: int;) = new(1);" "2:37" "E0407.*expected 0 argument")
