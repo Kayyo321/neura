@@ -13,19 +13,21 @@ let.promote _ = import:Std.Core.Unit;
 /// Every function needs the fs capability. Functions that open files close them on every path before returning,
 /// including after a failure.
 /// @see [Std.Fs.Fs](https://github.com/Kayyo321/neura/wiki/Stdlib-Fs-Fs)
+#Since("0.1.0")
 export let Fs = module (
     /// @brief Distinguishes regular files, directories, and other entries.
     export let FileKind = enum (File, Directory, Other);
 
     /// @brief What metadata reports about an entry. A link is followed; an entry that is neither a file nor a
-    /// directory is of kind Other.
+    /// directory is of kind Other. The fields are read-only.
+    #Final
     export let FileMetadata = class (
         /// @brief The classification reported by the filesystem provider.
-        export let kind: FileKind = FileKind.Other;
+        export last kind: FileKind;
         /// @brief The reported size in bytes.
-        export let size: int64 = 0;
+        export last size: int64;
         /// @brief The last modification instant, or nil when unavailable.
-        export let modified: instant.Instant = nil;
+        export last modified: instant.Instant;
 
         /// @brief Stores the entry's kind, size, and modification time.
         export let init = func(entry_kind: FileKind, byte_size: int64, modified_at: instant.Instant) {
@@ -39,7 +41,7 @@ export let Fs = module (
             if (!(other is FileMetadata)) {
                 return false;
             }
-            let metadata = other as FileMetadata;
+            last metadata = other as FileMetadata;
             return kind == metadata.kind && size == metadata.size &&
                 (modified == nil ? metadata.modified == nil : modified === metadata.modified);
         };
@@ -76,6 +78,7 @@ export let Fs = module (
     export const CopyBufferSize: int = 65536;
 
     /// @brief Reads all bytes from the path and closes the file before returning.
+    #NoDiscard
     export let read_bytes = func(path: Path) -> result.Result<uint8[list]> {
         match (files.open(path, files.OpenMode.Read)) {
             result.Result.Ok(file) => {
@@ -88,6 +91,7 @@ export let Fs = module (
     };
 
     /// @brief The file's text; invalid UTF-8 fails with InvalidData.
+    #NoDiscard
     export let read_text = func(path: Path) -> result.Result<string> {
         match (read_bytes(path)) {
             result.Result.Ok(data) => {
@@ -104,21 +108,25 @@ export let Fs = module (
     };
 
     /// @brief Creates or truncates the file and writes the bytes.
+    #NoDiscard
     export let write_bytes = func(path: Path, data: uint8[list]) -> result.Result<Unit> {
         return write_mode(path, data, files.OpenMode.Write);
     };
 
     /// @brief Creates or truncates the file and writes the UTF-8 bytes of the text.
+    #NoDiscard
     export let write_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Write);
     };
 
     /// @brief Creates the file if needed and writes the text at its end.
+    #NoDiscard
     export let append_text = func(path: Path, text: string) -> result.Result<Unit> {
         return write_mode(path, bytes.of_string(text), files.OpenMode.Append);
     };
 
     /// @brief Ok(false) for NotFound; other failures are errors. Follows links.
+    #NoDiscard
     export let exists = func(path: Path) -> result.Result<bool> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(_) => result.Result<bool>.Ok(true),
@@ -127,6 +135,7 @@ export let Fs = module (
     };
 
     /// @brief The kind, size in bytes, and last modification time of an entry, following links.
+    #NoDiscard
     export let metadata = func(path: Path) -> result.Result<FileMetadata> {
         return match (stat_path(path.to_string(), true)) {
             StatOutcome.Ok(status) => result.Result<FileMetadata>.Ok(metadata_of(status)),
@@ -135,10 +144,11 @@ export let Fs = module (
     };
 
     /// @brief The directory's entries joined to `path`, sorted by name bytes.
+    #NoDiscard
     export let list = func(path: Path) -> result.Result<Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
-                let entries: Path[list] = [];
+                last entries: Path[list] = [];
                 for (let name in names) {
                     entries.append(path.join(name));
                 }
@@ -151,13 +161,15 @@ export let Fs = module (
     };
 
     /// @brief Creates a single directory. Missing parents and an existing entry are reported as errors.
+    #NoDiscard
     export let create_directory = func(path: Path) -> result.Result<Unit> {
         return done(make_directory(path.to_string()), "create directory failed", path.to_string());
     };
 
     /// @brief Creates the directory and any missing parents; succeeds when the directory already exists.
+    #NoDiscard
     export let create_directories = func(path: Path) -> result.Result<Unit> {
-        let text = path.to_string();
+        last text = path.to_string();
         match (make_directory(text)) {
             DoneOutcome.Ok => {
                 return bytes.ok();
@@ -166,7 +178,7 @@ export let Fs = module (
                 if (code == 3) {
                     return existing_directory(text);
                 }
-                let parent = path.parent();
+                last parent = path.parent();
                 if (code != 1 || parent == nil) {
                     return result.Result<Unit>.Err(host_error.io(code, "create directory failed", text));
                 }
@@ -186,11 +198,13 @@ export let Fs = module (
 
     /// @brief Removes a file or another entry that is not a directory, such as a link (the link, not its
     /// target).
+    #NoDiscard
     export let remove_file = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), false), "remove file failed", path.to_string());
     };
 
     /// @brief Removes an empty directory.
+    #NoDiscard
     export let remove_directory = func(path: Path) -> result.Result<Unit> {
         return done(remove_path(path.to_string(), true), "remove directory failed", path.to_string());
     };
@@ -199,8 +213,9 @@ export let Fs = module (
     ///
     /// Links and other entries of kind Other are removed without descending into them. Stops at the first
     /// error.
+    #NoDiscard
     export let remove_tree = func(path: Path) -> result.Result<Unit> {
-        let text = path.to_string();
+        last text = path.to_string();
         match (stat_path(text, false)) {
             StatOutcome.Ok(status) => {
                 if (status[0] != 1) {
@@ -230,14 +245,16 @@ export let Fs = module (
     };
 
     /// @brief Renames or moves an entry, replacing an existing file at `to`.
+    #NoDiscard
     export let rename = func(from: Path, to: Path) -> result.Result<Unit> {
         return done(rename_path(from.to_string(), to.to_string()), "rename failed", from.to_string());
     };
 
     /// @brief Copies a file's bytes through a 65,536-byte buffer, replacing an existing target. Both files are
     /// closed on every path.
+    #NoDiscard
     export let copy_file = func(from: Path, to: Path) -> result.Result<Unit> {
-        let source: files.File = nil;
+        last source: files.File;
         match (files.open(from, files.OpenMode.Read)) {
             result.Result.Ok(opened) => {
                 source = opened;
@@ -246,7 +263,7 @@ export let Fs = module (
                 return result.Result<Unit>.Err(failure);
             },
         }
-        let target: files.File = nil;
+        last target: files.File;
         match (files.open(to, files.OpenMode.Write)) {
             result.Result.Ok(opened) => {
                 target = opened;
@@ -337,13 +354,15 @@ export let Fs = module (
 
     /// @brief Converts the provider's metadata tuple into library values.
     let metadata_of = func(status: [int, int64, int64, int]) -> FileMetadata {
-        let kind = FileKind.Other;
+        last kind: FileKind;
         if (status[0] == 0) {
             kind = FileKind.File;
         } else if (status[0] == 1) {
             kind = FileKind.Directory;
+        } else {
+            kind = FileKind.Other;
         }
-        return new FileMetadata(kind, status[1], instant.of_epoch_seconds(status[2], status[3]));
+        return new(kind, status[1], instant.of_epoch_seconds(status[2], status[3]));
     };
 
     /// @brief Translates NotFound to Ok(false) and preserves other provider failures.
