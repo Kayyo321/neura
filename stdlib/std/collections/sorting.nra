@@ -1,4 +1,5 @@
 let ordering = import:Std.Core.Ordering;
+let sort_kernels = import:Std.Internal.Kernels.Sort;
 
 /// @brief Stable sorting and binary search over built-in lists (Stdlib.md section
 /// 9.11). A comparator must define a total order. It must not change the
@@ -172,6 +173,38 @@ export let Sorting = module (
     /// calls.
     export let sort = func<T>(items: T[list], c: func(T, T) -> ordering.Ordering) {
         sort_range<T>(items, 0, items.length, c);
+    };
+
+    /// @brief Sorts a list of numbers in ascending order, with the result of `sort` and the type's `compare`
+    /// (`Float64.total_compare` for float64: -0.0 before 0.0, and every NaN last, in its original order with
+    /// its bits unchanged). The built-in kernels neura.sort.i64, u64, and f64 sort the list for about one step
+    /// per eight element comparisons; an int32 or uint32 list is widened into a new list for the kernel and
+    /// written back by index. Element writes leave the list's version unchanged, as in `sort`.
+    #Since("0.2.0")
+    export let sort_ascending = func(items: int64[list]) {
+        sort_kernels.i64(items);
+    } or func(items: uint64[list]) {
+        sort_kernels.u64(items);
+    } or func(items: float64[list]) {
+        sort_kernels.f64(items);
+    } or func(items: int32[list]) {
+        let wide: int64[list] = [];
+        for (let item in items) {
+            wide.append(item as int64);
+        }
+        sort_kernels.i64(wide);
+        for (let i = 0; i < wide.length; i++) {
+            items[i] = wide[i] as int32;
+        }
+    } or func(items: uint32[list]) {
+        let wide: uint64[list] = [];
+        for (let item in items) {
+            wide.append(item as uint64);
+        }
+        sort_kernels.u64(wide);
+        for (let i = 0; i < wide.length; i++) {
+            items[i] = wide[i] as uint32;
+        }
     };
 
     /// @brief `items` must be sorted by `c`. Returns the lowest index whose element is
