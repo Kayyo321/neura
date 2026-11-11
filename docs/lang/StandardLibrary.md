@@ -1,6 +1,6 @@
 # Standard library and I/O
 
-The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](Modules.md#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [implementation plan](Stdlib.md) specifies its contracts and algorithms; [section 18](Stdlib.md#18-implementation-decisions) records the decisions made where the plan was open.
+The standard library is Neura source installed with the tool below `share/neura/stdlib` and resolved for every `Std.*` import without an `-I` option ([Modules](Modules.md#standard-library-imports)). It is compiled together with each program, and an image contains only the library code the program reaches. The [library reference](../../wiki/Stdlib.md) links to individual modules; the [implementation plan](Stdlib.md) specifies their design and algorithms, and [section 18](Stdlib.md#18-implementation-decisions) records decisions made where the plan was open.
 
 Each type has its own module, named after it: `Std.Collections.ArrayList` is `stdlib/std/collections/array-list.nra` and exports the class `ArrayList` and its module functions. Import each module you use; there is no prelude.
 
