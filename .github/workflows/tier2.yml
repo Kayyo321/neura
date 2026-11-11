@@ -182,11 +182,17 @@ jobs:
       # native-container rewrites an executable it has just run, and the leak
       # checker's helper process can still hold that file open ("Text file
       # busy").
+      #
+      # The stack is raised to 1 GiB because sanitized frames are several
+      # times larger: backend-reference runs test programs 400 calls deep in
+      # an evaluator that recurses on the native stack, and overflows the
+      # default 8 MiB before the evaluator's own depth limit stops it.
       - name: Test
-        run: >
-          ctest --test-dir build --parallel "$(nproc)" --no-tests=error
-          --output-on-failure --output-junit ctest-junit.xml --timeout 3600
-          -E "^(native-install|native-container)$"
+        run: |
+          ulimit -s 1048576
+          ctest --test-dir build --parallel "$(nproc)" --no-tests=error \
+            --output-on-failure --output-junit ctest-junit.xml --timeout 3600 \
+            -E "^(native-install|native-container)$"
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
