@@ -1186,7 +1186,8 @@ int run_tests(const Options& options) {
             finished(i, result, " [saved schedule]");
         }
         ran = 1;
-    } else if (auto* device = options.schedules > 1 || options.virtual_time ? nullptr : gpu.device()) {
+    } else if (auto* device = options.schedules > 1 || options.virtual_time || options.save_schedule
+                                  ? nullptr : gpu.device()) {
         neura::nvm::Fleet fleet(image, {limits, device});
         for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
         neura::nvm::run_fleet(fleet, bindings,

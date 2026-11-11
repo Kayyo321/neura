@@ -421,6 +421,18 @@ if(UNIX)
     must("hello" run hello.nvr)
 endif()
 
+# The event trace is opened in place, so a symbolic link at its path is refused and its target stays as it was.
+if(UNIX)
+    file(WRITE "${TEST_DIR}/victim.txt" "untouched\n")
+    file(CREATE_LINK "${TEST_DIR}/victim.txt" "${TEST_DIR}/link.events" SYMBOLIC)
+    neura(linked run --trace-events link.events fan-out.nvr)
+    file(READ "${TEST_DIR}/victim.txt" victim)
+    if(linked_status STREQUAL "0" OR NOT linked_stderr MATCHES "cannot write link.events: it is a symbolic link" OR
+       NOT victim STREQUAL "untouched\n")
+        message(FATAL_ERROR "--trace-events followed a symbolic link (status ${linked_status})\n${linked_stderr}\n${victim}")
+    endif()
+endif()
+
 # A deadline stops a task that never parks and is the only one that can run.
 # A step limit bounds the run in case the deadline is never seen.
 foreach(quantum IN ITEMS 1 1024)

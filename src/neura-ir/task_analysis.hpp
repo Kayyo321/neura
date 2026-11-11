@@ -70,6 +70,14 @@ private:
     std::map<SymbolId, std::vector<std::pair<SymbolId, Span>>> callers_;
     bool library_code(SymbolId owner) const;
     Span user_site(SymbolId owner, const Span& fallback) const;
+    // The closure layouts that code which can run allocates. A function value
+    // exists only where one of these is created, so the union rules of
+    // sections 5.1 and 5.2 range over them and not over closures in library
+    // functions the program never reaches.
+    std::set<SymbolId> created_;
+    void find_created_closures();
+    // The closure layout whose body `function` is, or no_symbol.
+    SymbolId closure_of(SymbolId function) const;
     mutable std::map<SymbolId, bool> class_cache_;
     mutable std::map<SymbolId, bool> enum_cache_;
 

@@ -9,9 +9,11 @@
 #include <algorithm>
 #include <atomic>
 #include <csignal>
+#include <cstdio>
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <sstream>
 #include <stdexcept>
 
 #ifndef _WIN32
@@ -60,12 +62,30 @@ TaskDumps::TaskDumps(std::optional<nvm::TaskDumpFormat> on_trap) {
 }
 
 struct TraceEvents::Output {
-    std::ofstream file;
+    std::FILE* file = nullptr;
+    ~Output() {
+        if (file) std::fclose(file);
+    }
 };
 
+// The events are written as the run produces them, so the file is opened in
+// place. A symbolic link at the path is refused instead of followed: through
+// NEURA_RUN_OPTIONS the path comes from whoever sets the environment, and a
+// planted link must not make the process overwrite another file.
 TraceEvents::TraceEvents(const fs::path& path, bool wall_time)
     : output_(std::make_unique<Output>()), wall_time_(wall_time) {
-    output_->file.open(path, std::ios::binary | std::ios::trunc);
+#ifdef _WIN32
+    output_->file = _wfopen(path.c_str(), L"wb");
+#else
+    const int descriptor = ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0644);
+    if (descriptor < 0 && errno == ELOOP) {
+        throw std::runtime_error("cannot write " + path.string() + ": it is a symbolic link");
+    }
+    if (descriptor >= 0) {
+        output_->file = ::fdopen(descriptor, "wb");
+        if (!output_->file) ::close(descriptor);
+    }
+#endif
     if (!output_->file) throw std::runtime_error("cannot write " + path.string());
 }
 
@@ -107,7 +127,7 @@ void TraceEvents::event(const nvm::TaskEvent& event) {
     case Kind::HostRequest: name = "host-request"; other = "request"; break;
     case Kind::HostCompletion: name = "host-completion"; other = "request"; break;
     }
-    auto& out = output_->file;
+    std::ostringstream out;
     out << "{\"event\":\"" << name << "\",\"tick\":" << event.tick << ",\"task\":" << event.task;
     if (!other.empty()) out << ",\"" << other << "\":" << event.other;
     if (event.kind == Kind::Park) out << ",\"reason\":" << quoted(event.detail);
@@ -122,6 +142,8 @@ void TraceEvents::event(const nvm::TaskEvent& event) {
                    std::chrono::system_clock::now().time_since_epoch()).count();
     }
     out << "}\n";
+    const auto line = out.str();
+    std::fwrite(line.data(), 1, line.size(), output_->file);
 }
 
 TaskDumps::~TaskDumps() {

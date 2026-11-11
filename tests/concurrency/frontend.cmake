@@ -889,6 +889,35 @@ check_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_impor
     "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task: a function value of this type captures a value of type Box at tasks_all_ok_call_captures_an_object.nra:[0-9]+:[0-9]+ \\(the library starts the task at tasks.nra:[0-9]+:[0-9]+\\)")
 
 # ---------------------------------------------------------------------------
+# The union rule for function values ranges over the closures that code which can run creates. Std.Io.Console
+# holds a byte source that reads the root task's read-ahead buffer, but a program that never asks for it can read
+# through a Utf8Reader in a task; one that does ask for it cannot.
+set(reader_declarations "let readers = import:Std.Io.Utf8Reader;
+let result = import:Std.Core.Result;
+let nothing = func(max: int) -> result.Result<uint8[list]> {
+    let empty: uint8[list] = [];
+    return result.Result<uint8[list]>.Ok(empty);
+};
+let lines = func -> int => match (readers.create(nothing).read_line()) {
+    result.Result.Ok(_) => 1,
+    result.Result.Err(_) => 0,
+};
+")
+check_accepted(reader_in_a_task "${reader_declarations}" [=[
+        scope {
+            let task = spawn lines();
+            console.print_line(task.join().to_string());
+        }
+]=] "1\n")
+
+check_rejection(reader_in_a_task_beside_console_input "${reader_declarations}" [=[
+        let standard_input = console.input();
+        scope {
+            let task = spawn lines();
+        }
+]=] "17:24" "the spawned call is not task-safe: it reaches 'lines' [^\n]*that code uses the reassignable binding 'pending[a-z_]*' at console.nra")
+
+# ---------------------------------------------------------------------------
 # Forms that an earlier compiler refused.
 
 # A send arm needs no earlier plain send to resolve Sender.send.

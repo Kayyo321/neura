@@ -104,7 +104,56 @@ TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program) {
             }
         }
     }
+    find_created_closures();
     summarize();
+}
+
+SymbolId TaskAnalysis::closure_of(SymbolId function) const {
+    if (!valid(function) || symbol(function).kind != SymbolKind::Function) return no_symbol;
+    const auto owner = symbol(function).owner;
+    return capture_layout(owner) ? owner : no_symbol;
+}
+
+// Execution starts in the program's own code and in initializers. From
+// there, a body can run what it calls, and a closure's body can run once code
+// that can run has allocated the closure. Library functions that nothing
+// reaches allocate nothing.
+void TaskAnalysis::find_created_closures() {
+    std::set<SymbolId> reached;
+    std::vector<SymbolId> pending;
+    const auto reach = [&](SymbolId owner) {
+        if (valid(owner) && reached.insert(owner).second) pending.push_back(owner);
+    };
+    for (const auto& body : program_.bodies) {
+        if (!valid(body.owner)) continue;
+        // Any of the program's own functions may be an entry, and an
+        // initializer runs without being called.
+        if (!library_code(body.owner) || symbol(body.owner).kind != SymbolKind::Function) reach(body.owner);
+    }
+    while (!pending.empty()) {
+        const auto owner = pending.back();
+        pending.pop_back();
+        const auto body = bodies_.find(owner);
+        if (body == bodies_.end()) continue;
+        each_node(body->second->instructions, [&](const IrNode& node) {
+            if (node.op == IrOp::Allocate && valid(node.symbol) && capture_layout(symbol(node.symbol).owner)) {
+                // The closure exists from here on; any call through its type
+                // may run its body.
+                const auto layout = symbol(node.symbol).owner;
+                if (created_.insert(layout).second) {
+                    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+                        if (closure_of(id) == layout) reach(id);
+                    }
+                }
+            }
+            std::vector<std::pair<SymbolId, Span>> out;
+            callees(node, out);
+            for (const auto& [callee, span] : out) {
+                // A closure's body is reached through its creation above.
+                if (closure_of(callee) == no_symbol) reach(callee);
+            }
+        });
+    }
 }
 
 bool TaskAnalysis::signature_layout(SymbolId cls) const {
@@ -154,7 +203,9 @@ bool TaskAnalysis::transferable_class(SymbolId cls) const {
         // create is.
         result = true;
         if (const auto found = derived_.find(cls); found != derived_.end()) {
-            result = std::ranges::all_of(found->second, [&](SymbolId layout) { return fields_transferable(layout); });
+            result = std::ranges::all_of(found->second, [&](SymbolId layout) {
+                return !created_.contains(layout) || fields_transferable(layout);
+            });
         }
     } else if (capture_layout(cls) || concurrent_handle(cls)) {
         result = fields_transferable(cls);
@@ -250,7 +301,12 @@ void TaskAnalysis::callees(const IrNode& node, std::vector<std::pair<SymbolId, S
         // The union over every implementation the call can reach.
         add(node.symbol);
         if (const auto found = overriders_.find(node.symbol); found != overriders_.end()) {
-            for (const auto id : found->second) add(id);
+            for (const auto id : found->second) {
+                // Only a closure that some reachable code creates can be
+                // what the call runs.
+                if (const auto layout = closure_of(id); layout != no_symbol && !created_.contains(layout)) continue;
+                add(id);
+            }
         }
         break;
     case IrOp::BaseInitialize:
@@ -399,6 +455,7 @@ void TaskAnalysis::check() const {
             layouts.push_back(type.symbol);
         }
         for (const auto layout : layouts) {
+            if (!created_.contains(layout)) continue;
             for (const auto field : all_fields(layout)) {
                 if (transferable(symbol(field).type)) continue;
                 return ": a function value of this type captures a value of type " + display(symbol(field).type) +
