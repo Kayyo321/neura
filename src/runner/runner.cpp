@@ -1,6 +1,7 @@
 #include "runner.hpp"
 
 #include "nvm/schedule.hpp"
+#include "nvm/tier1.hpp"
 
 #include "nvm/trace.hpp"
 #include "nvm/trace_file.hpp"
@@ -359,6 +360,13 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
+    // One cache of lifted blocks for the run, so that its statistics can be
+    // reported; the run would otherwise keep its own.
+    std::optional<nvm::TierCache> tiers;
+    if (!limits.graph_device && !limits.tier_cache && std::min(limits.tier, nvm::tier_ceiling()) >= 1) {
+        tiers.emplace(image);
+        limits.tier_cache = &*tiers;
+    }
     std::optional<TraceEvents> events;
     if (options.trace_events) {
         events.emplace(*options.trace_events, options.trace_wall_time);
@@ -405,6 +413,9 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
                       << result.peak_queued_messages << ", peak pending requests " << result.peak_pending_requests;
         }
         std::cerr << '\n';
+    }
+    if (options.tier_stats) {
+        std::cerr << (tiers ? nvm::describe(tiers->statistics()) : std::string("tier: tier 0\n"));
     }
     if (options.limits.profile) {
         print_profile(image, result);

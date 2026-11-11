@@ -969,8 +969,10 @@ Recognition recognize(const nvr::Image& image, std::uint32_t function_index, std
     };
 
     // Candidates for each value the exits read from the graph.
+    const auto expired = [&] { return std::chrono::steady_clock::now() >= options.deadline; };
     std::vector<std::pair<std::uint32_t, std::vector<ExpressionPtr>>> options_per_value;
     for (const auto& [lane, type] : model.targets()) {
+        if (expired()) return unrecognized("out of time");
         const auto width = model.width_of(type);
         const auto support = model.words_of(lane, width);
         Candidates candidates(model, probes, options.extended);
@@ -993,6 +995,7 @@ Recognition recognize(const nvr::Image& image, std::uint32_t function_index, std
     std::vector<ExpressionPtr> conditions{nullptr};
     std::optional<std::size_t> exit_when_true;
     if (normal_exits == 2) {
+        if (expired()) return unrecognized("out of time");
         exit_when_true = 0;
         std::uint32_t boolean = 0;
         while (boolean < image.types.size() && image.types[boolean].kind != nvr::TypeKind::Bool) {
@@ -1040,6 +1043,7 @@ Recognition recognize(const nvr::Image& image, std::uint32_t function_index, std
                 if (++replays > 160) {
                     break;
                 }
+                if (expired()) return unrecognized("out of time");
                 Checks checks;
                 if (replay_matches(image, block, graph, order, condition, exit_when_true, &checks)) {
                     result.status = Recognition::Status::Lifted;

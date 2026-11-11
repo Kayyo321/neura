@@ -373,11 +373,19 @@ NEURA_TEST(nir, programs_without_tasks_keep_the_bytes_of_the_previous_writer) {
     }
 }
 
+// The standard library's declarations carry tags, and a tag is a NeuraIR 1.10
+// attribute, so a program that imports the library is written as 1.10. These
+// tests are about what tasks alone require, so they drop the attributes.
+IrProgram without_attributes(IrProgram program) {
+    for (auto& symbol : program.symbols) symbol.attributes.clear();
+    return program;
+}
+
 NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
     std::size_t polls = 0;
     std::size_t spawns = 0;
     for (const auto& fixture : concurrency_fixtures(environment)) {
-        const auto program = lower_files({fixture.path});
+        const auto program = without_attributes(lower_files({fixture.path}));
         check(has_spawn(program), fixture.name + ": the fixture spawns");
         const auto bytes = write_nir(program);
         check_equal(static_cast<int>(bytes[4]) + 256 * static_cast<int>(bytes[5]), 1, fixture.name + " major version");
@@ -418,7 +426,7 @@ NEURA_TEST(nir, programs_with_tasks_are_written_as_1_9_and_keep_their_polls) {
 }
 
 NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
-    const auto program = lower_files({environment.fixtures() / "concurrency" / "discard.nra"});
+    const auto program = without_attributes(lower_files({environment.fixtures() / "concurrency" / "discard.nra"}));
     const auto bytes = write_nir(program);
     check_equal(static_cast<int>(bytes[6]), 9, "discard.nir is NeuraIR 1.9");
 
@@ -846,7 +854,7 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
                 "attributes alone make a file 1.10");
     check_equal(static_cast<int>(write_nir(attributed_fixture(environment, false, true).program)[6]), 10,
                 "deferred initialization alone makes a file 1.10");
-    check(static_cast<int>(write_nir(attributed_fixture(environment, false, false).program)[6]) < 10,
+    check(static_cast<int>(write_nir(without_attributes(attributed_fixture(environment, false, false).program))[6]) < 10,
           "the fixture without either keeps an earlier version");
 }
 

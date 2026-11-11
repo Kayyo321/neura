@@ -12,6 +12,7 @@
 #include "ir-optimization/optimizer.hpp"
 #include "launcher/container.hpp"
 #include "lifecycle.hpp"
+#include "lift/hints.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
@@ -23,6 +24,7 @@
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
 #include "nvm/schedule.hpp"
+#include "nvm/tier1.hpp"
 #include "nvr/format.hpp"
 #include "runner/runner.hpp"
 #include "source_docs.hpp"
@@ -79,16 +81,18 @@ void usage(std::ostream& out) {
            "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
            "       neura emit-ir [--no-optimize] <file.nir>\n"
-           "       neura build [-I source-root] [--no-optimize] [--no-source-map] <file.nra>... -o <file.nvr>\n"
-           "       neura build [--no-optimize] [--no-source-map] <file.nir> -o <file.nvr>\n"
+           "       neura build [-I source-root] [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nra>... -o <file.nvr>\n"
+           "       neura build [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nir> -o <file.nvr>\n"
            "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
            "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura inspect <file> [-o <file.nvr>]\n"
-           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [capabilities] "
+           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [--tier=0|1] "
+           "[--tier-stats] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--max-heap-cells N] [--stats] [capabilities] [--gpu=auto|always|off] [--no-gpu]\n"
+           "                  [--max-heap-cells N] [--stats] [--tier=0|1] [--tier-stats] [capabilities]\n"
+           "                  [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
            "       neura assemble <file.nvra> -o <file.nvr>\n"
@@ -122,6 +126,9 @@ void usage(std::ostream& out) {
            "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
            "  --record <file>          (run) write every host request and response to a trace\n"
            "  --profile                (run) print the steps each function took\n"
+           "  --tier=0|1               the highest execution tier: 0 evaluates every graph by reference, 1 (the\n"
+           "                           default) also runs proven lifted blocks natively; the result is the same\n"
+           "  --tier-stats             print the blocks lifted and the steps each tier ran\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services; a trace of a\n"
            "                           concurrent run carries its own quantum and limits, which replace the options\n"
            "\n"
@@ -191,6 +198,10 @@ struct Options {
     Command command = Command::Check;
     bool optimize = true;
     bool source_map = true;
+    // build: emit the optional LIFT section (--no-lift-hints omits it).
+    bool lift_hints = true;
+    // run and test: report blocks lifted and steps per execution tier.
+    bool tier_stats = false;
     bool provenance = true;
     bool doxygen = false;
     bool native_executable = false;
@@ -600,6 +611,19 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-source-map applies only to build");
             }
             options.source_map = false;
+        } else if (arg == "--no-lift-hints") {
+            if (options.command != Command::Build) {
+                throw std::runtime_error("--no-lift-hints applies only to build");
+            }
+            options.lift_hints = false;
+        } else if (arg == "--tier=0" || arg == "--tier=1") {
+            if (!runs) throw std::runtime_error("--tier applies only to run and test");
+            options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');
+        } else if (arg.starts_with("--tier=")) {
+            throw std::runtime_error("--tier expects 0 or 1");
+        } else if (arg == "--tier-stats") {
+            if (!runs) throw std::runtime_error("--tier-stats applies only to run and test");
+            options.tier_stats = true;
         } else if (arg == "-o") {
             if (options.command != Command::Docs && options.command != Command::EmitIr &&
                 options.command != Command::Build && options.command != Command::Inspect &&
@@ -907,6 +931,13 @@ std::vector<std::uint8_t> build_image_bytes(const Options& options) {
         if (!options.roots.empty()) throw std::runtime_error("-I applies only to source inputs");
         if (!options.optimize) throw std::runtime_error("--no-optimize cannot be applied to an image that is already built");
         if (!options.source_map) throw std::runtime_error("--no-source-map cannot be applied to an image that is already built");
+        if (!options.lift_hints) {
+            // Hints are optional metadata: stripping them from a built image
+            // changes nothing it does.
+            auto image = neura::nvr::load(read_file(options.files.front()));
+            neura::lift::strip_hints(image);
+            return neura::nvr::encode(image);
+        }
         if (fs::file_size(options.files.front()) >= (std::uint64_t{1} << 32)) {
             throw std::runtime_error("native executable: image must be smaller than 4 GiB");
         }
@@ -915,6 +946,7 @@ std::vector<std::uint8_t> build_image_bytes(const Options& options) {
     neura::backend::BuildOptions build_options;
     build_options.optimize = options.optimize;
     build_options.source_map = options.source_map;
+    build_options.lift_hints = options.lift_hints;
     const auto conversion = neura::backend::build(load_program(options), build_options);
     return neura::nvr::encode(conversion.image);
 }
@@ -1140,6 +1172,23 @@ private:
     std::uint64_t low = 0;
 };
 
+// The lifted blocks shared by every run of one image (docs/runtime/NVM.md,
+// "Execution tiers"), unless the runs use a graph device or tier 0.
+std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image, neura::nvm::RunLimits& limits,
+                                                  const neura::nvm::GraphDevice* device) {
+    std::unique_ptr<neura::nvm::TierCache> cache;
+    if (!device && std::min(limits.tier, neura::nvm::tier_ceiling()) >= 1) {
+        cache = std::make_unique<neura::nvm::TierCache>(image);
+        limits.tier_cache = cache.get();
+    }
+    return cache;
+}
+
+void report_tiers(const Options& options, const std::unique_ptr<neura::nvm::TierCache>& cache) {
+    if (!options.tier_stats) return;
+    std::cerr << (cache ? neura::nvm::describe(cache->statistics()) : std::string("tier: tier 0\n"));
+}
+
 int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
              std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes, neura::nvm::GraphDevice* device) {
     const auto& path = options.files.front();
@@ -1172,6 +1221,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     neura::runner::TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
+    const auto tiers = tier_cache(image, limits, device);
     if (device) {
         neura::nvm::Fleet fleet(image, {limits, device});
         for (auto& list : lists) {
@@ -1197,6 +1247,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
                   << ", peak heap cells " << peak_heap_cells << ", host requests " << requests.text()
                   << ", " << image_costs(image) << ", image bytes " << image_bytes << '\n';
     }
+    report_tiers(options, tiers);
     return first_status;
 }
 
@@ -1217,6 +1268,7 @@ int run(const Options& options) {
                                           options.task_dump, options.trace_events, options.trace_wall_time};
     run_options.limits.graph_device = gpu.device();
     run_options.virtual_time = options.virtual_time;
+    run_options.tier_stats = options.tier_stats;
     const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
     return gpu.finish(status, options.stats);
 }
@@ -1346,6 +1398,11 @@ int run_tests(const Options& options) {
     neura::runner::TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
+    const bool fleet_device = options.schedule || options.schedules > 1 || options.virtual_time ||
+                                      options.save_schedule
+                                  ? false
+                                  : gpu.device() != nullptr;
+    const auto tiers = tier_cache(image, limits, fleet_device ? gpu.device() : nullptr);
     // One test, alone, under a chooser (null: the reference scheduler) and
     // its own virtual clock when virtual time is on.
     const auto run_test = [&](std::size_t i, neura::nvm::ScheduleChooser* chooser, std::uint64_t quantum,
@@ -1436,6 +1493,7 @@ int run_tests(const Options& options) {
     }
     std::cout << ran << " test(s), " << ran - failed << " passed, " << failed << " failed\n";
     std::cout.flush();
+    report_tiers(options, tiers);
     return gpu.finish(failed == 0 ? 0 : 1, options.stats);
 }
 

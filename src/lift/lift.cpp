@@ -4,6 +4,7 @@
 #include "proof.hpp"
 #include "recognize.hpp"
 
+#include <algorithm>
 #include <numeric>
 
 namespace neura::lift {
@@ -15,10 +16,51 @@ LiftResult rejected(std::string why) {
     return result;
 }
 
+// Overflow freedom, and every output lane (each is read by some exit or is
+// the selector) exactly 0 or 1. The unrefined analysis first: its intervals
+// are sound but wider, and it settles most graphs at a fraction of the cost.
+std::string prove_graph(const nvr::Graph& graph, std::uint64_t work) {
+    std::vector<std::uint32_t> lanes(graph.outputs.size());
+    std::iota(lanes.begin(), lanes.end(), 0U);
+    if (const auto quick = prove_no_overflow(graph, false);
+        quick.safe && lanes_are_bits(quick, graph, lanes, nullptr, false)) {
+        return {};
+    }
+    const auto overflow = prove_no_overflow(graph, true, &work);
+    if (overflow.exhausted) {
+        return exhausted_work;
+    }
+    if (!overflow.safe) {
+        return "overflow not excluded";
+    }
+    if (!lanes_are_bits(overflow, graph, lanes, nullptr, true, &work)) {
+        return work == 0 ? exhausted_work : "an output lane not proven 0 or 1";
+    }
+    return {};
+}
+
 } // namespace
 
+std::string GraphProofs::verdict(const nvr::Graph& graph, std::uint32_t index, std::uint64_t work) {
+    {
+        const std::lock_guard lock(mutex_);
+        if (const auto it = verdicts_.find(index); it != verdicts_.end()) return it->second;
+        if (const auto it = exhausted_.find(index); it != exhausted_.end() && it->second >= work) return exhausted_work;
+    }
+    // Two threads may prove one graph at once; they reach the same verdict.
+    auto verdict = prove_graph(graph, work);
+    const std::lock_guard lock(mutex_);
+    if (verdict == exhausted_work) {
+        auto& most = exhausted_[index];
+        most = std::max(most, work);
+        return verdict;
+    }
+    return verdicts_.emplace(index, std::move(verdict)).first->second;
+}
+
 LiftResult lift_and_prove(const nvr::Image& image, std::uint32_t function, std::uint32_t block_index,
-                          const LiftedForm* hint) {
+                          const LiftedForm* hint, std::chrono::steady_clock::time_point deadline,
+                          GraphProofs* proofs, std::uint64_t work) {
     const auto& block = image.functions.at(function).blocks.at(block_index);
     const auto& graph = image.graphs.at(block.graph);
     LiftedForm form;
@@ -29,10 +71,13 @@ LiftResult lift_and_prove(const nvr::Image& image, std::uint32_t function, std::
         // The decompiler's vocabulary first; bitwise operations and shifts
         // widen the search, which bounds its candidates, so they are tried
         // only for a block the narrower search does not recognize.
-        auto recognition = recognize(image, function, block_index);
+        RecognizeOptions narrow;
+        narrow.deadline = deadline;
+        auto recognition = recognize(image, function, block_index, narrow);
         if (recognition.status == Recognition::Status::Unrecognized) {
             RecognizeOptions options;
             options.extended = true;
+            options.deadline = deadline;
             auto extended = recognize(image, function, block_index, options);
             if (extended.status == Recognition::Status::Lifted) recognition = std::move(extended);
         }
@@ -63,16 +108,14 @@ LiftResult lift_and_prove(const nvr::Image& image, std::uint32_t function, std::
         return rejected("structural proof failed");
     }
 
-    // Overflow proof, and every output lane (each is read by some exit or is
-    // the selector) exactly 0 or 1.
-    const auto overflow = prove_no_overflow(graph);
-    if (!overflow.safe) {
-        return rejected("overflow not excluded");
-    }
-    std::vector<std::uint32_t> lanes(graph.outputs.size());
-    std::iota(lanes.begin(), lanes.end(), 0U);
-    if (!lanes_are_bits(overflow, graph, lanes)) {
-        return rejected("an output lane not proven 0 or 1");
+    if (auto failure = proofs ? proofs->verdict(graph, block.graph, work) : prove_graph(graph, work);
+        !failure.empty()) {
+        auto result = rejected(std::move(failure));
+        if (result.rejection == exhausted_work) {
+            result.exhausted = true;
+            result.form = std::make_shared<const LiftedForm>(std::move(form));
+        }
+        return result;
     }
 
     LiftResult result;

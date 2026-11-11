@@ -163,6 +163,10 @@ LoweringResult lower(const nvr::Image& image, const nvr::Block& block, const Lif
 // trap exit the block lacks; the reference evaluator then decides.
 std::optional<std::uint32_t> execute(const LoweredBlock& block, std::span<const std::uint64_t> inputs,
                                      std::span<std::uint64_t> outputs);
+// The same with the caller's registers: at least one per input and one per
+// instruction. The executor's tier steps use it and allocate nothing.
+std::optional<std::uint32_t> execute(const LoweredBlock& block, std::span<const std::uint64_t> inputs,
+                                     std::span<std::uint64_t> outputs, std::span<std::uint64_t> registers);
 
 // The graph output lanes of an executed block: the selector of `exit` and
 // each output value's bits. `lanes` has block.output_lanes entries; lanes no

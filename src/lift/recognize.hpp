@@ -3,6 +3,7 @@
 #include "expression.hpp"
 #include "nvr/image.hpp"
 
+#include <chrono>
 #include <cstdint>
 #include <optional>
 #include <utility>
@@ -41,6 +42,10 @@ struct RecognizeOptions {
     // "~", "<<", ">>"). The decompiler's search leaves them out, so its
     // output does not depend on this library's runtime use.
     bool extended = false;
+    // The search gives up, as unrecognized, once this time has passed. A
+    // runtime that lifts lazily bounds its time per image with it; the
+    // search's result never depends on it otherwise.
+    std::chrono::steady_clock::time_point deadline = std::chrono::steady_clock::time_point::max();
 };
 
 Recognition recognize(const nvr::Image& image, std::uint32_t function, std::uint32_t block,

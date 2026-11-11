@@ -11,6 +11,14 @@ with the binary built before the change and with the one built after it:
     scripts/runtime-identity.py capture --neura NEW/neura --images DIR --out after
     scripts/runtime-identity.py compare before after
 
+The execution tiers (docs/runtime/NVM.md, "Execution tiers") are compared
+with one binary: each capture passes its tier to every `run` and `test`, and
+--extended adds the wider case list below.
+
+    scripts/runtime-identity.py capture --neura build/neura --images DIR --out t0 --extended --run-option=--tier=0
+    scripts/runtime-identity.py capture --neura build/neura --images DIR --out t1 --extended --run-option=--tier=1
+    scripts/runtime-identity.py compare t0 t1
+
 Images are built once, by the first capture, so both runs execute the same
 NVR bytes and the comparison isolates the runtime. Each case records the
 exit status, stdout, stderr, `--stats`, `--profile`, and for some cases a
@@ -124,15 +132,103 @@ TEST_FILES = [
     ("test-hash-map", "tests/stdlib/hash-map/hash-map-tests.nra"),
 ]
 
+# --extended: more `neura test` files.
+EXTENDED_TEST_FILES = [
+    ("test-sorting", "tests/stdlib/sorting/sorting-tests.nra"),
+    ("test-strings", "tests/stdlib/strings/strings-tests.nra"),
+    ("test-json", "tests/stdlib/json/json-tests.nra"),
+    ("test-integers", "tests/stdlib/integers/integers-tests.nra"),
+    ("test-sha256", "tests/stdlib/sha256/sha256-tests.nra"),
+    ("test-big-integer", "tests/stdlib/big-integer/big-integer-tests.nra"),
+    ("test-tree-map", "tests/stdlib/tree-map/tree-map-tests.nra"),
+    ("test-float64", "tests/stdlib/floats/float64-tests.nra"),
+]
+
+# Standard library directories whose programs read the clock, entropy, the
+# network, the environment, files, or native code: their output can differ
+# from run to run whatever the tier, so --extended leaves them out.
+NONDETERMINISTIC_STDLIB = {
+    "clock", "system-clock", "instant", "local-date", "local-date-time", "local-time", "zone-offset", "random",
+    "net", "process", "environment", "file", "fs", "io", "host", "dynamic-foreign", "language-bindings",
+    "logger", "console", "concurrent", "uuid",
+}
+
+
+def first_line_size(source, quick):
+    """The size a benchmark runs at: `// sizes: quick <n>` or `// sizes: <n>`."""
+    for line in (ROOT / source).read_text().splitlines():
+        if line.startswith("// sizes: "):
+            words = line.split()
+            if quick and "quick" in words:
+                return words[words.index("quick") + 1]
+            return words[2]
+    return None
+
+
+def extended_programs():
+    """The --extended cases: every backend program and trap, every cost
+    benchmark, the wall-clock programs at their quick sizes, a spread of
+    standard library programs and traps, and every concurrency program."""
+    programs = []
+    known = {(source, tuple(arguments)) for _, source, arguments, _ in PROGRAMS}
+
+    def add(name, source, arguments, traced=True):
+        if (source, tuple(arguments)) not in known:
+            known.add((source, tuple(arguments)))
+            programs.append((name, source, arguments, traced))
+
+    for directory in ("tests/backend/programs", "tests/backend/traps"):
+        for path in sorted((ROOT / directory).glob("*.nra")):
+            add(f"x-{path.parent.name}-{path.stem}", f"{directory}/{path.name}", [])
+    for path in sorted((ROOT / "tests/benchmarks").glob("*.nra")):
+        source = f"tests/benchmarks/{path.name}"
+        add(f"x-bench-{path.stem}", source, [first_line_size(source, False)], False)
+    for path in sorted((ROOT / "tests/bench-wall/neura").glob("*.nra")):
+        source = f"tests/bench-wall/neura/{path.name}"
+        add(f"x-wall-{path.stem}", source, [first_line_size(source, True)], False)
+    for directory in sorted((ROOT / "tests/stdlib").iterdir()):
+        if not directory.is_dir() or directory.name in NONDETERMINISTIC_STDLIB:
+            continue
+        for kind in ("programs", "traps"):
+            for path in sorted((directory / kind).glob("*.nra"))[:3]:
+                add(f"x-stdlib-{directory.name}-{kind}-{path.stem}",
+                    f"tests/stdlib/{directory.name}/{kind}/{path.name}", [])
+    for path in sorted((ROOT / "tests/concurrency/programs").glob("*.nra")):
+        add(f"x-concurrency-{path.stem}", f"tests/concurrency/programs/{path.name}", [])
+    return programs
+
+
+# --extended: a step limit at every position of a small loop's first blocks,
+# and on programs whose blocks run lifted, so a step limit trap lands on
+# every kind of block.
+STEP_SWEEPS = [
+    ("x-programs-loops", range(1, 401)),
+    ("wall-collatz", list(range(1, 201)) + [997, 4093, 65521, 100003]),
+    ("bench-sort", [1, 2, 3, 5, 8, 13, 21, 34, 55, 89, 144, 233, 377, 610, 987, 1597, 2584, 4181, 6765, 10946]),
+]
+EXTENDED_SWEEP_PROGRAMS = ["x-programs-loops", "bench-sort", "bench-tree-map", "wall-binary-trees",
+                           "computation", "concurrency-worker-group"]
+EXTENDED_SWEEP = [
+    ["--max-heap-cells", "64"], ["--max-heap-cells", "200"], ["--max-heap-cells", "2048"],
+    ["--max-heap-cells", "20000"], ["--max-frames", "1"], ["--max-frames", "2"], ["--max-frames", "3"],
+    ["--max-frames", "8"], ["--max-frames", "20"],
+]
+
+
+RUN_OPTIONS = []
+
 
 def run(command, cwd):
-    result = subprocess.run(command, cwd=cwd, capture_output=True, timeout=600)
+    # The capture's run options follow `run` or `test`.
+    if len(command) > 1 and command[1] in ("run", "test"):
+        command = command[:2] + RUN_OPTIONS + command[2:]
+    result = subprocess.run(command, cwd=cwd, capture_output=True, timeout=600, stdin=subprocess.DEVNULL)
     return result.returncode, result.stdout, result.stderr
 
 
-def build_images(neura, images):
+def build_images(neura, images, programs):
     images.mkdir(parents=True, exist_ok=True)
-    for name, source, _, _ in PROGRAMS:
+    for name, source, _, _ in programs:
         target = images / f"{name}.nvr"
         if target.exists():
             continue
@@ -146,7 +242,9 @@ def capture(args):
     images = Path(args.images).resolve()
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
-    build_images(neura, images)
+    RUN_OPTIONS[:] = args.run_option
+    programs = PROGRAMS + (extended_programs() if args.extended else [])
+    build_images(neura, images, programs)
     work = out / "work"
     work.mkdir(exist_ok=True)
 
@@ -159,10 +257,13 @@ def capture(args):
             (out / f"{case}.trace").write_bytes(trace.read_bytes() if trace.exists() else b"<missing>")
 
     by_name = {}
-    for name, source, arguments, traced in PROGRAMS:
+    for name, source, arguments, traced in programs:
         image = str(images / f"{name}.nvr")
         by_name[name] = (image, arguments)
         tail = [image, "--", *arguments] if arguments else [image]
+        if name.startswith("x-concurrency-"):
+            # Under virtual time, timers do not depend on the machine.
+            tail = ["--virtual-time", *tail]
         record(f"{name}.stats", [neura, "run", "--stats", *tail])
         record(f"{name}.profile", [neura, "run", "--profile", *tail])
         if traced:
@@ -170,6 +271,9 @@ def capture(args):
             if trace.exists():
                 trace.unlink()
             record(f"{name}.record", [neura, "run", "--record", str(trace), *tail], trace)
+            if args.extended and trace.exists():
+                replay_tail = [arg for arg in tail if arg != "--virtual-time"]
+                record(f"{name}.replay", [neura, "run", "--replay", str(trace), *replay_tail])
     for name in SWEEP_PROGRAMS:
         image, arguments = by_name[name]
         tail = [image, "--", *arguments] if arguments else [image]
@@ -179,7 +283,32 @@ def capture(args):
         image, arguments = by_name[name]
         record(f"{name}.task-dump", [neura, "run", "--task-dump", image])
         record(f"{name}.task-dump-json", [neura, "run", "--task-dump=json", image])
-    for name, source in TEST_FILES:
+    if args.extended:
+        for name, steps in STEP_SWEEPS:
+            image, arguments = by_name[name]
+            tail = [image, "--", *arguments] if arguments else [image]
+            for limit in steps:
+                record(f"{name}.steps={limit}", [neura, "run", "--stats", "--max-steps", str(limit), *tail])
+        for name in EXTENDED_SWEEP_PROGRAMS:
+            image, arguments = by_name[name]
+            tail = [image, "--", *arguments] if arguments else [image]
+            if name.startswith("x-concurrency-"):
+                tail = ["--virtual-time", *tail]
+            for limit in SWEEP + EXTENDED_SWEEP:
+                record(f"{name}.sweep{limit[0]}={limit[1]}", [neura, "run", "--stats", *limit, *tail])
+        # One image run once per argument list (a fleet of runs).
+        lists = work / "each-lists.txt"
+        lists.write_text("".join(f"{n}\n" for n in (1, 7, 27, 97, 871, 6171, 2, 3, 0, 100)))
+        image, _ = by_name["wall-collatz"]
+        record("wall-collatz.each", [neura, "run", "--stats", "--each", lists.name, image])
+        each_image = images / "x-each-collatz.nvr"
+        if not each_image.exists():
+            status, _, stderr = run([neura, "build", str(ROOT / "tests/backend/each/collatz.nra"), "-o",
+                                     str(each_image)], ROOT)
+            if status != 0:
+                sys.exit(f"each collatz: build failed\n{stderr.decode(errors='replace')}")
+        record("each-collatz.each", [neura, "run", "--stats", "--each", lists.name, str(each_image)])
+    for name, source in TEST_FILES + (EXTENDED_TEST_FILES if args.extended else []):
         record(name, [neura, "test", "--stats", str(ROOT / source)])
     failing = work / "failing-tests.nra"
     failing.write_text(FAILING_TESTS)
@@ -217,6 +346,11 @@ def main():
     capture_parser.add_argument("--neura", required=True)
     capture_parser.add_argument("--images", required=True)
     capture_parser.add_argument("--out", required=True)
+    capture_parser.add_argument("--extended", action="store_true",
+                                help="also capture the wider case list (backend, benchmark, wall-clock, standard "
+                                     "library, and concurrency programs, step sweeps, replays, and --each)")
+    capture_parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
+                                help="pass OPTION to every run and test, for example --run-option=--tier=0")
     compare_parser = commands.add_parser("compare")
     compare_parser.add_argument("left")
     compare_parser.add_argument("right")

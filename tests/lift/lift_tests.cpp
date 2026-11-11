@@ -12,6 +12,7 @@
 
 #include "backend/converter.hpp"
 #include "ir-optimization/support.hpp"
+#include "lift/hints.hpp"
 #include "lift/lift.hpp"
 #include "lift/overflow.hpp"
 #include "lift/proof.hpp"
@@ -654,6 +655,84 @@ NEURA_TEST(overflow, intervals_bound_reference_evaluation) {
     clamp.outputs = {1};
     proof = lift::prove_no_overflow(clamp);
     check(proof.safe && proof.wires[1].lo == 0 && proof.wires[1].hi == 0, "ReLU clamps the interval");
+}
+
+NEURA_TEST(overflow, unrefined_and_bounded_proofs_agree_with_the_full_proof) {
+    // The products of an 8-bit multiplier need the refined analysis. With
+    // too little work it stops undecided; with enough, or none given, it
+    // proves what the unbounded analysis proves.
+    auto image = op_image();
+    LiftedForm form;
+    check(construct(image, {U8, U8}, lift::binary("*", U8, lift::input(U8, 0), lift::input(U8, 1)), nullptr, form),
+          "the block assembles");
+    const auto& graph = image.graphs[0];
+    std::vector<std::uint32_t> lanes(graph.outputs.size());
+    for (std::uint32_t i = 0; i < lanes.size(); ++i) lanes[i] = i;
+    const auto full = lift::prove_no_overflow(graph);
+    check(full.safe && lift::lanes_are_bits(full, graph, lanes), "the full analysis proves the multiplier");
+    const auto quick = lift::prove_no_overflow(graph, false);
+    check(quick.safe, "the unrefined analysis excludes overflow");
+    std::uint64_t none = 0;
+    const auto starved = lift::prove_no_overflow(graph, true, &none);
+    check(!starved.safe && starved.exhausted, "no work decides nothing");
+    std::uint64_t plenty = std::numeric_limits<std::uint64_t>::max();
+    const auto bounded = lift::prove_no_overflow(graph, true, &plenty);
+    check(bounded.safe && !bounded.exhausted, "enough work proves it");
+    check(bounded.wires.size() == full.wires.size(), "the bounded proof is the full proof");
+    for (std::size_t w = 0; w < full.wires.size(); ++w) {
+        check(bounded.wires[w].lo == full.wires[w].lo && bounded.wires[w].hi == full.wires[w].hi,
+              "wire " + std::to_string(w) + " has the same interval");
+    }
+    lift::GraphProofs proofs;
+    check_equal(proofs.verdict(graph, 0, 0), std::string(lift::exhausted_work), "a starved verdict is not final");
+    check(proofs.verdict(graph, 0).empty(), "an unbounded verdict proves the graph");
+    check(proofs.verdict(graph, 0, 0).empty(), "a proven graph stays proven");
+}
+
+NEURA_TEST(proof, hint_sections_round_trip_and_malformed_ones_are_ignored) {
+    // A shared form: x = a + b feeds both values, and a discarded product
+    // is computed for its check only.
+    auto image = op_image();
+    const auto a = lift::input(I32, 0);
+    const auto b = lift::input(I32, 1);
+    const auto sum = lift::binary("+", I32, a, b);
+    LiftedForm form;
+    form.shared = true;
+    form.schedule = {sum, lift::binary("*", I32, a, b), lift::binary("<", Bool, sum, lift::immediate(I32, 7))};
+    form.values[1] = sum;
+    form.condition = form.schedule.back();
+    form.exit_when_true = 0;
+    std::vector<lift::BlockHint> hints{{0, 3, form}, {0, 1, form}, {2, 0, form}};
+    const auto section = lift::encode_hints(hints);
+    check(section.tag == lift::hint_tag, "the section is tagged LIFT");
+    const auto decoded = lift::decode_hints(std::span<const std::uint8_t>(section.data));
+    check_equal(decoded.size(), std::size_t{3}, "every entry decodes");
+    const auto& back = *decoded.at({0, 1});
+    check(back.shared && back.schedule.size() == 3 && back.values.size() == 1 && back.condition &&
+              back.exit_when_true == 0,
+          "the form decodes whole");
+    check(back.values.at(1) == back.schedule[0], "a shared node stays shared");
+    check(back.condition == back.schedule[2] && back.schedule[2]->operands[0] == back.schedule[0],
+          "the condition reads the shared sum");
+    check(decoded.at({0, 1}) == decoded.at({0, 3}), "identical forms are stored once");
+    check(lift::encode_hints(hints).data == section.data, "the encoding is deterministic");
+
+    // Every truncation, and a byte too many, is ignored whole.
+    for (std::size_t n = 0; n < section.data.size(); ++n) {
+        const std::vector<std::uint8_t> cut(section.data.begin(), section.data.begin() + static_cast<std::ptrdiff_t>(n));
+        check(lift::decode_hints(std::span<const std::uint8_t>(cut)).empty(), "a truncated section is ignored");
+    }
+    auto longer = section.data;
+    longer.push_back(0);
+    check(lift::decode_hints(std::span<const std::uint8_t>(longer)).empty(), "trailing bytes are ignored");
+    // An operand that names a later node would make a cycle.
+    auto forward = section.data;
+    // The first form's third node (a binary) starts after the header (8),
+    // the node count (4), and two input nodes (9 each).
+    const std::size_t third = 8 + 4 + 9 + 9;
+    check(forward[third] == 3, "the third node is a binary operation");
+    forward[third + 6] = 9;
+    check(lift::decode_hints(std::span<const std::uint8_t>(forward)).empty(), "a forward operand is ignored");
 }
 
 NEURA_TEST(overflow, exclusive_indicators_sum_to_a_bit) {

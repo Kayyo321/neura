@@ -23,12 +23,16 @@ std::optional<Interval> scale(std::int64_t k, const Interval& interval) {
 
 class Analysis {
 public:
-    Analysis(const nvr::Graph& graph, OverflowProof& proof)
-        : graph_(graph), proof_(proof), values_(std::size_t{graph.input_lanes} + graph.nodes.size(), 0) {
+    Analysis(const nvr::Graph& graph, OverflowProof& proof, std::uint64_t* budget = nullptr)
+        : graph_(graph), proof_(proof), values_(std::size_t{graph.input_lanes} + graph.nodes.size(), 0),
+          budget_(budget) {
         if (proof_.group_of.size() != values_.size()) proof_.group_of.assign(values_.size(), nvr::absent);
     }
 
     const nvr::Node& node(std::uint32_t wire) const { return graph_.nodes[wire - graph_.input_lanes]; }
+
+    // Whether the case analysis ran out of the caller's work.
+    bool exhausted() const { return exhausted_; }
 
     // Step pairs: ReLU nodes P = relu(L + b) and Q = relu(L + b - 1) over the
     // same weighted sum L. For integer L, P - Q is 1 when L + b >= 1 and 0
@@ -388,11 +392,22 @@ private:
         std::int64_t hi = std::numeric_limits<std::int64_t>::min();
         std::vector<std::int64_t> choice(free.size());
         for (std::size_t i = 0; i < free.size(); ++i) choice[i] = variables[free[i]].lo;
+        // The same nodes in the same stored order, as a flat list: the loop
+        // below visits them once per assignment.
+        const std::vector<std::uint32_t> ordered(needed.begin(), needed.end());
         for (std::uint64_t count = 0; count < assignments; ++count) {
-            if (work_ < needed.size() + 1) return std::nullopt;
-            work_ -= needed.size() + 1;
+            if (work_ < ordered.size() + 1) return std::nullopt;
+            work_ -= ordered.size() + 1;
+            if (budget_) {
+                if (*budget_ < ordered.size() + 1) {
+                    *budget_ = 0;
+                    exhausted_ = true;
+                    return std::nullopt;
+                }
+                *budget_ -= ordered.size() + 1;
+            }
             for (std::size_t i = 0; i < free.size(); ++i) assign(variables[free[i]], choice[i]);
-            for (const auto wire : needed) {
+            for (const auto wire : ordered) {
                 const auto& n = node(wire);
                 std::int64_t sum = n.bias;
                 for (const auto& edge : n.edges) {
@@ -426,6 +441,8 @@ private:
     OverflowProof& proof_;
     std::vector<std::int64_t> values_;
     std::uint64_t work_ = 0;
+    std::uint64_t* budget_ = nullptr;
+    bool exhausted_ = false;
 };
 
 // A pattern neuron: a ReLU whose edges all have weight +1 or -1 from bit
@@ -498,7 +515,7 @@ bool one_hot_bit(const nvr::Graph& graph, const OverflowProof& proof, std::uint3
 
 } // namespace
 
-OverflowProof prove_no_overflow(const nvr::Graph& graph) {
+OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint64_t* work) {
     OverflowProof proof;
     for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
         for (const auto& edge : graph.nodes[n].edges) {
@@ -509,7 +526,7 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph) {
             }
         }
     }
-    Analysis analysis(graph, proof);
+    Analysis analysis(graph, proof, work);
     analysis.find_step_pairs();
     auto& wires = proof.wires;
     wires.reserve(std::size_t{graph.input_lanes} + graph.nodes.size());
@@ -535,7 +552,7 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph) {
         // Two halves of a selection, relu(s + t - 1) and relu(f - s) on
         // adjacent wires, read with equal weights: when case analysis shows
         // their sum is 0 or 1, they become a group, read as one bit.
-        for (std::size_t e = 0; e + 1 < node.edges.size(); ++e) {
+        for (std::size_t e = 0; refine && e + 1 < node.edges.size(); ++e) {
             const auto a = node.edges[e].source;
             const auto b = node.edges[e + 1].source;
             if (b != a + 1 || a < graph.input_lanes || node.edges[e].weight != node.edges[e + 1].weight ||
@@ -565,11 +582,17 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph) {
         // Case analysis over the wires below it narrows the interval, which
         // keeps the intervals of later nodes, and their overflow checks,
         // from compounding the looseness.
-        if (!within_bits(wires.back()) && !node.edges.empty()) {
+        if (refine && !within_bits(wires.back()) && !node.edges.empty()) {
             if (const auto range = analysis.range(node, 256, 4)) {
                 wires.back().lo = std::max(wires.back().lo, range->lo);
                 wires.back().hi = std::min(wires.back().hi, range->hi);
             }
+        }
+        if (analysis.exhausted()) {
+            proof.node = n;
+            proof.wires.clear();
+            proof.exhausted = true;
+            return proof;
         }
     }
     proof.safe = true;
@@ -577,7 +600,7 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph) {
 }
 
 bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::span<const std::uint32_t> lanes,
-                    BitEvidence* evidence) {
+                    BitEvidence* evidence, bool use_cases, std::uint64_t* work) {
     if (!proof.safe) {
         return false;
     }
@@ -596,12 +619,13 @@ bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::sp
             if (evidence) ++evidence->one_hot;
             continue;
         }
-        if (wire >= graph.input_lanes) {
+        if (use_cases && wire >= graph.input_lanes) {
             if (!cases) {
                 copy = proof;
-                cases.emplace(graph, copy);
+                cases.emplace(graph, copy, work);
             }
             const auto range = cases->range(graph.nodes[wire - graph.input_lanes], std::uint64_t{1} << 14, 48);
+            if (cases->exhausted()) return false;
             if (range && within_bits(*range)) {
                 if (evidence) ++evidence->cases;
                 continue;

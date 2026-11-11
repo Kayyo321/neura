@@ -35,6 +35,8 @@ struct RunOptions {
     // --virtual-time: timers, deadlines, and the clock services follow a
     // clock that moves only when every task is parked.
     bool virtual_time = false;
+    // --tier-stats: report blocks lifted and steps per execution tier.
+    bool tier_stats = false;
 };
 
 // Writes scheduler events as JSON lines (docs/lang/Concurrency.md section

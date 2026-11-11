@@ -4,6 +4,7 @@
 #include "graph_device.hpp"
 #include "run_support.hpp"
 #include "scalar_text.hpp"
+#include "tier1.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
 
@@ -11,6 +12,8 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <thread>
 #include <chrono>
@@ -314,6 +317,7 @@ public:
         : image_(image), types_(image), limits_(limits), entry_(entry) {
         check_device();
         check_task_settings();
+        setup_tier();
         if (entry_) validate_entry_arguments(image, *entry_, arguments);
         else validate_utf8_arguments(arguments);
         arguments_.assign(arguments.begin(), arguments.end());
@@ -323,6 +327,7 @@ public:
         : image_(image), types_(image), limits_(limits), start_function_(function) {
         check_device();
         check_task_settings();
+        setup_tier();
         validate_call_arguments(image, function, arguments);
         start_arguments_.assign(arguments.begin(), arguments.end());
     }
@@ -331,11 +336,36 @@ public:
     // argument, with the starting run's transferable constants as globals,
     // its own heap, and no scheduler. See run_item.
     State(const nvr::Image& image, RunLimits limits, const ParallelItem& item)
-        : image_(image), types_(image), limits_(limits), start_function_(item.function), item_(&item) {}
+        : image_(image), types_(image), limits_(limits), start_function_(item.function), item_(&item) {
+        setup_tier();
+    }
 
     ~State() {
         stop_parallel_workers();
         stop_tracking_heap();
+        if (tier_) {
+            tier_->add_steps(tier_steps_);
+            flush_reference_steps();
+        }
+    }
+
+    // Tier 1 runs without a graph device, below the process's ceiling. A
+    // run without a shared cache keeps its own and gives it to its parallel
+    // items.
+    void setup_tier() {
+        if (limits_.graph_device || std::min(limits_.tier, tier_ceiling()) < 1) {
+            limits_.tier_cache = nullptr;
+            return;
+        }
+        if (limits_.tier_cache && &limits_.tier_cache->image() != &image_) {
+            throw std::invalid_argument("tier cache was created for another image");
+        }
+        if (!limits_.tier_cache) {
+            own_tier_ = std::make_unique<TierCache>(image_);
+            limits_.tier_cache = own_tier_.get();
+        }
+        tier_ = limits_.tier_cache;
+        tier_check_ = tier_check_enabled();
     }
 
     // A concurrent image needs a positive quantum; reject it before any run state exists.
@@ -2114,6 +2144,10 @@ private:
         limits.max_heap_cells = item.max_cells;
         limits.max_frames = parent.max_frames;
         limits.max_handles = parent.max_handles;
+        // Items share the starting run's lifted blocks. With a graph device
+        // the run has no cache, and its items stay on the reference tier.
+        limits.tier = parent.tier_cache ? parent.tier : 0;
+        limits.tier_cache = parent.tier_cache;
         const auto refuse = [&](std::string detail) {
             item.trapped = true;
             item.trap = {};
@@ -2769,9 +2803,21 @@ private:
         bool decoded = false;
         std::uint32_t selector_lanes = 0;
         std::size_t first_input = 0;
+        // How tier 1 evaluates the block (src/nvm/tier1.hpp). Empty and
+        // Wired graphs have no neurons: no outputs, or outputs that are
+        // input lanes, starting at `first_wire` in wire_sources_. Lifted
+        // runs `lifted`. Counting blocks run by reference until the image's
+        // count of their executions (TierCache::count) reaches `threshold`;
+        // Reference blocks stay there.
+        enum class Tier : std::uint8_t { Reference, Counting, Lifted, Wired, Empty };
+        Tier tier = Tier::Reference;
+        std::uint64_t threshold = 0;
+        std::size_t first_wire = 0;
+        const lift::LoweredBlock* lifted = nullptr;
+        std::uint64_t reference_steps = 0;
     };
 
-    const BlockPlan& block_plan(std::uint32_t function, std::uint32_t block) {
+    BlockPlan& block_plan(std::uint32_t function, std::uint32_t block) {
         if (function_plans_.empty()) {
             function_plans_.reserve(image_.functions.size() + 1);
             std::size_t total = 0;
@@ -2799,6 +2845,7 @@ private:
                     argument_scratch_.reserve(exit.arguments.size());
                 }
             }
+            if (tier_) plan_tier(function, block, decoded, plan);
             plan.decoded = true;
         }
         return plan;
@@ -2838,15 +2885,19 @@ private:
         case nvr::ValueKind::Constant:
             return const_values_[value.index];
         case nvr::ValueKind::Lanes: {
-            const auto lanes = nvr::lane_count(type(value.type));
             std::uint64_t bits = 0;
-            for (unsigned i = 0; i < lanes; ++i) {
-                const auto lane = outputs_[value.index + i];
-                if (lane != 0 && lane != 1) {
-                    fault(TrapKind::NonBinaryLane, "output lane " + std::to_string(value.index + i) +
-                                                       " holds " + std::to_string(lane));
+            if (tier_lanes_ != TierLanes::None) {
+                bits = tier_value(value);
+            } else {
+                const auto lanes = nvr::lane_count(type(value.type));
+                for (unsigned i = 0; i < lanes; ++i) {
+                    const auto lane = outputs_[value.index + i];
+                    if (lane != 0 && lane != 1) {
+                        fault(TrapKind::NonBinaryLane, "output lane " + std::to_string(value.index + i) +
+                                                           " holds " + std::to_string(lane));
+                    }
+                    bits |= static_cast<std::uint64_t>(lane) << i;
                 }
-                bits |= static_cast<std::uint64_t>(lane) << i;
             }
             const auto kind = type(value.type).kind;
             if (nvr::is_reference(kind) &&
@@ -2879,7 +2930,7 @@ private:
         return index;
     }
 
-    template <bool Prepared>
+    template <bool Prepared, bool Defer = Prepared>
     std::optional<Event> begin_active_step() {
         if (finished_) return *finished_;
         if constexpr (Prepared) {
@@ -2900,7 +2951,7 @@ private:
             if (scheduler_ && scheduler_->deciding) {
                 if (auto event = decide()) return event;
             }
-            prepare_step(Prepared);
+            prepare_step(Defer);
             return std::nullopt;
         } catch (const Fault& failure) {
             return trap(failure);
@@ -2941,7 +2992,7 @@ private:
         }
         const auto& function = image_.functions[frame.function];
         const auto& block = function.blocks[frame.block];
-        const auto& plan = block_plan(frame.function, frame.block);
+        auto& plan = block_plan(frame.function, frame.block);
         if (defer_inputs) {
             // Validated graph inputs can only read constants or slots. Check
             // every read that can trap before offering this step to a device.
@@ -2998,6 +3049,7 @@ private:
     }
 
     std::optional<Event> step(std::vector<std::int64_t>& scratch) {
+        if (tier_) return tier_step(scratch);
         GraphStep current;
         if (auto event = begin_step(current)) return event;
         const auto& graph = image_.graphs[current.graph];
@@ -3009,9 +3061,16 @@ private:
         return finish_reference_step(scratch, false);
     }
 
+#include "tier1_steps.inc"
+
     std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
+        return commit_exit(block.exits[select(block, plan)]);
+    }
+
+    // Takes `exit` of the active block. Lanes values come from the graph's
+    // output lanes, or from tier 1's values while a tier step commits.
+    std::optional<Event> commit_exit(const nvr::Exit& exit) {
         auto frame = frames_.back();
-        const auto& exit = block.exits[select(block, plan)];
 
         // Resolve every value against the pre-transition state, then commit.
         // The buffers are reused: nothing a step does starts another step
@@ -3830,7 +3889,7 @@ private:
     std::string wait_text(std::uint64_t id, const Task& task) const;
     std::string cancellation_text(const Task& task) const;
     const nvr::Block* active_block_ = nullptr;
-    const BlockPlan* active_plan_ = nullptr;
+    BlockPlan* active_plan_ = nullptr;
     // Decoded blocks: the first plan of each function's blocks, the plans,
     // and the input lane counts they index.
     std::vector<std::size_t> function_plans_;
@@ -3853,6 +3912,19 @@ private:
     std::vector<std::int64_t> inputs_;
     std::vector<std::int64_t> outputs_;
     std::vector<std::int64_t> wires_;
+    // Tier 1 (tier1_steps.inc): the cache, its owner when the run has its own, and
+    // the buffers of a tier step: input values, lowered output values, the
+    // lowered block's registers, and each wired output lane's source.
+    std::unique_ptr<TierCache> own_tier_;
+    TierCache* tier_ = nullptr;
+    bool tier_check_ = false;
+    TierSteps tier_steps_;
+    TierLanes tier_lanes_ = TierLanes::None;
+    const BlockPlan* tier_plan_ = nullptr;
+    std::vector<std::uint64_t> tier_inputs_;
+    std::vector<std::uint64_t> tier_outputs_;
+    std::vector<std::uint64_t> tier_registers_;
+    std::vector<WireSource> wire_sources_;
     std::optional<Event> finished_;
     std::optional<Pending> pending_;
     std::uint64_t sequence_ = 0;

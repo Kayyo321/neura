@@ -67,6 +67,16 @@ struct LiftedForm {
     std::vector<std::pair<std::uint32_t, ExpressionPtr>> checks;
     // Dispatch blocks: the layouts each Call exit is taken for.
     std::map<std::size_t, std::vector<std::uint32_t>> dispatch;
+    // A shared form, as the converter records one (a LIFT hint): each
+    // expression node stands for one computation, however many times it is
+    // used, so a node reachable twice is built and computed once. The
+    // scheduled nodes come first, in the order the block computes them;
+    // they include operations whose only effect is a check, such as a
+    // statement whose value is discarded, and fix the order of every check.
+    // A form that is not shared builds a node once per use and has no
+    // schedule.
+    bool shared = false;
+    std::vector<ExpressionPtr> schedule;
 
     // The values in computation order: `order` when given, else lane order.
     std::vector<std::pair<std::uint32_t, ExpressionPtr>> computation_order() const;

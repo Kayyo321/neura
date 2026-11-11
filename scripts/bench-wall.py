@@ -67,6 +67,11 @@ def parse_args():
     parser.add_argument("--max-steps", type=int, default=10**12,
                         help="--max-steps for neura run (default 10^12; neura's own default is 10^8)")
     parser.add_argument("--no-java", action="store_true", help="skip Java even when it is installed")
+    parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
+                        help="pass OPTION to neura run, for example --run-option=--tier=0 (repeatable)")
+    parser.add_argument("--compare-tiers", action="store_true",
+                        help="run each program at --tier=0 and --tier=1 instead of comparing with Java, and "
+                             "report the share of steps tier 1 ran (docs/runtime/NVM.md, \"Execution tiers\")")
     parser.add_argument("--out-dir", default=str(ROOT / "build" / "bench-wall"),
                         help="where images, classes, and results go (default build/bench-wall)")
     args = parser.parse_args()
@@ -148,7 +153,7 @@ def main():
     classes = out / "classes"
     images.mkdir(parents=True, exist_ok=True)
     selected = programs(args)
-    java, java_note = find_java(args)
+    java, java_note = (None, "not run: tiers compared") if args.compare_tiers else find_java(args)
     print(f"neura: {neura}")
     print(f"java: {java_note}")
     print(f"mode: {'quick' if args.quick else 'full'}, {args.runs} runs, median wall time")
@@ -165,7 +170,11 @@ def main():
         built = subprocess.run([str(neura), "build", str(source), "-o", str(image)], capture_output=True, text=True)
         if built.returncode != 0:
             fail(f"{name}: neura build failed\n{built.stderr}")
-        command = [str(neura), "run", "--stats", "--max-steps", str(args.max_steps), str(image), "--", str(size)]
+        command = [str(neura), "run", "--stats", "--max-steps", str(args.max_steps), *args.run_option, str(image),
+                   "--", str(size)]
+        if args.compare_tiers:
+            results.append(compare_tiers(command, out, args.runs, name, size))
+            continue
         seconds, times, output, stats = median_run(command, out, args.runs, f"{name} (neura)")
         entry = {
             "name": name,
@@ -201,11 +210,54 @@ def main():
         "results": results,
     }
     (out / "bench-wall.json").write_text(json.dumps(report, indent=2) + "\n")
-    (out / "bench-wall.md").write_text(markdown(report))
+    (out / "bench-wall.md").write_text(tier_markdown(report) if args.compare_tiers else markdown(report))
     print(f"wrote {out / 'bench-wall.json'} and {out / 'bench-wall.md'}")
     if any(entry.get("outputs_match") is False for entry in results):
         fail("a Java program's output differs from its Neura program's")
     return 0
+
+
+TIER_STEPS = re.compile(r"tier: steps (\d+): tier 1 ([0-9.]+)%")
+
+
+def compare_tiers(command, cwd, runs, name, size):
+    """Times one program at tier 0 and tier 1. Both must print the same
+    output and report the same steps and peak heap cells."""
+    at = command.index("run") + 1
+    tier0 = command[:at] + ["--tier=0"] + command[at:]
+    tier1 = command[:at] + ["--tier=1", "--tier-stats"] + command[at:]
+    seconds0, times0, output0, stats0 = median_run(tier0, cwd, runs, f"{name} (tier 0)")
+    seconds1, times1, output1, stats1 = median_run(tier1, cwd, runs, f"{name} (tier 1)")
+    if output0 != output1 or stats0 != stats1:
+        fail(f"{name}: tier 0 and tier 1 differ in output or stats")
+    shares = TIER_STEPS.search(subprocess.run(tier1, cwd=cwd, capture_output=True).stderr.decode(errors="replace"))
+    share = float(shares.group(2)) if shares else None
+    print(f"{name:16} size {size:>8}  tier 0 {seconds0:8.3f} s  tier 1 {seconds1:8.3f} s  "
+          f"speedup {seconds0 / seconds1:5.2f}  tier 1 steps {share}%", flush=True)
+    return {"name": name, "size": size, "steps": stats0[0] if stats0 else None,
+            "tier0": {"median_seconds": seconds0, "seconds": times0},
+            "tier1": {"median_seconds": seconds1, "seconds": times1, "steps_percent": share},
+            "output": output0.decode(errors="replace")}
+
+
+def tier_markdown(report):
+    lines = [
+        f"Tier 0 against tier 1, {report['mode']} sizes, median of {report['runs']} runs "
+        f"({report['date']}, {report['machine']['system']} {report['machine']['machine']}, "
+        f"{report['machine']['cpus']} CPUs).",
+        "",
+        f"- Neura: {report['neura_version'] or report['neura']}",
+        "",
+        "| Program | Size | Steps | Tier 0 (s) | Tier 1 (s) | Speedup | Steps on tier 1 |",
+        "| --- | ---: | ---: | ---: | ---: | ---: | ---: |",
+    ]
+    for entry in report["results"]:
+        t0 = entry["tier0"]["median_seconds"]
+        t1 = entry["tier1"]["median_seconds"]
+        share = entry["tier1"]["steps_percent"]
+        lines.append(f"| {entry['name']} | {entry['size']} | {entry['steps']} | {t0:.3f} | {t1:.3f} | "
+                     f"{t0 / t1:.2f} | {'' if share is None else f'{share:.1f}%'} |")
+    return "\n".join(lines) + "\n"
 
 
 def markdown(report):

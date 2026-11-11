@@ -401,10 +401,12 @@ if(NOT bare_stderr MATCHES "\n    task 2  spawned at function [0-9]+ block [0-9]
 endif()
 
 # SIGQUIT asks a running image for a dump and the run continues to its end.
+# The run must outlast two seconds of wall time, so it stays on the reference
+# tier, whose speed the step limit was chosen for.
 if(UNIX)
     must("spin" build "${SOURCE_DIR}/tests/concurrency/spin.nra" -o spin.nvr)
     execute_process(
-        COMMAND sh -c "\"$0\" run --max-steps 30000000 spin.nvr 2> spin.err & pid=$!; sleep 1; kill -QUIT $pid; sleep 1; kill -QUIT $pid; wait $pid; echo $? > spin.status" "${NEURA}"
+        COMMAND sh -c "\"$0\" run --tier=0 --max-steps 30000000 spin.nvr 2> spin.err & pid=$!; sleep 1; kill -QUIT $pid; sleep 1; kill -QUIT $pid; wait $pid; echo $? > spin.status" "${NEURA}"
         WORKING_DIRECTORY "${TEST_DIR}"
         RESULT_VARIABLE shell_status)
     file(READ "${TEST_DIR}/spin.err" spin_err)

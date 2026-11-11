@@ -53,6 +53,9 @@ struct WireGroup {
 
 struct OverflowProof {
     bool safe = false;
+    // When not safe: the case analysis ran out of the work it was given, so
+    // nothing was decided. More work may prove the graph.
+    bool exhausted = false;
     // When not safe: the first node whose arithmetic was not proven in range.
     std::size_t node = 0;
     // When safe: the interval of every wire, inputs first.
@@ -62,7 +65,16 @@ struct OverflowProof {
     std::vector<std::uint32_t> group_of;
 };
 
-OverflowProof prove_no_overflow(const nvr::Graph& graph);
+// With `refine` off, the analysis skips both refinements above except the
+// step pairs: every interval is still sound, only wider, so a proof found
+// this way is as valid as a refined one and is much cheaper to find. The
+// lift library tries it first and refines only when it is not enough.
+//
+// `work`, when given, bounds the case analysis: each node it evaluates for
+// one assignment costs one unit, taken from *work. When it runs out, the
+// proof stops as `exhausted`. The bound changes only whether an answer is
+// found, never which: a proof found within it is the proof found without.
+OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine = true, std::uint64_t* work = nullptr);
 
 // How lanes_are_bits established each lane.
 struct BitEvidence {
@@ -81,7 +93,10 @@ struct BitEvidence {
 // and a bounded case analysis evaluates the lane for every assignment of a
 // cut of wires below it, each over its interval, with a wire group as one
 // variable. Each argument covers every input assignment; none samples.
+// Without `cases`, only the first two arguments are tried. `work` bounds the
+// case analysis as for prove_no_overflow; when it runs out the result is
+// false and *work is zero.
 bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::span<const std::uint32_t> lanes,
-                    BitEvidence* evidence = nullptr);
+                    BitEvidence* evidence = nullptr, bool cases = true, std::uint64_t* work = nullptr);
 
 } // namespace neura::lift
