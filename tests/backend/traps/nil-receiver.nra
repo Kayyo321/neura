@@ -9,5 +9,5 @@ let NilReceiver = module:program.Entry (
         let reference: class = nil;
         console.print_line(reference.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );

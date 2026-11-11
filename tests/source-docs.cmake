@@ -32,7 +32,7 @@ export let Example = module (
         /// Applies to both named bindings.
         let [first, second, _] = [result, result, 0];
         return first + second;
-    }
+    };
     /// First overload.
     export let convert = func(value: int32) -> int32 => value
         /// Second overload.

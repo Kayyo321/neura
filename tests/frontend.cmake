@@ -132,7 +132,7 @@ let Derived = class:Base (
     export let init = func() -> void {
         super.init();
         super.init();
-    }
+    };
 );
 ]=] "6:[1-9][0-9]*" "super.init must be the first statement")
 
@@ -220,7 +220,7 @@ let View = class (
         if (bind) {
             value = storage;
         }
-    }
+    };
 );
 ]=] "4:[1-9][0-9]*" "exit before binding reference field 'value'")
 check_rejection(reference-field-ambiguous [=[
@@ -231,7 +231,7 @@ let View = class (
             value = storage;
         }
         value = storage;
-    }
+    };
 );
 ]=] "8:[1-9][0-9]*" "reference field.*value.*bound")
 check_rejection(reference-field-read [=[
@@ -240,7 +240,7 @@ let View = class (
     let snapshot: int = value;
     let init = func(storage: &int) {
         value = storage;
-    }
+    };
 );
 ]=] "4:[1-9][0-9]*" "reference field.*value.*bound")
 
@@ -442,13 +442,13 @@ let wrong = func(x: int) -> int {
 
 check_rejection(implicit-base-constructor [=[
 let Base = class (
-    export let init = func(value: int) -> void {}
+    export let init = func(value: int) -> void {};
 );
 let Middle = class:Base ();
 let Derived = class:Middle (
     export let init = func() -> void {
         super.init();
-    }
+    };
 );
 ]=] "8:9" "class 'Middle' needs a constructor to initialize its base")
 

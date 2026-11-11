@@ -85,5 +85,5 @@ let Computation = module:program.Entry (
             console.print_line("exact signed division");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

@@ -21,7 +21,7 @@ The official conventions from [Coding style](https://github.com/Kayyo321/neura/b
 
 - Four spaces, no tabs. Spaces around binary operators and `->`; one space after `:` in annotations.
 - Module and class bodies: `(` on the declaration line, members indented, `);` on its own line. Function bodies: K&R braces.
-- End every statement and binding with `;`. A block-bodied member inside a class or module may end at `}`.
+- End every statement and every declaration with `;`, including a function, class, or module member whose body ends at `}` or `)`. Statement blocks (`if`, `while`, `for`, `match`, `scope`, bare `{ }`) take no `;`.
 - One primary module per file, named after the file (`greeter.nra` declares `Greeter`).
 - Group imports at the top of the file, one per line; aliases that do not clash with the file's own names.
 - `//` comments above the code they describe, or inline after one space. `///` for documentation of declarations.
@@ -45,12 +45,12 @@ let ServiceMonitor = module (
 
         export let get_connection_info = func() -> string {
             return default_service_name + ":" + DefaultPort;
-        }
+        };
     );
 
     export let run_health_check = func(config: ServiceConfig) -> void {
         console.print_line("Running check for: " + config.get_connection_info());
-    }
+    };
 );
 
 let App = module:program.Entry (
@@ -58,7 +58,7 @@ let App = module:program.Entry (
         let monitor_config = new ServiceMonitor.ServiceConfig();
         ServiceMonitor.run_health_check(monitor_config);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

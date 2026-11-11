@@ -10,5 +10,5 @@ let Bounds = module:program.Entry (
         console.print_line(names[position - 1]);
         console.print_line(names[position]);
         return program.ExitCode.Ok;
-    }
+    };
 );

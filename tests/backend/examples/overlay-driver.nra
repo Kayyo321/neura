@@ -12,5 +12,5 @@ let OverlayDriver = module:program.Entry (
             console.print_line(overlay.default_name + " is enabled");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

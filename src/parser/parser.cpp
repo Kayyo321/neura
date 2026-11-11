@@ -55,7 +55,7 @@ private:
 
     // A missing ';' is reported where it belongs, immediately after the
     // previous token, with an insertion that `neura check --fix` applies.
-    [[noreturn]] void missing_semicolon() const {
+    [[noreturn]] void missing_semicolon(std::string_view note = {}) const {
         const auto& previous = tokens_[cursor_ - 1].span;
         Span after{previous.file, previous.line, previous.column, previous.offset + previous.length, 0};
         // Columns count code points, and lines end as the lexer ends them.
@@ -75,6 +75,7 @@ private:
         if (next.span.offset != after.offset)
             error.label(next.span, next.kind == TokenKind::End ? "found the end of the file" : "found '" + next.text + "'");
         error.suggest("add the missing ';'", after, ";", Applicability::MachineApplicable);
+        if (!note.empty()) error.note(std::string(note));
         throw error;
     }
 
@@ -465,13 +466,16 @@ private:
             throw Diagnostic(current().span, "expected a type annotation or an initializer");
         }
 
-        // Aggregate members and overload groups can end at a block body.
-        auto& final_branch = result.overloads.empty() ? result : result.overloads.back();
-        if ((owner || !result.overloads.empty()) && final_branch.has_body && !expression_body) {
-            match(";");
-        } else {
-            expect(";");
-        }
+        // Every declaration ends with ';', including one whose value is a body.
+        const auto& final_branch = result.overloads.empty() ? result : result.overloads.back();
+        const bool body_value = (final_branch.has_body && !expression_body) ||
+                                result.kind == Declaration::Kind::Class ||
+                                result.kind == Declaration::Kind::Interface ||
+                                result.kind == Declaration::Kind::Module;
+        if (body_value && !at(";"))
+            missing_semicolon("every declaration ends with ';', including one whose value is a function, class or "
+                              "module body");
+        expect(";");
         if (result.overloads.empty()) result.span = span_from(start);
         return result;
     }

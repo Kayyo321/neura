@@ -8,7 +8,7 @@ let PrimitiveReferences = module (
 
         export let init = func(value: &int) {
             instance.total = value;
-        }
+        };
     );
 
     export let example = func(initial: int, amount: int) -> int {

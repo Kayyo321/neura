@@ -8,7 +8,7 @@ let Polymorphism = module (
         // This inherited implementation calls the actual object's render method.
         export let framed = func() -> string {
             return "[" + render() + "]";
-        }
+        };
     );
 
     export let Text = class:Renderable (
@@ -16,13 +16,13 @@ let Polymorphism = module (
 
         export let.override render = func() -> string {
             return value;
-        }
+        };
     );
 
     export let Alert = class:Text (
         export let.override render = func() -> string {
             return "Alert: " + value;
-        }
+        };
     );
 
     // Subtype polymorphism: the same function accepts different subclasses.
@@ -46,7 +46,7 @@ let Polymorphism = module (
 
         export let get = func() -> T {
             return value;
-        }
+        };
     );
 
     // Construction initializes base state before derived state.
@@ -57,16 +57,16 @@ let Polymorphism = module (
             super.init();
             label = name;
             value = content;
-        }
+        };
 
         export let.override render = func() -> string {
             return label + ": " + value;
-        }
+        };
 
         // Called when this object is explicitly destroyed.
         let deinit = func() -> void {
             // Release resources owned by NamedText here, if any.
-        }
+        };
     );
 
     export let example = func() -> void {

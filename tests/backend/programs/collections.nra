@@ -27,5 +27,5 @@ let Collections = module:program.Entry (
             console.print_line("element updated through a uint8 index");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

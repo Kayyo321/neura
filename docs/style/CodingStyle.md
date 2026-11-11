@@ -76,11 +76,11 @@ export let log = func(message: string) -> void;
 
 export let log_entry = func(entry: LogEntry) -> void {
     log(entry.format());
-}
+};
 
 export let.override main = func(args: string[]) -> program.ExitCode {
     return program.ExitCode.Ok;
-}
+};
 ```
 
 #### Variables and Properties (`snake_case`)
@@ -116,7 +116,7 @@ All function parameters must use `snake_case`:
 ```neura
 export let format_log = func(log_message: string, log_level: int) -> string {
     // ...
-}
+};
 ```
 
 ---
@@ -154,7 +154,7 @@ export let format_log = func(log_message: string, log_level: int) -> string {
       // ...
   );
   ```
-- Terminate statements, variable bindings, and function signatures with a semicolon `;`:
+- Terminate statements and every declaration with a semicolon `;`. A declaration whose value is a function, class, or module body ends with `};` or `);`. Statement blocks such as `if`, `while`, and `for` take no `;`:
   <!-- example: fragment: formatting illustration: a bodyless signature and a statement shown as module members -->
   ```neura
   export let log = func(message: string) -> void;
@@ -170,7 +170,7 @@ export let format_log = func(log_message: string, log_level: int) -> string {
       // Implementation of entrypoint
       export let.override main = func(args: string[]) -> program.ExitCode {
           // ...
-      }
+      };
   );
   ```
 
@@ -205,7 +205,7 @@ let ServiceMonitor = module (
         // Methods: snake_case
         export let get_connection_info = func() -> string {
             return default_service_name + ":" + DefaultPort;
-        }
+        };
     );
 
     // Functions: snake_case
@@ -213,7 +213,7 @@ let ServiceMonitor = module (
 
     export let run_health_check = func(config: ServiceConfig) -> void {
         console.print_line("Running check for: " + config.get_connection_info());
-    }
+    };
 );
 
 // Module inheritance: PascalCase
@@ -224,7 +224,7 @@ let App = module:program.Entry (
         ServiceMonitor.run_health_check(monitor_config);
 
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

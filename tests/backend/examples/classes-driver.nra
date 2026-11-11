@@ -15,5 +15,5 @@ let ClassesDriver = module:program.Entry (
         classes.example();
         console.print_line("Classes.example() completed");
         return program.ExitCode.Ok;
-    }
+    };
 );

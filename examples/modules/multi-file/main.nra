@@ -6,5 +6,5 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line(message("Neura"));
         return program.ExitCode.Ok;
-    }
+    };
 );

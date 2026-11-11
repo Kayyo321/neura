@@ -12,5 +12,5 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let _ = Text.value;
         return program.ExitCode.Ok;
-    }
+    };
 );

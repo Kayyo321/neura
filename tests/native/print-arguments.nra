@@ -10,5 +10,5 @@ let PrintArguments = module:program.Entry (
             console.print_line("<" + argument + ">");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

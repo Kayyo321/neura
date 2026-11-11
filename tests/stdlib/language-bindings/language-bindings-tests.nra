@@ -20,7 +20,7 @@ let Base = class (
     export static let selected = func -> int => 1;
     export static let note = func(number: int) {
         total = number;
-    }
+    };
 
     export static let Nested = class (
         export let value = 4;
@@ -30,7 +30,7 @@ let Base = class (
     export let add = func {
         value++;
         total++;
-    }
+    };
 );
 
 let Derived = class:Base (
@@ -62,7 +62,7 @@ let BindingTests = module (
         let _ = record();
         let _ = record();
         assert_equal_int32(4, effects);
-    }
+    };
 
     export let test_promoted_exports = func {
         let clock: Clock = nil;
@@ -70,14 +70,14 @@ let BindingTests = module (
         assert(clock == nil);
         assert_equal_int64(0, span.to_nanos());
         checks.assert_equal_int32(10, initial_value());
-    }
+    };
 
     export let test_singleton_state = func {
         let alias: counter = counter;
         assert(alias == counter);
         assert_equal_int32(10, counter.next());
         assert_equal_int32(11, alias.next());
-    }
+    };
 
     export let test_shared_static_state = func {
         let first = new Base();
@@ -104,7 +104,7 @@ let BindingTests = module (
         assert_equal_int32(100, (bounded as Base).Max);
         assert_equal_int32(-1, Bounded.Min);
         assert_equal_int32(-1, Limits.lower_bound());
-    }
+    };
 
     export let test_static_qualifier = func {
         as_nil().total = record();
@@ -118,5 +118,5 @@ let BindingTests = module (
         as_nil().note(record());
         assert_equal_int32(11, Base.total);
         assert_equal_int32(11, effects);
-    }
+    };
 );

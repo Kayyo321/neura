@@ -1,0 +1,13 @@
+error[E0201]: expected ';'
+ --> $DIR/missing-semicolon-after-member-function.nra:7:6
+  |
+7 |     }
+  |      ^ expected ';' here
+8 |     export let value = func -> int => count;
+  |     ------ found 'export'
+  |
+  = note: every declaration ends with ';', including one whose value is a function, class or module body
+help: add the missing ';'
+  |
+7 |     };
+  |      +

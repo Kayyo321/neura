@@ -636,7 +636,7 @@ let App = module:program.Entry (
             values.append(value);
         }
         return program.ExitCode.Ok;
-    }
+    };
 );
 )";
     const auto run = run_captured(build_program({path}));

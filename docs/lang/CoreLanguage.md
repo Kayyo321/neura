@@ -67,7 +67,9 @@ let reset = func {
 };
 ```
 
-`=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects. A named declaration with an expression body ends with `;`.
+`=> expression` gives a function an expression body. The expression supplies the result of a non-`void` function. A `void` function evaluates the expression for its effects.
+
+Every declaration ends with `;`, whatever its value: an expression, a function with an expression or block body, a class, or a module. Statement blocks, such as the bodies of `if`, `while`, `for`, `match`, and `scope`, and a bare `{ }` block, do not take a `;`.
 
 ### Function overloads
 
@@ -81,10 +83,10 @@ let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
     console.print_line(text.slice(0, byte_count));
-}
+};
 ```
 
-An overload group can end at a block body. End an expression-bodied final alternative with `;`.
+An overload group is one declaration, so it ends with `;` after its final alternative.
 
 The compiler first filters by argument count. With several candidates of the same arity, it ranks each argument's match in this order.
 
@@ -278,7 +280,7 @@ let Main = module:program.Entry (
         spare_sender.send(2);
         drain(inbox, spare);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

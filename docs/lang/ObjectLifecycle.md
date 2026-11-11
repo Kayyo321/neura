@@ -17,7 +17,7 @@ let Message = class (
 
     export let init = func(initial_text: string) {
         text = initial_text;
-    }
+    };
 );
 
 let message = new Message("Hello");

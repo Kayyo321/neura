@@ -17,5 +17,5 @@ let Grow = module:program.Entry (
             console.print_line("three");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

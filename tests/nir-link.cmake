@@ -29,7 +29,7 @@ let Shared = module (
     let initial = func -> int {
         console.print_line("static startup");
         return 3;
-    }
+    };
 
     export let Label = interface (
         let label = func -> string;
@@ -44,7 +44,7 @@ let Shared = module (
             value = seed;
         } or func(seed: string) {
             value = seed.byte_length;
-        }
+        };
 
         export let label = func -> string => value.to_string();
         export let pin = func -> &int => value;
@@ -91,7 +91,7 @@ let program = import:Std.Program;
 let Derived = class:shared.Counter (
     export let init = func(seed: string) {
         super.init(seed);
-    }
+    };
 );
 
 let print = func(value: int) {
@@ -114,7 +114,7 @@ let App = module:program.Entry (
         retained += 1;
         print(retained);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ]=])
 set(expected "shared startup\n6\nstatic startup\n4\n5\n3\n8\n7\n3\n2\n9\n3\n13\n")
@@ -156,7 +156,7 @@ let App = module:program.Entry (
         console.print_line(bridge.wrapped().to_string());
         console.print_line(shared.single.value.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ]=])
 file(RENAME "${artifacts}/first.nir" "${artifacts}/first-hidden.nir")

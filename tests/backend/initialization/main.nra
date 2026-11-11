@@ -12,7 +12,7 @@ let Counter = class (
     export let value: int32 = 0;
     export let deinit = func() -> void {
         console.print_line("main: counter destroyed");
-    }
+    };
 );
 
 let shared = new Counter();
@@ -26,5 +26,5 @@ let App = module:program.Entry (
         }
         destroy shared;
         return program.ExitCode.Ok;
-    }
+    };
 );

@@ -45,7 +45,7 @@ let HelloWorld = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("Hello, World!");
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

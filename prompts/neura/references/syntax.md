@@ -38,7 +38,7 @@ The complete language as of Neura 0.1.0, in the order you need it. The specifica
 - Integer literals are decimal digits only. No hexadecimal, octal, binary, digit separators, or suffixes. A leading `-` belongs to the literal, so `-128` is a valid `int8`.
 - Float literals need a fraction or exponent: `1.5`, `1e3`, `2.5e-4`. There are no literals for infinity or NaN (`1.0 / 0.0` and `0.0 / 0.0` produce them).
 - String literals use double quotes with escapes `\"`, `\\`, `\t`, `\r`, `\n`. There are no character literals and no string interpolation; use `+` with `to_string()`, or `Console.format`.
-- Statements end with `;`. Blocks use `{ }`. Class, module, interface, and enum bodies use `( )`.
+- Statements and every declaration end with `;`, including a declaration whose value is a block or `( )` body (`};`, `);`). Statement blocks (`if`, `while`, `for`, `match`, `scope`, bare `{ }`) take no `;`. Blocks use `{ }`. Class, module, interface, and enum bodies use `( )`.
 
 ## Bindings
 
@@ -111,7 +111,7 @@ let reset = func {                                  // void: -> void optional
 
 ### Overloads
 
-Join alternatives with `or func`. They share the name and visibility. The group may end at a block body; end an expression-bodied final alternative with `;`.
+Join alternatives with `or func`. They share the name and visibility. The group is one declaration and ends with `;` after its final alternative.
 
 <!-- example: check -->
 ```neura
@@ -121,7 +121,7 @@ let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
     console.print_line(text.slice(0, byte_count));
-}
+};
 ```
 
 Resolution filters by arity, then ranks each argument: exact type, then assignable (a more specific class wins), then binding a primitive reference, then a literal that fits, then one visible object cast. The unique best candidate wins; otherwise the call is ambiguous. Alternatives must differ in resolved parameter types (`int` and `int32` are the same type). Overloads cannot be generic themselves. Constructors (`init`) overload the same way.
@@ -257,7 +257,7 @@ let Point = class (
     export let init = func(px: int, py: int) {
         x = px;
         y = py;
-    }
+    };
 
     export let.override equals = func(other: class) -> bool {
         if (other is Point) {
@@ -265,7 +265,7 @@ let Point = class (
             return x == point.x && y == point.y;
         }
         return false;
-    }
+    };
 
     export let.override hash_code = func -> uint32 => (x * 31 + y) as uint32;
 );
@@ -450,16 +450,16 @@ let LogEntry = class (
     } or func(text: string, entry_level: string) {
         message = text;
         level = entry_level;
-    }
+    };
 
     export let format = func -> string {
         return "[" + level + "] " + message;
-    }
+    };
 
     export let renumber = func(value: int) -> LogEntry {
         instance.sequence = value;            // `instance` is the receiver
         return instance;
-    }
+    };
 );
 
 let entry = new LogEntry("started");
@@ -467,7 +467,7 @@ let warning = new LogEntry("disk", "WARN");
 let line = warning.format();
 ```
 
-- Members in a class body are separated by `;` or simply follow a block body's `}`; both styles compile. Fields and methods are private unless `export`ed.
+- Every member in a class body ends with `;`, including a method whose block body ends at `}` (`};`). Fields and methods are private unless `export`ed.
 - Inside methods, fields and methods are in scope unqualified; `instance` is the receiver when no other binding has that name.
 - A class without `init` gets a zero-argument constructor (if its base can be built with none), and code can set exported fields after `new`.
 - Reading a field before anything stored to it traps at run time (`read of an uninitialized field`).
@@ -514,7 +514,7 @@ let Renderable = class (
 
     export let framed = func -> string {
         return "[" + render() + "]";                  // dispatches to the override
-    }
+    };
 );
 
 let Text = class:Renderable (                         // `class:Base`
@@ -522,18 +522,18 @@ let Text = class:Renderable (                         // `class:Base`
 
     export let.override render = func -> string {
         return value;
-    }
+    };
 );
 
 let Alert = class:Text (
     export let init = func(text: string) {
         super.init();                                 // first statement
         value = text;
-    }
+    };
 
     export let.override render = func -> string {
         return "Alert: " + value;
-    }
+    };
 );
 
 let display = func(item: Renderable) -> string => item.framed();
@@ -677,7 +677,7 @@ let Reading = class (
 
     export let init = func(initial: int16) {
         instance.value = initial;
-    }
+    };
 
     export let.as int16 = func -> int16 => value
         or as int64 = func -> int64 => value as int64;
@@ -738,11 +738,11 @@ let Resource = class (
 
     export let init = func(label: string) {
         name = label;
-    }
+    };
 
     let deinit = func {                    // runs on `destroy`, most-derived first
         // release what this class owns
-    }
+    };
 );
 
 let use = func {

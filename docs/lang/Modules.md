@@ -119,7 +119,7 @@ let Logger = module (
 let ConsoleLogger = module:Logger (
     export let.override log = func(message: string) -> void {
         // Write the message to the console.
-    }
+    };
 );
 ```
 
@@ -132,7 +132,7 @@ let program = import:Std.Program;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

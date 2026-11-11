@@ -54,5 +54,5 @@ let Floats = module:program.Entry (
         report((300.75 as float16) == 300.75, "300.75 is exact in float16");
         report((1e300 as float32) > 3.4e38, "float64 to float32 overflows to infinity");
         return program.ExitCode.Ok;
-    }
+    };
 );

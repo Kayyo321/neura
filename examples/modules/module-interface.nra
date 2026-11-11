@@ -10,14 +10,14 @@ let Logger = module (
 
         export let format = func() -> string {
             return "[" + level + "] " + message;
-        }
+        };
     );
 
     export let log = func(message: string) -> void;
 
     export let log_entry = func(entry: LogEntry) -> void {
         log(entry.format());
-    }
+    };
 );
 
 let ConsoleLogger = module:Logger ( // ConsoleLogger module inherits from Logger interface
@@ -29,7 +29,7 @@ let ConsoleLogger = module:Logger ( // ConsoleLogger module inherits from Logger
 
     export let.override log = func(message: string) -> void {
         console.print_line(prefix + " -> " + message);
-    }
+    };
 );
 
 let App = module:program.Entry (
@@ -43,5 +43,5 @@ let App = module:program.Entry (
         ConsoleLogger.log_entry(entry);
 
         return program.ExitCode.Ok;
-    }
+    };
 );

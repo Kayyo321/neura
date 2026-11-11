@@ -41,5 +41,5 @@ let Main = module:program.Entry (
         let near_max: uint64[] = {18446744073709551614 .. 18446744073709551615 : 2};
         test.assert(near_max === [18446744073709551614]);
         return program.ExitCode.Ok;
-    }
+    };
 );

@@ -67,5 +67,5 @@ let Aggregates = module:program.Entry (
         test.assert(selected);
         console.print_line("tuples and enum payloads passed");
         return program.ExitCode.Ok;
-    }
+    };
 );

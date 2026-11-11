@@ -17,5 +17,5 @@ let Truncate = module:program.Entry (
             console.print_line("unreachable: NaN has no integer value");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

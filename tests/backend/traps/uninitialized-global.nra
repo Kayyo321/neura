@@ -6,7 +6,7 @@ let program = import:Std.Program;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         return program.ExitCode.Ok;
-    }
+    };
 );
 
 console.print_line("start");

@@ -11,5 +11,5 @@ let InvalidClassCast = module:program.Entry (
         let reference: class = new First();
         let wrong = reference as Second;
         return program.ExitCode.Ok;
-    }
+    };
 );

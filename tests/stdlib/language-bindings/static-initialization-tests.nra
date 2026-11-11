@@ -43,7 +43,7 @@ let Constructed = class (
 
     export let init = func(value: int) {
         argument = value;
-    }
+    };
 );
 
 let Generic = class<T> (
@@ -109,7 +109,7 @@ let Before = singleton (
 
     let init = func {
         counter = record_startup("i");
-    }
+    };
 );
 
 let Container = class (
@@ -133,7 +133,7 @@ let StaticInitializationTests = module (
         test.assert_equal_string("", events);
         test.assert_equal_int32(5, base_qualifier().Constant);
         test.assert_equal_string("q", events);
-    }
+    };
 
     export let test_inherited_access_initializes_only_the_declaring_class = func {
         test.assert_equal_int32(2, Derived.second);
@@ -142,19 +142,19 @@ let StaticInitializationTests = module (
         test.assert_equal_int32(3, Derived.own);
         test.assert_equal_int32(3, Derived.own);
         test.assert_equal_string("BbD", events);
-    }
+    };
 
     export let test_construction_initializes_bases_and_class_once = func {
         let _ = new Derived();
         test.assert_equal_string("BbDi", events);
         let _ = new Derived();
         test.assert_equal_string("BbDii", events);
-    }
+    };
 
     export let test_construction_initializes_an_inherited_static_scope = func {
         let _ = new Middle();
         test.assert_equal_string("Bb", events);
-    }
+    };
 
     export let test_static_calls_and_writes_initialize_on_first_use = func {
         test.assert_equal_int32(1, Called.invoke());
@@ -164,43 +164,43 @@ let StaticInitializationTests = module (
         test.assert_equal_int32(42, Written.value);
         test.assert_equal_int32(1, Called.invoke());
         test.assert_equal_string("CW", events);
-    }
+    };
 
     export let test_static_method_reference_initializes_on_invocation = func {
         let callback = call_qualifier().invoke;
         test.assert_equal_string("q", events);
         test.assert_equal_int32(2, callback());
         test.assert_equal_string("qC", events);
-    }
+    };
 
     export let test_static_call_runs_after_arguments = func {
         test.assert_equal_int32(2, call_qualifier().echo(record("a")));
         test.assert_equal_string("qaC", events);
-    }
+    };
 
     export let test_static_assignment_runs_after_qualifier_and_value = func {
         write_qualifier().value = record("a");
         test.assert_equal_string("qaW", events);
         test.assert_equal_int32(2, Written.value);
-    }
+    };
 
     export let test_compound_assignment_runs_before_right_operand = func {
         update_qualifier().value += record("a");
         test.assert_equal_string("qUa", events);
         test.assert_equal_int32(5, Updated.value);
-    }
+    };
 
     export let test_construction_initializes_before_arguments = func {
         let instance = new Constructed(record("a"));
         test.assert_equal_string("Na", events);
         test.assert_equal_int32(2, instance.argument);
-    }
+    };
 
     export let test_generic_applications_share_initialization = func {
         let _ = new Generic<int>();
         let _ = new Generic<string>();
         test.assert_equal_string("G", events);
-    }
+    };
 
     export let test_initialization_of_interfaces = func {
         let _ = new Marked();
@@ -210,14 +210,14 @@ let StaticInitializationTests = module (
         test.assert_equal_int32(4, with_default.read());
         test.assert_equal_int32(6, MarkerOnly.Token);
         test.assert_equal_string("BbPIXM", events);
-    }
+    };
 
     export let test_interface_use_does_not_initialize_superinterfaces = func {
         test.assert_equal_int32(1, Required.Token);
         test.assert_equal_string("I", events);
         test.assert_equal_int32(2, Required.ParentToken);
         test.assert_equal_string("IP", events);
-    }
+    };
 
     export let test_singletons_initialize_at_startup = func {
         test.assert_equal_string("odsin", startup_events);
@@ -230,5 +230,5 @@ let StaticInitializationTests = module (
         test.assert_equal_int32(6, Container.delayed);
         test.assert_equal_int32(6, Container.delayed);
         test.assert_equal_string("odsinL", startup_events);
-    }
+    };
 );

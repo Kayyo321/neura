@@ -5,7 +5,7 @@ let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, length: int) {
     console.print_line(text.slice(0, length));
-}
+};
 
 let choose = func(value: int16) -> string => "int16"
     or func(value: int32) -> string => "int32";
@@ -28,14 +28,14 @@ let MultiInt = class (
         wide = seed;
     } or func {
         narrow = 11;
-    }
+    };
 
     export let.as int16 = func -> int16 => narrow
         or as int64 = func -> int64 {
             console.print_line("cast");
             casts += 1;
             return wide;
-        }
+        };
 
     export let.as string = func -> string => instance.wide.to_string();
 
@@ -46,7 +46,7 @@ let MultiInt = class (
 let Derived = class:MultiInt (
     export let init = func(seed: int64) {
         super.init(seed);
-    }
+    };
 );
 
 let DefaultInt = class:MultiInt ();
@@ -101,10 +101,10 @@ let App = module:program.Entry (
         write(number.abs().to_string());
         write("éab".substring(2, 3));
         write(string.substring("éab", 2));
-    }
+    };
 
     export let.override main = func(args: string[]) -> program.ExitCode {
         exercise();
         return program.ExitCode.Ok;
-    }
+    };
 );

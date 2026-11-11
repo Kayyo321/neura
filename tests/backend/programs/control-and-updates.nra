@@ -8,7 +8,7 @@ let Point = class (
             return false;
         }
         return x == (other as Point).x;
-    }
+    };
 );
 
 let Main = module:program.Entry (
@@ -106,5 +106,5 @@ let Main = module:program.Entry (
         verify_updates();
         verify_selection_and_equality();
         return program.ExitCode.Ok;
-    }
+    };
 );

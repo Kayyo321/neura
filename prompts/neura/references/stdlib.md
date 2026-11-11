@@ -46,7 +46,7 @@ let App = module:program.Entry (
         console.print_line(text);
         console.eprintln("to stderr: {}", true);               // stderr
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -95,7 +95,7 @@ let App = module:program.Entry (
         }
         console.print_line(builder.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -162,7 +162,7 @@ let App = module:program.Entry (
         let port = result.value_or<int>(parse_port("x"), 80);
         console.print_line(port.to_string());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -238,7 +238,7 @@ let App = module:program.Entry (
         seen.add(3);
         console.println("set size {}", seen.size());
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -366,7 +366,7 @@ let App = module:program.Entry (
         members.append(["count", json.number_of_int64(3)]);
         console.print_line(json.write(json.JsonValue.Object(members)));
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 
@@ -420,7 +420,7 @@ let App = module:program.Entry (
         rng.shuffle<int>(deck);
         console.println("{}", deck.length);
         return program.ExitCode.Ok;
-    }
+    };
 );
 ```
 

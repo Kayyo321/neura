@@ -16,5 +16,5 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("entered main");
         return program.ExitCode.Ok;
-    }
+    };
 );

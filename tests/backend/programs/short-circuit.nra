@@ -47,5 +47,5 @@ let ShortCircuit = module:program.Entry (
             console.print_line("four operands evaluated");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );

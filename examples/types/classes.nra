@@ -9,20 +9,20 @@ let Classes = module (
 
         export let speak = func() -> string {
             return name + " makes a sound";
-        }
+        };
     );
 
     // A derived class inherits fields and can override methods.
     export let Dog = class:Animal (
         export let.override speak = func() -> string {
             return name + " barks";
-        }
+        };
     );
 
     export let Cat = class:Animal (
         export let.override speak = func() -> string {
             return name + " meows";
-        }
+        };
     );
 
     // A base-typed parameter accepts instances of derived classes.

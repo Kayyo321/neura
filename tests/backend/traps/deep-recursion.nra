@@ -14,5 +14,5 @@ let Recursion = module:program.Entry (
             console.print_line("unreachable");
         }
         return program.ExitCode.Ok;
-    }
+    };
 );
