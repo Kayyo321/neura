@@ -404,11 +404,11 @@ inline constexpr Step buffer_sort_f64_0[] = {{Op::Arg, 0u}};
 inline constexpr BufferSize buffers_sort_f64[] = {{1u, {"items", buffer_sort_f64_0, 1u}}};
 
 inline void thunk_text_index_of(void* const* args, void* result) {
-    *static_cast<neura_status*>(result) = neura_k_text_index_of(*static_cast<neura_text const*>(args[0]), *static_cast<neura_text const*>(args[1]), *static_cast<neura_i64 const*>(args[2]), *static_cast<neura_i64* const*>(args[3]));
+    *static_cast<neura_status*>(result) = neura_k_text_index_of(*static_cast<neura_text const*>(args[0]), *static_cast<neura_text const*>(args[1]), *static_cast<neura_i64 const*>(args[2]), *static_cast<neura_i64 const*>(args[3]), *static_cast<neura_i64* const*>(args[4]));
 }
-inline constexpr Step cost_text_index_of[] = {{Op::Const, 1u}, {Op::Arg, 0u}, {Op::Const, 16u}, {Op::Div, 0u}, {Op::Add, 0u}};
-inline constexpr Kind params_text_index_of[] = {Kind::Text, Kind::Text, Kind::I64, Kind::ResultI64};
-inline constexpr const char* param_names_text_index_of[] = {"s", "needle", "from", "result"};
+inline constexpr Step cost_text_index_of[] = {{Op::Const, 1u}, {Op::Arg, 0u}, {Op::Arg, 2u}, {Op::Sub, 0u}, {Op::Arg, 3u}, {Op::Arg, 1u}, {Op::Add, 0u}, {Op::Min, 0u}, {Op::Const, 16u}, {Op::Div, 0u}, {Op::Add, 0u}};
+inline constexpr Kind params_text_index_of[] = {Kind::Text, Kind::Text, Kind::I64, Kind::I64, Kind::ResultI64};
+inline constexpr const char* param_names_text_index_of[] = {"s", "needle", "from", "limit", "result"};
 
 inline void thunk_text_last_index_of(void* const* args, void* result) {
     *static_cast<neura_i64*>(result) = neura_k_text_last_index_of(*static_cast<neura_text const*>(args[0]), *static_cast<neura_text const*>(args[1]));
@@ -501,18 +501,18 @@ inline constexpr const char* param_names_text_blank_suffix_start[] = {"s"};
 inline void thunk_text_replace(void* const* args, void* result) {
     *static_cast<neura_status*>(result) = neura_k_text_replace(*static_cast<neura_text const*>(args[0]), *static_cast<neura_text const*>(args[1]), *static_cast<neura_text const*>(args[2]), *static_cast<neura_i64 const*>(args[3]), *static_cast<neura_out_text* const*>(args[4]));
 }
-inline constexpr Step cost_text_replace[] = {{Op::Const, 1u}, {Op::Arg, 0u}, {Op::Const, 16u}, {Op::Div, 0u}, {Op::Add, 0u}, {Op::Arg, 0u}, {Op::Arg, 1u}, {Op::Div, 0u}, {Op::Arg, 2u}, {Op::Mul, 0u}, {Op::Const, 64u}, {Op::Div, 0u}, {Op::Add, 0u}};
+inline constexpr Step cost_text_replace[] = {{Op::Const, 1u}, {Op::Arg, 0u}, {Op::Const, 16u}, {Op::Div, 0u}, {Op::Add, 0u}, {Op::Arg, 0u}, {Op::Arg, 1u}, {Op::Div, 0u}, {Op::Arg, 3u}, {Op::Min, 0u}, {Op::Arg, 2u}, {Op::Mul, 0u}, {Op::Const, 64u}, {Op::Div, 0u}, {Op::Add, 0u}};
 inline constexpr Kind params_text_replace[] = {Kind::Text, Kind::Text, Kind::Text, Kind::I64, Kind::OutText};
 inline constexpr const char* param_names_text_replace[] = {"s", "target", "replacement", "limit", "out"};
-inline constexpr Step buffer_text_replace_0[] = {{Op::Arg, 0u}, {Op::Arg, 0u}, {Op::Arg, 1u}, {Op::Div, 0u}, {Op::Arg, 2u}, {Op::Mul, 0u}, {Op::Add, 0u}};
-inline constexpr BufferSize buffers_text_replace[] = {{4u, {"s + s / target * replacement", buffer_text_replace_0, 7u}}};
+inline constexpr Step buffer_text_replace_0[] = {{Op::Arg, 0u}, {Op::Arg, 0u}, {Op::Arg, 1u}, {Op::Div, 0u}, {Op::Arg, 3u}, {Op::Min, 0u}, {Op::Arg, 2u}, {Op::Mul, 0u}, {Op::Add, 0u}};
+inline constexpr BufferSize buffers_text_replace[] = {{4u, {"s + min(s / target, limit) * replacement", buffer_text_replace_0, 9u}}};
 
-inline void thunk_text_split_next(void* const* args, void* result) {
-    *static_cast<neura_status*>(result) = neura_k_text_split_next(*static_cast<neura_text const*>(args[0]), *static_cast<neura_text const*>(args[1]), *static_cast<neura_i64 const*>(args[2]), *static_cast<neura_i64* const*>(args[3]));
+inline void thunk_text_split(void* const* args, void* result) {
+    *static_cast<neura_status*>(result) = neura_k_text_split(*static_cast<neura_text const*>(args[0]), *static_cast<neura_text const*>(args[1]), *static_cast<neura_i64 const*>(args[2]), *static_cast<neura_mut_i64 const*>(args[3]), *static_cast<neura_i64* const*>(args[4]));
 }
-inline constexpr Step cost_text_split_next[] = {{Op::Const, 1u}, {Op::Arg, 0u}, {Op::Arg, 2u}, {Op::Sub, 0u}, {Op::Const, 16u}, {Op::Div, 0u}, {Op::Add, 0u}};
-inline constexpr Kind params_text_split_next[] = {Kind::Text, Kind::Text, Kind::I64, Kind::ResultI64};
-inline constexpr const char* param_names_text_split_next[] = {"s", "separator", "start", "result"};
+inline constexpr Step cost_text_split[] = {{Op::Const, 1u}, {Op::Arg, 0u}, {Op::Arg, 3u}, {Op::Add, 0u}, {Op::Const, 16u}, {Op::Div, 0u}, {Op::Add, 0u}};
+inline constexpr Kind params_text_split[] = {Kind::Text, Kind::Text, Kind::I64, Kind::MutI64, Kind::ResultI64};
+inline constexpr const char* param_names_text_split[] = {"s", "separator", "limit", "offsets", "result"};
 
 }  // namespace neura::kernels::generated
 
@@ -623,8 +623,8 @@ inline constexpr KernelInfo kKernels[] = {
      generated::params_sort_u64, generated::param_names_sort_u64, 2u, Kind::Status, generated::buffers_sort_u64, 1u, generated::thunk_sort_u64},
     {"neura.sort.f64", 1u, {"1 + items * (1 + log2(items)) / 8", generated::cost_sort_f64, 10u},
      generated::params_sort_f64, generated::param_names_sort_f64, 2u, Kind::Status, generated::buffers_sort_f64, 1u, generated::thunk_sort_f64},
-    {"neura.text.index_of", 1u, {"1 + s / 16", generated::cost_text_index_of, 5u},
-     generated::params_text_index_of, generated::param_names_text_index_of, 4u, Kind::Status, nullptr, 0u, generated::thunk_text_index_of},
+    {"neura.text.index_of", 1u, {"1 + min(s - from, limit + needle) / 16", generated::cost_text_index_of, 11u},
+     generated::params_text_index_of, generated::param_names_text_index_of, 5u, Kind::Status, nullptr, 0u, generated::thunk_text_index_of},
     {"neura.text.last_index_of", 1u, {"1 + s / 16", generated::cost_text_last_index_of, 5u},
      generated::params_text_last_index_of, generated::param_names_text_last_index_of, 2u, Kind::I64, nullptr, 0u, generated::thunk_text_last_index_of},
     {"neura.text.contains", 1u, {"1 + s / 16", generated::cost_text_contains, 5u},
@@ -649,10 +649,10 @@ inline constexpr KernelInfo kKernels[] = {
      generated::params_text_blank_prefix_length, generated::param_names_text_blank_prefix_length, 1u, Kind::I64, nullptr, 0u, generated::thunk_text_blank_prefix_length},
     {"neura.text.blank_suffix_start", 1u, {"1 + s / 64", generated::cost_text_blank_suffix_start, 5u},
      generated::params_text_blank_suffix_start, generated::param_names_text_blank_suffix_start, 1u, Kind::I64, nullptr, 0u, generated::thunk_text_blank_suffix_start},
-    {"neura.text.replace", 1u, {"1 + s / 16 + s / target * replacement / 64", generated::cost_text_replace, 13u},
+    {"neura.text.replace", 1u, {"1 + s / 16 + min(s / target, limit) * replacement / 64", generated::cost_text_replace, 15u},
      generated::params_text_replace, generated::param_names_text_replace, 5u, Kind::Status, generated::buffers_text_replace, 1u, generated::thunk_text_replace},
-    {"neura.text.split_next", 1u, {"1 + (s - start) / 16", generated::cost_text_split_next, 7u},
-     generated::params_text_split_next, generated::param_names_text_split_next, 4u, Kind::Status, nullptr, 0u, generated::thunk_text_split_next},
+    {"neura.text.split", 1u, {"1 + (s + offsets) / 16", generated::cost_text_split, 7u},
+     generated::params_text_split, generated::param_names_text_split, 5u, Kind::Status, nullptr, 0u, generated::thunk_text_split},
 };
 
 inline constexpr std::size_t kKernelCount = 67;

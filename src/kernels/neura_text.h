@@ -4,7 +4,15 @@
  * Offsets are byte offsets. Every search keeps the rule of Strings.matches_at:
  * a candidate whose first or end byte is a continuation byte does not match.
  * For a valid needle in valid text this never rejects a byte match, so the
- * results are those of a plain byte search. */
+ * results are those of a plain byte search.
+ *
+ * Searches run the two-way algorithm, which takes work linear in the bytes of
+ * text it reads plus the needle's length and no allocation, so a search is
+ * charged by the text it can read: `s` for a whole-text search, `s - from`
+ * capped by the window for index_of. A search with an offset reads only from
+ * there, and a library loop that would search the same text repeatedly uses
+ * a kernel that does the whole operation (split) or a bounded window
+ * (index_of), so no loop is charged for the same bytes over and over. */
 #ifndef NEURA_TEXT_H
 #define NEURA_TEXT_H
 
@@ -14,12 +22,19 @@
 extern "C" {
 #endif
 
-/* Strings.index_of_from (and index_of with from = 0): the first occurrence
- * at or after `from`, or -1; an empty needle matches at `from`. `from`
- * outside 0 through the length gives NEURA_TRAP_OFFSET_OUT_OF_RANGE and one
- * on a continuation byte NEURA_TRAP_NOT_CHARACTER_BOUNDARY. */
-NEURA_KERNEL("neura.text.index_of", 1, "1 + s / 16")
-neura_status neura_k_text_index_of(neura_text s, neura_text needle, neura_i64 from, neura_i64* result);
+/* One window of Strings.index_of_from (and index_of with from = 0): the
+ * first occurrence that starts in the window, at or after `from` and before
+ * `from + limit` (a limit below 1 counts as 1) moved forward to a character
+ * boundary. The result is the occurrence, or -1 when there is none in the
+ * rest of the text, or -2 - e when there is none in the window and later
+ * candidates remain, where e is the window's end, a boundary to search on
+ * from. An empty needle matches at `from`. `from` outside 0 through the
+ * length gives NEURA_TRAP_OFFSET_OUT_OF_RANGE and one on a continuation byte
+ * NEURA_TRAP_NOT_CHARACTER_BOUNDARY. The wrapper doubles the window on each
+ * call, so a search is charged in proportion to the distance it covers. */
+NEURA_KERNEL("neura.text.index_of", 1, "1 + min(s - from, limit + needle) / 16")
+neura_status neura_k_text_index_of(neura_text s, neura_text needle, neura_i64 from, neura_i64 limit,
+                                   neura_i64* result);
 
 /* Strings.last_index_of: the last occurrence, or -1; an empty needle
  * matches at the length. */
@@ -84,19 +99,20 @@ neura_i64 neura_k_text_blank_suffix_start(neura_text s);
  * up to `limit` non-overlapping occurrences, left to right; a limit below 1
  * replaces nothing, as Strings.replace_up_to does. An empty target gives
  * NEURA_TRAP_EMPTY_TARGET. */
-NEURA_KERNEL("neura.text.replace", 1, "1 + s / 16 + s / target * replacement / 64")
-NEURA_KERNEL_BUFFER("out", "s + s / target * replacement")
+NEURA_KERNEL("neura.text.replace", 1, "1 + s / 16 + min(s / target, limit) * replacement / 64")
+NEURA_KERNEL_BUFFER("out", "s + min(s / target, limit) * replacement")
 neura_status neura_k_text_replace(neura_text s, neura_text target, neura_text replacement, neura_i64 limit,
                                   neura_out_text* out);
 
-/* The scan step of Strings.split and split_limit: the offset of the first
- * separator at or after `start`, or -1 (Strings.find, unchecked: a `start`
- * past the end finds nothing). An empty separator gives
- * NEURA_TRAP_EMPTY_SEPARATOR. Strings never passes a negative `start`; the
- * kernel answers one with NEURA_TRAP_OFFSET_OUT_OF_RANGE instead of reading
- * outside the text. */
-NEURA_KERNEL("neura.text.split_next", 1, "1 + (s - start) / 16")
-neura_status neura_k_text_split_next(neura_text s, neura_text separator, neura_i64 start, neura_i64* result);
+/* Strings.split, split_limit, and lines: the offsets of the first `limit`
+ * non-overlapping occurrences of the separator, left to right (none for a
+ * limit below 1). The offsets of the first ones are written to `offsets`,
+ * as many as it holds, and the result is the number found. The wrapper calls
+ * it with an empty list to count, then with a list of that length. An empty
+ * separator gives NEURA_TRAP_EMPTY_SEPARATOR. */
+NEURA_KERNEL("neura.text.split", 1, "1 + (s + offsets) / 16")
+neura_status neura_k_text_split(neura_text s, neura_text separator, neura_i64 limit, neura_mut_i64 offsets,
+                                neura_i64* result);
 
 #ifdef __cplusplus
 }

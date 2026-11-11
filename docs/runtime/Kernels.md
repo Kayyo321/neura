@@ -8,8 +8,15 @@ sorting an array. The kernels live in [`src/kernels/`](../../src/kernels/) and b
 errors, and traps exactly; the Neura implementation stays as its test oracle.
 
 **Status.** Every kernel below can be bound, and the generated modules `Std.Internal.Kernels.*` declare them.
-`Std.Digest.Sha256` and `Std.Digest.Crc32` are the first standard library modules that call kernels; every
-other module still runs its Neura code. An image that calls a kernel is NVR 1.6
+The standard library calls them from `Std.Digest.Sha256` and `Std.Digest.Crc32`; every function of
+`Std.Math.Math`; `Std.Collections.Sorting.sort_ascending`; `Std.Text.Strings` (searches, comparisons, trims,
+`split`, `split_limit`, `lines`, replacements, ASCII case mappings, `scalar_count`, `hash`, and the error path of
+`from_bytes`) and the `String` companion (comparisons, ASCII case comparison, `trim`, and the members built on
+`Strings`); `StringBuilder.hash_code`; the integer companions' `to_string_radix` and `parse_radix`; and
+`Std.Encoding.Utf8.validate`, `Base64`, and `Hex` ([Standard library, P2a](../lang/Stdlib.md#p2a-kernel-bindings-in-source)).
+Every other module runs its Neura code. The scalar hash kernels `neura.hash.combine`, `spread`, `i64`, `u64`, and
+`f64` are not called by the library, because a kernel call costs more steps than the few operations of Neura code
+they would replace; they are kept for completeness and as oracles. An image that calls a kernel is NVR 1.6
 ([NVR](NVR.md#kernels-16)), and the NVM runs the call as a state operation
 ([NVM](NVM.md#kernel-calls)).
 
@@ -30,7 +37,8 @@ The authoritative text is the comment at the top of
   between calls is a byte array with a fixed little-endian layout.
 - **Charged in advance.** Each kernel declares a step charge as a formula over its arguments. The runtime
   evaluates it and charges it before the call, so a step limit fires at the same point in every execution
-  mode.
+  mode. The charge counts the most work the arguments allow, and a kernel's worst-case work is within a
+  constant factor of it ([Step charges](#running-a-kernel)).
 - **Work budget.** A kernel whose work depends on the data beyond its argument sizes takes a `neura_work`:
   it may spend at most `budget` units, adds what it spends to `used`, and returns
   `NEURA_TRAP_WORK_EXHAUSTED` instead of exceeding the budget. The runtime charges `used` after the call. No
@@ -143,6 +151,29 @@ average NVM block step on the reference evaluator, so a step limit never lets a 
 same number of block steps could. For the digests the unit is 64 bytes read: on the measuring host one SHA-256
 compression took about 0.15 µs and CRC-32 over 64 bytes about 0.1 µs (plus about 0.06 µs to pack a list's
 bytes), while an average block step of the replaced SHA-256 code took about 0.75 µs.
+
+The work counted is the most the call can do with the arguments it is given, never what it happens to do, which
+the runtime cannot know before the call:
+
+- **Bounded by the arguments.** A charge counts the bytes or elements the call can read or write, plus the
+  writable views the runtime copies: `s - from` for a search that starts at an offset, the window
+  `min(s - from, limit + needle)` for `neura.text.index_of`, `min(s / target, limit)` copies of the replacement
+  for `neura.text.replace`, and `n log n` for a sort. A call is never charged for bytes it cannot touch, and the
+  charge is within a small constant factor of the work the call can do (`tests/kernels/kernel_tests.cpp`,
+  suite `table`, checks representative charges against the elements touched).
+- **Linear work.** A kernel's worst case must be linear in what it is charged for. The text searches use the
+  two-way algorithm, linear in the text read plus the needle, so a pathological needle cannot make a search do
+  quadratic work for a linear charge.
+- **No repeated charges.** A library loop never calls a kernel on the same text over and over. `Strings.split`,
+  `split_limit`, and `lines` find all separators with `neura.text.split`, one call to count and one to write the
+  offsets; `Strings.index_of` and `index_of_from` call `neura.text.index_of` on windows that start at 128 bytes
+  and double, so the charges of one search add up to about twice the distance it covers, and a loop that calls
+  `index_of_from` after each occurrence is charged in proportion to the text.
+
+**Versions.** A kernel's name and ABI version identify its signature and behaviour; a change to either takes a
+new version or a new name once the kernel has been released. A step charge or buffer formula is part of the
+runtime's table, not of the image, so a runtime that changes a charge charges every image by the new formula.
+No release has shipped a kernel yet, so the kernels changed before release keep ABI version 1.
 
 ## Kernels
 
@@ -294,7 +325,7 @@ buffer sizes. The notes under each table come from the comments in the header.
 
 | Kernel | Version | Parameters | Result | Step charge | Buffers |
 | --- | --- | --- | --- | --- | --- |
-| `neura.text.index_of` | 1 | `s` (text view), `needle` (text view), `from` (i64), `result` (i64 result) | status | `1 + s / 16` | none |
+| `neura.text.index_of` | 1 | `s` (text view), `needle` (text view), `from` (i64), `limit` (i64), `result` (i64 result) | status | `1 + min(s - from, limit + needle) / 16` | none |
 | `neura.text.last_index_of` | 1 | `s` (text view), `needle` (text view) | i64 | `1 + s / 16` | none |
 | `neura.text.contains` | 1 | `s` (text view), `needle` (text view) | bool | `1 + s / 16` | none |
 | `neura.text.starts_with` | 1 | `s` (text view), `prefix` (text view) | bool | `1 + prefix / 64` | none |
@@ -307,10 +338,10 @@ buffer sizes. The notes under each table come from the comments in the header.
 | `neura.text.space_suffix_start` | 1 | `s` (text view) | i64 | `1 + s / 64` | none |
 | `neura.text.blank_prefix_length` | 1 | `s` (text view) | i64 | `1 + s / 64` | none |
 | `neura.text.blank_suffix_start` | 1 | `s` (text view) | i64 | `1 + s / 64` | none |
-| `neura.text.replace` | 1 | `s` (text view), `target` (text view), `replacement` (text view), `limit` (i64), `out` (text output) | status | `1 + s / 16 + s / target * replacement / 64` | `out`: `s + s / target * replacement` |
-| `neura.text.split_next` | 1 | `s` (text view), `separator` (text view), `start` (i64), `result` (i64 result) | status | `1 + (s - start) / 16` | none |
+| `neura.text.replace` | 1 | `s` (text view), `target` (text view), `replacement` (text view), `limit` (i64), `out` (text output) | status | `1 + s / 16 + min(s / target, limit) * replacement / 64` | `out`: `s + min(s / target, limit) * replacement` |
+| `neura.text.split` | 1 | `s` (text view), `separator` (text view), `limit` (i64), `offsets` (writable i64 view), `result` (i64 result) | status | `1 + (s + offsets) / 16` | none |
 
-- `neura.text.index_of`: Strings.index_of_from (and index_of with from = 0): the first occurrence at or after `from`, or -1; an empty needle matches at `from`. `from` outside 0 through the length gives NEURA_TRAP_OFFSET_OUT_OF_RANGE and one on a continuation byte NEURA_TRAP_NOT_CHARACTER_BOUNDARY.
+- `neura.text.index_of`: One window of Strings.index_of_from (and index_of with from = 0): the first occurrence that starts in the window, at or after `from` and before `from + limit` (a limit below 1 counts as 1) moved forward to a character boundary. The result is the occurrence, or -1 when there is none in the rest of the text, or -2 - e when there is none in the window and later candidates remain, where e is the window's end, a boundary to search on from. An empty needle matches at `from`. `from` outside 0 through the length gives NEURA_TRAP_OFFSET_OUT_OF_RANGE and one on a continuation byte NEURA_TRAP_NOT_CHARACTER_BOUNDARY. The wrapper doubles the window on each call, so a search is charged in proportion to the distance it covers.
 - `neura.text.last_index_of`: Strings.last_index_of: the last occurrence, or -1; an empty needle matches at the length.
 - `neura.text.contains`: Strings.contains.
 - `neura.text.starts_with`: Strings.starts_with.
@@ -324,4 +355,4 @@ buffer sizes. The notes under each table come from the comments in the header.
 - `neura.text.blank_prefix_length`: The number of leading bytes up to 32 (String.trim's set: every code point through U+0020). With e = blank_suffix_start: String.trim is [this, max(e, this)).
 - `neura.text.blank_suffix_start`: The offset after the last byte above 32, or 0.
 - `neura.text.replace`: Strings.replace (limit 2147483647) and replace_first (limit 1): replaces up to `limit` non-overlapping occurrences, left to right; a limit below 1 replaces nothing, as Strings.replace_up_to does. An empty target gives NEURA_TRAP_EMPTY_TARGET.
-- `neura.text.split_next`: The scan step of Strings.split and split_limit: the offset of the first separator at or after `start`, or -1 (Strings.find, unchecked: a `start` past the end finds nothing). An empty separator gives NEURA_TRAP_EMPTY_SEPARATOR. Strings never passes a negative `start`; the kernel answers one with NEURA_TRAP_OFFSET_OUT_OF_RANGE instead of reading outside the text.
+- `neura.text.split`: Strings.split, split_limit, and lines: the offsets of the first `limit` non-overlapping occurrences of the separator, left to right (none for a limit below 1). The offsets of the first ones are written to `offsets`, as many as it holds, and the result is the number found. The wrapper calls it with an empty list to count, then with a list of that length. An empty separator gives NEURA_TRAP_EMPTY_SEPARATOR.
