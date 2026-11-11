@@ -387,12 +387,19 @@ NEURA_TEST(concurrency, every_task_thread_is_joined_on_every_exit_path) {
                 const auto outcome = run_concurrent(program, quantum, max_tasks);
                 exits.insert(outcome.status);
                 if (start) {
-                    // The kernel drops a finished thread's entry a moment after
-                    // join returns.
-                    for (int attempt = 0; attempt < 200 && *threads() != *start; ++attempt) {
+                    // The kernel drops a finished thread's entry after join
+                    // returns: join waits for the thread to clear its
+                    // identifier, which happens before the kernel has removed
+                    // the task. That is normally a matter of microseconds, and
+                    // on a machine with every processor busy the exiting
+                    // thread can wait for one much longer. A thread that was
+                    // never joined stays for as long as the process does, so
+                    // a generous limit still finds it.
+                    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
+                    while (*threads() != *start && std::chrono::steady_clock::now() < deadline) {
                         std::this_thread::sleep_for(std::chrono::milliseconds(5));
                     }
-                    check_equal(*threads(), *start, fixture.name + ": task threads left after the run");
+                    check_equal(*threads(), *start, fixture.name + ": task threads still alive 30 seconds after the run");
                 }
             }
         }
