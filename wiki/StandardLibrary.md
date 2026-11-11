@@ -7,6 +7,7 @@ The standard library is Neura source installed with the tool below `share/neura/
 
 Each type has its own module, named after it: `Std.Collections.ArrayList` is `stdlib/std/collections/array-list.nra` and exports the class `ArrayList` and its module functions. Import each module you use; there is no prelude.
 
+<!-- example: run -->
 ```neura
 let array_list = import:Std.Collections.ArrayList;
 let console = import:Std.Io.Console;
@@ -22,6 +23,12 @@ export let App = module:program.Entry (
         return program.ExitCode.Ok;
     };
 );
+```
+
+The program prints:
+
+```text
+Ada
 ```
 
 | Area | Modules |
@@ -104,6 +111,7 @@ When encoding to ASCII or Latin-1, an unrepresentable scalar becomes `?`. Decodi
 
 The byte-order-aware `Utf16` and `Utf32` variants encode a big-endian byte-order mark at the start and read either byte order when a mark is present. They decode unmarked input as big-endian. The explicit-endian variants omit a mark when encoding and preserve a decoded U+FEFF as text. Charset conversion always returns ordinary UTF-8 text on decode. [Java SE 26 Charset](https://docs.oracle.com/en/java/javase/26/docs/api/java.base/java/nio/charset/Charset.html)
 
+<!-- example: check -->
 ```neura
 let lower = "I".to_lower_case("tr");              // ı
 let bytes = lower.get_bytes("UTF-16LE");
@@ -114,6 +122,7 @@ let decoded = string.decode_bytes(bytes, "UTF-16LE");
 
 `Console.format(pattern, args...)` and the static `Console.Formatter.format` return a UTF-8 string. `print` and `println` format to stdout, and `eprint` and `eprintln` format to stderr. The two newline forms append one LF. The module functions have `try_` counterparts that return a `Result` containing the string or `Unit`. For an existing `Std.Core.Variadic.Argument[]`, use `vformat` or `try_vformat`. Use `write`, `print_line`, or `error_line` for already-formatted text that may contain literal braces.
 
+<!-- example: check -->
 ```neura
 let console = import:Std.Io.Console;
 
@@ -139,6 +148,7 @@ Format strings are checked at runtime and may come from any string expression. I
 
 `Std.Concurrent` holds the library side of [tasks](CoreLanguage#tasks-scopes-and-select): handles for the tasks and scopes that `spawn` and `scope` create, channels, cancellation, timers, helpers that run groups of calls, and handles for shared state. [Concurrency](Concurrency) is the specification, with the memory model and the scheduler. Each type has its own module, as elsewhere:
 
+<!-- example: check -->
 ```neura
 let channels = import:Std.Concurrent.Channel;
 

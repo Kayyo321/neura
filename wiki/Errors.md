@@ -7,6 +7,7 @@ Neura distinguishes expected failures, which a program handles, from runtime fai
 
 **Expected failures are returned values.** A function that can fail returns a value that says so, such as an enum variant or an object describing the failure, and its caller inspects it. There is no exception mechanism and no implicit propagation. The [standard library](StandardLibrary) provides `Std.Core.Result` and `Std.Core.Optional` for this; a program can also declare its own enums and classes for outcomes.
 
+<!-- example: check -->
 ```neura
 export let Parse = enum (Ok, Empty, TooLong);
 

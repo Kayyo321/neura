@@ -17,6 +17,7 @@ A bodyless class method declares a requirement. A class with an unimplemented re
 
 A generic declaration introduces type parameters in angle brackets after `func` or `class`. A call or type application supplies arguments in angle brackets:
 
+<!-- example: check -->
 ```neura
 let identity = func<T>(value: T) -> T {
     return value;
@@ -34,7 +35,13 @@ Calls to generic functions and uses of generic classes supply their type argumen
 
 A method of a class can be generic itself:
 
+<!-- example: check -->
 ```neura
+let Pair = class<A, B> (
+    export let first: A;
+    export let second: B;
+);
+
 let Box = class<T> (
     export let value: T;
     export let pair = func<U>(other: U) -> Pair<T, U> {
@@ -65,6 +72,7 @@ For proposed constructor and destructor behavior, including cleanup through a ba
 
 An interface declares method signatures and can give methods default bodies. An interface extends other interfaces after its colon. A class lists implemented interfaces after `implements` and can also name one class base after its colon.
 
+<!-- example: check -->
 ```neura
 let Comparable = interface<T> (
     let compare_to = func(other: T) -> int;

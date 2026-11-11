@@ -73,6 +73,7 @@ For readers who know another language's vocabulary:
 
 ### 4.1 `scope`, `spawn`, and `join`
 
+<!-- example: fragment: calls fetch_user, fetch_orders, and build_response and returns a Page, none of which the page defines, and omits the result import -->
 ```neura
 let load_page = func(user_id: int64) -> result.Result<Page> {
     scope {
@@ -126,6 +127,7 @@ Policies that combine results are named helpers in `Std.Concurrent.Tasks`, not l
 | `all_ok<T>(calls: (func() -> Result<T>)[list]) -> Result<T[list]>` | If every call returns `Ok`, the values in the order of the calls. Otherwise the first `Err` in the order the calls completed, after cancelling the calls still running and waiting for every one of them. |
 | `first_ok<T>(calls: (func() -> Result<T>)[list]) -> Result<T>` | The first `Ok` in the order the calls completed, after cancelling the calls still running and waiting for every one of them. If every call fails, the `Err` of the call that completed last. |
 
+<!-- example: fragment: calls fetch_price, which the page does not define, and omits the result and tasks imports -->
 ```neura
 let quote = func -> result.Result<int[list]> {
     let calls: (func() -> result.Result<int>)[list] = [
@@ -211,7 +213,11 @@ A class instance is transferable only if its class is a `Std.Concurrent` handle 
 
 `Std.Core.Error` is not transferable as declared, because its `Custom` variant holds an `ErrorDetail` object ([Stdlib](Stdlib-Design#63-error)). A `Result<T>` therefore crosses a join (section 5.3) but not a channel or a spawn. Decision: `Error` has a transferable flattening. `Std.Core.Error.PortableError` mirrors `Error` with one change: its `Custom` variant holds the detail's code and message texts in place of the object. `to_portable(e)` converts an error before it is sent and `from_portable(p)` converts it back after it is received:
 
+<!-- example: check -->
 ```neura
+let error = import:Std.Core.Error;
+let channels = import:Std.Concurrent.Channel;
+
 let report = func(failure: error.Error, failures: channels.Sender<error.PortableError>) {
     failures.send(error.to_portable(failure));
 };
@@ -277,6 +283,7 @@ Isolation means there is nothing else to order: two tasks have no other common s
 
 **Channels are the default way to share work.**
 
+<!-- example: fragment: one statement that opens a channel of Job values; Job and the channels import are not defined here -->
 ```neura
 let channels = import:Std.Concurrent.Channel;
 
@@ -304,6 +311,7 @@ Operations report typed outcomes. Closure and cancellation are expected events, 
 
 A `send` or `receive` that can complete does so even when the task's context is cancelled; cancellation is reported only by an operation that would otherwise park.
 
+<!-- example: fragment: a worker function that uses Job, Outcome, handle, and the channels import, none of which the page defines -->
 ```neura
 let worker = func(next_job: channels.Receiver<Job>, results: channels.Sender<Outcome>) {
     do {
@@ -321,6 +329,7 @@ let worker = func(next_job: channels.Receiver<Job>, results: channels.Sender<Out
 
 **`select`** waits on several operations and performs exactly one.
 
+<!-- example: fragment: a select statement, allowed only inside a function body; inbox, outbox, reply, slow, handle, note_sent, and logger are not defined -->
 ```neura
 select {
     let message = inbox.receive() => {
@@ -350,6 +359,7 @@ select {
 
 **Cancellation is cooperative and scoped.**
 
+<!-- example: fragment: a scope statement without its function; request, call_backend, query, and durations are not defined -->
 ```neura
 scope (request) {
     request.cancel_after(durations.of_seconds(2));
@@ -370,6 +380,7 @@ scope (request) {
 
 **Resources.** The language has no destructors that run at scope exit, and this design adds none ([Object lifecycle](ObjectLifecycle), [Stdlib](Stdlib-Design#55-resources)). Concurrent code gets a cleanup path from scoped library helpers instead:
 
+<!-- example: fragment: one call of files.with_open without its imports, path, and summarize -->
 ```neura
 let outcome = files.with_open<Summary>(path, files.OpenMode.Read, func(file: files.File) -> result.Result<Summary> {
     return summarize(file);
@@ -391,6 +402,7 @@ A trap still ends the run without cleanup, and the runner then closes every file
 
 **Start with task-local mutable state.** Most shared state is better owned by one task that serves requests over a channel:
 
+<!-- example: fragment: cache_owner without the CacheRequest enum and the channels and hash_maps imports it uses -->
 ```neura
 let cache_owner = func(requests: channels.Receiver<CacheRequest>) {
     let entries = hash_maps.create<string, string>();  // Owned by this task alone.
@@ -446,6 +458,7 @@ Every module of the table is implemented. [Standard library](StandardLibrary#std
 
 **`WorkerGroup`** is the answer to overload: a service bounds its in-flight work with a group and a queue long before it reaches the run-wide limits of section 10.3. Because tasks need a scope, a group exists only inside `with_workers`:
 
+<!-- example: fragment: one with_workers call without its groups import and its record function -->
 ```neura
 groups.with_workers<string>(2, 8, record, func(group: groups.WorkerGroup<string>) -> void {
     group.submit("started");
@@ -539,6 +552,7 @@ A replay that reaches a recorded tick with different scheduler state stops with 
 
 Tasks do not use more than one core. The first multicore feature is deliberately narrow:
 
+<!-- example: fragment: one parallel.map call without Chunk, Digest, hash_chunk, chunks, limits, or the parallel import -->
 ```neura
 let digests = parallel.map<Chunk, Digest>(chunks, hash_chunk, limits);
 ```

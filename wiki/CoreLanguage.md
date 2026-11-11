@@ -9,6 +9,7 @@ This page defines the initial core. See [Feature status](Status) for the fronten
 
 Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let` or `const`, with an optional type annotation. `let` permits reassignment; `const` prevents reassignment, not mutation through a reference. A binding must be initialized before it is read. The exact Unicode identifier and escape rules remain open.
 
+<!-- example: check -->
 ```neura
 let count: int32 = 0;
 const Limit: int32 = 3;
@@ -21,6 +22,7 @@ Bindings are visible from their declaration to the end of their enclosing block;
 
 Start each line of a documentation comment with `///` and place it immediately above the definition it describes. Consecutive documentation lines form one block. An empty `///` line adds a paragraph break. A blank source line or an ordinary `//` comment ends the block. An inline comment after code has ordinary comment behavior.
 
+<!-- example: check -->
 ```neura
 /// @brief Doubles an integer.
 /// @param value The input to double.
@@ -49,6 +51,7 @@ Function parameters use `name: Type`. Arguments are evaluated left to right. A f
 
 A [primitive reference parameter](Types#primitive-references) such as `value: &int` receives an alias to the caller's storage. Its argument uses the ordinary expression spelling, such as `increment(count)`.
 
+<!-- example: check -->
 ```neura
 let sum_to = func(limit: int32) -> int32 {
     let total: int32 = 0;
@@ -73,7 +76,10 @@ let reset = func {
 
 Join alternatives with `or func` in one file, module, or class declaration. Each alternative has its own parameters, result, and body. They share the binding name and visibility.
 
+<!-- example: check -->
 ```neura
+let console = import:Std.Io.Console;
+
 let write = func(text: string) {
     write(text, text.byte_length);
 } or func(text: string, byte_count: int) {
@@ -99,6 +105,7 @@ Distinct alternatives must have distinct resolved parameter types or counts. For
 
 A named function can mark its final parameter `items: ...T` to accept zero or more arguments assignable to `T`. Each call evaluates its fixed arguments and then its variadic arguments in source order. The function receives a new `T[]`. Reading a named variadic function as a function value exposes its packed signature, so an indirect call supplies the final array explicitly.
 
+<!-- example: check -->
 ```neura
 let count = func(items: ...int) -> int => items.length;
 let three = count(10, 20, 30);
@@ -112,6 +119,7 @@ A bare `items: ...` packs mixed types into an array of `Std.Core.Variadic.Argume
 
 A lambda is a function expression with typed parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
 
+<!-- example: check -->
 ```neura
 let make_adder = func(offset: int) -> func(int) -> int {
     return func(value: int) -> int {
@@ -133,18 +141,27 @@ Signatures, captures, and local types in a closure can mention the type paramete
 
 Neura supports pre-test, post-test, infinite, three-part, and for-each loops. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.
 
+<!-- example: check -->
 ```neura
-do {
-    total += current++;
-} while (current <= limit);
+let console = import:Std.Io.Console;
 
-for (let i: int32 = 0; i < limit; i++) {
-    total += i;
-}
+let sum_to = func(limit: int32, names: string[list]) -> int32 {
+    let total: int32 = 0;
+    let current: int32 = 0;
 
-for (let name in names) {
-    console.print_line(name);
-}
+    do {
+        total += current++;
+    } while (current <= limit);
+
+    for (let i: int32 = 0; i < limit; i++) {
+        total += i;
+    }
+
+    for (let name in names) {
+        console.print_line(name);
+    }
+    return total;
+};
 ```
 
 **Post-test and infinite loops.** `do { body } while (condition);` runs the body at least once. The Boolean condition is evaluated after the body falls through or executes `continue`. The body's local bindings are scoped to the body. A `break` or `return` skips the condition. With no trailing `while` clause, `do { body }` repeats indefinitely until a `break`, a `return`, or a trap.
@@ -197,7 +214,10 @@ The parent evaluates the callee, a method's receiver, and then the arguments fro
 
 `task.join()` waits until the task has finished and returns its result; joining again returns the same value. `task.is_finished()` does not wait. A scope can exit without joining, and the result is then discarded. A task reports an expected failure as an ordinary returned value, such as a `Result`, and `join` hands it to the caller.
 
+<!-- example: check -->
 ```neura
+let console = import:Std.Io.Console;
+
 let say = func(text: string) -> int {
     console.print_line(text);
     return text.byte_length;
@@ -225,7 +245,12 @@ At the default quantum, `report()` prints `parent continues`, then `left task` a
 - When no arm is ready, the default arm runs if there is one. Otherwise the task waits on every arm, and the first operation that completes for it commits.
 - When the task's scope is cancelled and nothing is ready and there is no default arm, a channel or timer arm commits `Cancelled`. A `join` arm is not cancelled.
 
+<!-- example: run -->
 ```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
 let drain = func(inbox: channels.Receiver<int>, spare: channels.Receiver<int>) {
     for (let round: int = 0; round < 3; round++) {
         select {
@@ -247,6 +272,23 @@ let drain = func(inbox: channels.Receiver<int>, spare: channels.Receiver<int>) {
         }
     }
 };
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let [inbox_sender, inbox, inbox_closer] = channels.open<int>(1);
+        let [spare_sender, spare, spare_closer] = channels.open<int>(1);
+        inbox_sender.send(1);
+        spare_sender.send(2);
+        drain(inbox, spare);
+        return program.ExitCode.Ok;
+    }
+);
+```
+
+```text
+inbox 1
+spare 2
+nothing ready
 ```
 
 With one value waiting on each channel, `drain` prints `inbox 1`, `spare 2`, and `nothing ready`: the preference moves to the second arm after the first select commits.
@@ -255,7 +297,10 @@ With one value waiting on each channel, `drain` prints `inbox 1`, `spare 2`, and
 
 A `Task<T>` or `Scope`, and an array, list, or tuple of them, is *scope-bound* and cannot be reachable after its scope exits. It can be held in a local declared inside the scope, including a local list, and passed as an argument to a call. It cannot be returned, stored in a field, global, or enum payload, captured by a lambda, passed to `spawn`, sent on a channel, used as a type argument, or assigned to a binding declared outside the scope. [Types](Types#scope-bound-and-transferable-types) lists the rules, the types that can cross between tasks, and the calls a task may make.
 
+<!-- example: check -->
 ```neura
+let cancellation = import:Std.Concurrent.Cancellation;
+
 let count_until_stopped = func -> int {
     let laps = 0;
     while (!cancellation.requested()) {

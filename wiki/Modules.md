@@ -5,6 +5,7 @@
 
 A module groups related values, functions, and types under a name. Members marked `export` form its public interface; other members are internal to the module. Access an exported member with `Module.member`.
 
+<!-- example: check -->
 ```neura
 let Logger = module (
     export let default_level: string = "INFO";
@@ -18,6 +19,7 @@ A module can also export types and functions with implementations. A function si
 
 Use `import:ModuleName` to bring a module into scope, normally under a short local alias:
 
+<!-- example: check -->
 ```neura
 let console = import:Std.Io.Console;
 console.print_line("Hello");
@@ -29,6 +31,7 @@ Use `let.promote` in a file or module to make an imported module's exports
 available by their unqualified names. A named import also keeps its alias.
 Use `_` to omit the alias.
 
+<!-- example: check -->
 ```neura
 let.promote clock = import:Std.Time.Clock;
 let.promote _ = import:Std.Time.Duration;
@@ -56,6 +59,7 @@ For project-local modules, the proposed qualified-name and file layout conventio
 
 `import:c("header.h", "library.a", ...)` imports a C header and links any static libraries or object files named after it. The compiler generates the module from the header's declarations; [Foreign interop](ForeignInterop#c-imports) defines the mapping and the native library the image carries.
 
+<!-- example: fragment: imports mathops.h and libmathops.a, which the page does not provide -->
 ```neura
 let mathops = import:c("mathops.h", "libmathops.a");
 let clib = import:c("stdlib.h");
@@ -65,6 +69,7 @@ let clib = import:c("stdlib.h");
 
 Use a quoted path to import a module from a prebuilt `.nir` artifact. Select a top-level project module after the closing quote when the artifact bundles several.
 
+<!-- example: fragment: imports lib/stats.nir, a prebuilt module the page does not provide -->
 ```neura
 let stats = import:"lib/stats.nir";
 let helpers = import:"lib/stats.nir".Helpers;
@@ -84,6 +89,7 @@ The compiler reserves the `Std` namespace. Installed tools resolve `Std.*` below
 
 A module in that source tree may bind a bodyless, non-generic function to a versioned host service.
 
+<!-- example: fragment: a host binding, which the compiler accepts only inside a module of the trusted standard library -->
 ```neura
 let WriteResult = enum (Ok, Error(uint32));
 let write_line = func(message: string) -> WriteResult host("neura.console.write_line", 1);
@@ -93,6 +99,7 @@ The result enum has exactly two variants. `Ok` represents success without a valu
 
 A module in that tree may also mark a function with a block body as a host callback, which a host service may call while it serves a request:
 
+<!-- example: fragment: a host callback with an ellipsis for its body, accepted only inside a module of the trusted standard library -->
 ```neura
 let dispatch = func(stub: int64, arguments: uint8[list]) -> uint8[list] {
     ...
@@ -105,7 +112,13 @@ A callback is a non-generic module function whose parameters are host data and w
 
 A module can inherit another module with `module:Base`. Its interface includes the inherited exports as well as its own. The derived module can implement inherited function signatures and use inherited implementations.
 
+<!-- example: check -->
 ```neura
+let Logger = module (
+    export let default_level: string = "INFO";
+    export let log = func(message: string) -> void;
+);
+
 let ConsoleLogger = module:Logger (
     export let.override log = func(message: string) -> void {
         // Write the message to the console.
@@ -115,6 +128,7 @@ let ConsoleLogger = module:Logger (
 
 Use `let.override` or `const.override` when defining an inherited member, including when supplying a body for an interface signature. For example, an application entry point uses:
 
+<!-- example: check -->
 ```neura
 let program = import:Std.Program;
 
@@ -127,6 +141,7 @@ let App = module:program.Entry (
 
 Use `const.override` when the replacement binding should remain constant. For example, an implementation can fix an inherited configuration value so it cannot be reassigned accidentally:
 
+<!-- example: check -->
 ```neura
 let Defaults = module (
     export let timeout_ms: int32 = 1000;
@@ -167,6 +182,7 @@ The former built-in `SysIo` and `Test` modules are retired. Importing either is 
 
 A module declared with `const` cannot be inherited from:
 
+<!-- example: check -->
 ```neura
 const Xyz = module (
     export let value: int32 = 1;
@@ -193,6 +209,7 @@ Then `main` runs. The same initialization runs before each test under `neura tes
 Ordinary static field initializers follow [the declaring type's initialization
 rules](Types#static-initialization).
 
+<!-- example: fragment: imports Settings, which needs a second source file, settings.nra, that the page describes in prose -->
 ```neura
 let console = import:Std.Io.Console;
 let settings = import:Settings;   // settings.nra initializes first

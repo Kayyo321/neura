@@ -36,6 +36,7 @@ Native results enter through the host boundary like file contents or clock readi
 
 The Java example that loads `libmathops.so`, finds `add`, and calls it reads:
 
+<!-- example: fragment: loads libmathops.so, a native library the page does not provide, and omits the Std.DynamicForeign imports -->
 ```neura
 let arena = arenas.of_confined();
 let lib = result.expect<lookups.SymbolLookup>(lookups.library_lookup("./libmathops.so", arena), "load");
@@ -76,6 +77,7 @@ The result is a `ForeignValue`. A pointer result is an `Address` segment of size
 
 `import:c("header.h", "library.a", ...)` imports the declarations of a C header as a module. Any further strings name static libraries (`.a`, `.lib`) or object files (`.o`, `.obj`) to link into the image. A header-only import such as `import:c("stdlib.h")` calls functions that the C library already provides.
 
+<!-- example: fragment: imports mathops.h and libmathops.a, which the page does not provide -->
 ```neura
 let mathops = import:c("mathops.h", "libmathops.a");
 let clib = import:c("stdlib.h");
@@ -115,6 +117,7 @@ C names are kept; a name that is a Neura keyword or built-in type name gets a tr
 
 `Linker.upcall_stub(target, descriptor, arena)` returns a native function pointer that calls a Neura function, the counterpart of Java's `upcallStub`. Native code such as `qsort` can call it with a comparator:
 
+<!-- example: fragment: continues the previous examples: linker, qsort, numbers, arena, values, and layouts are not defined here -->
 ```neura
 let compare = func(arguments: values.ForeignValue[list]) -> values.ForeignValue {
     let left = values.as_segment(arguments[0]).reinterpret(4).get_int32(0);

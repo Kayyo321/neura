@@ -29,6 +29,7 @@ This document defines the official coding style and naming conventions for Neura
 
 #### Modules (`PascalCase`)
 Modules must be defined using `PascalCase`:
+<!-- example: check -->
 ```neura
 let Logger = module (
     // ...
@@ -41,6 +42,7 @@ let ConsoleLogger = module:Logger (
 
 #### Classes (`PascalCase`)
 Class definitions must use `PascalCase`:
+<!-- example: check -->
 ```neura
 export let LogEntry = class (
     export let level: string;
@@ -54,6 +56,7 @@ export let NetworkBuffer = class (
 
 #### Enums and Enum Variants (`PascalCase`)
 Both enum type names and their variants must use `PascalCase`:
+<!-- example: fragment: naming illustration: a return statement shown outside a function -->
 ```neura
 // Enum type and variant access
 return program.ExitCode.Ok;
@@ -61,6 +64,7 @@ return program.ExitCode.Ok;
 
 #### Constants (`PascalCase`)
 Constants defined with `const` must use `PascalCase`:
+<!-- example: check -->
 ```neura
 const Thousand = 1000;
 const MaxRetries = 3;
@@ -69,6 +73,7 @@ const DefaultTimeoutMs = 5000;
 
 #### Functions and Methods (`snake_case`)
 All function definitions, exported routines, and class methods must use `snake_case`:
+<!-- example: fragment: naming illustration: module members shown without their module, with LogEntry and program undefined -->
 ```neura
 export let log = func(message: string) -> void;
 
@@ -83,6 +88,7 @@ export let.override main = func(args: string[]) -> program.ExitCode {
 
 #### Variables and Properties (`snake_case`)
 Local variables, exported module variables, and class fields must use `snake_case`:
+<!-- example: fragment: naming illustration: module members and local bindings together, with Logger undefined -->
 ```neura
 // Module-level variables
 export let default_level: string = "INFO";
@@ -101,6 +107,7 @@ let is_active = true;
 
 #### Import Aliases (`snake_case`)
 An import alias shares its file's scope with the members the file declares. Choose an alias that no member of the file uses, such as `hashing` for `Std.Core.Hash` in a module that exports its own `hash` function:
+<!-- example: check -->
 ```neura
 let hashing = import:Std.Core.Hash;
 let optional = import:Std.Core.Optional;
@@ -108,6 +115,7 @@ let optional = import:Std.Core.Optional;
 
 #### Function Parameters (`snake_case`)
 All function parameters must use `snake_case`:
+<!-- example: fragment: naming illustration: a module member shown without its module and with a placeholder body -->
 ```neura
 export let format_log = func(log_message: string, log_level: int) -> string {
     // ...
@@ -129,10 +137,12 @@ export let format_log = func(log_message: string, log_level: int) -> string {
 ### Indentation and Spacing
 - Use **4 spaces** for indentation. Do not use tabs.
 - Place spaces around binary operators (`+`, `-`, `=`, `->`, etc.):
+  <!-- example: fragment: formatting illustration: one statement that uses level and message from an enclosing function -->
   ```neura
   let full_message = "[" + level + "] " + message;
   ```
 - Leave one space after colons in type annotations:
+  <!-- example: fragment: formatting illustration: two field lines of a declaration, not a complete declaration -->
   ```neura
   export let level: string;
   export let prefix: string = "stdout";
@@ -141,12 +151,14 @@ export let format_log = func(log_message: string, log_level: int) -> string {
 ### Delimiters and Semicolons
 - Use parentheses for module and class definitions, with the opening parenthesis on the same line and the closing parenthesis on a new line. Function bodies use braces in K&R / 1TBS style.
 - Module and class definitions end with `);`:
+  <!-- example: fragment: formatting illustration: a module declaration with a placeholder body and no program import -->
   ```neura
   let HelloWorld = module:program.Entry (
       // ...
   );
   ```
 - Terminate statements, variable bindings, and function signatures with a semicolon `;`:
+  <!-- example: fragment: formatting illustration: a bodyless signature and a statement shown as module members -->
   ```neura
   export let log = func(message: string) -> void;
   console.print_line(prefix + " -> " + message);
@@ -155,6 +167,7 @@ export let format_log = func(log_message: string, log_level: int) -> string {
 ### Comments
 - Use `//` for single-line comments.
 - Place comments above the relevant code or inline with a single space after code:
+  <!-- example: fragment: formatting illustration: a module declaration with a placeholder body and no program import -->
   ```neura
   let HelloWorld = module:program.Entry ( // Inherits from Std.Program.Entry
       // Implementation of entrypoint
@@ -170,6 +183,7 @@ export let format_log = func(log_message: string, log_level: int) -> string {
 
 Here is a complete example demonstrating the coding style conventions:
 
+<!-- example: run -->
 ```neura
 let console = import:Std.Io.Console;
 let program = import:Std.Program;
@@ -215,6 +229,12 @@ let App = module:program.Entry (
         return program.ExitCode.Ok;
     }
 );
+```
+
+Running the program prints:
+
+```text
+Running check for: auth_service:8080
 ```
 
 ---

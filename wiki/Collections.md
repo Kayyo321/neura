@@ -20,6 +20,7 @@ Read suffixes from left to right: each suffix wraps the type to its left. Nested
 
 A bracketed literal constructs a collection using the expected type. Its elements must be assignable to that type's element type. An empty literal requires an expected type. For example:
 
+<!-- example: check -->
 ```neura
 let names: string[] = ["Ada", "Lin"];
 let queue: string[list] = ["first", "second"];
@@ -33,6 +34,7 @@ An array's length is fixed when it is created, including when that length is det
 
 `start .. stop` constructs a collection starting at `start` and ending before `stop`. Supply a step with `start .. stop : step`. Braces may group a range as `{start .. stop : step}`. The step defaults to one. A negative step counts down. A range whose start has already reached or passed its stop in the selected direction is empty. A zero step traps, including for an empty range.
 
+<!-- example: check -->
 ```neura
 let numbers = {0 .. 5};                 // int[] containing 0, 1, 2, 3, 4
 let evens: int[list] = 0 .. 8 : 2;      // [0, 2, 4, 6]
