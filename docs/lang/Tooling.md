@@ -165,6 +165,8 @@ build/neura decompile hello.nvr
 
 ## Version, install, and update
 
+`neura explain <CODE>`, `neura --explain <CODE>`, and `neura explain --list` print the page of a diagnostic code or the list of codes ([Diagnostics](#diagnostics)), and exit with status 0; a code that is not registered is an error that names the closest registered code.
+
 `neura --version` and `neura version` print one line to standard output, `neura <version> (<target>, commit <commit>)`, and exit with status 0. A build from a checkout reports a `-dev` version and commit `unknown`. `neura help` and `neura --help` print the usage text and exit with status 0; `neura` with no arguments prints it to standard error and exits with status 1.
 
 Three commands manage the installed tool; [Install](../Install.md) describes the install layout, the verification an update performs, and what each command removes:
@@ -179,7 +181,14 @@ Three commands manage the installed tool; [Install](../Install.md) describes the
 
 ## Diagnostics
 
-Diagnostics go to standard error. The first error ends compilation with status 1. Warnings are printed before that error, or at the end of a command that succeeds, sorted by file and byte offset. A diagnostic has a primary location, a message, and optionally a code, labels at other locations (which may be in other files), notes, and suggested edits. Codes are `E` or `W` and four digits; the hundreds digit names the area: `E01xx` lexer, `E02xx` parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes, `E06xx` concurrency, `E07xx` modules and imports, `E08xx` the backend, `E09xx` tags, and `W` warnings. Most errors have no code yet. A line is a line of the source as the lexer counts lines (LF, CRLF, or CR ends one), and a column counts Unicode code points from 1.
+Diagnostics go to standard error, and a command that reports an error exits with status 1. Warnings are printed before the errors, or at the end of a command that succeeds, sorted by file and byte offset. A diagnostic has a primary location, a message, and optionally a code, labels at other locations (which may be in other files), notes, and suggested edits. A line is a line of the source as the lexer counts lines (LF, CRLF, or CR ends one), and a column counts Unicode code points from 1.
+
+How many errors a run reports depends on the stage that finds them:
+
+- **Syntax.** The lexer and the parser recover and go on. The lexer skips an invalid character, a malformed number, or an unterminated string and reads the next token. The parser skips the rest of a statement or member that fails to parse: to the `;` that ends it at the same depth, to the closing delimiter of the enclosing block or member list, or to a keyword that begins the next statement. They report up to `--max-errors N` errors (20 by default; `check`, `emit-ir`, `build`, and `test` accept the option), in source order, and any syntax error stops compilation before NeuraIR lowering.
+- **Everything after parsing.** Name resolution, type checking, the later NeuraIR checks, and circuit conversion stop at the first error. Lowering resolves declarations on demand and abandons speculative work, such as ranking an overload, by catching errors, so continuing after an error would report errors that the first one caused.
+
+Every error has a code: `E` and four digits, whose hundreds digit names the area. `E01xx` is the lexer, `E02xx` the parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes and lifecycle, `E06xx` concurrency, `E07xx` modules and imports, and `E08xx` the backend; `E09xx` is reserved for tags, and warnings will have `W` codes. Errors that report the same mistake share a code, and `E0899` is the one code for errors that only a compiler defect can cause. A code is never reused for another error. [Diagnostic codes](../diagnostics/README.md) lists them. `neura explain <CODE>` (or `neura --explain <CODE>`) prints a code's page: the rule, a program that breaks it, and the program fixed. `neura explain --list` prints each code and its title. The pages are part of the `neura` binary, so `explain` reads no files.
 
 `--error-format` chooses the form. Every command accepts it.
 
@@ -204,11 +213,15 @@ help: add the missing ';'
   |
 2 | let limit = 10;
   |               +
+
+For more information about this error, try `neura explain E0201`.
 ```
 
 ```text
 /work/limits.nra:2:15: error[E0201]: expected ';'
 ```
+
+The `human` form ends, after errors with codes, with one line that points to `neura explain`: for one code as above, and for several, `Some errors have detailed explanations:` and the codes in order. The `short` and `json` forms have no such line.
 
 In the `human` form a tab shows as four spaces, a column is as wide as the character's East Asian width (two for wide characters, none for combining marks, from a table in the tool rather than the system locale), a span over several lines is underlined on its first line and followed by `...`, and a line wider than the terminal is cut around the span with `...`. A suggested edit shows the edited line with `+` under inserted text and `~` under replaced text, or the original line with `-` under removed text. A diagnostic in the module that a [C import](ForeignInterop.md#c-imports) generates has a note that names the header.
 
