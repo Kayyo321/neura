@@ -18,10 +18,11 @@ let.promote _ = import:Std.Core.Unit;
 /// operation finished first, in which case it reports its own result and its effect stays. A cancelled
 /// operation has done this much: a cancelled `connect` leaves no connection, and no stream is returned; a
 /// cancelled `read` consumed no bytes; a cancelled `write` reports in its message how many bytes it had
-/// written, and those bytes were sent. `close` and `set_read_timeout` do not wait and are not cancellable.
+/// written, and those bytes were sent. `close` and setting `read_timeout` do not wait and are not cancellable.
 /// Name resolution in `connect` still blocks every task for its duration. Without tasks each operation waits
 /// as before.
 /// @see [Std.Net.TcpStream](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-TcpStream)
+#Since("0.1.0")
 export let TcpStream = module (
     /// @brief Represents a host success with an identifier or position, or an unsigned host error code.
     let IdOutcome = enum (Ok(int64), Error(uint32));
@@ -43,13 +44,24 @@ export let TcpStream = module (
     let close_socket = func(socket: int64) -> DoneOutcome host("neura.net.close", 1);
 
     /// @brief Owns a connected TCP socket with an independently configured read timeout.
+    #[Final, NoDiscard(reason: "a stream must be closed")]
     export let TcpStream = class implements Closeable (
         /// @brief Holds the provider handle and the context used in error messages.
-        let handle: socket.Handle = nil;
+        last handle: socket.Handle;
         /// @brief Tracks whether the wrapper may still use the host handle.
         let open_now: bool = true;
-        /// @brief The read deadline interval in nanoseconds. Zero permits an indefinite wait.
-        let read_timeout: int64 = 0;
+        /// @brief The read timeout in nanoseconds, as the host service takes it.
+        let read_timeout_nanos: int64 = 0;
+
+        /// @brief The longest a read waits; zero, the initial value, waits without limit. Setting a negative
+        /// timeout traps with "invalid argument: negative timeout".
+        #Since("0.2.0")
+        export let read_timeout: Duration = of_nanos(0);
+            | get: read_timeout;
+            | set: {
+                read_timeout_nanos = timeout_nanos(value);
+                read_timeout = value;
+            };
 
         /// @brief Use connect or TcpListener.accept; the handle comes from the library.
         export let init = func(opened: socket.Handle) {
@@ -58,12 +70,13 @@ export let TcpStream = module (
 
         /// @brief Up to `max` bytes; an empty list once the peer has closed its side. Waits at most the read
         /// timeout, then fails with TimedOut. A maximum below 1 traps.
+        #NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
             if (!open_now) {
                 return Result<uint8[list]>.Err(bytes.closed("stream", handle.address));
             }
-            return match (read_socket(handle.id, max, read_timeout)) {
+            return match (read_socket(handle.id, max, read_timeout_nanos)) {
                 BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
                 BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, "stream read failed", handle.address)),
             };
@@ -72,6 +85,7 @@ export let TcpStream = module (
         /// @brief Writes every byte, repeating partial host writes. When the task's scope is cancelled while the
         /// write waits, it fails with Cancelled and the message "stream write cancelled after N bytes", where N
         /// is the number of bytes already sent.
+        #NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
             if (!open_now) {
                 return Result<Unit>.Err(bytes.closed("stream", handle.address));
@@ -102,12 +116,6 @@ export let TcpStream = module (
             return bytes.ok();
         };
 
-        /// @brief The longest a read waits; zero waits without limit. A negative timeout traps with "invalid
-        /// argument: negative timeout".
-        export let set_read_timeout = func(timeout: Duration) {
-            read_timeout = timeout_nanos(timeout);
-        };
-
         /// @brief Releases the connection. Closing again does nothing and returns Ok; the stream is closed even
         /// when the host reports an error.
         export let close = func -> Result<Unit> {
@@ -127,10 +135,11 @@ export let TcpStream = module (
     ///
     /// A port outside 0 through 65,535 traps with "invalid argument: port"; a negative timeout traps with
     /// "invalid argument: negative timeout".
+    #NoDiscard
     export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream> {
         socket.check_port(port);
-        let nanos = timeout_nanos(timeout);
-        let address = socket.address_of(host, port);
+        last nanos = timeout_nanos(timeout);
+        last address = socket.address_of(host, port);
         return match (connect_socket(host, port, nanos)) {
             IdOutcome.Ok(id) => Result<TcpStream>.Ok(new TcpStream(new socket.Handle(id, address))),
             IdOutcome.Error(code) => Result<TcpStream>.Err(host_error.io(code, "connect failed", address)),
@@ -149,8 +158,9 @@ export let TcpStream = module (
     ///   `Context` error whose cause is the body's error and whose message names the close error's message.
     ///
     /// A trap in the body ends the run without closing; the runner then closes every socket the run left open.
+    #NoDiscard
     export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T> {
-        let opened = connect(host, port, of_nanos(0));
+        last opened = connect(host, port, of_nanos(0));
         return match (opened) {
             Result.Err(problem) => Result<T>.Err(problem),
             Result.Ok(stream) => run_and_close<T>(stream, body),
@@ -163,7 +173,7 @@ export let TcpStream = module (
         scope {
             outcome = body(stream);
         }
-        let closed = stream.close();
+        last closed = stream.close();
         return match (closed) {
             Result.Ok(_) => outcome,
             Result.Err(close_problem) => match (outcome) {
@@ -176,7 +186,7 @@ export let TcpStream = module (
 
     /// @brief Converts a nonnegative duration to the provider's timeout argument.
     let timeout_nanos = func(timeout: Duration) -> int64 {
-        let nanos = timeout.to_nanos();
+        last nanos = timeout.to_nanos();
         if (nanos < 0) {
             trap_with_message("invalid argument: negative timeout");
         }

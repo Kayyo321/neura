@@ -12,7 +12,7 @@ let unit = import:Std.Core.Unit;
 export let Record = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let dir = path.of("record-data");
-        fs.remove_tree(dir);
+        let _ = fs.remove_tree(dir);
         result.expect<unit.Unit>(fs.create_directory(dir), "create");
         result.expect<unit.Unit>(fs.write_text(dir.join("r.txt"), "recorded"), "write");
         console.print_line(result.expect<string>(fs.read_text(dir.join("r.txt")), "read"));

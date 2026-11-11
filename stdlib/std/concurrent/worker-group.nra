@@ -6,6 +6,7 @@ let channels = import:Std.Concurrent.Channel;
 /// Because tasks need a scope, a group exists only inside with_workers, which starts the workers, runs the body
 /// that submits the jobs, and drains the queue before it returns.
 /// @see [Std.Concurrent.WorkerGroup](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-WorkerGroup)
+#Since("0.1.0")
 export let WorkerGroup = module (
     /// @brief What submit reports. Closure and cancellation are expected events, not errors.
     export let SubmitOutcome = enum (Submitted, Closed, Cancelled);
@@ -15,11 +16,12 @@ export let WorkerGroup = module (
 
     /// @brief The handle through which a body gives a group its jobs. It holds channel ends, so it can be given
     /// to a task. A job is a value of the transferable type T.
+    #Final
     export let WorkerGroup = class<T> (
-        let queue: channels.Sender<T>;
-        let closer: channels.Closer<T>;
-        let stopped: channels.Receiver<int>;
-        let workers: int;
+        last queue: channels.Sender<T>;
+        last closer: channels.Closer<T>;
+        last stopped: channels.Receiver<int>;
+        last workers: int;
         let drained: bool = false;
 
         /// @brief Wraps the ends of a group's channels. Use with_workers.
@@ -91,7 +93,7 @@ export let WorkerGroup = module (
             for (let index: int = 0; index < workers; index++) {
                 spawn run_worker<T>(work, next_job, stops, index);
             }
-            let group = new WorkerGroup<T>(jobs, closer, stopped, workers);
+            last group = new WorkerGroup<T>(jobs, closer, stopped, workers);
             body(group);
             group.close_and_drain();
         }

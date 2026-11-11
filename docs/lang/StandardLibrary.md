@@ -49,7 +49,7 @@ Ada
 
 Expected failures are `Result<T>` values whose error is the `Error` enum; absent values are `Optional<T>`. A violated precondition traps with one of the messages of [section 5.1](Stdlib.md#51-failure-model). An `Error` cannot be sent on a channel or given to a spawned task, because a `Custom` error holds an object. `Std.Core.Error.PortableError` is its transferable copy: `to_portable(e)` flattens a `Custom` error to its code and message, and `from_portable(p)` gives back an `Error` with the same message ([Stdlib](Stdlib.md#63-error)).
 
-`RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags or metadata can change their hashes.
+`RegexFlags` compares and hashes its three option values. A compiled `Regex` uses its pattern and the options recorded at compilation, and its text is the pattern. A `RegexMatch` uses its input, capture offsets, and group names, and its text is the whole match. `FileMetadata` uses the entry kind, size, and modification time for equality and hashing; its fields are read-only. Its text is `Kind(size, modified)`, with `nil` when the modification time is absent. Mutating flags can change their hashes.
 
 ## String
 

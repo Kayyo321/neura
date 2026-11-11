@@ -27,11 +27,11 @@ let PathTests = module (
     };
 
     export let test_is_absolute = func() -> void {
-        test.assert(path.of("/a").is_absolute());
-        test.assert(path.of("/").is_absolute());
-        test.assert(!path.of("a/b").is_absolute());
-        test.assert(!path.of("").is_absolute());
-        test.assert(!path.of("C:/x").is_absolute());
+        test.assert(path.of("/a").is_absolute);
+        test.assert(path.of("/").is_absolute);
+        test.assert(!path.of("a/b").is_absolute);
+        test.assert(!path.of("").is_absolute);
+        test.assert(!path.of("C:/x").is_absolute);
     };
 
     export let test_join = func() -> void {

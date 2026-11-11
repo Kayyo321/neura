@@ -27,7 +27,7 @@ let observe = func(label: string, listener: listeners.TcpListener) {
             console.print_line(label + ": accept failed: " + describe(problem));
         },
         result.Result.Ok(server) => {
-            server.set_read_timeout(durations.of_seconds(2));
+            server.read_timeout = durations.of_seconds(2);
             match (server.read(8)) {
                 result.Result.Ok(chunk) => {
                     if (chunk.length == 0) {
@@ -83,7 +83,7 @@ export let Main = module : program.Entry (
                 return program.ExitCode.Failure;
             },
             result.Result.Ok(listener) => {
-                let port = listener.local_port();
+                let port = listener.local_port;
 
                 show("ok", streams.with_connection<int>("127.0.0.1", port, func(stream: streams.TcpStream) -> result.Result<int> {
                     return result.Result<int>.Ok(7);
@@ -97,7 +97,7 @@ export let Main = module : program.Entry (
 
                 let replies = channels.open<string>(1);
                 scope (deadline) {
-                    deadline.cancel_after(durations.of_millis(200));
+                    let _ = deadline.cancel_after(durations.of_millis(200));
                     spawn cancelled_run(port, replies[0]);
                     match (replies[1].receive()) {
                         channels.Received.Value(text) => {
@@ -116,7 +116,7 @@ export let Main = module : program.Entry (
                 match (unused) {
                     result.Result.Err(_) => {},
                     result.Result.Ok(closed) => {
-                        let dead = closed.local_port();
+                        let dead = closed.local_port;
                         closed.close();
                         show("open error", streams.with_connection<int>("127.0.0.1", dead, func(stream: streams.TcpStream) -> result.Result<int> {
                             console.print_line("body ran");

@@ -6,8 +6,8 @@ let.promote _ = import:Std.Core.Unit;
 export let Bytes = module (
     /// @brief The UTF-8 bytes of `text`.
     export let of_string = func(text: string) -> uint8[list] {
-        let bytes: uint8[list] = [];
-        let count = text.byte_length;
+        last bytes: uint8[list] = [];
+        last count = text.byte_length;
         let i = 0;
         while (i < count) {
             bytes.append(text.byte_at(i));
@@ -18,7 +18,7 @@ export let Bytes = module (
 
     /// @brief A new list of bytes[start] up to but excluding bytes[end].
     export let copy_range = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
-        let copy: uint8[list] = [];
+        last copy: uint8[list] = [];
         let i = start;
         while (i < end) {
             copy.append(bytes[i]);
@@ -39,7 +39,7 @@ export let Bytes = module (
     /// @brief The index of the first `value` at or after `start`, or -1.
     export let index_of = func(bytes: uint8[list], start: int, value: uint8) -> int {
         let i = start;
-        let count = bytes.length;
+        last count = bytes.length;
         while (i < count) {
             if (bytes[i] == value) {
                 return i;

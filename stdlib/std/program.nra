@@ -4,6 +4,7 @@ let host_error = import:Std.Core.Internal.HostError;
 /// @brief The program entry contract (Stdlib.md section 11.3). A program's entry module inherits Entry and
 /// overrides main; arguments arrive only through its parameter.
 /// @see [Std.Program](https://github.com/Kayyo321/neura/wiki/Stdlib-Program)
+#Since("0.1.0")
 export let Program = module (
     /// @brief A process exit status. Ok is 0, Failure is 1, and Status gives 0 through 255; any other Status
     /// traps with "invalid argument: exit status". The named variants follow the shell convention of 128 plus
@@ -33,6 +34,7 @@ export let Program = module (
 
     /// @brief The process status `code` stands for: 0 through 255. Traps with "invalid argument: exit status"
     /// for a Status outside that range.
+    #NoDiscard
     export let status_of = func(code: ExitCode) -> int {
         return match (code) {
             ExitCode.Ok => 0,
@@ -78,6 +80,7 @@ export let Program = module (
 
         /// @brief The value of an environment variable. Needs the env capability; without it the lookup fails
         /// with CapabilityDenied.
+        #NoDiscard
         export let get = func(name: string) -> Lookup => match (get_variable(name)) {
             GetOutcome.Ok(found) => lookup_of(found),
             GetOutcome.Error(code) => Lookup.Failed(host_error.io(code, "environment lookup failed", "")),

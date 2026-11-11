@@ -15,7 +15,7 @@ export let Codec = module (
     /// @brief The provider's signature for `descriptor`: version 1, the fixed-argument count (65535 when not
     /// variadic), the argument count, the result type, and each argument type.
     export let signature = func(descriptor: FunctionDescriptor, variadic_index: int) -> uint8[list] {
-        let layouts = descriptor.argument_layouts();
+        last layouts = descriptor.argument_layouts();
         if (variadic_index >= 0) {
             if (variadic_index > layouts.length) {
                 trap_with_message("invalid argument: first variadic index past the arguments");
@@ -24,7 +24,7 @@ export let Codec = module (
                 check_promoted(layouts[i]);
             }
         }
-        let encoded: uint8[list] = [];
+        last encoded: uint8[list] = [];
         encoded.append(1);
         put_u16(encoded, (variadic_index < 0) ? 65535 : variadic_index);
         put_u16(encoded, layouts.length);
@@ -89,7 +89,7 @@ export let Codec = module (
             },
             Shape.Struct => {
                 check_natural(layout);
-                let fields: MemoryLayout[list] = [];
+                last fields: MemoryLayout[list] = [];
                 for (let member in layout.member_layouts()) {
                     flatten(fields, member);
                 }
@@ -119,7 +119,7 @@ export let Codec = module (
         match (member.shape()) {
             Shape.Padding => {},
             Shape.Sequence => {
-                let element = member.member_layouts()[0];
+                last element = member.member_layouts()[0];
                 for (let i: int64 = 0; i < member.element_count(); i++) {
                     flatten(fields, element);
                 }
@@ -132,12 +132,12 @@ export let Codec = module (
 
     /// @brief Traps unless the struct's offsets and size are the ones C's natural layout gives its members.
     let check_natural = func(layout: MemoryLayout) {
-        let members = layout.member_layouts();
-        let offsets = layout.member_offsets();
+        last members = layout.member_layouts();
+        last offsets = layout.member_offsets();
         let position: int64 = 0;
         let alignment: int64 = 1;
         for (let i = 0; i < members.length; i++) {
-            let member = members[i];
+            last member = members[i];
             if (member.shape() == Shape.Padding) {
                 continue;
             }
@@ -255,7 +255,7 @@ export let Codec = module (
             return;
         }
         let carrier = layout.carrier();
-        let size = carrier_size(carrier) as int;
+        last size = carrier_size(carrier) as int;
         match (value) {
             ForeignValue.Bool(v) => {
                 if (carrier != Carrier.Bool) { wrong(value, layout); }
@@ -318,8 +318,8 @@ export let Codec = module (
     export let decode_value = func(bytes: uint8[list], offset: int, layout: MemoryLayout, allocator: Arena)
         -> ForeignValue {
         if (layout.shape() == Shape.Struct) {
-            let segment = allocator.allocate(layout);
-            let part: uint8[list] = [];
+            last segment = allocator.allocate(layout);
+            last part: uint8[list] = [];
             for (let i = 0; i < (layout.byte_size() as int); i++) {
                 part.append(bytes[offset + i]);
             }
@@ -327,7 +327,7 @@ export let Codec = module (
             return ForeignValue.Struct(segment);
         }
         let carrier = layout.carrier();
-        let bits = native.get(bytes, offset, carrier_size(carrier) as int);
+        last bits = native.get(bytes, offset, carrier_size(carrier) as int);
         return match (carrier) {
             Carrier.Bool => ForeignValue.Bool(bits != 0),
             Carrier.Int8 => ForeignValue.Int8(native.sign_extend(bits, 1) as int8),

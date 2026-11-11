@@ -2,11 +2,12 @@
 /// ID never leaves the library.
 export let Socket = module (
     /// @brief Pairs a provider socket identifier with its address text.
+    #Final
     export let Handle = class (
         /// @brief The provider's socket identifier.
-        export let id: int64 = 0;
+        export last id: int64;
         /// @brief The address text retained for diagnostics.
-        export let address: string = "";
+        export last address: string;
 
         /// @brief Stores the provider identifier and address text.
         export let init = func(host_id: int64, address_text: string) {

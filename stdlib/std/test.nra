@@ -8,6 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// Each builds its message in Neura and traps through Failure.trap; the runner reports the message at the
 /// failing assertion's call site in the test file.
 /// @see [Std.Test](https://github.com/Kayyo321/neura/wiki/Stdlib-Test)
+#Since("0.1.0")
 export let Test = module (
     /// @brief Traps with the default assertion diagnostic when the condition is false.
     export let assert = func(condition: bool) {

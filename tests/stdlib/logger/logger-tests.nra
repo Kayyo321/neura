@@ -56,7 +56,7 @@ let LoggerTests = module (
         check_lines(expected, lines);
     };
 
-    export let test_threshold_and_set_level = func() -> void {
+    export let test_threshold_and_level = func() -> void {
         let lines: string[list] = [];
         let log = logger.create("svc", collector(lines), logger.LogLevel.Warn);
         log.trace("no");
@@ -68,14 +68,16 @@ let LoggerTests = module (
         test.assert(log.is_enabled(logger.LogLevel.Warn));
         test.assert(log.is_enabled(logger.LogLevel.Error));
         test.assert(!log.is_enabled(logger.LogLevel.Off));
-        log.set_level(logger.LogLevel.Debug);
+        test.assert(log.level == logger.LogLevel.Warn);
+        log.level = logger.LogLevel.Debug;
+        test.assert(log.level == logger.LogLevel.Debug);
         test.assert(log.is_enabled(logger.LogLevel.Debug) && !log.is_enabled(logger.LogLevel.Trace));
         log.debug("yes 3");
         log.trace("no");
-        log.set_level(logger.LogLevel.Off);
+        log.level = logger.LogLevel.Off;
         test.assert(!log.is_enabled(logger.LogLevel.Error));
         log.error("no");
-        log.set_level(logger.LogLevel.Trace);
+        log.level = logger.LogLevel.Trace;
         test.assert(log.is_enabled(logger.LogLevel.Trace) && !log.is_enabled(logger.LogLevel.Off));
         let expected: string[list] = ["WARN svc: yes 1", "ERROR svc: yes 2", "DEBUG svc: yes 3"];
         check_lines(expected, lines);

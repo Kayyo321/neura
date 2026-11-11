@@ -6,38 +6,38 @@ let.promote _ = import:Std.Core.Result;
 /// There is no global registry: a logger is passed to the code that uses it. Without a clock records carry no
 /// timestamp, so output is deterministic by default.
 /// @see [Std.Log.Logger](https://github.com/Kayyo321/neura/wiki/Stdlib-Log-Logger)
+#Since("0.1.0")
 export let Logger = module (
     /// @brief In order; levels compare by ordinal. Off disables a logger and is never a record's level.
     export let LogLevel = enum (Trace, Debug, Info, Warn, Error, Off);
 
     /// @brief A named logger with its own threshold, sink, and optional clock.
+    #Final
     export let Logger = class (
         /// @brief The name printed on each emitted record.
-        let logger_name: string;
+        last logger_name: string;
         /// @brief The callback that receives each formatted record.
-        let sink: func(string) -> void;
-        /// @brief The minimum level enabled for this logger.
-        let threshold: LogLevel;
+        last sink: func(string) -> void;
         /// @brief nil for a logger without timestamps.
-        let source: Clock = nil;
+        last source: Clock;
+
+        /// @brief The minimum level enabled for this logger. Assigning it changes the level of future records;
+        /// Off disables the logger.
+        #Since("0.2.0")
+        export let level: LogLevel;
 
         /// @brief Configures the logger's name, destination, threshold, and optional time source.
         export let init = func(name: string, target: func(string) -> void, level: LogLevel, time_source: Clock) {
             logger_name = name;
             sink = target;
-            threshold = level;
+            instance.level = level;
             source = time_source;
         };
 
         /// @brief True when a record at `level` would reach the sink: the level is not Off and is at least the
         /// logger's level.
         export let is_enabled = func(level: LogLevel) -> bool =>
-            level != LogLevel.Off && (level as int) >= (threshold as int);
-
-        /// @brief Changes the minimum level for future records.
-        export let set_level = func(level: LogLevel) {
-            threshold = level;
-        };
+            level != LogLevel.Off && (level as int) >= (instance.level as int);
 
         /// @brief Sends one record when the level is enabled: with a clock, the instant's text (or - when the
         /// clock fails) and a space; then the level in uppercase, a space, the name, ": ", and the message.
@@ -75,18 +75,18 @@ export let Logger = module (
             if (source != nil) {
                 line = timestamp(source) + " " + line;
             }
-            let write = sink;
+            last write = sink;
             write(line);
         };
     );
 
     /// @brief A logger without timestamps.
     export let create = func(name: string, sink: func(string) -> void, level: LogLevel) -> Logger =>
-        new Logger(name, sink, level, nil);
+        new(name, sink, level, nil);
 
     /// @brief A logger whose records start with the clock's instant.
     export let create_timed = func(name: string, sink: func(string) -> void, level: LogLevel, source: Clock) -> Logger =>
-        new Logger(name, sink, level, source);
+        new(name, sink, level, source);
 
     /// @brief Formats the current instant, or a dash when the clock fails.
     let timestamp = func(source: Clock) -> string => match (source.now()) {

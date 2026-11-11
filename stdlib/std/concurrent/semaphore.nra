@@ -3,15 +3,17 @@ let channels = import:Std.Concurrent.Channel;
 /// @brief A counting semaphore that tasks may share (Concurrency.md section 8). It bounds how many tasks do
 /// something at once.
 /// @see [Std.Concurrent.Semaphore](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Semaphore)
+#Since("0.1.0")
 export let Semaphore = module (
     /// @brief What an acquire reports.
     export let AcquireOutcome = enum (Acquired, Cancelled);
 
     /// @brief A fixed number of permits. A permit is a place in a channel: taking one is a receive, so tasks
     /// that wait are served first come, first served, and a wait can be cancelled.
+    #Final
     export let Semaphore = class (
-        let free: channels.Receiver<bool>;
-        let returned: channels.Sender<bool>;
+        last free: channels.Receiver<bool>;
+        last returned: channels.Sender<bool>;
 
         /// @brief A semaphore that owns the two ends of its permit channel. Use create.
         export let init = func(taking: channels.Receiver<bool>, giving: channels.Sender<bool>) {
@@ -20,12 +22,14 @@ export let Semaphore = module (
         };
 
         /// @brief Waits until a permit is free and takes it.
+        #NoDiscard(reason: "a cancelled acquire holds no permit")
         export let acquire = func -> AcquireOutcome => match (free.receive()) {
             channels.Received.Value(_) => AcquireOutcome.Acquired,
             _ => AcquireOutcome.Cancelled,
         };
 
         /// @brief Takes a permit if one is free; never waits.
+        #NoDiscard(reason: "the result says whether a permit was taken")
         export let try_acquire = func -> bool => match (free.try_receive()) {
             channels.TryReceived.Value(_) => true,
             _ => false,
@@ -52,6 +56,6 @@ export let Semaphore = module (
         for (let i: int = 0; i < permits; i++) {
             giving.try_send(true);
         }
-        return new Semaphore(taking, giving);
+        return new(taking, giving);
     };
 );

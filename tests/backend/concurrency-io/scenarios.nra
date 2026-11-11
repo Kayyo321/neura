@@ -115,7 +115,7 @@ let mixed = func {
         let ends = channels.open<int>(2);
         let tx = ends[0];
         let rx = ends[1];
-        limit.cancel_after(durations.of_millis(50));
+        let _ = limit.cancel_after(durations.of_millis(50));
         spawn producer(1, tx);
         spawn producer(2, tx);
         spawn waiter(99);

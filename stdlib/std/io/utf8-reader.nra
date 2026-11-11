@@ -5,11 +5,13 @@ let result = import:Std.Core.Result;
 /// @brief Reads UTF-8 text from a byte source (Stdlib.md section 11.1), requesting up to 8,192 bytes at a time.
 /// Invalid UTF-8 fails with InvalidData.
 /// @see [Std.Io.Utf8Reader](https://github.com/Kayyo321/neura/wiki/Stdlib-Io-Utf8Reader)
+#Since("0.1.0")
 export let Utf8Reader = module (
     /// @brief Decodes UTF-8 from a byte source and retains bytes read ahead.
+    #Final
     export let Utf8Reader = class (
         /// @brief The underlying byte source called when more input is needed.
-        let source: func(int) -> result.Result<uint8[list]>;
+        last source: func(int) -> result.Result<uint8[list]>;
         /// @brief Stores the buffered bytes.
         let buffer: uint8[list] = [];
         /// @brief The index of the next unread byte in the buffer.
@@ -24,6 +26,7 @@ export let Utf8Reader = module (
         ///
         /// An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are
         /// consumed and that byte is not.
+        #NoDiscard
         export let read_scalar = func -> result.Result<Optional<uint32>> {
             match (fill()) {
                 result.Result.Ok(available) => {
@@ -35,7 +38,7 @@ export let Utf8Reader = module (
                     return result.Result<Optional<uint32>>.Err(failure);
                 },
             }
-            let lead = buffer[start] as uint32;
+            last lead = buffer[start] as uint32;
             start++;
             if (lead < 128) {
                 return some_scalar(lead);
@@ -69,7 +72,7 @@ export let Utf8Reader = module (
                         return result.Result<Optional<uint32>>.Err(failure);
                     },
                 }
-                let next = buffer[start] as uint32;
+                last next = buffer[start] as uint32;
                 if ((next & 192) != 128) {
                     return invalid_scalar();
                 }
@@ -85,8 +88,9 @@ export let Utf8Reader = module (
 
         /// @brief The next line without its LF or a CR before it; None at the end of the stream. A final line
         /// without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
+        #NoDiscard
         export let read_line = func -> result.Result<Optional<string>> {
-            let line: uint8[list] = [];
+            last line: uint8[list] = [];
             do {
                 match (fill()) {
                     result.Result.Ok(available) => {
@@ -101,7 +105,7 @@ export let Utf8Reader = module (
                         return result.Result<Optional<string>>.Err(failure);
                     },
                 }
-                let end = bytes.index_of(buffer, start, 10 as uint8);
+                last end = bytes.index_of(buffer, start, 10 as uint8);
                 if (end >= 0) {
                     bytes.append_range(line, buffer, start, end);
                     start = end + 1;
@@ -113,8 +117,9 @@ export let Utf8Reader = module (
         };
 
         /// @brief The rest of the stream as text.
+        #NoDiscard
         export let read_to_end = func -> result.Result<string> {
-            let all: uint8[list] = [];
+            last all: uint8[list] = [];
             do {
                 match (fill()) {
                     result.Result.Ok(available) => {
@@ -176,5 +181,5 @@ export let Utf8Reader = module (
 
     /// @brief Creates a UTF-8 reader over the supplied byte source.
     export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader =>
-        new Utf8Reader(source);
+        new(source);
 );

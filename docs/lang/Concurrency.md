@@ -377,7 +377,7 @@ select {
 <!-- example: fragment: a scope statement without its function; request, call_backend, query, and durations are not defined -->
 ```neura
 scope (request) {
-    request.cancel_after(durations.of_seconds(2));
+    let _ = request.cancel_after(durations.of_seconds(2));
     let reply_task = spawn call_backend(query);
     return reply_task.join();  // Ok, or the backend's own Cancelled error.
 }
@@ -385,7 +385,7 @@ scope (request) {
 
 - Every scope has a signal. `Scope.cancel()` requests cancellation of the scope's tasks and all their descendants. It is idempotent and cannot be undone.
 - A child's context is its scope's signal joined with everything that scope's own task inherited. Cancelling an outer scope therefore cancels every task below it. A scope's deadline is the earlier of its own and its parent's; a nested scope cannot extend one.
-- `cancel_after(duration)` and `cancel_at(instant)` set a deadline on the run's monotonic clock; a later call replaces the scope's own deadline. Both read the clock and return `Result<Unit>`. The clock is granted by default; under `--deny-clock` they return the clock's `Err` (`CapabilityDenied`) and set nothing. Virtual time (section 14.4) changes what the clock reads, not who may read it, so the same holds there. `Scope.deadline()` returns the monotonic reading at which the scope's tasks are cancelled, as an `Optional<Duration>`: the earlier of the scope's own deadline and the one it inherited, or `None`.
+- `cancel_after(duration)` and `cancel_at(instant)` set a deadline on the run's monotonic clock; a later call replaces the scope's own deadline. Both read the clock and return `Result<Unit>`, which is `#NoDiscard`: a statement that drops it warns, so a program that ignores a failure says so with `let _ = ...;`. The clock is granted by default; under `--deny-clock` they return the clock's `Err` (`CapabilityDenied`) and set nothing. Virtual time (section 14.4) changes what the clock reads, not who may read it, so the same holds there. `Scope.deadline()` returns the monotonic reading at which the scope's tasks are cancelled, as an `Optional<Duration>`: the earlier of the scope's own deadline and the one it inherited, or `None`.
 - A request wakes every parked channel operation, every parked timer wait, and every parked cancellable host request (section 10.4) of the affected tasks. The channel operation returns `Cancelled`, and so does a timer wait. The host operation returns an `Io` error of kind `Cancelled` (`IoErrorKind.Cancelled`), unless it had already finished.
 - A running task is never interrupted. A CPU loop asks: `Std.Concurrent.Cancellation.requested()` returns whether the current task's context is cancelled, and `remaining()` returns the time to its deadline, if it has one, negative once it has passed. The root task's context is never cancelled, and cancelling a scope does not cancel the task that runs the scope, only the tasks spawned below it.
 - A deadline passes when the driver next reads the clock at or after its time. It reads the clock at every scheduling point while a timer or a deadline is armed: when the running task parks, finishes, or ends its turn, and when every task is parked and the scheduler waits for the clock. A task that never parks still ends its turn: when its quantum is spent and a deadline, a timer, or a host request is outstanding, the turn ends even if no other task can run, so a deadline stops a task that is the only runnable task and only computes (section 10.2). That task sees the request the next time it asks `Cancellation.requested()`. A request made with `cancel()` by a task that is running takes effect at once.
@@ -575,7 +575,7 @@ let digests = parallel.map<Chunk, Digest>(chunks, hash_chunk, limits);
 - **Meaning.** `map<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]` returns what calling `worker` on each item in index order would return. `T` and `U` are transferable.
 - **Isolation, statically.** `worker` must be task-safe, issue no host request and no scheduler operation (it cannot spawn, open a scope, or use a channel, timer, or guard), and perform no identity operation (class hash or class text, whose numbers depend on request order). The compiler checks this from the same effect summaries as section 5.2, and reports a violation at the program's own call of `Parallel.map`: `the worker of a parallel map is not task-safe: ...` or `the worker of a parallel map must compute in isolation: ...`, each with the call chain. The arguments given to an item and its result must be transferable (section 5.1). `neura check --task-safety` marks which task-safe functions could be the worker.
 - **Order.** `map` takes and returns arrays. Results are published in input order. If several items trap, the run reports the trap of the lowest index, which is the one the reference executor would have reached, and names it: `(item 2 of a parallel map)`, where the index counts from zero in the array.
-- **Limits.** Each item runs under `ItemLimits` (steps and heap cells, both positive, made with `parallel.limits(steps, heap_cells)`), the same under any worker count. An item that exceeds one traps as that item, with status 152 for steps and 137 for heap cells. The run's totals add the steps of items in index order, so the run's own `--max-steps` applies to the sum.
+- **Limits.** Each item runs under `ItemLimits` (steps and heap cells, both positive, made with `parallel.limits(steps, heap_cells)` and read back from its read-only fields `max_steps` and `max_heap_cells`), the same under any worker count. An item that exceeds one traps as that item, with status 152 for steps and 137 for heap cells. The run's totals add the steps of items in index order, so the run's own `--max-steps` applies to the sum.
 - **Execution.** Each item runs to its end in a state of its own: its own heap, with copies of the program's globals whose type is transferable (an item may read only those that are `const`), and no scheduler. The reference executor evaluates items one after another on the scheduler's thread. With `--parallel-workers N`, where N is from 1 to 1,024 and the option applies to `run` and `test`, N threads evaluate items at once. Only wall time and peak process memory may differ; the values, the reported trap, and the statistics do not.
 
 This is the same shape as a [fleet](GpuExecution.md#10-batched-running), many independent executions advanced together with results in member order, applied inside one run. It establishes what multicore Neura can deliver before any general parallel scheduler is designed. Benchmarks report I/O concurrency (tasks) and CPU speedup (`Parallel.map`) separately; neither figure stands in for the other.
@@ -640,11 +640,11 @@ A task dump is a read-only snapshot taken at a scheduling point. It never change
 
 ```text
 task 0  root  parked: join of task 1
-    Task.Task<int32>.join at std/concurrent/task.nra:15:40
+    Task.Task<int32>.join at std/concurrent/task.nra:17:40
     Main.main at dead.nra:18:32
     start Main.main at dead.nra:13:5
   task 1  spawned at dead.nra:16:27  parked: receive on channel 1 (0 of 1 queued, 0 senders waiting)
-      Channel.Receiver<int32>.receive at std/concurrent/channel.nra:74:53
+      Channel.Receiver<int32>.receive at std/concurrent/channel.nra:80:53
       wait_forever at dead.nra:6:19
       $closure662.$invoke at dead.nra:16:33
 ```

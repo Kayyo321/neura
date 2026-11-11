@@ -1,8 +1,10 @@
 /// @brief Mutable state that tasks may share, one at a time (Concurrency.md section 8). The guard owns the
 /// state; a task reaches it only inside `with`, and nothing that refers to it can leave.
 /// @see [Std.Concurrent.Guarded](https://github.com/Kayyo321/neura/wiki/Stdlib-Concurrent-Guarded)
+#Since("0.1.0")
 export let Guarded = module (
     /// @brief A guard around one mutable T.
+    #Final
     export let Guarded = class<T> (
         /// @brief A guard that owns the state. Use create, which builds the state inside the guard.
         export let init = func(state: T) {
@@ -13,9 +15,9 @@ export let Guarded = module (
         /// calls with waits until the first returns. The body's captures and its result are transferable, so
         /// no reference to the state escapes. Calling with on a guard the task already holds traps.
         export let with = func<U>(body: func(T) -> U) -> U {
-            let checked = transferable<(func(T) -> U)>(body);
-            let state = enter_guard<T>(instance);
-            let result = transferable<U>(checked(state));
+            last checked = transferable<(func(T) -> U)>(body);
+            last state = enter_guard<T>(instance);
+            last result = transferable<U>(checked(state));
             exit_guard<T>(instance);
             return result;
         };
@@ -24,8 +26,8 @@ export let Guarded = module (
     /// @brief A guard around the state that `initializer` builds. The initializer's captures are
     /// transferable, so the state it builds is reachable only through the guard.
     export let create = func<T>(initializer: func() -> T) -> Guarded<T> {
-        let checked = transferable<(func() -> T)>(initializer);
-        return new Guarded<T>(checked());
+        last checked = transferable<(func() -> T)>(initializer);
+        return new(checked());
     };
 
     let open_guard = func<T>(guard: Guarded<T>, state: T) scheduler("guard.open");

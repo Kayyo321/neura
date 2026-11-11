@@ -13,7 +13,7 @@ export let Main = module:program.Entry (
         let p = path.of("data.txt");
         result.expect<unit.Unit>(fs.write_text(p, "data"), "write");
         let f = result.expect<file.File>(file.open(p, file.OpenMode.Read), "open");
-        f.read(0);
+        let _ = f.read(0);
         return program.ExitCode.Ok;
     };
 );
