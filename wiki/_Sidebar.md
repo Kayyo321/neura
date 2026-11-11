@@ -4,6 +4,7 @@
 
 - [Tutorial](Tutorial)
 - [Tooling](Tooling)
+- [Install and update](Install)
 - [Language overview](Overview)
 - [Feature status and decisions](Status)
 

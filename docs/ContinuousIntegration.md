@@ -35,7 +35,7 @@ python3 scripts/update-stdlib-wiki-api.py --check
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 114
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 122
 ```
 
 The scripts need Python 3 and Git, and use no packages outside the Python standard library. `check-docs.py` reads the Markdown files that Git tracks, so `git add` a new page before checking it. It does not use the network: links to other websites are listed with `--list-external` and are not fetched.

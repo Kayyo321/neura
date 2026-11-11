@@ -93,6 +93,7 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 - [Language overview](docs/lang/Overview.md) and [tutorial](docs/lang/Tutorial.md) cover Neura syntax and semantics. See [examples](examples/) for sample `.nra` programs.
 - [Tooling](docs/lang/Tooling.md) covers building the compiler, checking source, inspecting NeuraIR, building and running `.nvr` images, running tests, and disassembling and decompiling images.
 - [Neura Virtual Machine](docs/runtime/NVM.md) and [NVR format](docs/runtime/NVR.md) define execution and the executable image. [Neuron conversion and execution](docs/Backend.md) and [Decompiler](docs/Decompiler.md) describe the implementation, and the [release checklist](docs/Release.md) maps each feature to its tests.
+- [Install, update, and uninstall](docs/Install.md) covers installing a release archive, `neura doctor`, `neura update`, and `neura uninstall`.
 - [Wiki maintenance](docs/Wiki.md) explains how to update, review, and publish the repository's wiki sources.
 - [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them.
 
