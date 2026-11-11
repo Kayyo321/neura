@@ -22,16 +22,6 @@
 
 Neura is a statically typed programming language and a toolchain for compiling its programs into deterministic neuron circuits and decompiling those circuits into readable representations. The compiler derives the topology and weights from the program. The resulting circuits can be run, inspected, tested, and optimized against the behavior defined by the language.
 
-## Compilation and execution
-
-```text
-Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
-```
-
-The compiler checks source semantics before producing typed NeuraIR. Optimization preserves the program's observable behavior, and the conversion stage maps the optimized IR to neuron primitives. The output describes the circuit, its weights, and the inputs, state, and runtime capabilities it needs.
-
-Pure computations can use feedforward circuits. Stateful execution carries mutable data and control state across steps. Classes share method circuits while each instance holds its own fields. Decompilation recovers behavior from supported artifacts and can use optional metadata to improve readability. Verification compares the recovered representation with the circuit over a defined input and state domain.
-
 ## Install
 
 On Linux, and on Windows inside a WSL 2 distribution, one command installs a release:
@@ -82,6 +72,16 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 | `neura update` | Installs a newer release. |
 
 [Tooling](docs/lang/Tooling.md) describes every command, and the [tutorial](docs/lang/Tutorial.md) introduces the language.
+
+## Compilation and execution
+
+```text
+Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
+```
+
+The compiler checks source semantics before producing typed NeuraIR. Optimization preserves the program's observable behavior, and the conversion stage maps the optimized IR to neuron primitives. The output describes the circuit, its weights, and the inputs, state, and runtime capabilities it needs.
+
+Pure computations can use feedforward circuits. Stateful execution carries mutable data and control state across steps. Classes share method circuits while each instance holds its own fields. Decompilation recovers behavior from supported artifacts and can use optional metadata to improve readability. Verification compares the recovered representation with the circuit over a defined input and state domain.
 
 ## Build from source
 
