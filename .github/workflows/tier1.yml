@@ -99,7 +99,7 @@ jobs:
 
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 114
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 115
 
       - name: Upload the test report
         if: ${{ !cancelled() }}

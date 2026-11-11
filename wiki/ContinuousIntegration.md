@@ -25,7 +25,19 @@ A pull request that adds CTest entries raises `--minimum` in the workflow to the
 
 ### What Tier 1 does not cover
 
-Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. No workflow builds or tests Neura on macOS, on Windows, on another processor architecture, or with another compiler. No workflow runs sanitizers or fuzzing, checks links to other websites, or builds release artifacts.
+Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does not build or test Neura on macOS, on another processor architecture, or with another compiler, and it does not run sanitizers; [Tier 2](#tier-2-platform-and-sanitizer-runs) does, when a maintainer starts it. No workflow builds or tests Neura on Windows, runs fuzzing, checks links to other websites, or builds release artifacts.
+
+## Tier 2: platform and sanitizer runs
+
+[`tier2.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/tier2.yml) has no automatic trigger. A maintainer starts it for a branch or commit with `gh workflow run tier2.yml --ref <branch>`. It has a read-only token and no secrets.
+
+| Job | Configuration |
+| --- | --- |
+| Build and test (Linux arm64) | Release, GCC 14, Ubuntu 24.04 on arm64, every CTest entry. |
+| Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, every CTest entry CMake registers on macOS. |
+| Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, every CTest entry. |
+
+Each job uploads its build log and CTest report. A Tier 2 job does not yet run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
 
 ## Run the checks locally
 
@@ -41,7 +53,7 @@ python3 scripts/generate-wiki.py --check
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 114
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 115
 ```
 
 To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
