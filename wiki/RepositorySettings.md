@@ -9,7 +9,7 @@ The rules in [GOVERNANCE.md](https://github.com/Kayyo321/neura/blob/main/GOVERNA
 
 | Setting | File | Effect |
 | --- | --- | --- |
-| Ruleset `main` | `ruleset-main.json` | A change reaches `main` only through a pull request whose **Tier 1** check passed and whose review conversations are resolved. Nobody can force-push to `main` or delete it. No account can bypass the ruleset, the maintainer included. |
+| Ruleset `main` | `ruleset-main.json` | A change reaches `main` only through a pull request whose **Tier 1** check passed and whose review conversations are resolved. Nobody can force-push to `main` or delete it. An account with the repository's `admin` role can merge a pull request before its checks pass, and only through a pull request ([GOVERNANCE.md](https://github.com/Kayyo321/neura/blob/main/GOVERNANCE.md#merging-before-the-checks-finish)); no account can push to `main` directly. |
 | Ruleset `release tags: creation` | `ruleset-release-tags-create.json` | Only an account with the `admin` role can create a tag that matches `v*`. |
 | Ruleset `release tags: no move or delete` | `ruleset-release-tags-protect.json` | A `v*` tag cannot be moved or deleted. No account can bypass this, so a mistaken tag stays and the correction is a new version. |
 | Actions policy | `repository.json` | Workflows can use only actions that GitHub publishes, each pinned to a full commit hash. The default workflow token is read-only and cannot approve pull requests. |
