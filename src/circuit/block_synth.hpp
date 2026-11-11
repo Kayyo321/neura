@@ -36,7 +36,7 @@ struct Operand {
     // The typed operation a Bits operand computes over its block's inputs,
     // when the converter could state it (src/lift/expression.hpp). It is
     // recorded as an optional LIFT hint and never affects the block.
-    std::shared_ptr<const lift::Expression> form;
+    std::shared_ptr<const lift::Expression> form = nullptr;
 };
 
 struct ExitSpec {

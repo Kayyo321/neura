@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <string_view>
 
 namespace neura::lift {
@@ -257,14 +258,17 @@ nvr::RawSection encode_hints(std::vector<BlockHint> hints) {
         return std::pair(a.function, a.block) < std::pair(b.function, b.block);
     });
     std::vector<std::vector<std::uint8_t>> forms;
-    std::map<std::vector<std::uint8_t>, std::uint32_t> form_index;
+    // Keyed by the form's bytes as a string: comparing byte vectors here
+    // draws a false -Wstringop-overread from GCC 14's library.
+    std::map<std::string, std::uint32_t> form_index;
     std::vector<std::uint32_t> entry_forms;
     for (std::size_t i = 0; i < hints.size(); ++i) {
         if (i > 0 && hints[i - 1].function == hints[i].function && hints[i - 1].block == hints[i].block) {
             throw std::invalid_argument("two lift hints for one block");
         }
         auto bytes = encode_form(hints[i].form);
-        const auto [it, inserted] = form_index.emplace(bytes, static_cast<std::uint32_t>(forms.size()));
+        const auto [it, inserted] = form_index.emplace(std::string(bytes.begin(), bytes.end()),
+                                                       static_cast<std::uint32_t>(forms.size()));
         if (inserted) forms.push_back(std::move(bytes));
         entry_forms.push_back(it->second);
     }

@@ -59,7 +59,10 @@ void each_node(std::vector<IrNode>& nodes, const Visit& visit) {
 }
 
 IrNode make(IrOp op, IrType type, const Span& span) {
-    IrNode node{op, std::move(type), span};
+    IrNode node;
+    node.op = op;
+    node.type = std::move(type);
+    node.span = span;
     return node;
 }
 
@@ -496,7 +499,11 @@ private:
             statement.operands.push_back(std::move(call));
             body.push_back(std::move(statement));
         } else {
-            IrSymbol local{SymbolKind::Local, "$result", span, method};
+            IrSymbol local;
+            local.kind = SymbolKind::Local;
+            local.name = "$result";
+            local.span = span;
+            local.owner = method;
             local.type = result;
             value = program_.symbols.size();
             program_.symbols.push_back(std::move(local));
