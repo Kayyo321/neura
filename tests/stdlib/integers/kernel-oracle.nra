@@ -1,0 +1,136 @@
+let error = import:Std.Core.Error;
+let int8s = import:Std.Core.Int8;
+let int16s = import:Std.Core.Int16;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let random = import:Std.Random.Random;
+let ref_int8 = import:ReferenceInt8;
+let ref_int16 = import:ReferenceInt16;
+let ref_int32 = import:ReferenceInt32;
+let ref_int64 = import:ReferenceInt64;
+let ref_uint8 = import:ReferenceUInt8;
+let ref_uint16 = import:ReferenceUInt16;
+let ref_uint32 = import:ReferenceUInt32;
+let ref_uint64 = import:ReferenceUInt64;
+let result = import:Std.Core.Result;
+let test = import:Std.Test;
+let uint8s = import:Std.Core.UInt8;
+let uint16s = import:Std.Core.UInt16;
+let uint32s = import:Std.Core.UInt32;
+let uint64s = import:Std.Core.UInt64;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). The integer
+// companions' to_string_radix and parse_radix run the neura.integer kernels;
+// the Reference* modules (support/) are the Neura code they replaced,
+// unchanged. Both must give the same text, the same value, and the same
+// error (kind, offset, and message) for a fixed edge corpus and for seeded
+// random values and texts, in every radix from 2 through 36.
+let IntegersKernelOracle = module (
+    // The kind, offset, and message of an error.
+    let show_error = func(failure: error.Error) -> string => match (failure) {
+        error.Error.Parse { kind, offset, message } =>
+            "Parse(" + kind.to_string() + ", " + offset.to_string() + ", " + message + ")",
+        _ => "other: " + error.message(failure),
+    };
+
+    let show = func<T>(value: result.Result<T>) -> string => match (value) {
+        result.Result.Ok(v) => "Ok(" + v.to_string() + ")",
+        result.Result.Err(failure) => "Err(" + show_error(failure) + ")",
+    };
+
+    // Every type's parse_radix agrees with its reference on the text.
+    let agree_parse = func(text: string, radix: int) {
+        test.assert_equal_string(show<int8>(ref_int8.parse_radix(text, radix)),
+            show<int8>(int8s.parse_radix(text, radix)));
+        test.assert_equal_string(show<int16>(ref_int16.parse_radix(text, radix)),
+            show<int16>(int16s.parse_radix(text, radix)));
+        test.assert_equal_string(show<int32>(ref_int32.parse_radix(text, radix)),
+            show<int32>(int32s.parse_radix(text, radix)));
+        test.assert_equal_string(show<int64>(ref_int64.parse_radix(text, radix)),
+            show<int64>(int64s.parse_radix(text, radix)));
+        test.assert_equal_string(show<uint8>(ref_uint8.parse_radix(text, radix)),
+            show<uint8>(uint8s.parse_radix(text, radix)));
+        test.assert_equal_string(show<uint16>(ref_uint16.parse_radix(text, radix)),
+            show<uint16>(uint16s.parse_radix(text, radix)));
+        test.assert_equal_string(show<uint32>(ref_uint32.parse_radix(text, radix)),
+            show<uint32>(uint32s.parse_radix(text, radix)));
+        test.assert_equal_string(show<uint64>(ref_uint64.parse_radix(text, radix)),
+            show<uint64>(uint64s.parse_radix(text, radix)));
+    };
+
+    // The 64-bit pattern formats the same in every type it fits, and its
+    // text parses the same back.
+    let agree_value = func(bits: uint64, radix: int) {
+        let signed = uint64s.to_signed(bits);
+        let texts: string[list][list] = [
+            [ref_uint64.to_string_radix(bits, radix), uint64s.to_string_radix(bits, radix)],
+            [ref_int64.to_string_radix(signed, radix), int64s.to_string_radix(signed, radix)],
+            [ref_uint32.to_string_radix((bits & 4294967295) as uint32, radix),
+                uint32s.to_string_radix((bits & 4294967295) as uint32, radix)],
+            [ref_uint16.to_string_radix((bits & 65535) as uint16, radix),
+                uint16s.to_string_radix((bits & 65535) as uint16, radix)],
+            [ref_uint8.to_string_radix((bits & 255) as uint8, radix), uint8s.to_string_radix((bits & 255) as uint8, radix)]
+        ];
+        if (signed >= -2147483648 && signed <= 2147483647) {
+            texts.append([ref_int32.to_string_radix(signed as int32, radix), int32s.to_string_radix(signed as int32, radix)]);
+        }
+        if (signed >= -32768 && signed <= 32767) {
+            texts.append([ref_int16.to_string_radix(signed as int16, radix), int16s.to_string_radix(signed as int16, radix)]);
+        }
+        if (signed >= -128 && signed <= 127) {
+            texts.append([ref_int8.to_string_radix(signed as int8, radix), int8s.to_string_radix(signed as int8, radix)]);
+        }
+        for (let pair in texts) {
+            test.assert_equal_string(pair[0], pair[1]);
+        }
+        // The unsigned text, with each sign, reaches every type's range check.
+        agree_parse(texts[0][1], radix);
+        agree_parse("+" + texts[0][1], radix);
+        agree_parse("-" + texts[0][1], radix);
+    };
+
+    // The radixes of the edge corpus: the smallest, the powers of two, ten,
+    // and the largest.
+    let radixes = [2, 3, 8, 10, 16, 32, 35, 36];
+
+    // Values at every type's bounds and one past them, in every radix, and
+    // malformed texts.
+    export let test_edge_corpus = func {
+        let values: uint64[list] = [0, 1, 2, 9, 10, 35, 36, 126, 127, 128, 129, 254, 255, 256, 32766, 32767, 32768,
+            32769, 65534, 65535, 65536, 2147483646, 2147483647, 2147483648, 2147483649, 4294967294, 4294967295,
+            4294967296, 9223372036854775806, 9223372036854775807, 9223372036854775808, 9223372036854775809,
+            18446744073709551488, 18446744073709551615, 18446744073709551614];
+        for (let radix in radixes) {
+            for (let bits in values) {
+                agree_value(bits, radix);
+            }
+        }
+        let texts = ["", "+", "-", "++1", "--1", "+-1", "0", "-0", "+0", "00000000000000000000000000000000000001",
+            "1a", "1A", "z", "Z", "zz", "ZZ", "1 ", " 1", "1_000", "0x10", "é", "1é", "99999999999999999999999",
+            "-99999999999999999999999", "18446744073709551616", "-9223372036854775809", "9223372036854775808",
+            "-9223372036854775808", "1.0", ":", "/", "@", "["];
+        for (let radix in [2, 10, 11, 16, 35, 36]) {
+            for (let text in texts) {
+                agree_parse(text, radix);
+            }
+        }
+    };
+
+    // Seeded random patterns and digit strings.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        let digits = "0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ+-_";
+        for (let round = 0; round < 60; round++) {
+            let radix = 2 + source.next_int_below(35);
+            let bits = source.next_uint64() >> (source.next_int_below(64) as uint64);
+            agree_value(bits, radix);
+            let text = "";
+            let length = source.next_int_below(24);
+            for (let i = 0; i < length; i++) {
+                let at = source.next_int_below(digits.byte_length);
+                text = text + digits.slice(at, at + 1);
+            }
+            agree_parse(text, radix);
+        }
+    };
+);

@@ -1,4 +1,6 @@
+let integer_kernels = import:Std.Internal.Kernels.IntegerText;
 let integer_text = import:Std.Core.Internal.IntegerText;
+let kernel_status = import:Std.Core.Internal.KernelStatus;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
@@ -309,24 +311,10 @@ export let UInt64 = module (
     /// @brief Decimal, with `-` for negative values (section 5.2).
     export let to_string = func(v: uint64) -> string => v.to_string();
 
-    /// @brief Lowercase digits. A radix outside 2 through 36 traps.
-    export let to_string_radix = func(v: uint64, radix: int) -> string {
-        integer_text.check_radix(radix);
-        if (radix == 10) {
-            return v.to_string();
-        }
-        let base = radix as uint64;
-        let rest = v;
-        let digits: uint8[list] = [];
-        do {
-            digits.append(integer_text.digit_byte((rest % base) as int));
-            rest /= base;
-            if (rest == 0) {
-                break;
-            }
-        }
-        return integer_text.digits_text(digits, false);
-    };
+    /// @brief Lowercase digits. A radix outside 2 through 36 traps. The neura.integer.format_u64 kernel
+    /// writes the digits.
+    export let to_string_radix = func(v: uint64, radix: int) -> string =>
+        integer_kernels.format_u64(v as uint64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
@@ -342,28 +330,12 @@ export let UInt64 = module (
     /// Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending
     /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. A `-` is accepted only
     /// for zero. A radix outside 2 through 36 traps.
+    ///
+    /// The neura.integer.parse_u64 kernel parses the text.
     export let parse_radix = func(text: string, radix: int) -> Result<uint64> {
-        integer_text.check_radix(radix);
-        match (integer_text.syntax_error(text, radix)) {
-            Optional.Some(failure) => {
-                return Result<uint64>.Err(failure);
-            },
-            Optional.None => {},
-        }
-        let start = integer_text.sign_length(text);
-        let negative = start == 1 && text.byte_at(0) == 45;
-        let base = radix as uint64;
-        let value: uint64 = 0;
-        let length = text.byte_length;
-        for (let i = start; i < length; i++) {
-            let digit = integer_text.digit_value(text.byte_at(i)) as uint64;
-            if (value > (Max - digit) / base) {
-                return Result<uint64>.Err(integer_text.out_of_range("uint64"));
-            }
-            value = value * base + digit;
-        }
-        if (negative && value != 0) {
-            return Result<uint64>.Err(integer_text.out_of_range("uint64"));
+        let [status, offset, value] = integer_kernels.parse_u64(text, radix as int64);
+        if (status != kernel_status.Ok) {
+            return Result<uint64>.Err(kernel_status.parse_error(status, offset, "uint64"));
         }
         return Result<uint64>.Ok(value);
     };

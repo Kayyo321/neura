@@ -1,0 +1,48 @@
+let.promote _ = import:Std.Core.Error;
+
+/// @brief Turns the status of a kernel's outcome tuple ([status, error offset, value]; docs/runtime/Kernels.md)
+/// into the Error that the Neura code the kernel replaced returned, with the same variant, kind, offset, and
+/// message (neura_kernel_status_message).
+///
+/// A status this module does not know traps with "invalid state: unknown kernel status": every kernel that the
+/// library binds returns only the statuses listed here.
+export let KernelStatus = module (
+    /// @brief The status of a kernel that succeeded.
+    export const Ok: uint32 = 0;
+
+    /// @brief The Encoding error of a NEURA_ERR_* encoding status (16 through 24) at the offset.
+    #NoDiscard
+    export let encoding_error = func(status: uint32, offset: int64) -> Error =>
+        Error.Encoding { offset: offset as int, message: encoding_message(status) };
+
+    /// @brief The Parse error of a NEURA_ERR_PARSE_* status (32 through 35) at the offset. An out-of-range value
+    /// names `type_name`, as "value out of range for int32".
+    #NoDiscard
+    export let parse_error = func(status: uint32, offset: int64, type_name: string) -> Error {
+        const [kind, message]: [ParseErrorKind, string] = parse_kind_and_message(status, type_name);
+        return Error.Parse { kind: kind, offset: offset as int, message: message };
+    };
+
+    /// @brief The message of an encoding status.
+    let encoding_message = func(status: uint32) -> string {
+        if (status == 16) { return "invalid start byte"; }
+        if (status == 17) { return "invalid continuation byte"; }
+        if (status == 18) { return "unexpected end of data"; }
+        if (status == 19) { return "invalid character"; }
+        if (status == 20) { return "invalid padding"; }
+        if (status == 21) { return "unexpected padding"; }
+        if (status == 22) { return "nonzero trailing bits"; }
+        if (status == 23) { return "invalid hex digit"; }
+        if (status == 24) { return "odd number of hex digits"; }
+        trap_with_message("invalid state: unknown kernel status");
+    };
+
+    /// @brief The kind and message of a parse status.
+    let parse_kind_and_message = func(status: uint32, type_name: string) -> [ParseErrorKind, string] {
+        if (status == 32) { return [ParseErrorKind.Empty, "empty input"]; }
+        if (status == 33) { return [ParseErrorKind.UnexpectedEnd, "expected a digit"]; }
+        if (status == 34) { return [ParseErrorKind.InvalidCharacter, "invalid character"]; }
+        if (status == 35) { return [ParseErrorKind.OutOfRange, "value out of range for " + type_name]; }
+        trap_with_message("invalid state: unknown kernel status");
+    };
+);

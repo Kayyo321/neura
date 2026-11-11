@@ -1,4 +1,6 @@
+let integer_kernels = import:Std.Internal.Kernels.IntegerText;
 let integer_text = import:Std.Core.Internal.IntegerText;
+let kernel_status = import:Std.Core.Internal.KernelStatus;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
@@ -250,28 +252,10 @@ export let Int16 = module (
     /// @brief Decimal, with `-` for negative values (section 5.2).
     export let to_string = func(v: int16) -> string => v.to_string();
 
-    /// @brief Lowercase digits. The digits are produced in the negative range, so Min needs no negation. A
-    /// radix outside 2 through 36 traps.
-    export let to_string_radix = func(v: int16, radix: int) -> string {
-        integer_text.check_radix(radix);
-        if (radix == 10) {
-            return v.to_string();
-        }
-        let base = radix as int16;
-        let rest = v;
-        if (rest > 0) {
-            rest = -rest;
-        }
-        let digits: uint8[list] = [];
-        do {
-            digits.append(integer_text.digit_byte(-(rest % base) as int));
-            rest /= base;
-            if (rest == 0) {
-                break;
-            }
-        }
-        return integer_text.digits_text(digits, v < 0);
-    };
+    /// @brief Lowercase digits, with `-` for a negative value. A radix outside 2 through 36 traps. The
+    /// neura.integer.format_i64 kernel writes the digits.
+    export let to_string_radix = func(v: int16, radix: int) -> string =>
+        integer_kernels.format_i64(v as int64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
@@ -285,41 +269,20 @@ export let Int16 = module (
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
     ///
     /// Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending
-    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. The digits accumulate in
-    /// the negative range, so Min parses without overflow. A radix outside 2 through 36 traps.
+    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. A radix outside 2
+    /// through 36 traps.
+    ///
+    /// The neura.integer.parse_i64 kernel parses the text as int64, and the value is then checked
+    /// against the type's range.
     export let parse_radix = func(text: string, radix: int) -> Result<int16> {
-        integer_text.check_radix(radix);
-        match (integer_text.syntax_error(text, radix)) {
-            Optional.Some(failure) => {
-                return Result<int16>.Err(failure);
-            },
-            Optional.None => {},
+        let [status, offset, value] = integer_kernels.parse_i64(text, radix as int64);
+        if (status != kernel_status.Ok) {
+            return Result<int16>.Err(kernel_status.parse_error(status, offset, "int16"));
         }
-        let start = integer_text.sign_length(text);
-        let negative = start == 1 && text.byte_at(0) == 45;
-        let limit = -Max;
-        if (negative) {
-            limit = Min;
+        if (value < (Min as int64) || value > (Max as int64)) {
+            return Result<int16>.Err(integer_text.out_of_range("int16"));
         }
-        let base = radix as int16;
-        let multiple_limit = limit / base;
-        let value: int16 = 0;
-        let length = text.byte_length;
-        for (let i = start; i < length; i++) {
-            let digit = integer_text.digit_value(text.byte_at(i)) as int16;
-            if (value < multiple_limit) {
-                return Result<int16>.Err(integer_text.out_of_range("int16"));
-            }
-            value *= base;
-            if (value < limit + digit) {
-                return Result<int16>.Err(integer_text.out_of_range("int16"));
-            }
-            value -= digit;
-        }
-        if (negative) {
-            return Result<int16>.Ok(value);
-        }
-        return Result<int16>.Ok(-value);
+        return Result<int16>.Ok(value as int16);
     };
 
     /// @brief Whether a * b leaves the type. The int64 product of two values of at most 32 bits cannot

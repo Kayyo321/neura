@@ -1,4 +1,6 @@
+let integer_kernels = import:Std.Internal.Kernels.IntegerText;
 let integer_text = import:Std.Core.Internal.IntegerText;
+let kernel_status = import:Std.Core.Internal.KernelStatus;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
@@ -259,28 +261,10 @@ export let Int64 = module (
     /// @brief Decimal, with `-` for negative values (section 5.2).
     export let to_string = func(v: int64) -> string => v.to_string();
 
-    /// @brief Lowercase digits. The digits are produced in the negative range, so Min needs no negation. A
-    /// radix outside 2 through 36 traps.
-    export let to_string_radix = func(v: int64, radix: int) -> string {
-        integer_text.check_radix(radix);
-        if (radix == 10) {
-            return v.to_string();
-        }
-        let base = radix as int64;
-        let rest = v;
-        if (rest > 0) {
-            rest = -rest;
-        }
-        let digits: uint8[list] = [];
-        do {
-            digits.append(integer_text.digit_byte(-(rest % base) as int));
-            rest /= base;
-            if (rest == 0) {
-                break;
-            }
-        }
-        return integer_text.digits_text(digits, v < 0);
-    };
+    /// @brief Lowercase digits, with `-` for a negative value. A radix outside 2 through 36 traps. The
+    /// neura.integer.format_i64 kernel writes the digits.
+    export let to_string_radix = func(v: int64, radix: int) -> string =>
+        integer_kernels.format_i64(v as int64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
@@ -294,41 +278,16 @@ export let Int64 = module (
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
     ///
     /// Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending
-    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. The digits accumulate in
-    /// the negative range, so Min parses without overflow. A radix outside 2 through 36 traps.
+    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. A radix outside 2
+    /// through 36 traps.
+    ///
+    /// The neura.integer.parse_i64 kernel parses the text.
     export let parse_radix = func(text: string, radix: int) -> Result<int64> {
-        integer_text.check_radix(radix);
-        match (integer_text.syntax_error(text, radix)) {
-            Optional.Some(failure) => {
-                return Result<int64>.Err(failure);
-            },
-            Optional.None => {},
+        let [status, offset, value] = integer_kernels.parse_i64(text, radix as int64);
+        if (status != kernel_status.Ok) {
+            return Result<int64>.Err(kernel_status.parse_error(status, offset, "int64"));
         }
-        let start = integer_text.sign_length(text);
-        let negative = start == 1 && text.byte_at(0) == 45;
-        let limit = -Max;
-        if (negative) {
-            limit = Min;
-        }
-        let base = radix as int64;
-        let multiple_limit = limit / base;
-        let value: int64 = 0;
-        let length = text.byte_length;
-        for (let i = start; i < length; i++) {
-            let digit = integer_text.digit_value(text.byte_at(i)) as int64;
-            if (value < multiple_limit) {
-                return Result<int64>.Err(integer_text.out_of_range("int64"));
-            }
-            value *= base;
-            if (value < limit + digit) {
-                return Result<int64>.Err(integer_text.out_of_range("int64"));
-            }
-            value -= digit;
-        }
-        if (negative) {
-            return Result<int64>.Ok(value);
-        }
-        return Result<int64>.Ok(-value);
+        return Result<int64>.Ok(value);
     };
 
     /// @brief Whether a * b leaves the type, decided by division before multiplying.
