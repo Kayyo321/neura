@@ -694,7 +694,9 @@ static int k_rem_pio2(double *x, double *y, int e0, int nx, int prec, const int 
     static const double zero = 0.0, one = 1.0, two24 = 1.67772160000000000000e+07,
         twon24 = 5.96046447753906250000e-08;
     int jz, jx, jv, jp, jk, carry, n, iq[20], i, j, k, m, q0, ih;
-    double z, fw, f[20], fq[20], q[20];
+    /* Every element read below is written first; the zero initializers only
+     * let a compiler that cannot follow the index arithmetic see that. */
+    double z, fw, f[20] = {0.0}, fq[20] = {0.0}, q[20] = {0.0};
     jk = init_jk[prec];
     jp = jk;
     jx = nx - 1;
