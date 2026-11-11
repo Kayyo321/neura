@@ -5,9 +5,12 @@
 #      undefined symbols is a C math function or a symbol the host's libm
 #      defines. The release binaries may depend only on libc, libm, and the
 #      loader, and the kernels must add nothing to that.
-#   2. Its other undefined symbols are only the memory functions a compiler
-#      emits for copies (memcpy, memmove, memset, memcmp), so no kernel calls
-#      a locale-dependent or otherwise stateful libc function.
+#   2. Its other undefined symbols are only what a compiler emits on its
+#      own: the memory functions for copies (memcpy, memmove, memset,
+#      memcmp), and the stack protector's failure hook and guard
+#      (__stack_chk_fail, __stack_chk_guard) where the toolchain turns the
+#      protector on by default, as Ubuntu's GCC does. So no kernel calls a
+#      locale-dependent or otherwise stateful libc function.
 #   3. The generated table and reference are up to date
 #      (python3 scripts/gen-kernels.py --check).
 #
@@ -78,6 +81,7 @@ others=""
 for symbol in $undefined; do
     case "$symbol" in
         memcpy | memmove | memset | memcmp) ;;
+        __stack_chk_fail | __stack_chk_guard) ;;
         *)
             case " $from_libm " in
                 *" $symbol "*) ;;
@@ -87,7 +91,7 @@ for symbol in $undefined; do
     esac
 done
 if [ -n "$others" ]; then
-    echo "check-kernels: the kernels call functions outside memcpy, memmove, memset, and memcmp:$others" >&2
+    echo "check-kernels: the kernels call functions outside memcpy, memmove, memset, memcmp, and the stack protector's hooks:$others" >&2
     status=1
 fi
 
@@ -97,6 +101,6 @@ fi
 
 if [ "$status" -eq 0 ]; then
     count=$(printf '%s\n' "$undefined" | grep -c . || true)
-    echo "check-kernels: no libm symbols; $count undefined symbols, all memory builtins"
+    echo "check-kernels: no libm symbols; $count undefined symbols, all memory builtins or stack protector hooks"
 fi
 exit "$status"
