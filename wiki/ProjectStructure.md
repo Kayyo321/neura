@@ -26,4 +26,4 @@ See [the complete example](https://github.com/Kayyo321/neura/blob/main/examples/
 
 ## Packages and open questions
 
-The `Acme` namespace illustrates how a project can group its own modules. It does not imply a package manifest, dependency installation, or a published package format. Package and dependency management and entry-point discovery remain open. The frontend converts PascalCase components to kebab-case and resolves them in the supplied source roots. See [Modules](Modules) for exports, imports, and module inheritance.
+The `Acme` namespace illustrates how a project can group its own modules. It does not imply a package manifest, dependency installation, or a published package format. Package and dependency management and entry-point discovery are not specified. The frontend converts PascalCase components to kebab-case and resolves them in the supplied source roots. See [Modules](Modules) for exports, imports, and module inheritance.

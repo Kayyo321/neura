@@ -1,6 +1,6 @@
 # `Std.Core.Error`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Core.Error`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/error.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Core.Error`. Its [source](https://github.com/Kayyo321
 
 - [Exported declarations for `Std.Core.Error`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -73,7 +73,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.7 Conformance summary
 
@@ -95,7 +95,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 6.1 `Optional<T>`
 
-**Recommendation: a generic payload enum with the variants `None` and `Some(T)`, read with `match`.** The first plan's class (a `present` flag and a late field) is dropped. The enum cannot be read without handling both cases, has no trapping accessor to misuse, and needs no late field.
+**`Optional<T>` is a generic payload enum with the variants `None` and `Some(T)`, read with `match`.** The enum cannot be read without handling both cases, has no trapping accessor to misuse, and needs no late field.
 
 Requires G2. The module `Optional` exports the enum and these functions; the last column says what each needs beyond G2.
 
@@ -116,7 +116,7 @@ The mapping functions are conveniences. A `match` is useful when the cases requi
 
 ### 6.2 `Result<T>`
 
-**Recommendation: a generic payload enum with the variants `Ok(T)` and `Err(Error)`.** It is the one representation of a fallible outcome. An operation with no value returns `Result<Unit>`. The error type is fixed to `Error` so that every fallible function composes with every other.
+**`Result<T>` is a generic payload enum with the variants `Ok(T)` and `Err(Error)`.** It is the one representation of a fallible outcome. An operation with no value returns `Result<Unit>`. The error type is fixed to `Error` so that every fallible function composes with every other.
 
 Requires G2. The module `Result` exports the enum and:
 
@@ -135,7 +135,7 @@ There is no accessor for the error alone: `match` reads it.
 
 ### 6.3 `Error`
 
-**Decision: `Error` is a payload enum.** Errors are ordinary values read with `match`. A custom error can hold an `ErrorDetail` reference, which is required to be non-nil.
+**`Error` is a payload enum.** Errors are ordinary values read with `match`. A custom error can hold an `ErrorDetail` reference, which is required to be non-nil.
 
 | Variant | Fields | Meaning |
 | --- | --- | --- |
@@ -147,7 +147,7 @@ There is no accessor for the error alone: `match` reads it.
 
 - `IoErrorKind` is a fieldless enum, in order: `NotFound`, `PermissionDenied`, `AlreadyExists`, `InvalidInput`, `Interrupted`, `UnexpectedEnd`, `NotADirectory`, `IsADirectory`, `DirectoryNotEmpty`, `ConnectionRefused`, `ConnectionReset`, `TimedOut`, `Unsupported`, `CapabilityDenied`, `Closed`, `InvalidData`, `Other`, `Cancelled`. The first fourteen map from host error codes 1 through 14, and `Cancelled` from code 15, the answer of a cancelled version 2 request (Concurrency, section 10.4); it comes last so that the kinds before it keep their order. `Closed` and `InvalidData` are produced by the library.
 - `ParseErrorKind`, in order: `Empty`, `InvalidCharacter`, `OutOfRange`, `UnexpectedEnd`, `Syntax`.
-- **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works today. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
+- **`ErrorDetail`** is an abstract class with two requirements, `code() → string` (a stable identifier such as `billing.card_declined`) and `message() → string`. User code defines its own error types by deriving from it; dynamic dispatch on a non-generic class works. It is the library's one class meant to be a base. `SimpleDetail` is the concrete subclass that stores both strings.
 - Adding a variant to `Error` breaks every `match` without a wildcard arm, so the variant list changes only with a major version. Code that only reports errors should end its `match` with a wildcard arm that calls `Errors.message`.
 - Errors are immutable. A cause is set at construction, so chains are finite and acyclic.
 - **`PortableError`** is the transferable copy of an `Error`, for a failure that must cross a channel or a spawn. `Error` itself is not transferable, because `Custom` holds an `ErrorDetail` object ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#51-transferable-types)). `PortableError` has the same variants and fields with one change: `Custom` is `Custom { code: string, message: string }`, and the cause of its `Context` is a `PortableError`.
@@ -169,29 +169,29 @@ The module `Error` exports the enum, the two kind enums, `ErrorDetail`, `SimpleD
 
 ### 11.3 `Std.Program`
 
-This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retiring-sysio-and-test)). It needs P3.
+This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retired-built-ins)). It needs P3.
 
-- **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, exactly as programs inherit `SysIo.Entry` today. Program arguments arrive only through this parameter.
-- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. The first plan kept the old one-variant enum; a payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
+- **`Entry`** is a module with one requirement, `main(args: string[]) → ExitCode`. A program's entry module inherits it and overrides `main`, as every program does. Program arguments arrive only through this parameter.
+- **`ExitCode`** is a payload enum: `Ok`, `Failure`, `Status(int)`, and the named statuses `SeriousFailure` (2), `CommandNotFound` (127), `IllegalInstruction` (132), `Breakpoint` (133), `Abort` (134), `ArithmeticError` (136), `OutOfMemory` (137), `BusError` (138), `SegmentationFault` (139), `CpuTimeExceeded` (152), and `FileSizeExceeded` (153). `Ok`, `Failure`, and `Status` map to 0, 1, and the given value. A `Status` outside 0 through 255 traps with `invalid argument: exit status`. A payload enum lets a program return any status without a host call. Neura enums cannot carry explicit integer values, so the compiler and `status_of(code) → int` hold the table; the named variants follow declaration order after `Status`, so the original three keep their ordinals.
 - **`status_of(code: ExitCode) → int`** returns the status a variant stands for, trapping for an invalid `Status`.
 - **`Environment.get(name: string) → Lookup`**, where `Lookup` is a payload enum: `Found(string)`, `Missing`, and `Failed(Error)`. A purpose-built enum reads better here than a `Result` of an `Optional`. Needs P2.
 - **`Process.exit(status: int)`** ends the run with that status through `neura.process.exit` and does not return. A status outside 0 through 255 traps. The overload `Process.exit(code: ExitCode)` exits with `status_of(code)`. Needs P2. Returning from `main` is preferred; `exit` is for leaving from deep inside a program.
 
 ### 14.1 `Std.Log`
 
-`Logger` can be written today: its sink is a concrete function value and its text is built by concatenation.
+`Logger`: its sink is a concrete function value and its text is built by concatenation.
 
 - `LogLevel` is a fieldless enum, in order: `Trace`, `Debug`, `Info`, `Warn`, `Error`, `Off`. Levels compare by ordinal.
 - **The sink is a function value** of type `(string) → void`, called once per accepted record with the finished line, without a line terminator. `Console.print_line` is a sink. A closure that appends to a captured list is a sink for tests; because a captured list is shared, the test reads the list afterwards. A sink that can fail handles its own failure, typically by counting it in a captured `Cell`.
 - Module functions `create(name: string, sink, level: LogLevel)` and `create_timed(name, sink, level, clock: Clock)`.
 - Each record is one line: with a clock, the instant's text and a space; then the level in uppercase, a space, the name, `: `, and the message. If the clock fails, the timestamp is `-`.
-- **Decision:** without a clock there is no timestamp, so log output is deterministic by default.
+- Without a clock there is no timestamp, so log output is deterministic by default.
 - Members: `trace`, `debug`, `info`, `warn`, `error` (each taking a message), `log(level, message)`, `log_lazy(level, make: () → string)` (the function runs only when the level is enabled), `is_enabled(level)`, and `set_level(level)`.
-- **Decision:** there is no global logger registry. A logger is passed to the code that uses it.
+- There is no global logger registry. A logger is passed to the code that uses it.
 
 ### 14.2 `Std.Test`
 
-This module replaces the built-in `Test` as described in [section 4.6](Stdlib-Design#46-retiring-sysio-and-test). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
+This module replaces the built-in `Test` as described in [section 4.6](Stdlib-Design#46-retired-built-ins). An assertion builds its message in Neura and calls `Failure.trap`. The runner reports the message from the trapping test.
 
 | Member | Failure message | Needs |
 | --- | --- | --- |
@@ -206,7 +206,7 @@ This module replaces the built-in `Test` as described in [section 4.6](Stdlib-De
 
 - The typed assertions remain available for callers that prefer a concrete signature.
 - **There is no assertion that expects a trap.** A trap cannot be caught, so a test function cannot observe one and continue. Code that must trap is tested by a separate program with an expected diagnostic ([section 17](Stdlib-Design#17-verification)).
-- A failed assertion ends its test, as today. Tests are discovered and run as [Testing](https://github.com/Kayyo321/neura/wiki/Testing) describes; only the import changes.
+- A failed assertion ends its test. Tests are discovered and run as [Testing](https://github.com/Kayyo321/neura/wiki/Testing) describes; only the import changes.
 
 ### 18.1 Language and layout
 

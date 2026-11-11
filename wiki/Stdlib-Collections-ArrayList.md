@@ -1,6 +1,6 @@
 # `Std.Collections.ArrayList`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Collections.ArrayList`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Collections.ArrayList`. Its [source](https://github.c
 
 - [Exported declarations for `Std.Collections.ArrayList`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -107,7 +107,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.1 Failure model
 
@@ -132,11 +132,11 @@ Library trap conditions and their messages. The message text is part of the cont
 | An assertion failed | The assertion's message | `Std.Test` |
 | A host write that has no error result failed | `console write failed` | `Console.print_line` |
 
-**Decision: the library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
+**The library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
 
-**What the absence of unwinding changes.** The first plan assumed panics that unwind, deferred actions, and recovery. None exists, and this plan asks for none.
+**What the absence of unwinding means.** The language has no panics that unwind, no deferred actions, and no recovery, and the library has none.
 
-| First plan's promise | Now |
+| Not provided | Instead |
 | --- | --- |
 | `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](Stdlib-Design#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
@@ -150,22 +150,22 @@ The loop form depends on the source value.
 
 | Way | Available | Notes |
 | --- | --- | --- |
-| For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Today | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
-| An index loop over `size()` and `get(index)` | Today | For lists and deques. No modification check. |
-| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Today, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
-| For-each directly over the collection | Today | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
+| For-each over the built-in list from `ArrayList.items()`, or from any collection's `to_list()` | Yes | The built-in loop compares the list's structural version before each advance and traps with reason 5 on a change. `items()` is live; `to_list()` is a copy. |
+| An index loop over `size()` and `get(index)` | Yes | For lists and deques. No modification check. |
+| The collection's iterator object: `iterator()` returns a class with `has_next() → bool` and `next() → T` | Yes, as one concrete iterator class per collection | `has_next` has no effect and can be repeated. `next` returns the next element and advances, and traps with `no such element` at the end. An iterator is used once. |
+| For-each directly over the collection | Yes | Lowers to the iterator protocol when the source implements `Iterable<T>`. Every public collection, `Sequence`, and `IntRange` implement it; `tests/stdlib/for-each` loops over each one. |
 
-- **Decision: iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
-- **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is the contract the first plan's `Entry` class existed to state.
-- **Decision: no removal through iterators.** Collections remove in bulk with `remove_if` and `retain_if`.
-- **Decision: fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
+- **Iteration does not allocate per element.** `has_next` and `next` stay two calls. A single `next` returning `Optional<T>` would read well with `match`, but it would allocate an enum value for every element.
+- **Map iteration yields tuples.** A map's iterator returns `[K, V]`. The tuple is an immutable snapshot of the entry, which is an immutable snapshot of one association.
+- **No removal through iterators.** Collections remove in bulk with `remove_if` and `retain_if`.
+- **Fail-fast iterator objects.** A wrapper over a single built-in list uses that list's `uint64` structural version. Other mutable collections use a `uint64` modification count and increment it after each structural change. An iterator records its version when created. `has_next` and `next` compare first and trap on a difference. Replacing an element by index or replacing the value for an existing key is not structural.
 - The iteration order of every collection is specified in section 9.
 - `Iterator<T>` and `Iterable<T>` are the interfaces for this protocol. Concrete iterator classes and collections implement these member signatures.
 
 ### 5.6 Callbacks
 
 - A callback parameter is written as a native function type. The library declares no named function shapes: a type overlay can be neither generic nor a function type, and the native spelling says everything a name would.
-- **Concrete callbacks work today.** `Logger` takes a sink of type `(string) → void`, and any module can use function values whose types name no type parameter.
+- **Concrete callbacks.** `Logger` takes a sink of type `(string) → void`, and any module can use function values whose types name no type parameter.
 - **Generic callbacks specialize with their caller.** A member of `ArrayList<T>` can take `(T) → bool`. The G1 label in API tables identifies members that depend on this compiler facility.
 - **Capture is by value.** A closure copies the locals it uses when it is created. A closure cannot count or accumulate in a captured local. It captures an object and mutates that. `Std.Core` provides `Cell<T>` ([section 6.5](Stdlib-Design#65-small-types)) for the purpose: a callback that sums captures a `Cell<int64>`.
 - **Capture of a reference is shared.** A closure that captures a collection sees later changes to it, and changes it makes are visible outside. A callback passed to a collection's own member must not structurally modify that collection; the member compares the modification count after each call and traps on a change.
@@ -191,23 +191,19 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 6.5 Small types
 
-| Type | Definition | Status |
+| Type | Definition | Available |
 | --- | --- | --- |
-| `Unit` | A fieldless enum with the single variant `Value`. | Today |
-| `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Today |
-| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Today |
+| `Unit` | A fieldless enum with the single variant `Value`. | Yes |
+| `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
+| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
 
-Removed from the first plan:
-
-- **`Pair<A, B>`** is the native tuple `[A, B]`. `partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`.
-- **`Entry<K, V>`** is the tuple `[K, V]`. Its contract was "an immutable snapshot of one association", which a tuple already is. Its text (`key: value`) is produced by the map's `to_string`.
-- **`Boxed<T>`** existed to pass non-class values as `Object`. No API on this page takes an `Object`.
+`Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 
 Named types are kept where the name carries a contract a tuple cannot: `RegexMatch` (group lookup by name), `FileMetadata` (three fields of unrelated types that will grow), and the value classes of `Std.Time`.
 
 ### 8.1 `Strings`
 
-All of `Strings` needs T1. String operations are functions that take the string first. **Decision:** all positions are byte offsets into the UTF-8 encoding, of type `int`. No member is named `length`: `byte_length` and `scalar_count` say which unit they count. An offset that is out of range, or not on a character boundary where one is required, traps.
+All of `Strings` needs T1. String operations are functions that take the string first. All positions are byte offsets into the UTF-8 encoding, of type `int`. No member is named `length`: `byte_length` and `scalar_count` say which unit they count. An offset that is out of range, or not on a character boundary where one is required, traps.
 
 | Member | Behavior |
 | --- | --- |
@@ -246,13 +242,13 @@ Functions that return several strings return a built-in list, not an `ArrayList`
 
 **UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
 
-**Unicode scope. Decision:** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 9.1 Contracts
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](Stdlib-Design#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](Stdlib-Design#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -326,7 +322,7 @@ All of this needs G3.
 
 ### 9.3 `ArrayList<T>`
 
-**Decision:** `ArrayList` is a thin class over one built-in list. Each built-in list operation is a single NVM storage operation; a library-managed backing array would spend graph evaluations on capacity checks for every append and would need runtime-length arrays, which do not exist.
+`ArrayList` is a thin class over one built-in list. Each built-in list operation is a single NVM storage operation; a library-managed backing array would spend graph evaluations on capacity checks for every append and would need runtime-length arrays, which do not exist.
 
 - **Layout.** One built-in list `storage`. Its `version` is the modification counter.
 - **Module functions.** `create<T>()`, `of<T>(items: T[list])` (copies), `filled<T>(count, value)`, and `wrap<T>(items: T[list])` (adopts the list without copying).
@@ -337,12 +333,12 @@ All of this needs G3.
 | --- | --- | --- |
 | `get`, `set`, `size`, `add`, `remove_last` | One storage operation | Built-in index, length, `append`, and `remove_at` of the last index. |
 | `remove_at` | One storage operation | Built-in `remove_at`. |
-| `add_at` | One operation per element after the index | At the end, append the new value directly. Otherwise append the last element again, shift the suffix right by one with indexed writes, and store the new value. A2 would make this one operation. |
-| `truncate`, `clear` | One operation per removed element | Repeatedly remove the last index from the same backing list. A2 would shorten this to one in-place operation. |
+| `add_at` | One operation per element after the index | At the end, append the new value directly. Otherwise append the last element again, shift the suffix right by one with indexed writes, and store the new value.  |
+| `truncate`, `clear` | One operation per removed element | Repeatedly remove the last index from the same backing list.  |
 | `remove_if` | Linear | Check the version after each callback, compact the kept elements by indexed writes, then remove the tail from the end. The backing version advances on each actual removal. |
 | `reverse`, `fill`, `slice`, `to_list` | Linear | Element reads and writes. |
 
-No removal leaves a stale reference: the built-in list drops the slot, and the probes showed the removed element is reclaimed.
+No removal leaves a stale reference: the built-in list drops the slot, and the removed element is reclaimed.
 
 ### 9.5 `LinkedList<T>`
 
@@ -370,13 +366,13 @@ It makes at most about `n log2 n` comparator calls. `ArrayList.sort` calls it on
 
 **`binary_search<T>(items: T[list], value: T, c) → int`** requires `items` sorted by `c`. It finds the lowest index whose element is not `Less` than `value`. If that element compares `Equal`, it returns the index, the first of any equal run. Otherwise it returns `-(insertion point) - 1`.
 
-The module **`Lists`** has helpers for built-in lists that need no callback and work today: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
+The module **`Lists`** has helpers for built-in lists that need no callback: `copy<T>(items)`, `concat<T>(a, b)`, `reverse<T>(items)`, `swap<T>(items, i, j)`, `fill<T>(items, value)`, `insert_at<T>(items, index, value)`, `truncate<T>(items, length)`, `clear<T>(items)`, `filled<T>(count, value)`, and `from_array<T>(items: T[])`. There is no conversion from a list to an array, because an array's length must come from a literal.
 
 ### 9.12 `Sequence<T>`
 
 A class for lazy pipelines, the counterpart of Java's streams. Needs G1; the members that return `Optional` also need G2.
 
-**Redesign.** The first plan wrapped an `Iterator<T>` interface and gave each operation an adapter class implementing it. A sequence is now two native function values, and each operation is a closure over the previous two.
+A sequence is two native function values, and each operation is a closure over the previous two.
 
 - **Layout.** `has_next: () → bool`, `next: () → T`, and a `bool` `consumed`.
 - **Why closures fit.** An adapter's state is exactly what a closure captures. `map` captures the upstream pair and the mapping function and needs no state of its own. Operations that do keep state (`take`'s remaining count, `filter`'s buffered element, `enumerate`'s index) hold it in a captured `Cell`, because captured locals are copies ([section 5.6](Stdlib-Design#56-callbacks)).
@@ -414,7 +410,7 @@ The module also has functions for sequences of one element type, which a member 
 - **Self-containment.** Text prints `(this collection)` where a collection's own text reaches it again, directly or through other collections. Each collection keeps the flag for this in the instance, so text conversion reads no module state and is task-safe ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#52-task-safe-calls)).
 - **LinkedList.** `sort` and `binary_search` work on a copy; `sort` and `reverse` move values between existing nodes, which is not a structural change; `clear` unlinks every node. Positional access outside the list traps with `invalid argument: index out of range`.
 - **ArrayList.add_all** reads the argument up to its starting length, so `add_all(items())` doubles the list instead of trapping.
-- **Equality direction.** Search members call `value.equals(element)` with the probe as the receiver.
+- **Equality direction.** Search members call `value.equals(element)` with the searched value as the receiver.
 - **OrdinalMap.** A key outside 0 through n - 1 is the language's bounds trap, also in `contains_key`; `equals` is false when the other map holds a key beyond this map's size; `compute` returns the callback's result.
 - **Trap details.** `negative size`, `size above current size`, `range`, `negative count`, `index out of range`, and `negative element` after `invalid argument: `; `invalid state: ` for a failed `validate()`.
 
@@ -428,7 +424,7 @@ The module also has functions for sequences of one element type, which a member 
 - **Sequence choices.** `range(from, to)` on a sorted collection is empty when `to` is not above `from`. `windowed` emits only full windows. `zip` and `chain` mark the other sequence used. `from_list` fails fast on a structural change to its list. `sum_float64` starts from the first element, so `[-0.0]` sums to `-0.0`, and an empty sequence sums to `0.0`. Maps and sets have no `sequence()` member; `ArrayList` and `LinkedList` build theirs with `from_iterator`.
 - **Trap details.** `duplicate key`, `negative count`, `chunk size`, and `window size` after `invalid argument: `; `invalid state: hash table …` and `invalid state: tree …` for a failed `validate()`.
 
-### 18.11 Verification as built
+### 18.11 Test layout
 
 - **Layout.** Each area of `tests/stdlib` holds test files, `support/` modules, `traps/` programs with `// status:` and `// stderr:` headers, and `programs/` with expected output (`tests/stdlib/area.cmake`). Every area runs against a fresh installation (`stdlib-install`), its tests optimized twice and unoptimized, its programs and traps in both modes, and its program images through `disassemble`, `assemble`, and `decompile`.
 - **Reference evaluator.** `backend-reference` runs every library test function under the NeuraIR reference evaluator and NVM and compares the outcome, the console output, and any trap message. Tests that need host responses (files, sockets, console input) or exceed the evaluator's budget are counted and not compared.

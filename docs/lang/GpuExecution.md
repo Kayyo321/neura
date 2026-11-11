@@ -1,12 +1,12 @@
 # GPU execution of neuron graphs
 
-This page specifies how `neura run` and `neura test` can evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The NVM exposes graph devices and fleets to embedders. The CLI defaults to automatic placement and can also select explicit Vulkan or CPU-only execution. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts.
+This page specifies how `neura run` and `neura test` evaluate neuron graphs on a GPU, how many executions are advanced together so that a GPU has enough work to be worth using, and how an automatic mode decides, by speed alone, whether to use a GPU at all and for which graphs. The NVM exposes graph devices and fleets to embedders. The CLI defaults to automatic placement and can also select explicit Vulkan or CPU-only execution. The [NVM specification](../runtime/NVM.md) and [NVR format](../runtime/NVR.md) remain the execution contracts. The reasons for the design are in the [design notes](../design/GpuExecution.md).
 
 ## 1. How to read this specification
 
-- "Must" states a requirement on the implementation. A constant, name, message, or layout given here is fixed. An implementer who finds one unworkable stops and reports it; they do not pick a replacement.
-- Section 3 lists every decision. Section 4 gives the measurements those decisions rest on, and says which are measurements and which are estimates.
-- Source references name the files and functions of the tree this page ships with, including host callbacks (`Execution::invoke_callback`).
+- "Must" states a requirement on the implementation. A constant, name, message, or layout given here is part of the contract.
+- Section 3 summarizes the modes and points to the section that specifies each rule. Section 4 records the measurements taken on the release host; the figures are observations on that host, and the design measurements in section 4.8 are the earlier prototype observations behind the constants of section 11.
+- Source references name the files and functions of the tree this page describes, including host callbacks (`Execution::invoke_callback`).
 
 Terms:
 
@@ -21,7 +21,7 @@ Terms:
 | Placement | The choice, for each job of a round, between the device and the reference evaluator. |
 | Mode | `auto`, `always`, or `off` (section 14). |
 
-**Stages affected.** Only the runtime after the output stage: the NVM library, a new GPU library, and the CLI. The lexer, parser, NeuraIR, IR optimization, IRtoNeuronConversion, the NVR writer and loader, and the decompiler do not change. The image format, the graph profile, and every image byte stay the same.
+**Stages involved.** Only the runtime after the output stage: the NVM library, the GPU library, and the CLI. The lexer, parser, NeuraIR, IR optimization, IRtoNeuronConversion, the NVR writer and loader, and the decompiler take no part. GPU execution does not change the image format, the graph profile (profile 1: checked signed 64-bit arithmetic, ascending-source edge order, stored node order), or any image byte.
 
 ## 2. Summary
 
@@ -36,28 +36,29 @@ Dispatch has a fixed cost. A GPU can repay it by evaluating many requests togeth
 
 Whatever is chosen, a run must be indistinguishable to the program and to anyone reading its output, status, trap diagnostics, step counts, heap figures, and host traces.
 
-## 3. Decisions
+## 3. Modes and rules in brief
 
-| ID | Decision |
-| --- | --- |
-| D1 | There are three modes. `auto`, the default, lets the runtime decide by predicted speed. `always` sends every eligible graph to a GPU. `off` uses the reference evaluator only. `--no-gpu` selects `off`. |
-| D2 | A device performs graph evaluation only. Frames, slots, exits, state operations, the heap, collection, limits, host requests, and trap construction stay in `Execution::State`. |
-| D3 | No NVR, NIR, or graph profile change. Profile 1 keeps its definition: checked signed 64-bit arithmetic, ascending-source edge order, stored node order. |
-| D4 | The device API is Vulkan 1.0 compute with no extensions and no layers. The Vulkan loader is opened at run time; the build needs only Vulkan headers and `glslangValidator`. |
-| D5 | GPU arithmetic is 32-bit two's-complement integer. Exactness comes from the weight budget and the wire bound of section 6, with `wire_bound = 32767`. |
-| D6 | The kernel is the layered kernel of section 8: one work group per request, 64 invocations per work group, one barrier per layer. Its source in section 8 is normative. |
-| D7 | Placement is fixed by the mode. In `always`, every job for an eligible graph goes to the device. In `auto`, placement is exactly the procedure of section 11. In `off`, nothing does. A graph with no neurons is never sent. The implementer adds no other threshold, sampling rule, or cache. |
-| D8 | When no usable device exists, `auto` and `always` use the reference evaluator and print nothing. `--require-gpu` turns that case into an error before entry. |
-| D9 | The NVM library's default stays the reference evaluator. `nvm::Execution`, `nvm::run`, `nvm::record`, `nvm::replay`, and `nvm::Fleet` use a device only when the caller passes one. Only the CLI applies D1. |
-| D10 | Device choice is deterministic: discrete, then integrated, then virtual, then other, each in loader enumeration order. Software implementations (`VK_PHYSICAL_DEVICE_TYPE_CPU`) are used only with `--gpu-software`. |
-| D11 | The existing CTest entries run with `NEURA_GPU=off`, so their evidence continues to come from the reference evaluator, one execution at a time, and their duration does not depend on the machine. New entries cover fleets, placement, and the GPU path. |
-| D12 | macOS is outside this specification. The CMake option `NEURA_GPU=AUTO` resolves to `OFF` on Apple platforms. The Windows path is specified and unverified, as MSVC builds are today ([Backend](../Backend.md#tests-and-the-limits-of-the-evidence)). |
-| D13 | A fleet delivers host requests and results in member order: a member's host request is issued only after every lower-numbered member has finished. A fleet is therefore equivalent to running its members one after another. |
-| D14 | `neura test` and `neura run --each` run their members as a fleet in `auto` and `always`, and one at a time in `off`. A `neura run` without `--each` executes one program and never forms a fleet. |
-| D15 | In `auto`, the decision to open a device is a deterministic function of the image and of the jobs the run produces. Decisions made after that use measured time, so they can differ between runs and machines. No decision can change a result. |
-| D16 | `auto` prefers the CPU when in doubt: the device must be predicted to take at most 0.75 of the CPU's time. A rejection lasts for the rest of the process. Nothing is cached on disk and no thread is created. |
-| D17 | `neura run --each <file>` is the command-line way to give one image many inputs (section 10.11). It is defined in every mode and build, including builds without the GPU. |
-| D18 | In `auto`, an Active device is retired when 256 consecutive Active calls kept more than nine jobs on the CPU for each job they placed (section 11.10). Retirement is a rejection with the reason `the device stopped gaining` and is not a failure. The call that retires it depends on measured time, so on the machine, unlike the opening decision of D15. |
+There are three modes: `auto`, the default, `always`, and `off`. The table gives what each does; the section named in the last column specifies it.
+
+| Mode | Selected by | Graph evaluation | `neura test` and `neura run --each` | Specified in |
+| --- | --- | --- | --- | --- |
+| `auto` | the default, `--gpu=auto`, `NEURA_GPU=auto` | The runtime decides by predicted speed. It opens a device only when the workload could repay opening it, discards one that cannot beat the CPU, and sends a call's jobs to it only when that is predicted to be clearly faster. | A fleet when a device is in use, otherwise one at a time. | [11](#11-auto-mode), [14.3](#143-order-of-work) |
+| `always` | `--gpu=always`, `--require-gpu`, `NEURA_GPU=always` | Every job for an eligible graph goes to the device when one is usable, and otherwise to the reference evaluator, silently. `--require-gpu` makes an unusable device an error before entry. | A fleet when a device is in use, otherwise one at a time. | [14.1](#141-options), [14.4](#144-errors) |
+| `off` | `--gpu=off`, `--no-gpu`, `NEURA_GPU=off` | The reference evaluator only. The Vulkan loader is not opened. | One at a time. | [14.1](#141-options) |
+
+The rules that apply in every mode:
+
+- A device performs graph evaluation only. Frames, slots, exits, state operations, the heap, collection, limits, host requests, and trap construction stay in the CPU NVM (section 2). A graph with no neurons is never sent to a device (section 6.2).
+- The library default is the reference evaluator. `nvm::Execution`, `nvm::run`, `nvm::record`, `nvm::replay`, and `nvm::Fleet` use a device only when the caller passes one (section 9.2); the modes above are applied by the CLI alone.
+- A `neura run` without `--each` executes one program and never forms a fleet. `neura run --each` is defined in every mode and build, including builds without the GPU (section 10.11).
+- When the mode is `auto`, the decision to open a device is a deterministic function of the image and of the jobs the run produces (section 11.5). The decisions made after that use measured time, so they can differ between runs and machines. No decision can change a result (section 5.1).
+- `auto` prefers the CPU when in doubt: the device must be predicted to take at most 0.75 of the CPU's time (section 11.3). A rejection lasts for the rest of the process; nothing is cached on disk and no thread is created (sections 11.4 and 11.6).
+- An Active device is retired when it stops gaining (section 11.10).
+- Device choice is deterministic: discrete, then integrated, then virtual, then other, each in loader enumeration order. Software implementations are used only with `--gpu-software` (section 12.2).
+- Exactness rests on 32-bit integer arithmetic, the weight budget, and the run-time wire bound (section 6). The kernel of section 8 is normative.
+- The device API is Vulkan 1.0 compute with no extensions and no layers; the Vulkan loader is opened at run time, and the build needs only the Vulkan headers and `glslangValidator` (sections 12.1 and 13).
+- The CTest entries other than `gpu-device` and `gpu-cli` run with `NEURA_GPU=off` (section 15).
+- macOS is outside this specification: the CMake option `NEURA_GPU=AUTO` resolves to `OFF` on Apple platforms (section 13). The Windows path is specified and unverified (section 17).
 
 ## 4. Release measurements
 
@@ -71,7 +72,7 @@ The single-execution runs used every program in `tests/benchmarks`, at both size
 
 ### 4.3 Single-execution timing
 
-Each row is the median of nine paired wall-time samples after warming each mode, measured at the release commit with retirement (section 11.10) in place. The image was built once. Every auto run reported `gpu: auto, not used (no graph can gain at this batch size)`. Output and non-GPU statistics matched byte for byte. All 18 rows are within the 1.05 bound of section 19, the largest being 1.018268.
+Each row is the median of nine paired wall-time samples after warming each mode, measured with retirement (section 11.10) in place. The image was built once. Every auto run reported `gpu: auto, not used (no graph can gain at this batch size)`. Output and non-GPU statistics matched byte for byte. The harness requires each ratio to be at most 1.05 and the auto run to report that no device was used; all 18 rows satisfy both, the largest ratio being 1.018268.
 
 | Workload | CPU only (s) | Auto (s) | Auto / CPU |
 | --- | ---: | ---: | ---: |
@@ -105,7 +106,7 @@ env -u DISPLAY -u WAYLAND_DISPLAY python3 tests/benchmarks/gpu-collatz.py build-
 
 ### 4.5 Fleet timing
 
-The test area times include compilation and test execution. Each row is the median of nine paired samples, pinned to CPU 7, at the release commit.
+The test area times include compilation and test execution. Each row is the median of nine paired samples, pinned to CPU 7.
 
 | Workload | CPU only (s) | Auto (s) | Auto / CPU |
 | --- | ---: | ---: | ---: |
@@ -113,11 +114,9 @@ The test area times include compilation and test execution. Each row is the medi
 | core | 0.019437 | 0.019528 | 1.004648 |
 | integers | 1.485685 | 1.574914 | 1.060059 |
 
-All three are within the 1.10 bound of section 19. The harness reported 21 of 21 workloads within their gates. The auto runs of `array-deque` and `core` reported `gpu: auto, not used (no graph can gain at this batch size)`. The `integers` area also reported `gpu: auto, not used (the workload stayed under the opening budget)` for some of its files.
+The harness requires each of these ratios to be at most 1.10, and all three are. Together with the 18 single-execution rows, it reported that all 21 workloads were within their bounds. The auto runs of `array-deque` and `core` reported `gpu: auto, not used (no graph can gain at this batch size)`. The `integers` area also reported `gpu: auto, not used (the workload stayed under the opening budget)` for some of its files.
 
-**The Collatz gate (phase 5, bound (c)).** `neura run --each` over 65,536 Collatz argument lists is the workload that opens a device. Before retirement, an Active device declined about 97 percent of the jobs of every round while each round still paid the formation of a wide round and the placement bookkeeping, and the auto run was slower than the CPU run. Three pinned pairs measured then were 1.105760, 1.096626 (all eight cores), and 1.083100 (after the prepared-input change). The bound was **NOT MET**.
-
-With retirement (section 11.10), three pinned pairs of `python3 tests/benchmarks/gpu-collatz.py build-gpu/neura --cpu 7` measured:
+**Collatz argument lists.** `neura run --each` over 65,536 Collatz argument lists is the workload that opens a device. Most of its jobs stay on the CPU: without retirement, an Active device declines about 97 percent of the jobs of every round while each round still pays for forming a wide round and the placement bookkeeping, which made the auto run slower than the CPU run by 8 to 11 percent in three pinned pairs. Retirement (section 11.10) removes that cost. Three pinned pairs of `python3 tests/benchmarks/gpu-collatz.py build-gpu/neura --cpu 7` measured:
 
 | Run | CPU only (s) | Auto (s) | Auto / CPU |
 | --- | ---: | ---: | ---: |
@@ -125,13 +124,13 @@ With retirement (section 11.10), three pinned pairs of `python3 tests/benchmarks
 | 2 | 18.103580 | 17.987131 | 0.993568 |
 | 3 | 18.067897 | 17.728125 | 0.981195 |
 
-Every run exited with status 0, matched the independent Collatz oracle and the other mode's non-GPU statistics (`members 65536, steps 37613886, peak heap cells 223, host requests 65536`), and printed `MET` under the script's rule (ratio at most 1.0). Phase 5(c) is **MET**. The margin is small: 0.6 to 2.6 percent, which is the same order as the 0.5 percent spread of the CPU-only times across the three runs, so the result establishes that the auto run is no slower on this host, not that it is faster. The device is retired early; run 3 printed:
+Every run exited with status 0, matched the independent Collatz oracle and the other mode's non-GPU statistics (`members 65536, steps 37613886, peak heap cells 223, host requests 65536`), and printed `MET` under the script's rule (ratio at most 1.0). The margin is small: 0.6 to 2.6 percent, which is the same order as the 0.5 percent spread of the CPU-only times across the three runs, so the result establishes that the auto run is no slower on this host, not that it is faster. The device is retired early; run 3 printed:
 
 ```text
 gpu: auto, device "NVIDIA GeForce RTX 5080", eligible graphs 48 of 50, evaluated 951711, kept on cpu 602481, ineligible 0, escaped 0, failed 0, dispatches 453, correction 1.13, retired (the device stopped gaining)
 ```
 
-The counters are those at retirement. `kept on cpu` no longer includes the roughly 32 million jobs that earlier runs counted, because a retired device does no accounting.
+The counters are those at retirement: a retired device does no accounting, so jobs offered after it are not counted in `kept on cpu`.
 
 ### 4.6 Calibration and fixed model fixtures
 
@@ -146,6 +145,24 @@ The structural model-fitting test uses the fixed design probe times 9.2, 253.9, 
 ### 4.7 Correctness on devices
 
 The integer circuit suite passed on the RTX 5080 and the integrated Radeon. On both, the mixed 65,536-request call split into exactly two dispatches, 65,535 requests and one, as section 7.4 derives. The CLI suite ran on the RTX 5080, including byte-identical trace recording and replay across evaluators. The llvmpipe context passed the startup self-test.
+
+### 4.8 Design measurements
+
+The constants of section 11 were chosen from measurements with prototypes on the same host, taken on 2026-11-10 and recorded in [revision 9325d45 of this page](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements-behind-the-design). They are observations on one machine, not guarantees for other hardware. The facts the later sections rely on:
+
+- A dispatch costs almost the same for one request as for several hundred, then grows in proportion to the requests it holds. On the discrete GPU the device overtakes the CPU between about 25 and 550 requests per dispatch, depending on the graph, and ends 4 to 29 times faster per request. A single request is 22 to 309 times slower than the CPU.
+- The five-parameter model of section 11.2, fitted by the probes of section 11.6, gave these parameters (microseconds):
+
+  | Device | `a` | `b0` | `b1` | `K` | `d` |
+  | --- | --- | --- | --- | --- | --- |
+  | RTX 5080 | 9.2 | 0.343 | 0.135 | 2,123 | 0.000259 |
+  | Radeon integrated | 22.0 | 0.306 | 0.163 | 54 | 0.000326 |
+  | llvmpipe | 25.1 | 0.416 | 0.007 | 5 | 0.001895 |
+
+- The break-even batch sizes the model gives for the RTX 5080 are 549, 234, 24, 121, and 136 requests for graphs of 24, 193, 499, 3,610, and 20,735 neurons. For the integrated GPU only the 499-neuron graph has one, at 58. For llvmpipe no graph has one.
+- Compiled graphs are deep and narrow: the largest measured graph has 20,735 neurons in 4,290 layers, and a layer rarely holds more than a handful of neurons.
+- Creating the Vulkan instance, device, and pipeline and running six dispatches took 91 to 132 ms per process on the RTX 5080 and about 40 ms on the other two devices. Opening a device costs more than many whole runs, so it is not done speculatively.
+- The largest neuron value observed on random inputs to the largest graphs was 29, and the weight budget of section 6 held for every graph of the images measured (64 + 32,767 × 256 is under 2²⁴).
 
 ## 5. Contract
 
@@ -280,7 +297,7 @@ Because the ceiling bounds one request, `io_initial` and `wires_initial` never e
 
 ## 8. The kernel
 
-`src/gpu/graph_eval.comp`. This source is normative. The `coherent` qualifier on `Wires` and the `memoryBarrierBuffer(); barrier();` pairs are what the shading language specifies for making one invocation's buffer writes visible to the others in its work group. They must not be removed, although an earlier prototype variant measured `coherent` at up to 1.8 times the kernel time on one driver.
+`src/gpu/graph_eval.comp`. This source is normative. The `coherent` qualifier on `Wires` and the `memoryBarrierBuffer(); barrier();` pairs are what the shading language specifies for making one invocation's buffer writes visible to the others in its work group. They must not be removed, although a prototype measurement on one driver put the cost of `coherent` at up to 1.8 times the kernel time.
 
 ```glsl
 #version 450
@@ -424,9 +441,9 @@ A device belongs to one image object. It reads `image.graphs` once, when constru
 
 ### 9.2 Splitting a step
 
-Today `Execution::State::step` evaluates the graph into `wires_` and then `select` and `read` index `wires_[graph.outputs[i]]`. The step is split at that point so that a caller can supply the output lane values.
+A block step evaluates the graph, and then `select` and `read` consume the graph's output lanes. The step is split at that point so that a caller can supply the output lane values.
 
-`src/nvm/machine.hpp` gains a free function, the only place the reference evaluator is turned into output lanes:
+`src/nvm/machine.hpp` declares a free function, the only place the reference evaluator is turned into output lanes:
 
 ```cpp
 // Evaluates `graph` on `inputs` with the reference evaluator and stores wire
@@ -436,7 +453,7 @@ std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<c
                                             std::vector<std::int64_t>& scratch, std::span<std::int64_t> outputs);
 ```
 
-`Execution` gains:
+`Execution` provides:
 
 ```cpp
 struct GraphStep {
@@ -451,15 +468,15 @@ Event fail_step(std::size_t node);
 std::uint64_t live_heap_cells() const;
 ```
 
-- `begin_step` returns the final event again when the run has finished. It throws `std::logic_error` while a host request is pending or a step is already begun. Otherwise it starts the run if needed, applies the step limit, counts the step and the profile entry, resolves the block's inputs through `read`, writes the lanes into a member vector `inputs_`, and fills `step`. A trap in any of these is returned as the `Trapped` event and ends the run, exactly as today.
-- `finish_step` copies `outputs` into a member vector `outputs_`, then does everything `step` does today after `evaluate`: `select`, the assignment and argument reads, the parallel commit, and the exit action. It returns nothing when the run continues, and otherwise the `HostRequest`, `Completed`, or `Trapped` event.
+- `begin_step` returns the final event again when the run has finished. It throws `std::logic_error` while a host request is pending or a step is already begun. Otherwise it starts the run if needed, applies the step limit, counts the step and the profile entry, resolves the block's inputs through `read`, writes the lanes into a member vector `inputs_`, and fills `step`. A trap in any of these is returned as the `Trapped` event and ends the run.
+- `finish_step` copies `outputs` into a member vector `outputs_`, then does everything a step does after evaluation: `select`, the assignment and argument reads, the parallel commit, and the exit action. It returns nothing when the run continues, and otherwise the `HostRequest`, `Completed`, or `Trapped` event.
 - `fail_step` raises `GraphOverflow` with the detail `graph <g> node <n>` for the begun step and returns the `Trapped` event.
-- `select` and `read` change in one way: where they read `wires_[graph.outputs[i]]` they read `outputs_[i]`. Their checks and messages are unchanged.
+- `select` and `read` take the graph's output lane `i` from `outputs_[i]`, however `outputs_` was produced.
 - `live_heap_cells` returns the current value of the counter that `peak_heap_cells` is the maximum of.
 
-The private `step` becomes: `begin_step`; evaluate; `finish_step` or `fail_step`. Evaluation inside `step` is: when `limits_.graph_device` is set and the graph has at least one node, call the device with that single job and use its outputs if it comes back evaluated; otherwise `evaluate_outputs` with the execution's own scratch vector. `advance` and `invoke_callback` keep calling `step`, so callbacks and single executions behave as before.
+The private `step` is: `begin_step`; evaluate; `finish_step` or `fail_step`. Evaluation inside `step` is: when `limits_.graph_device` is set and the graph has at least one node, call the device with that single job and use its outputs if it comes back evaluated; otherwise `evaluate_outputs` with the execution's own scratch vector. `advance` and `invoke_callback` call `step`, so callbacks and single executions evaluate in the same way.
 
-`RunLimits` gains one field, after `profile`:
+`RunLimits` has the field `graph_device`:
 
 ```cpp
 // Evaluates graphs for this run, or nullptr for the reference evaluator.
@@ -469,7 +486,7 @@ GraphDevice* graph_device = nullptr;
 
 Every `Execution::State` constructor throws `std::invalid_argument("graph device was created for another image")` when `limits.graph_device` is set and `&limits.graph_device->image() != &image`.
 
-The order of faults within a step does not change: step limit, input reads, graph overflow, selector, assignments, arguments, commit, action. `nvm::run`, `nvm::record`, and `nvm::replay` already pass `RunLimits` through to `Execution` and need no change.
+The order of faults within a step is: step limit, input reads, graph overflow, selector, assignments, arguments, commit, action. `nvm::run`, `nvm::record`, and `nvm::replay` pass `RunLimits` through to `Execution`. The library default for `graph_device` is `nullptr`, the reference evaluator.
 
 ### 9.3 `ModelDevice`
 
@@ -506,7 +523,7 @@ The reference evaluator computes every declined job, so none of these changes a 
 
 ### 10.1 Purpose
 
-The [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements) show that a dispatch costs almost the same for one request as for several hundred. A single execution produces one request per step, so it can only ever fill a dispatch with one. A fleet advances many executions of one image a step at a time and hands all of that round's requests to the device in one call.
+The [design measurements](#48-design-measurements) show that a dispatch costs almost the same for one request as for several hundred. A single execution produces one request per step, so it can only ever fill a dispatch with one. A fleet advances many executions of one image a step at a time and hands all of that round's requests to the device in one call.
 
 Where the members come from:
 
@@ -516,11 +533,11 @@ Where the members come from:
 | `neura run --each` (section 10.11) | One per argument list in a file |
 | Embedders and tests of the toolchain, through `nvm::Fleet` | Any set of entry points or scalar function calls of one image, for example every input of an exhaustive sweep |
 
-A `neura run` without `--each` executes one program, so it has one execution and no fleet. Section 18 lists other consumers that this specification does not add.
+A `neura run` without `--each` executes one program, so it has one execution and no fleet. The CLI is the only consumer of fleets outside tests and embedders (section 17).
 
 ### 10.2 Entry points
 
-`neura test` currently selects a test by writing `image.entry` before each run. Members that are alive together cannot share that field, so `Execution` gains a third constructor:
+When it runs tests one at a time, `neura test` selects a test by setting `image.entry` to the test's start function before each run. Members that are alive together cannot share that field, so a fleet starts each member through an `Execution` constructor that takes the entry function (the second of the three `Execution` constructors; the third starts at a function with scalar parameters, for embedders and tests):
 
 ```cpp
 // Starts at `entry`, which must have the image entry signature (one array of
@@ -535,7 +552,7 @@ It behaves exactly like the first constructor with `image.entry` equal to `entry
 
 ### 10.3 `Fleet`
 
-New files `src/nvm/fleet.hpp` and `fleet.cpp`, library `neura_nvm`:
+`src/nvm/fleet.hpp` and `fleet.cpp`, library `neura_nvm`:
 
 ```cpp
 namespace neura::nvm {
@@ -544,6 +561,7 @@ struct FleetOptions {
     RunLimits limits;                 // applied to every member
     GraphDevice* device = nullptr;    // receives each round's jobs; nullptr for the reference evaluator
     std::uint32_t window = 4096;      // most members considered per round
+    TaskClock* clock = nullptr;       // the clock of the members' timers and deadlines; the steady clock when null
 };
 
 struct FleetEvent {
@@ -625,17 +643,19 @@ With no device and no waiting members, the fleet can group rounds. It advances t
 
 So the sequence of events `advance` returns is the concatenation, in member order, of the event sequence each member produces when run alone. Services, and anything they keep per run, see exactly the serial order of requests.
 
-What does differ: a member may execute its pure steps earlier in wall time than it would have serially. A test that reads a clock can observe that, as it can observe any change in speed today.
+What does differ: a member may execute its pure steps earlier in wall time than it would have serially. A test that reads a clock can observe that, as it can observe any change in speed.
 
 ### 10.7 Window and memory
 
-`window` bounds how many members a round considers. The default, 4,096, is above every break-even batch size in the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements). A fleet steps only the head when the width is 1.
+`window` bounds how many members a round considers. The default, 4,096, is above every break-even batch size in the [design measurements](#48-design-measurements). A fleet steps only the head when the width is 1.
 
 Several members' heaps are alive at once. The memory rule of step 4: the head may always start; any other Waiting member may start only while the sum of `live_heap_cells()` over started, unfinished members is below `limits.max_heap_cells`. Started members are never suspended for memory, and each still traps at its own `max_heap_cells`, so the fleet's total can exceed one member's limit by what started members go on to allocate. In the worst case that is `window` times the limit; an embedder that cannot afford this passes a smaller window.
 
-### 10.8 Callbacks
+### 10.8 Callbacks and tasks
 
 A host service may call back into the program while a request is in progress (`CallbackContext` in `src/nvm/host.hpp`). In a fleet this can only happen for the head, while it is Awaiting. The callback runs to completion inside the head's `Execution::invoke_callback`, one step at a time, through the private `step`. A member's `RunLimits` carry no device, so those steps use the reference evaluator. They are not part of any round.
+
+Tasks ([Concurrency](Concurrency.md)) are part of a member. An image that uses `scope` and `spawn` runs in a fleet as in any other execution: each member has its own scheduler, tasks, channels, and timers, and its task steps are steps of that member, so their graphs are offered to the device in rounds like any other. A fleet over an image with tasks needs a positive task quantum, and `Fleet` throws `std::invalid_argument("task quantum must be positive")` otherwise. The fleet drives its members' timers and deadlines from one clock (`FleetOptions::clock`, the steady clock by default). A member that waits for a timer holds the whole fleet until the deadline. `Parallel.map` items run in a state of their own with no graph device, so they use the reference evaluator whatever the mode. `neura test` runs one at a time, with no device, under `--schedules` above 1, `--virtual-time`, `--save-schedule`, or `--schedule` (section 14.3), and `neura run --each` rejects `--virtual-time`.
 
 ### 10.9 `run_fleet`
 
@@ -652,15 +672,15 @@ It loops on `fleet.advance()`. For a `HostRequest` it invokes the bound service 
 
 ### 10.10 `neura test`
 
-In `off`, `run_tests` in `src/cli/main.cpp` is unchanged. In `auto` and `always`, when a device is in use (sections 11.4 and 14.3), it:
+In `off`, `run_tests` in `src/cli/main.cpp` runs the tests one at a time: for test `i` it sets `image.entry` to the test's start function index `i`, calls `nvm::run`, then calls `host.services.end_run()` and prints the `PASS` or `FAIL` line. In `auto` and `always`, when a device is in use (sections 11.4 and 14.3), it:
 
-1. builds and loads the test image as today and leaves `image.entry` alone;
-2. creates a `Fleet` with `limits = options.limits`, the mode's device, and the default window, and adds one member per test, in test order, with `add(i, {})`, where `i` is the test's start function index, the value `run_tests` assigns to `image.entry` today;
-3. calls `run_fleet` with a `finished` callback that does, for member `i`, exactly what the body of today's loop does after `nvm::run` returns: `host.services.end_run()`, then the `PASS` or `FAIL` line for test `i` from the result.
+1. builds and loads the test image as in `off` and leaves `image.entry` alone;
+2. creates a `Fleet` with `limits = options.limits`, the mode's device, and the default window, and adds one member per test, in test order, with `add(i, {})`, where `i` is the test's start function index, the value the serial runner assigns to `image.entry`;
+3. calls `run_fleet` with a `finished` callback that does, for member `i`, what the serial runner does after `nvm::run` returns: `host.services.end_run()`, then the `PASS` or `FAIL` line for test `i` from the result.
 
 Because a test's console writes are host requests, they are issued only while that test is the head, after the previous test's line has been printed. The byte stream on standard output, the files and sockets each test sees, the summary line, and the exit status are those of the serial runner. A test that writes early simply parks until it is the head.
 
-When no device is in use, `auto` and `always` run the tests one at a time, as `off` does.
+When no device is in use, `auto` and `always` run the tests one at a time, as `off` does. So do `--schedules` above 1, `--virtual-time`, `--save-schedule`, and `--schedule` (section 14.3).
 
 ### 10.11 `neura run --each`
 
@@ -668,7 +688,7 @@ When no device is in use, `auto` and `always` run the tests one at a time, as `o
 neura run [options] --each <lists> <file.nvr> [-- common arguments...]
 ```
 
-The image runs once per argument list in the file `<lists>`. Each run is a member; a member's arguments are the common arguments after `--`, if any, followed by its list's arguments. This is the command that gives one program enough simultaneous work for a device to help: for example one image applied to every line of an input set.
+The image runs once per argument list in the file `<lists>`. The option is available in every mode and in builds without the GPU. Each run is a member; a member's arguments are the common arguments after `--`, if any, followed by its list's arguments. This is the command that gives one program enough simultaneous work for a device to help: for example one image applied to every line of an input set.
 
 **The file.** It is read as bytes, in full, before anything runs.
 
@@ -698,25 +718,25 @@ Without a line number: `<lists>: no argument lists` when the file produces no me
 | --- | --- |
 | Status 0 | Nothing |
 | Another status | `<file.nvr>: <lists>:<n>: exit status <s>` |
-| A trap | `<file.nvr>: <lists>:<n>: trap: <diagnostic>`, with the diagnostic `nvm::describe` gives today |
+| A trap | `<file.nvr>: <lists>:<n>: trap: <diagnostic>`, with the diagnostic `nvm::describe` gives |
 
 `<n>` is the member's line number in the file. The exit status of the command is the status of the first member, in file order, that did not end with status 0, where a trapped member's status is `nvm::exit_status` of its trap; it is 0 when every member ended with status 0. Every member runs whatever earlier members did.
 
 **What it is equivalent to.** By section 10.6, standard output and every host effect are those of running the members one after another in file order in one process. Compared with a shell loop of separate `neura run` commands, the differences are that the image is loaded once, the members share the process's standard input and host providers (reset between members by `end_run`), the report lines above replace each command's own trap line, and there is one exit status.
 
-**Other options.** `--stats` prints, in place of the usual `stats:` line, `stats: members <m>, steps <sum over members>, peak heap cells <largest over members>, host requests <sum over members>, <image costs>, image bytes <n>`, followed by the `gpu:` line. `--each` cannot be combined with `--record`, `--replay`, or `--profile` (`--each cannot be combined with <option>`), may be given once (`--each given more than once`), and applies only to `run` (`--each applies only to run`).
+**Other options.** `--stats` prints, in place of the usual `stats:` line, `stats: members <m>, steps <sum over members>, peak heap cells <largest over members>, host requests <sum over members>, <image costs>, image bytes <n>`, followed by the `gpu:` line. `--each` cannot be combined with `--record`, `--replay`, `--profile`, or `--virtual-time` (`--each cannot be combined with <option>`), may be given once (`--each given more than once`), and applies only to `run` (`--each applies only to run`).
 
 **What gains.** Members are batched while they compute and park when they make a host call until earlier members have finished. A program that reads its arguments, computes, and prints at the end keeps many members in the same rounds. A program that prints as it goes runs mostly one member at a time, with the same results.
 
 ### 10.12 The cost of a fleet whose jobs stay on the CPU
 
-A round whose jobs are all declined does the same work per step as a single execution, through the same `begin_step`, `evaluate_outputs`, and `finish_step`. What it adds is the job list and moving between members' state. The cost is small but not zero, and nothing relies on it being zero: the release gates of section 19 measure it, and auto mode stops forming rounds, by returning a `batch_hint` of 1, once it has rejected or retired the device (section 11.10).
+A round whose jobs are all declined does the same work per step as a single execution, through the same `begin_step`, `evaluate_outputs`, and `finish_step`. What it adds is the job list and moving between members' state. The cost is small but not zero, and nothing relies on it being zero: section 4 measures it, and auto mode stops forming rounds, by returning a `batch_hint` of 1, once it has rejected or retired the device (section 11.10).
 
 ## 11. Auto mode
 
 ### 11.1 What it decides
 
-Auto mode makes three decisions, each by predicted time only.
+Auto mode makes four decisions, each by predicted time only.
 
 | Decision | When | Deterministic |
 | --- | --- | --- |
@@ -747,8 +767,8 @@ gpu(S)   = a + max over g in S of crit(g) + sum over jobs j in S of each(g_j)
 | `margin` | 0.75 | The device is chosen only when `gpu` is at most `margin` times the CPU time of the same jobs. |
 | `open_budget` | 150,000 | Predicted saving, in microseconds, that must accumulate before a device is opened. About the cost of opening and calibrating one. |
 | `give_up_work` | 3,000,000 | Predicted CPU time, in microseconds, after which a workload that has not reached `open_budget` is rejected: it could save under 5 percent. |
-| Optimistic device | `a` 5, `b0` 0.17, `b1` 0.07, `K` 4000, `d` 0.00013 | Used before a device is opened. Half the costs measured for the RTX 5080 in the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements). |
-| Nominal CPU | `c0` 0.08, `c1` 0.0008, `c2` 0.002 | Used before a device is opened. Twice the costs fitted to the CPU column of the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements). |
+| Optimistic device | `a` 5, `b0` 0.17, `b1` 0.07, `K` 4000, `d` 0.00013 | Used before a device is opened. About half the costs measured for the RTX 5080 in the [design measurements](#48-design-measurements), and about twice its `K`. |
+| Nominal CPU | `c0` 0.08, `c1` 0.0008, `c2` 0.002 | Used before a device is opened. Twice the costs fitted to the CPU measurements of the [design measurements](#48-design-measurements). |
 | Correction | starts at 1; moves one eighth of the way per dispatch; one sample may differ from the current value by at most a factor of 2; kept within 1/16 and 64 | Section 11.9. |
 
 The optimistic device and nominal CPU are deliberately generous to the GPU. They decide only whether opening a device could possibly pay; once a device is open, its own measurements replace them.
@@ -787,7 +807,7 @@ public:
 | --- | --- | --- |
 | Gated | Declines every job and does the accounting of section 11.5. | `max_jobs` |
 | Active | Places the call's jobs (section 11.8). | `max_jobs` |
-| Rejected | Declines every job. Does no accounting. A retired device (section 11.10) is Rejected. | 1 |
+| Rejected | Declines every job. Does no accounting. A retired device (section 11.10) is Rejected. The state lasts for the rest of the process. | 1 |
 
 A job that `AutoDevice` declines by its own choice is counted in `declined_placement`. The other counters are the inner device's.
 
@@ -812,7 +832,7 @@ If no graph passes, the state is Rejected at once with the reason `no graph can 
 
 The jobs of the call that opens the device are declined like the others. Placement starts with the next call. For the same image, batch limit, and sequence of jobs, the moment a device is opened, or the workload is given up on, is the same on every machine and every run. The gate groups jobs by graph and sums CPU work in first-occurrence order. It sums gain in the critical-time and graph-index order of section 11.8. The calculation uses binary64 with the default rounding mode and explicit fused multiply-add operations so compiler contraction does not change the result.
 
-Opening is synchronous. Its cost, 40 to 130 ms in the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements) plus the calibration of section 11.6, is paid at most once, after the workload has shown that a good device could have saved about that much already.
+Opening is synchronous, and no thread is created. Its cost, 40 to 130 ms in the [design measurements](#48-design-measurements) plus the calibration of section 11.6, is paid at most once, after the workload has shown that a good device could have saved about that much already.
 
 ### 11.6 Calibration
 
@@ -845,7 +865,7 @@ c0  = max(0, t(A) − c1 − c2)
 
 Every probe job must come back evaluated with the reference outputs; if one does not, or any measurement is not finite, or `a` exceeds 10,000, the opener fails with `calibration failed`. Calibration results are not stored anywhere outside the process.
 
-From the probe times in the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements), eight calls of each of the six measurements take about 45 ms on the discrete GPU, 90 ms on the integrated GPU, and 360 ms on llvmpipe. Most of it is probe C and the two 1,024-job measurements.
+From the probe times in the [design measurements](#48-design-measurements), eight calls of each of the six measurements take about 45 ms on the discrete GPU, 90 ms on the integrated GPU, and 360 ms on llvmpipe. Most of it is probe C and the two 1,024-job measurements.
 
 ### 11.7 Verdict
 
@@ -857,7 +877,7 @@ n × (margin × cpu(g) − each(g)) > a + crit(g)
 
 and the state becomes Active. Otherwise the inner device is destroyed and the state is Rejected with `the device cannot beat the CPU`. This test is exact for the model: if any mix of at most `n` jobs were predicted to gain, then `n` copies of the mix's most profitable graph would be too.
 
-This is where a GPU that is present but too weak is dropped. In the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements), it discards llvmpipe for every measured graph, and keeps the integrated GPU only for an image that has a wide, shallow graph and a fleet of at least 58.
+This is where a GPU that is present but too weak is dropped. In the [design measurements](#48-design-measurements), it discards llvmpipe for every measured graph, and keeps the integrated GPU only for an image that has a wide, shallow graph and a fleet of at least 58.
 
 ### 11.8 Placing the jobs of a call
 
@@ -909,13 +929,13 @@ The comparison is strict: `kept = 9 × placed` does not retire and `kept = 9 × 
 
 Retirement is a rejection, not a failure: the device is not marked failed, `failure_reason()` stays empty, and `--require-gpu` is not involved because it selects `always`. The device name and counters remain available to `--stats`, which reports the state as retired (section 14.5).
 
-**Why it cannot change a result.** Placement only chooses which evaluator computes a job (D7), and every declined job is computed by the reference evaluator whose result a device must equal (section 5.1). Retiring a device declines jobs that placement would, at worst, have sent to it, so a retired device can differ from an active one in wall time and in the `gpu:` line, and in nothing else.
+**Why it cannot change a result.** Placement only chooses which evaluator computes a job (section 11.8), and every declined job is computed by the reference evaluator whose result a device must equal (section 5.1). Retiring a device declines jobs that placement would, at worst, have sent to it, so a retired device can differ from an active one in wall time and in the `gpu:` line, and in nothing else.
 
-**What it depends on.** The index of the call that retires the device is a function of the sequence of calls and of which jobs placement selects. Placement uses the calibrated models and the correction, which come from measured time, so the retirement call index depends on the machine and on the run. This differs from the opening decision of section 11.5 and D15, which is a deterministic function of the image and the jobs.
+**What it depends on.** The index of the call that retires the device is a function of the sequence of calls and of which jobs placement selects. Placement uses the calibrated models and the correction, which come from measured time, so the retirement call index depends on the machine and on the run. This differs from the opening decision of section 11.5, which is a deterministic function of the image and the jobs. (Rationale: [design notes](../design/GpuExecution.md).)
 
-### 11.11 What auto mode will choose for today's programs
+### 11.11 What auto mode chooses for the programs measured
 
-From the [design measurements at the approved revision](https://github.com/Kayyo321/neura/blob/9325d45cedddb806185f8fce196ddc4179c767c4/docs/lang/GpuExecution.md#4-measurements):
+A forced device (`--gpu=always`) pays setup and dispatch costs for every eligible graph even when the CPU would be faster; auto mode estimates those costs before opening a device and again before selecting jobs. From the [design measurements](#48-design-measurements):
 
 - **`neura run`.** No compiled graph measured passes the prospect test with `max_jobs = 1`: the best case, the 499-neuron graph, would need about 10 microseconds on the optimistic device against a nominal 2.2 on the CPU. No device is opened and the run costs what `--no-gpu` costs.
 - **`neura test` with few tests.** A fleet forms when the image has a graph that passes the prospect test at the test count: from about seven tests for an image with a wide, shallow graph like the 499-neuron one, and from about thirty for the other graphs measured. The gate then opens a device only if enough tests are at profitable graphs in the same rounds; otherwise the workload is rejected after `give_up_work` and the rest runs one test at a time.
@@ -927,7 +947,7 @@ The implementation measurements in section 4 are observed results on the release
 
 ## 12. The Vulkan device
 
-New library `neura_gpu` in `src/gpu/`, namespace `neura::gpu`, linking `neura_nvm`. It is built only when the build enables it (section 13).
+The library `neura_gpu` in `src/gpu/`, namespace `neura::gpu`, linking `neura_nvm`. It is built only when the build enables it (section 13).
 
 | File | Contents |
 | --- | --- |
@@ -962,7 +982,7 @@ public:
 Creation, in order:
 
 1. Create an instance with `apiVersion = VK_API_VERSION_1_0`, application name `neura`, no layers, no extensions. Failure: `cannot create a Vulkan instance`.
-2. Enumerate physical devices. The enumeration is bounded: it asks the loader for the count and then for the devices, repeats the pair when the loader answers `VK_INCOMPLETE` because the count grew, and gives up after 8 attempts; a count of 0 or above 1,024 devices means no usable device. A device that reports 0 or more than 1,024 queue families is not a candidate. A **candidate** has a queue family with `VK_QUEUE_COMPUTE_BIT` and at least one queue (the lowest-numbered such family is used), `maxComputeWorkGroupInvocations ≥ 64`, `maxComputeWorkGroupSize[0] ≥ 64`, `maxPerStageDescriptorStorageBuffers ≥ 3`, `maxStorageBufferRange ≥ 2²⁰`, and a device type allowed by D10. The implementation checks these limits on the device; it must not assume the specification's minimums.
+2. Enumerate physical devices. The enumeration is bounded: it asks the loader for the count and then for the devices, repeats the pair when the loader answers `VK_INCOMPLETE` because the count grew, and gives up after 8 attempts; a count of 0 or above 1,024 devices means no usable device. A device that reports 0 or more than 1,024 queue families is not a candidate. A **candidate** has a queue family with `VK_QUEUE_COMPUTE_BIT` and at least one queue (the lowest-numbered such family is used), `maxComputeWorkGroupInvocations ≥ 64`, `maxComputeWorkGroupSize[0] ≥ 64`, `maxPerStageDescriptorStorageBuffers ≥ 3`, `maxStorageBufferRange ≥ 2²⁰`, and a device type that is allowed: software implementations (`VK_PHYSICAL_DEVICE_TYPE_CPU`) are candidates only when `allow_software` is set, which the CLI does for `--gpu-software`. The implementation checks these limits on the device; it must not assume the specification's minimums.
 3. Order candidates by type rank (discrete 0, integrated 1, virtual 2, other 3, CPU 4 and only with `allow_software`), then by enumeration index. No candidate: `no usable Vulkan device`.
 4. For each candidate in order, create the logical device with one queue and with `robustBufferAccess` enabled when the device reports it; create the shader module, a descriptor set layout with three `VK_DESCRIPTOR_TYPE_STORAGE_BUFFER` bindings for the compute stage, the pipeline layout, the compute pipeline, a command pool with `VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT`, and one fence; then run the self-test of section 12.5. The first candidate that passes is the device. A candidate that fails any step is destroyed and the next is tried. If all fail, the reason is `<device name>: <failure>` for the first candidate.
 
@@ -1014,15 +1034,15 @@ The implemented self-test uses the following input patterns. The list uses all f
 
 | Library | Change |
 | --- | --- |
-| `neura_nvm` | Adds `graph_device.cpp`, `layered.cpp`, `fleet.cpp`, and `placement.cpp`. Still links only `neura_nvr` and its existing platform libraries. No Vulkan dependency. |
-| `neura_gpu` | New. Built when the GPU is enabled. Links `neura_nvm` and `${CMAKE_DL_LIBS}`. |
+| `neura_nvm` | Contains `graph_device.cpp`, `layered.cpp`, `fleet.cpp`, and `placement.cpp`. Links only `neura_nvr` and its platform libraries. No Vulkan dependency. |
+| `neura_gpu` | Built when the GPU is enabled. Links `neura_nvm` and `${CMAKE_DL_LIBS}`. |
 | `neura` | Links `neura_gpu` and is compiled with `NEURA_HAS_GPU=1` when the GPU is enabled. |
 
 `CMakeLists.txt`:
 
 - `set(NEURA_GPU "AUTO" CACHE STRING "GPU graph execution: AUTO, ON, or OFF")`. This CMake cache variable and the run-time environment variable of section 14.2 share a name and are unrelated.
-- Locate the header with `find_path(NEURA_VULKAN_INCLUDE_DIR vulkan/vulkan.h)` and the compiler with `find_program(NEURA_GLSLANG glslangValidator)`.
-- `AUTO` enables the GPU when both are found and the platform is not Apple, and otherwise disables it with a `message(STATUS ...)` naming what was missing. `ON` fails configuration with `message(FATAL_ERROR ...)` when either is missing. `OFF` disables it.
+- The header is located with `find_path(NEURA_VULKAN_INCLUDE_DIR vulkan/vulkan.h)` and the compiler with `find_program(NEURA_GLSLANG glslangValidator)`. These are the only build requirements.
+- `AUTO` enables the GPU when both are found and the platform is not Apple, and otherwise disables it with a `message(STATUS ...)` naming what was missing (on Apple platforms, that the platform is outside the Vulkan backend). `ON` fails configuration with `message(FATAL_ERROR ...)` when either is missing. `OFF` disables it. Any other value fails configuration.
 - The shader is compiled at build time with `glslangValidator -V --target-env vulkan1.0 -x -o <build dir>/generated/graph_eval.spv.inc src/gpu/graph_eval.comp` through `add_custom_command`, and `device.cpp` includes the result, a comma-separated list of 32-bit words, as the initializer of a `std::uint32_t` array. No generated file is checked in.
 
 Fleets, placement, `ModelDevice`, and `AutoDevice` are in `neura_nvm` and are built and tested in every configuration. A runtime-only distribution that wants the GPU ships `neura_nvm` and `neura_gpu`; one that does not ships `neura_nvm` alone.
@@ -1053,7 +1073,7 @@ Usage errors:
 
 ### 14.2 Environment
 
-`NEURA_GPU` set to `auto`, `always`, or `off` selects the mode when the command line has none of `--gpu=`, `--no-gpu`, and `--require-gpu`. A mode option on the command line overrides it. An unset or empty variable has no effect. Any other value is the error `NEURA_GPU must be auto, always, or off`. The variable is read only by `run` and `test`.
+`NEURA_GPU` set to `auto`, `always`, or `off` selects the mode when the command line has none of `--gpu=`, `--no-gpu`, and `--require-gpu`. A mode option on the command line overrides it, and the variable is then not examined. An unset or empty variable has no effect. When the variable is examined, any other value is the error `NEURA_GPU must be auto, always, or off`. The variable is read only by `run` and `test`.
 
 ### 14.3 Order of work
 
@@ -1069,13 +1089,15 @@ Usage errors:
 
 | Mode | How the tests run |
 | --- | --- |
-| `off` | One at a time, as today. |
+| `off` | One at a time. |
 | `always` | Create the context and a `VulkanGraphDevice`. If that fails, one at a time, unless `--require-gpu` makes it an error. Otherwise as a fleet with that device (section 10.10). |
 | `auto` | Construct an `AutoDevice` with `max_jobs` equal to the smaller of the test count and 4,096. If its state is Rejected, one at a time. Otherwise as a fleet with that device. |
 
 `run --each` follows the `test` table with members in place of tests: `max_jobs` is the smaller of the member count and 4,096, and "one at a time" means `nvm::run` per member in file order (section 10.11).
 
-Under `--gpu-verify` a device, when there is one, is wrapped in a `VerifyingDevice` before it is used. In a build without the GPU, `auto` and `always` behave as `off`. An invalid image still fails before any device or host service is touched.
+`neura test` runs its tests one at a time, with no device, whatever the mode, when `--schedules` is above 1, when `--virtual-time` or `--save-schedule` is given, or when `--schedule` replays a saved schedule ([Concurrency](Concurrency.md#144-testing-concurrent-code)). In `always` the context and device are still created in those cases, and `--require-gpu` still fails when none can be, but the run does not use the device. `run --each` rejects `--virtual-time`.
+
+Under `--gpu-verify` a device, when there is one, is wrapped in a `VerifyingDevice` before it is used. In a build without the GPU, `auto` and `always` behave as `off`, and `--require-gpu` is an error (section 14.4). An invalid image still fails before any device or host service is touched.
 
 ### 14.4 Errors
 
@@ -1109,7 +1131,7 @@ The counters are the fields of `GraphDeviceStatistics`; `kept on cpu` is `declin
 
 ### 14.6 Usage text
 
-`usage()` in `src/cli/main.cpp` adds `[--each <lists>]` to the `run` line, `[--gpu=auto|always|off] [--no-gpu] [--require-gpu] [--gpu-software] [--gpu-verify]` to the `run` and `test` lines, and these lines after the capability list:
+`neura --help` (`usage()` in `src/cli/main.cpp`) shows `[--each <lists>]` on the `run` line, `[--gpu=auto|always|off] [--no-gpu] [--require-gpu] [--gpu-software] [--gpu-verify]` on the `run` and `test` lines, and these lines after the capability list:
 
 ```text
 graph execution: run and test choose between the CPU and a GPU by predicted speed.
@@ -1122,13 +1144,13 @@ graph execution: run and test choose between the CPU and a GPU by predicted spee
   --each <lists>           (run) run the image once per line of <lists>; each line is one argument list
 ```
 
-## 15. Existing tests
+## 15. CTest environment
 
-`CMakeLists.txt` sets `NEURA_GPU=off` on the existing Neura CTest entries by iterating the directory's `TESTS` property. The two GPU entries are exempt. With CMake 3.28 or newer, the setting also applies to the libclang submodule's own tests, which do not invoke the Neura CLI. Those tests therefore keep running one execution at a time on the reference evaluator. No existing test script, fixture, expected output, or baseline should need to change: `--stats` is used only by `tests/stdlib/area.cmake`, which compares standard output, and `tests/benchmarks/run.cmake`, which extracts figures by name, so the added `gpu: off` line on standard error affects neither. `tests/benchmarks/baseline.txt` is unaffected because steps, heap cells, neurons, and image bytes do not depend on the evaluator. If an existing test does fail, the implementer reports it and does not edit the expectation.
+`CMakeLists.txt` sets `NEURA_GPU=off` on every CTest entry except `gpu-device` and `gpu-cli`, by iterating the directory's `TESTS` property. With CMake 3.28 or newer, the setting also applies to the libclang submodule's own tests, which do not invoke the Neura CLI. Those entries therefore run one execution at a time on the reference evaluator, and their evidence and duration do not depend on the machine. The entries that exercise fleets, placement, and the GPU path are in section 16. `--stats` adds the `gpu:` line on standard error after the existing `stats:` line, which leaves standard output unchanged. `tests/benchmarks/baseline.txt` does not depend on the evaluator, because steps, heap cells, neurons, and image bytes are the same in every mode.
 
 ## 16. Verification
 
-Each entry names what it compares, over what domain, and what kind of evidence it is, in the terms of the [release checklist](../Release.md). `backend-layered`, `backend-fleet`, and `backend-placement` are new suites in `neura_backend_tests`; they and `backend-each` are built in every configuration.
+Each entry names what it compares, over what domain, and what kind of evidence it is, in the terms of the [release checklist](../Release.md). `backend-layered`, `backend-fleet`, and `backend-placement` are suites in `neura_backend_tests`; they and `backend-each` are built in every configuration.
 
 | CTest | What it establishes | Kind |
 | --- | --- | --- |
@@ -1141,56 +1163,29 @@ Each entry names what it compares, over what domain, and what kind of evidence i
 | `backend-fleet` | Equivalence: for every image of the corpus with an entry point, a fleet of eight members with different argument lists against eight `run_captured` runs in order: the sequence of host requests with their arguments, the captured output, and every `RunResult` field are equal. Repeated with no device, with `ModelDevice` wrapped in `VerifyingDevice`, and with windows 1, 3, and 4,096. | End to end |
 | `backend-fleet` | Ordering and states, with hand-assembled images: a member that prints before an earlier member finishes parks, and the output is the serial concatenation; a member that traps, one that hits the step limit, and one that ends through a process exit completion; a host callback served for the head; the memory rule stops admission and the head still starts; `add` after `advance`, `advance` while a request is pending, and a device for another image throw. | Structural |
 | `backend-fleet` | A sweep: 65,536 members created with `add_call` for a function of two 8-bit parameters from `tests/backend/fixtures`, against one `Execution` per input as `backend-conversion` runs them: every result and step count is equal. | Exhaustive (8-bit pairs) |
-| `backend-each` (new CMake script `tests/backend/each.cmake`, built in every configuration) | The file grammar: bare and quoted arguments, every escape, an empty line, a comment, a final line without LF, the exact size and list-count ceilings, and each error of section 10.11 with its exact text and line number, with no member run. With `tests/backend/arguments/first-argument.nra`: standard output equals the concatenation of separate `neura run` commands over the same lists; common arguments come first; a list that makes the program trap produces the report line and the trap's status as the exit status while later members still run; the exit-status rule for a nonzero status; the `stats:` form; the errors for `--record`, `--replay`, `--profile`, and a repeated `--each`. On POSIX, the next member starts with all file slots free after a member leaves a file open. | End to end |
+| `backend-each` (CMake script `tests/backend/each.cmake`, run in every configuration) | The file grammar: bare and quoted arguments, every escape, an empty line, a comment, a final line without LF, the exact size and list-count ceilings, and each error of section 10.11 with its exact text and line number, with no member run. With `tests/backend/arguments/first-argument.nra`: standard output equals the concatenation of separate `neura run` commands over the same lists; common arguments come first; a list that makes the program trap produces the report line and the trap's status as the exit status while later members still run; the exit-status rule for a nonzero status; the `stats:` form; the errors for `--record`, `--replay`, `--profile`, and a repeated `--each`. On POSIX, the next member starts with all file slots free after a member leaves a file open. | End to end |
 | `backend-placement` | `fit_device` and `fit_cpu`, the pure functions behind section 11.6: the six RTX 5080 measurements of section 4.6 (9.2, 253.9, 4605.6, 15.2, 371.9, 152.6) give `a` 9.2, `b0` 0.343, `b1` 0.135, `K` 2,123, `d` 0.000259 to three significant digits; the clamps apply for measurements that would give negative or unbounded values. | Structural |
 | `backend-placement` | The placement procedure with fixed models and hand-computed expectations: all jobs declined below break-even; a deep graph left out of a batch of shallow ones and included once it has enough jobs; the tie rule; a gain of exactly zero declines; ineligible graphs declined. The prospect test, the gate opening at an exact call and identically on a second run, the give-up rule, and the verdict accepting the RTX 5080 parameters and rejecting the llvmpipe parameters of section 4.6 for the same shapes. | Structural |
 | `backend-placement` | `AutoDevice` with an opener that returns `ModelDevice` and fixed models, and a scripted clock: state transitions, `batch_hint`, every counter, the correction after scripted elapsed times including both clamps, and rejection when the inner device fails. Then the corpus fleets of `backend-fleet` run through it wrapped in `VerifyingDevice`, with models that make it place some rounds and decline others: all results equal the serial runs. Across the same corpus at windows 1, 3, and 4,096, the unwrapped prepared path agrees with serial execution and the eager fleet, including round counts at each completion. | Structural, end to end |
 | `backend-placement` | Retirement (section 11.10) with `ModelDevice` and fixed models under which the device places the wide graph and never the one-neuron graph. A call of 1 placed and 10 kept jobs, repeated: the device is Active through call 389 and retired at the end of call 390 (the gate opens on call 134, calls 135 to 390 are the 256 Active calls), `batch_hint` is 1, the reason is `the device stopped gaining`, `failure_reason()` is empty, the counters keep the values they had (256 evaluated, `134 × 512 + 256 × 10` placement declines), later calls change none, and every evaluated output equals the reference. Calls that place nothing and calls with no jobs. `kept = 9 × placed` over four windows never retires, `kept = 9 × placed + 1` retires on the window's last call, and a window of kept and placed jobs is judged by its sums. A workload that places 10 and 18 percent never retires over ten windows. A window that gains resets the sums. | Structural |
 | `backend-placement` | The corpus fleets of `backend-fleet`, through `AutoDevice` with models under which nothing is placed, at windows 3 and 4,096, prepared and eager: results equal the serial runs and the device retires in at least one fleet. | End to end |
 | `backend-placement` | Allocation failure (section 9.5). An opener that throws `std::bad_alloc` or `std::length_error`: `unavailable: cannot allocate device memory`, no failure, one opener call. For each state, Gated and Active, the Nth allocation of `AutoDevice::evaluate` fails for N = 1 upward until the call finishes without a fault: the device is Rejected as failed with `device failed: cannot allocate placement memory`, every job of the call is declined and counted in `declined_failed`, none reaches the inner device, and later calls are declined without a retry. A prepared batch whose materializer returns an empty span is declined whole, and the next batch is served. A fleet whose first-dispatch allocation fails (the 1st to 3rd, prepared and eager) over every corpus image produces serial results. | Structural, end to end |
-| `gpu-device` (new, built with the GPU) | `VulkanGraphDevice` against `evaluate_graph` with the same circuit domains as `backend-layered`, submitted in dispatches of up to 65,535 requests; a mixed dispatch over several graphs; a call large enough to split into exactly two dispatches (65,535 requests and 1); `IO` and `WIRES` growth. Calibration returns finite, non-negative parameters and every probe job matches the reference. Calibration and the opener under injected host allocation failure, at the first allocations and at a spread of later ones: no exception, and the reason `cannot allocate device memory`. A deterministic host callback produces identical trace bytes and cross-replays in both directions. Uses `allow_software = true`. | Exhaustive (8-bit), sampled (wider), structural |
-| `gpu-cli` (new CMake script) | For each program under `tests/backend/programs` and `tests/backend/traps` whose `--no-gpu --stats` run takes at most 200,000 steps: stdout, exit status, and stderr without the `gpu:` line are identical between `--no-gpu`, `--require-gpu --gpu-software --gpu-verify`, and `--gpu=auto --gpu-software --gpu-verify`. The same comparison, also with auto verification disabled, for the programs, `neura test` on the suites under `tests/backend/testing`, and for `neura run --each` with a generated file of 2,000 argument lists for `first-argument.nra`. A single-request run, a multi-request run, and a trap produce byte-identical CPU and GPU traces and replay across evaluators in both directions. The usage and run errors of section 14. `NEURA_GPU` and its precedence. Two fixtures that open the gate (a 4,096-member run of one wide graph, and an 8,192-member run of 16 steps over two wide graphs on which the device keeps winning): off, unwrapped auto, and verified auto produce the same outputs, status, and non-GPU statistics, and whenever the `--require-gpu` run of the fixture reports a hardware device, the unwrapped auto run must report `evaluated` above 0 (and at least 1 and at least 2 dispatches respectively) with no `retired` suffix on the second. Under the fault loader of Linux builds: submission, status, mismatch, timeout, and allocation failures of one dispatch, startup failures, a non-power-of-two storage range, and a failure of the second of three dispatches (`gpu_partial_failure`), after which the first dispatch's jobs stay evaluated and the other 65,536 are declined as failed and have reference results. Programs over the step bound are listed in the log. Only files declaring a `// run-options:` line are also compared with their fixture options. | End to end |
+| `gpu-device` (built with the GPU) | `VulkanGraphDevice` against `evaluate_graph` with the same circuit domains as `backend-layered`, submitted in dispatches of up to 65,535 requests; a mixed dispatch over several graphs; a call large enough to split into exactly two dispatches (65,535 requests and 1); `IO` and `WIRES` growth. Calibration returns finite, non-negative parameters and every probe job matches the reference. Calibration and the opener under injected host allocation failure, at the first allocations and at a spread of later ones: no exception, and the reason `cannot allocate device memory`. A deterministic host callback produces identical trace bytes and cross-replays in both directions. Uses `allow_software = true`. | Exhaustive (8-bit), sampled (wider), structural |
+| `gpu-cli` (CMake script `tests/backend/gpu-cli.cmake`, built with the GPU) | For each program under `tests/backend/programs` and `tests/backend/traps` whose `--no-gpu --stats` run takes at most 200,000 steps: stdout, exit status, and stderr without the `gpu:` line are identical between `--no-gpu`, `--require-gpu --gpu-software --gpu-verify`, and `--gpu=auto --gpu-software --gpu-verify`. The same comparison, also with auto verification disabled, for the programs, `neura test` on the suites under `tests/backend/testing`, and for `neura run --each` with a generated file of 2,000 argument lists for `first-argument.nra`. A single-request run, a multi-request run, and a trap produce byte-identical CPU and GPU traces and replay across evaluators in both directions. The usage and run errors of section 14. `NEURA_GPU` and its precedence. Two fixtures that open the gate (a 4,096-member run of one wide graph, and an 8,192-member run of 16 steps over two wide graphs on which the device keeps winning): off, unwrapped auto, and verified auto produce the same outputs, status, and non-GPU statistics, and whenever the `--require-gpu` run of the fixture reports a hardware device, the unwrapped auto run must report `evaluated` above 0 (and at least 1 and at least 2 dispatches respectively) with no `retired` suffix on the second. Under the fault loader of Linux builds: submission, status, mismatch, timeout, and allocation failures of one dispatch, startup failures, a non-power-of-two storage range, and a failure of the second of three dispatches (`gpu_partial_failure`), after which the first dispatch's jobs stay evaluated and the other 65,536 are declined as failed and have reference results. Programs over the step bound are listed in the log. Only files declaring a `// run-options:` line are also compared with their fixture options. | End to end |
 
 **Which `gpu-cli` legs reach a device.** The `--require-gpu` legs over the programs, traps, test suites, the 2,000-list run, the trace recordings, and both fixtures evaluate jobs on the device the machine provides, and each sweep requires a nonzero `evaluated` count. The `--gpu=auto` legs over the programs, test suites, and the 2,000-list run, whether or not they are wrapped in `--gpu-verify`, report `gpu: auto, not used (...)`: their prospect or opening budget never opens a device. They establish that auto placement does not change any output and that the line has its specified form, and they do not reach a device. The auto legs reach a device only on the two fixtures, and only when the device is one that auto keeps; on a software device auto rejects it, and those legs establish equality of results alone. The log of a run names the device and the evaluated and dispatch counts of each fixture leg.
 
 `gpu-device` and `gpu-cli` exit with status 77 and are registered with `SKIP_RETURN_CODE 77` when no Vulkan device, hardware or software, can be created, so CTest reports them as skipped and never as passed. Both carry the CTest label `gpu` and a timeout of 1,800 seconds.
 
-**Limits of this evidence.** These are observed agreements over the stated domains. The argument of section 6.4 is a proof about the algorithm under the stated arithmetic, and section 10.6 is an argument about the fleet's algorithm; neither is a proof about a driver or about the implementation. A machine with only llvmpipe verifies the Vulkan path against a software implementation and no hardware driver. No test asserts which evaluator auto mode chose on a real device, because that depends on measured time; the placement logic is tested with fixed models, and on real devices only the equality of results is tested. A handoff must state which devices `gpu-device` and `gpu-cli` actually ran on, by the `gpu:` line, and name any that were skipped.
+**Limits of this evidence.** These are observed agreements over the stated domains. The argument of section 6.4 is a proof about the algorithm under the stated arithmetic, and section 10.6 is an argument about the fleet's algorithm; neither is a proof about a driver or about the implementation. A machine with only llvmpipe verifies the Vulkan path against a software implementation and no hardware driver. No test asserts which evaluator auto mode chose on a real device, because that depends on measured time; the placement logic is tested with fixed models, and on real devices only the equality of results is tested. The log of a `gpu-device` or `gpu-cli` run names the devices it used, by the `gpu:` line; a report of a run states those devices and any skipped entry.
 
-## 17. Documentation to update with the implementation
+## 17. Limits
 
-| Page | Change |
-| --- | --- |
-| [NVM](../runtime/NVM.md) | In "Graphs and continuations", after the profile paragraph: an implementation may compute a graph's output lanes by another method when the values equal the reference rule's and the reference rule does not overflow. A new section "Graph devices" with the contract of section 5. A new section "Fleets" with the rule of D13 and the equivalence of section 10.6. In "Determinism, limits, and observability", the sentence about the reference executor running one block at a time gains the fleet as a permitted faster executor. |
-| [Backend](../Backend.md) | The directory table gains `src/gpu/` and the new `src/nvm/` files; "Running an image" gains the modes, the fallback rule, and the embedding interfaces; the test table gains the new entries. |
-| [Tooling](Tooling.md) | `neura run --each` with its file format, report lines, and exit status (section 10.11); the options of section 14, the environment variable, the `gpu:` line, and the build requirement for `NEURA_GPU`. |
-| [Testing](Testing.md) | "Tests run serially in declaration order" becomes: tests may be advanced together; each test's output, its host effects, and its report line appear in declaration order, exactly as when run one at a time. |
-| [Status](Status.md) | The Tooling row lists `run --each` and the new options. |
-| [Release](../Release.md) | Rows under "Toolchain and formats" mapping GPU graph execution, fleets, and auto placement to their tests and kinds. |
-| [Project](../Project.md) | One sentence in "Runtime boundary": graph evaluation may run on a GPU, and independent executions may be advanced together, with results identical to the reference evaluator run one execution at a time. |
-| `wiki/` | The matching pages, following [wiki maintenance](../Wiki.md). |
-| This page | Is the specification. Section 4 records the measurements of the release it describes, and sections 5 to 14 are the contract. |
+What GPU execution does and does not cover:
 
-## 18. What to expect
-
-The single-run, test, and argument-list measurements are in section 4. A forced device pays setup and dispatch costs for each eligible graph even when a CPU would be faster. Auto estimates those costs before opening the device and again before selecting jobs, and retires a device that has stopped gaining (section 11.10). On the Collatz workload the run with a retired device was no slower than the CPU-only run on this host (section 4.5): a workload that suits a device only briefly neither gains nor loses much.
-
-Further ways to use graph devices require separate design work:
-
-1. **More consumers of fleets.** The decompiler's exhaustive lifting and the exhaustive suites of the toolchain's own tests, which today call the reference evaluator one input at a time.
-2. **Shallower circuits.** Deep circuits take more work-group barriers. The cost model includes both the layer count and critical edge work. Parallel-prefix carries and tree reduction would trade more neurons for far fewer layers. That is an IRtoNeuronConversion change with its own cost contract; [Backend](../Backend.md#circuits) documents the ripple-carry adder and restoring division used today, and [Project](../Project.md#neurair-and-optimization) lists graph depth among the circuit costs.
-3. **Parallelism in the language.** [Concurrency](ResourcesConcurrency.md) is deferred. A data-parallel construct would give one program many frames evaluating the same graph.
-
-Also outside this specification: moving frames, exits, state operations, or the heap to the GPU; stepping fleet members on several CPU threads; any change to circuits, the image format, or the graph profile; device selection by the user, several devices at once, and pipeline caches; storing calibration between runs; opening a device on a background thread; macOS, and any API other than Vulkan.
-
-## 19. Release gates
-
-The work was delivered in the phases below. Each leaves every existing test passing. Where a phase asks for a measurement, the handoff reports the command, the machine, and the numbers; a missed bound is reported and the constants of this specification are not changed to meet it.
-
-| Phase | Work | Done when |
-| --- | --- | --- |
-| 1 | The step split of section 9.2, `graph_device.hpp`, `layered.*` with shapes, `ModelDevice`, `VerifyingDevice`, and the `RunLimits` field. No CLI change. | `backend-layered` and the step-split case of `backend-fleet` pass. All existing tests pass unchanged. `tests/benchmarks` wall time is within 3 percent of the previous commit. |
-| 2 | The entry-point constructor, `Fleet`, and `run_fleet`. CLI: `neura run --each`, running its members one at a time. | `backend-fleet` and `backend-each` pass. Measured: the test files of three `tests/stdlib` areas run as a fleet without a device take at most 1.10 times as long as the same members run one at a time through `nvm::run`. |
-| 3 | `NEURA_GPU` in CMake, `neura_gpu`, the kernel, `Context`, `VulkanGraphDevice`, and the self-test. CLI: every option of section 14.1 except `--gpu=auto`; the default is `off`. `neura test` and `neura run --each` use a fleet under `always`. | `gpu-device` passes on at least one named device. The `always` and `off` parts of `gpu-cli` pass. A build with `NEURA_GPU=OFF` passes all tests. |
-| 4 | `placement.*`, `AutoDevice`, calibration, and `--gpu=auto`. The default is still `off`. | `backend-placement` passes. The `auto` parts of `gpu-cli` pass on at least one named device. |
-| 5 | `auto` becomes the default; the `NEURA_GPU` environment variable; the environment setting on existing tests (section 15); the `gpu:` line; the documentation of section 17. | The full suite passes with the GPU built and with `NEURA_GPU=OFF`. Measured on a machine with a discrete GPU: (a) `neura run --stats` for every program of `tests/benchmarks` prints `gpu: auto, not used` and takes at most 1.05 times its `--no-gpu` wall time; (b) `neura test` over three `tests/stdlib` areas takes at most 1.10 times its `--no-gpu` wall time; (c) `neura run --each` with 65,536 argument lists, for a new fixture `tests/backend/each/collatz.nra` that parses one integer argument, counts its Collatz steps in `int64` arithmetic, and prints the count, is not slower with `--gpu=auto` than with `--no-gpu`; both wall times and the `gpu:` line are reported. The handoff lists the devices used and any skipped entry. |
+- A device evaluates graphs. Frames, exits, state operations, the heap, host calls, and traps stay in the CPU NVM (section 2). The decompiler, the compiler stages, and the NVR writer and loader do not use a device or a fleet.
+- A fleet is advanced on one CPU thread, and no thread is created for placement or for opening a device. `--parallel-workers` applies to the items of `Parallel.map`, which run under the reference evaluator whatever the mode (section 10.8).
+- One device serves one run. The user cannot choose a device, several devices are not used at once, no Vulkan pipeline cache is kept, calibration is not stored between runs (section 11.6), and a device is not opened on a background thread.
+- Vulkan is the only graph-device API. Apple platforms are outside it (section 13). The Windows loader path (section 12.1) is specified and unverified, as MSVC builds are ([Backend](../Backend.md#tests-and-the-limits-of-the-evidence)).
+- A native executable made by `build --native` evaluates graphs on the CPU ([Standalone](Standalone.md)).
+- A graph's kernel time grows with its layer count, because each layer ends in a work-group barrier. The circuits that IRtoNeuronConversion emits for wide integer arithmetic are deep ([Backend](../Backend.md#circuits) documents the ripple-carry adder and restoring division, and [Project](../Project.md#neurair-and-optimization) lists graph depth among the circuit costs). The cost model of section 11.2 includes both the layer count and the critical edge work.

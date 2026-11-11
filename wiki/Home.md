@@ -1,5 +1,7 @@
 # Neura documentation
 
+This documentation describes Neura 0.1.0, the version in the repository's `VERSION` file. `neura --version` prints the installed version ([Install](Install), [Tooling](Tooling#version-install-and-update)); a build from a checkout reports `0.1.0-dev`.
+
 Neura is a statically typed language whose compiler translates programs into deterministic neuron circuits. Its toolchain builds executable images, runs them in the Neura Virtual Machine, and provides tools to inspect and decompile those images.
 
 ## Start here
@@ -23,4 +25,4 @@ The [project design](Project) describes stage boundaries and the execution model
 
 ## Reading this documentation
 
-The repository's [language specification](https://github.com/Kayyo321/neura/tree/main/docs/lang) and [project design](https://github.com/Kayyo321/neura/blob/main/docs/Project.md) are the source of truth. This wiki presents those documents for navigation and includes a circuit introduction. When the wiki and repository differ, consult the repository files. The [feature status and decisions](Status) page distinguishes implemented behavior from proposals and unresolved rules; examples illustrate the language and are not conformance guarantees unless backed by tests. The [release checklist](Release) maps features to verification.
+The repository's [language specification](https://github.com/Kayyo321/neura/tree/main/docs/lang) and [project design](https://github.com/Kayyo321/neura/blob/main/docs/Project.md) are the source of truth. This wiki presents those documents for navigation and includes a circuit introduction. When the wiki and repository differ, consult the repository files. The [feature status](Status) page lists what is supported, what is outside this release, and the open language decisions; examples illustrate the language and are not conformance guarantees unless backed by tests. The [release checklist](Release) maps features to verification.

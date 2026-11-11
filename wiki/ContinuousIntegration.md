@@ -37,7 +37,7 @@ Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does 
 | Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, every CTest entry CMake registers on macOS. |
 | Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, every CTest entry. |
 
-Each job uploads its build log and CTest report. A Tier 2 job does not yet run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
+Each job uploads its build log and CTest report. A Tier 2 job does not run `check-test-report.py`, so a skipped test does not fail it: read the report before treating a green job as full coverage of that platform. A green Tier 2 run is not required to merge a pull request.
 
 ## Pages: website deployment
 

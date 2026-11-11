@@ -1,6 +1,6 @@
 # `Std.Collections.Sequence`
 
-[Standard library index](Stdlib) · [Shared contracts and implementation decisions](Stdlib-Design) · [Language status](Status)
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
 
 Import this module as `Std.Collections.Sequence`. Its [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/sequence.nra) defines the shipped declarations. The [declaration reference](#exported-declarations) lists its exported members and links each declaration to its source.
 
@@ -8,7 +8,7 @@ Import this module as `Std.Collections.Sequence`. Its [source](https://github.co
 
 - [Exported declarations for `Std.Collections.Sequence`](#exported-declarations)
 - [Failure, equality, ordering, iteration, and resource contracts](Stdlib-Design#5-core-contracts)
-- [Implementation decisions and verification limits](Stdlib-Design#18-implementation-decisions)
+- [Behavior details and verification limits](Stdlib-Design#18-behavior-details)
 
 ## Exported declarations
 
@@ -117,7 +117,7 @@ The following public declarations are taken from the module source; each links t
 
 ## Detailed contracts
 
-The following sections preserve the relevant descriptions and later implementation decisions from the standard-library design. Later implementation decisions qualify earlier plan text. The source and current [language status](Status) identify shipped behavior.
+The following sections are taken from the [standard library specification](Stdlib-Design) and the module's source comments. The source and the [language status](Status) identify shipped behavior.
 
 ### 5.1 Failure model
 
@@ -142,11 +142,11 @@ Library trap conditions and their messages. The message text is part of the cont
 | An assertion failed | The assertion's message | `Std.Test` |
 | A host write that has no error result failed | `console write failed` | `Console.print_line` |
 
-**Decision: the library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
+**The library does not re-check what the language already checks.** An index outside a built-in list, an overflow, a zero divisor, a shift count out of range, and an out-of-range conversion trap in the language with their own reasons (1 and 2) and locations. A library member that would fail the same way lets the built-in operation trap and documents that it does. `ArrayList.get` with a bad index is a bounds trap from the list read, not a library trap.
 
-**What the absence of unwinding changes.** The first plan assumed panics that unwind, deferred actions, and recovery. None exists, and this plan asks for none.
+**What the absence of unwinding means.** The language has no panics that unwind, no deferred actions, and no recovery, and the library has none.
 
-| First plan's promise | Now |
+| Not provided | Instead |
 | --- | --- |
 | `Closeables.use` closes the resource even when the body panics | Replaced by the scoped helpers of [section 5.5](Stdlib-Design#55-resources), which close the resource on every ordinary completion. A body cannot fail and return; it either returns or the run ends, and when a run ends, by return or by trap, the host releases every file and socket. |
 | "If the predicate of `remove_if` panics, the collection is left valid" | Removed. A trap inside a callback ends the run, so no state can be observed afterwards. No collection keeps recovery code. |
@@ -176,7 +176,7 @@ These are the intended source-module contracts. Compiler support for the operati
 
 This section fixes the member sets that the concrete classes and the interfaces in [section 9.10](Stdlib-Design#910-interfaces-and-read-only-views) share.
 
-The **Needs** column names the compiler facilities an implementation relies on.
+The **Needs** column names the compiler facilities of [section 3](Stdlib-Design#3-language-facilities) that a member uses.
 
 **List contract** (`ArrayList`, `LinkedList`)
 
@@ -252,7 +252,7 @@ All of this needs G3.
 
 A class for lazy pipelines, the counterpart of Java's streams. Needs G1; the members that return `Optional` also need G2.
 
-**Redesign.** The first plan wrapped an `Iterator<T>` interface and gave each operation an adapter class implementing it. A sequence is now two native function values, and each operation is a closure over the previous two.
+A sequence is two native function values, and each operation is a closure over the previous two.
 
 - **Layout.** `has_next: () → bool`, `next: () → T`, and a `bool` `consumed`.
 - **Why closures fit.** An adapter's state is exactly what a closure captures. `map` captures the upstream pair and the mapping function and needs no state of its own. Operations that do keep state (`take`'s remaining count, `filter`'s buffered element, `enumerate`'s index) hold it in a captured `Cell`, because captured locals are copies ([section 5.6](Stdlib-Design#56-callbacks)).
