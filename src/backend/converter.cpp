@@ -4,6 +4,9 @@
 #include "circuit/circuit.hpp"
 #include "circuit/float_circuit.hpp"
 #include "ir-optimization/analysis.hpp"
+#include "lift/hints.hpp"
+#include "lift/lowered_block.hpp"
+#include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
 #include "neura-ir/float.hpp"
@@ -47,6 +50,12 @@ struct OpenBlock {
     std::optional<Span> failure_span;
     std::optional<Span> operation_span;
     std::optional<Span> statement_span;
+    // The block's lifted form for its LIFT hint (lift/hints.hpp): every
+    // operation recorded in the order it was built, and the condition that
+    // chooses between two exits.
+    std::vector<lift::ExpressionPtr> schedule;
+    lift::ExpressionPtr condition;
+    std::size_t exit_when_true = 0;
 };
 
 // A virtual call or destruction whose targets depend on the classes the
@@ -118,6 +127,14 @@ private:
     void assign(std::uint32_t slot, Operand operand);
     void fail_when(const Signal& condition, std::uint32_t reason, const Span& span);
     void operation_at(const Span& span);
+    // LIFT hints: the form of an operand whose lanes the open block already
+    // uses, and a result described by `form`, recorded in the block's
+    // schedule. A null form leaves the result undescribed.
+    lift::ExpressionPtr form_of(const Operand& operand);
+    Operand described(Operand result, lift::ExpressionPtr form);
+    lift::ExpressionPtr unary_form(std::string op, std::uint32_t type, const Operand& operand);
+    lift::ExpressionPtr binary_form(std::string op, std::uint32_t type, const Operand& left, const Operand& right);
+    lift::ExpressionPtr convert_form(std::uint32_t type, const Operand& operand);
 
     // Effects that end a block.
     Operand state(nvr::StateOp operation, std::uint32_t immediate, std::vector<Operand> arguments,
@@ -276,6 +293,10 @@ public:
     void set_function(std::uint32_t index, nvr::Function function, std::vector<std::optional<Span>> spans,
                       std::vector<std::uint32_t> placeholders);
     void name_slots(std::uint32_t index, std::vector<std::string> names) { slot_names_[index] = std::move(names); }
+    bool lift_hints() const { return options_.lift_hints; }
+    void add_hint(std::uint32_t function, std::uint32_t block, lift::LiftedForm form) {
+        hints_[{function, block}] = std::move(form);
+    }
     const nvr::Function& converted(std::uint32_t index) const { return image_.functions.at(index); }
     const nvr::Type& type_at(std::uint32_t index) const { return image_.types.at(index); }
     const nvr::Global& global_at(std::uint32_t index) const { return image_.globals.at(index); }
@@ -289,6 +310,7 @@ private:
     void build_dispatch(const Dispatch& dispatch);
     void thread_jumps();
     void remove_unreachable_blocks();
+    void lift_hint_section();
     void source_map();
     void names();
     std::string label(const std::string& file) const;
@@ -316,6 +338,8 @@ private:
     std::vector<std::vector<std::optional<Span>>> spans_;
     std::vector<std::vector<std::uint32_t>> placeholders_;
     std::map<std::uint32_t, std::vector<std::string>> slot_names_;
+    // Lifted forms by (function, block) for the LIFT section.
+    std::map<std::pair<std::uint32_t, std::uint32_t>, lift::LiftedForm> hints_;
 
     std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, std::vector<SymbolId>> constructors_;
@@ -1047,6 +1071,7 @@ Conversion Converter::run() {
     }
     thread_jumps();
     remove_unreachable_blocks();
+    if (options_.lift_hints) lift_hint_section();
     if (concurrent_) {
         mark_transferable_layouts();
     }
@@ -1200,6 +1225,17 @@ void Converter::build_dispatch(const Dispatch& dispatch) {
     if (exits.size() == 1) {
         block.selector_start = 0;
     }
+    if (exits.size() > 1) {
+        // The layouts each call exit is taken for.
+        lift::LiftedForm form;
+        for (const auto& [layout_index, cls] : classes) {
+            const auto callee = functions_.at(target(dispatch, cls));
+            for (std::size_t e = 0; e + 1 < exits.size(); ++e) {
+                if (exits[e].target == callee) form.dispatch[e].push_back(layout_index);
+            }
+        }
+        hints_[{dispatch.function, dispatch.block}] = std::move(form);
+    }
     block.exits = std::move(exits);
     block.graph = graph(circuit.finish());
     image_.functions[dispatch.function].blocks[dispatch.block] = std::move(block);
@@ -1315,7 +1351,38 @@ void Converter::remove_unreachable_blocks() {
         }
         function.blocks = std::move(blocks);
         spans_[f] = std::move(spans);
+        // Hints follow their blocks; those of removed blocks are dropped.
+        const auto first = hints_.lower_bound({static_cast<std::uint32_t>(f), 0});
+        const auto last = hints_.lower_bound({static_cast<std::uint32_t>(f) + 1, 0});
+        std::vector<std::pair<std::uint32_t, lift::LiftedForm>> kept;
+        for (auto it = first; it != last; ++it) {
+            const auto old = it->first.second;
+            if (std::binary_search(order.begin(), order.end(), old)) kept.emplace_back(position[old], std::move(it->second));
+        }
+        hints_.erase(first, last);
+        for (auto& [block, form] : kept) hints_.emplace(std::pair{static_cast<std::uint32_t>(f), block}, std::move(form));
     }
+}
+
+// The LIFT section (docs/runtime/NVR.md, "Lift hints"): the form recorded
+// for each block with neurons whose regeneration from that form reproduces
+// the block and its graph. The runtime proves every hint again before it
+// uses one; checking the structural proof here only keeps forms the
+// runtime would reject (a block built with an operation the converter does
+// not record) out of the image.
+void Converter::lift_hint_section() {
+    std::vector<lift::BlockHint> hints;
+    for (auto& [key, form] : hints_) {
+        const auto& block = image_.functions[key.first].blocks[key.second];
+        const auto& graph = image_.graphs[block.graph];
+        if (graph.nodes.empty() || !lift::prove_structure(image_, block, graph, form) ||
+            !lift::lower(image_, block, form).block) {
+            continue;
+        }
+        hints.push_back({key.first, key.second, std::move(form)});
+    }
+    hints_.clear();
+    if (!hints.empty()) image_.other_sections.push_back(lift::encode_hints(std::move(hints)));
 }
 
 } // namespace
@@ -1553,6 +1620,56 @@ void FunctionCompiler::operation_at(const Span& span) {
     current().operation_span = span;
 }
 
+lift::ExpressionPtr FunctionCompiler::form_of(const Operand& original) {
+    if (!c_.lift_hints()) return nullptr;
+    const auto operand = resolve(original);
+    switch (operand.kind) {
+    case Operand::Kind::Immediate:
+        return lift::immediate(operand.type,
+                               operand.bits & width_mask(nvr::lane_count(c_.type_at(operand.type))));
+    case Operand::Kind::Slot:
+    case Operand::Kind::Constant: {
+        const auto kind = operand.kind == Operand::Kind::Slot ? nvr::ValueKind::Slot : nvr::ValueKind::Constant;
+        const auto& inputs = current().synth.inputs();
+        for (std::size_t i = 0; i < inputs.size(); ++i) {
+            if (inputs[i].kind == kind && inputs[i].index == operand.index) return lift::input(inputs[i].type, i);
+        }
+        return nullptr;
+    }
+    case Operand::Kind::Bits:
+        return operand.form;
+    case Operand::Kind::Void:
+        break;
+    }
+    return nullptr;
+}
+
+Operand FunctionCompiler::described(Operand result, lift::ExpressionPtr form) {
+    if (!form) return result;
+    // Every operation is recorded, even one folded to a constant: its
+    // regeneration builds the same gadgets and registers the same checks.
+    current().schedule.push_back(form);
+    if (result.kind == Operand::Kind::Bits) result.form = std::move(form);
+    return result;
+}
+
+lift::ExpressionPtr FunctionCompiler::unary_form(std::string op, std::uint32_t type, const Operand& operand) {
+    auto a = form_of(operand);
+    return a ? lift::unary(std::move(op), type, std::move(a)) : nullptr;
+}
+
+lift::ExpressionPtr FunctionCompiler::binary_form(std::string op, std::uint32_t type, const Operand& left,
+                                                  const Operand& right) {
+    auto a = form_of(left);
+    auto b = form_of(right);
+    return a && b ? lift::binary(std::move(op), type, std::move(a), std::move(b)) : nullptr;
+}
+
+lift::ExpressionPtr FunctionCompiler::convert_form(std::uint32_t type, const Operand& operand) {
+    auto a = form_of(operand);
+    return a ? lift::convert(type, std::move(a)) : nullptr;
+}
+
 void FunctionCompiler::fail_when(const Signal& condition, std::uint32_t reason, const Span& span) {
     if (current().synth.fail_when(condition, reason) && !current().failure_span) {
         current().failure_span = span;
@@ -1570,6 +1687,26 @@ void FunctionCompiler::close(std::vector<ExitSpec> exits) {
         }
     }
     auto block = open_block.synth.close(std::move(exits));
+    if (c_.lift_hints()) {
+        // The block's lifted form: each value an exit reads and, between two
+        // exits, the condition. The schedule fixes the order of the checks.
+        lift::LiftedForm form;
+        form.shared = true;
+        form.schedule = std::move(open_block.schedule);
+        bool complete = true;
+        for (const auto& [lane, value] : open_block.synth.value_forms()) {
+            complete = complete && value;
+            form.values[lane] = value;
+        }
+        std::size_t normal = 0;
+        for (const auto& exit : block.exits) normal += exit.kind != nvr::ExitKind::Trap || normal == 0 ? 1 : 0;
+        if (normal == 2) {
+            form.condition = open_block.condition;
+            form.exit_when_true = open_block.exit_when_true;
+            complete = complete && form.condition;
+        }
+        if (complete && normal <= 2) c_.add_hint(index_, open_block.index, std::move(form));
+    }
     for (const auto* candidate : {&open_block.failure_span, &open_block.operation_span, &open_block.statement_span}) {
         if (*candidate && !(*candidate)->file.empty()) {
             spans_[open_block.index] = **candidate;
@@ -1592,6 +1729,8 @@ void FunctionCompiler::jump(std::uint32_t target, bool poll) {
 
 void FunctionCompiler::branch(const Operand& condition, std::uint32_t when_true, std::uint32_t when_false) {
     const auto bit = lanes(condition).front();
+    current().condition = form_of(condition);
+    current().exit_when_true = 0;
     ExitSpec yes;
     yes.kind = nvr::ExitKind::Continue;
     yes.when = bit;
@@ -2265,21 +2404,26 @@ SymbolId FunctionCompiler::resolve_global(const IrNode& node) {
 Operand FunctionCompiler::unary(const IrNode& node) {
     const auto operand = expression(node.operands.front());
     if (node.text == "!") {
-        return bits(c_.scalar(nvr::TypeKind::Bool), {Circuit::logical_not(lanes(operand).front())});
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        auto result = bits(boolean, {Circuit::logical_not(lanes(operand).front())});
+        return described(std::move(result), unary_form("!", boolean, operand));
     }
     if (node.text == "~") {
         auto word = lanes(operand);
         std::ranges::transform(word, word.begin(), Circuit::logical_not);
-        return bits(c_.type_of(node.type, node.span), std::move(word));
+        const auto type = c_.type_of(node.type, node.span);
+        return described(bits(type, std::move(word)), unary_form("~", type, operand));
     }
     if (node.type.kind == TypeKind::Float) {
-        return bits(c_.type_of(node.type, node.span), float_negate(lanes(operand)));
+        const auto type = c_.type_of(node.type, node.span);
+        return described(bits(type, float_negate(lanes(operand))), unary_form("neg", type, operand));
     }
     const auto format = integer_format(node.type, node.span);
     const auto input = lanes(operand);
     auto result = negate(current().synth.circuit(), input, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
-    return bits(c_.type_of(node.type, node.span), std::move(result.value));
+    const auto type = c_.type_of(node.type, node.span);
+    return described(bits(type, std::move(result.value)), unary_form("neg", type, operand));
 }
 
 Operand FunctionCompiler::binary(const IrNode& node) {
@@ -2290,7 +2434,9 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         const auto left = lanes(operands[0]);
         const auto right = lanes(operands[1]);
         const auto same = equal(current().synth.circuit(), left, right);
-        return bits(c_.scalar(nvr::TypeKind::Bool), {op == "==" ? same : Circuit::logical_not(same)});
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        return described(bits(boolean, {op == "==" ? same : Circuit::logical_not(same)}),
+                         binary_form(op, boolean, operands[0], operands[1]));
     }
     if (operand_type.kind == TypeKind::String) {
         auto operands = sequence(node.operands);
@@ -2309,15 +2455,18 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     const auto b = lanes(operands[1]);
     auto& circuit = current().synth.circuit();
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+    // What the operation computes, for the block's LIFT hint.
+    const auto form = [&](std::uint32_t type) { return binary_form(op, type, operands[0], operands[1]); };
     if (operand_type.kind == TypeKind::Bool) {
         const auto same = Circuit::logical_not(circuit.logical_xor(a.front(), b.front()));
-        return bits(boolean, {op == "==" ? same : Circuit::logical_not(same)});
+        return described(bits(boolean, {op == "==" ? same : Circuit::logical_not(same)}), form(boolean));
     }
     const auto format = integer_format(operand_type, node.span);
+    const auto result_type = c_.type_of(node.type, node.span);
     if (is_shift(op)) {
         auto result = shift(circuit, a, b, op == ">>", format.is_signed);
         fail_when(result.failure, arithmetic_failure, node.span);
-        return bits(c_.type_of(node.type, node.span), std::move(result.value));
+        return described(bits(result_type, std::move(result.value)), form(result_type));
     }
     if (is_bitwise_binary(op)) {
         Word result;
@@ -2331,7 +2480,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
                 result.push_back(circuit.logical_xor(a[i], b[i]));
             }
         }
-        return bits(c_.type_of(node.type, node.span), std::move(result));
+        return described(bits(result_type, std::move(result)), form(result_type));
     }
     if (is_comparison(op)) {
         Signal result;
@@ -2348,7 +2497,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         } else {
             result = Circuit::logical_not(less(circuit, a, b, format.is_signed));
         }
-        return bits(boolean, {result});
+        return described(bits(boolean, {result}), form(boolean));
     }
     Checked result;
     if (op == "+") {
@@ -2365,7 +2514,7 @@ Operand FunctionCompiler::binary(const IrNode& node) {
         throw Diagnostic(node.span, "operator '" + op + "' is not supported").with_code("E0801");
     }
     fail_when(result.failure, arithmetic_failure, node.span);
-    return bits(c_.type_of(node.type, node.span), std::move(result.value));
+    return described(bits(result_type, std::move(result.value)), form(result_type));
 }
 
 Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, Operand right,
@@ -2386,7 +2535,8 @@ Operand FunctionCompiler::isolated_arithmetic(const IrNode& node, Operand left, 
                   : node.text == "/" ? divide(circuit, a, b, format.is_signed)
                                      : remainder(circuit, a, b, format.is_signed);
     fail_when(result.failure, arithmetic_failure, node.span);
-    auto value = bits(c_.type_of(node.type, node.span), std::move(result.value));
+    const auto type = c_.type_of(node.type, node.span);
+    auto value = described(bits(type, std::move(result.value)), binary_form(node.text, type, left, right));
     spill(value);
     const auto next = new_block();
     jump(next);
@@ -2419,13 +2569,15 @@ Operand FunctionCompiler::float_binary(const IrNode& node, Operand left, Operand
                                            : FloatComparison::GreaterEqual;
         const auto a = lanes(left);
         const auto b = lanes(right);
-        return bits(c_.scalar(nvr::TypeKind::Bool), {float_compare(current().synth.circuit(), a, b, format, comparison)});
+        const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+        return described(bits(boolean, {float_compare(current().synth.circuit(), a, b, format, comparison)}),
+                         binary_form(op, boolean, left, right));
     }
     const auto type = c_.type_of(node.type, node.span);
     if (left.kind == Operand::Kind::Immediate || right.kind == Operand::Kind::Immediate) {
         const auto a = lanes(left);
         const auto b = lanes(right);
-        return bits(type, compute(current().synth.circuit(), a, b));
+        return described(bits(type, compute(current().synth.circuit(), a, b)), binary_form(op, type, left, right));
     }
     spill(left);
     spill(right);
@@ -2434,7 +2586,7 @@ Operand FunctionCompiler::float_binary(const IrNode& node, Operand left, Operand
     begin(own, node.span);
     const auto a = lanes(left);
     const auto b = lanes(right);
-    auto value = bits(type, compute(current().synth.circuit(), a, b));
+    auto value = described(bits(type, compute(current().synth.circuit(), a, b)), binary_form(op, type, left, right));
     spill(value);
     const auto next = new_block();
     jump(next);
@@ -2448,11 +2600,13 @@ Operand FunctionCompiler::convert(const IrNode& node) {
     auto& circuit = current().synth.circuit();
     const auto type = c_.type_of(node.type, node.span);
     if (source.type.kind == TypeKind::Float && node.type.kind == TypeKind::Float) {
-        return bits(type, float_convert(circuit, lanes(operand), float_of(source.type), float_of(node.type)));
+        auto result = bits(type, float_convert(circuit, lanes(operand), float_of(source.type), float_of(node.type)));
+        return described(std::move(result), convert_form(type, operand));
     }
     if (node.type.kind == TypeKind::Float) {
         const auto from = integer_format(source.type, source.span);
-        return bits(type, float_from_integer(circuit, lanes(operand), from.is_signed, float_of(node.type)));
+        auto result = bits(type, float_from_integer(circuit, lanes(operand), from.is_signed, float_of(node.type)));
+        return described(std::move(result), convert_form(type, operand));
     }
     const auto to = integer_format(node.type, node.span);
     Checked result;
@@ -2463,7 +2617,7 @@ Operand FunctionCompiler::convert(const IrNode& node) {
         result = convert_integer(circuit, lanes(operand), from.is_signed, to.bits, to.is_signed);
     }
     fail_when(result.failure, arithmetic_failure, node.span);
-    return bits(type, std::move(result.value));
+    return described(bits(type, std::move(result.value)), convert_form(type, operand));
 }
 
 Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector<Operand> operands,
@@ -2536,10 +2690,13 @@ Operand FunctionCompiler::short_circuit(const IrNode& node) {
     if (graph_only(node)) {
         // Evaluating the right operand cannot fail or have an effect, so the
         // graph may compute both operands.
-        const auto a = lanes(expression(node.operands.front())).front();
-        const auto b = lanes(expression(right)).front();
+        const auto left = expression(node.operands.front());
+        const auto a = lanes(left).front();
+        const auto right_value = expression(right);
+        const auto b = lanes(right_value).front();
         auto& circuit = current().synth.circuit();
-        return bits(boolean, {conjunction ? circuit.logical_and(a, b) : circuit.logical_or(a, b)});
+        return described(bits(boolean, {conjunction ? circuit.logical_and(a, b) : circuit.logical_or(a, b)}),
+                         binary_form(node.text, boolean, left, right_value));
     }
     const auto left = expression(node.operands.front());
     const auto result = new_slot(boolean);
@@ -2557,6 +2714,10 @@ Operand FunctionCompiler::short_circuit(const IrNode& node) {
     undecided.kind = nvr::ExitKind::Continue;
     undecided.when = Circuit::logical_not(decided.when);
     undecided.resume = evaluate_right;
+    // Exit 0 continues to the right operand when the left one is true for
+    // && and false for ||.
+    current().condition = form_of(left);
+    current().exit_when_true = conjunction ? 0 : 1;
     close({undecided, decided});
     begin(evaluate_right, right.span);
     auto value = expression(right);
@@ -2932,7 +3093,8 @@ Operand FunctionCompiler::to_index(const Operand& index, const IrType& type, con
         fail_when(word.back(), bounds_failure, span);
     }
     word.resize(64, Signal::of(0));
-    return bits(c_.scalar(nvr::TypeKind::Unsigned, 64), std::move(word));
+    const auto u64 = c_.scalar(nvr::TypeKind::Unsigned, 64);
+    return described(bits(u64, std::move(word)), unary_form("index", u64, index));
 }
 
 // ---------------------------------------------------------------------------
@@ -3374,6 +3536,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     }
     ConversionOptions conversion;
     conversion.source_map = options.source_map;
+    conversion.lift_hints = options.lift_hints;
     return convert(program, conversion);
 }
 

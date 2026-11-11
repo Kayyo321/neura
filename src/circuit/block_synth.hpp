@@ -5,8 +5,13 @@
 
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <utility>
 #include <vector>
+
+namespace neura::lift {
+struct Expression;
+} // namespace neura::lift
 
 namespace neura::backend {
 
@@ -28,6 +33,10 @@ struct Operand {
     // function compiler uses these.
     std::uint64_t generation = 0;
     std::uint32_t home = nvr::absent;
+    // The typed operation a Bits operand computes over its block's inputs,
+    // when the converter could state it (src/lift/expression.hpp). It is
+    // recorded as an optional LIFT hint and never affects the block.
+    std::shared_ptr<const lift::Expression> form;
 };
 
 struct ExitSpec {
@@ -96,6 +105,11 @@ public:
     const std::map<std::uint32_t, Operand>& pending() const { return pending_; }
     const std::vector<nvr::Value>& inputs() const { return inputs_; }
     const std::vector<std::pair<std::uint32_t, Signal>>& failures() const { return failures_; }
+    // After close(): the form of the operand behind each value's output
+    // lanes, by first lane, or null when the operand had none.
+    const std::map<std::uint32_t, std::shared_ptr<const lift::Expression>>& value_forms() const {
+        return value_forms_;
+    }
 
     // Ends the block. The first failing check, in evaluation order, selects
     // its trap; the given exits apply only when no check fails.
@@ -109,6 +123,7 @@ private:
     std::map<std::vector<WireId>, std::uint32_t> output_lanes_;
     std::map<std::uint32_t, Operand> pending_;
     std::vector<std::pair<std::uint32_t, Signal>> failures_;
+    std::map<std::uint32_t, std::shared_ptr<const lift::Expression>> value_forms_;
 };
 
 } // namespace neura::backend

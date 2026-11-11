@@ -260,6 +260,7 @@ neura_target_defaults(neura_circuit)
 add_library(neura_lift STATIC
     src/lift/expression.cpp
     src/lift/hints.cpp
+    src/lift/hints.cpp
     src/lift/lift.cpp
     src/lift/lowered_block.cpp
     src/lift/overflow.cpp
@@ -305,7 +306,7 @@ add_library(neura_compiler STATIC
     src/util/source_map.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
-target_link_libraries(neura_compiler PUBLIC neura_circuit neura_nvr PRIVATE neura_libclang)
+target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their

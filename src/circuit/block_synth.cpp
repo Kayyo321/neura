@@ -63,6 +63,9 @@ nvr::Value BlockSynthesizer::value(const Operand& operand) {
             for (const auto wire : wires) {
                 circuit_.output(Signal::wire(wire));
             }
+            value_forms_[it->second] = operand.form;
+        } else if (auto& form = value_forms_[it->second]; !form) {
+            form = operand.form;
         }
         return {nvr::ValueKind::Lanes, operand.type, it->second};
     }
