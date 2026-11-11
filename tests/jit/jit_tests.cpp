@@ -830,10 +830,15 @@ void check_same(const Captured& actual, const Captured& expected, const std::str
     }
 }
 
-// Whether this process runs regions at all, and as native code.
+// Whether this process runs regions at all, and as native code. Whole runs
+// execute generated code under the same rule as the region programs above
+// (native_runs_here): where `auto` enables it, and elsewhere only when the
+// environment asks with NEURA_JIT=on, so that a build on a platform whose
+// code is not yet verified by execution does not depend on it.
 bool regions_run() { return nvm::tier_ceiling() >= 2; }
 bool native_enabled() {
-    return regions_run() && jit::availability(jit::combine(jit::Mode::On, jit::environment_mode())).enabled;
+    return regions_run() && native_runs_here() &&
+           jit::availability(jit::combine(jit::Mode::On, jit::environment_mode())).enabled;
 }
 
 // Runs `image` at tier 0, at tier 2 on the interpreter, and at tier 2 with
@@ -848,7 +853,7 @@ void compare_modes(const nvr::Image& image, nvm::TierCache& interpreted, nvm::Ti
     auto off = limits(2, jit::Mode::Off, &interpreted);
     adjust(off);
     check_same(run_captured(image, off, std::nullopt, arguments), reference, label + " (interpreter)");
-    if (!jit::availability(jit::Mode::On).enabled) return;
+    if (!native_enabled()) return;
     auto on = limits(2, jit::Mode::On, &native);
     adjust(on);
     check_same(run_captured(image, on, std::nullopt, arguments), reference, label + " (native)");
@@ -1161,7 +1166,7 @@ NEURA_TEST(jit, an_exception_in_a_helper_leaves_native_code_as_it_leaves_the_int
             const auto off = run(2, jit::Mode::Off, &interpreted);
             check_equal(off.first, reference.first, label + " (interpreter)");
             check_equal(off.second, reference.second, label + " writes (interpreter)");
-            if (!jit::availability(jit::Mode::On).enabled) continue;
+            if (!native_enabled()) continue;
             const auto on = run(2, jit::Mode::On, &native);
             check_equal(on.first, reference.first, label + " (native)");
             check_equal(on.second, reference.second, label + " writes (native)");
