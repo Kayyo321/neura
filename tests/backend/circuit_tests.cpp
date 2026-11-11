@@ -4,7 +4,7 @@
 // reference results are computed with ordinary C++ integer arithmetic,
 // guarded so that the reference itself never overflows.
 
-#include "backend/circuit.hpp"
+#include "circuit/circuit.hpp"
 #include "circuit_tests.hpp"
 #include "fixtures.hpp"
 #include "nvm/layered.hpp"

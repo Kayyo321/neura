@@ -240,6 +240,17 @@ add_library(neura_lifecycle STATIC
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
+# The neuron circuit library: gadgets for bits, integers, and IEEE floats,
+# and block assembly. The converter emits graphs with it and the decompiler
+# regenerates them with it, so it depends only on the image format.
+add_library(neura_circuit STATIC
+    src/circuit/block_synth.cpp
+    src/circuit/circuit.cpp
+    src/circuit/float_circuit.cpp
+)
+target_link_libraries(neura_circuit PUBLIC neura_nvr)
+neura_target_defaults(neura_circuit)
+
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
     src/cli/source_loader.cpp
@@ -263,13 +274,10 @@ add_library(neura_compiler STATIC
     src/ir-optimization/integer_folding.cpp
     src/ir-optimization/optimizer.cpp
     src/ir-optimization/passes.cpp
-    src/backend/block_synth.cpp
-    src/backend/circuit.cpp
-    src/backend/float_circuit.cpp
     src/backend/converter.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
-target_link_libraries(neura_compiler PUBLIC neura_nvr PRIVATE neura_libclang)
+target_link_libraries(neura_compiler PUBLIC neura_circuit neura_nvr PRIVATE neura_libclang)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their

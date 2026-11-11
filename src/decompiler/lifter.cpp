@@ -1,8 +1,8 @@
 #include "lifter.hpp"
 
-#include "backend/block_synth.hpp"
-#include "backend/circuit.hpp"
-#include "backend/float_circuit.hpp"
+#include "circuit/block_synth.hpp"
+#include "circuit/circuit.hpp"
+#include "circuit/float_circuit.hpp"
 #include "neura-ir/float.hpp"
 #include "nvm/machine.hpp"
 

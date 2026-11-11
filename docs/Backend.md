@@ -19,9 +19,9 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/neura-ir/nir_format.*` | `neura_compiler` | The `.nir` reader and writer. [NeuraIR file format](NirFormat.md) specifies the encoding. |
 | `src/neura-ir/specialize.*` | `neura_compiler` | Generic specialization. |
 | `src/neura-ir/float.*` | `neura_compiler` | Float formats and exact decimal literal conversion. |
-| `src/backend/circuit.*` | `neura_compiler` | Neuron circuits for bits and fixed-width integers. |
-| `src/backend/float_circuit.*` | `neura_compiler` | Neuron circuits for IEEE floating point in any exponent and fraction width. |
-| `src/backend/block_synth.*` | `neura_compiler` | Block assembly: inputs, checks, pending assignments, exits, and the selector. The converter and the decompiler share it. |
+| `src/circuit/circuit.*` | `neura_circuit` | Neuron circuits for bits and fixed-width integers. |
+| `src/circuit/float_circuit.*`, `float_format.hpp` | `neura_circuit` | Neuron circuits for IEEE floating point in any exponent and fraction width, and the format description they share with the compiler. |
+| `src/circuit/block_synth.*` | `neura_circuit` | Block assembly: inputs, checks, pending assignments, exits, and the selector. The converter and the decompiler share it. |
 | `src/backend/converter.*` | `neura_compiler` | `IRtoNeuronConversion` and the build pipeline shared by both routes. |
 | `src/nvr/` | `neura_nvr` | The image model, the writer, and the validating loader. |
 | `src/nvm/` | `neura_nvm` | Execution, graph devices and layered tables, fleets, host services, the console sink, and host traces. |
@@ -30,7 +30,7 @@ hello.nvr --> load --> bind imports --> Execution
 | `src/launcher/` | `neura_launcher`, `neura_launcher_static` | CPU launchers and the executable container. |
 | `src/decompiler/` | `neura_decompiler` | Assembly, lifting, and the reconstruction form ([Decompiler](Decompiler.md)). |
 
-`neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
+`neura_circuit` links only `neura_nvr` and `neura_compiler` links it, so the circuit library builds without the rest of the compiler. `neura_nvm` links only `neura_nvr`, so a runtime-only distribution needs no compiler code. The `neura` executable links both and provides `neura run`.
 
 ## Supported NeuraIR
 
@@ -143,7 +143,7 @@ Arithmetic uses these gadgets:
 - Integer conversions extend or truncate lanes and check that every dropped lane equals the sign the target needs.
 - Integer shifts use one mux stage per power of two below the word width. The left shift fills with zeros, and the right shift fills with zeros or the sign bit. Any set lane above the count lanes used by the stages selects a reason-1 trap.
 
-Float circuits (`src/backend/float_circuit.cpp`) are written once for any exponent and fraction width and instantiated for the four formats. An operand is unpacked into sign, exponent, and significand with an explicit leading bit, and flags for NaN, infinity, and zero. Addition aligns the smaller operand with a barrel shifter that keeps a sticky bit, adds or subtracts with three extra lanes (guard, round, sticky), and normalizes. Multiplication forms the full product of the significands with the column multiplier. Division normalizes both significands and runs restoring division for `fraction + 3` quotient bits, with the remainder as sticky. Every operation and conversion ends in one shared round-and-pack step: a leading-zero normalization limited by the exponent, a right shift into the subnormal range, round to nearest even, and overflow to infinity. Special cases select the canonical NaN, an infinity, or a signed zero last.
+Float circuits (`src/circuit/float_circuit.cpp`) are written once for any exponent and fraction width and instantiated for the four formats. An operand is unpacked into sign, exponent, and significand with an explicit leading bit, and flags for NaN, infinity, and zero. Addition aligns the smaller operand with a barrel shifter that keeps a sticky bit, adds or subtracts with three extra lanes (guard, round, sticky), and normalizes. Multiplication forms the full product of the significands with the column multiplier. Division normalizes both significands and runs restoring division for `fraction + 3` quotient bits, with the remainder as sticky. Every operation and conversion ends in one shared round-and-pack step: a leading-zero normalization limited by the exponent, a right shift into the subnormal range, round to nearest even, and overflow to infinity. Special cases select the canonical NaN, an infinity, or a signed zero last.
 
 Measured cost of one signed operation on two variable operands, in neurons and edges:
 
