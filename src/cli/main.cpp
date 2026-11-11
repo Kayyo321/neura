@@ -2,6 +2,7 @@
 #include "diagnostic_render.hpp"
 #include "explain.hpp"
 #include "neura-ir/tags.hpp"
+#include "util/diagnostic_codes.hpp"
 #include "util/suggest.hpp"
 #include "backend/converter.hpp"
 #include "decompiler/assembly.hpp"
@@ -524,6 +525,15 @@ Options read_options(int argc, char** argv) {
                 if (warning.empty() || warning.find_first_not_of("abcdefghijklmnopqrstuvwxyz0123456789-") !=
                                            std::string_view::npos)
                     throw std::runtime_error("expected a warning name after " + std::string(enable ? "-W" : "-Wno-"));
+                if (!neura::find_warning(warning)) {
+                    std::vector<std::string> names;
+                    for (const auto& entry : neura::warning_codes) names.emplace_back(entry.name);
+                    std::string message = "unknown warning '" + std::string(warning) + "'";
+                    if (const auto close = neura::closest_name(warning, names))
+                        message += "; did you mean " + *close + "?";
+                    else message += "; `neura explain --list` lists the warnings and their names";
+                    throw std::runtime_error(message);
+                }
                 options.diagnostics.warnings.insert_or_assign(std::string(warning), enable);
             }
         } else if (arg == "--max-errors" || arg.starts_with("--max-errors=")) {
@@ -1656,7 +1666,8 @@ int dispatch(const Options& options) {
         std::vector<std::string> names;
         for (const auto& tag : neura::tag_registry()) names.emplace_back(tag.name);
         std::string message = "'" + options.explain_code + "' is not a tag";
-        if (const auto close = neura::closest_name(options.explain_code, names)) message += "; did you mean " + *close + "?";
+        if (const auto close = neura::closest_name(options.explain_code, names))
+            message += "; did you mean " + *close + "?";
         else message += "; `neura tags` lists the tags";
         throw std::runtime_error(message);
     }

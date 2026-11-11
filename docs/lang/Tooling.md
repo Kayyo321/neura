@@ -233,7 +233,7 @@ Each `json` object has `code` (a string, or `null`), `severity` (`error` or `war
 
 | Option | Meaning |
 | --- | --- |
-| `-W<name>`, `-Wno-<name>` | Enable or disable the warning `<name>`. Warnings are enabled by default; the last option for a name wins. |
+| `-W<name>`, `-Wno-<name>` | Enable or disable the warning `<name>`. Warnings are enabled by default; the last option for a name wins. A name that is not a warning's is an error. |
 | `-Werror` | Report every warning as an error; the command then exits with status 1. |
 | `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. A warning about a use is reported where the use is, so a program that uses a deprecated standard library declaration gets the warning without this option. |
 

@@ -138,6 +138,34 @@ int sink_suite() {
     first.also(Diagnostic(at("b.nra", 1, 5, 4, 1), "second").with_code("E0101"));
     CHECK(first.following().size() == 1 && std::string(first.following().front().what()) == "second");
     CHECK(Diagnostic(at("b.nra", 1, 1, 0, 3), "plain").following().empty());
+
+    // Warnings that a #Deny tag made errors leave the sink as errors, and a
+    // warning reported twice for one construct is kept once; entries before
+    // the mark are not touched.
+    DiagnosticSink tags;
+    tags.report(Diagnostic::warning(at("b.nra", 1, 1, 0, 3), "deprecated", "before").with_code("W0001"));
+    tags.report(Diagnostic::warning(at("b.nra", 1, 1, 0, 3), "deprecated", "before").with_code("W0001"));
+    const auto mark = tags.size();
+    tags.report(Diagnostic::warning(at("b.nra", 1, 5, 4, 1), "deprecated", "use").with_code("W0001"));
+    tags.report(Diagnostic::warning(at("b.nra", 1, 5, 4, 1), "deprecated", "use").with_code("W0001"));
+    auto denied = Diagnostic::warning(at("b.nra", 1, 9, 8, 1), "experimental", "denied").with_code("W0002");
+    denied.edit().severity = Severity::Error;
+    tags.report(denied);
+    tags.report(Diagnostic::warning(at("b.nra", 1, 9, 8, 1), "experimental", "other").with_code("W0002"));
+    tags.deduplicate(mark);
+    CHECK(tags.size() == mark + 3);
+    const auto errors = tags.take_errors(mark);
+    CHECK(errors.size() == 1 && std::string(errors.front().what()) == "denied");
+    CHECK(tags.size() == mark + 2);
+    CHECK(std::string(tags.entries().at(mark).what()) == "use");
+    CHECK(std::string(tags.entries().at(mark + 1).what()) == "other");
+    CHECK(std::string(tags.entries().at(1).what()) == "before");
+
+    // Warning codes are registered with their names, and explain finds them.
+    CHECK(find_warning("deprecated") && find_warning("deprecated")->code == "W0001");
+    CHECK(find_warning("W0003") && find_warning("W0003")->name == "unused-result");
+    CHECK(find_warning("E0101") == nullptr);
+    CHECK(diagnostic_title("W0004") == "#Inline(always: true) function that cannot be inlined");
     return failures;
 }
 

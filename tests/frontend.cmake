@@ -760,3 +760,8 @@ foreach(tag IN LISTS registered_tags)
         message(FATAL_ERROR "docs/lang/Tags.md does not list ${tag}")
     endif()
 endforeach()
+# -W and -Wno- take the name of a warning.
+run_status(output status check -Wdepricated tag-warnings.nra)
+if(NOT status STREQUAL "1" OR NOT output MATCHES "unknown warning 'depricated'; did you mean deprecated[?]")
+    message(FATAL_ERROR "Expected -Wdepricated to be rejected with a suggestion (${status})\n${output}")
+endif()

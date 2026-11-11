@@ -13,7 +13,6 @@
 #include <charconv>
 #include <filesystem>
 #include <ostream>
-#include <set>
 #include <tuple>
 #include <utility>
 
@@ -154,7 +153,8 @@ std::string normalized_warning(std::string text) {
 }
 
 // The literal value of one argument checked against its parameter.
-IrAttributeValue argument_value(const TagInfo& tag, const TagParameter& parameter, const TagArgumentSyntax& argument) {
+IrAttributeValue argument_value(const TagInfo& tag, const TagParameter& parameter,
+                                const TagArgumentSyntax& argument) {
     using Kind = TagArgumentSyntax::Kind;
     const auto mismatch = [&] {
         auto error = Diagnostic(argument.span, "#" + std::string(tag.name) + " expects " +
@@ -164,7 +164,8 @@ IrAttributeValue argument_value(const TagInfo& tag, const TagParameter& paramete
             .with_code("E0905").label("expected " + article(type_name(parameter.type)));
         if (parameter.type == 't' && argument.kind != Kind::String && argument.kind != Kind::List) {
             if (const auto text = source_text(argument.span))
-                error.suggest("write it as a string", argument.span, "\"" + *text + "\"", Applicability::MaybeIncorrect);
+                error.suggest("write it as a string", argument.span, "\"" + *text + "\"",
+                              Applicability::MaybeIncorrect);
         }
         error.help("the signature is #" + tag_signature(tag));
         return error;
@@ -207,8 +208,8 @@ IrAttributeValue argument_value(const TagInfo& tag, const TagParameter& paramete
             const auto& text = argument.text;
             const auto [end, error] = std::from_chars(text.data(), text.data() + text.size(), value);
             if (error != std::errc{} || end != text.data() + text.size())
-                throw Diagnostic(argument.span, "the integer " + text + " does not fit in 64 bits").with_code("E0905")
-                    .label("out of range for #" + std::string(tag.name));
+                throw Diagnostic(argument.span, "the integer " + text + " does not fit in 64 bits")
+                    .with_code("E0905").label("out of range for #" + std::string(tag.name));
             return attribute_signed(value);
         }
         if (parameter.type == 'x' && argument.kind == Kind::Float) return attribute_text(argument.text);
@@ -235,51 +236,52 @@ std::vector<TagArgument> bind_arguments(const TagInfo& tag, const TagSyntax& syn
     std::vector<const TagArgumentSyntax*> given(parameters.size(), nullptr);
     std::size_t position = 0;
     bool named = false;
-    const std::string tag_text = "#" + std::string(tag.name);
+    const std::string written = "#" + std::string(tag.name);
     for (const auto& argument : syntax.arguments) {
         std::size_t index = 0;
         if (!argument.name.empty()) {
             const auto found = std::ranges::find(parameters, argument.name, &TagParameter::name);
             if (found == parameters.end()) {
-                auto error = Diagnostic(*argument.name_span, tag_text + " has no argument " + in_quotes(argument.name))
+                auto error = Diagnostic(*argument.name_span,
+                                        written + " has no argument " + in_quotes(argument.name))
                     .with_code("E0902").label("unknown argument");
                 std::vector<std::string> names;
                 for (const auto& parameter : parameters) names.push_back(parameter.name);
                 if (const auto close = closest_name(argument.name, names))
                     error.suggest("there is an argument with a similar name", *argument.name_span, *close,
                                   Applicability::MaybeIncorrect);
-                error.help(parameters.empty() ? tag_text + " takes no arguments"
+                error.help(parameters.empty() ? written + " takes no arguments"
                                               : "the signature is #" + tag_signature(tag));
                 throw error;
             }
             index = static_cast<std::size_t>(found - parameters.begin());
             if (given[index] && !parameters[index].rest) {
-                throw Diagnostic(*argument.name_span, "the argument " + in_quotes(argument.name) + " of " + tag_text +
+                throw Diagnostic(*argument.name_span, "the argument " + in_quotes(argument.name) + " of " + written +
                                                           " is given twice")
                     .with_code("E0904").label("given again here").label(given[index]->span, "first given here");
             }
             named = true;
         } else {
             if (named) {
-                throw Diagnostic(argument.span, "a positional argument of " + tag_text + " follows a named one")
+                throw Diagnostic(argument.span, "a positional argument of " + written + " follows a named one")
                     .with_code("E0902").label("positional argument after a named argument")
                     .help("name it, or move it before the named arguments");
             }
             if (parameters.empty()) {
-                throw Diagnostic(argument.span, tag_text + " takes no arguments").with_code("E0902")
-                    .label("unexpected argument").help("write " + tag_text + " without parentheses");
+                throw Diagnostic(argument.span, written + " takes no arguments").with_code("E0902")
+                    .label("unexpected argument").help("write " + written + " without parentheses");
             }
             const bool rest = parameters.back().rest;
             if (position >= parameters.size() && !rest) {
-                throw Diagnostic(argument.span, tag_text + " takes " + std::to_string(parameters.size()) +
+                throw Diagnostic(argument.span, written + " takes " + std::to_string(parameters.size()) +
                                                     (parameters.size() == 1 ? " argument" : " arguments"))
                     .with_code("E0902").label("unexpected argument")
                     .help("the signature is #" + tag_signature(tag));
             }
             index = std::min(position, parameters.size() - 1);
             if (given[index] && !parameters[index].rest) {
-                throw Diagnostic(argument.span, "the argument " + in_quotes(parameters[index].name) + " of " + tag_text +
-                                                    " is given twice")
+                throw Diagnostic(argument.span, "the argument " + in_quotes(parameters[index].name) + " of " +
+                                                    written + " is given twice")
                     .with_code("E0904").label("given again here").label(given[index]->span, "first given here");
             }
             ++position;
@@ -288,7 +290,7 @@ std::vector<TagArgument> bind_arguments(const TagInfo& tag, const TagSyntax& syn
         if (!given[index]) given[index] = &argument;
         if (argument.kind == TagArgumentSyntax::Kind::List) {
             if (!parameter.rest) {
-                throw Diagnostic(argument.span, tag_text + " expects one " + type_name(parameter.type) + " for " +
+                throw Diagnostic(argument.span, written + " expects one " + type_name(parameter.type) + " for " +
                                                     in_quotes(parameter.name) + ", found a list")
                     .with_code("E0905").label("expected " + article(type_name(parameter.type)));
             }
@@ -303,7 +305,7 @@ std::vector<TagArgument> bind_arguments(const TagInfo& tag, const TagSyntax& syn
         const bool empty_rest = parameter.rest && parameter.at_least_one &&
             std::ranges::none_of(result, [&](const TagArgument& item) { return item.name == parameter.name; });
         if ((parameter.required && !given[i]) || empty_rest) {
-            throw Diagnostic(syntax.span, tag_text + " needs " +
+            throw Diagnostic(syntax.span, written + " needs " +
                                               (parameter.rest ? "at least one " + type_name(parameter.type) + " for "
                                                               : "the argument ") + in_quotes(parameter.name))
                 .with_code("E0903").label("missing " + in_quotes(parameter.name))
@@ -461,7 +463,8 @@ void internal_use(const IrProgram& program, SymbolId target, const Span& use, Sy
     auto error = Diagnostic(use, std::string(kind_word(program, target)) + " " + in_quotes(item.name) +
                                      " is internal to its library")
         .with_code("E0911").label("used outside the library that declares it");
-    if (const auto at = tag_span(item, TagId::Internal)) error.label(*at, in_quotes(item.name) + " is marked internal here");
+    if (const auto at = tag_span(item, TagId::Internal))
+        error.label(*at, in_quotes(item.name) + " is marked internal here");
     if (declared->standard) {
         error.note("an #Internal declaration of the standard library is usable only inside the standard library");
     } else {
@@ -668,9 +671,10 @@ TagTarget tag_target(const IrProgram& program, SymbolId id) {
     case SymbolKind::Interface: return TagTarget::Interface;
     case SymbolKind::Enum: return TagTarget::Enum;
     case SymbolKind::Variant: return TagTarget::Variant;
-    case SymbolKind::Function:
-        return owner_kind(owner) == SymbolKind::Class || owner_kind(owner) == SymbolKind::Interface ? TagTarget::Method
-                                                                                                    : TagTarget::Function;
+    case SymbolKind::Function: {
+        const auto kind = owner_kind(owner);
+        return kind == SymbolKind::Class || kind == SymbolKind::Interface ? TagTarget::Method : TagTarget::Function;
+    }
     case SymbolKind::Field: return TagTarget::Field;
     case SymbolKind::Local: return TagTarget::Local;
     case SymbolKind::Parameter: return TagTarget::Parameter;
@@ -877,7 +881,8 @@ void finish_tags(const IrProgram& program, SymbolId first, std::size_t mark,
     const auto checks = [&] {
         for (SymbolId id = first; id < program.symbols.size(); ++id) {
             const auto& item = program.symbols[id];
-            if (item.kind != SymbolKind::Class && item.kind != SymbolKind::Interface && item.kind != SymbolKind::Function)
+            if (item.kind != SymbolKind::Class && item.kind != SymbolKind::Interface &&
+                item.kind != SymbolKind::Function)
                 continue;
             const auto declared = spans(id);
             if (!declared) continue;
@@ -907,18 +912,22 @@ void finish_tags(const IrProgram& program, SymbolId first, std::size_t mark,
                     std::string message = "method " + in_quotes(item.name) + " overrides a deprecated method";
                     if (!as_of.empty()) message += ", deprecated since " + as_of;
                     if (!reason.empty()) message += ": " + reason;
-                    auto warning = Diagnostic::warning(declared->name, "deprecated", std::move(message)).with_code("W0001");
+                    auto warning =
+                        Diagnostic::warning(declared->name, "deprecated", std::move(message)).with_code("W0001");
                     if (const auto tag = tag_span(overridden, TagId::Deprecated))
                         warning.label(*tag, in_quotes(overridden.name) + " is marked deprecated here");
-                    if (const auto instead = tag_text(overridden, TagId::Deprecated, "use_instead"); instead && !instead->empty())
+                    const auto instead = tag_text(overridden, TagId::Deprecated, "use_instead");
+                    if (instead && !instead->empty())
                         warning.help("override " + in_quotes(*instead) + " instead");
                     report_scoped_warning(program, id, std::move(warning));
                 }
             }
-            if (item.type.kind == TypeKind::Void && has_tag(item, TagId::NoDiscard) && item.overload_group == no_symbol) {
+            if (item.type.kind == TypeKind::Void && has_tag(item, TagId::NoDiscard) &&
+                item.overload_group == no_symbol) {
                 const auto tag = tag_span(item, TagId::NoDiscard);
-                throw Diagnostic(tag.value_or(declared->name), "#NoDiscard on " + std::string(kind_word(program, id)) +
-                                                                   " " + in_quotes(item.name) + ", which returns nothing")
+                throw Diagnostic(tag.value_or(declared->name), "#NoDiscard on " +
+                                                                   std::string(kind_word(program, id)) + " " +
+                                                                   in_quotes(item.name) + ", which returns nothing")
                     .with_code("E0916").label("there is no result to discard")
                     .label(declared->name, in_quotes(item.name) + " returns void")
                     .help("remove #NoDiscard, or return a value");

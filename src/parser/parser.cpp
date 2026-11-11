@@ -346,7 +346,8 @@ private:
                 }
                 if (variadic && at(","))
                     throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
-                result.push_back({name.span, name.text, std::move(parameter_type), variadic, std::move(parameter_tags)});
+                result.push_back(
+                    {name.span, name.text, std::move(parameter_type), variadic, std::move(parameter_tags)});
             } while (match(","));
         }
         expect(")");
