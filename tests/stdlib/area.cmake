@@ -5,7 +5,11 @@
 #                          twice (output and step counts must be identical)
 #                          and unoptimized (the same tests must pass). An
 #                          optional `// test-options: ...` header line adds
-#                          options such as capabilities.
+#                          options such as capabilities. A file whose tests
+#                          read a live host value, such as the clock, has a
+#                          `// host-dependent-counts: <reason>` header line:
+#                          its two optimized runs must give the same results,
+#                          and their step and heap counts are not compared.
 #   <area>/support/        Modules the test files import; passed with -I.
 #   <area>/traps/*.nra     Programs that must stop with a diagnostic. Header
 #                          lines give `// status: N`, `// stderr: <regex>`,
@@ -55,7 +59,15 @@ foreach(file IN LISTS test_files)
         message(FATAL_ERROR "${AREA}/${name}: tests failed (status ${first_status})\n${first_stdout}${first_stderr}")
     endif()
     neura(second "${TEST_DIR}" test --stats ${test_options} ${support} "${file}")
-    if(NOT second_stdout STREQUAL first_stdout)
+    file(STRINGS "${file}" host_dependent REGEX "^// host-dependent-counts: [^ ]")
+    if(host_dependent)
+        string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+\\)" "" first_compared "${first_stdout}")
+        string(REGEX REPLACE " \\(steps [0-9]+, peak heap cells [0-9]+\\)" "" second_compared "${second_stdout}")
+    else()
+        set(first_compared "${first_stdout}")
+        set(second_compared "${second_stdout}")
+    endif()
+    if(NOT second_status STREQUAL "0" OR NOT second_compared STREQUAL first_compared)
         message(FATAL_ERROR "${AREA}/${name}: a second run differed\n${first_stdout}\n${second_stdout}")
     endif()
     neura(plain "${TEST_DIR}" test --no-optimize ${test_options} ${support} "${file}")
