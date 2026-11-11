@@ -17,19 +17,19 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Ordering** · [`export let Ordering = enum (Less, Equal, Greater)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L6)
-  The three outcomes of comparing a left operand to a right operand.
-- **Ordering** · [`export let reverse = func(o: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L9)
+- **Ordering** · [`export let Ordering = enum (Less, Equal, Greater)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L8)
+  The three outcomes of comparing a left operand to a right operand. Since 0.1.0.
+- **Ordering** · [`export let reverse = func(o: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L11)
   Swaps Less and Greater while preserving Equal.
-- **Ordering** · [`export let then = func(first: Ordering, second: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L20)
+- **Ordering** · [`export let then = func(first: Ordering, second: Ordering) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L22)
   `first` unless it is Equal, for comparing by several keys.
-- **Ordering** · [`export let is_less = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L24)
+- **Ordering** · [`export let is_less = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L26)
   Tests whether the left operand precedes the right.
-- **Ordering** · [`export let is_at_most = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L27)
+- **Ordering** · [`export let is_at_most = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L29)
   Tests whether the left operand precedes or equals the right.
-- **Ordering** · [`export let is_greater = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L30)
+- **Ordering** · [`export let is_greater = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L32)
   Tests whether the left operand follows the right.
-- **Ordering** · [`export let is_at_least = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L33)
+- **Ordering** · [`export let is_at_least = func(o: Ordering) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/ordering.nra#L35)
   Tests whether the left operand follows or equals the right.
 <!-- END SOURCE API -->
 
@@ -76,9 +76,9 @@ The following sections are taken from the [standard library specification](Stdli
 | `to_unsigned(v)`, `to_signed(v)` | The same-width type with the same bit pattern ([section 7.2](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics)). |
 | `hash(v) → uint32` | [Section 5.2](Stdlib-Design#52-equality-hashing-and-text). |
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
-| `to_string_radix(v, radix: int) → string` | Lowercase digits. |
+| `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
-| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. |
+| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
 
@@ -141,11 +141,11 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** The searches, comparisons, trims, splits, `lines`, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a). The text searches use the two-way string-matching algorithm, so a search is linear in the length of the text it reads plus the needle's length, never their product. A kernel is charged by the work its arguments allow (P2a), so the steps of each member are linear: `index_of` and `index_of_from` search in windows that start at 128 bytes and double, so their steps grow with the distance from `from` to the occurrence rather than with the rest of the text, and a loop that calls `index_of_from` after each occurrence is linear in the text; `split`, `split_limit`, and `lines` find every separator in two kernel calls over the text (one counts, one writes the offsets) and then slice the pieces, so they are linear in the text plus the number of pieces.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
-**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 9.1 Contracts
 
@@ -222,6 +222,8 @@ The module `Sorting`. Generic sorting needs G1 for the comparator.
 4. If the result ended in the buffer, write it back to `items` by index. Element writes do not change the list's structural version.
 
 It makes at most about `n log2 n` comparator calls. `ArrayList.sort` calls it on `storage`. `sort_range(items, start, end, c)` sorts part of a list.
+
+**`sort_ascending(items)`** sorts an `int64`, `uint64`, `float64`, `int32`, or `uint32` list in ascending order, with the result `sort` gives with the type's `compare` (`Float64.total_compare` for `float64`, so `-0.0` comes before `0.0` and every NaN comes last, in its original order). The kernels `neura.sort.i64`, `u64`, and `f64` do the work (P2a) for one step per eight element comparisons; an `int32` or `uint32` list is widened into a new list for the kernel and written back by index. Like `sort`, it writes elements and leaves the list's version unchanged. The comparator `sort` stays in Neura, because a kernel cannot call back into the program.
 
 **`binary_search<T>(items: T[list], value: T, c) → int`** requires `items` sorted by `c`. It finds the lowest index whose element is not `Less` than `value`. If that element compares `Equal`, it returns the index, the first of any equal run. Otherwise it returns `-(insertion point) - 1`.
 

@@ -15,28 +15,28 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Arena** · [`export let Arena = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L15)
-  A lifetime for native memory.
-- **Arena.Arena** · [`export let init = func(scope: scopes.Scope)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L20)
+- **Arena** · [`export let Arena = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L17)
+  A lifetime for native memory. Tagged `#Final`.
+- **Arena.Arena** · [`export let init = func(scope: scopes.Scope)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L22)
   Use of_confined or global.
-- **Arena.Arena** · [`export let allocate = func(size: int64, alignment: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L25)
+- **Arena.Arena** · [`export let allocate = func(size: int64, alignment: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L27)
   `size` zeroed bytes aligned to `alignment`, a power of two up to 4096.
-- **Arena.Arena** · [`export let allocate_array = func(layout: MemoryLayout, count: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L39)
+- **Arena.Arena** · [`export let allocate_array = func(layout: MemoryLayout, count: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L41)
   Zeroed memory for `count` consecutive values of `layout`.
-- **Arena.Arena** · [`export let allocate_utf8 = func(text: string) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L48)
+- **Arena.Arena** · [`export let allocate_utf8 = func(text: string) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L50)
   The UTF-8 bytes of `text` followed by a NUL, as a C string. Traps if `text` contains a NUL.
-- **Arena.Arena** · [`export let allocate_bytes = func(bytes: uint8[list]) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L55)
+- **Arena.Arena** · [`export let allocate_bytes = func(bytes: uint8[list]) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L57)
   A copy of `bytes` in native memory.
-- **Arena.Arena** · [`export let is_alive = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L62)
+- **Arena.Arena** · [`export let is_alive = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L64)
   Whether the arena is still open.
-- **Arena.Arena** · [`export let scope = func -> scopes.Scope`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L65)
+- **Arena.Arena** · [`export let scope = func -> scopes.Scope`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L67)
   The scope shared with the arena's segments, for library code.
-- **Arena.Arena** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L69)
+- **Arena.Arena** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L71)
   Frees the arena's memory and unloads its libraries. Closing twice, or closing the global arena, traps.
-- **Arena** · [`export let of_confined = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L75)
+- **Arena** · [`export let of_confined = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L77)
   A new arena that frees its memory when closed (Java's Arena.ofConfined).
-- **Arena** · [`export let of_shared = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L78)
+- **Arena** · [`export let of_shared = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L80)
   The same as of_confined: Neura runs on one thread (Java's Arena.ofShared).
-- **Arena** · [`export let global = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L81)
+- **Arena** · [`export let global = func -> Arena`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/arena.nra#L83)
   The arena whose memory lives until the end of the run (Java's Arena.global).
 <!-- END SOURCE API -->

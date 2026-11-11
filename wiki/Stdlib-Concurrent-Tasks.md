@@ -19,11 +19,11 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Tasks** · [`export let all = func<T>(calls: (func() -> T)[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra#L20)
+- **Tasks** · [`export let all = func<T>(calls: (func() -> T)[list]) -> T[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra#L21)
   Runs every call as a task and returns their results in the order of the calls. Waits for all of them; nothing is cancelled.
-- **Tasks** · [`export let all_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra#L38)
+- **Tasks** · [`export let all_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra#L39)
   Runs every call as a task. If all return Ok, returns their values in the order of the calls. Otherwise returns the first Err in the order the calls completed, after cancelling the calls still running and waiting for every one of them to finish. If the calling task is cancelled while it waits, the calls are cancelled the same way and the result is an Err with the code tasks.cancelled.
-- **Tasks** · [`export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra#L83)
+- **Tasks** · [`export let first_ok = func<T>(calls: (func() -> result.Result<T>)[list]) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/tasks.nra#L84)
   Runs every call as a task and returns the first Ok in the order the calls completed, after cancelling the calls still running and waiting for every one of them to finish. If every call fails, returns the Err of the one that completed last. With no calls, or if the calling task is cancelled while it waits, the result is an Err with the code tasks.empty or tasks.cancelled.
 <!-- END SOURCE API -->
 

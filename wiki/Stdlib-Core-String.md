@@ -19,30 +19,30 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **String** · [`export let Charset = charsets.Charset`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L16)
+- **String** · [`export let Charset = charsets.Charset`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L17)
   Aliases the supported character encodings from Std.Text.Charsets.
-- **String** · [`export let concat = func(s: string, suffix: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L19)
+- **String** · [`export let concat = func(s: string, suffix: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L20)
   Returns the text with suffix appended.
-- **String** · [`export let substring = func(s: string, start: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L22)
+- **String** · [`export let substring = func(s: string, start: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L23)
   Returns the suffix beginning at a UTF-8 byte boundary.
-- **String** · [`export let sub_sequence = func(s: string, start: int, end: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L27)
+- **String** · [`export let sub_sequence = func(s: string, start: int, end: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L28)
   Returns the half-open byte range as an immutable string.
-- **String** · [`export let content_equals = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L30)
+- **String** · [`export let content_equals = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L31)
   Tests for identical UTF-8 bytes.
-- **String** · [`export let compare_to = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L36)
+- **String** · [`export let compare_to = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L37)
   Compares UTF-8 bytes lexicographically and returns -1, 0, or 1.
-- **String** · [`export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L43)
+- **String** · [`export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L40)
   Compares UTF-8 bytes lexicographically after folding ASCII letters.
-- **String** · [`export let to_lower_case = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L47)
-  Applies Unicode lowercase mapping with the root locale rules.
-- **String** · [`export let to_upper_case = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L53)
-  Applies Unicode uppercase mapping with the root locale rules.
-- **String** · [`export let compare_to_ignore_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L59)
+- **String** · [`export let to_lower_case = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L45)
+  Applies Unicode lowercase mapping with the root locale rules. Tagged `#NoDiscard`.
+- **String** · [`export let to_upper_case = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L52)
+  Applies Unicode uppercase mapping with the root locale rules. Tagged `#NoDiscard`.
+- **String** · [`export let compare_to_ignore_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L58)
   Compares scalars after simple uppercase followed by simple lowercase mapping.
-- **String** · [`export let equals_ignore_case = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L63)
+- **String** · [`export let equals_ignore_case = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L62)
   Tests equality using simple scalar case mapping.
 - **String** · [`export let case_fold = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L67)
-  Applies full locale-independent Unicode case folding, which can expand a scalar.
+  Applies full locale-independent Unicode case folding, which can expand a scalar. Tagged `#NoDiscard`.
 - **String** · [`export let compare_to_fold_case = func(s: string, other: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L70)
   Orders the results of full Unicode case folding.
 - **String** · [`export let equals_fold_case = func(s: string, other: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L74)
@@ -73,66 +73,66 @@ The following public declarations are taken from the module source; each links t
   Copies all Unicode scalars into a list in order.
 - **String** · [`export let get_bytes = func(s: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L155)
   Copies the UTF-8 bytes into a new list.
-- **String** · [`export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L164)
-  Encodes strictly and reports the byte offset of an unrepresentable scalar.
-- **String** · [`export let decode_bytes = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L174)
+- **String** · [`export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L165)
+  Encodes strictly and reports the byte offset of an unrepresentable scalar. Tagged `#NoDiscard`.
+- **String** · [`export let decode_bytes = func(bytes: uint8[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L175)
   Decodes UTF-8, substituting U+FFFD for each maximal malformed subpart.
-- **String** · [`export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L182)
-  Decodes UTF-8 strictly, returning an error at the first invalid sequence.
-- **String** · [`export let utf16_length = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L195)
+- **String** · [`export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L184)
+  Decodes UTF-8 strictly, returning an error at the first invalid sequence. Tagged `#NoDiscard`.
+- **String** · [`export let utf16_length = func(s: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L197)
   Explicit UTF-16 adapters. Other positional operations use UTF-8.
-- **String** · [`export let char_at = func(s: string, index: int) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L209)
+- **String** · [`export let char_at = func(s: string, index: int) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L211)
   Returns a UTF-16 code unit by index, including either half of a surrogate pair. Invalid indexes trap.
-- **String** · [`export let to_char_array = func(s: string) -> uint16[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L228)
+- **String** · [`export let to_char_array = func(s: string) -> uint16[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L230)
   Copies the text into UTF-16 code units in a new list.
-- **String** · [`export let chars = func(s: string) -> uint16[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L231)
+- **String** · [`export let chars = func(s: string) -> uint16[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L233)
   Returns the UTF-16 code units as a list.
-- **String** · [`export let get_chars = func(s: string, start: int, end: int, destination: uint16[], destination_start: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L234)
+- **String** · [`export let get_chars = func(s: string, start: int, end: int, destination: uint16[], destination_start: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L236)
   Copies a half-open UTF-16 code-unit range into an existing array or list. Invalid ranges trap.
-- **String** · [`export let from_char_array = func(units: uint16[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L248)
+- **String** · [`export let from_char_array = func(units: uint16[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L250)
   Decodes UTF-16 code units. Unpaired surrogates trap.
-- **String** · [`export let offset_by_code_points = func(s: string, offset: int, count: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L272)
+- **String** · [`export let offset_by_code_points = func(s: string, offset: int, count: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L274)
   Moves a byte offset by a signed number of Unicode scalars. Invalid offsets or positions trap.
-- **String** · [`export let.override trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L294)
-  Removes leading and trailing code points through U+0020.
+- **String** · [`export let.override trim = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L297)
+  Removes leading and trailing code points through U+0020. Tagged `#NoDiscard`.
 - **String** · [`export let is_blank = func(s: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L307)
   Tests whether the entire string consists of whitespace, including the empty string.
-- **String** · [`export let strip = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L310)
-  Removes whitespace from both ends using the companion's Unicode whitespace set.
-- **String** · [`export let strip_leading = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L313)
-  Removes leading whitespace using the companion's Unicode whitespace set.
-- **String** · [`export let strip_trailing = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L317)
-  Removes trailing whitespace using the companion's Unicode whitespace set.
-- **String** · [`export let.override lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L330)
+- **String** · [`export let strip = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L311)
+  Removes whitespace from both ends using the companion's Unicode whitespace set. Tagged `#NoDiscard`.
+- **String** · [`export let strip_leading = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L315)
+  Removes leading whitespace using the companion's Unicode whitespace set. Tagged `#NoDiscard`.
+- **String** · [`export let strip_trailing = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L320)
+  Removes trailing whitespace using the companion's Unicode whitespace set. Tagged `#NoDiscard`.
+- **String** · [`export let.override lines = func(s: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L333)
   CR, LF, and CRLF each end a line. An empty string has no lines.
-- **String** · [`export let indent = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L354)
-  Positive counts add spaces. Negative counts remove up to that many leading whitespace code points. Each resulting line ends with LF.
-- **String** · [`export let strip_indent = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L372)
-  Removes incidental indentation and trailing whitespace per line. A terminal line separator fixes the removable indentation at zero.
-- **String** · [`export let matches = func(s: string, pattern: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L405)
+- **String** · [`export let indent = func(s: string, count: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L358)
+  Positive counts add spaces. Negative counts remove up to that many leading whitespace code points. Each resulting line ends with LF. Tagged `#NoDiscard`.
+- **String** · [`export let strip_indent = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L377)
+  Removes incidental indentation and trailing whitespace per line. A terminal line separator fixes the removable indentation at zero. Tagged `#NoDiscard`.
+- **String** · [`export let matches = func(s: string, pattern: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L411)
   Tests whether a regex matches the whole string. An invalid pattern traps.
-- **String** · [`export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L409)
-  Replaces every occurrence of a Unicode scalar with another scalar.
-- **String** · [`export let replace_all = func(s: string, pattern: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L413)
-  Replaces all regex matches. An invalid pattern or replacement traps.
-- **String** · [`export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L417)
-  Replaces the first regex match. An invalid pattern or replacement traps.
-- **String** · [`export let split_regex = func(s: string, pattern: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L421)
+- **String** · [`export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L416)
+  Replaces every occurrence of a Unicode scalar with another scalar. Tagged `#NoDiscard`.
+- **String** · [`export let replace_all = func(s: string, pattern: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L421)
+  Replaces all regex matches. An invalid pattern or replacement traps. Tagged `#NoDiscard`.
+- **String** · [`export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L426)
+  Replaces the first regex match. An invalid pattern or replacement traps. Tagged `#NoDiscard`.
+- **String** · [`export let split_regex = func(s: string, pattern: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L430)
   Splits at regex matches and keeps empty pieces.
-- **String** · [`export let split_regex_limit = func(s: string, pattern: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L425)
+- **String** · [`export let split_regex_limit = func(s: string, pattern: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L434)
   Splits into at most the positive limit of pieces, leaving the remainder in the last one.
-- **String** · [`export let split_with_delimiters = func(s: string, pattern: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L429)
+- **String** · [`export let split_with_delimiters = func(s: string, pattern: string, limit: int) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L438)
   Splits into at most the positive limit of pieces and interleaves the matched delimiters.
-- **String** · [`export let formatted = func(s: string, args: ...) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L433)
+- **String** · [`export let formatted = func(s: string, args: ...) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L442)
   Formats the arguments into text with the console format grammar. Invalid formats trap.
-- **String** · [`export let vformatted = func(s: string, args: variadic.Argument[]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L437)
+- **String** · [`export let vformatted = func(s: string, args: variadic.Argument[]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L446)
   Formats a prebuilt variadic argument array into text. Invalid formats trap.
-- **String** · [`export let value_of = func<T>(value: T) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L441)
+- **String** · [`export let value_of = func<T>(value: T) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L450)
   Returns the value's to_string representation.
-- **String** · [`export let transform = func<T>(s: string, operation: func(string) -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L444)
+- **String** · [`export let transform = func<T>(s: string, operation: func(string) -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L453)
   Applies the supplied callback to the text and returns its result.
-- **String** · [`export let translate_escapes = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L448)
-  Decodes supported backslash and octal escapes and removes escaped line endings. Malformed escapes trap.
+- **String** · [`export let translate_escapes = func(s: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string.nra#L458)
+  Decodes supported backslash and octal escapes and removes escaped line endings. Malformed escapes trap. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Current text and formatting contracts
@@ -266,19 +266,19 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** The searches, comparisons, trims, splits, `lines`, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a). The text searches use the two-way string-matching algorithm, so a search is linear in the length of the text it reads plus the needle's length, never their product. A kernel is charged by the work its arguments allow (P2a), so the steps of each member are linear: `index_of` and `index_of_from` search in windows that start at 128 bytes and double, so their steps grow with the distance from `from` to the occurrence rather than with the rest of the text, and a loop that calls `index_of_from` after each occurrence is linear in the text; `split`, `split_limit`, and `lines` find every separator in two kernel calls over the text (one counts, one writes the offsets) and then slice the pieces, so they are linear in the text plus the number of pieces.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
-**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 13.1 `Std.Encoding`
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).

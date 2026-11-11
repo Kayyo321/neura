@@ -17,34 +17,34 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Random** · [`export let Random = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L18)
-  A deterministic xoshiro256** generator with an optional cached normal sample.
-- **Random.Random** · [`export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L33)
+- **Random** · [`export let Random = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L20)
+  A deterministic xoshiro256** generator with an optional cached normal sample. Tagged `#Final`.
+- **Random.Random** · [`export let init = func(seal: Seal, a: uint64, b: uint64, c: uint64, d: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L35)
   Initializes the four state words supplied by the seeding factory.
-- **Random.Random** · [`export let next_uint64 = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L41)
+- **Random.Random** · [`export let next_uint64 = func -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L43)
   One step: rotate_left(s1 * 5, 7) * 9, then the state transition.
-- **Random.Random** · [`export let next_uint32 = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L54)
+- **Random.Random** · [`export let next_uint32 = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L56)
   The high 32 bits of one step.
-- **Random.Random** · [`export let next_bool = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L57)
+- **Random.Random** · [`export let next_bool = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L59)
   The top bit of one step.
-- **Random.Random** · [`export let next_int_below = func(bound: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L63)
+- **Random.Random** · [`export let next_int_below = func(bound: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L65)
   Uniform in 0 up to but excluding `bound`: next_uint32 masked to the smallest all-ones mask covering bound - 1, drawn until below bound. A bound below 1 traps with "invalid argument: bound must be positive".
-- **Random.Random** · [`export let next_int_between = func(low: int, high: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L72)
+- **Random.Random** · [`export let next_int_between = func(low: int, high: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L74)
   Uniform from `low` up to but excluding `high`, with the span in int64. Traps with "invalid argument: low must be below high" unless low < high.
-- **Random.Random** · [`export let next_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L81)
+- **Random.Random** · [`export let next_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L83)
   The top 53 bits of one step times 2^-53: uniform in 0 up to but excluding 1.
-- **Random.Random** · [`export let next_gaussian = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L87)
+- **Random.Random** · [`export let next_gaussian = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L89)
   A standard normal value by Marsaglia's polar method: u and v are next_float64() * 2 - 1, drawn in pairs until s = u^2 + v^2 is below 1 and not 0; then m = sqrt(-2 log(s) / s) with Std.Math, u * m is returned and v * m is kept for the next call.
-- **Random.Random** · [`export let fill_bytes = func(count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L110)
+- **Random.Random** · [`export let fill_bytes = func(count: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L112)
   A new list of `count` bytes. Each step supplies 8 bytes, least significant first; a final partial group uses the low bytes. A negative count traps with "invalid argument: negative count".
-- **Random.Random** · [`export let shuffle = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L128)
+- **Random.Random** · [`export let shuffle = func<T>(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L130)
   Fisher-Yates: for i from the last index down to 1, swaps i with next_int_below(i + 1).
-- **Random.Random** · [`export let choose = func<T>(items: T[list]) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L140)
+- **Random.Random** · [`export let choose = func<T>(items: T[list]) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L142)
   An element chosen with next_int_below. An empty list traps with "no such element".
-- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L165)
+- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L167)
   The four words are successive outputs of SplitMix64 started at the seed.
-- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L185)
-  Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy capability; a denied or failed request is an Io error (CapabilityDenied when denied).
+- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L188)
+  Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy capability; a denied or failed request is an Io error (CapabilityDenied when denied). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -120,8 +120,8 @@ The same seed gives the same sequence of results from every member, on every run
 
 - **Receivers.** A method cannot name its own receiver, so a member that returns "the same object" needs a stored self reference. `StringBuilder` keeps one, set by its factory `create()`. Classes whose invariants need a factory (`StringBuilder`, `Random`, `File`, `TcpStream`, `TcpListener`) take a module-private token or an internal handle in their constructors.
 - **Constructor visibility.** An unexported `init` is private to its class, not to its module, so a module function cannot call it. `Regex` exports its constructor for that reason; an object built directly with it traps on use.
-- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure).
-- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#initialization)).
+- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](ProjectStructure).
+- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](Modules#initialization)).
 - **Extra members.** `Error` and `Result` have `equals`, `hash`, and `to_string`, and `SimpleDetail` compares its code and message, so errors compare structurally. `Comparable<T>` is `Std.Core.Comparable`. The collection interfaces declare `add(T) → bool` for every mutable collection (lists return true), and a sorted map's `first`, `last`, `range`, and `descending` give entries while `floor`, `ceiling`, `lower`, and `higher` give keys, with `_entry` forms for entries.
 
 ### 18.5 Time, randomness, and logging

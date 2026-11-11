@@ -19,19 +19,19 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Semaphore** · [`export let AcquireOutcome = enum (Acquired, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L8)
+- **Semaphore** · [`export let AcquireOutcome = enum (Acquired, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L9)
   What an acquire reports.
-- **Semaphore** · [`export let Semaphore = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L12)
-  A fixed number of permits. A permit is a place in a channel: taking one is a receive, so tasks that wait are served first come, first served, and a wait can be cancelled.
-- **Semaphore.Semaphore** · [`export let init = func(taking: channels.Receiver<bool>, giving: channels.Sender<bool>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L17)
+- **Semaphore** · [`export let Semaphore = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L14)
+  A fixed number of permits. A permit is a place in a channel: taking one is a receive, so tasks that wait are served first come, first served, and a wait can be cancelled. Tagged `#Final`.
+- **Semaphore.Semaphore** · [`export let init = func(taking: channels.Receiver<bool>, giving: channels.Sender<bool>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L19)
   A semaphore that owns the two ends of its permit channel. Use create.
-- **Semaphore.Semaphore** · [`export let acquire = func -> AcquireOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L23)
-  Waits until a permit is free and takes it.
-- **Semaphore.Semaphore** · [`export let try_acquire = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L29)
-  Takes a permit if one is free; never waits.
-- **Semaphore.Semaphore** · [`export let release = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L36)
+- **Semaphore.Semaphore** · [`export let acquire = func -> AcquireOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L26)
+  Waits until a permit is free and takes it. Tagged `#NoDiscard(reason: "a cancelled acquire holds no permit")`.
+- **Semaphore.Semaphore** · [`export let try_acquire = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L33)
+  Takes a permit if one is free; never waits. Tagged `#NoDiscard(reason: "the result says whether a permit was taken")`.
+- **Semaphore.Semaphore** · [`export let release = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L40)
   Returns a permit and wakes the task that has waited longest. Releasing more permits than the semaphore was created with traps.
-- **Semaphore** · [`export let create = func(permits: int) -> Semaphore`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L47)
+- **Semaphore** · [`export let create = func(permits: int) -> Semaphore`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L51)
   A semaphore with `permits` permits, all free. A negative count traps.
 <!-- END SOURCE API -->
 

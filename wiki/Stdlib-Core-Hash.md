@@ -17,15 +17,15 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Hash** · [`export let combine = func(seed: uint32, value: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L6)
+- **Hash** · [`export let combine = func(seed: uint32, value: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L7)
   31 * seed + value, modulo 2^32. The product is below 2^37 in uint64.
-- **Hash** · [`export let spread = func(hash: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L12)
+- **Hash** · [`export let spread = func(hash: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L13)
   Mixes the high half into the low half before a table masks the hash.
-- **Hash** · [`export let of_bool = func(value: bool) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L15)
+- **Hash** · [`export let of_bool = func(value: bool) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L16)
   1231 for true and 1237 for false.
-- **Hash** · [`export let of_int64 = func(value: int64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L18)
+- **Hash** · [`export let of_int64 = func(value: int64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L19)
   The low 32 bits exclusive-or the high 32 bits of the two's complement pattern.
-- **Hash** · [`export let of_uint64 = func(value: uint64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L21)
+- **Hash** · [`export let of_uint64 = func(value: uint64) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/hash.nra#L22)
   Folds the high and low halves of an unsigned 64-bit value into a 32-bit hash.
 <!-- END SOURCE API -->
 

@@ -17,33 +17,33 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Optional** · [`export let Optional = enum<T> (None, Some(T))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L10)
-  Represents an absent value (None) or a present payload (Some).
-- **Optional** · [`export let is_some = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L13)
+- **Optional** · [`export let Optional = enum<T> (None, Some(T))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L12)
+  Represents an absent value (None) or a present payload (Some). Since 0.1.0.
+- **Optional** · [`export let is_some = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L15)
   Reports whether the optional contains a payload.
-- **Optional** · [`export let is_none = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L19)
+- **Optional** · [`export let is_none = func<T>(o: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L21)
   Reports whether the optional is None.
-- **Optional** · [`export let value_or = func<T>(o: Optional<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L25)
+- **Optional** · [`export let value_or = func<T>(o: Optional<T>, fallback: T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L27)
   Returns the payload or the already-evaluated fallback.
-- **Optional** · [`export let expect = func<T>(o: Optional<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L31)
+- **Optional** · [`export let expect = func<T>(o: Optional<T>, detail: string) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L33)
   The value, or a trap with "no such element: " and the detail.
-- **Optional** · [`export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L43)
-  Wraps a present payload in Ok or uses the supplied error for None.
-- **Optional** · [`export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L49)
-  Applies the function only to a present payload and wraps its output in Some.
-- **Optional** · [`export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L55)
-  Applies the function only to a present payload and returns its optional result.
-- **Optional** · [`export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L61)
-  Keeps the present payload only when it passes the predicate.
-- **Optional** · [`export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L76)
+- **Optional** · [`export let to_result = func<T>(o: Optional<T>, failure: Error) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L46)
+  Wraps a present payload in Ok or uses the supplied error for None. Tagged `#NoDiscard`.
+- **Optional** · [`export let map = func<T, U>(o: Optional<T>, f: func(T) -> U) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L53)
+  Applies the function only to a present payload and wraps its output in Some. Tagged `#NoDiscard`.
+- **Optional** · [`export let and_then = func<T, U>(o: Optional<T>, f: func(T) -> Optional<U>) -> Optional<U>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L60)
+  Applies the function only to a present payload and returns its optional result. Tagged `#NoDiscard`.
+- **Optional** · [`export let filter = func<T>(o: Optional<T>, keep: func(T) -> bool) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L67)
+  Keeps the present payload only when it passes the predicate. Tagged `#NoDiscard`.
+- **Optional** · [`export let value_or_else = func<T>(o: Optional<T>, make: func() -> T) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L82)
   Calls `make` only for None.
-- **Optional** · [`export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L82)
-  Calls the fallback only for None and returns its optional result.
-- **Optional** · [`export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L88)
+- **Optional** · [`export let or_else = func<T>(o: Optional<T>, other: func() -> Optional<T>) -> Optional<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L89)
+  Calls the fallback only for None and returns its optional result. Tagged `#NoDiscard`.
+- **Optional** · [`export let equals = func<T>(a: Optional<T>, b: Optional<T>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L95)
   Both None, or both Some with equal values.
-- **Optional** · [`export let hash = func<T>(o: Optional<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L103)
+- **Optional** · [`export let hash = func<T>(o: Optional<T>) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L110)
   0 for None, otherwise Hash.combine(1, the value's hash).
-- **Optional** · [`export let to_string = func<T>(o: Optional<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L109)
+- **Optional** · [`export let to_string = func<T>(o: Optional<T>) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/optional.nra#L116)
   Formats None or the text of a present payload wrapped in Some.
 <!-- END SOURCE API -->
 
@@ -155,9 +155,9 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 | `to_unsigned(v)`, `to_signed(v)` | The same-width type with the same bit pattern ([section 7.2](Stdlib-Design#72-arithmetic-without-wrapping-intrinsics)). |
 | `hash(v) → uint32` | [Section 5.2](Stdlib-Design#52-equality-hashing-and-text). |
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
-| `to_string_radix(v, radix: int) → string` | Lowercase digits. |
+| `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
-| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. |
+| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
 
@@ -198,11 +198,11 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** The searches, comparisons, trims, splits, `lines`, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a). The text searches use the two-way string-matching algorithm, so a search is linear in the length of the text it reads plus the needle's length, never their product. A kernel is charged by the work its arguments allow (P2a), so the steps of each member are linear: `index_of` and `index_of_from` search in windows that start at 128 bytes and double, so their steps grow with the distance from `from` to the occurrence rather than with the rest of the text, and a loop that calls `index_of_from` after each occurrence is linear in the text; `split`, `split_limit`, and `lines` find every separator in two kernel calls over the text (one counts, one writes the offsets) and then slice the pieces, so they are linear in the text plus the number of pieces.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
-**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](https://github.com/Kayyo321/neura/wiki/StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
+**Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
 ### 8.4 `Regex`
 
@@ -221,9 +221,9 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `find_all(input)` | A built-in list of `RegexMatch`: successive non-overlapping matches. After an empty match the search resumes one scalar value later. |
 | `replace_all(input, replacement) → string`, `replace_first(...)` | `$0` through `$99` and `${name}` insert groups; `$$` is a dollar sign. A reference to a group that does not exist traps; a group that did not participate inserts nothing. |
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
-| `group_count() → int`, `pattern() → string` | |
+| `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: `start()`, `end()`, `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
 
 ### 9.1 Contracts
 
@@ -360,7 +360,7 @@ An immutable arbitrary-precision integer. Parsing uses T1 and conversion to `flo
 | `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
-| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](https://github.com/Kayyo321/neura/wiki/StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
+| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
 | `print`, `println`, `eprint`, `eprintln`, and their `try_` forms | Format first and then write to output or to the error stream. The newline forms append one LF. | T1, P2 |
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
@@ -379,9 +379,9 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, the read-only field `size`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
 | `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`; the read-only field `buffered` is the number of bytes waiting. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 
@@ -395,7 +395,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 - The separator is `/` on every host. The host service translates.
 - **Normalization at construction:** repeated separators collapse; `.` components are removed; a trailing separator is removed except for the root; an empty result is `.`. `..` components are kept, because removing them is not correct in the presence of links.
-- `is_absolute()` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
+- The read-only field `is_absolute` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
 - Module function `of(text)`. Members include `join(other: string) → Path`, `parent() → Path`, `file_name()`, `stem()`, `extension()`, `components()`, `resolve_lexically() → Path`, `starts_with(other: Path) → bool`, and `relative_to(base: Path) → Path`. An absolute argument to `join` replaces the path. `parent` returns `nil` when the path has no parent. `relative_to` returns `nil` when it cannot express the path relative to the base. `file_name`, `stem`, and `extension` return `Optional<string>`. The extension is the text after the last `.` of the file name when that dot is not the first character. `components` returns a built-in list of strings. Equality, hash, ordering, and text use the normalized path.
 
 **`File`** is a class wrapping a host file ID. The module functions `open(path, mode: OpenMode) → Result<File>` and `with_open<T>(path, mode, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](Stdlib-Design#55-resources)). A `File` is unbuffered.
@@ -407,7 +407,7 @@ Needs P2 for every host operation and T1 for `Path`.
 | `read_bytes(path) → Result<uint8[list]>`, `read_text(path) → Result<string>` | `read_text` fails with `InvalidData` for invalid UTF-8. Both close the file on every path, including a failed read. |
 | `write_bytes(path, bytes)`, `write_text(path, text)`, `append_text(path, text)` `→ Result<Unit>` | Create the file if needed; the `write_` forms truncate. A failed write is reported after the file is closed. |
 | `exists(path) → Result<bool>` | `Ok(false)` for `NotFound`; other failures are errors. |
-| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class: `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, `modified: Instant`. |
+| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class with the read-only fields `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, and `modified: Instant`. |
 | `list(path)` | A `Result` of a built-in list of `Path`: the directory's entries joined to `path`, sorted by name bytes. |
 | `create_directory(path)`, `create_directories(path)` | The second creates missing parents and succeeds when the directory exists. |
 | `remove_file(path)`, `remove_directory(path)` | `remove_directory` requires an empty directory. |
@@ -430,9 +430,9 @@ This module replaces `SysIo.Entry` ([section 4.6](Stdlib-Design#46-retired-built
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
@@ -473,6 +473,6 @@ The module `Json`:
 
 - **Receivers.** A method cannot name its own receiver, so a member that returns "the same object" needs a stored self reference. `StringBuilder` keeps one, set by its factory `create()`. Classes whose invariants need a factory (`StringBuilder`, `Random`, `File`, `TcpStream`, `TcpListener`) take a module-private token or an internal handle in their constructors.
 - **Constructor visibility.** An unexported `init` is private to its class, not to its module, so a module function cannot call it. `Regex` exports its constructor for that reason; an object built directly with it traps on use.
-- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure).
-- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#initialization)).
+- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](ProjectStructure).
+- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](Modules#initialization)).
 - **Extra members.** `Error` and `Result` have `equals`, `hash`, and `to_string`, and `SimpleDetail` compares its code and message, so errors compare structurally. `Comparable<T>` is `Std.Core.Comparable`. The collection interfaces declare `add(T) → bool` for every mutable collection (lists return true), and a sorted map's `first`, `last`, `range`, and `descending` give entries while `floor`, `ceiling`, `lower`, and `higher` give keys, with `_entry` forms for entries.

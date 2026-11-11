@@ -19,22 +19,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Timer** · [`export let TimerOutcome = enum (Fired, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L11)
+- **Timer** · [`export let TimerOutcome = enum (Fired, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L12)
   What a wait reports.
-- **Timer** · [`export let Timer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L14)
-  A timer that fires once, at a reading of the monotonic clock.
-- **Timer.Timer** · [`export let init = func(at: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L16)
+- **Timer** · [`export let Timer = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L16)
+  A timer that fires once, at a reading of the monotonic clock. Tagged `#Final`.
+- **Timer.Timer** · [`export let init = func(at: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L18)
   A timer that fires when the monotonic clock reads `at` nanoseconds. Use after or at.
-- **Timer.Timer** · [`export let wait = func -> TimerOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L21)
+- **Timer.Timer** · [`export let wait = func -> TimerOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L23)
   Waits until the timer has fired. Returns at once when it already has.
-- **Timer.Timer** · [`export let select_handle = func -> Timer`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L24)
-  What a select waits on for this timer. Used by the select statement.
-- **Timer.Timer** · [`export let wait_selected = func(code: uint32) -> TimerOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L27)
-  The outcome of a wait that a select committed. Used by the select statement.
-- **Timer** · [`export let after = func(span: duration.Duration) -> result.Result<Timer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L36)
-  A timer that fires once the duration has passed. Needs the clock capability.
-- **Timer** · [`export let at = func(moment: instant.Instant) -> result.Result<Timer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L43)
-  A timer that fires at the instant. Needs the clock capability.
+- **Timer** · [`export let after = func(span: duration.Duration) -> result.Result<Timer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L41)
+  A timer that fires once the duration has passed. Needs the clock capability. Tagged `#NoDiscard`.
+- **Timer** · [`export let at = func(moment: instant.Instant) -> result.Result<Timer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/timer.nra#L49)
+  A timer that fires at the instant. Needs the clock capability. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

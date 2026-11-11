@@ -17,31 +17,31 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Json** · [`export let JsonValue = enum ( Null, Boolean(bool), Number(string), Text(string), Array(JsonValue[list]), Object([string, JsonValue][list]) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L24)
-  Represents null, booleans, number text, strings, arrays, and ordered object members.
-- **Json** · [`export let number_of_int64 = func(v: int64) -> JsonValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L37)
+- **Json** · [`export let JsonValue = enum ( Null, Boolean(bool), Number(string), Text(string), Array(JsonValue[list]), Object([string, JsonValue][list]) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L26)
+  Represents null, booleans, number text, strings, arrays, and ordered object members. Since 0.1.0.
+- **Json** · [`export let number_of_int64 = func(v: int64) -> JsonValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L39)
   A Number with the integer's decimal text.
-- **Json** · [`export let number_of_float64 = func(v: float64) -> JsonValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L43)
+- **Json** · [`export let number_of_float64 = func(v: float64) -> JsonValue`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L45)
   A Number with the float's shortest round-trip text (Stdlib.md section 7.5), which is valid JSON number text. NaN and the infinities trap with "invalid argument: number is not finite".
-- **Json** · [`export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L51)
-  The value of the first member with the name.
-- **Json** · [`export let number_to_int64 = func(text: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L62)
+- **Json** · [`export let member = func(members: [string, JsonValue][list], name: string) -> Optional<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L54)
+  The value of the first member with the name. Tagged `#NoDiscard`.
+- **Json** · [`export let number_to_int64 = func(text: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L65)
   Some(the value) when the text is a JSON number with no fraction and no exponent whose value fits in int64; otherwise None, including for text that is not a JSON number.
-- **Json** · [`export let number_to_float64 = func(text: string) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L97)
+- **Json** · [`export let number_to_float64 = func(text: string) -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L100)
   The float64 nearest the number, ties to even (Float64.parse). Text that is not a JSON number traps with "invalid argument: number text".
-- **Json** · [`export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L109)
+- **Json** · [`export let number_to_big_decimal = func(text: string) -> big_decimals.BigDecimal`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L112)
   The exact value: the number's digits as the unscaled value, with the scale of its fraction digits minus its exponent, so "1.50" has scale 2 and "15e-1" scale 1. Text that is not a JSON number traps with "invalid argument: number text"; a number whose scale leaves the int range, such as 1e3000000000, traps with "invalid argument: number exponent out of range".
-- **Json** · [`export let parse = func(text: string) -> Result<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L133)
-  The value, or a Parse error. Parsing is strict: no comments, no trailing commas, no leading zeros, and only space, tab, LF, and CR as whitespace. Nesting deeper than 512 arrays and objects fails. For a repeated member name the last value wins and the name keeps its first position. Offsets are byte offsets. The errors: - Empty, "no value": the text is empty or only whitespace (offset: its length). - UnexpectedEnd, "unexpected end of input": at the text's length. - Syntax: "expected a value", "expected ',' or ']'", "expected ',' or '}'", "expected a member name", "expected ':'", "unexpected text after value", at the offending byte. - InvalidCharacter: "invalid literal", "expected a digit", "leading zero", "control character in string" at the offending byte; "invalid escape", "invalid \u escape", and "unpaired surrogate" at the escape's backslash. - OutOfRange, "nesting deeper than 512": at the bracket that opens the 513th level.
-- **Json** · [`export let write = func(value: JsonValue) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L148)
-  The value's JSON text with no whitespace. A Number whose text is not a JSON number traps with "invalid argument: number text".
-- **Json** · [`export let write_pretty = func(value: JsonValue, indent: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L159)
-  The value's JSON text with each element and member on its own line, indented by `indent` spaces per level, and ": " after member names. Empty arrays and objects are [] and {}. A negative indent traps with "invalid argument: negative indent".
-- **Json** · [`export let equals = func(a: JsonValue, b: JsonValue) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L174)
+- **Json** · [`export let parse = func(text: string) -> Result<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L137)
+  The value, or a Parse error. Parsing is strict: no comments, no trailing commas, no leading zeros, and only space, tab, LF, and CR as whitespace. Nesting deeper than 512 arrays and objects fails. For a repeated member name the last value wins and the name keeps its first position. Offsets are byte offsets. The errors: - Empty, "no value": the text is empty or only whitespace (offset: its length). - UnexpectedEnd, "unexpected end of input": at the text's length. - Syntax: "expected a value", "expected ',' or ']'", "expected ',' or '}'", "expected a member name", "expected ':'", "unexpected text after value", at the offending byte. - InvalidCharacter: "invalid literal", "expected a digit", "leading zero", "control character in string" at the offending byte; "invalid escape", "invalid \u escape", and "unpaired surrogate" at the escape's backslash. - OutOfRange, "nesting deeper than 512": at the bracket that opens the 513th level. Tagged `#NoDiscard`.
+- **Json** · [`export let write = func(value: JsonValue) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L153)
+  The value's JSON text with no whitespace. A Number whose text is not a JSON number traps with "invalid argument: number text". Tagged `#NoDiscard`.
+- **Json** · [`export let write_pretty = func(value: JsonValue, indent: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L165)
+  The value's JSON text with each element and member on its own line, indented by `indent` spaces per level, and ": " after member names. Empty arrays and objects are [] and {}. A negative indent traps with "invalid argument: negative indent". Tagged `#NoDiscard`.
+- **Json** · [`export let equals = func(a: JsonValue, b: JsonValue) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L180)
   Structural equality. Numbers are equal when their exact decimal values are, so 1, 1.0, 10e-1, and -0 versus 0 compare by value. Arrays compare element by element. Objects are equal when they have the same number of members and each member of either has a member with the same name and an equal value in the other, in any order. A Number whose text is not a JSON number traps with "invalid argument: number text".
-- **Json** · [`export let hash = func(value: JsonValue) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L224)
+- **Json** · [`export let hash = func(value: JsonValue) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L230)
   A hash consistent with equals. Null is 1; Boolean(b) is Hash.combine(2, Hash.of_bool(b)); Number is Hash.combine(3, the hash of its canonical text); Text(s) is Hash.combine(4, s.hash_code()); Array starts at 5 and combines each element's hash in order; Object is Hash.combine(Hash.combine(6, member count), S), where S is the wrapping sum of the distinct values among the members' Hash.combine(name hash, value hash). The canonical text of a number is "0" for zero and otherwise an optional "-", the significant digits without leading or trailing zeros, "e", and the decimal exponent that makes them an integer: 120.50 is "1205e-1".
-- **Json** · [`export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L235)
+- **Json** · [`export let index = func(members: [string, JsonValue][list]) -> StringMap<JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json.nra#L241)
   A StringMap from each member name to its value, in member order. For a repeated name the last value wins and the name keeps its first position, as in parse.
 <!-- END SOURCE API -->
 
@@ -53,9 +53,9 @@ The following sections are taken from the [standard library specification](Stdli
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).
@@ -102,4 +102,4 @@ The module `Json`:
 - **Json parse errors.** `Empty` for empty or all-whitespace text; `UnexpectedEnd` at the text length; `Syntax` for structure; `InvalidCharacter` inside a token, with escapes reported at the backslash; `OutOfRange` at the bracket that opens level 513. Top-level scalars are accepted.
 - **Json values.** Numbers compare by a canonical decimal text, including exponents beyond `int64`. `hash` starts each variant from its position (Null 1 through Object 6), and an object's hash combines its member count with the wrapping sum of its distinct member hashes, so it agrees with order-insensitive equality even when names repeat. `number_to_int64` is `None` for anything but a plain integer. `index` keeps the last value of a repeated name. A `StringMap<JsonValue>` supports lookups; its `equals` and `to_string` are rejected at build time because `JsonValue` has no built-in value members.
 - **Json traps.** `number is not finite`, `negative indent`, `number text`, and `number exponent out of range`, after `invalid argument: `.
-- **Sha256** keeps rolled loops: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB.
+- **Sha256** kept rolled loops while it was Neura code: unrolling cut steps by about four but grew the image by 1.5 to 3.6 MB. It now calls kernels (P2a), which cut the `sha256` benchmark from 163,795 steps and 861,597 image bytes to 31,043 steps (mostly building the input) and 600,765 bytes.

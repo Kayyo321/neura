@@ -17,62 +17,62 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Duration** · [`export let Duration = class implements Comparable<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L13)
-  An immutable signed duration represented as an exact count of nanoseconds.
-- **Duration.Duration** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L18)
+- **Duration** · [`export let Duration = class implements Comparable<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L15)
+  An immutable signed duration represented as an exact count of nanoseconds. Tagged `#Final`, `#NoDiscard`.
+- **Duration.Duration** · [`export let init = func(nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L20)
   Stores the signed nanosecond count.
-- **Duration.Duration** · [`export let plus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L23)
+- **Duration.Duration** · [`export let plus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L25)
   Adds two durations with checked nanosecond arithmetic.
-- **Duration.Duration** · [`export let minus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L26)
+- **Duration.Duration** · [`export let minus = func(other: Duration) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L28)
   Subtracts another duration with checked nanosecond arithmetic.
-- **Duration.Duration** · [`export let multiplied_by = func(factor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L29)
+- **Duration.Duration** · [`export let multiplied_by = func(factor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L31)
   Scales the duration by an integer. Overflow traps.
-- **Duration.Duration** · [`export let divided_by = func(divisor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L33)
+- **Duration.Duration** · [`export let divided_by = func(divisor: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L35)
   Truncates toward zero. A zero divisor traps (reason 1), as does the most negative duration divided by -1.
-- **Duration.Duration** · [`export let negated = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L36)
+- **Duration.Duration** · [`export let negated = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L38)
   Reverses the sign. The most negative duration cannot be negated.
-- **Duration.Duration** · [`export let abs = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L39)
+- **Duration.Duration** · [`export let abs = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L41)
   Returns the nonnegative magnitude. The most negative duration traps.
-- **Duration.Duration** · [`export let is_zero = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L47)
+- **Duration.Duration** · [`export let is_zero = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L49)
   Reports whether the nanosecond count is zero.
-- **Duration.Duration** · [`export let is_negative = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L50)
+- **Duration.Duration** · [`export let is_negative = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L52)
   Reports whether the nanosecond count is below zero.
-- **Duration.Duration** · [`export let to_nanos = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L53)
+- **Duration.Duration** · [`export let to_nanos = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L55)
   Returns the exact signed nanosecond count.
-- **Duration.Duration** · [`export let to_micros = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L56)
+- **Duration.Duration** · [`export let to_micros = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L58)
   The to_ conversions truncate toward zero.
-- **Duration.Duration** · [`export let to_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L59)
+- **Duration.Duration** · [`export let to_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L61)
   Returns whole milliseconds, truncating toward zero.
-- **Duration.Duration** · [`export let to_seconds = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L62)
+- **Duration.Duration** · [`export let to_seconds = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L64)
   Returns whole seconds, truncating toward zero.
-- **Duration.Duration** · [`export let to_seconds_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L66)
+- **Duration.Duration** · [`export let to_seconds_float64 = func -> float64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L68)
   The nanoseconds converted to float64, divided by 10^9. Exact conversion, so correctly rounded, while the count is at most 2^53.
-- **Duration.Duration** · [`export let compare_to = func(other: Duration) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L69)
+- **Duration.Duration** · [`export let compare_to = func(other: Duration) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L71)
   Orders durations by their signed nanosecond counts.
-- **Duration.Duration** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L80)
+- **Duration.Duration** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L82)
   Tests equality of signed nanosecond counts.
-- **Duration.Duration** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L85)
+- **Duration.Duration** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L87)
   Hashes the signed nanosecond count.
-- **Duration.Duration** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L91)
+- **Duration.Duration** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L93)
   ISO 8601: PT, then hours, minutes, and seconds with their unit letters, zero units omitted, the fraction trimmed of trailing zeros. Zero is PT0S; a negative duration is - and the text of its magnitude.
-- **Duration** · [`export const Zero: Duration = new Duration(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L117)
+- **Duration** · [`export const Zero: Duration = new Duration(0)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L119)
   The duration of zero nanoseconds.
-- **Duration** · [`export let of_nanos = func(nanos: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L120)
+- **Duration** · [`export let of_nanos = func(nanos: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L122)
   Constructs a duration from an exact nanosecond count.
-- **Duration** · [`export let of_micros = func(micros: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L123)
+- **Duration** · [`export let of_micros = func(micros: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L125)
   Converts microseconds to nanoseconds. Overflow traps.
-- **Duration** · [`export let of_millis = func(millis: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L126)
+- **Duration** · [`export let of_millis = func(millis: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L128)
   Converts milliseconds to nanoseconds. Overflow traps.
-- **Duration** · [`export let of_seconds = func(seconds: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L129)
+- **Duration** · [`export let of_seconds = func(seconds: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L131)
   Converts seconds to nanoseconds. Overflow traps.
-- **Duration** · [`export let of_minutes = func(minutes: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L132)
+- **Duration** · [`export let of_minutes = func(minutes: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L134)
   Converts 60-second minutes to nanoseconds. Overflow traps.
-- **Duration** · [`export let of_hours = func(hours: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L135)
+- **Duration** · [`export let of_hours = func(hours: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L137)
   Converts 60-minute hours to nanoseconds. Overflow traps.
-- **Duration** · [`export let of_days = func(days: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L138)
+- **Duration** · [`export let of_days = func(days: int64) -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L140)
   A day is 24 hours.
-- **Duration** · [`export let parse = func(text: string) -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L146)
-  An optional sign, P, an optional day count with D, then optionally T and at least one of hours (H), minutes (M), and seconds (S) in that order; seconds may have a fraction of one through nine digits. At least one component is required, and letters are uppercase. The to_string form always parses. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first digit of the component that leaves int64.
+- **Duration** · [`export let parse = func(text: string) -> result.Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/time/duration.nra#L149)
+  An optional sign, P, an optional day count with D, then optionally T and at least one of hours (H), minutes (M), and seconds (S) in that order; seconds may have a fraction of one through nine digits. At least one component is required, and letters are uppercase. The to_string form always parses. Errors: Empty; InvalidCharacter or UnexpectedEnd at the first byte that does not fit; OutOfRange at the first digit of the component that leaves int64. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -99,10 +99,10 @@ These are the intended source-module contracts. Compiler support for the operati
 
 ### 11.4 `Std.Net`
 
-TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#104-host-io)). Needs P2 and T1.
+TCP only. A call waits for its result; in a program with tasks the waiting task parks and the others run, and cancelling its scope ends the wait with kind `Cancelled` ([Concurrency](Concurrency#104-host-io)). Needs P2 and T1.
 
-- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `set_read_timeout(timeout: Duration)` (zero for none; an expired timeout fails with kind `TimedOut`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
-- `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, `local_port() → int`, and `close()`. Port 0 asks the host for a free port.
+- `TcpStream`: the module functions `connect(host: string, port: int, timeout: Duration) → Result<TcpStream>` and `with_connection<T>(host, port, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). Members `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), the field `read_timeout: Duration` (zero, the initial value, for none; an expired timeout fails with kind `TimedOut`; assigning a negative duration traps with `invalid argument: negative timeout`), and `close()`. A write that is cancelled while it waits fails with kind `Cancelled` and the message `stream write cancelled after N bytes`, where N is the number of bytes already sent.
+- `TcpListener`: the module function `bind(host: string, port: int) → Result<TcpListener>`. Members `accept() → Result<TcpStream>`, the read-only field `local_port: int`, and `close()`. Port 0 asks the host for a free port.
 - A port outside 0 through 65,535 traps.
 - Service arguments: `connect` takes the host text, the port, and the timeout in nanoseconds; `listen` takes the host text and port; `accept` takes a listener ID; `read` takes a socket ID, a maximum count, and a timeout in nanoseconds (0 for none); `write` takes a socket ID and bytes; `close` takes either kind of ID.
 
@@ -120,21 +120,23 @@ The value types are immutable classes with `compare_to`, `equals`, `hash_code`, 
 
 **`Instant`** is a point on the UTC time line: `int64` seconds since 1970-01-01T00:00:00Z and an `int` nanosecond adjustment from 0 through 999,999,999. Leap seconds are ignored, as in POSIX time.
 
-- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. Members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `epoch_seconds()`, `nanos()`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
+- Module functions `of_epoch_seconds(seconds, nanos)`, `of_epoch_millis`, the constant `Epoch`, and `parse`. The read-only fields `epoch_seconds` and `nanos`, and the members `plus(Duration)`, `minus(Duration)`, `duration_since(other) → Duration`, `to_epoch_millis()`, `to_local(offset: ZoneOffset) → LocalDateTime`.
 - `to_string` is `YYYY-MM-DDTHH:MM:SS` with a fraction of 3, 6, or 9 digits when the nanoseconds are not zero (the shortest of those that is exact), then `Z`. `parse` accepts that form and a numeric offset in place of `Z`.
 
 **`Clock`** is an interface with `now() → Result<Instant>`, `monotonic() → Result<Duration>` (elapsed time from an arbitrary fixed origin, never decreasing), and `sleep(duration) → Result<Unit>`.
 
 - `SystemClock` uses the clock host services (P2) and fails with `CapabilityDenied` when they are not allowed.
 - `FixedClock` holds an instant set at construction; `set(instant)` and `advance(duration)` change it; `sleep` advances it and returns at once; it never fails. Library code that needs time takes a `Clock`, so tests pass a `FixedClock`.
-- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, and `elapsed() → Result<Duration>`.
+- `Stopwatch` takes a `Clock` and offers `start`, `stop`, `reset`, `elapsed() → Result<Duration>`, and the read-only field `is_running`.
 
 **Calendar types** use the proleptic Gregorian calendar.
 
-- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
-- `LocalTime`: `hour`, `minute`, `second`, `nano`, stored as nanoseconds of the day. `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
-- `LocalDateTime`: a `LocalDate` and a `LocalTime`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
-- `ZoneOffset`: total seconds from -64,800 through 64,800. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+- `LocalDate` stores `year` (-999,999 through 999,999), `month` (1 through 12), and `day`, read-only fields. The module function `of(year, month, day)` traps for an invalid date. `try_of(year, month, day) → LocalDate` returns `nil` for invalid components. Conversion to and from a day count since 1970-01-01 (`to_epoch_day`, `of_epoch_day`) uses the 400-year cycle of 146,097 days. Shift the year so that it starts in March, split it into the cycle and the year within the cycle, and compute the day of the cycle using floor division so that negative years work. Members include `plus_days`, `plus_months`, `plus_years`, `days_until(other) → int64`, `day_of_week() → DayOfWeek`, `day_of_year()`, `is_leap_year()`, and `length_of_month()`. Month and year changes clamp the day to the end of the target month. `DayOfWeek` runs from `Monday` through `Sunday`, with epoch day 0 on Thursday. Text uses `YYYY-MM-DD`. Years outside 0000 through 9999 have a sign and at least four digits.
+- `LocalTime`: `hour()`, `minute()`, `second()`, `nano()`, computed from the nanoseconds of the day that it stores (`to_nano_of_day()`). `plus(Duration)` wraps around midnight. Text form `HH:MM:SS` with the same fraction rule as `Instant`.
+- `LocalDateTime`: a `LocalDate` and a `LocalTime`, the read-only fields `date` and `time`. `plus(Duration)` carries into the date. `at_offset(offset) → Instant`. Text form: the date, `T`, the time.
+- `ZoneOffset`: total seconds from -64,800 through 64,800, the read-only field `total_seconds`. The constant `Utc`, `of_hours_minutes`, text form `Z` or `±HH:MM`.
+
+A read-only field is an exported `last` field (an `is_running` with a get-only [accessor](Types#accessors)): code outside the class reads it as `date.year` and cannot assign it. The value classes are `#Final`, and `#NoDiscard`, so a call whose result is dropped, such as `instant.plus(span);`, warns ([Tags](Tags)).
 
 There is no time zone database, no named zones, and no daylight-saving rules. Conversions between instants and local times take an explicit `ZoneOffset`. The ISO forms above are the only text forms.
 

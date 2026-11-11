@@ -19,18 +19,18 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Parallel** · [`export let ItemLimits = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L8)
-  The limits each item of a map runs under, the same under any number of workers. An item that exceeds one traps as that item.
-- **Parallel.ItemLimits** · [`export let max_steps: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L10)
+- **Parallel** · [`export let ItemLimits = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L10)
+  The limits each item of a map runs under, the same under any number of workers. An item that exceeds one traps as that item. The fields are read-only. Tagged `#Final`.
+- **Parallel.ItemLimits** · [`export last max_steps: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L12)
   The most steps one item may execute.
-- **Parallel.ItemLimits** · [`export let max_heap_cells: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L13)
+- **Parallel.ItemLimits** · [`export last max_heap_cells: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L15)
   The most heap cells one item may hold at once, the copies of the program's constants it can read included.
-- **Parallel.ItemLimits** · [`export let init = func(steps: int64, heap_cells: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L16)
+- **Parallel.ItemLimits** · [`export let init = func(steps: int64, heap_cells: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L18)
   Limits of the given steps and heap cells, both positive.
-- **Parallel** · [`export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L29)
+- **Parallel** · [`export let limits = func(steps: int64, heap_cells: int64) -> ItemLimits`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L31)
   Limits of the given steps and heap cells for each item.
-- **Parallel** · [`export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L35)
-  Returns what `worker` returns for each item, in input order. T and U are transferable. The worker is task-safe, issues no host request, uses no task, channel, or other scheduler operation, and uses no object identity; the compiler checks this. Each item runs alone under `limits`. If items trap, the run reports the trap of the lowest index.
+- **Parallel** · [`export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/parallel.nra#L38)
+  Returns what `worker` returns for each item, in input order. T and U are transferable. The worker is task-safe, issues no host request, uses no task, channel, or other scheduler operation, and uses no object identity; the compiler checks this. Each item runs alone under `limits`. If items trap, the run reports the trap of the lowest index. Tagged `#NoDiscard(reason: "the worker has no effects, so the results are all a map gives")`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

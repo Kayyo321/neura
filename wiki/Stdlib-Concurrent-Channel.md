@@ -19,50 +19,42 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Channel** · [`export let SendOutcome = enum (Sent, Closed, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L6)
+- **Channel** · [`export let SendOutcome = enum (Sent, Closed, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L7)
   What a send reports. Closure and cancellation are expected events, not errors.
-- **Channel** · [`export let TrySendOutcome = enum (Sent, Full, Closed)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L9)
+- **Channel** · [`export let TrySendOutcome = enum (Sent, Full, Closed)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L10)
   What a send that never waits reports.
-- **Channel** · [`export let Received = enum<T> (Value(T), Closed, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L12)
+- **Channel** · [`export let Received = enum<T> (Value(T), Closed, Cancelled)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L13)
   What a receive reports: the value, or why there is none.
-- **Channel** · [`export let TryReceived = enum<T> (Value(T), Empty, Closed)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L15)
+- **Channel** · [`export let TryReceived = enum<T> (Value(T), Empty, Closed)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L16)
   What a receive that never waits reports.
-- **Channel** · [`export let State = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L19)
-  The identity the scheduler keeps a channel's buffer and waiters under. The three ends of one channel share one State; the scheduler releases the channel when the State is collected.
-- **Channel.State** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L21)
+- **Channel** · [`export let State = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L21)
+  The identity the scheduler keeps a channel's buffer and waiters under. The three ends of one channel share one State; the scheduler releases the channel when the State is collected. Tagged `#Final`.
+- **Channel.State** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L23)
   Creates an identity that open has yet to register. Use open.
-- **Channel** · [`export let Sender = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L25)
-  The sending end of a channel of T.
-- **Channel.Sender** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L29)
+- **Channel** · [`export let Sender = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L28)
+  The sending end of a channel of T. Tagged `#Final`.
+- **Channel.Sender** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L32)
   Wraps a channel's identity. Use open, which returns the three ends of one channel.
-- **Channel.Sender** · [`export let send = func(value: T) -> SendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L34)
+- **Channel.Sender** · [`export let send = func(value: T) -> SendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L37)
   Sends the value. Waits while the buffer is full, or with capacity 0 until a receiver takes it.
-- **Channel.Sender** · [`export let try_send = func(value: T) -> TrySendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L37)
+- **Channel.Sender** · [`export let try_send = func(value: T) -> TrySendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L40)
   Sends the value if that needs no waiting.
-- **Channel.Sender** · [`export let select_handle = func -> State`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L49)
-  What a select waits on for this end. Used by the select statement.
-- **Channel.Sender** · [`export let send_selected = func(code: uint32) -> SendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L52)
-  The outcome of a send that a select committed. Used by the select statement.
-- **Channel** · [`export let Receiver = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L64)
-  The receiving end of a channel of T.
-- **Channel.Receiver** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L68)
+- **Channel** · [`export let Receiver = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L70)
+  The receiving end of a channel of T. Tagged `#Final`.
+- **Channel.Receiver** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L74)
   Wraps a channel's identity. Use open, which returns the three ends of one channel.
-- **Channel.Receiver** · [`export let receive = func -> Received<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L74)
+- **Channel.Receiver** · [`export let receive = func -> Received<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L80)
   Receives the next value in the order the sends committed. Waits while the channel is empty and open. Values already buffered are still received after the channel closes.
-- **Channel.Receiver** · [`export let try_receive = func -> TryReceived<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L77)
+- **Channel.Receiver** · [`export let try_receive = func -> TryReceived<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L83)
   Receives a value if one is there.
-- **Channel.Receiver** · [`export let select_handle = func -> State`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L89)
-  What a select waits on for this end. Used by the select statement.
-- **Channel.Receiver** · [`export let receive_selected = func(code: uint32) -> Received<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L92)
-  The outcome of a receive that a select committed. Used by the select statement.
-- **Channel** · [`export let Closer = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L104)
-  Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot.
-- **Channel.Closer** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L108)
+- **Channel** · [`export let Closer = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L113)
+  Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot. Tagged `#Final`.
+- **Channel.Closer** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L117)
   Wraps a channel's identity. Use open, which returns the three ends of one channel.
-- **Channel.Closer** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L115)
+- **Channel.Closer** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L124)
   Closes the channel. Closing again does nothing. Afterwards a send reports Closed; parked senders wake with Closed and their values are not delivered; receivers see Closed once the buffer is empty.
-- **Channel** · [`export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L122)
-  Opens a channel that buffers `capacity` values of the transferable type T. Capacity 0 is a rendezvous: each send waits for its receive. A negative capacity traps.
+- **Channel** · [`export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L132)
+  Opens a channel that buffers `capacity` values of the transferable type T. Capacity 0 is a rendezvous: each send waits for its receive. A negative capacity traps. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

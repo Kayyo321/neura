@@ -36,7 +36,7 @@ build/neura emit-ir tests/ir-optimization/fixtures/folding.nra > after.ir
 diff before.ir after.ir
 ```
 
-The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](IrOptimization) for the passes and their preconditions.
+The two listings for this fixture share a symbol table, so the diff shows rewritten instructions. For programs that take primitive references or specialize generics, the optimized listing can also show new or rewritten symbols from those compilation stages, and inlining adds a local named `$inline.<callee>.<name>` to the caller for each inlined parameter and local. The listing is separate from the versioned `.nir` file described below, which holds NeuraIR before those transformations. See [NeuraIR optimization](IrOptimization) for the passes and their preconditions.
 
 ## Build and run executables
 
@@ -47,13 +47,13 @@ build/neura build examples/hello-world/hello-world.nra -o hello.nvr
 build/neura run hello.nvr -- arg1 arg2
 ```
 
-`emit-ir -o` writes the program as lowered, before optimization, to a versioned [`.nir` file](NirFormat). `emit-ir` also accepts one `.nir` file in place of sources and prints its listing. `build` takes sources or one `.nir` file. It verifies and optimizes the IR, converts it to neuron graphs, and writes the `.nvr` image only when every step succeeds. Both routes produce the same bytes for the same program and options, and repeating a build reproduces them. `--no-optimize` converts the verified IR without optimizing it. `--no-source-map` omits the optional source map, which otherwise labels blocks with paths relative to the sources' common directory.
+`emit-ir -o` writes the program as lowered, before optimization, to a versioned [`.nir` file](NirFormat). `emit-ir` also accepts one `.nir` file in place of sources and prints its listing. `build` takes sources or one `.nir` file. It verifies and optimizes the IR, converts it to neuron graphs, and writes the `.nvr` image only when every step succeeds. Both routes produce the same bytes for the same program and options, and repeating a build reproduces them. `--no-optimize` converts the verified IR without optimizing it. `--no-source-map` omits the optional source map, which otherwise labels blocks with paths relative to the sources' common directory. `--no-lift-hints` omits the optional `LIFT` section, which records the typed operations of each block for the runner's faster tier ([NVR](NVR#lift-hints)); it changes nothing a program does.
 
 Sources can [import prebuilt modules](Modules#prebuilt-neurair-modules) with `import:"library.nir".Module`. `check`, `emit-ir`, `build`, and `test` resolve and link those imports during source compilation.
 
 `neura docs <file.nra>...` exports declaration documentation and source ranges as JSON for IDE tooling. Pass `-o <file.json>` to save the index. `neura docs --doxygen <file.nra>` emits a declaration view for Doxygen's input filter. [Documentation comments](CoreLanguage#documentation-comments)
 
-`run` loads and validates an image, binds its host imports to the runner's services ([NVM](NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with the status of its class, such as 136 for an arithmetic trap or 134 for a message trap ([Errors](Errors)). Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. A program with tasks has further limits and options ([Run programs with tasks](#run-programs-with-tasks)). `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
+`run` loads and validates an image, binds its host imports to the runner's services ([NVM](NVM#host-services)), and passes the arguments after `--` to the entry function as UTF-8 text. The image needs no source files. The exit status is the `ExitCode` that `main` returns, or the status given to `Std.Program.Process.exit`. A runtime trap prints its reason and source location, when the image has a source map, to standard error and exits with the status of its class, such as 136 for an arithmetic trap or 134 for a message trap ([Errors](Errors)). Load, bind, and usage errors exit with status 1. `--max-steps`, `--max-frames`, and `--max-heap-cells` bound a run. A program with tasks has further limits and options ([Run programs with tasks](#run-programs-with-tasks)). `--stats` prints the run's step count, peak heap cells, host requests, graph, neuron, and edge counts, and image bytes to standard error. `run` evaluates a block whose graph is proven to compute typed operations as native operations ([execution tiers](NVM#execution-tiers)) and every other block by reference; the result, the steps, the traps, the output, and a recorded trace are the same either way. `--tier=0` evaluates every block by reference and `--tier=1`, the default, allows lifted blocks; `NEURA_TIER=0` in the environment has the effect of `--tier=0` for every run. `--tier-stats` prints, after the run, the blocks lifted, the steps each tier ran, and why the busiest blocks stayed on the reference tier. These lines are diagnostics: they depend on timing, unlike `--stats`. `cmake --install build --prefix <dir>` installs the `neura` executable, which contains both the compiler and the runner, and the standard library below `<dir>/share/neura/stdlib`, where the installed tool finds it without any `-I` option.
 
 Console input and output and `Std.Program.Process.exit` are always available. Every other host service is granted by default: with no capability option, `run`, `test`, and the policy that `build --native` records grant files, the network, environment variables, clocks, entropy, and native code. A `--deny-*` option turns a group off. A denied service still binds, and every call returns the `CapabilityDenied` error (error 14), exactly as if the program had no access:
 
@@ -77,7 +77,7 @@ Capability options apply in command-line order, and a later option for a group o
 
 ### Run programs with tasks
 
-A program that uses [tasks](Concurrency) builds like any other, into an NVR 1.5 image, and `run` and `test` accept these options for it. Each limit ends the run with status 137 at the operation that would exceed it.
+A program that uses [tasks](Concurrency) builds like any other, into an NVR 1.5 image (1.6 when it also calls a kernel), and `run` and `test` accept these options for it. Each limit ends the run with status 137 at the operation that would exceed it.
 
 | Option | Commands | Meaning |
 | --- | --- | --- |
@@ -102,7 +102,7 @@ neura inspect hello -o hello.nvr
 
 `build --native` packages sources, a `.nir`, or a validated `.nvr` with a CPU launcher. The image and launcher bytes are preserved. Every argument to the executable reaches the program, including `--help` and `--`. The build records the capability policy, the three run limits above, and the task settings: `--max-tasks`, `--task-quantum`, `--max-queued-messages`, `--max-pending-requests`, and `--parallel-workers` are accepted with `--native` and recorded, each with the default of `neura run` when it is not given. With no capability option the policy grants every group, so the executable can do whatever the user who runs it can; build with `--deny-*` options (the example denies everything but the files below `data`) to give it less. Relative file-system prefixes are resolved from the executable's working directory.
 
-Set `NEURA_RUN_OPTIONS` to space- or tab-separated options to lower a recorded limit (`--max-steps`, `--max-frames`, `--max-heap-cells`, `--max-tasks`, `--max-queued-messages`, `--max-pending-requests`) or the recorded `--parallel-workers` count, to deny a group with `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, or `--deny-all`, or to select `--stats`, `--profile`, `--task-dump[=text|json]`, `--trace-events <file>`, `--trace-wall-time`, `--record <file>`, or `--replay <file>`. It also accepts `--no-gpu` and `--gpu=off`, which name the CPU evaluation the launcher always uses. `--task-quantum` is rejected, because it changes the interleaving and so the output order of tasks, and `--virtual-time` because it changes what the program reads from the clock; a native executable uses the quantum its policy records. The variable has no quoting and cannot widen the build policy: every `--allow-*` option is rejected. A build with `--sealed` ignores it, `--deny-*` options included. Without `--sealed`, an executable trusts whoever sets the variable: `--record` and `--trace-events` can create or replace any file the process may write, and `--replay` answers host requests from a file of their choosing.
+Set `NEURA_RUN_OPTIONS` to space- or tab-separated options to lower a recorded limit (`--max-steps`, `--max-frames`, `--max-heap-cells`, `--max-tasks`, `--max-queued-messages`, `--max-pending-requests`) or the recorded `--parallel-workers` count, to deny a group with `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, or `--deny-all`, or to select `--stats`, `--profile`, `--tier=0`, `--tier-stats`, `--task-dump[=text|json]`, `--trace-events <file>`, `--trace-wall-time`, `--record <file>`, or `--replay <file>`. It also accepts `--no-gpu` and `--gpu=off`, which name the CPU evaluation the launcher always uses. `--task-quantum` is rejected, because it changes the interleaving and so the output order of tasks, and `--virtual-time` because it changes what the program reads from the clock; a native executable uses the quantum its policy records. The variable has no quoting and cannot widen the build policy: every `--allow-*` option is rejected. A build with `--sealed` ignores it, `--deny-*` options included. Without `--sealed`, an executable trusts whoever sets the variable: `--record` and `--trace-events` can create or replace any file the process may write, and `--replay` answers host requests from a file of their choosing.
 
 `--static` selects the fully static flavor, which excludes native interop, so the policy it records grants every group except native code and `--static --allow-native` is an error. Set the CMake option `NEURA_STATIC_LAUNCHER` to `ON` to require that flavor or `OFF` to disable it. `AUTO` builds it when a static C library is available. Linux launchers install below `lib/neura/launchers/<triple>/`. Use `--target <triple>` to choose an installed ELF target or `--launcher <file>` to supply the launcher. Linux x86-64 is the verified target.
 
@@ -144,7 +144,7 @@ A member with status 0 has no report. For other outcomes, standard error shows `
 build/neura test -I examples/guide examples/testing/math-tests.nra
 ```
 
-`test` builds the listed files, runs every test they declare in a fresh execution, prints `PASS` or `FAIL` with the failure and its location for each, and a summary line. It exits with status 0 only when every test passes. It accepts the capability options of `run`, `--stats`, the run limits, and the task options of [Run programs with tasks](#run-programs-with-tasks) other than `--trace-events`. [Testing](Testing) defines tests and the `Std.Test` assertions.
+`test` builds the listed files, runs every test they declare in a fresh execution, prints `PASS` or `FAIL` with the failure and its location for each, and a summary line. It exits with status 0 only when every test passes. It accepts the capability options of `run`, `--stats`, `--tier=0|1`, `--tier-stats`, the run limits, and the task options of [Run programs with tasks](#run-programs-with-tasks) other than `--trace-events`. The tests of one run share the lifted blocks of their image. [Testing](Testing) defines tests and the `Std.Test` assertions.
 
 These options test concurrent code ([Testing](Testing#tests-of-concurrent-code)):
 
@@ -180,6 +180,78 @@ Three commands manage the installed tool; [Install](Install) describes the insta
 
 `update` and `uninstall` apply only to an install made by the release archive's `install.sh`. A source build, a copy, or a package manager's install exits with status 3.
 
+## Diagnostics
+
+Diagnostics go to standard error, and a command that reports an error exits with status 1. Warnings are printed before the errors, or at the end of a command that succeeds, sorted by file and byte offset. A diagnostic has a primary location, a message, and optionally a code, labels at other locations (which may be in other files), notes, and suggested edits. A line is a line of the source as the lexer counts lines (LF, CRLF, or CR ends one), and a column counts Unicode code points from 1.
+
+How many errors a run reports depends on the stage that finds them:
+
+- **Syntax.** The lexer and the parser recover and go on. The lexer skips an invalid character, a malformed number, or an unterminated string and reads the next token. The parser skips the rest of a statement or member that fails to parse: to the `;` that ends it at the same depth, to the closing delimiter of the enclosing block or member list, or to a keyword that begins the next statement. They report up to `--max-errors N` errors (20 by default; `check`, `emit-ir`, `build`, and `test` accept the option), in source order, and any syntax error stops compilation before NeuraIR lowering.
+- **Everything after parsing.** Name resolution, type checking, the later NeuraIR checks, and circuit conversion stop at the first error. Lowering resolves declarations on demand and abandons speculative work, such as ranking an overload, by catching errors, so continuing after an error would report errors that the first one caused.
+
+Every error has a code: `E` and four digits, whose hundreds digit names the area. `E01xx` is the lexer, `E02xx` the parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes and lifecycle, `E06xx` concurrency, `E07xx` modules and imports, `E08xx` the backend, and `E09xx` [tags](Tags). A warning has a code, `W` and four digits, and a name. Errors that report the same mistake share a code, and `E0899` is the one code for errors that only a compiler defect can cause. A code is never reused for another error. [Diagnostic codes](Diagnostics) lists them. `neura explain <CODE>` (or `neura --explain <CODE>`) prints a code's page: the rule, a program that breaks it, and the program fixed. `neura explain --list` prints each code and its title, with the name of each warning; `neura explain <name>` also takes a warning's name. `neura tags` prints the catalogue of [tags](Tags), and `neura tags <Name>` one tag's signature, targets, status, and meaning. The pages are part of the `neura` binary, so `explain` reads no files. `explain` exits with status 0; a code that is not registered is an error that names the closest registered code.
+
+`--error-format` chooses the form. Every command accepts it.
+
+| Form | Output |
+| --- | --- |
+| `human` (default) | The message, its location, and the source lines with the primary span underlined by `^` and other labels by `-`, then notes and suggested edits. |
+| `short` | One line per diagnostic: `file:line:column: error: message`, or `file:line:column: error[E0201]: message` when the diagnostic has a code, and `warning` in place of `error` for a warning. |
+| `json` | One JSON object per line. |
+
+The `short` form is the stable machine-readable form: tools and tests that match diagnostics use it, and its layout changes only with a release note. The `human` form may change in any release. This is a missing semicolon in both forms:
+
+```text
+error[E0201]: expected ';'
+ --> /work/limits.nra:2:15
+  |
+2 | let limit = 10
+  |               ^ expected ';' here
+3 | let half = limit / 2;
+  | --- found 'let'
+  |
+help: add the missing ';'
+  |
+2 | let limit = 10;
+  |               +
+
+For more information about this error, try `neura explain E0201`.
+```
+
+```text
+/work/limits.nra:2:15: error[E0201]: expected ';'
+```
+
+The `human` form ends, after errors with codes, with one line that points to `neura explain`: for one code as above, and for several, `Some errors have detailed explanations:` and the codes in order. The `short` and `json` forms have no such line.
+
+In the `human` form a tab shows as four spaces, a column is as wide as the character's East Asian width (two for wide characters, none for combining marks, from a table in the tool rather than the system locale), a span over several lines is underlined on its first line and followed by `...`, and a line wider than the terminal is cut around the span with `...`. A suggested edit shows the edited line with `+` under inserted text and `~` under replaced text, or the original line with `-` under removed text. A diagnostic in the module that a [C import](ForeignInterop#c-imports) generates has a note that names the header.
+
+Each `json` object has `code` (a string, or `null`), `severity` (`error` or `warning`), `message`, `spans`, `notes`, `help`, `suggestions`, `args`, and `rendered`. Each span has `file`, `offset` and `length` in bytes, `line`, `column`, `primary`, and `label` (a string, or `null`). Each suggestion has `message`, `applicability` (`MachineApplicable`, `MaybeIncorrect`, `HasPlaceholders`, or `Unspecified`), and `edits`, each a span and its `replacement`. `args` holds facts about the error as strings, such as the `kind`, `name`, and `owner` of a name that did not resolve. `rendered` is the `human` form without color.
+
+`--color=auto|always|never` colors the `human` form. `auto`, the default, colors it when standard error is a terminal, `NO_COLOR` is unset or empty, and `TERM` is not `dumb`; `always` and `never` ignore all three. The width that long lines are cut to is the terminal's, else the `COLUMNS` environment variable, else 100.
+
+`check`, `emit-ir`, `build`, and `test` accept the warning options:
+
+| Option | Meaning |
+| --- | --- |
+| `-W<name>`, `-Wno-<name>` | Enable or disable the warning `<name>`. Warnings are enabled by default; the last option for a name wins. A name that is not a warning's is an error. |
+| `-Werror` | Report every warning as an error; the command then exits with status 1. |
+| `--warn-library` | Also report warnings in the standard library, which are otherwise hidden. A warning about a use is reported where the use is, so a program that uses a deprecated standard library declaration gets the warning without this option. |
+
+The warnings come from [tags](Tags) and [accessors](Types#accessors):
+
+| Code | Name | Warning | Reported by |
+| --- | --- | --- | --- |
+| `W0001` | `deprecated` | A use of a `#Deprecated` declaration, or an override of a deprecated method | `check`, `emit-ir`, `build`, `test` |
+| `W0002` | `experimental` | A use of an `#Experimental` declaration | `check`, `emit-ir`, `build`, `test` |
+| `W0003` | `unused-result` | An expression statement that discards the result of a `#NoDiscard` function or type, or a `new` of a `#NoDiscard` class | `check`, `emit-ir`, `build`, `test` |
+| `W0004` | `inline` | An `#Inline(always: true)` function that the `inline-calls` pass cannot inline | `emit-ir`, `build`, and `test` when they optimize |
+| `W0005` | `setter-never-stores` | A setter that never assigns its field | `check`, `emit-ir`, `build`, `test` |
+
+`#Allow(<name or code>)` on a declaration silences a warning inside it, and `#Deny(...)` makes it an error there; neither is affected by `-Wno-<name>`, and `-Werror` applies to the warnings that remain.
+
+`neura check --fix <file.nra>...` applies the suggestions marked `MachineApplicable` to the source files, saving each file in place. It checks the program, applies the edits of what it reports from the end of each file to the start, and repeats until no edit applies, then reports `neura: check --fix applied <n> edits to <m> files` on standard error and checks the result as `check` does. It never edits a standard library file or a module generated from a C header, and says so when a suggestion would. `--fix` cannot be combined with `--task-safety`.
+
 ## Exit status
 
 Each status below is the tool's own. The exit status of a program that `neura run` executes, and of a native executable, is the program's: the `ExitCode` that `main` returns, or the status of its trap class.
@@ -196,6 +268,6 @@ Each status below is the tool's own. The exit status of a program that `neura ru
 
 The [NVM specification](NVM#toolchain-and-distribution) defines how `neura build` produces an executable `.nvr` image from source or `.nir` and how `neura run` executes that image. Package configuration is not part of this release.
 
-Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. Diagnostics go to standard error and compilation fails on errors. Exact format, encoding of column offsets and warning policy remain open.
+Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. [Diagnostics](#diagnostics) defines their formats, columns, and warning options.
 
 A formatter should produce stable, idempotent output consistent with [Coding style](CodingStyle). Editor integration should eventually expose diagnostics, navigation and completion; debugger support should include source locations, stepping and local variables. These are tooling goals, not promises of first-release support.

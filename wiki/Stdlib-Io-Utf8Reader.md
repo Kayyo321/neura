@@ -17,17 +17,17 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Utf8Reader** · [`export let Utf8Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L10)
-  Decodes UTF-8 from a byte source and retains bytes read ahead.
-- **Utf8Reader.Utf8Reader** · [`export let init = func(input: func(int) -> result.Result<uint8[list]>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L19)
+- **Utf8Reader** · [`export let Utf8Reader = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L12)
+  Decodes UTF-8 from a byte source and retains bytes read ahead. Tagged `#Final`.
+- **Utf8Reader.Utf8Reader** · [`export let init = func(input: func(int) -> result.Result<uint8[list]>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L21)
   Initializes the reader with a byte source and an empty buffer.
-- **Utf8Reader.Utf8Reader** · [`export let read_scalar = func -> result.Result<Optional<uint32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L27)
-  The next Unicode scalar value; None at the end of the stream. An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are consumed and that byte is not.
-- **Utf8Reader.Utf8Reader** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L88)
-  The next line without its LF or a CR before it; None at the end of the stream. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
-- **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L116)
-  The rest of the stream as text.
-- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L178)
+- **Utf8Reader.Utf8Reader** · [`export let read_scalar = func -> result.Result<Optional<uint32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L30)
+  The next Unicode scalar value; None at the end of the stream. An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are consumed and that byte is not. Tagged `#NoDiscard`.
+- **Utf8Reader.Utf8Reader** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L92)
+  The next line without its LF or a CR before it; None at the end of the stream. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line. Tagged `#NoDiscard`.
+- **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L121)
+  The rest of the stream as text. Tagged `#NoDiscard`.
+- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L183)
   Creates a UTF-8 reader over the supplied byte source.
 <!-- END SOURCE API -->
 
@@ -44,7 +44,7 @@ The following sections are taken from the [standard library specification](Stdli
 | `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
-| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](https://github.com/Kayyo321/neura/wiki/StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
+| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
 | `print`, `println`, `eprint`, `eprintln`, and their `try_` forms | Format first and then write to output or to the error stream. The newline forms append one LF. | T1, P2 |
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
@@ -63,9 +63,9 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, the read-only field `size`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
 | `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`; the read-only field `buffered` is the number of bytes waiting. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 

@@ -17,28 +17,28 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **File** · [`export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L17)
+- **File** · [`export let OpenMode = enum (Read, Write, Append, ReadWrite, CreateNew)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L18)
   Read: must exist. Write: create or truncate. Append: create, and write at the end. ReadWrite: must exist. CreateNew: read and write a new file; fails with AlreadyExists.
-- **File** · [`export let SeekOrigin = enum (Start, Current, End)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L19)
+- **File** · [`export let SeekOrigin = enum (Start, Current, End)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L20)
   Selects the start, current position, or end as the reference point for seeking.
-- **File** · [`export let File = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L41)
-  An unbuffered host file with an explicit, idempotent close operation.
-- **File.File** · [`export let init = func(opened: FileHandle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L48)
+- **File** · [`export let File = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L43)
+  An unbuffered host file with an explicit, idempotent close operation. Tagged `#Final`, `#NoDiscard(reason: "an open file must be closed")`.
+- **File.File** · [`export let init = func(opened: FileHandle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L50)
   Use File.open; the handle comes from the library.
-- **File.File** · [`export let read = func(max: int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L54)
-  Up to `max` bytes from the current position; an empty list at the end of the file. A maximum below 1 traps.
-- **File.File** · [`export let write = func(data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L66)
-  Writes every byte, repeating partial host writes.
-- **File.File** · [`export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L91)
-  Moves the position and returns it, counted from the start.
-- **File.File** · [`export let size = func -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L102)
-  The file's size in bytes. The position is unchanged.
-- **File.File** · [`export let close = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L129)
+- **File.File** · [`export let read = func(max: int) -> result.Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L57)
+  Up to `max` bytes from the current position; an empty list at the end of the file. A maximum below 1 traps. Tagged `#NoDiscard`.
+- **File.File** · [`export let write = func(data: uint8[list]) -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L70)
+  Writes every byte, repeating partial host writes. Tagged `#NoDiscard`.
+- **File.File** · [`export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L96)
+  Moves the position and returns it, counted from the start. Tagged `#NoDiscard`.
+- **File.File** · [`export let size = func -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L108)
+  The file's size in bytes. The position is unchanged. Tagged `#NoDiscard`.
+- **File.File** · [`export let close = func -> result.Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L135)
   Releases the file. Closing again does nothing and returns Ok; the file is closed even when the host reports an error.
-- **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L142)
-  Opens the normalized path using the selected mode and returns an owned file.
-- **File** · [`export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L157)
-  Opens the file, runs `body` with it in a scope this helper owns, and closes it exactly once on every ordinary completion (Concurrency.md section 7, "Resources"). If the open fails, returns that error and does not call the body. Otherwise returns the body's result, with two exceptions for a failed close: a body Err becomes a Context error whose cause is the body's error and whose message carries the close error's message, and a body Ok becomes the close error (Std.Io.Closeable.release does the combining). The file is closed even if the body closed it already, which reports no error. A trap in the body ends the run without cleanup, and the runner then closes the files the run left open. Needs the fs capability.
+- **File** · [`export let open = func(path: Path, mode: OpenMode) -> result.Result<File>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L149)
+  Opens the normalized path using the selected mode and returns an owned file. Tagged `#NoDiscard`.
+- **File** · [`export let with_open = func<T>(path: Path, mode: OpenMode, body: func(File) -> result.Result<T>) -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/fs/file.nra#L165)
+  Opens the file, runs `body` with it in a scope this helper owns, and closes it exactly once on every ordinary completion (Concurrency.md section 7, "Resources"). If the open fails, returns that error and does not call the body. Otherwise returns the body's result, with two exceptions for a failed close: a body Err becomes a Context error whose cause is the body's error and whose message carries the close error's message, and a body Ok becomes the close error (Std.Io.Closeable.release does the combining). The file is closed even if the body closed it already, which reports no error. A trap in the body ends the run without cleanup, and the runner then closes the files the run left open. Needs the fs capability. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 
 ## Detailed contracts
@@ -48,8 +48,9 @@ The following sections are taken from the [standard library specification](Stdli
 ### 5.5 Resources
 
 - A host resource (`File`, `TcpStream`, `TcpListener`) has `close() → Result<Unit>`. Closing again does nothing and returns `Ok`. Any other operation on a closed resource returns an `Io` error of kind `Closed`. If `close` reports an error the resource is still closed.
+- **Results that must be used.** The functions and methods of `Std.Io`, `Std.Fs`, and `Std.Net` whose `Result` can report a failed read, write, open, connection, or file system operation are tagged `#NoDiscard`, and so are the classes `File`, `TcpStream`, and `TcpListener`: a statement that drops such a result warns with `W0003` ([Tags](Tags#nodiscard)), and `let _ = ...;` drops one on purpose. `close()` is not tagged.
 - **Closing is always explicit.** Reclaiming an unreachable resource object frees its storage and does nothing else: `deinit` does not run and the host ID stays open until the run ends. No library class declares `deinit`. `Fs` and `Net` each allow at most 1,024 simultaneously open IDs per run; exceeding that returns an `Io` error of kind `Other`.
-- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. With tasks a body can end early by cancellation, and the close must still happen ([Concurrency](https://github.com/Kayyo321/neura/blob/main/docs/lang/Concurrency.md#7-cancellation-deadlines-and-resources)).
+- **Scoped helpers.** `File.with_open<T>(path, mode, body: (File) → Result<T>) → Result<T>` and `TcpStream.with_connection<T>(host, port, body: (TcpStream) → Result<T>) → Result<T>` open the resource, run the body, and close the resource exactly once on every ordinary completion: a returned value, a returned error, and a return after the body's scope was cancelled. With tasks a body can end early by cancellation, and the close must still happen ([Concurrency](Concurrency#7-cancellation-deadlines-and-resources)).
   - If the open fails, the helper returns that error and does not call the body.
   - The body runs in a `scope` the helper owns, so every task started in that scope has finished before the resource is closed.
   - If the close succeeds, the helper returns the body's result unchanged. If the close fails after a body `Ok`, it returns the close error. If the close fails after a body `Err`, it returns a `Context` error whose cause is the body's error and whose message carries the close error's message: `closing the resource also failed: ` and that message from `with_open`, `close failed after the body failed: ` and that message from `with_connection`.
@@ -57,7 +58,7 @@ The following sections are taken from the [standard library specification](Stdli
   - A trap in the body ends the run without cleanup; the runner then closes what the run left open.
 - **`Closeable.release<T>(resource: Closeable, outcome: Result<T>) → Result<T>`** is the closing rule on its own: it closes the resource and combines the result with the outcome of the work, as `with_open` does. A program that owns another kind of closeable resource calls it exactly once, after the work, on every ordinary completion.
 - Where a wrapper owns a closeable resource, it can use the `Closeable` interface. A wrapper over a bare function value does not own or close the function's receiver.
-- **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](https://github.com/Kayyo321/neura/wiki/NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
+- **Frame slots keep storage alive.** A reference in a local stays reachable until the local is overwritten or the function returns ([NVM](NVM#garbage-collection)). The rule for library code: an operation that replaces a large structure (a hash rebuild, a sort buffer, a deque rebalance) does the work in a helper function and returns the new structure, so the old one's last frame reference dies when the helper returns and not when the caller's loop ends.
 
 ### 6.4 Concrete aliases and absence
 
@@ -74,7 +75,7 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 | `print_line(s: string)` | Writes the text and one LF through `neura.console.write_line`. A failed write traps with `console write failed`. | F1 for the message |
 | `try_print_line(s: string) → Result<Unit>` | The same write, returning the failure. | |
 | `write(s)`, `error_line(s)`, and their `try_` forms | Write raw text through `neura.console.write`, to output or to the error stream. | T1 (text to bytes) |
-| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](https://github.com/Kayyo321/neura/wiki/StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
+| `format(pattern, args...)`, `vformat(pattern, args)`, and their `try_` forms | Render a [format string](StandardLibrary#console-formatting) to UTF-8 without calling a host service. | |
 | `print`, `println`, `eprint`, `eprintln`, and their `try_` forms | Format first and then write to output or to the error stream. The newline forms append one LF. | T1, P2 |
 | `read_line() → Result<Optional<string>>` | A line without its terminator; `None` at the end of input. | T1 |
 | `output() → ByteSink`, `error() → ByteSink`, `input() → ByteSource` | The console as streams. | |
@@ -93,9 +94,9 @@ The three names are this page's shorthand. A type overlay cannot name a function
 
 | Class | Behavior | Needs |
 | --- | --- | --- |
-| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, `size()`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
+| `ByteBuffer` | An in-memory accumulator over a built-in `uint8` list. `write` (a `ByteSink` when bound), `to_list()`, the read-only field `size`, `clear()`, and `reader()`, a `ByteSource` over a copy. Equality, hashing, and text use the current ordered bytes. A reader's position is independent of its buffer, and mutating a buffer used as a hash key invalidates that key's stored hash. | None |
 | `BufferedReader` | Built from a `ByteSource`. Holds up to 8,192 bytes (configurable, at least 16). `read` is a `ByteSource`; `read_exact(count) → Result<uint8[list]>` fails with kind `UnexpectedEnd`; `read_all()`. | None |
-| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`. It does not close anything. | None |
+| `BufferedWriter` | Built from a `ByteSink`. Collects up to 8,192 bytes and passes them on when full and on `flush() → Result<Unit>`; the read-only field `buffered` is the number of bytes waiting. It does not close anything. | None |
 | `Utf8Reader` | Built from a `ByteSource`. `read_scalar() → Result<Optional<uint32>>`, `read_line() → Result<Optional<string>>`, `read_to_end() → Result<string>`. Invalid UTF-8 fails with kind `InvalidData`. | T1 |
 | `Utf8Writer` | Built from a `ByteSink`. `write` is a `TextSink`; `write_line(s)` adds one LF. | T1 |
 
@@ -109,7 +110,7 @@ Needs P2 for every host operation and T1 for `Path`.
 
 - The separator is `/` on every host. The host service translates.
 - **Normalization at construction:** repeated separators collapse; `.` components are removed; a trailing separator is removed except for the root; an empty result is `.`. `..` components are kept, because removing them is not correct in the presence of links.
-- `is_absolute()` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
+- The read-only field `is_absolute` is true exactly when the text starts with `/`. Platform prefixes such as drive letters are passed to the host unchanged and are not interpreted.
 - Module function `of(text)`. Members include `join(other: string) → Path`, `parent() → Path`, `file_name()`, `stem()`, `extension()`, `components()`, `resolve_lexically() → Path`, `starts_with(other: Path) → bool`, and `relative_to(base: Path) → Path`. An absolute argument to `join` replaces the path. `parent` returns `nil` when the path has no parent. `relative_to` returns `nil` when it cannot express the path relative to the base. `file_name`, `stem`, and `extension` return `Optional<string>`. The extension is the text after the last `.` of the file name when that dot is not the first character. `components` returns a built-in list of strings. Equality, hash, ordering, and text use the normalized path.
 
 **`File`** is a class wrapping a host file ID. The module functions `open(path, mode: OpenMode) → Result<File>` and `with_open<T>(path, mode, body)`, the scoped helper of [section 5.5](Stdlib-Design#55-resources). `OpenMode` is a fieldless enum: `Read` (must exist), `Write` (create or truncate), `Append`, `ReadWrite` (must exist), `CreateNew` (fails with `AlreadyExists`). Members: `read` (a `ByteSource` when bound), `write` (a `ByteSink` when bound), `seek(offset: int64, origin: SeekOrigin) → Result<int64>` (`SeekOrigin`: `Start`, `Current`, `End`), `size() → Result<int64>`, and `close() → Result<Unit>` ([section 5.5](Stdlib-Design#55-resources)). A `File` is unbuffered.
@@ -121,7 +122,7 @@ Needs P2 for every host operation and T1 for `Path`.
 | `read_bytes(path) → Result<uint8[list]>`, `read_text(path) → Result<string>` | `read_text` fails with `InvalidData` for invalid UTF-8. Both close the file on every path, including a failed read. |
 | `write_bytes(path, bytes)`, `write_text(path, text)`, `append_text(path, text)` `→ Result<Unit>` | Create the file if needed; the `write_` forms truncate. A failed write is reported after the file is closed. |
 | `exists(path) → Result<bool>` | `Ok(false)` for `NotFound`; other failures are errors. |
-| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class: `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, `modified: Instant`. |
+| `metadata(path) → Result<FileMetadata>` | `FileMetadata` is a class with the read-only fields `kind` (`FileKind`: `File`, `Directory`, `Other`), `size: int64`, and `modified: Instant`. |
 | `list(path)` | A `Result` of a built-in list of `Path`: the directory's entries joined to `path`, sorted by name bytes. |
 | `create_directory(path)`, `create_directories(path)` | The second creates missing parents and succeeds when the directory exists. |
 | `remove_file(path)`, `remove_directory(path)` | `remove_directory` requires an empty directory. |
@@ -134,8 +135,8 @@ Needs P2 for every host operation and T1 for `Path`.
 
 - **Receivers.** A method cannot name its own receiver, so a member that returns "the same object" needs a stored self reference. `StringBuilder` keeps one, set by its factory `create()`. Classes whose invariants need a factory (`StringBuilder`, `Random`, `File`, `TcpStream`, `TcpListener`) take a module-private token or an internal handle in their constructors.
 - **Constructor visibility.** An unexported `init` is private to its class, not to its module, so a module function cannot call it. `Regex` exports its constructor for that reason; an object built directly with it traps on use.
-- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](https://github.com/Kayyo321/neura/wiki/ProjectStructure).
-- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](https://github.com/Kayyo321/neura/wiki/Modules#initialization)).
+- **Module file names.** `Std.Core.UInt8` and `Std.Core.BFloat16` live in `u-int8.nra` and `b-float16.nra`, following the PascalCase to kebab-case mapping of [Project structure](ProjectStructure).
+- **Optional and Result** import each other (`to_result` and `to_optional`); both contain only declarations. Files that import each other initialize as one cycle after the files the cycle imports ([Modules](Modules#initialization)).
 - **Extra members.** `Error` and `Result` have `equals`, `hash`, and `to_string`, and `SimpleDetail` compares its code and message, so errors compare structurally. `Comparable<T>` is `Std.Core.Comparable`. The collection interfaces declare `add(T) → bool` for every mutable collection (lists return true), and a sorted map's `first`, `last`, `range`, and `descending` give entries while `floor`, `ceiling`, `lower`, and `higher` give keys, with `_entry` forms for entries.
 
 ### 18.6 Host services, files, and networking
