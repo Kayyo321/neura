@@ -1,4 +1,5 @@
 // test-options: --allow-clock
+// host-dependent-counts: the arithmetic on two readings of the real clock takes a number of steps that depends on their values
 let clock = import:Std.Time.Clock;
 let duration = import:Std.Time.Duration;
 let instant = import:Std.Time.Instant;
