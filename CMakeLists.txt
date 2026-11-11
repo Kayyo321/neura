@@ -537,6 +537,10 @@ if(BUILD_TESTING)
             ARCHIVE_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     endforeach()
+    # The tests name the shared library libmathops.so. dlopen ignores a file's
+    # suffix, so on macOS the Mach-O dynamic library keeps that name instead of
+    # CMake's libmathops.dylib.
+    set_target_properties(neura_test_mathops_shared PROPERTIES SUFFIX ".so")
     set(neura_native_test_dir "${CMAKE_CURRENT_BINARY_DIR}/native-tests")
     add_test(NAME backend-capabilities COMMAND ${CMAKE_COMMAND}
         "-DNEURA=$<TARGET_FILE:neura>"

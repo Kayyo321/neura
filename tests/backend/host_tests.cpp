@@ -15,6 +15,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
+#include <iostream>
 
 #ifndef _WIN32
 #include <arpa/inet.h>
@@ -116,10 +117,28 @@ void write_text_file(const fs::path& path, std::string_view contents) {
     out << contents;
 }
 
+// The system libraries the native interop tests open by name. macOS has no
+// libc.so.6 or libm.so.6: libSystem provides both, and dyld resolves the name.
+#ifdef __APPLE__
+constexpr const char* c_library = "/usr/lib/libSystem.B.dylib";
+constexpr const char* math_library = "/usr/lib/libSystem.B.dylib";
+#else
+constexpr const char* c_library = "libc.so.6";
+constexpr const char* math_library = "libm.so.6";
+#endif
+
 // The number of open file descriptors of this process.
 std::size_t open_descriptors() {
     std::size_t count = 0;
-    for ([[maybe_unused]] const auto& entry : fs::directory_iterator("/proc/self/fd")) ++count;
+    // Linux lists them in procfs; macOS has no procfs, and /dev/fd lists the
+    // process's descriptors. Either listing includes the descriptor of the
+    // directory being read, which a difference between two counts cancels.
+#ifdef __APPLE__
+    constexpr const char* descriptor_directory = "/dev/fd";
+#else
+    constexpr const char* descriptor_directory = "/proc/self/fd";
+#endif
+    for ([[maybe_unused]] const auto& entry : fs::directory_iterator(descriptor_directory)) ++count;
     return count;
 }
 
@@ -184,7 +203,7 @@ NEURA_TEST(host, ungranted_groups_return_capability_denied) {
     denied("neura.ffi.arena.open", {});
     denied("neura.ffi.arena.close", {i64(1)});
     denied("neura.ffi.alloc", {i64(0), i64(8), i64(8)});
-    denied("neura.ffi.library.open", {i64(0), text("libc.so.6")});
+    denied("neura.ffi.library.open", {i64(0), text(c_library)});
     denied("neura.ffi.library.default", {});
     denied("neura.ffi.library.embedded", {});
     denied("neura.ffi.symbol", {i64(0), text("abs")});
@@ -253,7 +272,7 @@ NEURA_TEST(host, native_services_allocate_read_write_and_call) {
     expect_error(host.call("neura.ffi.call", {abs.value, bytes(variadic), bytes(std::string(12, '\0'))}),
                  host_error::invalid_input, "unpromoted variadic float");
 
-    const auto math = host.call("neura.ffi.library.open", {arena.value, text("libm.so.6")});
+    const auto math = host.call("neura.ffi.library.open", {arena.value, text(math_library)});
     expect_ok(math, "libm through the arena");
     expect_ok(host.call("neura.ffi.symbol", {math.value, text("cos")}), "cos in libm");
 
@@ -373,9 +392,17 @@ NEURA_TEST(host, file_services_report_error_codes) {
     for (const auto& name : listed.value.elements) names.push_back(name.bytes);
     check(names == std::vector<std::string>{"B", "a", "z", "\xc3\xa9"}, "names sorted by bytes");
     expect_error(host.call("neura.fs.list", {text(dir / "a.txt")}), host_error::not_a_directory, "list a file");
+    // Some file systems refuse to create a name that is not UTF-8: APFS
+    // fails with EILSEQ. Such a directory can never list one, so the check
+    // applies only where the name can exist.
     write_text_file(dir.path() / "sub" / "\xff", "");
-    expect_error(host.call("neura.fs.list", {text(dir / "sub")}), host_error::unsupported, "a name not UTF-8");
-    fs::remove(dir.path() / "sub" / "\xff");
+    std::error_code not_created;
+    if (fs::symlink_status(dir.path() / "sub" / "\xff", not_created).type() != fs::file_type::not_found) {
+        expect_error(host.call("neura.fs.list", {text(dir / "sub")}), host_error::unsupported, "a name not UTF-8");
+        fs::remove(dir.path() / "sub" / "\xff");
+    } else {
+        std::cout << "  this file system rejects names that are not UTF-8: that listing error was not checked\n";
+    }
 
     expect_error(host.call("neura.fs.remove", {text(dir / "sub"), boolean(true)}), host_error::directory_not_empty,
                  "remove a full directory");

@@ -134,12 +134,14 @@ let FsTests = module (
     export let test_list_is_sorted_by_bytes = func() -> void {
         let dir = fresh("list");
         test.assert_equal_string("", names(test.assert_ok<path.Path[list]>(fs.list(dir))));
-        for (let name in ["b", "é", "a", "B", "z", "a2"]) {
+        // "Q" sorts before "a" by bytes; no two names differ only by case, which
+        // a case-insensitive file system (the macOS default) treats as one file.
+        for (let name in ["b", "é", "a", "Q", "z", "a2"]) {
             test.assert_ok<unit.Unit>(fs.write_text(dir.join(name), name));
         }
         test.assert_ok<unit.Unit>(fs.create_directory(dir.join("sub")));
         test.assert_equal_string(
-            "fs-work/list/B;fs-work/list/a;fs-work/list/a2;fs-work/list/b;fs-work/list/sub;fs-work/list/z;fs-work/list/é;",
+            "fs-work/list/Q;fs-work/list/a;fs-work/list/a2;fs-work/list/b;fs-work/list/sub;fs-work/list/z;fs-work/list/é;",
             names(test.assert_ok<path.Path[list]>(fs.list(dir))));
         expect_kind<path.Path[list]>(fs.list(dir.join("missing")), error.IoErrorKind.NotFound);
         expect_kind<path.Path[list]>(fs.list(dir.join("a")), error.IoErrorKind.NotADirectory);
