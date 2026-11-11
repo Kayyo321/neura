@@ -1,0 +1,14 @@
+// A #ThreadSafe class that tasks cannot share (E0609): one of its exported
+// methods is not synchronized, so it is not a monitor.
+#ThreadSafe
+let Stats = class (
+    let hits: int64 = 0;
+
+    #Synchronized
+    export let record = func() -> int64 {
+        hits = hits + 1;
+        return hits;
+    };
+
+    export let peek = func() -> int64 => hits;
+);

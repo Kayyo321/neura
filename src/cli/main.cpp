@@ -1515,9 +1515,13 @@ int task_safety_report(neura::IrProgram program) {
 namespace {
 
 int check_program(neura::IrProgram program) {
-    if (neura::uses_tasks(program)) {
-        // The isolation rules of a spawn need concrete types, which
-        // exist after specialization (Concurrency.md section 5).
+    const bool thread_safe_tags = std::any_of(program.symbols.begin(), program.symbols.end(), [](const auto& item) {
+        return neura::has_tag(item, neura::TagId::ThreadSafe);
+    });
+    if (neura::uses_tasks(program) || thread_safe_tags) {
+        // The isolation rules of a spawn, and the #ThreadSafe check, need
+        // concrete types, which exist after specialization (Concurrency.md
+        // section 5).
         neura::require_valid_ir(program, "before specialization");
         neura::materialize_reference_storage(program);
         neura::specialize(program);

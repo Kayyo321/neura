@@ -1,0 +1,12 @@
+error[E0602]: a value of type Counter is not transferable, so it cannot be given to a spawned task
+  --> $DIR/monitor-not-shareable.nra:21:20
+   |
+13 |     export let peek = func() -> int64 => count;
+   |     ------ 'Counter' is not shareable: method 'peek' is exported and not synchronized
+...
+21 |         spawn work(counter);
+   |                    ^^^^^^^ not transferable
+   |
+   = note: tasks may share an instance of a monitor: a class whose exported methods are all #Synchronized, whose fields are transferable, and whose state only its own methods reach through their receiver
+
+For more information about this error, try `neura explain E0602`.

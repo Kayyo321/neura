@@ -1,0 +1,16 @@
+error[E0608]: #ThreadSafe function 'clamp' is not task-safe: it reaches 'current_limit', which uses the reassignable binding 'limit'
+  --> $DIR/thread-safe-function.nra:9:1
+   |
+ 6 |     return limit;
+   |            ----- uses the reassignable binding 'limit' here
+...
+ 9 | #ThreadSafe
+   | ^^^^^^^^^^^ #ThreadSafe promises task safety
+10 | let clamp = func(value: int32) -> int32 {
+11 |     let most = current_limit();
+   |                --------------- calls 'current_limit'
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+   = help: remove #ThreadSafe, or remove the use of shared state
+
+For more information about this error, try `neura explain E0608`.

@@ -2,6 +2,8 @@
 
 #include "attributes.hpp"
 
+#include "monitors.hpp"
+#include "tags.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
 
@@ -755,7 +757,18 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
     insert_polls(program);
-    if (uses_tasks(program)) TaskAnalysis(program).check();
+    // Synchronized methods take their receiver's guard only in a program that
+    // spawns; the guard operations are then part of what the isolation
+    // checks see.
+    lower_synchronized(program);
+    const bool thread_safe_tags = std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+        return has_tag(item, TagId::ThreadSafe);
+    });
+    if (uses_tasks(program) || thread_safe_tags) {
+        const TaskAnalysis analysis(program);
+        analysis.check_tags();
+        if (uses_tasks(program)) analysis.check();
+    }
 }
 
 } // namespace neura

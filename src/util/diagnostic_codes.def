@@ -141,6 +141,8 @@ NEURA_DIAGNOSTIC(E0604, "tasks combined with foreign code")
 NEURA_DIAGNOSTIC(E0605, "scope-bound value leaves its scope")
 NEURA_DIAGNOSTIC(E0606, "invalid select")
 NEURA_DIAGNOSTIC(E0607, "scope block outside a function body")
+NEURA_DIAGNOSTIC(E0608, "#ThreadSafe function that is not task-safe")
+NEURA_DIAGNOSTIC(E0609, "#ThreadSafe class whose instances cannot be shared")
 
 // Modules and imports
 NEURA_DIAGNOSTIC(E0701, "unresolved import")
@@ -169,7 +171,7 @@ NEURA_DIAGNOSTIC(E0807, "literal not representable in the circuit")
 NEURA_DIAGNOSTIC(E0808, "generic specialization limit exceeded")
 NEURA_DIAGNOSTIC(E0899, "internal compiler error")
 
-// Tags (docs/lang/Tags.md); E0917-E0929 stay free for later tags.
+// Tags (docs/lang/Tags.md); E0923-E0929 stay free for later tags.
 NEURA_DIAGNOSTIC(E0900, "unknown tag")
 NEURA_DIAGNOSTIC(E0901, "tag on a declaration it does not apply to")
 NEURA_DIAGNOSTIC(E0902, "unknown or misplaced tag argument")
@@ -187,6 +189,12 @@ NEURA_DIAGNOSTIC(E0913, "override of a final method")
 NEURA_DIAGNOSTIC(E0914, "extension of a sealed type outside its module")
 NEURA_DIAGNOSTIC(E0915, "unknown warning in a tag")
 NEURA_DIAGNOSTIC(E0916, "result tag on a function without a result")
+NEURA_DIAGNOSTIC(E0917, "#Pure function that is not pure")
+NEURA_DIAGNOSTIC(E0918, "assignable field in an #Immutable class")
+NEURA_DIAGNOSTIC(E0919, "field of a mutable type in an #Immutable class")
+NEURA_DIAGNOSTIC(E0920, "#Immutable class with a base or subclass that is not #Immutable")
+NEURA_DIAGNOSTIC(E0921, "#Synchronized on a method without a body to guard")
+NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchronized")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

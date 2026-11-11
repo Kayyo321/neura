@@ -1,0 +1,13 @@
+// A #ThreadSafe function that reads a reassignable module binding through a
+// call (E0608), with the same call chain a spawn of it would report.
+let limit: int32 = 10;
+
+let current_limit = func() -> int32 {
+    return limit;
+};
+
+#ThreadSafe
+let clamp = func(value: int32) -> int32 {
+    let most = current_limit();
+    return value > most ? most : value;
+};

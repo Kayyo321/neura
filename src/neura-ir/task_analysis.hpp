@@ -19,10 +19,26 @@ public:
     explicit TaskAnalysis(const IrProgram& program);
 
     // Section 5.1. A recursive type is transferable when its parts are.
-    bool transferable(const IrType& type) const;
-    // Whether objects of exactly this class may be given to another task.
-    // The converter marks the layouts of these classes in the image.
-    bool transferable_class(SymbolId cls) const;
+    bool transferable(const IrType& type) const { return transferable_in(type, false); }
+    // Whether objects of exactly this class may be given to another task:
+    // a Std.Concurrent handle, a closure with transferable captures, an
+    // #Immutable class, or a shareable monitor. The converter marks the
+    // layouts of these classes in the image.
+    bool transferable_class(SymbolId cls) const { return class_transferable(cls, false); }
+
+    // A rule that keeps a class's instances from being shared between tasks
+    // (section 8.1), with the member or tag that breaks it.
+    struct Problem {
+        std::string text;
+        Span span;
+    };
+    // Why instances of `cls` may not be shared between tasks, or nothing for
+    // a shareable monitor: a class whose declaration is a monitor's
+    // (class.shareable), not marked #NotThreadSafe, whose fields are all
+    // transferable, whose state no code reaches except through the
+    // receiver, and whose subclasses are all shareable.
+    std::optional<Problem> shareable_problem(SymbolId cls) const;
+    bool shareable(SymbolId cls) const { return !shareable_problem(cls); }
 
     // Section 5.2. The operation that makes `function` unsafe off the root
     // task, with the calls that reach it, or nothing when it is task-safe.
@@ -43,6 +59,8 @@ public:
     // Diagnostic at the first violation: at the argument for a value that is
     // not transferable, and at the spawn for a call that is not task-safe.
     void check() const;
+    // Checks #ThreadSafe on functions, methods, and classes (E0608, E0609).
+    void check_tags() const;
 
 private:
     struct Reason {
@@ -78,8 +96,20 @@ private:
     void find_created_closures();
     // The closure layout whose body `function` is, or no_symbol.
     SymbolId closure_of(SymbolId function) const;
-    mutable std::map<SymbolId, bool> class_cache_;
-    mutable std::map<SymbolId, bool> enum_cache_;
+    // Two caches each: for a value given to a task, and for a value that
+    // enters or leaves an isolated parallel item, which is copied into
+    // another heap and so cannot be a monitor, whose guard is scheduler state.
+    mutable std::map<SymbolId, bool> class_cache_[2];
+    mutable std::map<SymbolId, bool> enum_cache_[2];
+    // Per class, the first access to its state that does not go through the
+    // receiver of one of its own methods (section 8.1).
+    std::map<SymbolId, Problem> stray_access_;
+    bool transferable_in(const IrType& type, bool item) const;
+    bool class_transferable(SymbolId cls, bool item) const;
+    void find_stray_accesses();
+    // A diagnostic for a value that is not transferable: when its class was
+    // meant to be shared, why it is not.
+    void explain_class(Diagnostic& error, const IrType& type) const;
 
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     bool valid(SymbolId id) const { return id < program_.symbols.size(); }

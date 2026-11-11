@@ -1,0 +1,10 @@
+// A field of an #Immutable class declared with let (E0918).
+#Immutable
+let Point = class (
+    export last x: int32;
+    export let y: int32 = 0;
+
+    export let init = func(start: int32) {
+        x = start;
+    };
+);
