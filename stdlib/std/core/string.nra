@@ -1,16 +1,17 @@
 let charsets = import:Std.Text.Charsets;
 let formatting = import:Std.Io.Internal.Formatting;
-let ordering = import:Std.Core.Ordering;
 let regex = import:Std.Text.Regex;
 let result = import:Std.Core.Result;
 let string_builder = import:Std.Core.StringBuilder;
 let unicode_case = import:Std.Text.Internal.UnicodeCase;
 let unicode_scalars = import:Std.Text.Scalars;
 let strings = import:Std.Text.Strings;
+let text_kernels = import:Std.Internal.Kernels.Text;
 let variadic = import:Std.Core.Variadic;
 
 /// @brief The primitive companion for immutable UTF-8 text.
 /// @see [Std.Core.String](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-String)
+#Since("0.1.0")
 export let String = module:strings (
     /// @brief Aliases the supported character encodings from Std.Text.Charsets.
     export let Charset = charsets.Charset;
@@ -33,23 +34,21 @@ export let String = module:strings (
             other != nil && s == other.to_string();
 
     /// @brief Compares UTF-8 bytes lexicographically and returns -1, 0, or 1.
-    export let compare_to = func(s: string, other: string) -> int => match (strings.compare(s, other)) {
-        ordering.Ordering.Less => -1,
-        ordering.Ordering.Equal => 0,
-        ordering.Ordering.Greater => 1,
-    };
+    export let compare_to = func(s: string, other: string) -> int => text_kernels.compare(s, other) as int;
 
     /// @brief Compares UTF-8 bytes lexicographically after folding ASCII letters.
     export let compare_to_ignore_ascii_case = func(s: string, other: string) -> int =>
-        compare_to(strings.to_ascii_lower(s), strings.to_ascii_lower(other));
+        text_kernels.compare(text_kernels.ascii_lower(s), text_kernels.ascii_lower(other)) as int;
 
     /// @brief Applies Unicode lowercase mapping with the root locale rules.
+    #NoDiscard
     export let to_lower_case = func(s: string) -> string => unicode_case.lower(s, "")
         /// @brief Applies Unicode lowercase mapping with Turkish, Azerbaijani, or Lithuanian tailoring when
         /// selected.
         or func(s: string, language_tag: string) -> string => unicode_case.lower(s, language_tag);
 
     /// @brief Applies Unicode uppercase mapping with the root locale rules.
+    #NoDiscard
     export let to_upper_case = func(s: string) -> string => unicode_case.upper(s, "")
         /// @brief Applies Unicode uppercase mapping with Turkish, Azerbaijani, or Lithuanian tailoring when
         /// selected.
@@ -64,6 +63,7 @@ export let String = module:strings (
         compare_to_ignore_case(s, other) == 0;
 
     /// @brief Applies full locale-independent Unicode case folding, which can expand a scalar.
+    #NoDiscard
     export let case_fold = func(s: string) -> string => unicode_case.fold(s);
 
     /// @brief Orders the results of full Unicode case folding.
@@ -110,7 +110,7 @@ export let String = module:strings (
 
     /// @brief Finds the first occurrence wholly within the half-open byte range, or returns -1.
     export let index_of_range = func(s: string, needle: string, start: int, end: int) -> int {
-        let found = strings.index_of(s.slice(start, end), needle);
+        last found = strings.index_of(s.slice(start, end), needle);
         return found < 0 ? -1 : start + found;
     };
 
@@ -161,6 +161,7 @@ export let String = module:strings (
             charsets.encode(s, result.expect<Charset>(charsets.for_name(charset_name), "encode text"));
 
     /// @brief Encodes strictly and reports the byte offset of an unrepresentable scalar.
+    #NoDiscard
     export let try_get_bytes = func(s: string, charset: Charset) -> result.Result<uint8[list]> =>
         charsets.try_encode(s, charset)
         /// @brief Resolves the charset name and encodes strictly, returning an error for either failure.
@@ -179,6 +180,7 @@ export let String = module:strings (
             charsets.decode(bytes, result.expect<Charset>(charsets.for_name(charset_name), "decode bytes"));
 
     /// @brief Decodes UTF-8 strictly, returning an error at the first invalid sequence.
+    #NoDiscard
     export let try_decode_bytes = func(bytes: uint8[list]) -> result.Result<string> =>
         charsets.try_decode(bytes, Charset.Utf8)
         /// @brief Decodes the supplied charset strictly, returning an error for malformed input.
@@ -194,9 +196,9 @@ export let String = module:strings (
     /// @brief Explicit UTF-16 adapters. Other positional operations use UTF-8.
     export let utf16_length = func(s: string) -> int {
         let length = 0;
-        let bytes = s.byte_length;
+        last bytes = s.byte_length;
         for (let i = 0; i < bytes; i += 1) {
-            let byte = s.byte_at(i);
+            last byte = s.byte_at(i);
             if ((byte & 192) != 128) {
                 length += byte >= 240 ? 2 : 1;
             }
@@ -213,8 +215,8 @@ export let String = module:strings (
         let offset = 0;
         let remaining = index;
         while (offset < s.byte_length) {
-            let scalar = strings.scalar_at(s, offset);
-            let width = utf16_width(scalar);
+            last scalar = strings.scalar_at(s, offset);
+            last width = utf16_width(scalar);
             if (remaining < width) {
                 return utf16_unit(scalar, remaining);
             }
@@ -233,12 +235,12 @@ export let String = module:strings (
     /// @brief Copies a half-open UTF-16 code-unit range into an existing array or list. Invalid ranges trap.
     export let get_chars =
         func(s: string, start: int, end: int, destination: uint16[], destination_start: int) {
-            let units = checked_utf16_window(s, start, end, destination.length, destination_start);
+            last units = checked_utf16_window(s, start, end, destination.length, destination_start);
             for (let i = 0; i < units.length; i += 1) {
                 destination[destination_start + i] = units[i];
             }
         } or func(s: string, start: int, end: int, destination: uint16[list], destination_start: int) {
-            let units = checked_utf16_window(s, start, end, destination.length, destination_start);
+            last units = checked_utf16_window(s, start, end, destination.length, destination_start);
             for (let i = 0; i < units.length; i += 1) {
                 destination[destination_start + i] = units[i];
             }
@@ -246,10 +248,10 @@ export let String = module:strings (
 
     /// @brief Decodes UTF-16 code units. Unpaired surrogates trap.
     export let from_char_array = func(units: uint16[list]) -> string {
-        let text = string_builder.create();
+        last text = string_builder.create();
         let i = 0;
         while (i < units.length) {
-            let first = units[i] as uint32;
+            last first = units[i] as uint32;
             i += 1;
             if (first < 55296 || first > 57343) {
                 text.append_scalar(first);
@@ -258,7 +260,7 @@ export let String = module:strings (
             if (first >= 56320 || i == units.length) {
                 trap_with_message("invalid argument: unpaired UTF-16 surrogate");
             }
-            let second = units[i] as uint32;
+            last second = units[i] as uint32;
             if (second < 56320 || second > 57343) {
                 trap_with_message("invalid argument: unpaired UTF-16 surrogate");
             }
@@ -291,14 +293,12 @@ export let String = module:strings (
     };
 
     /// @brief Removes leading and trailing code points through U+0020.
+    #NoDiscard
     export let.override trim = func(s: string) -> string {
-        let start = 0;
-        let end = s.byte_length;
-        while (start < end && s.byte_at(start) <= 32) {
-            start += 1;
-        }
-        while (end > start && s.byte_at(end - 1) <= 32) {
-            end -= 1;
+        last start = text_kernels.blank_prefix_length(s) as int;
+        let end = text_kernels.blank_suffix_start(s) as int;
+        if (end < start) {
+            end = start;
         }
         return s.slice(start, end);
     };
@@ -307,17 +307,20 @@ export let String = module:strings (
     export let is_blank = func(s: string) -> bool => leading_whitespace_end(s, s.byte_length as int64) == s.byte_length;
 
     /// @brief Removes whitespace from both ends using the companion's Unicode whitespace set.
+    #NoDiscard
     export let strip = func(s: string) -> string => strip_trailing(strip_leading(s));
 
     /// @brief Removes leading whitespace using the companion's Unicode whitespace set.
+    #NoDiscard
     export let strip_leading = func(s: string) -> string =>
         s.slice(leading_whitespace_end(s, s.byte_length as int64), s.byte_length);
 
     /// @brief Removes trailing whitespace using the companion's Unicode whitespace set.
+    #NoDiscard
     export let strip_trailing = func(s: string) -> string {
         let end = s.byte_length;
         while (end > 0) {
-            let prev = previous_boundary(s, end);
+            last prev = previous_boundary(s, end);
             if (!is_whitespace(strings.scalar_at(s, prev))) {
                 break;
             }
@@ -328,12 +331,12 @@ export let String = module:strings (
 
     /// @brief CR, LF, and CRLF each end a line. An empty string has no lines.
     export let.override lines = func(s: string) -> string[list] {
-        let pieces: string[list] = [];
+        last pieces: string[list] = [];
         let start = 0;
         let i = 0;
-        let length = s.byte_length;
+        last length = s.byte_length;
         while (i < length) {
-            let byte = s.byte_at(i);
+            last byte = s.byte_at(i);
             if (byte == 10 || byte == 13) {
                 pieces.append(s.slice(start, i));
                 if (byte == 13 && i + 1 < length && s.byte_at(i + 1) == 10) {
@@ -351,16 +354,17 @@ export let String = module:strings (
 
     /// @brief Positive counts add spaces. Negative counts remove up to that many leading whitespace code
     /// points. Each resulting line ends with LF.
+    #NoDiscard
     export let indent = func(s: string, count: int) -> string {
-        let parts = lines(s);
+        last parts = lines(s);
         if (parts.length == 0) {
             return "";
         }
-        let prefix = count > 0 ? strings.repeat(" ", count) : "";
-        let remove_count = count < 0 ? -(count as int64) : 0;
-        let changed: string[list] = [];
+        last prefix = count > 0 ? strings.repeat(" ", count) : "";
+        last remove_count = count < 0 ? -(count as int64) : 0;
+        last changed: string[list] = [];
         for (let line in parts) {
-            let start = leading_whitespace_end(line, remove_count);
+            last start = leading_whitespace_end(line, remove_count);
             changed.append(prefix + line.slice(start, line.byte_length));
         }
         changed.append("");
@@ -369,30 +373,32 @@ export let String = module:strings (
 
     /// @brief Removes incidental indentation and trailing whitespace per line. A terminal line separator fixes
     /// the removable indentation at zero.
+    #NoDiscard
     export let strip_indent = func(s: string) -> string {
-        let parts = lines(s);
+        last parts = lines(s);
         if (parts.length == 0) {
             return "";
         }
-        let final_byte = s.byte_at(s.byte_length - 1);
-        let has_final_separator = final_byte == 10 || final_byte == 13;
+        last final_byte = s.byte_at(s.byte_length - 1);
+        last has_final_separator = final_byte == 10 || final_byte == 13;
         let common = 0;
         if (!has_final_separator) {
-            let last = parts[parts.length - 1];
-            common = code_point_count(last, 0, leading_whitespace_end(last, last.byte_length as int64));
+            last final_line = parts[parts.length - 1];
+            common = code_point_count(final_line, 0,
+                leading_whitespace_end(final_line, final_line.byte_length as int64));
             for (let line in parts) {
-                let end = leading_whitespace_end(line, line.byte_length as int64);
+                last end = leading_whitespace_end(line, line.byte_length as int64);
                 if (end != line.byte_length) {
-                    let count = code_point_count(line, 0, end);
+                    last count = code_point_count(line, 0, end);
                     if (count < common) {
                         common = count;
                     }
                 }
             }
         }
-        let changed: string[list] = [];
+        last changed: string[list] = [];
         for (let line in parts) {
-            let start = leading_whitespace_end(line, common as int64);
+            last start = leading_whitespace_end(line, common as int64);
             changed.append(strip_trailing(line.slice(start, line.byte_length)));
         }
         if (has_final_separator) {
@@ -406,14 +412,17 @@ export let String = module:strings (
         compile_pattern(pattern).matches_fully(s);
 
     /// @brief Replaces every occurrence of a Unicode scalar with another scalar.
+    #NoDiscard
     export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string =>
         strings.replace(s, strings.from_scalars([target]), strings.from_scalars([replacement]));
 
     /// @brief Replaces all regex matches. An invalid pattern or replacement traps.
+    #NoDiscard
     export let replace_all = func(s: string, pattern: string, replacement: string) -> string =>
         compile_pattern(pattern).replace_all(s, replacement);
 
     /// @brief Replaces the first regex match. An invalid pattern or replacement traps.
+    #NoDiscard
     export let replace_first_regex = func(s: string, pattern: string, replacement: string) -> string =>
         compile_pattern(pattern).replace_first(s, replacement);
 
@@ -445,8 +454,9 @@ export let String = module:strings (
 
     /// @brief Decodes supported backslash and octal escapes and removes escaped line endings. Malformed escapes
     /// trap.
+    #NoDiscard
     export let translate_escapes = func(s: string) -> string {
-        let text = string_builder.create();
+        last text = string_builder.create();
         let start = 0;
         let pos = 0;
         while (pos < s.byte_length) {
@@ -459,13 +469,13 @@ export let String = module:strings (
             if (pos == s.byte_length) {
                 trap_with_message("invalid argument: incomplete escape");
             }
-            let escape = s.byte_at(pos);
+            last escape = s.byte_at(pos);
             pos += 1;
             if (escape >= 48 && escape <= 55) {
                 let value = (escape as uint32) - 48;
                 let digits = escape <= 51 ? 2 : 1;
                 while (digits > 0 && pos < s.byte_length) {
-                    let digit = s.byte_at(pos);
+                    last digit = s.byte_at(pos);
                     if (digit < 48 || digit > 55) {
                         break;
                     }
@@ -500,18 +510,18 @@ export let String = module:strings (
         if (scalar <= 65535) {
             return scalar as uint16;
         }
-        let payload = scalar - 65536;
+        last payload = scalar - 65536;
         return (index == 0 ? 55296 + (payload >> 10) : 56320 + (payload & 1023)) as uint16;
     };
 
     /// @brief Copies the half-open range of UTF-16 units, possibly selecting only one half of a surrogate pair.
     let utf16_window = func(s: string, start: int, end: int) -> uint16[list] {
-        let units: uint16[list] = [];
+        last units: uint16[list] = [];
         let offset = 0;
         let index = 0;
         while (index < end && offset < s.byte_length) {
-            let scalar = strings.scalar_at(s, offset);
-            let width = utf16_width(scalar);
+            last scalar = strings.scalar_at(s, offset);
+            last width = utf16_width(scalar);
             for (let i = 0; i < width && index < end; i += 1) {
                 if (index >= start) {
                     units.append(utf16_unit(scalar, i));
@@ -563,7 +573,7 @@ export let String = module:strings (
         let end = 0;
         let remaining = count;
         while (end < s.byte_length && remaining != 0) {
-            let scalar = strings.scalar_at(s, end);
+            last scalar = strings.scalar_at(s, end);
             if (!is_whitespace(scalar)) {
                 break;
             }
@@ -582,22 +592,22 @@ export let String = module:strings (
         if (limit < 1) {
             trap_with_message("invalid argument: limit below 1");
         }
-        let expression = compile_pattern(pattern);
-        let pieces: string[list] = [];
+        last expression = compile_pattern(pattern);
+        last pieces: string[list] = [];
         let start = 0;
         let from = 0;
         let remaining = limit - 1;
         while (remaining > 0) {
-            let found = expression.find_from(s, from);
+            last found = expression.find_from(s, from);
             if (found == nil) {
                 break;
             }
-            let match_start = found.start();
+            last match_start = found.start;
             pieces.append(s.slice(start, match_start));
             if (keep_delimiters) {
                 pieces.append(found.text());
             }
-            start = found.end();
+            start = found.end;
             remaining -= 1;
             from = start;
             if (match_start == start) {

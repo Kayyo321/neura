@@ -1,4 +1,6 @@
+let integer_kernels = import:Std.Internal.Kernels.IntegerText;
 let integer_text = import:Std.Core.Internal.IntegerText;
+let kernel_status = import:Std.Core.Internal.KernelStatus;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
@@ -9,6 +11,7 @@ let unsigned = import:Std.Core.UInt8;
 /// Every operation uses checked arithmetic; the wrapping forms follow the recipes of section 7.2, so no
 /// intermediate value leaves its type.
 /// @see [Std.Core.Int8](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Int8)
+#Since("0.1.0")
 export let Int8 = module (
     /// @brief The smallest value representable by this integer type.
     export const Min: int8 = -128;
@@ -97,7 +100,7 @@ export let Int8 = module (
             y = -y;
         }
         while (y != 0) {
-            let remainder = x % y;
+            last remainder = x % y;
             x = y;
             y = remainder;
         }
@@ -105,6 +108,7 @@ export let Int8 = module (
     };
 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
+    #NoDiscard
     export let checked_add = func(a: int8, b: int8) -> Optional<int8> {
         if ((b > 0 && a > Max - b) || (b < 0 && a < Min - b)) {
             return Optional<int8>.None;
@@ -113,6 +117,7 @@ export let Int8 = module (
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_sub = func(a: int8, b: int8) -> Optional<int8> {
         if ((b < 0 && a > Max + b) || (b > 0 && a < Min + b)) {
             return Optional<int8>.None;
@@ -121,6 +126,7 @@ export let Int8 = module (
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_mul = func(a: int8, b: int8) -> Optional<int8> {
         if (multiply_overflows(a, b)) {
             return Optional<int8>.None;
@@ -129,6 +135,7 @@ export let Int8 = module (
     };
 
     /// @brief None for a zero divisor and for Min / -1.
+    #NoDiscard
     export let checked_div = func(a: int8, b: int8) -> Optional<int8> {
         if (b == 0 || (a == Min && b == -1)) {
             return Optional<int8>.None;
@@ -137,6 +144,7 @@ export let Int8 = module (
     };
 
     /// @brief None for a zero divisor. Min % -1 is 0, as for the operator.
+    #NoDiscard
     export let checked_rem = func(a: int8, b: int8) -> Optional<int8> {
         if (b == 0) {
             return Optional<int8>.None;
@@ -197,7 +205,7 @@ export let Int8 = module (
     /// @brief The quotient rounded toward negative infinity. A zero divisor and Min / -1 trap (reason 1) in the
     /// division.
     export let floor_div = func(a: int8, b: int8) -> int8 {
-        let quotient = a / b;
+        last quotient = a / b;
         if (a % b != 0 && (a < 0) != (b < 0)) {
             return quotient - 1;
         }
@@ -206,7 +214,7 @@ export let Int8 = module (
 
     /// @brief The remainder with the divisor's sign. A zero divisor traps (reason 1).
     export let floor_mod = func(a: int8, b: int8) -> int8 {
-        let remainder = a % b;
+        last remainder = a % b;
         if (remainder != 0 && (remainder < 0) != (b < 0)) {
             return remainder + b;
         }
@@ -250,28 +258,10 @@ export let Int8 = module (
     /// @brief Decimal, with `-` for negative values (section 5.2).
     export let to_string = func(v: int8) -> string => v.to_string();
 
-    /// @brief Lowercase digits. The digits are produced in the negative range, so Min needs no negation. A
-    /// radix outside 2 through 36 traps.
-    export let to_string_radix = func(v: int8, radix: int) -> string {
-        integer_text.check_radix(radix);
-        if (radix == 10) {
-            return v.to_string();
-        }
-        let base = radix as int8;
-        let rest = v;
-        if (rest > 0) {
-            rest = -rest;
-        }
-        let digits: uint8[list] = [];
-        do {
-            digits.append(integer_text.digit_byte(-(rest % base) as int));
-            rest /= base;
-            if (rest == 0) {
-                break;
-            }
-        }
-        return integer_text.digits_text(digits, v < 0);
-    };
+    /// @brief Lowercase digits, with `-` for a negative value. A radix outside 2 through 36 traps. The
+    /// neura.integer.format_i64 kernel writes the digits.
+    export let to_string_radix = func(v: int8, radix: int) -> string =>
+        integer_kernels.format_i64(v as int64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
@@ -280,52 +270,33 @@ export let Int8 = module (
 
     /// @brief Parses a base-10 integer, returning an error for invalid text or a value outside the type's
     /// range.
+    #NoDiscard
     export let parse = func(text: string) -> Result<int8> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
     ///
     /// Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending
-    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. The digits accumulate in
-    /// the negative range, so Min parses without overflow. A radix outside 2 through 36 traps.
+    /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. A radix outside 2
+    /// through 36 traps.
+    ///
+    /// The neura.integer.parse_i64 kernel parses the text as int64, and the value is then checked
+    /// against the type's range.
+    #NoDiscard
     export let parse_radix = func(text: string, radix: int) -> Result<int8> {
-        integer_text.check_radix(radix);
-        match (integer_text.syntax_error(text, radix)) {
-            Optional.Some(failure) => {
-                return Result<int8>.Err(failure);
-            },
-            Optional.None => {},
+        let [status, offset, value] = integer_kernels.parse_i64(text, radix as int64);
+        if (status != kernel_status.Ok) {
+            return Result<int8>.Err(kernel_status.parse_error(status, offset, "int8"));
         }
-        let start = integer_text.sign_length(text);
-        let negative = start == 1 && text.byte_at(0) == 45;
-        let limit = -Max;
-        if (negative) {
-            limit = Min;
+        if (value < (Min as int64) || value > (Max as int64)) {
+            return Result<int8>.Err(integer_text.out_of_range("int8"));
         }
-        let base = radix as int8;
-        let multiple_limit = limit / base;
-        let value: int8 = 0;
-        let length = text.byte_length;
-        for (let i = start; i < length; i++) {
-            let digit = integer_text.digit_value(text.byte_at(i)) as int8;
-            if (value < multiple_limit) {
-                return Result<int8>.Err(integer_text.out_of_range("int8"));
-            }
-            value *= base;
-            if (value < limit + digit) {
-                return Result<int8>.Err(integer_text.out_of_range("int8"));
-            }
-            value -= digit;
-        }
-        if (negative) {
-            return Result<int8>.Ok(value);
-        }
-        return Result<int8>.Ok(-value);
+        return Result<int8>.Ok(value as int8);
     };
 
     /// @brief Whether a * b leaves the type. The int64 product of two values of at most 32 bits cannot
     /// overflow.
     let multiply_overflows = func(a: int8, b: int8) -> bool {
-        let product = (a as int64) * (b as int64);
+        last product = (a as int64) * (b as int64);
         return product < (Min as int64) || product > (Max as int64);
     };
 );

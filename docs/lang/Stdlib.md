@@ -95,7 +95,7 @@ Trusted library source can bind a bodyless function with the suffix `host("servi
 
 Trusted library source can also bind a bodyless function with the suffix `kernel("neura.area.name", version)`. A built-in C kernel of the runtime then computes it ([Kernels](../runtime/Kernels.md)): a deterministic, pure function that keeps the results, errors, and traps of the Neura code it replaces. The function's signature must be the one the kernel's parameter and result kinds give ([Binding a kernel](../runtime/Kernels.md#binding-a-kernel)); lowering checks it against the compiler's kernel table and rejects a binding in user code (`E0780`), a signature that differs (`E0781`), and an unknown kernel or ABI version (`E0782`). A call is a runtime state operation, not a host request: it needs no import, provider, or capability, it is task-safe, and a trace never records it. The image lists the kernels it calls with their signatures, and a runtime without one of them refuses the image before it runs.
 
-`scripts/gen-kernels.py` writes the declarations of every kernel into the internal modules `Std.Internal.Kernels.*` (`stdlib/std/internal/kernels/`), and a public module wraps them. `Std.Digest.Crc32` and `Std.Digest.Sha256` are kernel-backed; every other module runs its Neura code. The Neura code a kernel replaced moves unchanged to the module's tests as the oracle that the kernel is checked against ([CONTRIBUTING](../../CONTRIBUTING.md#kernel-oracles)).
+`scripts/gen-kernels.py` writes the declarations of every kernel into the internal modules `Std.Internal.Kernels.*` (`stdlib/std/internal/kernels/`), and a public module wraps them. `Std.Digest.Crc32` and `Std.Digest.Sha256` are kernel-backed, and so are parts of `Std.Text.Strings`, the `String` companion, `StringBuilder.hash_code`, the integer companions' `to_string_radix` and `parse_radix`, `Std.Encoding.Utf8.validate`, `Base64`, and `Hex` (sections 7.1, 8.1, and 13.1); every other module runs its Neura code. The Neura code a kernel replaced moves unchanged to the module's tests as the oracle that the kernel is checked against ([CONTRIBUTING](../../CONTRIBUTING.md#kernel-oracles)).
 
 ### P3. Entry point from the library
 
@@ -454,7 +454,7 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 | --- | --- | --- |
 | `Unit` | A fieldless enum with the single variant `Value`. | Yes |
 | `Cell<T>` | A class with one mutable field `value`, and the module function `of<T>(value)`. It exists so that closures, which capture by value, can share mutable state. | Yes |
-| `IntRange` | An immutable class: `start` (inclusive), `end` (exclusive), `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
+| `IntRange` | An immutable class with the get-only fields `start` (inclusive), `end` (exclusive), and `step` (nonzero). Module functions `of(start, end)` and `stepped(start, end, step)`; a zero step traps. A negative step counts down while the value is greater than `end`. Members `size()`, `is_empty()`, `contains(value)`, `get(index)`, `to_list()`, and `iterator()`; it implements `Iterable<int>`, so `for (let i in range)` visits the values in order. `size` and iteration are computed in `int64` so that no intermediate overflows. | Yes |
 
 `Pair`, `Entry`, and `Boxed` do not exist: a pair is the native tuple `[A, B]` (`partition` returns `[ArrayList<T>, ArrayList<T>]`, `divide_and_remainder` returns `[BigInteger, BigInteger]`, `enumerate` yields `[int, T]`, and `zip` yields `[T, U]`), and a map entry is the tuple `[K, V]`. No API on this page takes an `Object`.
 
@@ -486,9 +486,9 @@ Named types are kept where the name carries a contract a tuple cannot: `RegexMat
 | `to_unsigned(v)`, `to_signed(v)` | The same-width type with the same bit pattern ([section 7.2](#72-arithmetic-without-wrapping-intrinsics)). |
 | `hash(v) → uint32` | [Section 5.2](#52-equality-hashing-and-text). |
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
-| `to_string_radix(v, radix: int) → string` | Lowercase digits. |
+| `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
-| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. |
+| `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
 
@@ -590,9 +590,9 @@ All of `Strings` needs T1. String operations are functions that take the string 
 
 Functions that return several strings return a built-in list, not an `ArrayList`: the built-in for-each works on it, and `Std.Text` then needs nothing from `Std.Collections`.
 
-**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The simple scan has the smallest circuit and a predictable step count.
+**Search algorithm.** `index_of` scans for the needle's first byte and then compares the remaining bytes in place. Its worst case is the product of the two lengths. The searches, comparisons, trims, replacements, ASCII case mappings, `scalar_count`, and `hash` run on the `neura.text`, `neura.hash`, and `neura.encoding` kernels (P2a), which use the same scan; a kernel's step charge depends only on its arguments' lengths, so `index_of_from` is charged for the whole text whatever `from` is. `split` and `split_limit` keep the scan in Neura, whose steps follow the distance it covers.
 
-**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator is Neura code in `Std.Text` and must agree with the validation NVM performs when constructing text.
+**UTF-8 validity** follows the Unicode definition: shortest form only, no surrogates, nothing above 0x10FFFF. The validator, the `neura.encoding.utf8_check` and `utf8_validate` kernels, must agree with the validation NVM performs when constructing text; its Neura original is the oracle of the `strings` and `utf8` tests.
 
 **Unicode scope.** `Std.Text.Strings` handles UTF-8 encoding, decoding, and iteration for all Unicode scalar values. Its original ASCII case and classification methods keep their scope. The [`String` companion](StandardLibrary.md#string) adds a fixed whitespace set for strip and indentation, Unicode 17.0.0 case conversion and folding, and standard charset conversion from `Std.Text.Charsets`. These are ordinary Neura routines with embedded Unicode data and use no host locale or charset services.
 
@@ -608,7 +608,8 @@ A class in `Std.Core` that accumulates text. Needs T1. The module function `crea
 | `append_scalar(scalar: uint32)`, `append_line(s)`, `append_repeated(s, count: int)` | `append_line` appends `s` and one LF. |
 | `append_int(v: int64)`, `append_uint(v: uint64)`, `append_float(v: float64)`, `append_bool(v: bool)` | Append the value's text without building an intermediate string. |
 | `append_value<T>(value: T)` | Appends `value.to_string()`. **G3.** |
-| `byte_length() → int`, `is_empty() → bool` | |
+| `byte_length: int` | A get-only field ([accessor](Types.md#accessors)): the number of bytes, read as `builder.byte_length` like a string's. |
+| `is_empty() → bool` | |
 | `truncate(byte_length: int)`, `clear()` | `truncate` requires a character boundary. |
 | `to_string() → string` | Constructs a string from the bytes. The builder stays usable. |
 | `equals(other: class) → bool`, `hash_code() → uint32` | Compare and hash the current UTF-8 bytes. The hash changes with the contents, so a builder used as a hash key must stay unchanged while stored. |
@@ -636,9 +637,9 @@ A class holding a compiled regular expression. Needs T1 only: its types are all 
 | `find_all(input)` | A built-in list of `RegexMatch`: successive non-overlapping matches. After an empty match the search resumes one scalar value later. |
 | `replace_all(input, replacement) → string`, `replace_first(...)` | `$0` through `$99` and `${name}` insert groups; `$$` is a dollar sign. A reference to a group that does not exist traps; a group that did not participate inserts nothing. |
 | `split(input)` | A built-in list of strings, with the rules of `Strings.split`. |
-| `group_count() → int`, `pattern() → string` | |
+| `group_count: int`, `pattern: string` | Get-only fields ([accessors](Types.md#accessors)), set at compilation. |
 
-`RegexMatch` is an immutable class: `start()`, `end()`, `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
+`RegexMatch` is an immutable class: the get-only fields `start` and `end` (byte offsets), `text()`, `group(index) → Optional<string>`, `group_start(index) → int` (-1 when the group did not participate), and `named_group(name) → Optional<string>`. Group 0 is the whole match.
 
 ## 9. `Std.Collections`
 
@@ -1139,9 +1140,9 @@ The same seed gives the same sequence of results from every member, on every run
 
 Everything here needs T1 except the `Json` value type itself.
 
-- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone.
-- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error).
-- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero.
+- **`Utf8`:** `encode(s)` (a built-in `uint8` list); `decode(bytes) → Result<string>`; `decode_lossy(bytes) → string`; `validate(bytes) → int` (the offset of the first invalid byte, or -1). `validate` works on bytes alone. The kernel `neura.encoding.utf8_validate` computes it (P2a).
+- **`Hex`:** `encode(bytes) → string` (lowercase); `decode(text) → Result<uint8[list]>` (either case; an odd length or a non-hex character fails with an `Encoding` error). The kernels `neura.encoding.hex_encode` and `hex_decode` compute it (P2a).
+- **`Base64`:** the standard and URL-safe alphabets of RFC 4648. `encode`, `encode_url`, and their `_unpadded` forms; `decode` and `decode_url`. Decoding is strict: padded forms require correct padding, unpadded forms reject padding, whitespace is rejected, and unused trailing bits must be zero. The kernels `neura.encoding.base64_encode` and `base64_decode` compute every form (P2a).
 - **`Csv`** (RFC 4180): `parse(text)` returns a `Result` of a built-in list of built-in lists of strings, and `write(rows) → string`. Fields are separated by commas and records by LF or CRLF. A quoted field may contain commas, line breaks, and doubled quotes. A quote inside an unquoted field, or text after a closing quote, fails with a `Parse` error. A final line break does not add an empty record. The writer quotes a field only when it contains a comma, a quote, a CR, or an LF, and ends each record with LF.
 
 **`Json`** (RFC 8259).

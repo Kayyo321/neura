@@ -1,0 +1,82 @@
+// The Neura implementation of Std.Encoding.Utf8 (its validate) before it became a kernel binding, kept
+// unchanged (but for the module's name) as the oracle of kernel-oracle.nra. It lives with the tests,
+// not in the standard library: only library source may import an Internal module, and code
+// here never reaches a user's image.
+
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief UTF-8 (Stdlib.md section 13.1) with the validity rules of section 8.1: shortest form only, no
+/// surrogates, nothing above U+10FFFF.
+///
+/// Encoding and decoding share Std.Text.Strings, so an error here is the error Strings.from_bytes reports.
+/// @see [Std.Encoding.Utf8](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Utf8)
+export let ReferenceUtf8 = module (
+    /// @brief A copy of the string's bytes.
+    export let encode = func(s: string) -> uint8[list] => strings.to_bytes(s);
+
+    /// @brief The text, or an Encoding error at the offset `validate` returns. The message is "invalid start
+    /// byte", "invalid continuation byte", or "unexpected end of data".
+    export let decode = func(bytes: uint8[list]) -> Result<string> => strings.from_bytes(bytes);
+
+    /// @brief The text with each maximal ill-formed subsequence (Unicode's maximal subpart practice) replaced
+    /// by one U+FFFD.
+    export let decode_lossy = func(bytes: uint8[list]) -> string => strings.from_bytes_lossy(bytes);
+
+    /// @brief -1 when the bytes are valid UTF-8; otherwise the offset of the first byte that cannot begin or
+    /// continue a valid sequence's prefix, which is the length of the longest valid prefix.
+    ///
+    /// Valid input costs one string.from_utf8 call; invalid input is rescanned here.
+    export let validate = func(bytes: uint8[list]) -> int {
+        let [valid, _] = string.from_utf8(bytes);
+        if (valid) {
+            return -1;
+        }
+        let count = bytes.length;
+        let i = 0;
+        while (i < count) {
+            let lead = bytes[i];
+            if (lead < 128) {
+                i++;
+                continue;
+            }
+            // The sequence length and the range of the second byte.
+            let size = 0;
+            let low: uint8 = 128;
+            let high: uint8 = 191;
+            if (lead >= 194 && lead <= 223) {
+                size = 2;
+            } else if (lead >= 224 && lead <= 239) {
+                size = 3;
+                if (lead == 224) {
+                    low = 160;
+                } else if (lead == 237) {
+                    high = 159;
+                }
+            } else if (lead >= 240 && lead <= 244) {
+                size = 4;
+                if (lead == 240) {
+                    low = 144;
+                } else if (lead == 244) {
+                    high = 143;
+                }
+            } else {
+                return i;
+            }
+            if (i + size > count) {
+                return i;
+            }
+            let second = bytes[i + 1];
+            if (second < low || second > high) {
+                return i;
+            }
+            for (let k = 2; k < size; k++) {
+                if ((bytes[i + k] & 192) != 128) {
+                    return i;
+                }
+            }
+            i += size;
+        }
+        return -1;
+    };
+);

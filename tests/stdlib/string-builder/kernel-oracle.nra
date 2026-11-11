@@ -1,0 +1,41 @@
+let builders = import:Std.Core.StringBuilder;
+let random = import:Std.Random.Random;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). StringBuilder's
+// hash_code runs the neura.hash.list_u8 kernel over its bytes; the code it
+// replaced was the built-in hash_code of that uint8 list, which is the
+// oracle here. The two must agree for a fixed edge corpus and for seeded
+// random texts, including after truncate and clear.
+let StringBuilderKernelOracle = module (
+    let agree = func(builder: builders.StringBuilder) {
+        let bytes = strings.to_bytes(builder.to_string());
+        test.assert_equal_uint64(bytes.hash_code() as uint64, builder.hash_code() as uint64);
+    };
+
+    export let test_edge_corpus = func {
+        let builder = builders.create();
+        agree(builder);
+        for (let text in ["a", "é", "😀", "hello, world", "€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€€"]) {
+            builder.append(text);
+            agree(builder);
+        }
+        builder.truncate(3);
+        agree(builder);
+        builder.clear();
+        agree(builder);
+    };
+
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        for (let round = 0; round < 40; round++) {
+            let builder = builders.create();
+            let count = source.next_int_below(200);
+            for (let i = 0; i < count; i++) {
+                builder.append_scalar(32 + source.next_uint32() % 1000);
+            }
+            agree(builder);
+        }
+    };
+);

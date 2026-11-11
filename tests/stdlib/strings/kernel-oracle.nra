@@ -1,0 +1,153 @@
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let random = import:Std.Random.Random;
+let reference = import:ReferenceStrings;
+let reference_string = import:ReferenceString;
+let result = import:Std.Core.Result;
+let string = import:Std.Core.String;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Std.Text.Strings
+// runs the neura.text, neura.hash.string, and neura.encoding.utf8_* kernels,
+// and Std.Core.String runs neura.text.compare, ascii_lower, and the blank
+// trim kernels; ReferenceStrings and ReferenceString (support/) are the Neura
+// code they replaced, unchanged. The two must agree on a fixed edge corpus
+// and on seeded random texts built from pieces that exercise every byte
+// class the kernels distinguish.
+let StringsKernelOracle = module (
+    // ASCII letters of both cases, every Strings.is_space byte, other
+    // control bytes up to 32, DEL, and two-, three-, and four-byte scalars.
+    let pieces = func -> string[list] {
+        let list: string[list] = ["a", "b", "z", "A", "B", "Z", "@", "[", "`", "{", "ab", "Ab", "aB", "é", "É", "€",
+            "😀", "ü", "ß"];
+        for (let scalar in [9, 10, 11, 12, 13, 32, 0, 1, 8, 14, 28, 31, 127, 133, 160]) {
+            list.append(strings.from_scalars([scalar as uint32]));
+        }
+        return list;
+    };
+
+    let corpus = func -> string[list] {
+        let space = strings.from_scalars([32, 9, 10, 11, 12, 13]);
+        let blank = strings.from_scalars([0, 1, 31, 32, 9]);
+        return ["", " ", "a", "A", "é", "😀", "abc", "ABC", "aBc", "a b c", space, blank, space + "x" + space,
+            blank + "x" + blank, space + blank, blank + space, "  é😀  ", "abcabcabc", "aaaa", "éééé", "€€",
+            "😀a😀", "Hello, World!", "x" + strings.from_scalars([133]) + "y", strings.from_scalars([160, 65, 160])];
+    };
+
+    // A text of up to `count` random pieces.
+    let text = func(source: random.Random, count: int) -> string {
+        let all = pieces();
+        let out = "";
+        let n = source.next_int_below(count + 1);
+        for (let i = 0; i < n; i++) {
+            out = out + all[source.next_int_below(all.length)];
+        }
+        return out;
+    };
+
+    let show_optional = func(value: optional.Optional<string>) -> string => match (value) {
+        optional.Optional.Some(text) => "Some(" + text + ")",
+        optional.Optional.None => "None",
+    };
+
+    let show_result = func(value: result.Result<string>) -> string => match (value) {
+        result.Result.Ok(text) => "Ok(" + text + ")",
+        result.Result.Err(failure) => "Err(" + error.message(failure) + ")",
+    };
+
+    // The UTF-8 bytes of s with byte `at` replaced, for from_bytes.
+    let corrupt = func(s: string, at: int, value: uint8) -> uint8[list] {
+        let bytes = strings.to_bytes(s);
+        if (at < bytes.length) {
+            bytes[at] = value;
+        } else {
+            bytes.append(value);
+        }
+        return bytes;
+    };
+
+    // Every member that runs a kernel agrees with the reference on s.
+    let agree_one = func(s: string) {
+        test.assert_equal_int32(reference.scalar_count(s), strings.scalar_count(s));
+        test.assert_equal_uint64(reference.hash(s) as uint64, strings.hash(s) as uint64);
+        test.assert_equal_string(reference.trim(s), strings.trim(s));
+        test.assert_equal_string(reference.trim_start(s), strings.trim_start(s));
+        test.assert_equal_string(reference.trim_end(s), strings.trim_end(s));
+        test.assert_equal_string(reference.to_ascii_upper(s), strings.to_ascii_upper(s));
+        test.assert_equal_string(reference.to_ascii_lower(s), strings.to_ascii_lower(s));
+        test.assert_equal_string(reference_string.trim(s), string.trim(s));
+        test.assert_equal_string(reference.pad_start(s, 6, "·"), strings.pad_start(s, 6, "·"));
+        let bytes = strings.to_bytes(s);
+        test.assert_equal_string(show_result(reference.from_bytes(bytes)), show_result(strings.from_bytes(bytes)));
+        for (let at = 0; at <= bytes.length; at++) {
+            for (let value in [128, 191, 192, 224, 237, 240, 244, 245, 255]) {
+                let broken = corrupt(s, at, value as uint8);
+                test.assert_equal_string(show_result(reference.from_bytes(broken)),
+                    show_result(strings.from_bytes(broken)));
+            }
+        }
+    };
+
+    // Every two-text member that runs a kernel agrees with the reference.
+    let agree_pair = func(s: string, t: string) {
+        test.assert(reference.compare(s, t) == strings.compare(s, t));
+        test.assert_equal_int32(reference_string.compare_to(s, t), string.compare_to(s, t));
+        test.assert_equal_int32(reference_string.compare_to_ignore_ascii_case(s, t),
+            string.compare_to_ignore_ascii_case(s, t));
+        test.assert_equal_bool(reference.starts_with(s, t), strings.starts_with(s, t));
+        test.assert_equal_bool(reference.ends_with(s, t), strings.ends_with(s, t));
+        test.assert_equal_bool(reference.contains(s, t), strings.contains(s, t));
+        test.assert_equal_bool(reference.equals_ignore_ascii_case(s, t), strings.equals_ignore_ascii_case(s, t));
+        test.assert_equal_int32(reference.index_of(s, t), strings.index_of(s, t));
+        test.assert_equal_int32(reference.last_index_of(s, t), strings.last_index_of(s, t));
+        test.assert_equal_string(show_optional(reference.strip_prefix(s, t)),
+            show_optional(strings.strip_prefix(s, t)));
+        test.assert_equal_string(show_optional(reference.strip_suffix(s, t)),
+            show_optional(strings.strip_suffix(s, t)));
+        for (let from = 0; from <= s.byte_length; from++) {
+            if (strings.is_boundary(s, from)) {
+                test.assert_equal_int32(reference.index_of_from(s, t, from), strings.index_of_from(s, t, from));
+            }
+        }
+        if (t.byte_length > 0) {
+            for (let replacement in ["", "-", "é😀", t + t]) {
+                test.assert_equal_string(reference.replace(s, t, replacement), strings.replace(s, t, replacement));
+                test.assert_equal_string(reference.replace_first(s, t, replacement),
+                    strings.replace_first(s, t, replacement));
+            }
+        }
+    };
+
+    // Every text of the corpus alone and with every other as needle.
+    export let test_edge_corpus = func {
+        let texts = corpus();
+        for (let s in texts) {
+            agree_one(s);
+            for (let t in texts) {
+                agree_pair(s, t);
+            }
+            for (let piece in pieces()) {
+                agree_pair(s, piece);
+            }
+        }
+    };
+
+    // Seeded random texts, needles taken from inside them, and unrelated
+    // needles.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        for (let round = 0; round < 60; round++) {
+            let s = text(source, 24);
+            agree_one(s);
+            agree_pair(s, text(source, 3));
+            let start = source.next_int_below(s.byte_length + 1);
+            let end = start + source.next_int_below(s.byte_length - start + 1);
+            if (strings.is_boundary(s, start) && strings.is_boundary(s, end)) {
+                let inner = s.slice(start, end);
+                agree_pair(s, inner);
+                agree_pair(s + inner + s, inner);
+            }
+        }
+    };
+);

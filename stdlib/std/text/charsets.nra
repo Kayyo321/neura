@@ -6,16 +6,19 @@ let strings = import:Std.Text.Strings;
 
 /// @brief Looks up charset names and converts between UTF-8 strings and encoded bytes.
 /// @see [Std.Text.Charsets](https://github.com/Kayyo321/neura/wiki/Stdlib-Text-Charsets)
+#Since("0.1.0")
 export let Charsets = module (
     /// @brief Selects ASCII, Latin-1, UTF-8, or a UTF-16 or UTF-32 byte-order policy.
+    #Since("0.1.0")
     export let Charset = enum (Ascii, Latin1, Utf8, Utf16, Utf16Be, Utf16Le, Utf32, Utf32Be, Utf32Le);
 
     /// @brief The out-of-range scalar used to signal malformed input.
     const InvalidScalar: uint32 = 1114112;
 
     /// @brief Resolves a supported charset name or alias without regard to ASCII case.
+    #NoDiscard
     export let for_name = func(name: string) -> result.Result<Charset> {
-        let key = strings.to_ascii_lower(name);
+        last key = strings.to_ascii_lower(name);
         if (key == "us-ascii" || key == "ascii" || key == "iso646-us") {
             return result.Result<Charset>.Ok(Charset.Ascii);
         }
@@ -52,6 +55,7 @@ export let Charsets = module (
         result.expect<uint8[list]>(encode_text(text, charset, false), "encode text");
 
     /// @brief Encodes strictly and returns an Encoding error for the first unrepresentable scalar.
+    #NoDiscard
     export let try_encode = func(text: string, charset: Charset) -> result.Result<uint8[list]> =>
         encode_text(text, charset, true);
 
@@ -60,6 +64,7 @@ export let Charsets = module (
         result.expect<string>(decode_bytes(bytes, charset, false), "decode bytes");
 
     /// @brief Decodes strictly and returns an Encoding error at the first malformed input.
+    #NoDiscard
     export let try_decode = func(bytes: uint8[list], charset: Charset) -> result.Result<string> =>
         decode_bytes(bytes, charset, true);
 
@@ -68,17 +73,17 @@ export let Charsets = module (
         if (charset == Charset.Utf8) {
             return result.Result<uint8[list]>.Ok(strings.to_bytes(text));
         }
-        let bytes: uint8[list] = [];
-        let little_endian = charset == Charset.Utf16Le || charset == Charset.Utf32Le;
-        let width = unit_width(charset);
+        last bytes: uint8[list] = [];
+        last little_endian = charset == Charset.Utf16Le || charset == Charset.Utf32Le;
+        last width = unit_width(charset);
         if (charset == Charset.Utf16 || charset == Charset.Utf32) {
             append_unit(bytes, 65279, width, little_endian);
         }
         let offset = 0;
         while (offset < text.byte_length) {
-            let scalar = strings.scalar_at(text, offset);
+            last scalar = strings.scalar_at(text, offset);
             if (width == 1) {
-                let maximum: uint32 = charset == Charset.Ascii ? 127 : 255;
+                last maximum: uint32 = charset == Charset.Ascii ? 127 : 255;
                 if (scalar > maximum) {
                     if (strict) {
                         return result.Result<uint8[list]>.Err(error.Error.Encoding {
@@ -90,7 +95,7 @@ export let Charsets = module (
                     bytes.append(scalar as uint8);
                 }
             } else if (width == 2 && scalar > 65535) {
-                let supplementary = scalar - 65536;
+                last supplementary = scalar - 65536;
                 append_unit(bytes, 55296 + (supplementary >> 10), width, little_endian);
                 append_unit(bytes, 56320 + (supplementary & 1023), width, little_endian);
             } else {
@@ -104,7 +109,7 @@ export let Charsets = module (
     /// @brief Appends a code unit in the selected byte order.
     let append_unit = func(bytes: uint8[list], unit: uint32, width: int, little_endian: bool) {
         for (let i = 0; i < width; i += 1) {
-            let shift = (little_endian ? i : width - 1 - i) * 8;
+            last shift = (little_endian ? i : width - 1 - i) * 8;
             bytes.append(((unit >> shift) & 255) as uint8);
         }
     };
@@ -125,8 +130,8 @@ export let Charsets = module (
         if (charset == Charset.Utf8) {
             return strict ? strings.from_bytes(bytes) : result.Result<string>.Ok(strings.from_bytes_lossy(bytes));
         }
-        let text = string_builder.create();
-        let width = unit_width(charset);
+        last text = string_builder.create();
+        last width = unit_width(charset);
         let little_endian = charset == Charset.Utf16Le || charset == Charset.Utf32Le;
         let offset = 0;
         if ((charset == Charset.Utf16 || charset == Charset.Utf32) && bytes.length >= width) {
@@ -157,9 +162,9 @@ export let Charsets = module (
         if (bytes.length - offset < width) {
             return [InvalidScalar, bytes.length - offset];
         }
-        let unit = read_unit(bytes, offset, width, little_endian);
+        last unit = read_unit(bytes, offset, width, little_endian);
         if (width == 2 && unit >= 55296 && unit <= 56319 && bytes.length - offset >= 4) {
-            let low = read_unit(bytes, offset + 2, 2, little_endian);
+            last low = read_unit(bytes, offset + 2, 2, little_endian);
             if (low >= 56320 && low <= 57343) {
                 return [65536 + ((unit - 55296) << 10) + (low - 56320), 4];
             }
@@ -174,7 +179,7 @@ export let Charsets = module (
     let read_unit = func(bytes: uint8[list], offset: int, width: int, little_endian: bool) -> uint32 {
         let unit: uint32 = 0;
         for (let i = 0; i < width; i += 1) {
-            let shift = (little_endian ? i : width - 1 - i) * 8;
+            last shift = (little_endian ? i : width - 1 - i) * 8;
             unit = unit | ((bytes[offset + i] as uint32) << shift);
         }
         return unit;

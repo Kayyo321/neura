@@ -1,4 +1,6 @@
+let integer_kernels = import:Std.Internal.Kernels.IntegerText;
 let integer_text = import:Std.Core.Internal.IntegerText;
+let kernel_status = import:Std.Core.Internal.KernelStatus;
 let.promote _ = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Ordering;
 let.promote _ = import:Std.Core.Result;
@@ -8,6 +10,7 @@ let.promote _ = import:Std.Core.Result;
 /// Every operation uses checked arithmetic; the wrapping forms follow the recipes of section 7.2, so no
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt8](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt8)
+#Since("0.1.0")
 export let UInt8 = module (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint8 = 0;
@@ -78,7 +81,7 @@ export let UInt8 = module (
         let x = a;
         let y = b;
         while (y != 0) {
-            let remainder = x % y;
+            last remainder = x % y;
             x = y;
             y = remainder;
         }
@@ -86,6 +89,7 @@ export let UInt8 = module (
     };
 
     /// @brief None where the operator would trap. Each test runs before the operation, so nothing overflows.
+    #NoDiscard
     export let checked_add = func(a: uint8, b: uint8) -> Optional<uint8> {
         if (b > Max - a) {
             return Optional<uint8>.None;
@@ -94,6 +98,7 @@ export let UInt8 = module (
     };
 
     /// @brief Returns the difference in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_sub = func(a: uint8, b: uint8) -> Optional<uint8> {
         if (a < b) {
             return Optional<uint8>.None;
@@ -102,6 +107,7 @@ export let UInt8 = module (
     };
 
     /// @brief Returns the product in Some, or None when it falls outside the type's range.
+    #NoDiscard
     export let checked_mul = func(a: uint8, b: uint8) -> Optional<uint8> {
         if (a != 0 && b > Max / a) {
             return Optional<uint8>.None;
@@ -110,6 +116,7 @@ export let UInt8 = module (
     };
 
     /// @brief Returns the quotient in Some, or None when the divisor is zero.
+    #NoDiscard
     export let checked_div = func(a: uint8, b: uint8) -> Optional<uint8> {
         if (b == 0) {
             return Optional<uint8>.None;
@@ -118,6 +125,7 @@ export let UInt8 = module (
     };
 
     /// @brief Returns the remainder in Some, or None when the divisor is zero.
+    #NoDiscard
     export let checked_rem = func(a: uint8, b: uint8) -> Optional<uint8> {
         if (b == 0) {
             return Optional<uint8>.None;
@@ -230,7 +238,7 @@ export let UInt8 = module (
     /// @brief `n` is reduced to 0 through Bits - 1 first. A rotation by 0 returns `v`; otherwise both shift
     /// counts are between 1 and Bits - 1.
     export let rotate_left = func(v: uint8, n: int) -> uint8 {
-        let count = rotation(n);
+        last count = rotation(n);
         if (count == 0) {
             return v;
         }
@@ -239,7 +247,7 @@ export let UInt8 = module (
 
     /// @brief Rotates the bits right, reducing the distance modulo the bit width.
     export let rotate_right = func(v: uint8, n: int) -> uint8 {
-        let count = rotation(n);
+        last count = rotation(n);
         if (count == 0) {
             return v;
         }
@@ -265,24 +273,10 @@ export let UInt8 = module (
     /// @brief Decimal, with `-` for negative values (section 5.2).
     export let to_string = func(v: uint8) -> string => v.to_string();
 
-    /// @brief Lowercase digits. A radix outside 2 through 36 traps.
-    export let to_string_radix = func(v: uint8, radix: int) -> string {
-        integer_text.check_radix(radix);
-        if (radix == 10) {
-            return v.to_string();
-        }
-        let base = radix as uint8;
-        let rest = v;
-        let digits: uint8[list] = [];
-        do {
-            digits.append(integer_text.digit_byte((rest % base) as int));
-            rest /= base;
-            if (rest == 0) {
-                break;
-            }
-        }
-        return integer_text.digits_text(digits, false);
-    };
+    /// @brief Lowercase digits. A radix outside 2 through 36 traps. The neura.integer.format_u64 kernel
+    /// writes the digits.
+    export let to_string_radix = func(v: uint8, radix: int) -> string =>
+        integer_kernels.format_u64(v as uint64, radix as int64);
 
     /// @brief to_string_radix, left-padded with copies of `pad` to `min_width` characters, sign included. A `0`
     /// pad goes after the sign. `pad` must be one scalar value.
@@ -291,6 +285,7 @@ export let UInt8 = module (
 
     /// @brief Parses a base-10 integer, returning an error for invalid text or a value outside the type's
     /// range.
+    #NoDiscard
     export let parse = func(text: string) -> Result<uint8> => parse_radix(text, 10);
 
     /// @brief An optional `+` or `-`, then one or more digits of the radix in either case.
@@ -298,35 +293,24 @@ export let UInt8 = module (
     /// Syntax errors are reported first (Empty, UnexpectedEnd at the end, InvalidCharacter at the offending
     /// byte); a well-formed value outside the type fails with OutOfRange at offset 0. A `-` is accepted only
     /// for zero. A radix outside 2 through 36 traps.
+    ///
+    /// The neura.integer.parse_u64 kernel parses the text as uint64, and the value is then checked
+    /// against the type's range.
+    #NoDiscard
     export let parse_radix = func(text: string, radix: int) -> Result<uint8> {
-        integer_text.check_radix(radix);
-        match (integer_text.syntax_error(text, radix)) {
-            Optional.Some(failure) => {
-                return Result<uint8>.Err(failure);
-            },
-            Optional.None => {},
+        let [status, offset, value] = integer_kernels.parse_u64(text, radix as int64);
+        if (status != kernel_status.Ok) {
+            return Result<uint8>.Err(kernel_status.parse_error(status, offset, "uint8"));
         }
-        let start = integer_text.sign_length(text);
-        let negative = start == 1 && text.byte_at(0) == 45;
-        let base = radix as uint8;
-        let value: uint8 = 0;
-        let length = text.byte_length;
-        for (let i = start; i < length; i++) {
-            let digit = integer_text.digit_value(text.byte_at(i)) as uint8;
-            if (value > (Max - digit) / base) {
-                return Result<uint8>.Err(integer_text.out_of_range("uint8"));
-            }
-            value = value * base + digit;
-        }
-        if (negative && value != 0) {
+        if (value > (Max as uint64)) {
             return Result<uint8>.Err(integer_text.out_of_range("uint8"));
         }
-        return Result<uint8>.Ok(value);
+        return Result<uint8>.Ok(value as uint8);
     };
 
     /// @brief `n` modulo Bits, between 0 and Bits - 1.
     let rotation = func(n: int) -> int {
-        let count = n % Bits;
+        last count = n % Bits;
         if (count < 0) {
             return count + Bits;
         }

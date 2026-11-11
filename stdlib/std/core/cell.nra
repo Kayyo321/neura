@@ -1,8 +1,10 @@
 /// @brief A mutable box. Closures capture locals by value, so a callback that needs to count or accumulate
 /// captures a Cell and updates its value.
 /// @see [Std.Core.Cell](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Cell)
+#Since("0.1.0")
 export let Cell = module (
     /// @brief A mutable slot shared by holders of the same Cell reference.
+    #[Final, Since("0.1.0")]
     export let Cell = class<T> (
         /// @brief The value currently stored in the shared slot.
         export let value: T;
@@ -14,5 +16,5 @@ export let Cell = module (
     );
 
     /// @brief Creates a new, independent cell containing the value.
-    export let of = func<T>(value: T) -> Cell<T> => new Cell<T>(value);
+    export let of = func<T>(value: T) -> Cell<T> => new(value);
 );

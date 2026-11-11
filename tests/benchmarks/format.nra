@@ -21,7 +21,7 @@ export let FormatBenchmark = module:program.Entry (
             }
             value = value + 39999999;
         }
-        if (text.byte_length() < n * 30) {
+        if (text.byte_length < n * 30) {
             console.print_line("too short");
             return program.ExitCode.Failure;
         }

@@ -1,10 +1,11 @@
 /// @brief Hash building blocks (Stdlib.md section 5.2). Every result is a uint32 and every step is computed
 /// without wrapping intrinsics.
 /// @see [Std.Core.Hash](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Hash)
+#Since("0.1.0")
 export let Hash = module (
     /// @brief 31 * seed + value, modulo 2^32. The product is below 2^37 in uint64.
     export let combine = func(seed: uint32, value: uint32) -> uint32 {
-        let sum = (seed as uint64) * 31 + (value as uint64);
+        last sum = (seed as uint64) * 31 + (value as uint64);
         return (sum & 4294967295) as uint32;
     };
 

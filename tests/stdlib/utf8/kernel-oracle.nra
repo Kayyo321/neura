@@ -1,0 +1,63 @@
+let random = import:Std.Random.Random;
+let reference = import:ReferenceUtf8;
+let test = import:Std.Test;
+let utf8s = import:Std.Encoding.Utf8;
+
+// The kernel oracle (CONTRIBUTING.md, "Kernel oracles"). Utf8.validate runs
+// the neura.encoding.utf8_validate kernel; ReferenceUtf8 (support/) is the
+// Neura implementation it replaced, unchanged. The two must agree on every
+// sequence of up to two bytes, on every lead byte followed by every
+// boundary of the continuation ranges, and on seeded random bytes.
+let Utf8KernelOracle = module (
+    let agree = func(bytes: uint8[list]) {
+        test.assert_equal_int32(reference.validate(bytes), utf8s.validate(bytes));
+    };
+
+    // Every one- and two-byte sequence, and a valid prefix before each.
+    export let test_short_sequences = func {
+        agree([]);
+        for (let a = 0; a < 256; a++) {
+            agree([a as uint8]);
+            agree([65, a as uint8]);
+            for (let b = 0; b < 256; b += 3) {
+                agree([a as uint8, b as uint8]);
+            }
+        }
+    };
+
+    // Each lead byte of a multi-byte sequence with second and later bytes at
+    // the edges of the continuation ranges (Unicode Table 3-7), cut short
+    // and followed by more text.
+    export let test_edge_corpus = func {
+        let edges: uint8[list] = [0, 127, 128, 143, 144, 159, 160, 191, 192, 255];
+        for (let lead = 192; lead < 256; lead++) {
+            for (let second in edges) {
+                for (let third in edges) {
+                    agree([lead as uint8, second, third]);
+                    agree([lead as uint8, second, third, 128]);
+                    agree([97, lead as uint8, second, third, 128, 98]);
+                }
+            }
+        }
+    };
+
+    // Seeded random bytes, mostly valid text with errors mixed in.
+    export let test_seeded_random = func {
+        let source = random.seeded(20261111);
+        let valid: uint8[list][list] = [[97], [195, 169], [226, 130, 172], [240, 159, 152, 128], [10], [127]];
+        for (let round = 0; round < 300; round++) {
+            let bytes: uint8[list] = [];
+            let count = source.next_int_below(40);
+            for (let i = 0; i < count; i++) {
+                if (source.next_int_below(8) == 0) {
+                    bytes.append((source.next_uint32() & 255) as uint8);
+                } else {
+                    for (let b in valid[source.next_int_below(valid.length)]) {
+                        bytes.append(b);
+                    }
+                }
+            }
+            agree(bytes);
+        }
+    };
+);
