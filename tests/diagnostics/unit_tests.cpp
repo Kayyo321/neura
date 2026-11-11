@@ -10,6 +10,7 @@
 #include "util/diagnostic.hpp"
 #include "util/diagnostic_codes.hpp"
 #include "util/source_map.hpp"
+#include "util/suggest.hpp"
 
 #include <iostream>
 #include <sstream>
@@ -107,6 +108,36 @@ int sink_suite() {
     cli::DiagnosticPrinter strict(config, {}, sources);
     CHECK(strict.warnings(all, warnings) == 3);
     check_text(all.str(), "b.nra:1:1: error: first\nb.nra:1:5: error: second\nlib.nra:1:1: error: library\n", __LINE__);
+
+    // After coded errors, the human form ends with one line that points to
+    // neura explain; the short form has none.
+    cli::DiagnosticConfig human;
+    human.format = cli::ErrorFormat::Human;
+    std::ostringstream one;
+    cli::DiagnosticPrinter single(human, {}, sources);
+    single.print(one, Diagnostic(at("b.nra", 1, 1, 0, 3), "first").with_code("E0302"));
+    single.print(one, Diagnostic(at("b.nra", 1, 5, 4, 1), "again").with_code("E0302"));
+    single.finish(one);
+    CHECK(one.str().ends_with("\n\nFor more information about this error, try `neura explain E0302`.\n"));
+    std::ostringstream several;
+    cli::DiagnosticPrinter mixed(human, {}, sources);
+    mixed.print(several, Diagnostic(at("b.nra", 1, 5, 4, 1), "b").with_code("E0403"));
+    mixed.print(several, Diagnostic(at("b.nra", 1, 1, 0, 3), "a").with_code("E0201"));
+    mixed.print(several, Diagnostic(at("b.nra", 1, 1, 0, 3), "uncoded"));
+    mixed.finish(several);
+    CHECK(several.str().ends_with("\nSome errors have detailed explanations: E0201, E0403.\n"
+                                  "For more information about an error, try `neura explain E0201`.\n"));
+    std::ostringstream brief;
+    cli::DiagnosticPrinter short_form(config, {}, sources);
+    short_form.print(brief, Diagnostic(at("b.nra", 1, 1, 0, 3), "first").with_code("E0302"));
+    short_form.finish(brief);
+    check_text(brief.str(), "b.nra:1:1: error[E0302]: first\n", __LINE__);
+
+    // Errors that a recovering stage carries keep their order.
+    auto first = Diagnostic(at("b.nra", 1, 1, 0, 3), "first").with_code("E0101");
+    first.also(Diagnostic(at("b.nra", 1, 5, 4, 1), "second").with_code("E0101"));
+    CHECK(first.following().size() == 1 && std::string(first.following().front().what()) == "second");
+    CHECK(Diagnostic(at("b.nra", 1, 1, 0, 3), "plain").following().empty());
     return failures;
 }
 
@@ -305,6 +336,37 @@ int edits_suite() {
     std::string other = "abcdef";
     CHECK(cli::apply_edits(other, {{at("f", 1, 1, 1, 3), "X"}, {at("f", 1, 1, 2, 3), "Y"}, {at("f", 1, 1, 10, 0), "Z"}}) == 1);
     CHECK(other == "abYf");
+
+    // A suggestion that inserts whole lines shows each new line.
+    SourceMap sources;
+    sources.add("m.nra", "match (x) {\n    A.B => {},\n}\n", SourceKind::User);
+    const auto insertion = Diagnostic(at("m.nra", 1, 1, 0, 5), "missing")
+        .suggest("add the arms", at("m.nra", 3, 1, 27, 0), "    A.C => {},\n    A.D => {},\n",
+                 Applicability::HasPlaceholders);
+    check_text(cli::render_human(insertion, sources, {}),
+               "error: missing\n"
+               " --> m.nra:1:1\n"
+               "  |\n"
+               "1 | match (x) {\n"
+               "  | ^^^^^\n"
+               "  |\n"
+               "help: add the arms\n"
+               "  |\n"
+               "3 |     A.C => {},\n"
+               "  |     ++++++++++\n"
+               "4 |     A.D => {},\n"
+               "  |     ++++++++++\n",
+               __LINE__);
+
+    // "Did you mean": a swap of two letters is one edit, a case difference
+    // is none, and nothing is suggested for a distant or exact name.
+    CHECK(edit_distance("cuont", "count") == 1);
+    CHECK(edit_distance("kitten", "sitting") == 3);
+    CHECK(closest_name("cuont", {"total", "count"}) == std::optional<std::string>("count"));
+    CHECK(closest_name("Count", {"amount", "count"}) == std::optional<std::string>("count"));
+    CHECK(!closest_name("x", {"total", "count"}));
+    CHECK(!closest_name("count", {"count", "counts"}));
+    CHECK(!closest_name("cap", {"$cap"}));
     return failures;
 }
 
