@@ -97,7 +97,9 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
             set(NEURA_HAS_STATIC_LAUNCHER ON)
             add_library(neura_nvm_static STATIC ${neura_nvm_sources})
             target_link_libraries(neura_nvm_static PUBLIC neura_nvr)
-            target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP)
+            # A static program cannot use the C library's resolver portably,
+            # so this launcher takes numeric addresses and "localhost" only.
+            target_compile_definitions(neura_nvm_static PRIVATE NEURA_NO_NATIVE_INTEROP NEURA_NUMERIC_ADDRESSES_ONLY)
             neura_target_defaults(neura_nvm_static)
 
             add_library(neura_runner_static STATIC ${neura_runner_sources})

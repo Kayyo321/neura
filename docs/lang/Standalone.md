@@ -263,9 +263,9 @@ A launcher is `src/launcher/main.cpp` linked with `neura_nvm` and `neura_nvr` an
 | Flavor | Links | Use |
 | --- | --- | --- |
 | Default | The platform C library dynamically; libffi, the C++ runtime, and everything else statically | Any image. Runs wherever the target's C library is present. |
-| Static (`--static`) | Everything statically. The native provider is compiled out, and every `neura.ffi.*` service is registered to fail with code 13 (`Unsupported`). | Images without native interop, in minimal containers and images with no C library. |
+| Static (`--static`) | Everything statically. The native provider is compiled out, and every `neura.ffi.*` service is registered to fail with code 13 (`Unsupported`). Host names are not resolved. | Images without native interop, in minimal containers and images with no C library. |
 
-Dynamic loading needs a dynamic C library, which is why native interop and a fully static file exclude each other.
+Dynamic loading needs a dynamic C library, which is why native interop and a fully static file exclude each other. Name resolution is excluded for the same reason: in a static program the C library's resolver loads, at run time, the name-service libraries of the C library it was linked with, which the machine that runs the executable may not have. A static executable therefore connects and listens on numeric IPv4 and IPv6 addresses and on `localhost`, and any other host name fails with `Unsupported`. A program that must resolve names uses the default flavor.
 
 ### 7.3 Build, install, and search
 
@@ -328,7 +328,7 @@ CTest entries, with the evidence each gives:
 | `native-replay` | A trace recorded by the executable replays under `neura run`, and the reverse, with identical trace bytes. A symbolic link planted at the destination and at the old temporary name is not followed, and the trace still replays. | Replay, hardening |
 | `native-container` | Every truncation of the payload and footer, a wrong checksum, reserved bits, trailing bytes, container versions 0 and 3, a bare launcher, a stripped executable, and crafted payloads (empty or non-UTF-8 file-system prefix, a prefix count or length beyond the payload, an image length that lies, a zero-length payload, a payload offset inside the launcher, a zero task setting, 1,025 parallel workers, a version 1 policy under a version 2 footer and the reverse) each fail at start-up with status 1 and before any host import is invoked. A version 1 container runs, and so does one that records 1,024 workers. | Exhaustive (truncations), structural |
 | `native-install` | From an installed toolchain, an executable is built, copied to an empty directory with no toolchain on the path, and run. With `--static`, it runs with no shared library available, in a root holding only the executable (no procfs) and in a root with procfs. When no static launcher was built, the test prints `static launcher: NOT BUILT, static checks not run` as a warning. | End to end |
-| `native-c-import` | An image with a `NATV` section runs with the default policy and fails as documented under `--deny-native`; the static launcher's default policy omits native code; a library for another target is a build error. | End to end on Linux x86-64 |
+| `native-c-import` | An image with a `NATV` section runs with the default policy and fails as documented under `--deny-native`; the static launcher's default policy omits native code, and a static executable refuses a host name while connecting to a numeric address and to `localhost`; a library for another target is a build error. | End to end on Linux x86-64 |
 
 On a platform without a launcher, CMake registers none of these except `native-replay`, without its launcher comparison, and prints a status line naming them.
 

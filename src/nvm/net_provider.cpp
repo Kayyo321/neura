@@ -49,6 +49,7 @@ namespace {
 
 HostCompletion errno_failure() { return fail(host_error::from_errno(errno)); }
 
+#ifndef NEURA_NUMERIC_ADDRESSES_ONLY
 // getaddrinfo failures: an unknown name is NotFound.
 std::uint32_t resolution_error(int code) {
     switch (code) {
@@ -67,13 +68,88 @@ std::uint32_t resolution_error(int code) {
         return host_error::other;
     }
 }
+#endif
 
+#ifdef NEURA_NUMERIC_ADDRESSES_ONLY
+// The fully static launcher does not use the C library's resolver: in a
+// static program getaddrinfo loads, at run time, the name-service libraries
+// of the C library it was linked with, which another machine may not have.
+// It accepts numeric IPv4 and IPv6 addresses and "localhost", and the empty
+// host of a listener; any other name is Unsupported.
+struct NumericAddress {
+    addrinfo info{};
+    sockaddr_storage storage{};
+};
+
+struct Addresses {
+    addrinfo* list = nullptr;
+    ~Addresses() {
+        while (list != nullptr) {
+            auto* next = list->ai_next;
+            // `info` is the first member of the node that holds it.
+            delete reinterpret_cast<NumericAddress*>(list);
+            list = next;
+        }
+    }
+};
+
+// The error of a failed resolution, or nothing when `out` holds addresses.
+std::optional<std::uint32_t> resolve(const std::string& host, std::int32_t port, bool passive, Addresses& out) {
+    std::vector<const char*> candidates;
+    if (host.empty() && passive) {
+        candidates = {"0.0.0.0", "::"};
+    } else if (host == "localhost") {
+        candidates = {"127.0.0.1", "::1"};
+    } else {
+        candidates = {host.c_str()};
+    }
+    addrinfo** tail = &out.list;
+    for (const char* text : candidates) {
+        auto node = std::make_unique<NumericAddress>();
+        auto* v4 = reinterpret_cast<sockaddr_in*>(&node->storage);
+        auto* v6 = reinterpret_cast<sockaddr_in6*>(&node->storage);
+        if (::inet_pton(AF_INET, text, &v4->sin_addr) == 1) {
+            v4->sin_family = AF_INET;
+            v4->sin_port = htons(static_cast<std::uint16_t>(port));
+            node->info.ai_family = AF_INET;
+            node->info.ai_addrlen = sizeof(sockaddr_in);
+        } else if (::inet_pton(AF_INET6, text, &v6->sin6_addr) == 1) {
+            v6->sin6_family = AF_INET6;
+            v6->sin6_port = htons(static_cast<std::uint16_t>(port));
+            node->info.ai_family = AF_INET6;
+            node->info.ai_addrlen = sizeof(sockaddr_in6);
+        } else {
+            return host_error::unsupported;
+        }
+        node->info.ai_socktype = SOCK_STREAM;
+        node->info.ai_addr = reinterpret_cast<sockaddr*>(&node->storage);
+        *tail = &node.release()->info;
+        tail = &(*tail)->ai_next;
+    }
+    return std::nullopt;
+}
+#else
 struct Addresses {
     addrinfo* list = nullptr;
     ~Addresses() {
         if (list != nullptr) ::freeaddrinfo(list);
     }
 };
+
+// The error of a failed resolution, or nothing when `out` holds addresses.
+std::optional<std::uint32_t> resolve(const std::string& host, std::int32_t port, bool passive, Addresses& out) {
+    addrinfo hints{};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+    if (passive) hints.ai_flags = AI_PASSIVE;
+    const auto service = std::to_string(port);
+    const char* node = passive && host.empty() ? nullptr : host.c_str();
+    if (const int code = ::getaddrinfo(node, service.c_str(), &hints, &out.list); code != 0) {
+        return resolution_error(code);
+    }
+    return std::nullopt;
+}
+#endif
 
 bool set_blocking(int descriptor, bool blocking) {
     const int flags = ::fcntl(descriptor, F_GETFL, 0);
@@ -251,14 +327,8 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         if (sockets->sockets.size() >= max_open_ids) return fail(host_error::other);
         const bool limited = timeout > 0;
         const auto deadline = std::chrono::steady_clock::now() + std::chrono::nanoseconds(limited ? timeout : 0);
-        addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
         Addresses addresses;
-        const auto service = std::to_string(port);
-        if (const int code = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &addresses.list); code != 0) {
-            return fail(resolution_error(code));
-        }
+        if (const auto failure = resolve(host, port, false, addresses)) return fail(*failure);
         std::uint32_t error = host_error::not_found;
         for (const auto* address = addresses.list; address != nullptr; address = address->ai_next) {
             const int descriptor = connect_one(*address, deadline, limited, error);
@@ -274,17 +344,8 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         const auto port = as_int32(request.arguments.at(1));
         if (host.find('\0') != std::string::npos || !valid_port(port)) return fail(host_error::invalid_input);
         if (sockets->sockets.size() >= max_open_ids) return fail(host_error::other);
-        addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
-        hints.ai_flags = AI_PASSIVE;
         Addresses addresses;
-        const auto service = std::to_string(port);
-        if (const int code = ::getaddrinfo(host.empty() ? nullptr : host.c_str(), service.c_str(), &hints,
-                                           &addresses.list);
-            code != 0) {
-            return fail(resolution_error(code));
-        }
+        if (const auto failure = resolve(host, port, true, addresses)) return fail(*failure);
         std::uint32_t error = host_error::not_found;
         for (const auto* address = addresses.list; address != nullptr; address = address->ai_next) {
             const int descriptor = new_socket(address->ai_family);
@@ -399,15 +460,8 @@ void add_net_services(const Adder& add, const OverlapAdder& overlap, StandardSer
         const auto timeout = as_int64(request.arguments.at(2));
         if (!usable_text(host) || !valid_port(port) || timeout < 0) return fail(host_error::invalid_input);
         if (sockets->sockets.size() >= max_open_ids) return fail(host_error::other);
-        addrinfo hints{};
-        hints.ai_family = AF_UNSPEC;
-        hints.ai_socktype = SOCK_STREAM;
         auto connecting = std::make_shared<Connecting>();
-        const auto service = std::to_string(port);
-        if (const int code = ::getaddrinfo(host.c_str(), service.c_str(), &hints, &connecting->addresses.list);
-            code != 0) {
-            return fail(resolution_error(code));
-        }
+        if (const auto failure = resolve(host, port, false, connecting->addresses)) return fail(*failure);
         connecting->next = connecting->addresses.list;
         // The completion once a connection attempt has settled, or nothing
         // while one is in progress.

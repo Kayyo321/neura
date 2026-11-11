@@ -93,6 +93,16 @@ if(HAS_STATIC)
     endif()
     expect_ok("${NEURA}" build --native --static --allow-native --deny-native plain.nvr -o static-denied-native)
     build_error("${static_error}" --static --deny-native --allow-native plain.nvr)
+
+    # A static program cannot use the C library's resolver, so the static
+    # launcher takes numeric addresses and "localhost" and refuses names.
+    get_filename_component(native_tests "${CMAKE_CURRENT_LIST_DIR}" ABSOLUTE)
+    expect_ok("${NEURA}" build --native --static "${native_tests}/static-names.nra" -o static-names)
+    invoke("${TEST_DIR}/static-names")
+    if(NOT result_status STREQUAL "0" OR
+       NOT result_stdout MATCHES "^name: Unsupported: [^\n]*\nlocalhost: (connected|ConnectionRefused: [^\n]*)\nnumeric: (connected|ConnectionRefused: [^\n]*)\n$")
+        message(FATAL_ERROR "the static launcher's address handling is not as documented\n${result_stdout}${result_stderr}")
+    endif()
 endif()
 
 # The original archive and source play no part in either execution.

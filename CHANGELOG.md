@@ -29,7 +29,7 @@ No version has been published. The [release checklist](docs/Release.md) lists th
 - `neura test --schedules N`, `--schedule-seed S`, `--save-schedule <file>`, and `--schedule <file>`: run tests under several legal task schedules and reproduce a failing one.
 - `neura check --task-safety`: report, for every function, whether a spawned task may call it.
 - Record and replay of programs with tasks (trace file version 3).
-- `neura build --native`: package an image as a native executable with a recorded policy of capabilities, limits, and task settings; `neura inspect` reads it back; `NEURA_RUN_OPTIONS` restricts or observes a run ([Native executables](docs/lang/Standalone.md)).
+- `neura build --native`: package an image as a native executable with a recorded policy of capabilities, limits, and task settings; `neura inspect` reads it back; `NEURA_RUN_OPTIONS` restricts or observes a run ([Native executables](docs/lang/Standalone.md)). The fully static flavor (`--static`) has no native interop and resolves no host names.
 - GPU execution of eligible graphs for `neura run` and `neura test`, with `--gpu=auto|always|off`, `--require-gpu`, `--gpu-verify`, and `run --each` for batched runs ([GPU execution](docs/lang/GpuExecution.md)).
 - NVR 1.5 (scheduler operations, poll bits, and the transferable-layout table) and `.nir` 1.9 (`task_scope`, `spawn`, `scheduler_call`, and polls).
 - `--deny-fs`, `--deny-net`, `--deny-env`, `--deny-clock`, `--deny-entropy`, `--deny-native`, and `--deny-all`.
