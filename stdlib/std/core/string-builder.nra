@@ -1,4 +1,5 @@
 let.promote cell = import:Std.Core.Cell;
+let hash_kernels = import:Std.Internal.Kernels.Hash;
 
 /// @brief Accumulates UTF-8 text (Stdlib.md section 8.2).
 ///
@@ -142,7 +143,7 @@ export let StringBuilder = module (
         };
 
         /// @brief Hashes the current text contents.
-        export let.override hash_code = func -> uint32 => bytes.hash_code();
+        export let.override hash_code = func -> uint32 => hash_kernels.list_u8(bytes);
 
         /// @brief The accumulated text. The builder stays usable.
         export let.override to_string = func -> string {
