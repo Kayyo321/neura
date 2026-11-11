@@ -1,0 +1,28 @@
+// sizes: quick 40000 full 400000
+// Builds one string from n pieces "item <i>;" with a StringBuilder, then
+// folds its bytes into a checksum: the byte length and the checksum. The
+// size is the first argument; java/StringBuilding.java prints the same line.
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let StringBuilding = module:program.Entry (
+    const Mask: int64 = 1073741823;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let builder = builders.create();
+        for (let i = 0; i < n; i = i + 1) {
+            builder.append("item ").append_int(i as int64).append(";");
+        }
+        let text = builder.to_string();
+        let checksum: int64 = 0;
+        for (let i = 0; i < text.byte_length; i = i + 1) {
+            checksum = (checksum * 31 + (text.byte_at(i) as int64)) & Mask;
+        }
+        console.println("string-building {} {}", text.byte_length, checksum);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,30 @@
+// sizes: quick 300000 full 3000000
+// Sieve of Eratosthenes over 2 to n: the number of primes and their sum. The
+// size is the first argument; java/Sieve.java prints the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Sieve = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let composite = lists.filled<bool>(n + 1, false);
+        let count = 0;
+        let sum: int64 = 0;
+        for (let i = 2; i <= n; i = i + 1) {
+            if (!composite[i]) {
+                count = count + 1;
+                sum = sum + (i as int64);
+                let multiple = (i as int64) * (i as int64);
+                while (multiple <= (n as int64)) {
+                    composite[multiple as int32] = true;
+                    multiple = multiple + (i as int64);
+                }
+            }
+        }
+        console.println("sieve {} {}", count, sum);
+        return program.ExitCode.Ok;
+    };
+);

@@ -154,6 +154,67 @@ NEURA_TEST(vm, graph_overflow_traps_before_the_exit) {
     expect_trap(image, TrapKind::GraphOverflow, "node 0");
 }
 
+// A loop that starts with every bit of a uint64 set and shifts it left once
+// per step. Graph 1 shifts the bits, sums every lane with a distinct weight,
+// and ends with a node that overflows once lane `lane` is clear, so the run
+// traps on the graph's (lane + 2)th evaluation. Most wires are nonzero.
+nvr::Image shifting_overflow_image(std::uint32_t lane) {
+    using Kind = nvr::TypeKind;
+    nvr::Image image;
+    image.types = {{Kind::Void}, {Kind::Signed, 32}, {Kind::Text}, {Kind::Array, 0, 2}, {Kind::Unsigned, 64}};
+    image.constants = {{4, {255, 255, 255, 255, 255, 255, 255, 255}}};
+    nvr::Graph shift;
+    shift.input_lanes = 64;
+    for (std::uint32_t i = 0; i < 64; ++i) {
+        nvr::Node node{nvr::Activation::Identity, 0, {}};
+        if (i > 0) node.edges.push_back({i - 1, 1});
+        shift.nodes.push_back(std::move(node));
+        shift.outputs.push_back(64 + i);
+    }
+    nvr::Node mixed{nvr::Activation::Relu, -3, {}};
+    for (std::uint32_t i = 0; i < 64; ++i) mixed.edges.push_back({i, static_cast<std::int64_t>(i) - 20});
+    shift.nodes.push_back(std::move(mixed));
+    // Nodes 65 and 66 are one exactly when the lane is clear; node 67 then
+    // overflows at its second edge.
+    shift.nodes.push_back({nvr::Activation::Relu, 1, {{lane, -1}}});
+    shift.nodes.push_back({nvr::Activation::Relu, 1, {{lane, -1}}});
+    shift.nodes.push_back({nvr::Activation::Identity, 0, {{129, std::numeric_limits<std::int64_t>::max()}, {130, 1}}});
+    image.graphs = {nvr::Graph{}, std::move(shift)};
+
+    nvr::Exit start;
+    start.kind = nvr::ExitKind::Continue;
+    start.resume = 1;
+    start.assignments = {{1, {ValueKind::Constant, 4, 0}}};
+    nvr::Exit again;
+    again.kind = nvr::ExitKind::Continue;
+    again.resume = 1;
+    again.assignments = {{1, {ValueKind::Lanes, 4, 0}}};
+    nvr::Block loop = one_exit(again);
+    loop.graph = 1;
+    loop.inputs = {{ValueKind::Slot, 4, 1}};
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = 1;
+    entry.frame_types = {3, 4};
+    entry.blocks = {one_exit(start), std::move(loop)};
+    image.functions = {std::move(entry)};
+    return image;
+}
+
+NEURA_TEST(vm, graph_overflow_reports_the_same_node_on_every_evaluation) {
+    // The evaluator may change how it runs a graph after its first
+    // evaluations; the failing node and the step count must not change.
+    for (const std::uint32_t lane : {0U, 3U, 6U, 7U, 8U, 40U, 63U}) {
+        const auto image = shifting_overflow_image(lane);
+        const auto run = run_captured(nvr::load(nvr::encode(image)));
+        check(!run.result.completed && run.result.trap.kind == TrapKind::GraphOverflow,
+              "lane " + std::to_string(lane) + ": " + describe_trap(run.result, image));
+        check_equal(run.result.trap.detail, std::string("graph 1 node 67"), "failing node");
+        check_equal(run.result.trap.block, 1U, "trap block");
+        check_equal(run.result.steps, std::uint64_t{lane} + 3, "steps of lane " + std::to_string(lane));
+    }
+}
+
 NEURA_TEST(vm, traps_map_to_signal_exit_statuses) {
     const auto status = [](TrapKind kind, std::uint32_t reason = 0) {
         nvm::Trap trap;

@@ -1,0 +1,107 @@
+// sizes: quick 50000 full 500000
+// SHA-256 (FIPS 180-4) written out over uint32 words, applied to an n-byte
+// message whose byte i is i mod 251: the digest in hexadecimal. The size is
+// the first argument; java/Sha256.java prints the same line.
+let builders = import:Std.Core.StringBuilder;
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Sha256 = module:program.Entry (
+    const Mask: uint64 = 4294967295;
+
+    let RoundConstants: uint32[] = [
+        1116352408, 1899447441, 3049323471, 3921009573, 961987163, 1508970993, 2453635748, 2870763221,
+        3624381080, 310598401, 607225278, 1426881987, 1925078388, 2162078206, 2614888103, 3248222580,
+        3835390401, 4022224774, 264347078, 604807628, 770255983, 1249150122, 1555081692, 1996064986,
+        2554220882, 2821834349, 2952996808, 3210313671, 3336571891, 3584528711, 113926993, 338241895,
+        666307205, 773529912, 1294757372, 1396182291, 1695183700, 1986661051, 2177026350, 2456956037,
+        2730485921, 2820302411, 3259730800, 3345764771, 3516065817, 3600352804, 4094571909, 275423344,
+        430227734, 506948616, 659060556, 883997877, 958139571, 1322822218, 1537002063, 1747873779,
+        1955562222, 2024104815, 2227730452, 2361852424, 2428436474, 2756734187, 3204031479, 3329325298
+    ];
+
+    let rotate = func(value: uint32, count: int) -> uint32 => (value >> count) | (value << (32 - count));
+
+    // The sum of the operands modulo 2^32.
+    let add = func(a: uint32, b: uint32) -> uint32 => (((a as uint64) + (b as uint64)) & Mask) as uint32;
+
+    // Processes the 64-byte block of `message` that starts at `start`.
+    let compress = func(state: uint32[], message: uint8[list], start: int, schedule: uint32[list]) {
+        for (let t = 0; t < 16; t = t + 1) {
+            let at = start + 4 * t;
+            schedule[t] = ((message[at] as uint32) << 24) | ((message[at + 1] as uint32) << 16) |
+                          ((message[at + 2] as uint32) << 8) | (message[at + 3] as uint32);
+        }
+        for (let t = 16; t < 64; t = t + 1) {
+            let w15 = schedule[t - 15];
+            let w2 = schedule[t - 2];
+            let s0 = rotate(w15, 7) ^ rotate(w15, 18) ^ (w15 >> 3);
+            let s1 = rotate(w2, 17) ^ rotate(w2, 19) ^ (w2 >> 10);
+            schedule[t] = add(add(schedule[t - 16], s0), add(schedule[t - 7], s1));
+        }
+        let a = state[0];
+        let b = state[1];
+        let c = state[2];
+        let d = state[3];
+        let e = state[4];
+        let f = state[5];
+        let g = state[6];
+        let h = state[7];
+        for (let t = 0; t < 64; t = t + 1) {
+            let s1 = rotate(e, 6) ^ rotate(e, 11) ^ rotate(e, 25);
+            let choice = (e & f) ^ (~e & g);
+            let t1 = add(add(add(h, s1), add(choice, RoundConstants[t])), schedule[t]);
+            let s0 = rotate(a, 2) ^ rotate(a, 13) ^ rotate(a, 22);
+            let majority = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = add(s0, majority);
+            h = g;
+            g = f;
+            f = e;
+            e = add(d, t1);
+            d = c;
+            c = b;
+            b = a;
+            a = add(t1, t2);
+        }
+        state[0] = add(state[0], a);
+        state[1] = add(state[1], b);
+        state[2] = add(state[2], c);
+        state[3] = add(state[3], d);
+        state[4] = add(state[4], e);
+        state[5] = add(state[5], f);
+        state[6] = add(state[6], g);
+        state[7] = add(state[7], h);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let message: uint8[list] = [];
+        for (let i = 0; i < n; i = i + 1) {
+            message.append((i % 251) as uint8);
+        }
+        // Padding: a one bit, zeros to 56 mod 64 bytes, then the bit length.
+        message.append(128);
+        while (message.length % 64 != 56) {
+            message.append(0);
+        }
+        let bit_length = (n as uint64) * 8;
+        for (let shift = 56; shift >= 0; shift = shift - 8) {
+            message.append(((bit_length >> shift) & 255) as uint8);
+        }
+        let state: uint32[] = [1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635,
+                               1541459225];
+        let schedule = lists.filled<uint32>(64, 0);
+        for (let start = 0; start < message.length; start = start + 64) {
+            compress(state, message, start, schedule);
+        }
+        let digest = builders.create();
+        for (let i = 0; i < 8; i = i + 1) {
+            digest.append(console.format("{:08x}", state[i]));
+        }
+        console.println("sha256 {}", digest.to_string());
+        return program.ExitCode.Ok;
+    };
+);

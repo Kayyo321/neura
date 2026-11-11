@@ -1,0 +1,38 @@
+// sizes: quick 40000 full 200000
+// Inserts n int32 keys into an insertion-ordered HashMap, looks each up,
+// overwrites half, deletes a quarter, and folds the remaining entries, in
+// order, into a checksum. The size is the first argument; java/HashMap.java
+// prints the same line with java.util.LinkedHashMap.
+let console = import:Std.Io.Console;
+let hash_map = import:Std.Collections.HashMap;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let HashMapBenchmark = module:program.Entry (
+    const Mask: int64 = 1073741823;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let map = hash_map.create<int32, int64>();
+        for (let i = 0; i < n; i = i + 1) {
+            map.set(i * 7919, i as int64);
+        }
+        let total: int64 = 0;
+        for (let i = 0; i < n; i = i + 1) {
+            total = total + map.get_or(i * 7919, -1);
+        }
+        for (let i = 0; i < n; i = i + 2) {
+            map.set(i * 7919, 0);
+        }
+        for (let i = 0; i < n; i = i + 4) {
+            map.delete(i * 7919);
+        }
+        let checksum: int64 = 0;
+        for (let entry in map) {
+            checksum = (checksum * 31 + (entry[0] as int64) * 3 + entry[1]) & Mask;
+        }
+        console.println("hash-map {} {} {}", map.size(), total, checksum);
+        return program.ExitCode.Ok;
+    };
+);
