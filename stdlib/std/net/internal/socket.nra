@@ -2,7 +2,7 @@
 /// ID never leaves the library.
 export let Socket = module (
     /// @brief Pairs a provider socket identifier with its address text.
-    #Final
+    #[Final, Immutable]
     export let Handle = class (
         /// @brief The provider's socket identifier.
         export last id: int64;

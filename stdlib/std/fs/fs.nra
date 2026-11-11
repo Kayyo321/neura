@@ -20,7 +20,7 @@ export let Fs = module (
 
     /// @brief What metadata reports about an entry. A link is followed; an entry that is neither a file nor a
     /// directory is of kind Other. The fields are read-only.
-    #Final
+    #[Final, Immutable, ThreadSafe]
     export let FileMetadata = class (
         /// @brief The classification reported by the filesystem provider.
         export last kind: FileKind;

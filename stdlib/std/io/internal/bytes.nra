@@ -5,6 +5,7 @@ let.promote _ = import:Std.Core.Unit;
 /// @brief Byte-list helpers shared by Std.Io, Std.Fs, and Std.Net.
 export let Bytes = module (
     /// @brief The UTF-8 bytes of `text`.
+    #Pure
     export let of_string = func(text: string) -> uint8[list] {
         last bytes: uint8[list] = [];
         last count = text.byte_length;
@@ -17,6 +18,7 @@ export let Bytes = module (
     };
 
     /// @brief A new list of bytes[start] up to but excluding bytes[end].
+    #Pure
     export let copy_range = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
         last copy: uint8[list] = [];
         let i = start;
@@ -37,6 +39,7 @@ export let Bytes = module (
     };
 
     /// @brief The index of the first `value` at or after `start`, or -1.
+    #Pure
     export let index_of = func(bytes: uint8[list], start: int, value: uint8) -> int {
         let i = start;
         last count = bytes.length;
@@ -50,25 +53,31 @@ export let Bytes = module (
     };
 
     /// @brief Creates a successful result with no payload.
+    #Pure
     export let ok = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
 
     /// @brief Creates an I/O error with its category, diagnostic, and path.
+    #Pure
     export let io = func(kind: error.IoErrorKind, message: string, path: string) -> error.Error =>
         error.Error.Io { kind: kind, message: message, path: path };
 
     /// @brief The error of an operation on a closed resource (Stdlib.md 5.5).
+    #Pure
     export let closed = func(what: string, path: string) -> error.Error =>
         io(error.IoErrorKind.Closed, what + " is closed", path);
 
     /// @brief The error for bytes that are not valid UTF-8.
+    #Pure
     export let invalid_utf8 = func(path: string) -> error.Error =>
         io(error.IoErrorKind.InvalidData, "invalid UTF-8", path);
 
     /// @brief The error for a host write that reported no progress.
+    #Pure
     export let no_progress = func(message: string, path: string) -> error.Error =>
         io(error.IoErrorKind.Other, message, path);
 
     /// @brief A source's maximum count must be at least 1.
+    #Pure
     export let check_maximum = func(max: int) {
         if (max < 1) {
             trap_with_message("invalid argument: maximum count below 1");
