@@ -27,6 +27,60 @@ Field initializers run before the body of their declaring class's `init`. A fiel
 
 For a derived class, `super.init(...)` must be the first statement of each declared constructor. It initializes the direct base before derived field initializers and the rest of the derived constructor execute. A class without a declared constructor implicitly invokes the base's zero-argument constructor. `new Derived(...)` selects from the constructors declared by `Derived`, and `super.init(...)` selects from the direct base. Both use [function overload resolution](CoreLanguage.md#function-overloads). Failure during construction and the state of a partially constructed object are not specified.
 
+### Target-typed new
+
+Where the type of a value is already known, `new` can leave the class out:
+
+```text
+new-expression := "new" type "(" arguments ")"
+                | "new" "(" arguments ")"
+                | "new"
+```
+
+After `new`, an opening parenthesis always begins the constructor arguments, and `new` followed by anything that cannot begin a type, such as `;`, `,`, `)`, `]`, or `}`, is the form without arguments. A class in parentheses, `new (T)(x)`, is therefore [E0435](../diagnostics/E0435.md); write `new T(x)`. `let a: T = new;` is the same as `let a: T = new T();`, and `let a: T = new(x, y);` is the same as `let a: T = new T(x, y);`: the constructor is selected, checked for access, and run exactly as for the written class, and errors in its arguments are the errors of `new T(...)`.
+
+The class to construct is the expected type of the `new`, which comes from:
+
+- the annotation of the binding or field it initializes, including an element of a [typed destructuring declaration](Types.md#typed-and-listed-destructuring);
+- the declared type of the variable, field, or element that an assignment stores to;
+- the declared result type of the function, for the value of a `return`;
+- the parameter, for a call argument, once the callee is known. Among overloads, a target-typed `new` fits every alternative whose parameter is a class it can construct, as a contextual argument, and an ambiguity is the usual [overload error](CoreLanguage.md#function-overloads);
+- the element type of a collection literal whose type is expected, and the arms of a conditional expression whose type is expected.
+
+A generic class takes its type arguments from the expected type, so `let box: Box<string> = new("text");` constructs `Box<string>`. The expected type must be a concrete class. With no expected type, or with an interface, the umbrella type `class`, a singleton, a type parameter, or a type that is not a class, the `new` is [E0420](../diagnostics/E0420.md). An abstract class is rejected as for `new T()`.
+
+<!-- example: check -->
+```neura
+let Point = class (
+    export let x: int = 0;
+    export let y: int = 0;
+    export let init = func() {
+    } or func(x0: int, y0: int) {
+        x = x0;
+        y = y0;
+    };
+);
+
+let Box = class<T> (
+    export let item: T;
+    export let init = func(value: T) {
+        item = value;
+    };
+);
+
+let distance = func(from: Point, to: Point) -> int => (to.x - from.x) + (to.y - from.y);
+
+let origin: Point = new;
+let corner: Point = new(3, 4);
+let label: Box<string> = new("corner");
+let far = distance(new, new(10, 10));
+let make = func() -> Point {
+    return new(1, 1);
+};
+```
+
+[Anonymous classes](Types.md#anonymous-classes) describe which field initializers `new` runs for a class written in a type position.
+
 ## Destruction
 
 A class may declare a zero-argument `deinit` function returning `void`. The `destroy object;` statement ends the object's lifetime and invokes cleanup from the most-derived class toward its bases, regardless of the static type of the reference. Each class's `deinit` runs at most once; base cleanup is automatic and must not be called explicitly. A class without `deinit` has no cleanup body of its own. Cleanup should release resources owned by that class, not resources it merely borrows.

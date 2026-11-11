@@ -161,6 +161,22 @@ export let format_log = func(log_message: string, log_level: int) -> string {
   console.print_line(prefix + " -> " + message);
   ```
 
+### Construction and anonymous classes
+- When an annotation already names the class, construct it with `new` alone, `= new;` or `= new(arguments);`, rather than repeating the class. Name the class after `new` where nothing else does:
+  <!-- example: fragment: style illustration: Point is a class declared elsewhere -->
+  ```neura
+  let origin: Point = new;
+  let corner = new Point(3, 4);
+  ```
+- Use an anonymous class for a small group of fields that one or two places pass around, and a named class for anything with methods or used across modules. Lay out a multi-line anonymous class like a class definition, with the closing parenthesis on its own line:
+  <!-- example: check -->
+  ```neura
+  let settings: class (
+      export let retries: int = 3;
+      export let verbose: bool = false;
+  ) = new;
+  ```
+
 ### Comments
 - Use `//` for single-line comments.
 - Place comments above the relevant code or inline with a single space after code:
@@ -247,4 +263,5 @@ Running check for: auth_service:8080
 | `let default_level: string = "INFO";` | `let DefaultLevel: string = "INFO";` | Variables use `snake_case`. |
 | `func(target_host: string)` | `func(targetHost: string)` | Parameters use `snake_case`. |
 | `program.ExitCode.Ok` | `program.exit_code.ok` | Enums and variants use `PascalCase`. |
+| `let origin: Point = new;` | `let origin: Point = new Point();` | The annotation already names the class. |
 

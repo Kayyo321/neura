@@ -13,6 +13,22 @@ const Limit: int32 = 3;
 count = count + 1;
 ```
 
+An annotation names the type, so the value need not repeat it. `new` without a class constructs the annotated type ([target-typed `new`](ObjectLifecycle.md#target-typed-new)), a destructuring declaration can annotate its names with a tuple type and give each name its own value ([typed and listed destructuring](Types.md#typed-and-listed-destructuring)), and a class body can be written where a type is expected ([anonymous classes](Types.md#anonymous-classes)).
+
+<!-- example: check -->
+```neura
+let Counter = class (
+    export let count: int = 0;
+);
+
+let first: Counter = new;
+let [low, high]: [Counter, int] = new, 10;
+let point: class (
+    export let x: int = 0;
+    export let y: int = 0;
+) = new;
+```
+
 Bindings are visible from their declaration to the end of their enclosing block; nested blocks introduce scopes. Duplicate names in the same scope are errors. A nested block, and a function body, may declare a name that an enclosing scope or a parameter already has; the new binding hides the outer one for the rest of its block. Whether shadowing stays allowed is an open language decision ([Status](Status.md#open-language-decisions)). Exported module and class members form their public interface; unexported members are accessible within their declaring module or class. Visibility and inheritance rules beyond these are not specified.
 
 ### Documentation comments

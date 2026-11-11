@@ -187,6 +187,11 @@ foreach(quantum IN ITEMS 1 64 1024)
         --task-quantum ${quantum})
 endforeach()
 
+# Target-typed new, typed destructuring, and an anonymous class.
+build_image("${TEST_DIR}/construction.nvr" "${SOURCE_DIR}/examples/types/construction.nra")
+expect_run("construction example" "${TEST_DIR}/construction.nvr"
+    "Ada has 250\nGrace has 10\n4 accounts, 260 in total\n" 0 "")
+
 # Library examples run through drivers that import them.
 foreach(driver IN ITEMS core overlay classes collections polymorphism errors)
     # The errors driver shows a denied read, so it runs with files denied.
