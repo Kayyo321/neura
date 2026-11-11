@@ -46,6 +46,11 @@ No version has been published. The [release checklist](docs/Release.md) lists th
 - The trap for denied native access reads `native access denied: the native capability is not granted`.
 - A program that uses a scope, a channel, or another scheduler operation cannot also use `Std.DynamicForeign` or `import:c(...)`.
 
+### Known issues
+
+- `neura run --each <file> --gpu=always` does not finish for an image whose tasks wait on cancellable host I/O, such as `tests/concurrency/io/cancelled.nra`; the same fleet finishes with `--gpu=off` and with the default `--gpu=auto`. [GPU execution](docs/lang/GpuExecution.md) specifies that a fleet gives the results of running its members in order, so this is a defect, not a documented limit. The release archives are built without the GPU backend and are not affected; a build from source with the backend is.
+- On Linux arm64, `neura-libclang-load`, a test of the `neura-libclang` submodule, fails because it expects `char` to be signed. C imports themselves map `char` as the platform does.
+
 ### Security
 
 - A native executable finds its own file through `/proc/self/exe` or the path the kernel recorded, never through its program name, and writes traces through an exclusively created temporary file. `--trace-events` refuses a symbolic link at its path.

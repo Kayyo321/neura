@@ -11,6 +11,7 @@
 </p>
 
 <p align="center">
+  <a href="https://kayyo321.github.io/neura/">Website</a>&nbsp;·
   <a href="#getting-started">Quickstart</a>&nbsp;·
   <a href="docs/lang/Overview.md">Language</a>&nbsp;·
   <a href="docs/lang/StandardLibrary.md">Standard&nbsp;library</a>&nbsp;·
@@ -95,6 +96,7 @@ The `.nvr` image contains the circuit and execution information needed by the Ne
 - [Neura Virtual Machine](docs/runtime/NVM.md) and [NVR format](docs/runtime/NVR.md) define execution and the executable image. [Neuron conversion and execution](docs/Backend.md) and [Decompiler](docs/Decompiler.md) describe the implementation, and the [release checklist](docs/Release.md) maps each feature to its tests.
 - [Install, update, and uninstall](docs/Install.md) covers installing a release archive, `neura doctor`, `neura update`, and `neura uninstall`.
 - [Wiki maintenance](docs/Wiki.md) explains how to update, review, and publish the repository's wiki sources.
+- [Website maintenance](docs/Site.md) explains how to change, preview, and publish the [website](https://kayyo321.github.io/neura/), whose pages are in [`site/`](site/) and whose documentation is this repository's Markdown, rendered. [The design of the website](docs/SiteDesign.md) records its colors, type, grids, and illustrations.
 - [Contributing](CONTRIBUTING.md) explains how to propose changes and verify them.
 
 ## Rules for agents

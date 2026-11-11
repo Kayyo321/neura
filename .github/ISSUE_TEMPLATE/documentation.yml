@@ -1,12 +1,12 @@
 name: Documentation problem
-description: A page in docs/ or the wiki is wrong, unclear, incomplete, or disagrees with what Neura does.
+description: A page in docs/, the wiki, or the website is wrong, unclear, incomplete, or disagrees with what Neura does.
 labels: [documentation]
 body:
   - type: input
     id: page
     attributes:
       label: Page and section
-      description: The file path or wiki page, and the heading.
+      description: The file path, wiki page, or website address, and the heading.
       placeholder: docs/lang/Numbers.md, "Integer arithmetic"
     validations:
       required: true

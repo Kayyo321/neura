@@ -49,6 +49,8 @@ jobs:
 
       - name: Check that the wiki pages are generated from docs
         run: python3 scripts/generate-wiki.py --check
+      - name: Check the website
+        run: python3 scripts/build-site.py --check
 
   build-and-test:
     name: Build and test (Linux x86-64)

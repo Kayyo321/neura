@@ -6,6 +6,7 @@
 - Read the relevant page in [the language design](docs/lang/Overview.md) before changing syntax or behavior. Use [language status](docs/lang/Status.md) to identify unresolved decisions. Treat `.nra` files under [examples](examples/) as illustrations unless a conformance test establishes the behavior.
 - Follow [the Neura coding style](docs/style/CodingStyle.md) for `.nra` code, including examples and fixtures. Follow [CONTRIBUTING.md](CONTRIBUTING.md) for change and verification expectations.
 - When updating wiki content, follow [wiki maintenance](docs/Wiki.md) to keep the repository sources and the separately hosted GitHub wiki in sync.
+- When changing the website, follow [website maintenance](docs/Site.md) and keep to [its design](docs/SiteDesign.md). The site is the pages in [`site/`](site/) and the repository documents that [`site/contents.toml`](site/contents.toml) lists, which the build renders, so a change to a listed document changes the site. Merging into `main` publishes it. Correct a document in the document, not on the site. When a document links to another Markdown file, list that file in `contents.toml`. Preview the change and run `python3 scripts/build-site.py --check`.
 - Preserve existing work. Keep edits within the requested feature and avoid unrelated formatting, renames, dependencies, or generated files.
 
 ## Keep compiler stages separate
