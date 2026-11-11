@@ -192,7 +192,7 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
         const auto size = input.integer<std::uint32_t>();
         const auto trailing = tail_size + std::uint64_t{prefixes - i - 1} * sizeof(std::uint32_t);
         std::string prefix;
-        if (size > input.remaining() - trailing || size > prefix.max_size()) {
+        if (size > input.remaining() - trailing || static_cast<std::uint64_t>(size) > prefix.max_size()) {
             malformed("invalid file-system prefix length");
         }
         prefix.resize(size);
@@ -220,7 +220,7 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
         }
     }
     const auto image_size = input.integer<std::uint32_t>();
-    if (image_size > input.remaining() || image_size > result.image.max_size()) {
+    if (image_size > input.remaining() || static_cast<std::uint64_t>(image_size) > result.image.max_size()) {
         malformed("invalid image length");
     }
     if (image_size < input.remaining()) malformed("trailing bytes after image");
