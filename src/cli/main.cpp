@@ -28,11 +28,19 @@
 #include "nvr/format.hpp"
 #include "runner/runner.hpp"
 #include "source_docs.hpp"
+#include "tooling/test_protocol.hpp"
+#include "tooling/coverage.hpp"
 #include "source_loader.hpp"
 #include "util/source_map.hpp"
+#include "tooling/lsp.hpp"
+#include "tooling/debug.hpp"
+#include "tooling/formatter.hpp"
+#include "tooling/json.hpp"
+#include "tooling/inspect.hpp"
 
 #include <algorithm>
 #include <charconv>
+#include <chrono>
 #include <cstring>
 #include <cstdio>
 #include <cstdlib>
@@ -76,7 +84,11 @@ using neura::runner::read_file;
 using neura::runner::write_file;
 
 void usage(std::ostream& out) {
-    out << "usage: neura check [-I source-root] [--task-safety | --fix] <file.nra>...\n"
+    out << "usage: neura lsp --stdio\n"
+           "       neura debug --stdio\n"
+           "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
+           "       neura capabilities --json\n"
+           "       neura check [-I source-root] [--task-safety | --fix] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
@@ -91,6 +103,8 @@ void usage(std::ostream& out) {
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
+           "                  [--list --format=json] [--filter <exact-id>] [--reporter=json]\n"
+           "                  [--workspace-root <directory>]\n"
            "                  [--max-heap-cells N] [--stats] [--tier=0|1|2] [--jit=off|on|auto]\n"
            "                  [--tier-stats] [capabilities]\n"
            "                  [--gpu=auto|always|off] [--no-gpu]\n"
@@ -221,6 +235,14 @@ struct Options {
     bool task_safety = false;
     // check --fix: apply machine-applicable suggestions in place.
     bool fix = false;
+    // Editor test discovery and execution. Human terminal output is the default.
+    bool list_tests = false;
+    bool test_format_json = false;
+    bool test_format_set = false;
+    bool test_reporter_json = false;
+    std::vector<std::string> test_filters;
+    std::optional<fs::path> test_workspace;
+    std::optional<fs::path> test_coverage;
     neura::cli::DiagnosticConfig diagnostics;
     std::optional<fs::path> trace_events;
     bool trace_wall_time = false;
@@ -516,6 +538,35 @@ Options read_options(int argc, char** argv) {
             }
         } else if (arg == "--") {
             positional_only = true;
+        } else if (arg == "--list") {
+            if (options.command != Command::Test) throw std::runtime_error("--list applies only to test");
+            options.list_tests = true;
+        } else if (arg.starts_with("--format=")) {
+            if (options.command != Command::Test) throw std::runtime_error("--format applies only to test --list");
+            const auto format = arg.substr(9);
+            if (format != "json" && format != "human") throw std::runtime_error("--format expects json or human");
+            options.test_format_json = format == "json";
+            options.test_format_set = true;
+        } else if (arg == "--coverage" || arg.starts_with("--coverage=")) {
+            if (options.command != Command::Test) throw std::runtime_error("--coverage applies only to test");
+            const std::string_view path = arg == "--coverage" ? std::string_view(next()) : arg.substr(11);
+            if (path.empty()) throw std::runtime_error("--coverage expects an output JSON path");
+            options.test_coverage = fs::path(path);
+        } else if (arg == "--workspace-root") {
+            if (options.command != Command::Test) throw std::runtime_error("--workspace-root applies only to test");
+            const auto directory = fs::canonical(next());
+            if (!fs::is_directory(directory)) throw std::runtime_error("--workspace-root expects a directory");
+            options.test_workspace = directory;
+        } else if (arg == "--filter" || arg.starts_with("--filter=")) {
+            if (options.command != Command::Test) throw std::runtime_error("--filter applies only to test");
+            const std::string_view filter = arg == "--filter" ? std::string_view(next()) : arg.substr(9);
+            if (filter.empty()) throw std::runtime_error("--filter expects an exact test id");
+            options.test_filters.emplace_back(filter);
+        } else if (arg.starts_with("--reporter=")) {
+            if (options.command != Command::Test) throw std::runtime_error("--reporter applies only to test");
+            const auto reporter = arg.substr(11);
+            if (reporter != "json" && reporter != "human") throw std::runtime_error("--reporter expects json or human");
+            options.test_reporter_json = reporter == "json";
         } else if (arg.starts_with("--error-format=")) {
             const auto format = arg.substr(15);
             if (format == "human") options.diagnostics.format = neura::cli::ErrorFormat::Human;
@@ -726,6 +777,23 @@ Options read_options(int argc, char** argv) {
             options.files.push_back(fs::canonical(argv[i]));
         }
     }
+    if (options.test_coverage) {
+        if (options.list_tests) throw std::runtime_error("--coverage cannot be combined with --list");
+        // Count every source-mapped block, without optimizer removal or
+        // lifted/JIT regions bypassing the reference block observer.
+        options.optimize = false;
+        options.limits.tier = 0;
+        options.limits.jit = neura::jit::Mode::Off;
+        options.limits.parallel_workers = 1;
+        options.gpu = {};
+        options.gpu.mode = neura::cli::GpuMode::Off;
+    }
+    if (options.test_format_set && !options.list_tests)
+        throw std::runtime_error("--format requires test --list");
+    if (options.list_tests && options.test_reporter_json)
+        throw std::runtime_error("--reporter=json cannot be combined with --list; use --format=json");
+    if (options.test_format_json || options.test_reporter_json)
+        options.diagnostics.format = neura::cli::ErrorFormat::Json;
     if (first_policy_flag && !options.native_executable) {
         throw std::runtime_error(std::string(*first_policy_flag) + " applies only with --native");
     }
@@ -1325,27 +1393,46 @@ std::optional<std::string> test_failure_message(const neura::nvm::Trap& trap, co
 // with test_ in a module of the listed files is a test. Each test runs in a
 // fresh execution of one image, so no state carries over between tests.
 int run_tests(const Options& options) {
-    auto program = load_program(options);
+    // Discovery does semantic analysis but never links native code, converts
+    // circuits, initializes modules, or executes any user function.
+    auto analysis_options = options;
+    if (options.list_tests) analysis_options.command = Command::Check;
+    auto program = load_program(analysis_options);
+    if (options.test_coverage) {
+        for (const auto& item : program.symbols) {
+            if (item.kind != neura::SymbolKind::File) continue;
+            const auto file = item.span.file.empty() ? item.name : item.span.file;
+            std::error_code error;
+            if (!file.empty() && fs::equivalent(*options.test_coverage, file, error) && !error)
+                throw std::runtime_error("coverage output must not replace a source file: " + file);
+        }
+    }
     neura::require_valid_ir(program, "before specialization");
+    auto catalog = neura::tooling::discover_tests(program, options.files,
+                                                   options.test_workspace.value_or(fs::current_path()));
+    if (!options.test_filters.empty()) {
+        const std::set<std::string> selected(options.test_filters.begin(), options.test_filters.end());
+        for (const auto& id : selected) {
+            if (std::ranges::none_of(catalog, [&](const auto& item) { return item.id == id; }))
+                throw std::runtime_error("unknown test id: " + id + "; use test --list --format=json");
+        }
+        std::erase_if(catalog, [&](const auto& item) { return !selected.contains(item.id); });
+    }
+    if (options.list_tests) {
+        if (options.test_format_json) {
+            neura::tooling::Json records = neura::tooling::Json::Array{};
+            for (const auto& test : catalog) records.push_back(neura::tooling::test_info_json(test));
+            std::cout << neura::tooling::Json{{"version", 1}, {"tests", std::move(records)}}.dump() << '\n';
+        } else {
+            for (const auto& test : catalog) std::cout << test.id << '\n';
+        }
+        return 0;
+    }
     std::vector<neura::SymbolId> tests;
     std::vector<std::string> names;
-    for (neura::SymbolId id = 0; id < program.symbols.size(); ++id) {
-        const auto& item = program.symbols[id];
-        if (item.kind != neura::SymbolKind::Function || !item.exported || !item.has_body ||
-            !item.name.starts_with("test_") || !item.parameters.empty() || !item.generics.empty() ||
-            item.type.kind != neura::TypeKind::Void || item.owner == neura::no_symbol ||
-            program.symbols[item.owner].kind != neura::SymbolKind::Module ||
-            neura::is_static_scope(program.symbols[item.owner]) ||
-            !program.symbols[item.owner].generics.empty()) {
-            continue;
-        }
-        const auto file = fs::path(item.span.file);
-        if (std::none_of(options.files.begin(), options.files.end(),
-                         [&](const fs::path& listed) { return fs::equivalent(listed, file); })) {
-            continue;
-        }
-        tests.push_back(id);
-        names.push_back(program.symbols[item.owner].name + "." + item.name);
+    for (const auto& test : catalog) {
+        tests.push_back(test.symbol);
+        names.push_back(test.label);
     }
     if (tests.empty()) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
@@ -1360,8 +1447,39 @@ int run_tests(const Options& options) {
     }
     neura::backend::ConversionOptions conversion_options;
     conversion_options.entries = tests;
+    if (options.test_coverage) {
+        // Emit concrete project functions even when no selected test calls
+        // them, so their mapped locations appear as unexecuted coverage.
+        for (const auto& body : program.bodies) {
+            const auto& item = program.symbols[body.owner];
+            auto owner = body.owner;
+            while (owner < program.symbols.size() && program.symbols[owner].kind != neura::SymbolKind::File)
+                owner = program.symbols[owner].owner;
+            if (owner >= program.symbols.size() || !program.symbols[owner].library_path.empty() ||
+                !item.generics.empty() || item.span.file.empty() || !fs::is_regular_file(item.span.file)) continue;
+            conversion_options.extra_functions.push_back(body.owner);
+        }
+    }
     auto conversion = neura::backend::convert(program, conversion_options);
     auto image = neura::nvr::load(neura::nvr::encode(conversion.image));
+    std::unique_ptr<neura::tooling::LineCoverage> coverage;
+    if (options.test_coverage) {
+        std::map<std::string, fs::path> sources;
+        std::map<std::string, fs::path> all_labels;
+        for (const auto& item : program.symbols) {
+            if (item.kind != neura::SymbolKind::File) continue;
+            const auto file = item.span.file.empty() ? item.name : item.span.file;
+            if (file.empty() || !fs::is_regular_file(file)) continue;
+            const auto path = fs::canonical(file);
+            const auto label = neura::backend::source_label(program, file);
+            const auto [previous, inserted] = all_labels.try_emplace(label, path);
+            if (!inserted && previous->second != path)
+                throw std::runtime_error("coverage: source-map path '" + label +
+                                         "' names more than one file; use separate source roots");
+            if (item.library_path.empty()) sources.insert_or_assign(label, path);
+        }
+        coverage = std::make_unique<neura::tooling::LineCoverage>(image, sources);
+    }
     const auto max_jobs = std::min<std::size_t>(tests.size(), neura::nvm::FleetOptions{}.window);
     neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
 
@@ -1372,42 +1490,96 @@ int run_tests(const Options& options) {
     for (const auto& file : options.files) {
         test_labels.insert(neura::backend::source_label(program, file.generic_string()));
     }
+    std::unique_ptr<neura::tooling::TestReporter> reporter;
+    if (options.test_reporter_json) {
+        reporter = std::make_unique<neura::tooling::TestReporter>();
+        reporter->event("runStart", {{"count", options.schedule ? std::size_t{1} : tests.size()}});
+    }
+    std::unique_ptr<neura::tooling::TestOutputCapture> captured;
+    std::vector<std::chrono::steady_clock::time_point> started(tests.size());
+    const auto begin = [&](std::size_t i) {
+        if (!reporter) return;
+        reporter->event("testStart", neura::tooling::test_info_json(catalog[i]));
+        started[i] = std::chrono::steady_clock::now();
+        captured = std::make_unique<neura::tooling::TestOutputCapture>(
+            [&, i](std::string_view stream, std::string_view text) {
+                reporter->event("output", neura::tooling::test_output_json(catalog[i].id, stream, text));
+            });
+    };
     Host host(options.capabilities);
     provide_native_library(image, host.services);
     const auto bindings = neura::nvm::bind(image, host.registry);
     std::size_t failed = 0;
+    std::optional<std::size_t> saved_schedule_test;
     // `note` follows the test's name: which schedule failed, or how many ran.
-    const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result, const std::string& note = {}) {
+    const auto finished = [&](std::size_t i, const neura::nvm::RunResult& result, const std::string& note = {},
+                              const std::string& forced_failure = {}) {
         // Each test is its own run: files and sockets it left open close now.
         host.services.end_run();
-        // A test that ends the process with a nonzero status through
-        // Std.Program.Process.exit fails.
-        if (result.completed && result.status != 0) {
-            ++failed;
-            std::cout << "FAIL " << names[i] << note << ": the test exited with status " << result.status << '\n';
-            return;
+        std::string message = forced_failure;
+        if (message.empty() && result.completed && result.status != 0)
+            message = "the test exited with status " + std::to_string(result.status);
+        if (message.empty() && !result.completed) {
+            if (const auto assertion = test_failure_message(result.trap, image, test_labels)) message = *assertion;
+            else message = neura::nvm::describe(result.trap, image, false);
         }
-        if (result.completed) {
-            std::cout << "PASS " << names[i] << note;
-            if (options.stats) {
-                std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells << ")";
+        const bool success = message.empty();
+        if (!success) ++failed;
+        if (reporter) {
+            if (captured) {
+                captured->finish([&](std::string_view stream, std::string_view text) {
+                    reporter->event("output", neura::tooling::test_output_json(catalog[i].id, stream, text));
+                });
+                captured.reset();
             }
-            std::cout << '\n';
+            const auto duration = std::chrono::duration<double, std::milli>(
+                std::chrono::steady_clock::now() - started[i]).count();
+            neura::tooling::Json event{{"id", catalog[i].id}, {"name", catalog[i].name},
+                {"state", success ? "passed" : "failed"}, {"duration", duration},
+                {"steps", result.steps}, {"peakHeapCells", result.peak_heap_cells},
+                {"message", message}, {"note", note}};
+            if (!success && !result.completed) {
+                std::optional<neura::nvr::SourceLocation> place;
+                if (test_failure_message(result.trap, image, test_labels)) {
+                    std::vector<std::pair<std::uint32_t, std::uint32_t>> frames{
+                        {result.trap.function, result.trap.block}};
+                    frames.insert(frames.end(), result.trap.callers.begin(), result.trap.callers.end());
+                    for (const auto& [function, block] : frames) {
+                        const auto location = block_location(image, function, block);
+                        if (location && test_labels.contains(location->path)) { place = location; break; }
+                    }
+                }
+                if (!place) place = block_location(image, result.trap.function, result.trap.block);
+                if (place) {
+                    std::string file;
+                    for (const auto& input : options.files) {
+                        if (neura::backend::source_label(program, input.generic_string()) == place->path) {
+                            file = input.generic_string(); break;
+                        }
+                    }
+                    event["location"] = neura::tooling::Json{{"path", place->path}, {"file", file},
+                                                           {"line", place->line}, {"column", place->column}};
+                }
+            }
+            if (!success && saved_schedule_test == i && options.save_schedule)
+                event["savedSchedule"] = fs::absolute(*options.save_schedule).generic_string();
+            if (!success && options.schedule)
+                event["savedSchedule"] = fs::absolute(*options.schedule).generic_string();
+            reporter->event("testResult", std::move(event));
             return;
         }
-        ++failed;
-        std::cout << "FAIL " << names[i] << note << ": ";
-        if (const auto message = test_failure_message(result.trap, image, test_labels)) {
-            std::cout << *message << '\n';
-        } else {
-            // Function and block numbers are internal to the test image; the
-            // source location identifies the fault.
-            std::cout << neura::nvm::describe(result.trap, image, false) << '\n';
-        }
+        std::cout << (success ? "PASS " : "FAIL ") << names[i] << note;
+        if (!success) std::cout << ": " << message;
+        else if (options.stats)
+            std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells << ")";
+        std::cout << '\n';
     };
     neura::runner::TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
+    if (coverage) limits.block_observer = [&](std::uint32_t function, std::uint32_t block) {
+        coverage->block(function, block);
+    };
     const bool fleet_device = options.schedule || options.schedules > 1 || options.virtual_time ||
                                       options.save_schedule
                                   ? false
@@ -1443,22 +1615,33 @@ int run_tests(const Options& options) {
         }
         const auto i = static_cast<std::size_t>(found - names.begin());
         neura::nvm::RecordedChooser chooser(saved.choices);
+        begin(i);
         const auto result = run_test(i, &chooser, saved.quantum, saved.virtual_time || options.virtual_time);
         if (chooser.diverged()) {
-            host.services.end_run();
-            ++failed;
-            std::cout << "FAIL " << names[i] << " [saved schedule]: the schedule does not fit this program: at decision "
-                      << chooser.diverged_tick() << " fewer tasks could run than its choice needs\n";
+            finished(i, result, " [saved schedule]", "the schedule does not fit this program: at decision " +
+                     std::to_string(chooser.diverged_tick()) + " fewer tasks could run than its choice needs");
         } else {
             finished(i, result, " [saved schedule]");
         }
         ran = 1;
     } else if (auto* device = options.schedules > 1 || options.virtual_time || options.save_schedule
                                   ? nullptr : gpu.device()) {
-        neura::nvm::Fleet fleet(image, {limits, device});
-        for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
-        neura::nvm::run_fleet(fleet, bindings,
-                              [&](std::size_t i, const neura::nvm::RunResult& result) { finished(i, result); });
+        if (reporter) {
+            // A single member per fleet preserves GPU behavior while making
+            // every native/console byte unambiguously attributable to a test.
+            for (std::size_t i = 0; i < tests.size(); ++i) {
+                begin(i);
+                neura::nvm::Fleet fleet(image, {limits, device, 1});
+                fleet.add(static_cast<std::uint32_t>(i), {});
+                neura::nvm::run_fleet(fleet, bindings,
+                    [&](std::size_t, const neura::nvm::RunResult& result) { finished(i, result); });
+            }
+        } else {
+            neura::nvm::Fleet fleet(image, {limits, device});
+            for (std::size_t i = 0; i < tests.size(); ++i) fleet.add(static_cast<std::uint32_t>(i), {});
+            neura::nvm::run_fleet(fleet, bindings,
+                                  [&](std::size_t i, const neura::nvm::RunResult& result) { finished(i, result); });
+        }
     } else {
         // Schedule 1 is the reference scheduler's. Each later one varies
         // which runnable task goes next, from the seed. Exploration is
@@ -1466,6 +1649,7 @@ int run_tests(const Options& options) {
         std::uint64_t explored = 0;
         bool saved = false;
         for (std::size_t i = 0; i < tests.size(); ++i) {
+            begin(i);
             auto result = run_test(i, nullptr, limits.task_quantum, options.virtual_time);
             std::uint64_t count = 1;
             std::string note;
@@ -1491,17 +1675,26 @@ int run_tests(const Options& options) {
             if (!passed(result) && options.save_schedule && !saved) {
                 neura::nvm::write_schedule(*options.save_schedule, failing);
                 saved = true;
+                saved_schedule_test = i;
                 std::cerr << "neura: note: the failing schedule of " << names[i] << " was written to "
                           << options.save_schedule->string() << '\n';
             }
             finished(i, result, note);
         }
-        if (options.schedules > 1) {
+        if (options.schedules > 1 && !reporter) {
             std::cout << "explored " << explored << " schedule(s) of " << tests.size() << " test(s), seed "
                       << options.schedule_seed << '\n';
         }
     }
-    std::cout << ran << " test(s), " << ran - failed << " passed, " << failed << " failed\n";
+    if (coverage) {
+        const auto json = coverage->report().dump() + "\n";
+        write_file(*options.test_coverage, std::vector<std::uint8_t>(json.begin(), json.end()));
+        const auto path = fs::absolute(*options.test_coverage).generic_string();
+        if (reporter) reporter->event("coverage", {{"path", path}, {"granularity", "mapped-block-line"}});
+        else std::cerr << "neura: source-map line coverage was written to " << path << '\n';
+    }
+    if (reporter) reporter->event("summary", {{"total", ran}, {"passed", ran - failed}, {"failed", failed}});
+    else std::cout << ran << " test(s), " << ran - failed << " passed, " << failed << " failed\n";
     std::cout.flush();
     report_tiers(options, tiers);
     return gpu.finish(failed == 0 ? 0 : 1, options.stats);
@@ -1783,6 +1976,36 @@ int main(int argc, char** argv) {
     if (argc < 2) {
         usage(std::cerr);
         return 1;
+    }
+    // Protocol commands own stdout. Dispatch before ordinary option/diagnostic
+    // handling so no terminal notices can corrupt their transport.
+    const std::string_view tooling_command(argv[1]);
+    if (tooling_command == "lsp" || tooling_command == "fmt" || tooling_command == "debug" || tooling_command == "capabilities" || tooling_command == "inspect-image") {
+        try {
+            std::vector<std::string> arguments;
+            for (int i = 2; i < argc; ++i) arguments.emplace_back(argv[i]);
+            if (tooling_command == "lsp") return neura::tooling::run_lsp(arguments);
+            if (tooling_command == "fmt") return neura::tooling::run_formatter(arguments);
+            if (tooling_command == "inspect-image") return neura::tooling::run_image_inspector(arguments);
+            if (tooling_command == "debug") {
+                if (arguments != std::vector<std::string>{"--stdio"}) throw std::runtime_error("usage: neura debug --stdio");
+                return neura::tooling::run_debug(std::cin, std::cout, fs::absolute(argv[0]));
+            }
+            if (arguments != std::vector<std::string>{"--json"}) throw std::runtime_error("usage: neura capabilities --json");
+            const neura::tooling::Json info = neura::tooling::Json::Object{
+                {"schemaVersion", 1}, {"version", neura::version::full},
+                {"features", neura::tooling::Json::Object{{"lsp", true}, {"formatter", true}, {"debugger", true},
+                    {"testDiscovery", true}, {"testFilter", true}, {"testReporter", true}, {"coverage", true}, {"testCoverage", true}, {"documentation", true}, {"imageInspection", true}}}
+            };
+            std::cout << info.dump() << '\n'; return 0;
+        } catch (const neura::Diagnostic& error) {
+            neura::cli::DiagnosticConfig config;
+            neura::cli::DiagnosticPrinter print(config, {use_color(config.color), terminal_width()}, neura::SourceMap::global());
+            print.print(std::cerr, error);
+            for (const auto& next : error.following()) print.print(std::cerr, next);
+            print.finish(std::cerr);
+            return 1;
+        } catch (const std::exception& error) { std::cerr << "neura: " << error.what() << '\n'; return 1; }
     }
     // Warnings collect here while a command runs and print before its error
     // or at its end.

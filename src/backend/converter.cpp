@@ -298,6 +298,7 @@ public:
                       std::vector<std::uint32_t> placeholders);
     void name_slots(std::uint32_t index, std::vector<std::string> names) { slot_names_[index] = std::move(names); }
     bool lift_hints() const { return options_.lift_hints; }
+    bool debug_statements() const { return options_.debug_statements; }
     void add_hint(std::uint32_t function, std::uint32_t block, lift::LiftedForm form) {
         hints_[{function, block}] = std::move(form);
     }
@@ -1871,6 +1872,14 @@ void FunctionCompiler::region(const std::vector<IrNode>& statements) {
             return;
         }
         statement(item);
+        if (c_.debug_statements() && open()) {
+            // Commit this statement's assignments before exposing the next
+            // source stop. A state operation can leave an open resume block
+            // whose graph still holds the assignment of its result.
+            const auto next = new_block();
+            jump(next);
+            begin(next, item.span);
+        }
     }
 }
 
@@ -3579,6 +3588,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     ConversionOptions conversion;
     conversion.source_map = options.source_map;
     conversion.lift_hints = options.lift_hints;
+    conversion.debug_statements = options.debug_statements;
     return convert(program, conversion);
 }
 

@@ -22,7 +22,7 @@ A `v*` tag cannot be moved or deleted ([repository settings](RepositorySettings)
 
 | Job | What it does |
 | --- | --- |
-| Check the tag | The tag has one of the two forms above, names the version in `VERSION`, and points at a commit on `main`. A final tag also needs a dated `## [<VERSION>]` section in `CHANGELOG.md`. |
+| Check the tag | The tag has one of the two forms above, names the version in `VERSION`, and points at a commit on `main`, or, for a candidate only, the exact `codex/vscode-tooling-rc` branch tip. A final tag also needs a dated `## [<VERSION>]` section in `CHANGELOG.md`. |
 | Build and test, once for each target | Builds from the tagged commit with `NEURA_PORTABLE_RELEASE=ON`. Fails on a compiler warning in Neura's sources, on a failed, skipped, or missing test, on a file that needs a library other than the C library or a glibc newer than 2.39, or when `neura --version` does not report the tag's version, target, and commit. Packs the archive. |
 | Qualify the archive, once for each target | On a new runner that has built nothing, runs [`packaging/qualify.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/qualify.sh) on the packed archive with an empty environment and a new home directory. |
 | Publish | Runs in the protected `release` environment after a maintainer approves it. Writes `SHA256SUMS` and `neura-release.txt`, attests the build provenance of each file, creates the release, then downloads the release's files again and checks them against the checksums, the built files, and the attestations. For a release candidate it then runs the documented [one-line install command](Install#install-with-one-command) against the published candidate and checks that the installed `neura` reports the tagged version and commit. |
@@ -43,6 +43,12 @@ The qualification script runs ten checks and prints `PASS`, `FAIL`, or `NOT RUN`
 One test is left out on arm64: `neura-libclang-load`, which belongs to the `neura-libclang` submodule and expects `char` to be signed.
 
 Started by hand (`gh workflow run release.yml --ref <branch>`), the workflow builds and qualifies that branch as a `-dev` version and publishes nothing. Use this to try a change to the workflow before spending a tag on it.
+
+## Isolated tooling research candidates
+
+The editor-tooling research candidate is developed on `codex/vscode-tooling-rc` from its recorded base without merging concurrent release work. The release workflow explicitly permits a candidate at that branch's exact remote tip. A stable tag cannot use this exception. The candidate is marked `prerelease` and `latest=false`; existing tags and releases are never replaced.
+
+For this candidate only, the normal requirement to merge release changes into `main` is replaced by isolated-branch validation. The build, archive qualification, protected publication environment, and verification requirements still apply. No merge or promotion to stable is part of this workflow.
 
 ## Before the first candidate
 

@@ -3,7 +3,8 @@
 
 A release tag is `v<VERSION>` or `v<VERSION>-rc.<N>`, where `<VERSION>` is the
 content of the `VERSION` file at the tagged commit. The tagged commit must be
-on `main`. A tag without `-rc.<N>` also needs a `## [<VERSION>]` section with a
+on `main`, except a release candidate may be the exact tip of an explicitly
+selected candidate branch. A tag without `-rc.<N>` also needs a `## [<VERSION>]` section with a
 date in `CHANGELOG.md`.
 
 On success the script prints `version=`, `prerelease=`, and `full=` lines in
@@ -31,6 +32,7 @@ def main() -> int:
     parser.add_argument("--root", type=Path, default=Path(__file__).resolve().parent.parent)
     parser.add_argument("--main", default="origin/main", help="the ref the tagged commit must be on")
     parser.add_argument("--no-ancestry", action="store_true")
+    parser.add_argument("--candidate-branch", help="allow a release candidate at the exact tip of this isolated branch")
     arguments = parser.parse_args()
 
     problems: list[str] = []
@@ -62,7 +64,13 @@ def main() -> int:
         result = subprocess.run(["git", "-C", str(arguments.root), "merge-base", "--is-ancestor", "HEAD", arguments.main],
                                 capture_output=True, text=True, check=False)
         if result.returncode != 0:
-            problems.append(f"the tagged commit is not on {arguments.main}" + (f": {result.stderr.strip()}" if result.stderr.strip() else ""))
+            candidate = False
+            if prerelease and arguments.candidate_branch:
+                head = subprocess.run(["git", "-C", str(arguments.root), "rev-parse", "HEAD"], capture_output=True, text=True, check=False)
+                branch = subprocess.run(["git", "-C", str(arguments.root), "rev-parse", "--verify", arguments.candidate_branch], capture_output=True, text=True, check=False)
+                candidate = head.returncode == 0 and branch.returncode == 0 and head.stdout.strip() == branch.stdout.strip()
+            if not candidate:
+                problems.append(f"the tagged commit is not on {arguments.main} or the exact allowed candidate branch tip" + (f": {result.stderr.strip()}" if result.stderr.strip() else ""))
 
     if problems:
         for problem in problems:

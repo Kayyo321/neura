@@ -19,7 +19,7 @@ The following public declarations are taken from the module source; each links t
   The major version component of the shipped library.
 - **Version** · [`export const Minor: int = 2`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L9)
   The minor version component of the shipped library.
-- **Version** · [`export const Patch: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L11)
+- **Version** · [`export const Patch: int = 1`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/version.nra#L11)
   The patch version component of the shipped library.
 <!-- END SOURCE API -->
 

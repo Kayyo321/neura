@@ -59,10 +59,22 @@ public:
     // The file named `name`, or null.
     std::shared_ptr<const SourceFile> find(std::string_view name) const;
     void clear();
+    std::vector<std::shared_ptr<const SourceFile>> files() const;
 
 private:
     mutable std::mutex mutex_;
     std::map<std::string, std::shared_ptr<const SourceFile>, std::less<>> files_;
+};
+
+// Redirect legacy compiler source helpers into a compilation-session map.
+class SourceMapScope {
+public:
+    explicit SourceMapScope(SourceMap& map);
+    ~SourceMapScope();
+    SourceMapScope(const SourceMapScope&) = delete;
+    SourceMapScope& operator=(const SourceMapScope&) = delete;
+private:
+    SourceMap* previous_;
 };
 
 // Helpers for building suggestions from the files in SourceMap::global().

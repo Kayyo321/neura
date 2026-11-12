@@ -317,8 +317,15 @@ add_library(neura_compiler STATIC
     src/ir-optimization/value_passes.cpp
     src/backend/converter.cpp
     src/util/source_map.cpp
+    src/tooling/analysis.cpp
+    src/tooling/lsp.cpp
+    src/tooling/formatter.cpp
+    src/tooling/test_protocol.cpp
+    src/tooling/refactor.cpp
+    src/tooling/coverage.cpp
 )
 target_include_directories(neura_compiler PUBLIC src)
+target_include_directories(neura_compiler PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang)
 neura_target_defaults(neura_compiler)
 
@@ -348,7 +355,7 @@ file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pa
     CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
 
 add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
-    src/launcher/descriptor.cpp)
+    src/launcher/descriptor.cpp src/tooling/debug.cpp src/tooling/inspect.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)
@@ -512,8 +519,24 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/source-docs-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/source-docs.cmake"
     )
-    # Every Neura example in the documentation is compiled or run.
+    # Editor protocol contracts execute real compiler and runtime paths.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    foreach(suite IN ITEMS formatter_tests test_protocol lsp_protocol refactor_protocol debug_protocol coverage release_gate image_inspection)
+        if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
+            add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py" "$<TARGET_FILE:neura>")
+            set_tests_properties(tooling-${suite} PROPERTIES TIMEOUT 180)
+        endif()
+    endforeach()
+    add_executable(neura_coverage_tests tests/tooling/coverage_unit.cpp)
+    target_link_libraries(neura_coverage_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_coverage_tests)
+    add_test(NAME tooling-coverage-unit COMMAND neura_coverage_tests)
+    add_executable(neura_test_output_tests tests/tooling/test_output_unit.cpp)
+    target_link_libraries(neura_test_output_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_test_output_tests)
+    add_test(NAME tooling-test-output COMMAND neura_test_output_tests)
+    # Every Neura example in the documentation is compiled or run.
     add_test(NAME doc-examples COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-doc-examples.py"
         --neura "$<TARGET_FILE:neura>" --root "${CMAKE_CURRENT_SOURCE_DIR}"

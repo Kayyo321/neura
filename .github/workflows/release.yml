@@ -50,7 +50,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           if [ "$REF_TYPE" = tag ]; then
-            if ! python3 scripts/check-release-tag.py "$REF_NAME" > plan.txt; then
+            if ! python3 scripts/check-release-tag.py "$REF_NAME" --candidate-branch origin/codex/vscode-tooling-rc > plan.txt; then
               cat plan.txt
               exit 1
             fi
@@ -381,7 +381,7 @@ jobs:
         run: |
           if [ -n "$PRERELEASE" ]; then
             gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
-              --title "Neura $FULL" --notes-file notes.md --prerelease
+              --title "Neura $FULL" --notes-file notes.md --prerelease --latest=false
           else
             gh release create "$TAG" dist/* --repo "$GITHUB_REPOSITORY" --verify-tag \
               --title "Neura $FULL" --notes-file notes.md --draft
