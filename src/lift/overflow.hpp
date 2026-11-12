@@ -86,9 +86,12 @@ struct OverflowProof {
 // lift library tries it first and refines only when it is not enough.
 //
 // `work`, when given, bounds the case analysis: each node it evaluates for
-// one assignment costs one unit, taken from *work. When it runs out, the
-// proof stops as `exhausted`. The bound changes only whether an answer is
-// found, never which: a proof found within it is the proof found without.
+// one assignment costs one unit, taken from *work. A node whose sources keep
+// their values from the previous assignment is not evaluated again, and an
+// enumeration the analysis has already made is not made again, so neither
+// costs anything. When it runs out, the proof stops as `exhausted`. The
+// bound changes only whether an answer is found, never which: a proof found
+// within it is the proof found without.
 //
 // `resume`, when given, is an earlier refined analysis of the same graph
 // that ran out of work: it kept the intervals and groups of every node it

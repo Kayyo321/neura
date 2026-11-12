@@ -20,6 +20,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 ### Changed
 
 - Native code for tier 2 regions now computes `float32` and `float64` arithmetic, comparisons, and conversions with the processor's scalar instructions instead of calling the runtime for each operation (x86-64 and AArch64). Results are bit for bit those of the reference evaluator, including canonical NaNs; only speed changes ([native compilation](docs/runtime/NVM.md#native-compilation)).
+- The overflow proof that lets a block run as native operations is about three to four times faster: the analysis keeps the results of enumerations it has already made, re-evaluates only the nodes an assignment changes, and no longer rebuilds its bookkeeping for every wire. It proves exactly what it proved before.
 
 ## [0.2.0] - 2026-11-11
 

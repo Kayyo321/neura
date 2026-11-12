@@ -721,6 +721,77 @@ NEURA_TEST(overflow, unrefined_and_bounded_proofs_agree_with_the_full_proof) {
     check(proofs.verdict(graph, 0, 0).empty(), "a proven graph stays proven");
 }
 
+NEURA_TEST(overflow, bounded_work_counts_the_evaluations_made_and_resumes_to_the_full_proof) {
+    // The case analysis charges the caller's work for the nodes it
+    // evaluates: an enumeration it has already made costs nothing again, and
+    // after the first assignment only the nodes that depend on a variable
+    // that changed are evaluated again. One unit per node per assignment
+    // would need 678,585 units for the 8-bit multiplier; the analysis proves
+    // it with 500,000. With any bound, a proof found, at once or resumed in
+    // pieces, is the proof found without one: same intervals, same groups.
+    const auto same = [](const lift::OverflowProof& a, const lift::OverflowProof& b) {
+        if (a.wires.size() != b.wires.size() || a.groups.size() != b.groups.size() || a.group_of != b.group_of) {
+            return false;
+        }
+        for (std::size_t w = 0; w < a.wires.size(); ++w) {
+            if (a.wires[w].lo != b.wires[w].lo || a.wires[w].hi != b.wires[w].hi) return false;
+        }
+        for (std::size_t g = 0; g < a.groups.size(); ++g) {
+            if (a.groups[g].members != b.groups[g].members || a.groups[g].range.lo != b.groups[g].range.lo ||
+                a.groups[g].range.hi != b.groups[g].range.hi) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto lanes_of = [](const nvr::Graph& graph) {
+        std::vector<std::uint32_t> lanes(graph.outputs.size());
+        std::iota(lanes.begin(), lanes.end(), 0U);
+        return lanes;
+    };
+    {
+        auto image = op_image();
+        LiftedForm form;
+        check(construct(image, {U8, U8}, lift::binary("*", U8, lift::input(U8, 0), lift::input(U8, 1)), nullptr, form),
+              "the multiplier assembles");
+        const auto& graph = image.graphs[0];
+        const auto full = lift::prove_no_overflow(graph);
+        std::uint64_t work = 500'000;
+        const auto bounded = lift::prove_no_overflow(graph, true, &work);
+        check(bounded.safe && !bounded.exhausted, "500,000 units prove the multiplier");
+        check(same(bounded, full), "the bounded proof is the full proof");
+        check(lift::lanes_are_bits(bounded, graph, lanes_of(graph), nullptr, true, &work),
+              "the remaining work proves the lanes");
+    }
+    // Float addition proves its lanes by cases and narrows its wires by
+    // elimination and by enumerations that repeat across rounds: resumed
+    // from every point where its work ran out, it ends with the full proof.
+    auto image = op_image();
+    LiftedForm form;
+    check(construct(image, {F32, F32}, lift::binary("+", F32, lift::input(F32, 0), lift::input(F32, 1)), nullptr,
+                    form),
+          "the float32 addition assembles");
+    const auto& graph = image.graphs[0];
+    const auto full = lift::prove_no_overflow(graph);
+    check(full.safe && lift::lanes_are_bits(full, graph, lanes_of(graph)), "the full analysis proves the addition");
+    lift::OverflowProof partial;
+    std::size_t pieces = 0;
+    std::uint64_t size = 64;
+    for (; pieces < 100000; ++pieces) {
+        std::uint64_t piece = size;
+        auto next = lift::prove_no_overflow(graph, true, &piece, pieces ? &partial : nullptr);
+        if (!next.exhausted) {
+            partial = std::move(next);
+            break;
+        }
+        check(pieces == 0 || next.node >= partial.node, "a resumed analysis does not go back");
+        if (pieces != 0 && next.node == partial.node) size *= 2;
+        partial = std::move(next);
+    }
+    check(partial.safe && pieces > 2, "the addition's analysis finishes in pieces");
+    check(same(partial, full), "the resumed proof is the full proof");
+}
+
 NEURA_TEST(proof, hint_sections_round_trip_and_malformed_ones_are_ignored) {
     // A shared form: x = a + b feeds both values, and a discarded product
     // is computed for its check only.
