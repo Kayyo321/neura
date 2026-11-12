@@ -229,7 +229,7 @@ private:
     Json evaluate(const Json& arguments);
     nvm::DebugValue expression(std::string_view text, const FrameRef& frame);
     FrameRef find_frame(const Json& arguments) const;
-    Json set_breakpoints(const Json& arguments);
+    Json set_breakpoints(const Json& arguments, bool preserve_ids = false);
     Json stack_trace(const Json& arguments);
     bool hit(Breakpoint& breakpoint, const FrameRef& frame);
     std::string interpolate(std::string_view text, const FrameRef& frame);
@@ -428,20 +428,20 @@ void Adapter::launch(const Json& arguments) {
     // compiled source map now that executable locations are known.
     for (auto& [path, points] : breakpoints_) {
         Json list = Json::Array{};
-        for (const auto& point : points) list.push_back(Json{{"line", point.line}, {"condition", point.condition},
+        for (const auto& point : points) list.push_back(Json{{"id", point.id}, {"line", point.line}, {"condition", point.condition},
             {"hitCondition", point.hit_condition}, {"logMessage", point.log_message}});
-        const auto updated = set_breakpoints(Json{{"source", Json{{"path", path}}}, {"breakpoints", list}});
+        const auto updated = set_breakpoints(Json{{"source", Json{{"path", path}}}, {"breakpoints", list}}, true);
         for (const auto& point : updated["breakpoints"].items()) event("breakpoint", Json{{"reason", "changed"}, {"breakpoint", point}});
     }
 }
 
-Json Adapter::set_breakpoints(const Json& arguments) {
+Json Adapter::set_breakpoints(const Json& arguments, bool preserve_ids) {
     const auto path = path_key(arguments["source"]["path"].string(), cwd_.empty() ? fs::current_path() : cwd_);
     std::vector<Breakpoint> points;
     Json result = Json::Array{};
     for (const auto& item : arguments["breakpoints"].items()) {
         Breakpoint point;
-        point.id = breakpoint_sequence_++;
+        point.id = preserve_ids ? static_cast<int>(item["id"].integer()) : breakpoint_sequence_++;
         point.path = path;
         point.line = static_cast<int>(item["line"].integer());
         point.condition = item["condition"].string();
@@ -830,6 +830,9 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
         FrameRef frame;
         std::size_t position = 0;
         unsigned depth = 0;
+        // Skipped logical operands are still parsed for valid syntax, but
+        // never resolve names or inspect program storage.
+        bool evaluating = true;
         void space() { while (position < input.size() && (input[position] == ' ' || input[position] == '\t')) ++position; }
         bool take(std::string_view token) {
             space();
@@ -914,12 +917,13 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                 } else {
                     const auto identifier = name();
                     if (identifier == "true" || identifier == "false") result = boolean(identifier == "true");
-                    else result = lookup(identifier);
+                    else result = evaluating ? lookup(identifier) : boolean(false);
                 }
             }
             for (;;) {
                 if (take(".")) {
                     const auto field = name();
+                    if (!evaluating) continue;
                     const auto kind = result.type < adapter.image_->types.size()
                         ? adapter.image_->types[result.type].kind : nvr::TypeKind::Void;
                     if (field == "length" && (kind == nvr::TypeKind::Array || kind == nvr::TypeKind::List || kind == nvr::TypeKind::Bytes)) {
@@ -937,11 +941,12 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                     result = values.front();
                 } else if (take("[")) {
                     const auto index_value = logical_or();
+                    if (!take("]")) throw std::runtime_error("expected ']'");
+                    if (!evaluating) continue;
                     std::uint64_t index = 0;
                     const auto [end, error] = std::from_chars(index_value.text.data(), index_value.text.data() + index_value.text.size(), index);
                     if (error != std::errc{} || end != index_value.text.data() + index_value.text.size() || index >= result.children)
                         throw std::runtime_error("debug index is out of bounds");
-                    if (!take("]")) throw std::runtime_error("expected ']'");
                     const auto values = adapter.execution_->debug_children(result.type, result.bits, static_cast<std::size_t>(index), 1);
                     if (values.empty() || !values.front().initialized) throw std::runtime_error("element is not initialized");
                     result = values.front();
@@ -950,7 +955,13 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
             --depth;
             return result;
         }
-        nvm::DebugValue unary() { if (take("!")) return boolean(!truth(unary())); return primary(); }
+        nvm::DebugValue unary() {
+            if (take("!")) {
+                const auto operand = unary();
+                return boolean(evaluating && !truth(operand));
+            }
+            return primary();
+        }
         nvm::DebugValue comparison() {
             auto left = unary();
             std::string_view op;
@@ -958,6 +969,7 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                 if (take(candidate)) { op = candidate; break; }
             if (op.empty()) return left;
             const auto right = unary();
+            if (!evaluating) return boolean(false);
             // Exact decimal integer comparison without floating conversion:
             // this remains precise for uint64 even on hosts with 64-bit
             // long double. Boolean equality is handled separately.
@@ -982,12 +994,26 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
         }
         nvm::DebugValue logical_and() {
             auto result = comparison();
-            while (take("&&")) { const auto right = comparison(); result = boolean(truth(result) && truth(right)); }
+            while (take("&&")) {
+                const bool parent = evaluating;
+                const bool left = parent && truth(result);
+                evaluating = parent && left;
+                const auto right = comparison();
+                evaluating = parent;
+                result = boolean(parent && left && truth(right));
+            }
             return result;
         }
         nvm::DebugValue logical_or() {
             auto result = logical_and();
-            while (take("||")) { const auto right = logical_and(); result = boolean(truth(result) || truth(right)); }
+            while (take("||")) {
+                const bool parent = evaluating;
+                const bool left = parent && truth(result);
+                evaluating = parent && !left;
+                const auto right = logical_and();
+                evaluating = parent;
+                result = boolean(parent && (left || truth(right)));
+            }
             return result;
         }
     };
@@ -1074,11 +1100,14 @@ void Adapter::handle(const Json& request) {
         Json result = Json::Array{};
         const auto path = path_key(args["source"]["path"].string(), cwd_.empty() ? fs::current_path() : cwd_);
         const auto first = args["line"].integer(1), last = args["endLine"].integer(first);
-        std::set<std::pair<unsigned, unsigned>> seen;
+        std::set<std::pair<unsigned, std::size_t>> seen;
         if (image_ && image_->source_map) for (const auto& at : *image_->source_map) {
             const auto found = sources_.find(at.path);
-            if (found != sources_.end() && found->second.path == path && at.line >= first && at.line <= last &&
-                seen.emplace(at.line, at.column).second) result.push_back(Json{{"line", at.line}, {"column", at.column}});
+            if (found == sources_.end() || found->second.path != path || at.line < first || at.line > last) continue;
+            std::size_t column = at.column;
+            if (found->second.snapshot)
+                column = utf16_column(found->second.snapshot->line_text(at.line - 1), at.column);
+            if (seen.emplace(at.line, column).second) result.push_back(Json{{"line", at.line}, {"column", column}});
         }
         response(request, Json{{"breakpoints", result}});
     } else {

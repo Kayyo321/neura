@@ -140,6 +140,11 @@ let App = module:program.Entry (
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter'})['result'], '1')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter < 2 && counter >= 1'})['result'], 'true')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'values[1]'})['result'], '5')
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && values[999] == 0'})['result'], 'false')
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'true || missing == 0'})['result'], 'true')
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && missing.field[999] == 0 || true'})['result'], 'true')
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'true || (false && missing.field[999] == 0)'})['result'], 'true')
+        self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && (counter = 9)'}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter = 9'}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter()'}, success=False)
         scopes = self.client.request('scopes', {'frameId': frame['id']})['scopes']
@@ -165,6 +170,53 @@ let App = module:program.Entry (
         outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
         self.assertIn('dap output\n', ''.join(outputs))
         self.assertFalse(self.capabilities['supportsStepBack'])
+
+    def test_pending_breakpoint_keeps_id_and_condition_short_circuits(self):
+        path = self.source('pending.nra', """let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let counter: int32 = 1;
+        counter += 1;
+        return program.ExitCode.Ok;
+    };
+);
+""")
+        pending = self.client.request('setBreakpoints', {'source': {'path': str(path)},
+            'breakpoints': [{'line': 5, 'condition': 'counter == 1 && (true || missing.field[999] == 0)'}]})
+        original_id = pending['breakpoints'][0]['id']
+        self.assertFalse(pending['breakpoints'][0]['verified'])
+        self.launch(path)
+        changed = self.client.event('breakpoint')
+        self.assertEqual(changed['reason'], 'changed')
+        self.assertEqual(changed['breakpoint']['id'], original_id)
+        self.assertTrue(changed['breakpoint']['verified'])
+        self.client.request('configurationDone')
+        stopped = self.client.event('stopped')
+        self.assertEqual(stopped['reason'], 'breakpoint')
+        self.assertEqual(stopped['hitBreakpointIds'], [original_id])
+        self.assertNotIn('description', stopped)
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+
+    def test_breakpoint_locations_use_utf16_columns(self):
+        source = """let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("😀"); let marker: int32 = 1;
+        return program.ExitCode.Ok;
+    };
+);
+"""
+        path = self.source('unicode.nra', source)
+        self.launch(path)
+        line = source.splitlines()[4]
+        prefix = line[:line.index('let marker')]
+        expected = len(prefix.encode('utf-16-le')) // 2 + 1
+        self.assertNotEqual(expected, len(prefix) + 1)
+        locations = self.client.request('breakpointLocations', {'source': {'path': str(path)}, 'line': 5, 'endLine': 5})
+        self.assertIn(expected, [item['column'] for item in locations['breakpoints']])
 
     def test_one_selected_test_and_stable_workspace_identity(self):
         path = self.source('suite.nra', '''let Suite = module (
