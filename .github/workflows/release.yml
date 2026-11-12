@@ -50,7 +50,7 @@ jobs:
           REF_NAME: ${{ github.ref_name }}
         run: |
           if [ "$REF_TYPE" = tag ]; then
-            if ! python3 scripts/check-release-tag.py "$REF_NAME" --candidate-branch origin/codex/vscode-tooling-rc > plan.txt; then
+            if ! python3 scripts/check-release-tag.py "$REF_NAME" > plan.txt; then
               cat plan.txt
               exit 1
             fi
@@ -92,23 +92,23 @@ jobs:
         include:
           - triple: x86_64-linux-gnu
             runner: ubuntu-24.04
-            minimum: 159
+            minimum: 170
             exclude: "^$"
           # neura-libclang-load, a test of the neura-libclang submodule,
           # expects `char` to be signed, which it is not on arm64.
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
-            minimum: 158
+            minimum: 169
             exclude: "^neura-libclang-load$"
           # macOS has no native launcher, so the six native-* tests are not
           # registered there.
           - triple: aarch64-apple-darwin
             runner: macos-15
-            minimum: 153
+            minimum: 164
             exclude: "^$"
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
-            minimum: 153
+            minimum: 164
             exclude: "^$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"

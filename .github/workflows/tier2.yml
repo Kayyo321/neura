@@ -120,12 +120,12 @@ jobs:
           ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
 
-      # 153 = the 159 tests Tier 1 requires on Linux without a GPU, less the 6
+      # 164 = the 170 tests Tier 1 requires on Linux without a GPU, less the 6
       # that need the Linux native launcher (native-build, native-run,
       # native-container, native-policy, native-install, native-c-import).
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 153
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 164
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
