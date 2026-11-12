@@ -275,7 +275,7 @@ A formatter should produce stable, idempotent output consistent with [Coding sty
 
 ## Editor tooling research candidate
 
-The `0.2.1-rc.1` tooling candidate adds these interfaces for the VS Code extension. They are capability-negotiated: `neura capabilities --json` returns a versioned feature object.
+The `0.2.1-rc.2` tooling candidate provides these interfaces for the VS Code extension. They are capability-negotiated: `neura capabilities --json` returns a versioned feature object.
 
 - `neura lsp --stdio` speaks LSP with UTF-16 positions. It analyzes unsaved sources and imports using per-session overlays, recovers partial syntax, and provides diagnostics, tokens, completion, hover, symbols, navigation, rename, hierarchy, refactoring, and formatting. Editor requests never link or run a program. C header analysis requires a trusted session.
 - `neura fmt [--check | --write] <file.nra>...` shares the editor formatter. `--stdin --stdin-filepath <file>` formats unsaved text. It preserves token spellings, comments and documentation attachment; malformed input is rejected before writes. `--check` reports files that need formatting without changing them.
@@ -283,5 +283,7 @@ The `0.2.1-rc.1` tooling candidate adds these interfaces for the VS Code extensi
 - Repeatable `test --filter <exact-id>` selects tests. `--reporter=json` emits version 1 `runStart`, `testStart`, `output`, `testResult`, `coverage`, and `summary` events, with program output framed separately. Ordinary human output is unchanged. `--coverage <file.json>` observes actual CPU block entries and includes zero-count mapped lines; its declared granularity is `mapped-block-line`, not statement or branch coverage.
 - `neura debug --stdio` speaks DAP and drives actual unoptimized NVM execution. It supports source/test launch, breakpoints, stepping, traps, typed frame/heap inspection and read-only expressions. Task state comes from the runtime. Source maps currently identify blocks, so stepping and visible frame slots have block/frame granularity rather than exact lexical live ranges. Calls/getters/assignments are rejected in watch evaluation; native execution, optimized attach, and reverse debugging are unavailable. Console input uses the `neura/input` request.
 - `neura inspect-image --json <image.nvr> [--graph N] [--limit N]` validates an image and returns source/function/block/graph summaries. Selected graph details use wire IDs; exact integer biases/weights are strings. Graph output is bounded and explicitly reports truncation.
+
+Editor formatting returns no edits for an incomplete or otherwise syntactically invalid buffer, leaving diagnostics to explain the source error. The CLI formatter still rejects invalid input. Completion works with partial declaration modifiers and import paths; promoted exports follow the scope and precedence rules in [Modules](Modules#imports), and override suggestions follow inherited member eligibility. Hover renders documentation commands such as `@brief` as readable Markdown. Outline symbols always have a name and a selection within their full range.
 
 The compiler's strict build/check behavior and image execution contract are unchanged. The normal command line and editor share the parser, resolver, diagnostics, formatter, and runtime rather than maintaining a separate editor language implementation.

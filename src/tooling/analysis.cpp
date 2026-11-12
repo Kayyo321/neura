@@ -1,6 +1,7 @@
 #include "analysis.hpp"
 
 #include "cli/source_loader.hpp"
+#include "cli/module_path.hpp"
 #include "neura-ir/attributes.hpp"
 #include "neura-ir/tags.hpp"
 
@@ -81,6 +82,66 @@ std::string syntax_type(const TypeSyntax &type) {
     for (auto kind : type.collections)
         name += kind == CollectionKind::Array ? "[]" : "[list]";
     return name;
+}
+// The documentation index keeps the original Doxygen text. Editor prose is
+// Markdown, so render its commands rather than displaying their source syntax.
+std::string documentation_markdown(std::string_view text) {
+    std::string result;
+    bool code = false, fence = false;
+    while (!text.empty()) {
+        const auto newline = text.find('\n');
+        auto line = text.substr(0, newline);
+        text = newline == std::string_view::npos ? std::string_view{} : text.substr(newline + 1);
+        const auto first = line.find_first_not_of(" \t");
+        auto trimmed = first == std::string_view::npos ? std::string_view{} : line.substr(first);
+        if (trimmed.starts_with("```"))
+            fence = !fence;
+        if (!fence && !trimmed.empty() && (trimmed.front() == '@' || trimmed.front() == '\\')) {
+            const auto end = trimmed.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ", 1);
+            const auto command = trimmed.substr(1, end == std::string_view::npos ? end : end - 1);
+            auto body = end == std::string_view::npos ? std::string_view{} : trimmed.substr(end);
+            const auto content = body.find_first_not_of(" \t");
+            body = content == std::string_view::npos ? std::string_view{} : body.substr(content);
+            if (command == "endcode" || command == "endverbatim") {
+                line = "```";
+                code = false;
+            } else if (!code && (command == "code" || command == "verbatim")) {
+                line = "```";
+                code = true;
+            } else if (!code && (command == "brief" || command == "details"))
+                line = body;
+            else if (!code) {
+                std::string rendered;
+                if (command == "param" || command == "tparam" || command == "retval") {
+                    if (command == "param" && body.starts_with('[')) {
+                        const auto close = body.find(']');
+                        if (close != std::string_view::npos) {
+                            body.remove_prefix(close + 1);
+                            const auto at = body.find_first_not_of(" \t");
+                            body = at == std::string_view::npos ? std::string_view{} : body.substr(at);
+                        }
+                    }
+                    const auto space = body.find_first_of(" \t");
+                    rendered = "\n**" + std::string(command == "tparam" ? "Type parameter" : command == "retval" ? "Return value" : "Parameter") +
+                               " `" + std::string(body.substr(0, space)) + "`**";
+                    if (space != std::string_view::npos)
+                        rendered += " — " + std::string(body.substr(space + 1));
+                } else {
+                    std::string title = command == "return" || command == "returns" ? "Returns" : std::string(command);
+                    if (!title.empty()) title.front() = static_cast<char>(std::toupper(static_cast<unsigned char>(title.front())));
+                    rendered = "\n**" + title + "** " + std::string(body);
+                }
+                result += rendered;
+                result += '\n';
+                continue;
+            }
+        }
+        result += line;
+        result += '\n';
+    }
+    while (!result.empty() && result.back() == '\n') result.pop_back();
+    if (code) result += "\n```";
+    return result;
 }
 std::string signature(const Declaration &d) {
     std::string text = d.exported ? "export " : "";
@@ -404,8 +465,11 @@ void AnalysisSession::index_workspace() {
     const auto options = fs::directory_options::skip_permission_denied;
     for (fs::recursive_directory_iterator it(root, options, error), end; !error && it != end; it.increment(error)) {
         const auto name = it->path().filename().string();
-        if (it->is_directory(error) && (name == ".git" || name == "node_modules" || name == "build" || name == "dist" ||
-                                        name == ".neura" || name == ".neura-vscode" || name == "third_party")) {
+        if (it->is_directory(error) && (name == ".git" || name == ".claude" || name == ".codex" ||
+                                        name == ".worktrees" || name == "worktrees" || name == "out" ||
+                                        name == "node_modules" || name == "build" || name.starts_with("build-") ||
+                                        name.starts_with("cmake-build-") || name == "dist" || name == ".neura" ||
+                                        name == ".neura-vscode" || name == "third_party")) {
             it.disable_recursion_pending();
             continue;
         }
@@ -512,7 +576,7 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
         symbol.declaration = decl;
         symbol.qualified = parent == none ? symbol.name : symbols[parent].qualified + "." + symbol.name;
         if (decl && decl->documentation)
-            symbol.documentation = decl->documentation->text;
+            symbol.documentation = documentation_markdown(decl->documentation->text);
         symbols.push_back(std::move(symbol));
         return symbols.size() - 1;
     };
@@ -1129,126 +1193,641 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
     return Json{{"data", data}};
 }
 
-Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset) const {
+Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, bool override_only) const {
+    offset = std::min(offset, doc.source.size());
     Json::Array items;
     std::set<std::string> seen;
+    if (override_only) {
+        std::vector<std::string_view> words;
+        for (const auto &token : doc.tokens)
+            if (token.kind != TokenKind::End && token.span.offset + token.span.length <= offset)
+                words.push_back(token.text);
+        if (words.size() < 3 || words.back() != "override" || words[words.size() - 2] != "." ||
+            (words[words.size() - 3] != "let" && words[words.size() - 3] != "const"))
+            return Json{{"isIncomplete", false}, {"items", items}};
+    }
+    const auto identifier = [](char c) {
+        return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
+    };
     std::size_t start = offset;
-    while (start && ((doc.source[start - 1] >= 'A' && doc.source[start - 1] <= 'Z') ||
-                     (doc.source[start - 1] >= 'a' && doc.source[start - 1] <= 'z') ||
-                     (doc.source[start - 1] >= '0' && doc.source[start - 1] <= '9') || doc.source[start - 1] == '_'))
-        --start;
+    while (start && identifier(doc.source[start - 1])) --start;
     const auto prefix = doc.source.substr(start, offset - start);
     const auto replacement_range = doc.range(Span{doc.path, 1, 1, start, offset - start});
     const auto before = start ? doc.source.find_last_not_of(" \t\r\n", start - 1) : std::string::npos;
+    const auto add = [&](std::string name, int kind, std::string detail = {}, std::string documentation = {}) {
+        if (name.empty() || name == "_" || name.starts_with('$') || !name.starts_with(prefix) ||
+            !seen.insert(name + detail).second) return;
+        items.emplace_back(Json{{"label", name}, {"kind", kind}, {"detail", detail},
+                                {"documentation", Json{{"kind", "markdown"}, {"value", documentation}}},
+                                {"textEdit", Json{{"range", replacement_range}, {"newText", name}}}});
+    };
+    // Do not offer language words inside comment trivia or string literals.
+    for (const auto &token : doc.tokens) {
+        if (token.kind == TokenKind::String && offset > token.span.offset &&
+            offset < token.span.offset + token.span.length)
+            return Json{{"isIncomplete", false}, {"items", items}};
+    }
+    const auto line_start = doc.source.rfind('\n', offset ? offset - 1 : 0);
+    auto comment = doc.source.find("//", line_start == std::string::npos ? 0 : line_start + 1);
+    while (comment != std::string::npos && comment < offset) {
+        bool in_string = false;
+        for (const auto &token : doc.tokens)
+            if (token.kind == TokenKind::String && contains(token.span, comment)) in_string = true;
+        if (!in_string) return Json{{"isIncomplete", false}, {"items", items}};
+        comment = doc.source.find("//", comment + 2);
+    }
     if (before != std::string::npos && doc.source[before] == '#') {
         for (const auto &tag : tag_registry()) {
-            if (tag.status == TagStatus::Reserved || !std::string_view(tag.name).starts_with(prefix))
-                continue;
-            items.emplace_back(Json{{"label", tag.name},
-                                    {"kind", 14},
-                                    {"detail", tag_signature(tag) + " — " + std::string(tag_status_name(tag.status))},
-                                    {"documentation", Json{{"kind", "markdown"}, {"value", std::string(tag.meaning)}}},
-                                    {"insertText", tag.name}});
+            if (tag.status == TagStatus::Reserved) continue;
+            add(std::string(tag.name), 14, tag_signature(tag) + " — " + std::string(tag_status_name(tag.status)),
+                std::string(tag.meaning));
         }
         return Json{{"isIncomplete", false}, {"items", items}};
     }
+
+    // Incomplete imports cannot be lowered. Enumerate actual source modules
+    // using the compiler's filename convention, including unopened stdlib files.
+    std::size_t qualified_start = start;
+    while (qualified_start && (identifier(doc.source[qualified_start - 1]) || doc.source[qualified_start - 1] == '.'))
+        --qualified_start;
+    const auto qualified = doc.source.substr(qualified_start, offset - qualified_start);
+    auto import_at = qualified_start ? doc.source.find_last_not_of(" \t\r\n", qualified_start - 1) : std::string::npos;
+    bool importing = false;
+    if (import_at != std::string::npos && doc.source[import_at] == ':') {
+        auto word_end = import_at;
+        while (word_end && std::isspace(static_cast<unsigned char>(doc.source[word_end - 1]))) --word_end;
+        importing = word_end >= 6 && doc.source.substr(word_end - 6, 6) == "import" &&
+                    (word_end == 6 || !identifier(doc.source[word_end - 7]));
+    }
+    const auto pascal = [](std::string_view text) {
+        std::string name;
+        bool upper = true;
+        for (const char c : text) {
+            if (c == '-') { upper = true; continue; }
+            name += upper ? static_cast<char>(std::toupper(static_cast<unsigned char>(c))) : c;
+            upper = false;
+        }
+        return name;
+    };
+    if (importing) {
+        const auto dot = qualified.find_last_of('.');
+        const auto parent = dot == std::string::npos ? std::string{} : qualified.substr(0, dot + 1);
+        std::set<std::string> modules;
+        if (std::string_view("Std").starts_with(qualified)) modules.insert("Std");
+        const auto enumerate = [&](const fs::path &directory, bool standard) {
+            std::error_code error;
+            if (!fs::is_directory(directory, error)) return;
+            for (fs::recursive_directory_iterator it(directory, fs::directory_options::skip_permission_denied, error), end;
+                 !error && it != end; it.increment(error)) {
+                const auto filename = it->path().filename().string();
+                if (it->is_directory(error) && (filename.starts_with('.') || filename == "node_modules" ||
+                    filename == "third_party" || filename == "dist" || filename == "out" ||
+                    filename == "worktrees" || filename == "build" ||
+                    filename.starts_with("build-") || filename.starts_with("cmake-build-"))) {
+                    it.disable_recursion_pending();
+                    continue;
+                }
+                if (!it->is_regular_file(error) || it->path().extension() != ".nra") continue;
+                const auto relative = it->path().lexically_relative(directory);
+                std::string name = standard ? "Std" : "";
+                for (auto part = relative.begin(); part != relative.end(); ++part)
+                    name += (name.empty() ? "" : ".") + pascal(std::next(part) == relative.end()
+                                                                 ? part->stem().string() : part->string());
+                if ((name == "Std" || name.starts_with("Std.")) != standard) continue;
+                if (!doc.library && (name.ends_with(".Internal") || name.find(".Internal.") != std::string::npos)) continue;
+                if (module_path(name) != (standard ? fs::path("std") / relative : relative)) continue;
+                modules.insert(std::move(name));
+            }
+        };
+        if (qualified.empty() || qualified == "Std" || qualified.starts_with("Std."))
+            enumerate(library / "std", true);
+        if (!qualified.starts_with("Std.")) {
+            enumerate(fs::path(doc.path).parent_path(), false);
+            for (const auto &directory : source_roots) enumerate(directory, false);
+            for (const auto &[path, open_doc] : documents) {
+                if (!open_doc.open || open_doc.library) continue;
+                for (const auto &statement : open_doc.syntax.statements)
+                    if (statement.declaration && statement.declaration->kind == Declaration::Kind::Module)
+                        modules.insert(statement.declaration->name);
+            }
+        }
+        for (const auto &name : modules) {
+            if (!name.starts_with(qualified)) continue;
+            auto component = name.substr(parent.size());
+            component = component.substr(0, component.find('.'));
+            add(component, 9, "module " + parent + component);
+        }
+        return Json{{"isIncomplete", false}, {"items", items}};
+    }
+
+    struct Target {
+        const Declaration *declaration{};
+        const EditorDocument *document{};
+        const Declaration *owner{};
+        const TypeSyntax *annotation{};
+        bool instance{};
+    };
+    const auto exported = [](Target target) {
+        return target.declaration->exported || (target.owner &&
+               (target.owner->kind == Declaration::Kind::Interface || target.owner->kind == Declaration::Kind::Enum));
+    };
+    std::map<std::string, EditorDocument> loaded;
+    const auto find_declaration = [&](const EditorDocument &context, std::string_view name, std::size_t at) {
+        Target result;
+        std::size_t scope_size = std::numeric_limits<std::size_t>::max();
+        std::function<void(const std::vector<Statement> &, const Span &)> statements;
+        std::function<void(const Declaration &, const Span &)> declaration;
+        declaration = [&](const Declaration &candidate, const Span &scope) {
+            if (candidate.name == name && contains(scope, at) && scope.length <= scope_size &&
+                (candidate.kind != Declaration::Kind::Binding || !candidate.name_span || candidate.name_span->offset <= at)) {
+                result = {&candidate, &context};
+                scope_size = scope.length;
+            }
+            if (!contains(candidate.span, at)) return;
+            for (const auto &parameter : candidate.parameters)
+                if (parameter.name == name && candidate.span.length <= scope_size) {
+                    result = {nullptr, &context, &candidate, &parameter.type, true};
+                    scope_size = candidate.span.length;
+                }
+            for (const auto &member : candidate.members) declaration(member, candidate.span);
+            statements(candidate.body, candidate.span);
+        };
+        statements = [&](const std::vector<Statement> &body, const Span &scope) {
+            for (const auto &statement : body) {
+                if (statement.declaration) declaration(*statement.declaration, scope);
+                const auto nested = statement.kind == Statement::Kind::Block ? statement.span : scope;
+                statements(statement.body, nested);
+                statements(statement.alternative, nested);
+            }
+        };
+        statements(context.syntax.statements, Span{context.path, 1, 1, 0, context.source.size()});
+        return result;
+    };
+    const auto imported = [&](std::string_view name, const EditorDocument &context) {
+        Target result;
+        if (name.ends_with(".*")) return result;
+        if (!context.library && (name.ends_with(".Internal") || name.find(".Internal.") != std::string::npos)) return result;
+        std::vector<fs::path> paths;
+        if (name.starts_with("Std.")) paths.push_back(library / module_path(name));
+        else {
+            paths.push_back(fs::path(context.path).parent_path() / module_path(name));
+            for (const auto &directory : source_roots) paths.push_back(directory / module_path(name));
+        }
+        for (auto path : paths) {
+            std::error_code error;
+            path = fs::weakly_canonical(path, error);
+            if (error) continue;
+            const auto key = path.generic_string();
+            const EditorDocument *source = nullptr;
+            if (const auto found = documents.find(key); found != documents.end()) source = &found->second;
+            else if (const auto found = loaded.find(key); found != loaded.end()) source = &found->second;
+            else if (fs::is_regular_file(path, error)) {
+                try {
+                    EditorDocument next;
+                    next.path = key;
+                    next.source = read_text(path);
+                    next.library = name.starts_with("Std.");
+                    next.tokens = lex_recovering(next.source, key, next.syntax_diagnostics);
+                    next.syntax = parse_recovering(next.tokens, next.syntax_diagnostics);
+                    source = &loaded.emplace(key, std::move(next)).first->second;
+                } catch (const std::exception &) { continue; }
+            }
+            if (!source) continue;
+            const auto separator = name.find_last_of('.');
+            const auto component = name.substr(separator == std::string_view::npos ? 0 : separator + 1);
+            for (const auto &statement : source->syntax.statements)
+                if (statement.declaration && statement.declaration->kind == Declaration::Kind::Module &&
+                    statement.declaration->name == component)
+                    return Target{statement.declaration.get(), source};
+        }
+        return result;
+    };
+    std::function<Target(Target, unsigned)> nominal;
+    std::function<Target(const EditorDocument &, std::string_view, std::size_t, unsigned)> resolve;
+    std::function<std::vector<Target>(Target, unsigned)> members;
+    members = [&](Target target, unsigned depth) {
+        std::vector<Target> result;
+        if (!target.declaration || depth > 32) return result;
+        for (const auto &member : target.declaration->members)
+            result.push_back({&member, target.document, target.declaration});
+        const auto inherit = [&](const TypeSyntax &type) {
+            auto base = resolve(*target.document, type.name, type.span.offset, depth + 1);
+            auto inherited = members(base, depth + 1);
+            for (const auto &item : inherited)
+                if (exported(item) && !(item.declaration->static_member && item.owner &&
+                    item.owner->kind == Declaration::Kind::Interface) &&
+                    std::none_of(result.begin(), result.end(), [&](const Target &own) {
+                    return own.declaration->name == item.declaration->name;
+                })) result.push_back(item);
+        };
+        if (target.declaration->base) inherit(*target.declaration->base);
+        for (const auto &interface : target.declaration->interfaces) inherit(interface);
+        return result;
+    };
+    resolve = [&](const EditorDocument &context, std::string_view name, std::size_t at, unsigned depth) -> Target {
+        if (depth > 32 || name.empty()) return {};
+        const auto dot = name.find('.');
+        auto target = nominal(find_declaration(context, name.substr(0, dot), at), depth + 1);
+        if (dot == std::string_view::npos) return target;
+        name.remove_prefix(dot + 1);
+        while (target.declaration && !name.empty()) {
+            const auto end = name.find('.');
+            const auto component = name.substr(0, end);
+            const auto children = members(target, depth + 1);
+            const auto found = std::find_if(children.begin(), children.end(), [&](const Target &item) {
+                return item.declaration->name == component && (exported(item) ||
+                    (target.document->path == context.path && contains(target.declaration->span, at)));
+            });
+            if (found == children.end()) return {};
+            target = nominal(*found, depth + 1);
+            if (end == std::string_view::npos) return target;
+            name.remove_prefix(end + 1);
+        }
+        return target;
+    };
+    nominal = [&](Target target, unsigned depth) -> Target {
+        if (depth > 32) return {};
+        if (target.annotation) {
+            if (target.annotation->anonymous)
+                return Target{target.annotation->anonymous.get(), target.document, nullptr, nullptr, true};
+            auto type = resolve(*target.document, target.annotation->name, target.annotation->span.offset, depth + 1);
+            type.instance = true;
+            return type;
+        }
+        if (!target.declaration) return {};
+        const auto &declaration = *target.declaration;
+        if (declaration.kind != Declaration::Kind::Binding) return target;
+        if (declaration.initializer && declaration.initializer->kind == Expr::Kind::Import)
+            return imported(declaration.initializer->text, *target.document);
+        if (declaration.type) {
+            if (declaration.type->anonymous)
+                return Target{declaration.type->anonymous.get(), target.document, nullptr, nullptr, true};
+            auto type = resolve(*target.document, declaration.type->name, declaration.type->span.offset, depth + 1);
+            type.instance = true;
+            return type;
+        }
+        if (declaration.initializer) {
+            const auto &value = *declaration.initializer;
+            if (value.kind == Expr::Kind::Name)
+                return resolve(*target.document, value.text, value.span.offset, depth + 1);
+            if (value.kind == Expr::Kind::New && value.type) {
+                auto type = resolve(*target.document, value.type->name, value.type->span.offset, depth + 1);
+                type.instance = true;
+                return type;
+            }
+        }
+        return target;
+    };
+    Target enclosing;
+    bool in_function = false;
+    for (const auto &symbol : symbols)
+        if (symbol.file == doc.path && symbol.declaration && contains(symbol.span, offset) &&
+            (symbol.kind == 2 || symbol.kind == 5 || symbol.kind == 11) &&
+            (!enclosing.declaration || symbol.span.length < enclosing.declaration->span.length))
+            enclosing = {symbol.declaration, &doc};
+    for (const auto &symbol : symbols)
+        if (symbol.file == doc.path && symbol.declaration && symbol.declaration->kind == Declaration::Kind::Function &&
+            contains(symbol.span, offset) && (!enclosing.declaration || symbol.span.length < enclosing.declaration->span.length))
+            in_function = true;
+    // Token context distinguishes declaration modifiers from ordinary members.
+    std::vector<const Token *> preceding;
+    for (const auto &token : doc.tokens)
+        if (token.kind != TokenKind::End && token.span.offset + token.span.length <= start)
+            preceding.push_back(&token);
+    const auto text_before = [&](std::size_t reverse) -> std::string_view {
+        return preceding.size() > reverse ? preceding[preceding.size() - 1 - reverse]->text : std::string_view{};
+    };
+    const bool modifier_context = text_before(0) == "." && (text_before(1) == "let" || text_before(1) == "const");
+    if (modifier_context) {
+        if (text_before(1) == "let" && !in_function) {
+            if (!enclosing.declaration || enclosing.declaration->kind == Declaration::Kind::Module)
+                add("promote", 14, "Bring an imported module's exports into this scope");
+            if (enclosing.declaration && enclosing.declaration->kind == Declaration::Kind::Class)
+                add("as", 14, "Declare a class cast");
+        }
+        if (!in_function && enclosing.declaration && (enclosing.declaration->kind == Declaration::Kind::Class ||
+            enclosing.declaration->base || !enclosing.declaration->interfaces.empty())) {
+            add("override", 14, "Replace an inherited member");
+            if (!items.empty() && items.back()["label"].string() == "override") {
+                items.back()["textEdit"]["newText"] = "override ";
+                items.back()["command"] = Json{{"title", "Complete inherited member"}, {"command", "editor.action.triggerSuggest"}};
+            }
+        }
+        return Json{{"isIncomplete", false}, {"items", items}};
+    }
+    const bool overriding = text_before(0) == "override" && text_before(1) == "." &&
+                            (text_before(2) == "let" || text_before(2) == "const");
+    const auto add_declaration = [&](Target target) {
+        const auto &declaration = *target.declaration;
+        if (!doc.library && target.document->library && std::any_of(declaration.tags.begin(), declaration.tags.end(),
+            [](const TagSyntax &tag) { return tag.name == "Internal"; })) return;
+        const auto kind = declaration.kind == Declaration::Kind::Function ? 3 :
+                          declaration.kind == Declaration::Kind::Class ? 7 :
+                          declaration.kind == Declaration::Kind::Interface ? 8 :
+                          declaration.kind == Declaration::Kind::Module ? 9 :
+                          declaration.kind == Declaration::Kind::Enum ? 13 : 6;
+        add(declaration.name, kind, signature(declaration),
+            declaration.documentation ? documentation_markdown(declaration.documentation->text) : "");
+    };
+    if (overriding) {
+        if (enclosing.declaration) {
+            const auto &container = *enclosing.declaration;
+            auto inherited = members(enclosing, 0);
+            for (const auto &target : inherited) {
+                const auto &candidate = *target.declaration;
+                if (!exported(target) || candidate.static_member || candidate.last || !candidate.generics.empty() ||
+                    !candidate.overloads.empty() || candidate.cast_target || candidate.name == "init" || candidate.name == "deinit" ||
+                    std::any_of(container.members.begin(), container.members.end(), [&](const Declaration &own) {
+                        return own.name == candidate.name;
+                    }) || std::any_of(candidate.tags.begin(), candidate.tags.end(), [](const TagSyntax &tag) {
+                        return tag.name == "Final";
+                    })) continue;
+                if (container.kind == Declaration::Kind::Class && candidate.kind != Declaration::Kind::Function) continue;
+                add_declaration(target);
+            }
+            if (container.kind == Declaration::Kind::Class)
+                for (const auto &[name, detail] : {
+                    std::pair{"equals", "equals(other: class) -> bool"},
+                    std::pair{"hash_code", "hash_code() -> uint32"},
+                    std::pair{"to_string", "to_string() -> string"}}) {
+                    if (std::none_of(inherited.begin(), inherited.end(), [&](const Target &candidate) {
+                        return candidate.declaration->name == name;
+                    })) add(name, 3, detail);
+                }
+        }
+        return Json{{"isIncomplete", false}, {"items", items}};
+    }
+    const bool member = before != std::string::npos && doc.source[before] == '.';
+    if (member) {
+        std::size_t end = before;
+        while (end && std::isspace(static_cast<unsigned char>(doc.source[end - 1]))) --end;
+        std::size_t begin = end;
+        while (begin && (identifier(doc.source[begin - 1]) || doc.source[begin - 1] == '.')) --begin;
+        const auto receiver_name = std::string_view(doc.source).substr(begin, end - begin);
+        const auto canonical = [](std::string name) {
+            if (name == "int") return std::string("int32");
+            if (name == "byte") return std::string("uint8");
+            if (name == "float") return std::string("float32");
+            return name;
+        };
+        // These are the primitive_wrapper contracts in lowering.cpp. Source
+        // declarations supply the available functions and their documentation;
+        // a value consumes the first parameter as its receiver.
+        const std::map<std::string, std::string> wrappers{
+            {"bool", "Bool"}, {"string", "String"}, {"int8", "Int8"}, {"int16", "Int16"},
+            {"int32", "Int32"}, {"int64", "Int64"}, {"uint8", "UInt8"}, {"uint16", "UInt16"},
+            {"uint32", "UInt32"}, {"uint64", "UInt64"}, {"float16", "Float16"},
+            {"bfloat16", "BFloat16"}, {"float32", "Float32"}, {"float64", "Float64"}};
+        struct ValueType { TypeSyntax syntax; bool value{true}; };
+        std::function<std::optional<ValueType>(const Expr &, const EditorDocument &, unsigned)> expression_type;
+        std::function<std::optional<ValueType>(Target, unsigned)> declared_type;
+        declared_type = [&](Target candidate, unsigned depth) -> std::optional<ValueType> {
+            if (depth > 32) return {};
+            if (candidate.annotation) return ValueType{*candidate.annotation};
+            if (!candidate.declaration) return {};
+            if (candidate.declaration->kind != Declaration::Kind::Binding) return {};
+            if (candidate.declaration->type) return ValueType{*candidate.declaration->type};
+            if (candidate.declaration->initializer)
+                return expression_type(*candidate.declaration->initializer, *candidate.document, depth + 1);
+            return {};
+        };
+        expression_type = [&](const Expr &value, const EditorDocument &context, unsigned depth) -> std::optional<ValueType> {
+            if (depth > 32) return {};
+            if (value.kind == Expr::Kind::Name) {
+                const auto candidate = find_declaration(context, value.text, value.span.offset);
+                if (!candidate.declaration && !candidate.annotation && wrappers.contains(canonical(value.text))) {
+                    TypeSyntax type;
+                    type.name = canonical(value.text);
+                    return ValueType{std::move(type), false};
+                }
+                return declared_type(candidate, depth + 1);
+            }
+            if (value.kind == Expr::Kind::Cast && value.type) return ValueType{*value.type};
+            if (value.kind == Expr::Kind::Unary && value.operands.size() == 1)
+                return expression_type(value.operands.front(), context, depth + 1);
+            TypeSyntax type;
+            switch (value.kind) {
+            case Expr::Kind::Integer: type.name = "int32"; break;
+            case Expr::Kind::Float: type.name = "float64"; break;
+            case Expr::Kind::String: type.name = "string"; break;
+            case Expr::Kind::Boolean: type.name = "bool"; break;
+            case Expr::Kind::Collection: {
+                if (value.operands.empty()) return {};
+                auto element = expression_type(value.operands.front(), context, depth + 1);
+                if (!element) return {};
+                for (const auto &item : value.operands) {
+                    const auto next = expression_type(item, context, depth + 1);
+                    if (!next || syntax_type(next->syntax) != syntax_type(element->syntax)) return {};
+                }
+                element->syntax.collections.push_back(CollectionKind::Array);
+                return element;
+            }
+            default: return {};
+            }
+            return ValueType{std::move(type)};
+        };
+        auto type = declared_type(find_declaration(doc, receiver_name, begin), 0);
+        if (!type && wrappers.contains(canonical(std::string(receiver_name)))) {
+            TypeSyntax syntax;
+            syntax.name = canonical(std::string(receiver_name));
+            type = ValueType{std::move(syntax), false};
+        }
+        if (type) {
+            const auto name = canonical(type->syntax.name);
+            const bool collection = !type->syntax.collections.empty();
+            const auto wrapper = wrappers.find(name);
+            if (collection || wrapper != wrappers.end()) {
+                // Composite intrinsic operations are available only when the
+                // element itself supports value members (aggregate.hpp).
+                bool value_members = wrapper != wrappers.end();
+                if (collection && !value_members) {
+                    const auto element = resolve(doc, type->syntax.name, begin, 0);
+                    value_members = element.declaration && (element.declaration->kind == Declaration::Kind::Class ||
+                        element.declaration->kind == Declaration::Kind::Interface ||
+                        (element.declaration->kind == Declaration::Kind::Enum && std::none_of(
+                            element.declaration->members.begin(), element.declaration->members.end(),
+                            [](const Declaration &variant) { return !variant.parameters.empty(); })));
+                }
+                if (type->value && value_members) {
+                    add("equals", 3, "equals(other: " + syntax_type(type->syntax) + ") -> bool");
+                    add("hash_code", 3, "hash_code() -> uint32");
+                    add("to_string", 3, "to_string() -> string");
+                }
+                if (collection) {
+                    add("length", 10, "length: int32");
+                    if (type->syntax.collections.back() == CollectionKind::List) {
+                        auto element = type->syntax;
+                        element.collections.pop_back();
+                        add("version", 10, "version: uint64");
+                        add("append", 3, "append(value: " + syntax_type(element) + ") -> void");
+                        add("remove_at", 3, "remove_at(index: int32) -> void");
+                    }
+                } else {
+                    if (type->value && name == "string") {
+                        add("byte_length", 10, "byte_length: int32");
+                        add("byte_at", 3, "byte_at(index: int32) -> uint8");
+                        add("slice", 3, "slice(start: int32, end: int32) -> string");
+                    }
+                    if (type->value && (name.starts_with("float") || name == "bfloat16"))
+                        add("to_bits", 3, "to_bits() -> uint" + std::string(name == "bfloat16" ? "16" : name.substr(5)));
+                    const auto companion = imported("Std.Core." + wrapper->second, doc);
+                    for (const auto &candidate : members(companion, 0)) {
+                        const auto &method = *candidate.declaration;
+                        if (!exported(candidate) || method.kind != Declaration::Kind::Function) continue;
+                        if (type->value && (method.parameters.empty() || !method.parameters.front().type.collections.empty() ||
+                            canonical(method.parameters.front().type.name) != name || method.parameters.front().variadic ||
+                            method.name == "equals" || method.name == "hash_code" || method.name == "to_string" ||
+                            method.name == "to_bits" || method.name == "byte_at" || method.name == "slice")) continue;
+                        Declaration signature_source{};
+                        signature_source.kind = Declaration::Kind::Function;
+                        signature_source.name = method.name;
+                        signature_source.exported = method.exported;
+                        signature_source.type = method.type;
+                        signature_source.parameters = method.parameters;
+                        if (type->value) signature_source.parameters.erase(signature_source.parameters.begin());
+                        add(method.name, 3, signature(signature_source), method.documentation
+                            ? documentation_markdown(method.documentation->text) : "");
+                    }
+                }
+                return Json{{"isIncomplete", false}, {"items", items}};
+            }
+        }
+        const auto target = resolve(doc, receiver_name, begin, 0);
+        if (target.declaration && target.declaration->kind != Declaration::Kind::Binding) {
+            const auto children = members(target, 0);
+            for (const auto &candidate : children)
+                if ((target.declaration->kind != Declaration::Kind::Class ||
+                    (candidate.declaration->name != "init" && candidate.declaration->name != "deinit" &&
+                     (target.instance || target.declaration->singleton || candidate.declaration->static_member))) &&
+                    (target.declaration->kind != Declaration::Kind::Interface ||
+                     candidate.declaration->static_member != target.instance) &&
+                    (exported(candidate) || (candidate.document->path == doc.path &&
+                    contains(target.declaration->span, offset)))) add_declaration(candidate);
+            if (target.declaration->kind == Declaration::Kind::Class && (target.instance || target.declaration->singleton))
+                for (const auto &[name, detail] : {
+                    std::pair{"equals", "equals(other: class) -> bool"},
+                    std::pair{"hash_code", "hash_code() -> uint32"},
+                    std::pair{"to_string", "to_string() -> string"}}) {
+                    if (std::none_of(children.begin(), children.end(), [&](const Target &candidate) {
+                        return candidate.declaration->name == name;
+                    })) add(name, 3, detail);
+                }
+            return Json{{"isIncomplete", false}, {"items", items}};
+        }
+    }
     std::optional<SymbolId> owner;
-    bool member = false;
-    if (before != std::string::npos && doc.source[before] == '.') {
-        member = true;
-        std::size_t end = before, begin = end;
-        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1])))
-            --begin;
-        end = begin;
-        while (begin &&
-               (std::isalnum(static_cast<unsigned char>(doc.source[begin - 1])) || doc.source[begin - 1] == '_'))
-            --begin;
-        const auto *receiver = symbol_at(doc, begin);
-        if (receiver && program && receiver->compiler_id != no_symbol) {
+    if (member && program) {
+        std::size_t begin = before;
+        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1]))) --begin;
+        while (begin && identifier(doc.source[begin - 1])) --begin;
+        if (const auto *receiver = symbol_at(doc, begin); receiver && receiver->compiler_id != no_symbol) {
             const auto &target = program->symbols[receiver->compiler_id];
             if (target.kind == SymbolKind::Module || target.kind == SymbolKind::Class ||
-                target.kind == SymbolKind::Interface || target.kind == SymbolKind::Enum)
-                owner = receiver->compiler_id;
-            else if (target.type.symbol != no_symbol)
-                owner = target.type.symbol;
-            else if (target.base != no_symbol)
-                owner = target.base;
-        }
-        if (!owner && receiver && receiver->declaration && receiver->declaration->initializer &&
-            receiver->declaration->initializer->kind == Expr::Kind::Import) {
-            auto name = receiver->declaration->initializer->text;
-            auto last = name.find_last_of('.');
-            name = name.substr(last == std::string::npos ? 0 : last + 1);
-            for (const auto &s : symbols)
-                if (s.name == name && s.kind == 2 && s.compiler_id != no_symbol) {
-                    owner = s.compiler_id;
-                    break;
-                }
+                target.kind == SymbolKind::Interface || target.kind == SymbolKind::Enum) owner = receiver->compiler_id;
+            else if (target.type.symbol != no_symbol) owner = target.type.symbol;
+            else if (target.base != no_symbol) owner = target.base;
         }
     }
     for (const auto &symbol : symbols) {
-        if (symbol.name.empty() || symbol.name.starts_with('$') || !symbol.name.starts_with(prefix))
-            continue;
         if (member) {
-            if (!owner || !program || symbol.compiler_id == no_symbol)
-                continue;
-            const auto &s = program->symbols[symbol.compiler_id];
-            bool owned = s.owner == *owner;
-            if (!owned && s.owner != no_symbol && is_static_scope(program->symbols[s.owner]))
-                owned = program->symbols[s.owner].owner == *owner;
-            if (!owned)
-                continue;
-            if (symbol.file != doc.path && !s.exported)
-                continue;
+            if (!owner || !program || symbol.compiler_id == no_symbol) continue;
+            const auto &candidate = program->symbols[symbol.compiler_id];
+            bool owned = candidate.owner == *owner;
+            if (!owned && candidate.owner != no_symbol && is_static_scope(program->symbols[candidate.owner]))
+                owned = program->symbols[candidate.owner].owner == *owner;
+            if (!owned || !candidate.exported) continue;
         } else if (symbol.file != doc.path || !contains(symbol.scope, offset) ||
-                   (symbol.kind == 13 && symbol.token_type != 6 && symbol.selection.offset > offset))
-            continue;
-        if (!seen.insert(symbol.name + symbol.detail).second)
-            continue;
-        int kind = symbol.kind == 12 || symbol.kind == 6  ? 3
-                   : symbol.kind == 5                     ? 7
-                   : symbol.kind == 11                    ? 8
-                   : symbol.kind == 2                     ? 9
-                   : symbol.kind == 10                    ? 13
-                   : symbol.kind == 22                    ? 20
-                   : symbol.token_type == 6               ? 6
-                   : symbol.kind == 7 || symbol.kind == 8 ? 10
-                                                          : 6;
-        Json item{{"label", symbol.name},
-                  {"kind", kind},
-                  {"detail", symbol.detail},
-                  {"documentation", Json{{"kind", "markdown"}, {"value", symbol.documentation}}},
-                  {"textEdit", Json{{"range", replacement_range},
-                                    {"newText", symbol.name}}}};
-        if (symbol.modifiers & modifier("deprecated"))
-            item["tags"] = Json::Array{1};
-        items.push_back(std::move(item));
+                   (symbol.kind == 13 && symbol.token_type != 6 && symbol.selection.offset > offset)) continue;
+        add(symbol.name, symbol.kind == 12 || symbol.kind == 6 ? 3 : symbol.kind == 5 ? 7 :
+                         symbol.kind == 11 ? 8 : symbol.kind == 2 ? 9 : symbol.kind == 10 ? 13 :
+                         symbol.kind == 22 ? 20 : symbol.kind == 7 || symbol.kind == 8 ? 10 : 6,
+            symbol.detail, symbol.documentation);
+        if (!items.empty() && items.back()["label"].string() == symbol.name &&
+            (symbol.modifiers & modifier("deprecated"))) items.back()["tags"] = Json::Array{1};
     }
-    if (!member)
-        for (const auto &word : {"let",    "last", "const", "func", "class",  "interface", "module", "enum",
-                                 "if",     "else", "while", "for",  "return", "match",     "scope",  "spawn",
-                                 "select", "new",  "nil",   "true", "false",  "export",    "import"})
-            if (std::string_view(word).starts_with(prefix))
-                items.emplace_back(Json{{"label", word}, {"kind", 14}});
+    if (!member) {
+        // Promoted imports contribute unqualified names. Local declarations win;
+        // ambiguous exports from two modules do not form usable suggestions.
+        std::map<std::string, std::pair<std::size_t, std::vector<Target>>> promoted;
+        for (const auto &symbol : symbols) {
+            if (symbol.file != doc.path || !symbol.declaration || !symbol.declaration->promote_import ||
+                !contains(symbol.scope, offset) || !symbol.declaration->initializer) continue;
+            const auto &name = symbol.declaration->initializer->text;
+            std::vector<Target> modules;
+            if (name.ends_with(".*")) {
+                const auto prefix_name = name.substr(0, name.size() - 2);
+                auto relative = module_path(prefix_name);
+                relative.replace_extension();
+                std::vector<fs::path> directories;
+                if (name.starts_with("Std.")) directories.push_back(library / relative);
+                else {
+                    directories.push_back(fs::path(doc.path).parent_path() / relative);
+                    for (const auto &directory : source_roots) directories.push_back(directory / relative);
+                }
+                std::set<std::string> names;
+                for (const auto &directory : directories) {
+                    std::error_code error;
+                    for (fs::directory_iterator it(directory, error), end; !error && it != end; it.increment(error))
+                        if (it->is_regular_file(error) && it->path().extension() == ".nra") {
+                            const auto module = prefix_name + "." + pascal(it->path().stem().string());
+                            if (module_path(module) == relative / it->path().filename()) names.insert(module);
+                        }
+                }
+                for (const auto &module : names) modules.push_back(imported(module, doc));
+            } else modules.push_back(imported(name, doc));
+            for (const auto &module : modules)
+                for (const auto &candidate : members(module, 0)) {
+                    if (!exported(candidate)) continue;
+                    auto [entry, inserted] = promoted.try_emplace(candidate.declaration->name,
+                                                                symbol.scope.length, std::vector<Target>{});
+                    if (symbol.scope.length < entry->second.first) entry->second = {symbol.scope.length, {}};
+                    auto &candidates = entry->second.second;
+                    if (symbol.scope.length == entry->second.first && std::none_of(candidates.begin(), candidates.end(),
+                        [&](const Target &old) { return old.declaration == candidate.declaration; }))
+                        candidates.push_back(candidate);
+                }
+        }
+        for (const auto &[name, entry] : promoted) {
+            const auto &candidates = entry.second;
+            if (candidates.size() != 1 || resolve_name(doc, name, offset)) continue;
+            add_declaration(candidates.front());
+        }
+        for (const auto &word : {"let", "last", "const", "func", "class", "interface", "module", "enum", "if", "else",
+                                 "while", "for", "return", "match", "scope", "spawn", "select", "new", "nil", "true",
+                                 "false", "export", "import"}) add(word, 14);
+    }
     return Json{{"isIncomplete", false}, {"items", items}};
 }
 
 Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
     std::map<std::size_t, std::vector<std::size_t>> children;
+    const auto visible = [&](const EditorSymbol &symbol) {
+        return symbol.file == doc.path && !symbol.name.empty() && !symbol.name.starts_with('$') &&
+               !(symbol.name == "value" && symbol.selection.length != 5);
+    };
     for (std::size_t i = 0; i < symbols.size(); ++i) {
         const auto &s = symbols[i];
-        if (s.file == doc.path && !(s.name == "value" && s.selection.length != 5))
-            children[s.parent].push_back(i);
+        if (!visible(s)) continue;
+        auto parent = s.parent;
+        // Anonymous functions have no outline name, but their named locals
+        // still belong under the nearest named declaration.
+        while (parent != none && !visible(symbols[parent])) parent = symbols[parent].parent;
+        children[parent].push_back(i);
     }
     std::function<Json(std::size_t)> item = [&](std::size_t index) {
         const auto &s = symbols[index];
         Json::Array nested;
         for (auto child : children[index])
             nested.push_back(item(child));
+        auto full = s.span;
+        const auto begin = std::min(full.offset, s.selection.offset);
+        const auto end = std::max(full.offset + full.length, s.selection.offset + s.selection.length);
+        full.offset = begin;
+        full.length = end - begin;
         Json result{{"name", s.name},
                     {"detail", s.detail},
                     {"kind", s.kind},
-                    {"range", doc.range(s.span)},
+                    {"range", doc.range(full)},
                     {"selectionRange", doc.range(s.selection)}};
         if (!nested.empty())
             result["children"] = nested;

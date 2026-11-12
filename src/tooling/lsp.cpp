@@ -244,7 +244,7 @@ class Server {
         Json capabilities{
             {"positionEncoding", "utf-16"},
             {"textDocumentSync", Json{{"openClose", true}, {"change", 2}, {"save", Json{{"includeText", false}}}}},
-            {"completionProvider", Json{{"triggerCharacters", Json::Array{".", "#", ":"}}, {"resolveProvider", false}}},
+            {"completionProvider", Json{{"triggerCharacters", Json::Array{".", "#", ":", " "}}, {"resolveProvider", false}}},
             {"hoverProvider", true},
             {"definitionProvider", true},
             {"declarationProvider", true},
@@ -562,7 +562,8 @@ class Server {
         if (method == "textDocument/documentSymbol")
             return session_.document_symbols(*doc);
         if (method == "textDocument/completion")
-            return session_.completion(*doc, offset);
+            return session_.completion(*doc, offset, params["context"]["triggerKind"].integer() == 2 &&
+                                                     params["context"]["triggerCharacter"].string() == " ");
         if (method == "textDocument/codeLens")
             return code_lens_enabled_ ? session_.code_lenses(*doc) : Json{Json::Array{}};
         if (method == "textDocument/inlayHint")
@@ -596,7 +597,15 @@ class Server {
             options.tab_size =
                 static_cast<unsigned>(std::clamp<std::int64_t>(params["options"]["tabSize"].integer(4), 1, 16));
             options.insert_spaces = params["options"]["insertSpaces"].boolean(true);
-            const auto formatted = format_source(doc->source, doc->path, options);
+            std::string formatted;
+            try {
+                formatted = format_source(doc->source, doc->path, options);
+            } catch (const Diagnostic &) {
+                // An editor snapshot can be between keystrokes. Diagnostics
+                // already describe invalid source; formatting should leave it
+                // untouched without turning format-on-save into a popup.
+                return Json::Array{};
+            }
             if (formatted == doc->source)
                 return Json::Array{};
             // Full-document edits preserve formatter context even when the
