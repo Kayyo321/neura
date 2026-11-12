@@ -96,6 +96,9 @@ private:
                 std::ranges::transform(word, word.begin(), Circuit::logical_not);
                 return word;
             }
+            if (e.op == "hash") {
+                return value_hash(image_.types.at(e.operands[0]->type), operand);
+            }
             if (e.op == "index") {
                 // to_index: a negative signed index is a bounds failure.
                 const auto& from = image_.types.at(e.operands[0]->type);
@@ -191,6 +194,9 @@ private:
         if (op == "+~") {
             return backend::add(circuit_, a, b, is_signed).value;
         }
+        if (op == "-~") {
+            return backend::subtract(circuit_, a, b, is_signed).value;
+        }
         if (op == "+") {
             result = backend::add(circuit_, a, b, is_signed);
         } else if (op == "-") {
@@ -204,6 +210,41 @@ private:
         }
         fail_(1, result.failure);
         return result.value;
+    }
+
+    // hash_code of a scalar as the converter builds it: a float's NaNs
+    // replaced by its canonical NaN, then a Boolean selects one of two
+    // constants, a 64-bit word is folded by exclusive or of its halves, and
+    // a narrower one is extended to 32 lanes, with its sign for a signed
+    // integer.
+    Word value_hash(const nvr::Type& type, Word word) {
+        if (is_floating(type)) {
+            const auto format = float_of(type);
+            const auto first_exponent = word.begin() + format.fraction_bits;
+            const auto nan = circuit_.logical_and(circuit_.all({first_exponent, word.end() - 1}),
+                                                  circuit_.any({word.begin(), first_exponent}));
+            const auto canonical = backend::constant_word(format.canonical_nan(), format.width());
+            for (std::size_t bit = 0; bit < word.size(); ++bit) {
+                word[bit] = circuit_.choose(nan, canonical[bit], word[bit]);
+            }
+        }
+        if (type.kind == nvr::TypeKind::Bool) {
+            const auto true_hash = backend::constant_word(1231, 32);
+            const auto false_hash = backend::constant_word(1237, 32);
+            Word hash;
+            for (std::size_t bit = 0; bit < 32; ++bit) {
+                hash.push_back(circuit_.choose(word.front(), true_hash[bit], false_hash[bit]));
+            }
+            return hash;
+        }
+        if (word.size() == 64) {
+            for (std::size_t bit = 0; bit < 32; ++bit) word[bit] = circuit_.logical_xor(word[bit], word[bit + 32]);
+            word.resize(32);
+        } else if (word.size() < 32) {
+            const auto extension = type.kind == nvr::TypeKind::Signed ? word.back() : Signal::of(0);
+            word.resize(32, extension);
+        }
+        return word;
     }
 
     const nvr::Image& image_;

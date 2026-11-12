@@ -608,7 +608,8 @@ NEURA_TEST(jit, every_instruction_matches_lift_evaluate) {
                              Opcode::NotEqual,   Opcode::Less,      Opcode::LessEqual, Opcode::Greater,
                              Opcode::GreaterEqual, Opcode::And,     Opcode::Or,        Opcode::Not,
                              Opcode::BitAnd,     Opcode::BitOr,     Opcode::BitXor,    Opcode::BitNot,
-                             Opcode::ShiftLeft,  Opcode::ShiftRight, Opcode::Index,    Opcode::Constant};
+                             Opcode::ShiftLeft,  Opcode::ShiftRight, Opcode::Index,    Opcode::Constant,
+                             Opcode::SubtractWrapping, Opcode::ValueHash};
     for (const auto op : binary) {
         for (const auto width : widths) {
             for (const bool is_signed : {false, true}) {

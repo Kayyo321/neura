@@ -33,11 +33,13 @@
 #include <chrono>
 #include <cstring>
 #include <fstream>
+#include <functional>
 #include <iomanip>
 #include <iostream>
 #include <limits>
 #include <map>
 #include <numeric>
+#include <optional>
 #include <random>
 #include <set>
 #include <sstream>
@@ -337,7 +339,7 @@ std::vector<OpCase> op_cases() {
     const auto in = [](std::uint32_t t, std::size_t i) { return lift::input(t, i); };
     const std::vector<std::uint32_t> integers{I8, U8, I16, U16, I32, U32, I64, U64};
     for (const auto t : integers) {
-        for (const auto* op : {"+", "-", "*", "/", "%", "+~", "&", "|", "^", "<<", ">>"}) {
+        for (const auto* op : {"+", "-", "*", "/", "%", "+~", "-~", "&", "|", "^", "<<", ">>"}) {
             cases.push_back({type_name(t) + " " + op, {t, t}, lift::binary(op, t, in(t, 0), in(t, 1)), nullptr});
         }
         for (const auto* op : {"==", "!=", "<", "<=", ">", ">="}) {
@@ -520,6 +522,48 @@ private:
     std::vector<std::uint64_t> outputs_;
     std::vector<std::int64_t> lanes_;
 };
+
+// A copy of `form` in which node `from` is replaced by `to` wherever it is
+// used, keeping every other node shared as in the original.
+LiftedForm substitute(const LiftedForm& form, const Expression* from, const ExpressionPtr& to) {
+    std::map<const Expression*, ExpressionPtr> done;
+    const std::function<ExpressionPtr(const ExpressionPtr&)> copy = [&](const ExpressionPtr& e) -> ExpressionPtr {
+        if (!e) return e;
+        if (e.get() == from) return to;
+        if (const auto it = done.find(e.get()); it != done.end()) return it->second;
+        auto node = std::make_shared<Expression>(*e);
+        bool changed = false;
+        for (auto& operand : node->operands) {
+            auto replaced = copy(operand);
+            changed = changed || replaced != operand;
+            operand = std::move(replaced);
+        }
+        ExpressionPtr result = changed ? ExpressionPtr(std::move(node)) : e;
+        done.emplace(e.get(), result);
+        return result;
+    };
+    auto out = form;
+    for (auto& e : out.schedule) e = copy(e);
+    for (auto& [lane, e] : out.values) e = copy(e);
+    for (auto& [lane, e] : out.order) e = copy(e);
+    out.condition = copy(out.condition);
+    return out;
+}
+
+// Every node of a form, operands before users.
+std::vector<const Expression*> form_nodes(const LiftedForm& form) {
+    std::vector<const Expression*> nodes;
+    std::set<const Expression*> seen;
+    const std::function<void(const Expression*)> visit = [&](const Expression* e) {
+        if (!e || !seen.insert(e).second) return;
+        for (const auto& operand : e->operands) visit(operand.get());
+        nodes.push_back(e);
+    };
+    for (const auto& e : form.schedule) visit(e.get());
+    for (const auto& [lane, e] : form.values) visit(e.get());
+    visit(form.condition.get());
+    return nodes;
+}
 
 std::string percent(double part, double whole) {
     std::ostringstream out;
@@ -838,6 +882,171 @@ NEURA_TEST(proof, hint_sections_round_trip_and_malformed_ones_are_ignored) {
     check(lift::decode_hints(std::span<const std::uint8_t>(forward)).empty(), "a forward operand is ignored");
 }
 
+NEURA_TEST(proof, recorded_constructions_prove_and_mutated_hints_do_not) {
+    // Blocks of compiled programs whose LIFT hints describe the length
+    // narrowing, the loops of generated functions (concatenation, text and
+    // value members), the nil tests of value members, the hash steps, and
+    // float negation. Each genuine hint is accepted; a hint with a wrong operand, a
+    // wrong constant, a wrong width or signedness, another operation, or the
+    // exits swapped is rejected.
+    const auto root = environment.source_dir;
+    const std::vector<fs::path> files{
+        root / "tests" / "benchmarks" / "strings.nra",
+        root / "tests" / "backend" / "programs" / "ranges-and-variadics.nra",
+        root / "tests" / "backend" / "programs" / "class-nil.nra",
+        root / "tests" / "backend" / "programs" / "stdlib-primitives.nra",
+        root / "tests" / "bench-wall" / "neura" / "nbody.nra",
+        root / "tests" / "bench-wall" / "neura" / "hash-map.nra",
+    };
+    std::map<std::string, std::size_t> found;
+    std::size_t mutants = 0;
+    for (const auto& file : files) {
+        const auto image = build({file.filename().string(), {file}, {}, ""});
+        const auto type_is = [&](const Expression* e, nvr::TypeKind kind, unsigned width) {
+            const auto& t = image.types.at(e->type);
+            return t.kind == kind && (width == 0 || t.width == width);
+        };
+        const auto find_type = [&](nvr::TypeKind kind, unsigned width) -> std::optional<std::uint32_t> {
+            for (std::uint32_t t = 0; t < image.types.size(); ++t) {
+                if (image.types[t].kind == kind && image.types[t].width == width) return t;
+            }
+            return std::nullopt;
+        };
+        const auto is_input = [&](const ExpressionPtr& e, nvr::TypeKind kind, unsigned width) {
+            return e->kind == Expression::Kind::Input && type_is(e.get(), kind, width);
+        };
+        const auto is_immediate = [](const ExpressionPtr& e) { return e->kind == Expression::Kind::Immediate; };
+        for (const auto& [key, hinted] : lift::decode_hints(image)) {
+            const auto [f, b] = key;
+            const auto& form = *hinted;
+            const auto where = file.filename().string() + " function " + std::to_string(f) + " block " +
+                               std::to_string(b);
+            std::vector<std::pair<std::string, LiftedForm>> wrong;
+            const auto replace = [&](std::string what, const Expression* node, ExpressionPtr by) {
+                wrong.emplace_back(std::move(what), substitute(form, node, std::move(by)));
+            };
+            const auto swap_exits = [&](const std::string& what) {
+                auto swapped = form;
+                swapped.exit_when_true = 1 - *form.exit_when_true;
+                wrong.emplace_back(what + ": exits swapped", std::move(swapped));
+            };
+            const auto is_condition = [&](const Expression* e) { return form.condition.get() == e; };
+            std::string label;
+            for (const auto* e : form_nodes(form)) {
+                const auto& ops = e->operands;
+                if (e->kind == Expression::Kind::Convert && type_is(e, nvr::TypeKind::Signed, 32) &&
+                    is_input(ops[0], nvr::TypeKind::Unsigned, 64)) {
+                    label = "length narrowing";
+                    if (const auto u32 = find_type(nvr::TypeKind::Unsigned, 32)) {
+                        replace(label + ": unsigned target", e, lift::convert(*u32, ops[0]));
+                    }
+                    replace(label + ": constant operand", e, lift::convert(e->type, lift::immediate(ops[0]->type, 3)));
+                    if (form.exit_when_true) swap_exits(label);
+                } else if (e->kind == Expression::Kind::Binary && e->op == "<" && is_condition(e) &&
+                           is_input(ops[0], nvr::TypeKind::Unsigned, 64) && is_input(ops[1], nvr::TypeKind::Unsigned, 64) &&
+                           ops[0]->input != ops[1]->input) {
+                    label = "index loop test";
+                    replace(label + ": operands swapped", e, lift::binary("<", e->type, ops[1], ops[0]));
+                    replace(label + ": '<='", e, lift::binary("<=", e->type, ops[0], ops[1]));
+                    swap_exits(label);
+                } else if (e->kind == Expression::Kind::Binary && e->op == "+~" &&
+                           is_input(ops[0], nvr::TypeKind::Unsigned, 64) && is_immediate(ops[1]) && ops[1]->bits == 1) {
+                    label = "index advance";
+                    replace(label + ": constant 2", e, lift::binary("+~", e->type, ops[0], lift::immediate(ops[1]->type, 2)));
+                    replace(label + ": checked", e, lift::binary("+", e->type, ops[0], ops[1]));
+                    if (const auto u32 = find_type(nvr::TypeKind::Unsigned, 32)) {
+                        replace(label + ": 32 bits", e,
+                                lift::binary("+~", *u32, lift::convert(*u32, ops[0]), lift::immediate(*u32, 1)));
+                    }
+                } else if (e->kind == Expression::Kind::Binary && e->op == "==" && is_condition(e) &&
+                           is_input(ops[0], nvr::TypeKind::Unsigned, 64) && is_input(ops[1], nvr::TypeKind::Unsigned, 64)) {
+                    label = "length equality";
+                    replace(label + ": '!='", e, lift::binary("!=", e->type, ops[0], ops[1]));
+                    replace(label + ": one operand twice", e, lift::binary("==", e->type, ops[0], ops[0]));
+                    swap_exits(label);
+                } else if (e->kind == Expression::Kind::Binary && e->op == "!=" && is_condition(e) &&
+                           is_input(ops[0], nvr::TypeKind::Unsigned, 64) && is_immediate(ops[1])) {
+                    label = "nonzero index";
+                    replace(label + ": constant 1", e, lift::binary("!=", e->type, ops[0], lift::immediate(ops[1]->type, 1)));
+                    swap_exits(label);
+                } else if (e->kind == Expression::Kind::Binary && e->op == "==" && ops[0]->kind == Expression::Kind::Input &&
+                           nvr::is_reference(image.types.at(ops[0]->type).kind) && is_immediate(ops[1])) {
+                    label = "nil test";
+                    replace(label + ": another handle", e,
+                            lift::binary("==", e->type, ops[0], lift::immediate(ops[1]->type, 1)));
+                    replace(label + ": '!='", e, lift::binary("!=", e->type, ops[0], ops[1]));
+                    for (const auto* user : form_nodes(form)) {
+                        if (user->kind == Expression::Kind::Binary && (user->op == "&&" || user->op == "||")) {
+                            replace(label + ": other connective", user,
+                                    lift::binary(user->op == "&&" ? "||" : "&&", user->type, user->operands[0],
+                                                 user->operands[1]));
+                        }
+                    }
+                    if (form.exit_when_true) swap_exits(label);
+                } else if (e->kind == Expression::Kind::Binary && e->op == "+~" && type_is(e, nvr::TypeKind::Unsigned, 32) &&
+                           ops[0]->kind == Expression::Kind::Binary && ops[0]->op == "-~") {
+                    label = "hash step";
+                    const auto& difference = ops[0];
+                    const auto& shifted = difference->operands[0];
+                    const auto& hash = difference->operands[1];
+                    replace(label + ": checked subtraction", difference.get(),
+                            lift::binary("-", difference->type, shifted, hash));
+                    replace(label + ": addition for the subtraction", difference.get(),
+                            lift::binary("+~", difference->type, shifted, hash));
+                    replace(label + ": operands of the subtraction swapped", difference.get(),
+                            lift::binary("-~", difference->type, hash, shifted));
+                    replace(label + ": the hash added", e, lift::binary("+~", e->type, difference, hash));
+                    if (shifted->kind == Expression::Kind::Binary && shifted->op == "<<") {
+                        replace(label + ": shifted by 4", shifted.get(),
+                                lift::binary("<<", shifted->type, shifted->operands[0],
+                                             lift::immediate(shifted->operands[1]->type, 4)));
+                    }
+                    if (const auto u64 = find_type(nvr::TypeKind::Unsigned, 64)) {
+                        replace(label + ": 64 bits", e,
+                                lift::convert(e->type, lift::binary("+~", *u64, lift::convert(*u64, difference),
+                                                                    lift::convert(*u64, ops[1]))));
+                    }
+                } else if (e->kind == Expression::Kind::Unary && e->op == "hash" && ops[0]->kind == Expression::Kind::Input) {
+                    label = "value hash";
+                    replace(label + ": constant operand", e, lift::unary("hash", e->type, lift::immediate(ops[0]->type, 0)));
+                    replace(label + ": result changed", e, lift::binary("^", e->type, lift::unary("hash", e->type, ops[0]), lift::immediate(e->type, 1)));
+                    if (is_input(ops[0], nvr::TypeKind::Signed, 0) || is_input(ops[0], nvr::TypeKind::Unsigned, 0)) {
+                        replace(label + ": a conversion", e, lift::convert(e->type, ops[0]));
+                    }
+                    if (is_input(ops[0], nvr::TypeKind::Bool, 0)) {
+                        replace(label + ": negated operand", e, lift::unary("hash", e->type, lift::unary("!", ops[0]->type, ops[0])));
+                    }
+                } else if (e->kind == Expression::Kind::Unary && e->op == "neg" && is_input(ops[0], nvr::TypeKind::Float, 0)) {
+                    label = "float negation";
+                    replace(label + ": the operand itself", e, ops[0]);
+                    if (const auto f32 = find_type(nvr::TypeKind::Float, 32); f32 && !type_is(e, nvr::TypeKind::Float, 32)) {
+                        replace(label + ": another width", e, lift::unary("neg", *f32, lift::input(*f32, ops[0]->input)));
+                    }
+                } else {
+                    continue;
+                }
+                break;
+            }
+            if (label.empty()) continue;
+            const auto genuine = lift::lift_and_prove(image, f, b, &form);
+            check(genuine.block != nullptr, where + " (" + label + "): the genuine hint is rejected: " + genuine.rejection);
+            ++found[label];
+            for (const auto& [what, mutant] : wrong) {
+                const auto result = lift::lift_and_prove(image, f, b, &mutant);
+                check(!result.block, where + ": a mutated hint is accepted (" + what + ")");
+                ++mutants;
+            }
+        }
+    }
+    for (const auto* label : {"length narrowing", "index loop test", "index advance", "length equality",
+                              "nonzero index", "float negation",
+                              "nil test", "hash step", "value hash"}) {
+        check(found[label] > 0, std::string("no hinted block of the construction: ") + label);
+        std::cout << "  " << label << ": " << found[label] << " blocks\n";
+    }
+    std::cout << "  " << mutants << " mutated hints rejected\n";
+}
+
 NEURA_TEST(overflow, exclusive_indicators_sum_to_a_bit) {
     // Equality tests of the same 24 lanes against different constants are
     // exclusive, so their sum is a bit although its interval is [0, 3], and
@@ -948,6 +1157,83 @@ NEURA_TEST(execute, operations_match_the_reference) {
     for (const auto& label : unexpected) std::cout << "  not lifted: " << label << '\n';
     check(unproven.size() <= 20, "the 0/1 lane proof covers most float operations");
     check(unexpected.empty(), std::to_string(unexpected.size()) + " operations were not lifted");
+}
+
+NEURA_TEST(execute, wrapping_subtraction_matches_the_reference) {
+    // "-~" of every integer type: exhaustive at 8 bits, and at the other
+    // widths the boundary values crossed with each other and 100,000 seeded
+    // random pairs, each lane against the reference evaluator.
+    std::size_t vectors = 0;
+    for (const auto t : {I8, U8, I16, U16, I32, U32, I64, U64}) {
+        auto image = op_image();
+        LiftedForm form;
+        const auto value = lift::binary("-~", t, lift::input(t, 0), lift::input(t, 1));
+        check(construct(image, {t, t}, value, nullptr, form), type_name(t) + " -~: the block assembles");
+        const auto result = lift::lift_and_prove(image, 0, 0, &form);
+        check(result.block != nullptr, type_name(t) + " -~: not lifted: " + result.rejection);
+        check(result.block->code.size() == 1 && result.block->code[0].op == lift::Opcode::SubtractWrapping,
+              type_name(t) + " -~: lowered to one wrapping subtraction");
+        std::vector<std::vector<std::uint64_t>> inputs;
+        if (nvr::lane_count(image.types[t]) == 8) {
+            inputs = input_vectors(image, {t, t}, 0, 0);
+            check_equal(inputs.size(), std::size_t{65536}, "every pair of bytes");
+        } else {
+            inputs = input_vectors(image, {t, t}, 100000, 0x5eb7 + t);
+        }
+        const auto comparison = compare(image, image.functions[0].blocks[0], *result.block, inputs);
+        check(comparison.mismatch.empty(), type_name(t) + " -~: " + comparison.mismatch);
+        vectors += comparison.vectors;
+        // The circuit of "-~" is that of "-" without its check.
+        auto checked = op_image();
+        LiftedForm checked_form;
+        check(construct(checked, {t, t}, lift::binary("-", t, lift::input(t, 0), lift::input(t, 1)), nullptr,
+                        checked_form),
+              "the checked subtraction assembles");
+        check(!lift::prove_structure(image, image.functions[0].blocks[0], image.graphs[0], checked_form),
+              type_name(t) + ": a checked subtraction does not prove the wrapping block");
+        check(!lift::prove_structure(checked, checked.functions[0].blocks[0], checked.graphs[0], form),
+              type_name(t) + ": a wrapping subtraction does not prove the checked block");
+    }
+    std::cout << "  " << vectors << " input vectors matched\n";
+}
+
+NEURA_TEST(execute, value_hash_matches_the_reference) {
+    // "hash" of every scalar type, as hash_code builds it: exhaustive where
+    // the operand has at most 16 lanes (bool, 8- and 16-bit integers, and
+    // both 16-bit float formats, every NaN included), and otherwise the
+    // boundary values (NaNs with several payloads among them) and 100,000
+    // seeded random values, each lane against the reference evaluator.
+    std::size_t vectors = 0;
+    for (const auto t : {Bool, I8, U8, I16, U16, I32, U32, I64, U64, F16, BF16, F32, F64}) {
+        auto image = op_image();
+        LiftedForm form;
+        const auto value = lift::unary("hash", U32, lift::input(t, 0));
+        check(construct(image, {t}, value, nullptr, form), type_name(t) + " hash: the block assembles");
+        const auto result = lift::lift_and_prove(image, 0, 0, &form);
+        check(result.block != nullptr, type_name(t) + " hash: not lifted: " + result.rejection);
+        check(result.block->code.size() == 1 && result.block->code[0].op == lift::Opcode::ValueHash &&
+                  !result.block->uses_float,
+              type_name(t) + " hash: lowered to one value hash that needs no float environment");
+        const auto lanes = nvr::lane_count(image.types[t]);
+        auto inputs = input_vectors(image, {t}, lanes <= 16 ? 0 : 100000, 0x4a5b + t);
+        if (lanes <= 16) check_equal(inputs.size(), std::size_t{1} << lanes, type_name(t) + ": every value");
+        const auto comparison = compare(image, image.functions[0].blocks[0], *result.block, inputs);
+        check(comparison.mismatch.empty(), type_name(t) + " hash: " + comparison.mismatch);
+        vectors += comparison.vectors;
+    }
+    // The hash is not a conversion: a conversion's block does not prove the
+    // hash's, nor the other way round.
+    auto image = op_image();
+    LiftedForm form;
+    check(construct(image, {I64}, lift::unary("hash", U32, lift::input(I64, 0)), nullptr, form), "int64 hash");
+    auto other = op_image();
+    LiftedForm converted;
+    check(construct(other, {I64}, lift::convert(U32, lift::input(I64, 0)), nullptr, converted), "int64 as uint32");
+    check(!lift::prove_structure(image, image.functions[0].blocks[0], image.graphs[0], converted),
+          "a conversion does not prove the hash block");
+    check(!lift::prove_structure(other, other.functions[0].blocks[0], other.graphs[0], form),
+          "a hash does not prove the conversion block");
+    std::cout << "  " << vectors << " input vectors matched\n";
 }
 
 NEURA_TEST(corpus, blocks_match_the_reference_and_coverage_is_reported) {

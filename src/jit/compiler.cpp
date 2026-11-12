@@ -337,6 +337,7 @@ private:
         case lift::Opcode::Add:
         case lift::Opcode::AddWrapping:
         case lift::Opcode::Subtract:
+        case lift::Opcode::SubtractWrapping:
         case lift::Opcode::Negate:
         case lift::Opcode::Multiply:
         case lift::Opcode::Equal:
@@ -643,6 +644,12 @@ private:
         case Opcode::AddWrapping:
             operands();
             m_.alu(Alu::Add, T0, T1);
+            mask(T0, w);
+            return T0;
+        case Opcode::SubtractWrapping:
+            // r = (a - b) & m.
+            operands();
+            m_.alu(Alu::Sub, T0, T1);
             mask(T0, w);
             return T0;
         case Opcode::Subtract:

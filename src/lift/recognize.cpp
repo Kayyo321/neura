@@ -325,6 +325,8 @@ std::optional<std::uint64_t> semantic(const nvr::Image& image, const Expression&
         if (!x) return std::nullopt;
         if (e.op == "!") return (*x ^ 1U) & 1U;
         if (e.op == "index") return *x;
+        // The search proposes no hash; a form that has one is not evaluated.
+        if (e.op == "hash") return std::nullopt;
         if (e.op == "~") return ~*x & m;
         if (floating(t)) return *x ^ (std::uint64_t{1} << (width - 1));
         return (0 - *x) & m;
@@ -401,7 +403,7 @@ std::optional<std::uint64_t> semantic(const nvr::Image& image, const Expression&
             return (is_signed ? static_cast<std::uint64_t>(signed_value(*a, w) >> *b) : *a >> *b) & m;
         }
         if (op == "+" || op == "+~") return (*a + *b) & m;
-        if (op == "-") return (*a - *b) & m;
+        if (op == "-" || op == "-~") return (*a - *b) & m;
         if (op == "*") return (*a * *b) & m;
         if (*b == 0) return std::nullopt;
         if (!is_signed) return (op == "/" ? *a / *b : *a % *b) & m;

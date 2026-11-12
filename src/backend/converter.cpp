@@ -136,6 +136,9 @@ private:
     lift::ExpressionPtr unary_form(std::string op, std::uint32_t type, const Operand& operand);
     lift::ExpressionPtr binary_form(std::string op, std::uint32_t type, const Operand& left, const Operand& right);
     lift::ExpressionPtr convert_form(std::uint32_t type, const Operand& operand);
+    // The form of a hash step, (hash << 5) -~ hash +~ value, on uint32 words,
+    // with `value` first widened to uint32 when `widen` is set.
+    lift::ExpressionPtr hash_step_form(const Operand& hash, const Operand& value, bool widen);
 
     // Effects that end a block.
     Operand state(nvr::StateOp operation, std::uint32_t immediate, std::vector<Operand> arguments,
@@ -1702,6 +1705,18 @@ lift::ExpressionPtr FunctionCompiler::convert_form(std::uint32_t type, const Ope
     return a ? lift::convert(type, std::move(a)) : nullptr;
 }
 
+lift::ExpressionPtr FunctionCompiler::hash_step_form(const Operand& hash, const Operand& value, bool widen) {
+    auto h = form_of(hash);
+    auto v = form_of(value);
+    if (!h || !v) return nullptr;
+    const auto u32 = c_.scalar(nvr::TypeKind::Unsigned, 32);
+    if (widen) v = lift::convert(u32, std::move(v));
+    // The shift by a constant count only moves lanes; the subtraction and
+    // the addition keep the low word.
+    auto shifted = lift::binary("<<", u32, h, lift::immediate(u32, 5));
+    return lift::binary("+~", u32, lift::binary("-~", u32, std::move(shifted), h), std::move(v));
+}
+
 void FunctionCompiler::fail_when(const Signal& condition, std::uint32_t reason, const Span& span) {
     if (current().synth.fail_when(condition, reason) && !current().failure_span) {
         current().failure_span = span;
@@ -2334,7 +2349,8 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         const auto length = state(nvr::StateOp::ReadLength, 0, {collection}, u64, node.span);
         auto narrowed = convert_integer(current().synth.circuit(), lanes(length), false, 32, true);
         fail_when(narrowed.failure, arithmetic_failure, node.span);
-        return bits(c_.type_of(node.type, node.span), std::move(narrowed.value));
+        const auto type = c_.type_of(node.type, node.span);
+        return described(bits(type, std::move(narrowed.value)), convert_form(type, length));
     }
     case IrOp::TextByteAt:
     case IrOp::TextSlice: {
@@ -2354,7 +2370,8 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         const auto boolean = c_.scalar(nvr::TypeKind::Bool);
         auto equal = state(nvr::StateOp::TextEqual, 0, std::move(arguments), boolean, node.span);
         if (node.text == "==") return equal;
-        return bits(boolean, {Circuit::logical_not(lanes(equal).front())});
+        auto different = bits(boolean, {Circuit::logical_not(lanes(equal).front())});
+        return described(std::move(different), unary_form("!", boolean, equal));
     }
     case IrOp::ReinterpretFloat: {
         auto input = expression(node.operands.front());
@@ -2448,7 +2465,8 @@ Operand FunctionCompiler::unary(const IrNode& node) {
     }
     if (node.type.kind == TypeKind::Float) {
         const auto type = c_.type_of(node.type, node.span);
-        return described(bits(type, float_negate(lanes(operand))), unary_form("neg", type, operand));
+        auto negated = bits(type, float_negate(lanes(operand)));
+        return described(std::move(negated), unary_form("neg", type, operand));
     }
     const auto format = integer_format(node.type, node.span);
     const auto input = lanes(operand);
@@ -2692,8 +2710,12 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         return word;
     };
     auto first = normalized(operands.front());
-    if (op == IrOp::ValueEquals)
-        return bits(boolean, {equal(circuit, first, normalized(operands[1]))});
+    if (op == IrOp::ValueEquals) {
+        auto result = bits(boolean, {equal(circuit, first, normalized(operands[1]))});
+        // Without the float normalization, value equality is lane equality.
+        if (type.kind == TypeKind::Float) return result;
+        return described(std::move(result), binary_form("==", boolean, operands[0], operands[1]));
+    }
 
     if (type.kind == TypeKind::Bool) {
         const auto true_hash = constant_word(1231, 32);
@@ -2701,7 +2723,8 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         Word hash;
         for (std::size_t bit = 0; bit < 32; ++bit)
             hash.push_back(circuit.choose(first.front(), true_hash[bit], false_hash[bit]));
-        return bits(hash_type, std::move(hash));
+        auto result = bits(hash_type, std::move(hash));
+        return described(std::move(result), unary_form("hash", hash_type, operands.front()));
     }
     if (first.size() == 64) {
         for (std::size_t bit = 0; bit < 32; ++bit)
@@ -2712,7 +2735,8 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         const auto extension = signed_integer ? first.back() : Signal::of(0);
         first.resize(32, extension);
     }
-    return bits(hash_type, std::move(first));
+    auto result = bits(hash_type, std::move(first));
+    return described(std::move(result), unary_form("hash", hash_type, operands.front()));
 }
 
 Operand FunctionCompiler::short_circuit(const IrNode& node) {
@@ -2961,16 +2985,25 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract")
         .with_code("E0899");
     for (auto& operand : operands) spill(operand);
+    const auto boolean = c_.scalar(nvr::TypeKind::Bool);
+    // No lane of a nil handle is set: the test is a comparison with nil.
     const auto is_nil = [&](const Operand& operand) {
         const auto word = lanes(operand);
-        return Circuit::logical_not(current().synth.circuit().any(word));
+        auto result = bits(boolean, {Circuit::logical_not(current().synth.circuit().any(word))});
+        return described(std::move(result), binary_form("==", boolean, operand, immediate(operand.type, 0)));
     };
-    const auto left_nil = is_nil(operands[0]);
-    const auto right_nil = equality ? is_nil(operands[1]) : Signal::of(0);
+    const auto left_nil_value = is_nil(operands[0]);
+    const auto left_nil = lanes(left_nil_value).front();
+    std::optional<Operand> right_nil_value;
+    if (equality) right_nil_value = is_nil(operands[1]);
+    const auto right_nil = right_nil_value ? lanes(*right_nil_value).front() : Signal::of(0);
     const auto nil = current().synth.circuit().logical_or(left_nil, right_nil);
+    auto nil_value = equality ? described(bits(boolean, {nil}), binary_form("||", boolean, left_nil_value, *right_nil_value))
+                              : left_nil_value;
     auto fallback = immediate(result_type, 0);
     if (equality) {
-        fallback = bits(result_type, {current().synth.circuit().logical_and(left_nil, right_nil)});
+        auto both = bits(result_type, {current().synth.circuit().logical_and(left_nil, right_nil)});
+        fallback = described(std::move(both), binary_form("&&", boolean, left_nil_value, *right_nil_value));
         spill(fallback);
     } else if (op == IrOp::ValueText) {
         fallback.kind = Operand::Kind::Constant;
@@ -2980,7 +3013,7 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     const auto invoke_method = new_block();
     const auto done = new_block();
     const auto slot = new_slot(result_type);
-    branch(bits(c_.scalar(nvr::TypeKind::Bool), {nil}), handle_nil, invoke_method);
+    branch(nil_value, handle_nil, invoke_method);
     begin(handle_nil, span);
     assign(slot, fallback);
     jump(done);
@@ -3284,11 +3317,13 @@ void FunctionCompiler::append_text_bytes(const Operand& buffer, const Operand& s
     const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
     const auto body = new_block();
     const auto next = new_block();
-    branch(bits(boolean, {more}), body, next);
+    branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, next);
     begin(body, span);
     const auto byte = state(nvr::StateOp::ReadElement, 0, {source, slot_operand(position)}, u8, span);
     auto incremented = add(current().synth.circuit(), lanes(slot_operand(position)), constant_word(1, 64), false);
-    assign(position, bits(u64, std::move(incremented.value)));
+    // The index stays below the length, so the addition is not checked.
+    assign(position, described(bits(u64, std::move(incremented.value)),
+                               binary_form("+~", u64, slot_operand(position), immediate(u64, 1))));
     state(nvr::StateOp::AppendElement, 0, {buffer, byte}, void_type, span);
     jump(head);
     begin(next, span);
@@ -3346,7 +3381,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
             times_32.insert(times_32.end(), word.begin(), word.end() - 5);
             auto& circuit = current().synth.circuit();
             const auto product = subtract(circuit, times_32, word, false).value;
-            assign(hash, bits(hash_type, add(circuit, product, lanes(value), false).value));
+            auto next = bits(hash_type, add(circuit, product, lanes(value), false).value);
+            assign(hash, described(std::move(next), hash_step_form(slot_operand(hash), value, false)));
         } else {
             append_text_bytes(buffer, value, span);
         }
@@ -3363,7 +3399,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
         if (equality) {
             const auto other = state(nvr::StateOp::ReadLength, 0, {slot_operand(right)}, count, span);
-            require_equal(bits(boolean, {equal(current().synth.circuit(), lanes(length), lanes(other))}));
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), lanes(other))});
+            require_equal(described(std::move(same), binary_form("==", boolean, length, other)));
         }
         const auto position = new_slot(count);
         assign(position, immediate(count, 0));
@@ -3372,14 +3409,16 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto done = new_block();
         jump(head);
         begin(head, span);
-        branch(bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)),
-                                   lanes(length), false)}), next, done);
+        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+        branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), next, done);
         begin(next, span);
         if (!equality && !hashing) {
             const auto nonzero = current().synth.circuit().any(lanes(slot_operand(position)));
             const auto separator = new_block();
             const auto element = new_block();
-            branch(bits(boolean, {nonzero}), separator, element);
+            branch(described(bits(boolean, {nonzero}),
+                             binary_form("!=", boolean, slot_operand(position), immediate(count, 0))),
+                   separator, element);
             begin(separator, span);
             append(',');
             append(' ');
@@ -3389,7 +3428,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         process(type.arguments.front(), 0, slot_operand(position));
         const auto incremented = add(current().synth.circuit(), lanes(slot_operand(position)),
                                      constant_word(1, 64), false);
-        assign(position, bits(count, incremented.value));
+        assign(position, described(bits(count, incremented.value),
+                                   binary_form("+~", count, slot_operand(position), immediate(count, 1))));
         jump(head);
         begin(done, span);
     }
@@ -3434,7 +3474,7 @@ void FunctionCompiler::compile_hash_text() {
     const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
     const auto body = new_block();
     const auto done = new_block();
-    branch(bits(boolean, {more}), body, done);
+    branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, done);
     begin(body, none);
     const auto byte = state(nvr::StateOp::ReadElement, 0, {slot_operand(source), slot_operand(position)}, u8, none);
     auto& circuit = current().synth.circuit();
@@ -3445,9 +3485,10 @@ void FunctionCompiler::compile_hash_text() {
     padded.resize(32, Signal::of(0));
     // Only the low word is retained. (previous << 5) - previous is 31 * previous.
     auto next = add(circuit, subtract(circuit, shifted, previous, false).value, padded, false);
-    assign(hash, bits(u32, std::move(next.value)));
+    assign(hash, described(bits(u32, std::move(next.value)), hash_step_form(slot_operand(hash), byte, true)));
     auto advance = add(circuit, lanes(slot_operand(position)), constant_word(1, 64), false);
-    assign(position, bits(u64, std::move(advance.value)));
+    assign(position, described(bits(u64, std::move(advance.value)),
+                               binary_form("+~", u64, slot_operand(position), immediate(u64, 1))));
     jump(head);
     begin(done, none);
     ExitSpec exit;

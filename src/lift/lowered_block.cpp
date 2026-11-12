@@ -195,6 +195,9 @@ private:
                 instruction.op = Opcode::Not;
             } else if (e.op == "~") {
                 instruction.op = Opcode::BitNot;
+            } else if (e.op == "hash") {
+                instruction.op = Opcode::ValueHash;
+                instruction.format = float_type(from);
             } else if (e.op == "index") {
                 instruction.op = Opcode::Index;
                 instruction.reason = instruction.is_signed ? 2 : 0;
@@ -299,8 +302,9 @@ private:
                                             : Opcode::GreaterEqual;
                 return push(instruction);
             }
-            if (op == "+~" || op == "&" || op == "|" || op == "^") {
+            if (op == "+~" || op == "-~" || op == "&" || op == "|" || op == "^") {
                 instruction.op = op == "+~" ? Opcode::AddWrapping
+                               : op == "-~" ? Opcode::SubtractWrapping
                                : op == "&"  ? Opcode::BitAnd
                                : op == "|"  ? Opcode::BitOr
                                             : Opcode::BitXor;

@@ -10,9 +10,9 @@ namespace neura::lift {
 namespace {
 
 // Operators by code. The order is part of the section's format.
-constexpr std::array<std::string_view, 23> operators{
+constexpr std::array<std::string_view, 25> operators{
     "!", "~", "index", "neg", "+", "+~", "-", "*", "/", "%", "==", "!=",
-    "<", "<=", ">", ">=", "&&", "||", "&", "|", "^", "<<", ">>",
+    "<", "<=", ">", ">=", "&&", "||", "&", "|", "^", "<<", ">>", "-~", "hash",
 };
 
 enum NodeKind : std::uint8_t { InputNode = 0, ImmediateNode = 1, UnaryNode = 2, BinaryNode = 3, ConvertNode = 4 };
