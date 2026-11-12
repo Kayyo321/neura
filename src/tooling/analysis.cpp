@@ -1515,6 +1515,12 @@ Json AnalysisSession::code_actions(const EditorDocument &doc, const Json &params
     for (const auto &d : diagnostics) {
         if (d.span.file != doc.path || !d.data())
             continue;
+        if (!d.code().empty() && d.span.offset <= end && d.span.offset + d.span.length >= begin) {
+            const auto title = "Explain " + std::string(d.code());
+            result.emplace_back(Json{{"title", title}, {"kind", "quickfix"},
+                                     {"command", Json{{"title", title}, {"command", "neura.explainDiagnostic"},
+                                                       {"arguments", Json::Array{std::string(d.code())}}}}});
+        }
         for (const auto &suggestion : d.data()->suggestions) {
             bool applicable = true;
             for (const auto &edit : suggestion.edits) {

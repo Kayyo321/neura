@@ -133,6 +133,8 @@ class LanguageServerTests(unittest.TestCase):
             **params(path), 'range': {'start': {'line': 1, 'character': 15},
                                      'end': {'line': 1, 'character': 15}}, 'context': {'diagnostics': []}})
         self.assertTrue(any(action['kind'] == 'quickfix' for action in actions))
+        self.assertTrue(any(action.get('command', {}).get('command') == 'neura.explainDiagnostic'
+                            and action['command'].get('arguments') == ['E0201'] for action in actions))
         self.client.notify('textDocument/didChange', {'textDocument': {'uri': path.as_uri(), 'version': 2},
                            'contentChanges': [{'text': source.replace('2\n', '2;\n')}]})
         self.client.request('textDocument/documentSymbol', params(path))
