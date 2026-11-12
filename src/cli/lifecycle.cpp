@@ -1,6 +1,7 @@
 #include "lifecycle.hpp"
 
 #include "install_layout.hpp"
+#include "release_channel.hpp"
 #include "neura/version.hpp"
 #include "util/sha256.hpp"
 
@@ -512,6 +513,40 @@ Fetcher make_fetcher(const std::string& given) {
     return fetcher;
 }
 
+PublishedRelease newest_github_release(const fs::path& root) {
+    if (find_in_path("curl").empty()) throw Failure{"curl is not installed; --nightly needs it to check GitHub releases"};
+    constexpr std::size_t page_size = 20;
+    constexpr std::size_t max_pages = 100;
+    const auto deadline = std::time(nullptr) + 120;
+    std::optional<PublishedRelease> selected;
+    for (std::size_t page_number = 1; page_number <= max_pages; ++page_number) {
+        const auto remaining = deadline - std::time(nullptr);
+        if (remaining <= 0) throw Failure{"the --nightly GitHub release check exceeded its 120 second limit"};
+        const int seconds = static_cast<int>(std::min<std::time_t>(remaining, 30));
+        const std::string url = std::string("https://api.github.com/repos/") + repository + "/releases?per_page=" +
+                                std::to_string(page_size) + "&page=" + std::to_string(page_number);
+        int descriptor = -1;
+        const auto temp = make_temp_file(root, ".meta-", descriptor);
+        ::close(descriptor);
+        RemoveOnExit cleanup(temp);
+        auto command = curl_command(url, temp, seconds, max_metadata_bytes);
+        command.insert(command.end(), {"--header", "Accept: application/vnd.github+json", "--header", "X-GitHub-Api-Version: 2022-11-28"});
+        const auto result = run_child(command, seconds + 5);
+        if (!result.started || result.status != 0) {
+            throw Failure{"cannot check GitHub releases for --nightly: " + (result.started ? failure_detail(result) : "curl could not be run")};
+        }
+        std::string error;
+        const auto page = parse_github_release_page(read_small_file(temp, "GitHub releases"), error);
+        if (!page || page->count > page_size) throw Failure{"cannot check GitHub releases for --nightly: " + (page ? "oversized page" : error)};
+        select_newest_release(selected, *page);
+        if (page->count < page_size) {
+            if (!selected) throw Failure{"GitHub has no published Neura release with a valid semantic-version tag"};
+            return *selected;
+        }
+    }
+    throw Failure{"the --nightly GitHub release list exceeded 100 pages; no update was selected"};
+}
+
 ReleaseMetadata fetch_metadata(const Fetcher& fetcher, const fs::path& root, int max_seconds) {
     std::string text;
     if (fetcher.remote) {
@@ -657,7 +692,7 @@ void replace_symlink(const fs::path& root, const std::string& target) {
 int run_update(const fs::path& executable, const Detection& detection, const UpdateOptions& options) {
     const auto& root = detection.root;
     const std::string current = version::full;
-    const auto fetcher = make_fetcher(options.source);
+    auto fetcher = make_fetcher(options.source);
     std::optional<UpdateLock> lock;
     if (!options.check) {
         if (options.require_attestation && find_in_path("gh").empty()) {
@@ -666,14 +701,22 @@ int run_update(const fs::path& executable, const Detection& detection, const Upd
         lock.emplace(root);
         remove_stale_staging(root);
     }
+    std::optional<PublishedRelease> selected;
+    if (options.nightly && options.source == default_release_source) {
+        selected = newest_github_release(root);
+        fetcher = make_fetcher(std::string("https://github.com/") + repository + "/releases/download/" + selected->tag);
+    }
     const auto metadata = fetch_metadata(fetcher, root, 30);
+    if (selected && metadata.version != selected->version) {
+        throw Failure{"the release metadata version " + metadata.version + " does not match selected GitHub tag " + selected->tag};
+    }
     if (!is_newer(metadata.version, current)) {
         std::cout << "neura " << current << " is up to date\n";
         return exit_ok;
     }
     if (options.check) {
         std::cout << "neura " << current << " is installed; neura " << metadata.version << " is available\n"
-                  << "run \"neura update\" to install it\n";
+                  << "run \"neura update" << (options.nightly ? " --nightly" : "") << "\" to install it\n";
         return exit_update_available;
     }
     const auto* asset = metadata.find(version::triple);

@@ -118,7 +118,7 @@ void usage(std::ostream& out) {
            "       neura --version | version\n"
            "       neura --help | help\n"
            "       neura doctor\n"
-           "       neura update [--check] [--source <https-url-or-directory>] [--require-attestation]\n"
+           "       neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]\n"
            "       neura uninstall [--dry-run] [--yes]\n"
            "\n"
            "doctor, update, and uninstall manage an installed neura and are described in docs/Install.md.\n"
@@ -422,6 +422,8 @@ void read_lifecycle_options(Options& options, int argc, char** argv) {
         };
         if (options.command == Command::Update && arg == "--check") {
             options.update.check = true;
+        } else if (options.command == Command::Update && arg == "--nightly") {
+            options.update.nightly = true;
         } else if (options.command == Command::Update && arg == "--source") {
             options.update.source = value();
         } else if (options.command == Command::Update && arg == "--require-attestation") {

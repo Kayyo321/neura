@@ -22,7 +22,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Research-candidate editor tooling for the separate Neura VS Code extension: `neura lsp --stdio`, compiler-backed unsaved analysis and semantic editing, `neura fmt`, `neura debug --stdio`, and `neura capabilities --json`.
 - Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.
 - Read-only image/graph JSON inspection through `neura inspect-image --json`.
-- Isolated tooling candidates may be tagged from the exact `codex/vscode-tooling-rc` branch tip. They remain prereleases and never replace the latest stable release; final releases still require `main`.
+- `neura update --nightly` includes published prereleases when selecting the newest version. It also works with `--check`; ordinary updates continue to use stable releases.
 
 ### Fixed
 

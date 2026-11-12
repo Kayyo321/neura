@@ -172,7 +172,7 @@ Three commands manage the installed tool; [Install](../Install.md) describes the
 | Command | Does |
 | --- | --- |
 | `neura doctor` | Prints `ok`, `warn`, or `FAIL` for each check of the install and its optional tools (the standard library, native launchers, libclang, a C compiler, the GPU backend, `curl`, `tar`, `gh`). Exits with status 1 if a check failed. Uses no network. |
-| `neura update [--check] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release after checking the archive's size and SHA-256 and, where `gh` is available, its build provenance. `--check` reports without changing anything. |
+| `neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release after checking the archive's size and SHA-256 and, where `gh` is available, its build provenance. `--check` reports without changing anything. `--nightly` includes published GitHub prereleases, selecting the highest semantic version. |
 | `neura uninstall [--dry-run] [--yes]` | Removes an archive install and nothing else. |
 
 `update` and `uninstall` apply only to an install made by the release archive's `install.sh`. A source build, a copy, or a package manager's install exits with status 3.
