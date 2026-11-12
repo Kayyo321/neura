@@ -125,6 +125,14 @@ struct OverflowProof {
 // caller that sees the analysis fail runs it again with the next use, down
 // to AdviceUse::none. Every use establishes every fact itself. A resumed
 // analysis must use the same setting.
+//
+// Precondition: every node reads only earlier wires, its edges name
+// strictly ascending sources (so no wire twice), and the graph has fewer
+// than 2^31 wires, as the loader requires of a graph it accepts. For a graph
+// that does not meet it, the proof is not safe and `node` names the first
+// node that breaks it (0 when there are too many wires); nothing else is
+// analysed. lanes_are_bits accepts no lane of such a graph either, nor of a
+// proof whose wires or group entries do not match the graph's wire count.
 using ProofAdvice = backend::GadgetAdvice;
 OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine = true, std::uint64_t* work = nullptr,
                                 const OverflowProof* resume = nullptr, const ProofAdvice* advice = nullptr,
