@@ -589,6 +589,12 @@ public:
     std::string location(std::uint32_t function, std::uint32_t block) const {
         return function == nvr::absent ? std::string("root") : task_location(function, block);
     }
+    DebugPosition debug_position() const;
+    DebugSnapshot debug_snapshot() const;
+    DebugValue debug_value(std::uint32_t type, std::uint64_t bits, bool initialized) const;
+    std::vector<DebugValue> debug_children(std::uint32_t type, std::uint64_t handle,
+                                           std::size_t start, std::size_t count) const;
+
 
 private:
     friend class Execution;
@@ -3049,6 +3055,7 @@ private:
         }
         ++steps_;
         const auto frame = frames_.back();
+        if (limits_.block_observer) limits_.block_observer(frame.function, frame.block);
         if (scheduler_ && limits_.profile) ++current_task().steps;
         if (limits_.profile) {
             if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
@@ -4114,6 +4121,129 @@ std::string Execution::State::cancellation_text(const Task& task) const {
     return {};
 }
 
+DebugValue Execution::State::debug_value(std::uint32_t index, std::uint64_t bits,
+                                               bool initialized) const {
+    DebugValue value{index, bits, initialized, {}, 0};
+    if (!initialized) { value.text = "<uninitialized>"; return value; }
+    if (index >= image_.types.size()) { value.text = "<invalid type>"; return value; }
+    const auto& value_type = image_.types[index];
+    if (!nvr::is_reference(value_type.kind)) {
+        value.text = value_type.kind == nvr::TypeKind::Void ? "void" : scalar_text(value_type, bits);
+        return value;
+    }
+    if (bits == 0) { value.text = "nil"; return value; }
+    const auto* entry = heap_.find(bits);
+    if (!entry) { value.text = "<released reference>"; return value; }
+    switch (entry->kind) {
+    case EntryKind::Text: {
+        // Keep large strings and binary bytes out of every stack snapshot.
+        value.text = "\"";
+        auto limit = std::min<std::size_t>(entry->bytes.size(), 512);
+        while (limit != 0 && limit < entry->bytes.size() &&
+               (static_cast<unsigned char>(entry->bytes[limit]) & 0xc0U) == 0x80U) --limit;
+        for (std::size_t i = 0; i < limit; ++i) {
+            const auto c = static_cast<unsigned char>(entry->bytes[i]);
+            if (c == '\n') value.text += "\\n";
+            else if (c == '\r') value.text += "\\r";
+            else if (c == '\t') value.text += "\\t";
+            else if (c == '"' || c == '\\') { value.text += '\\'; value.text += static_cast<char>(c); }
+            else if (c >= 32) value.text += static_cast<char>(c);
+            else {
+                constexpr char digits[] = "0123456789abcdef";
+                value.text += "\\u00";
+                value.text += digits[c >> 4];
+                value.text += digits[c & 15];
+            }
+        }
+        if (limit < entry->bytes.size()) value.text += "…";
+        value.text += '"';
+        break;
+    }
+    case EntryKind::Bytes:
+        value.text = "bytes[" + std::to_string(entry->bytes.size()) + "]";
+        value.children = entry->bytes.size();
+        break;
+    case EntryKind::Array:
+    case EntryKind::List:
+        value.text = std::string(entry->kind == EntryKind::Array ? "array[" : "list[") +
+                     std::to_string(entry->cells.size()) + "]";
+        value.children = entry->cells.size();
+        break;
+    case EntryKind::Object:
+        value.layout = entry->type;
+        value.text = "object @" + std::to_string(bits);
+        value.children = entry->cells.size();
+        break;
+    }
+    return value;
+}
+
+std::vector<DebugValue> Execution::State::debug_children(std::uint32_t index, std::uint64_t handle,
+                                                         std::size_t start, std::size_t count) const {
+    std::vector<DebugValue> values;
+    if (index >= image_.types.size() || !nvr::is_reference(image_.types[index].kind) || handle == 0) return values;
+    const auto* entry = heap_.find(handle);
+    if (!entry) return values;
+    count = std::min<std::size_t>(count, 1000);
+    if (entry->kind == EntryKind::Object) {
+        const auto& fields = image_.layouts[entry->type].fields;
+        const auto end = start + std::min(count, fields.size() - std::min(start, fields.size()));
+        for (auto i = start; i < end; ++i) values.push_back(debug_value(fields[i], entry->cells[i], entry->initialized[i]));
+    } else if (entry->kind == EntryKind::Array || entry->kind == EntryKind::List) {
+        const auto element = image_.types[entry->type].reference;
+        const auto end = start + std::min(count, entry->cells.size() - std::min(start, entry->cells.size()));
+        // Collections are initialized atomically at allocation; only object
+        // fields carry per-cell initialized flags.
+        for (auto i = start; i < end; ++i) values.push_back(debug_value(element, entry->cells[i], true));
+    } else if (entry->kind == EntryKind::Bytes) {
+        std::uint32_t byte_type = nvr::absent;
+        for (std::uint32_t i = 0; i < image_.types.size(); ++i)
+            if (image_.types[i].kind == nvr::TypeKind::Unsigned && image_.types[i].width == 8) { byte_type = i; break; }
+        const auto end = start + std::min(count, entry->bytes.size() - std::min(start, entry->bytes.size()));
+        for (auto i = start; i < end; ++i) {
+            const auto bits = static_cast<unsigned char>(entry->bytes[i]);
+            values.push_back(DebugValue{byte_type, bits, true, std::to_string(bits), 0});
+        }
+    }
+    return values;
+}
+
+DebugPosition Execution::State::debug_position() const {
+    if (frames_.empty()) return {};
+    const auto& frame = frames_.header(frames_.size() - 1);
+    return DebugPosition{scheduler_ ? scheduler_->current : 0, frame.function, frame.block, frames_.size()};
+}
+
+DebugSnapshot Execution::State::debug_snapshot() const {
+    DebugSnapshot snapshot;
+    snapshot.current_task = scheduler_ ? scheduler_->current : 0;
+    const auto copy_frames = [&](const FrameStack& stack) {
+        std::vector<DebugFrame> result;
+        result.reserve(stack.size());
+        for (auto depth = stack.size(); depth-- > 0;) {
+            const auto& frame = stack.header(depth);
+            DebugFrame copied{frame.function, frame.block, {}};
+            const auto& types = image_.functions[frame.function].frame_types;
+            for (std::size_t i = 0; i < types.size(); ++i)
+                copied.slots.push_back(debug_value(types[i], stack.slots(depth)[i], stack.initialized(depth)[i] != 0));
+            result.push_back(std::move(copied));
+        }
+        return result;
+    };
+    if (scheduler_) {
+        for (const auto& [id, task] : scheduler_->tasks) {
+            if (task.state == TaskState::Finished) continue;
+            const auto& stack = id == scheduler_->current && task.state == TaskState::Running ? frames_ : task.frames;
+            snapshot.threads.push_back(DebugThread{id, wait_text(id, task), copy_frames(stack)});
+        }
+    } else {
+        snapshot.threads.push_back(DebugThread{0, "running", copy_frames(frames_)});
+    }
+    for (std::size_t i = 0; i < globals_.size(); ++i)
+        snapshot.globals.push_back(debug_value(image_.globals[i].type, globals_[i], global_initialized_[i] != 0));
+    return snapshot;
+}
+
 std::string Execution::State::dump_tasks(TaskDumpFormat format) const {
     if (!scheduler_) return {};
     std::map<std::uint64_t, std::vector<std::uint64_t>> children;
@@ -4283,6 +4413,13 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 
 Event Execution::advance() { return state_->advance(); }
 std::string Execution::dump_tasks(TaskDumpFormat format) const { return state_->dump_tasks(format); }
+DebugPosition Execution::debug_position() const { return state_->debug_position(); }
+DebugSnapshot Execution::debug_snapshot() const { return state_->debug_snapshot(); }
+std::vector<DebugValue> Execution::debug_children(std::uint32_t type, std::uint64_t handle,
+                                                  std::size_t start, std::size_t count) const {
+    return state_->debug_children(type, handle, start, count);
+}
+
 std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
 std::uint64_t Execution::tick() const { return state_->tick(); }
 std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }

@@ -29,6 +29,7 @@ struct DoctorOptions {
 
 struct UpdateOptions {
     bool check = false;
+    bool nightly = false;
     std::string source = default_release_source;
     bool require_attestation = false;
 };

@@ -24,7 +24,25 @@ namespace {
 
 namespace fs = std::filesystem;
 
-CImportOptions c_import_options;
+thread_local CImportOptions c_import_options;
+thread_local const std::map<std::string, std::string, std::less<>>* source_overlays = nullptr;
+thread_local bool overlay_c_imports = true;
+thread_local const std::set<std::string>* overlay_hidden_sources = nullptr;
+
+fs::path source_canonical(const fs::path& path) {
+    if (overlay_hidden_sources && overlay_hidden_sources->contains(fs::weakly_canonical(fs::absolute(path)).generic_string()))
+        throw std::runtime_error("source file was moved: " + path.string());
+    if (source_overlays) {
+        const auto actual = fs::weakly_canonical(fs::absolute(path));
+        if (source_overlays->contains(actual.generic_string())) return actual;
+    }
+    return fs::canonical(path);
+}
+bool source_exists(const fs::path& path) {
+    if (overlay_hidden_sources && overlay_hidden_sources->contains(fs::weakly_canonical(fs::absolute(path)).generic_string())) return false;
+    if (source_overlays && source_overlays->contains(fs::weakly_canonical(fs::absolute(path)).generic_string())) return true;
+    return fs::is_regular_file(path);
+}
 
 // The modules generated for C imports during one source load.
 struct CImports {
@@ -190,8 +208,8 @@ fs::path find_module(const Expr& import, const std::vector<fs::path>& roots, con
     std::set<fs::path> candidates;
     auto search = [&](const fs::path& root) {
         const auto path = root / relative;
-        if (fs::is_regular_file(path)) {
-            const auto actual = fs::canonical(path);
+        if (source_exists(path)) {
+            const auto actual = source_canonical(path);
             if (library_path(actual, library).empty()) {
                 candidates.insert(actual);
             }
@@ -235,11 +253,21 @@ std::vector<fs::path> find_wildcard_modules(const Expr& import, const std::vecto
     std::map<fs::path, fs::path> candidates;
     auto search = [&](const fs::path& root) {
         const auto directory = root / relative;
-        if (!fs::is_directory(directory)) return;
-        for (const auto& item : fs::directory_iterator(directory)) {
-            const auto filename = item.path().filename();
-            if (filename.extension() != ".nra" || !item.is_regular_file()) continue;
-            const auto actual = fs::canonical(item.path());
+        std::set<fs::path> entries;
+        if (fs::is_directory(directory)) {
+            for (const auto& item : fs::directory_iterator(directory))
+                if (item.is_regular_file() && source_exists(item.path())) entries.insert(source_canonical(item.path()));
+        }
+        if (source_overlays) {
+            const auto actual_directory = fs::weakly_canonical(fs::absolute(directory));
+            for (const auto& [name, source] : *source_overlays) {
+                const fs::path candidate(name);
+                if (candidate.parent_path() == actual_directory && source_exists(candidate)) entries.insert(candidate);
+            }
+        }
+        for (const auto& actual : entries) {
+            const auto filename = actual.filename();
+            if (filename.extension() != ".nra") continue;
             const auto trusted_path = library_path(actual, library);
             if (standard) {
                 if (trusted_path != (relative / filename).generic_string() ||
@@ -297,7 +325,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
                                           CImports* c_imports = nullptr) {
     const auto trusted = library.empty() ? fs::path{} : fs::canonical(library);
     std::vector<fs::path> pending;
-    for (const auto& file : files) pending.push_back(fs::canonical(file));
+    for (const auto& file : files) pending.push_back(source_canonical(file));
     std::set<fs::path> visited;
     std::vector<ParsedFile> parsed;
     for (std::size_t i = 0; i < pending.size(); ++i) {
@@ -311,6 +339,9 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
         if (c_imports && c_imports->sources.contains(file)) {
             source = c_imports->sources.at(file);
             SourceMap::global().add(name, source, SourceKind::Generated, c_imports->headers[file]);
+        } else if (source_overlays && source_overlays->contains(name)) {
+            source = source_overlays->at(name);
+            SourceMap::global().add(name, source, in_library ? SourceKind::Library : SourceKind::User);
         } else {
             if (!fs::is_regular_file(file)) {
                 throw std::runtime_error("not a regular input file: " + file.string());
@@ -354,6 +385,8 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             }
             const bool from_library = !syntax.library_path.empty();
             if (!import->c_import.empty()) {
+                if (source_overlays && !overlay_c_imports)
+                    throw Diagnostic(import->span, "C header analysis requires trusted workspace configuration").with_code("E0708");
                 if (from_library || !c_imports)
                     throw Diagnostic(import->span, "a C import is not available here").with_code("E0708");
                 const auto header = find_c_header(import->c_import.front(), file.parent_path(), roots, import->span);
@@ -540,6 +573,19 @@ IrProgram lower_with_artifacts(std::vector<ParsedFile> parsed, std::vector<Artif
 }
 
 } // namespace
+
+SourceOverlayScope::SourceOverlayScope(const std::map<std::string, std::string, std::less<>>& sources,
+                                       bool allow_c_imports, const std::set<std::string>* hidden_sources)
+    : previous_(source_overlays), previous_c_imports_(overlay_c_imports), previous_hidden_(overlay_hidden_sources) {
+    source_overlays = &sources;
+    overlay_c_imports = allow_c_imports;
+    overlay_hidden_sources = hidden_sources;
+}
+SourceOverlayScope::~SourceOverlayScope() {
+    source_overlays = previous_;
+    overlay_c_imports = previous_c_imports_;
+    overlay_hidden_sources = previous_hidden_;
+}
 
 std::vector<ParsedFile> read_sources(const std::vector<fs::path>& files,
                                      const std::vector<fs::path>& roots, const fs::path& library) {

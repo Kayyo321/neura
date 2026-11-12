@@ -100,3 +100,8 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 | `tags/download.nra` | Compiles and runs; tags on `last` fields, accessors, and anonymous classes. `backend-cli` builds and runs it optimized and unoptimized. |
 | `tags/tags.nra` | Compiles and runs; it uses implemented and informational [tags](Tags). `ir-optimization-cli` builds it with and without optimization and compares the output and the step counts. |
 | `concurrency/monitor.nra` | Compiles and runs; a monitor shared by tasks, an `#Immutable` value class, and `#Pure` and `#ThreadSafe` functions ([Tags](Tags#implemented-tags)). `backend-cli` builds and runs it. |
+
+
+## Editor tooling candidate
+
+The isolated `0.2.1-rc.1` research branch adds LSP, formatting, exact test discovery/reporting, mapped-block line coverage, DAP source debugging, and graph inspection. See [Tooling](Tooling#editor-tooling-research-candidate) for interfaces and present limits. This tooling candidate is separate from stable release work; it changes no language syntax or runtime semantics.

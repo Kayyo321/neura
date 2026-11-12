@@ -143,6 +143,7 @@ class Document:
     title: str = ""
     plate: str = ""
     group: str = ""
+    overview: bool = True
     rendered: site_markdown.Document | None = None
     body: str = ""
     members: list[tuple[str, str]] = field(default_factory=list)
@@ -330,7 +331,8 @@ class Assembly:
                         continue
                     name = posixpath.basename(source)[:-3].removeprefix("Stdlib-")
                     group, _, label = name.partition("-")
-                    self.add_document(section, source, label or group, "", "", group if label else "")
+                    self.add_document(section, source, label or group, "", "", group if label else "",
+                                      overview=not source.startswith("docs/diagnostics/"))
         unlisted = contents.get("unlisted")
         if unlisted:
             self.add_unlisted(unlisted)
@@ -361,14 +363,14 @@ class Assembly:
             self.sections.append(section)
 
     def add_document(self, section: Section, source: str, label: str, title: str, plate: str,
-                     group: str = "") -> None:
+                     group: str = "", overview: bool = True) -> None:
         if not (self.root / source).is_file():
             self.report(f"{SITE}/{CONTENTS}", 1, f"lists `{source}`, which is not a file in the repository")
             return
         if source in self.documents:
             self.report(f"{SITE}/{CONTENTS}", 1, f"lists `{source}` twice")
             return
-        document = Document(source, self.published_path(source), section, label, title, plate, group)
+        document = Document(source, self.published_path(source), section, label, title, plate, group, overview)
         section.documents.append(document)
         self.documents[source] = document
 
@@ -647,6 +649,9 @@ class Assembly:
             for document in section.documents:
                 if document.group:
                     groups[document.group] = groups.get(document.group, 0) + 1
+                    continue
+                # Diagnostic entries stay in the directory and search; the shelf links to their index.
+                if not document.overview:
                     continue
                 summary = first_sentence(document.rendered.summary) if document.rendered else ""
                 items.append(f'<li><a href="{relative(page, document.published)}">{html.escape(document.label)}</a>'

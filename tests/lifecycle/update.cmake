@@ -266,6 +266,105 @@ lc_expect_untouched("rejected sources")
 lc_exec(options ENV ${update_env} COMMAND "${LC_LINK}" update --bogus)
 lc_expect_status("update with an unknown option" options 1)
 
+# --- (f) opt-in prereleases: real CLI and transport, with no network --------
+
+set(nightly_version "9.9.9-rc.10")
+set(stable_version "${new_version}")
+set(new_version "${nightly_version}")
+string(REPLACE "9.9.9" "${nightly_version}" nightly_script "${good_script}")
+lc_scripted_release(nightly "${nightly_script}")
+set(new_version "${stable_version}")
+set(nightly_fixture "${work}/nightly-fixture")
+set(nightly_tools "${work}/nightly-tools")
+file(MAKE_DIRECTORY "${nightly_fixture}" "${nightly_tools}")
+find_program(LC_CP cp REQUIRED)
+find_program(LC_GZIP gzip REQUIRED)
+file(CREATE_LINK "${LC_TAR}" "${nightly_tools}/tar" SYMBOLIC)
+file(CREATE_LINK "${LC_GZIP}" "${nightly_tools}/gzip" SYMBOLIC)
+set(mock_curl [=[#!/bin/sh
+output=
+url=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) shift; output=$1 ;;
+        --url) shift; url=$1 ;;
+    esac
+    shift
+done
+printf '%s\n' "$url" >> "$NEURA_NIGHTLY_FIXTURE/requests"
+case "$NEURA_NIGHTLY_MODE" in
+    failure) echo "fixture GitHub API failure" >&2; exit 22 ;;
+esac
+case "$url" in
+    'https://api.github.com/repos/Kayyo321/neura/releases?per_page=20&page=1')
+        source="$NEURA_NIGHTLY_FIXTURE/page1.json" ;;
+    'https://api.github.com/repos/Kayyo321/neura/releases?per_page=20&page=2')
+        source="$NEURA_NIGHTLY_FIXTURE/page2.json" ;;
+    'https://github.com/Kayyo321/neura/releases/latest/download/neura-release.txt')
+        source="$NEURA_NIGHTLY_FIXTURE/../good/neura-release.txt" ;;
+    'https://github.com/Kayyo321/neura/releases/download/v9.9.9-rc.10/neura-release.txt')
+        if [ "$NEURA_NIGHTLY_MODE" = mismatch ]; then
+            source="$NEURA_NIGHTLY_FIXTURE/../good/neura-release.txt"
+        else
+            source="$NEURA_NIGHTLY_FIXTURE/../nightly/neura-release.txt"
+        fi ;;
+    'https://github.com/Kayyo321/neura/releases/download/v9.9.9-rc.10/neura-'*.tar.gz)
+        source="$NEURA_NIGHTLY_FIXTURE/../nightly/${url##*/}" ;;
+    *) echo "unexpected fixture URL: $url" >&2; exit 22 ;;
+esac
+"@LC_CP@" "$source" "$output"
+]=])
+string(CONFIGURE "${mock_curl}" mock_curl @ONLY)
+file(WRITE "${nightly_tools}/curl" "${mock_curl}")
+file(CHMOD "${nightly_tools}/curl" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE)
+set(nightly_env "PATH=${nightly_tools}" "NEURA_NIGHTLY_FIXTURE=${nightly_fixture}")
+set(page_one "[")
+foreach(index RANGE 1 19)
+    string(APPEND page_one "{\"tag_name\":\"v9.9.8\",\"draft\":false,\"prerelease\":false,\"published_at\":\"2026-11-12T00:00:00Z\"},")
+endforeach()
+string(APPEND page_one "{\"tag_name\":\"v99.0.0\",\"draft\":true,\"prerelease\":false,\"published_at\":null}]")
+file(WRITE "${nightly_fixture}/page1.json" "${page_one}")
+file(WRITE "${nightly_fixture}/page2.json" [=[[
+{"tag_name":"v9.9.9-rc.2","draft":false,"prerelease":true,"published_at":"2026-11-12T00:00:00Z"},
+{"tag_name":"v9.9.9-rc.10","draft":false,"prerelease":true,"published_at":"2026-11-11T00:00:00Z"},
+{"tag_name":"v98.0.0-rc.1","draft":false,"prerelease":true,"published_at":null}
+]]=])
+lc_exec(stable_check ENV ${update_env} ${nightly_env} COMMAND "${LC_LINK}" update --check)
+lc_expect_status("the default channel remains stable" stable_check 4)
+lc_expect_contains("stable channel" "${stable_check_OUT}" "neura ${stable_version} is available")
+file(READ "${nightly_fixture}/requests" stable_requests)
+lc_expect_equal("the stable channel never queries prereleases" "${stable_requests}"
+    "https://github.com/Kayyo321/neura/releases/latest/download/neura-release.txt\n")
+file(WRITE "${nightly_fixture}/requests" "")
+lc_exec(nightly_check ENV ${update_env} ${nightly_env} COMMAND "${LC_LINK}" update --check --nightly)
+lc_expect_status("nightly check" nightly_check 4)
+lc_expect_contains("nightly check" "${nightly_check_OUT}" "neura ${nightly_version} is available")
+lc_expect_contains("nightly check installation hint" "${nightly_check_OUT}" "neura update --nightly")
+file(READ "${nightly_fixture}/requests" nightly_requests)
+lc_expect_contains("nightly pagination" "${nightly_requests}" "per_page=20&page=2")
+lc_expect_contains("nightly pins its selected tag" "${nightly_requests}" "/download/v${nightly_version}/neura-release.txt")
+lc_expect_untouched("nightly check")
+lc_exec(local_nightly ENV ${update_env} COMMAND "${LC_LINK}" update --nightly --check --source "${work}/nightly")
+lc_expect_status("nightly with an explicit local source" local_nightly 4)
+lc_expect_contains("nightly local source" "${local_nightly_OUT}" "neura ${nightly_version} is available")
+foreach(mode IN ITEMS failure mismatch)
+    lc_exec(nightly_error ENV ${update_env} ${nightly_env} "NEURA_NIGHTLY_MODE=${mode}" COMMAND "${LC_LINK}" update --nightly)
+    lc_expect_status("nightly ${mode}" nightly_error 1)
+    if(mode STREQUAL "failure")
+        lc_expect_contains("nightly API failure" "${nightly_error_ERR}" "cannot check GitHub releases")
+    else()
+        lc_expect_contains("nightly metadata mismatch" "${nightly_error_ERR}" "does not match selected GitHub tag")
+    endif()
+    lc_expect_untouched("nightly ${mode}")
+endforeach()
+foreach(page IN ITEMS "{}" "[]" "not JSON")
+    file(WRITE "${nightly_fixture}/page1.json" "${page}")
+    lc_exec(nightly_error ENV ${update_env} ${nightly_env} COMMAND "${LC_LINK}" update --check --nightly)
+    lc_expect_status("nightly with invalid or empty release list" nightly_error 1)
+    lc_expect_untouched("nightly invalid release list")
+endforeach()
+file(WRITE "${nightly_fixture}/page1.json" "${page_one}")
+
 # --- (d) installs that neura does not manage --------------------------------
 
 foreach(arguments IN ITEMS "update" "update;--check" "uninstall" "uninstall;--dry-run")
@@ -329,3 +428,18 @@ lc_expect_equal("the entries of the root after the update" "${entries}" "current
 lc_exec(after COMMAND "${LC_LINK}" --version)
 lc_expect_status("the bin link after the update" after 0)
 lc_expect_equal("the bin link after the update" "${after_OUT}" "neura 9.9.9 (test, commit test)\n")
+
+# A second pristine archive install exercises actual candidate activation.
+# PATH has the fixture curl and tar but no gh; provenance behavior is already
+# exercised above, and candidate archives keep exactly the same SHA checks.
+lc_make_install("${TEST_DIR}-nightly")
+lc_exec(nightly_update ENV "HOME=${LC_HOME}" ${nightly_env} COMMAND "${LC_LINK}" update --nightly)
+lc_expect_status("nightly candidate update" nightly_update 0)
+lc_expect_contains("nightly candidate update" "${nightly_update_OUT}" "updated neura ${LC_VERSION} to ${nightly_version}")
+lc_expect_contains("nightly candidate integrity" "${nightly_update_OUT}" "verified: size and SHA-256")
+file(READ_SYMLINK "${LC_ROOT}/current" nightly_target)
+lc_expect_equal("nightly activated version" "${nightly_target}" "versions/${nightly_version}")
+lc_exec(after_nightly COMMAND "${LC_LINK}" --version)
+lc_expect_status("nightly installed binary" after_nightly 0)
+lc_expect_equal("nightly installed binary" "${after_nightly_OUT}" "neura ${nightly_version} (test, commit test)\n")
+lc_expect_no_leftovers("nightly candidate update" "${LC_ROOT}")

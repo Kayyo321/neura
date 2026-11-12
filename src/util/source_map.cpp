@@ -3,6 +3,10 @@
 #include <algorithm>
 
 namespace neura {
+namespace { thread_local SourceMap* active_source_map = nullptr; }
+
+SourceMapScope::SourceMapScope(SourceMap& map) : previous_(active_source_map) { active_source_map = &map; }
+SourceMapScope::~SourceMapScope() { active_source_map = previous_; }
 
 SourceFile::SourceFile(std::string name, std::string text, SourceKind kind, std::string origin)
     : name_(std::move(name)), text_(std::move(text)), kind_(kind), origin_(std::move(origin)) {
@@ -28,7 +32,7 @@ std::string_view SourceFile::line_text(std::size_t line) const {
 
 SourceMap& SourceMap::global() {
     static SourceMap map;
-    return map;
+    return active_source_map ? *active_source_map : map;
 }
 
 void SourceMap::add(std::string name, std::string text, SourceKind kind, std::string origin) {
@@ -41,6 +45,13 @@ std::shared_ptr<const SourceFile> SourceMap::find(std::string_view name) const {
     const std::lock_guard lock(mutex_);
     const auto found = files_.find(name);
     return found == files_.end() ? nullptr : found->second;
+}
+
+std::vector<std::shared_ptr<const SourceFile>> SourceMap::files() const {
+    const std::lock_guard lock(mutex_);
+    std::vector<std::shared_ptr<const SourceFile>> result;
+    for (const auto& [name, file] : files_) result.push_back(file);
+    return result;
 }
 
 void SourceMap::clear() {

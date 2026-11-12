@@ -8,5 +8,5 @@ export let Version = module (
     /// @brief The minor version component of the shipped library.
     export const Minor: int = 2;
     /// @brief The patch version component of the shipped library.
-    export const Patch: int = 0;
+    export const Patch: int = 1;
 );

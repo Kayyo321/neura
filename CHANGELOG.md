@@ -19,6 +19,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- Research-candidate editor tooling for the separate Neura VS Code extension: `neura lsp --stdio`, compiler-backed unsaved analysis and semantic editing, `neura fmt`, `neura debug --stdio`, and `neura capabilities --json`.
+- Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.
+- Read-only image/graph JSON inspection through `neura inspect-image --json`.
+- `neura update --nightly` includes published prereleases when selecting the newest version. It also works with `--check`; ordinary updates continue to use stable releases.
 - `neura run --tier-stats` (and `run --each` and `neura test` with it) ends with a line that divides the command's wall time among loading the image, proving, searching, tier 0, tier 1, regions, garbage collection, host services, and the rest ([controls](docs/runtime/NVM.md#controls)). The existing lines are unchanged.
 
 ### Changed
@@ -31,6 +35,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- The website places one skill-copy button above its prompt with feedback that keeps the page in place, keeps the front page's frame fitted during mobile scrolling, and gives diagnostic codes a compact Reading Room overview.
 - Three defects of the overflow proof that 0.2.0 has. The proof accepted a graph in which a node reads one wire twice, counting the two edges as the two halves of a step pair; it divided the most negative 64-bit weight by -1, which is undefined; and when a wire's range was 2^63 wide or more it looped over that range without counting the work against its limit. The loader rejects the first kind of graph before any proof, and no graph that the circuit library builds was found to reach the other two, so no image is known to have run wrongly. The proof now refuses a graph whose edges are not in strictly ascending order of source itself, and its arithmetic and loops are bounded on every input ([execution tiers](docs/runtime/NVM.md#execution-tiers)).
 
 ## [0.2.0] - 2026-11-11

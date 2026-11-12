@@ -40,6 +40,10 @@ struct RunLimits {
     // Count the steps of each function, for `neura run --profile`. Counting
     // does not change execution.
     bool profile = false;
+    // Observes every begun reference-tier block, including one that later
+    // traps. Tooling coverage supplies this with tier=0, no device, and one
+    // parallel worker. It must not mutate or call back into the execution.
+    std::function<void(std::uint32_t function, std::uint32_t block)> block_observer{};
     // Evaluates graphs for this run, or nullptr for the reference evaluator.
     // The device must have been created for the image the run executes.
     GraphDevice* graph_device = nullptr;
@@ -284,6 +288,45 @@ struct Event {
 
 // One run of a validated image. The run owns its frames, heap, globals, and
 // counters; constructing another Execution starts again from the image.
+// Read-only debugger data copied between completed graph steps. These are
+// runtime values, never evaluated expressions: inspection cannot invoke a
+// getter, run a function, initialize a slot, or retain a heap object.
+struct DebugValue {
+    std::uint32_t type = nvr::absent;
+    std::uint64_t bits = 0;
+    bool initialized = false;
+    std::string text;
+    std::size_t children = 0;
+    std::uint32_t layout = nvr::absent;
+};
+
+struct DebugFrame {
+    std::uint32_t function = nvr::absent;
+    std::uint32_t block = nvr::absent;
+    // Slots retain image order; NAME supplies optional source names.
+    std::vector<DebugValue> slots;
+};
+
+struct DebugThread {
+    std::uint64_t id = 0;
+    std::string state;
+    // Innermost frame first.
+    std::vector<DebugFrame> frames;
+};
+
+struct DebugPosition {
+    std::uint64_t task = 0;
+    std::uint32_t function = nvr::absent;
+    std::uint32_t block = nvr::absent;
+    std::size_t depth = 0;
+};
+
+struct DebugSnapshot {
+    std::uint64_t current_task = 0;
+    std::vector<DebugThread> threads;
+    std::vector<DebugValue> globals;
+};
+
 class Execution {
 public:
     // Throws std::invalid_argument when an argument is not valid UTF-8.
@@ -309,6 +352,14 @@ public:
     // Snapshot of scheduler state between block steps: the task tree with
     // each task's spawn site, state, and stack. Empty for a serial image.
     std::string dump_tasks(TaskDumpFormat format = TaskDumpFormat::Text) const;
+    // Call only while execution is stopped between steps (or after
+    // begin_step and before finish_step). Copies are bounded by the caller's
+    // variable window; they never alter program or collector state.
+    DebugPosition debug_position() const;
+    DebugSnapshot debug_snapshot() const;
+    std::vector<DebugValue> debug_children(std::uint32_t type, std::uint64_t handle,
+                                           std::size_t start = 0, std::size_t count = 100) const;
+
     // The most tasks that were live at once, counting the root. Zero for a
     // serial image.
     std::uint64_t peak_tasks() const;

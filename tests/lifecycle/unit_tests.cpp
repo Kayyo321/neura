@@ -6,6 +6,7 @@
 // Usage: neura_lifecycle_tests <sha256|semver|release-metadata|marker>
 
 #include "cli/install_layout.hpp"
+#include "cli/release_channel.hpp"
 #include "util/sha256.hpp"
 
 #include <cstdlib>
@@ -131,6 +132,35 @@ int semver_suite() {
         CHECK(!parse_semver(bad));
     }
     CHECK(parse_semver("0.0.0") && parse_semver("1.2.3-0") && parse_semver("1.2.3-0a") && parse_semver("1.2.3-x.y.0"));
+    // GitHub publication order is not semantic version order. A later page
+    // can contain the newest candidate; a stable release beats its own RC.
+    std::string error;
+    const auto first_page = parse_github_release_page(R"([
+        {"tag_name":"v1.2.3-rc.2","draft":false,"prerelease":true,"published_at":"2026-11-12T00:00:00Z"},
+        {"tag_name":"v1.2.3","draft":false,"prerelease":false,"published_at":"2026-11-11T00:00:00Z"},
+        {"tag_name":"v99.0.0","draft":true,"prerelease":false,"published_at":"2026-11-13T00:00:00Z"},
+        {"tag_name":"v98.0.0","draft":false,"prerelease":true,"published_at":null},
+        {"tag_name":"../../evil","draft":false,"prerelease":true,"published_at":"today"}
+    ])", error);
+    CHECK(first_page && first_page->count == 5 && first_page->releases.size() == 2);
+    std::optional<PublishedRelease> selected;
+    if (first_page) select_newest_release(selected, *first_page);
+    CHECK(selected && selected->version == "1.2.3" && selected->tag == "v1.2.3");
+    const auto next_page = parse_github_release_page(R"([
+        {"tag_name":"1.3.0-rc.10","draft":false,"prerelease":true,"published_at":"2026-11-10T00:00:00Z"},
+        {"tag_name":"v1.3.0-rc.2","draft":false,"prerelease":true,"published_at":"2026-11-12T00:00:00Z"}
+    ])", error);
+    CHECK(next_page.has_value());
+    if (next_page) select_newest_release(selected, *next_page);
+    CHECK(selected && selected->version == "1.3.0-rc.10" && selected->tag == "1.3.0-rc.10");
+    for (const char* bad : {"", "{}", "null", "[null]", "[{\"tag_name\":\"v9.0.0\"}]",
+                            "[{\"tag_name\":\"v9.0.0\",\"draft\":\"false\",\"prerelease\":true}]"}) {
+        error.clear();
+        CHECK(!parse_github_release_page(bad, error));
+        CHECK(!error.empty());
+    }
+    const auto empty_page = parse_github_release_page("[]", error);
+    CHECK(empty_page && empty_page->count == 0 && empty_page->releases.empty());
     return failures;
 }
 
