@@ -24,8 +24,9 @@ class EditorRegressionTests(unittest.TestCase):
         self.sequence += 1
         path = self.root / f'edit-{self.sequence}.nra'
         self.client.open(path, source + after)
-        line = source.count('\n')
-        column = len(source.rsplit('\n', 1)[-1].encode('utf-16-le')) // 2
+        logical_source = source.replace('\r\n', '\n').replace('\r', '\n')
+        line = logical_source.count('\n')
+        column = len(logical_source.rsplit('\n', 1)[-1].encode('utf-16-le')) // 2
         return self.client.request('textDocument/completion', params(path, line, column))['items']
 
     def labels(self, marked):
@@ -236,7 +237,20 @@ class EditorRegressionTests(unittest.TestCase):
         self.assertEqual(self.labels('let text = "import:Std.<cursor>";'), set())
         self.assertEqual(self.labels('// let.<cursor>'), set())
         self.assertEqual(self.labels('let text = "//"; // let.<cursor>'), set())
+        for source in ['let text = "con<cursor>', 'let text = "import:Std.<cursor>',
+                       'let text = "escaped\\<cursor>', 'let text = "escaped \\" con<cursor>',
+                       'let text = "// con<cursor>', 'let text = "\\q con<cursor>";',
+                       'let text = "bad\\q con<cursor>',
+                       '// "con<cursor>', 'let text = "closed"// con<cursor>']:
+            with self.subTest(source=source):
+                self.assertEqual(self.labels(source), set())
         self.assertIn('let', self.labels('let text = "//";\nl<cursor>'))
+        self.assertIn('const', self.labels('let text = "closed"; con<cursor>'))
+        self.assertIn('const', self.labels('let text = "closed"<cursor>'))
+        for newline in ['\n', '\r', '\r\n']:
+            with self.subTest(newline=repr(newline)):
+                self.assertIn('const', self.labels('let text = "unfinished' + newline + 'con<cursor>'))
+                self.assertIn('const', self.labels('// "comment' + newline + 'con<cursor>'))
 
     def test_workspace_symbols_exclude_tool_worktrees_and_build_outputs(self):
         for directory in ['.claude/worktrees/old', '.codex/worktrees/old', '.worktrees/old', 'worktrees/old',

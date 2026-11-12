@@ -1227,12 +1227,25 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             offset < token.span.offset + token.span.length)
             return Json{{"isIncomplete", false}, {"items", items}};
     }
-    const auto line_start = doc.source.rfind('\n', offset ? offset - 1 : 0);
+    // The recovering lexer drops an unfinished string token. E0103 still
+    // records its opening quote and the point where scanning reached the line
+    // end (or EOF), including a trailing escape. Use that scanned interval;
+    // the next line is ordinary code, since literals cannot cross newlines.
+    for (const auto &diagnostic : doc.syntax_diagnostics) {
+        if (diagnostic.code() != "E0103" || diagnostic.span.file != doc.path) continue;
+        auto end = diagnostic.span.offset + diagnostic.span.length;
+        for (const auto &label : diagnostic.labels())
+            if (label.span.file == doc.path) end = std::max(end, label.span.offset + label.span.length);
+        if (offset > diagnostic.span.offset && offset <= end)
+            return Json{{"isIncomplete", false}, {"items", items}};
+    }
+    const auto line_start = doc.source.find_last_of("\r\n", offset ? offset - 1 : 0);
     auto comment = doc.source.find("//", line_start == std::string::npos ? 0 : line_start + 1);
     while (comment != std::string::npos && comment < offset) {
         bool in_string = false;
         for (const auto &token : doc.tokens)
-            if (token.kind == TokenKind::String && contains(token.span, comment)) in_string = true;
+            if (token.kind == TokenKind::String && comment >= token.span.offset &&
+                comment < token.span.offset + token.span.length) in_string = true;
         if (!in_string) return Json{{"isIncomplete", false}, {"items", items}};
         comment = doc.source.find("//", comment + 2);
     }
