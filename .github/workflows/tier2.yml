@@ -142,7 +142,7 @@ jobs:
   sanitizers:
     name: Address and undefined-behavior sanitizers (Linux x86-64)
     runs-on: ubuntu-24.04
-    timeout-minutes: 180
+    timeout-minutes: 300
     env:
       CC: gcc-14
       CXX: g++-14
@@ -163,11 +163,14 @@ jobs:
             gcc-14 g++-14 libffi-dev libclang1-19 libclang-common-19-dev
 
       # A static executable cannot carry the sanitizer runtime, so the static
-      # launcher is left out of this configuration.
+      # launcher is left out of this configuration. backend-reference ran for
+      # more than its usual limit of an hour here without a sanitizer report,
+      # so it gets three hours.
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DNEURA_STATIC_LAUNCHER=OFF
+          -DNEURA_REFERENCE_TEST_TIMEOUT=10800
           "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"

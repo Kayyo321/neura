@@ -32,7 +32,7 @@ Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does 
 | --- | --- |
 | Build and test (Linux arm64) | Release, GCC 14, Ubuntu 24.04 on arm64, every CTest entry. |
 | Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, every CTest entry CMake registers on macOS. |
-| Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, with a 1 GiB stack, every CTest entry except `native-install` and `native-container`. |
+| Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, with a 1 GiB stack and a three-hour limit for `backend-reference`, every CTest entry except `native-install` and `native-container`. |
 
 The sanitizer job leaves out two tests that cannot hold in its configuration: `native-install` requires a launcher that needs only the C library, and `native-container` rewrites an executable it has just run, which the leak checker's helper process can still hold open. It raises the stack because sanitized frames are several times larger, and `backend-reference` runs test programs 400 calls deep in an evaluator that recurses on the native stack.
 
