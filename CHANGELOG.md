@@ -17,6 +17,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ## Unreleased
 
+### Fixed
+
+- The website places one skill-copy button above its prompt with feedback that keeps the page in place, keeps the front page's frame fitted during mobile scrolling, and gives diagnostic codes a compact Reading Room overview.
+
 ## [0.2.0] - 2026-11-11
 
 This version adds assign-once `last` bindings, target-typed `new`, anonymous classes in type positions, accessors on exported fields, and `#` tags to the language; requires a `;` after every declaration; gives every diagnostic a code, a rendered source snippet, and a page that `neura explain` prints; runs parts of the standard library on built-in C kernels; and adds two execution tiers above the reference evaluator: blocks proven to compute typed operations run as native operations, and regions of them run together, as machine code the runner generates on x86-64 Linux. The standard library is rewritten in the new style, and some of its zero-argument methods are now fields. The [release checklist](docs/Release.md) maps each feature to its tests.

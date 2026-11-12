@@ -279,7 +279,24 @@ def documents_build() -> None:
     with tempfile.TemporaryDirectory() as directory:
         home_page = HOME.replace("<body>", "<body>\n<!-- include: masthead -->\n<!-- markdown: docs/Ref.md#a-table -->"
                                            "\n<!-- markdown: docs/Guide.md#guide without-code -->")
-        write_site(directory, {**SITE, **DOCUMENTS, "site/index.html": home_page})
+        contents = CONTENTS + '''
+[[sections]]
+title = "Diagnostic codes"
+pages = [{ source = "docs/diagnostics/README.md", label = "Index of codes" }]
+modules = "docs/diagnostics/[EW]*.md"
+[[sections]]
+title = "Standard library"
+pages = ["wiki/Stdlib.md"]
+modules = "wiki/Stdlib-*.md"
+'''
+        write_site(directory, {**SITE, **DOCUMENTS, "site/index.html": home_page, "site/contents.toml": contents,
+                               "docs/diagnostics/README.md": "# Diagnostic codes\n\nAn index of errors and warnings.\n\n"
+                                   "[E0101](E0101.md) and [W0001](W0001.md).\n",
+                               "docs/diagnostics/E0101.md": "# E0101: Invalid character\n\nCharacter rule.\n",
+                               "docs/diagnostics/W0001.md": "# W0001: Unused binding\n\nBinding rule.\n",
+                               "wiki/Stdlib.md": "# Standard library\n\n## Std.Collections\n",
+                               "wiki/Stdlib-Program.md": "# Program\n\nProgram lifecycle.\n",
+                               "wiki/Stdlib-Collections-Array.md": "# Array\n\nAn array.\n"})
         output = Path(directory) / "out"
         expect("site: documents: a build", site_command(directory, "--output", str(output)), None)
 
@@ -287,7 +304,11 @@ def documents_build() -> None:
             path = output / name
             return path.read_text(encoding="utf-8") if path.is_file() else ""
 
-        guide, front = read("docs/Guide.html"), read("index.html")
+        guide, front, room = read("docs/Guide.html"), read("index.html"), read("docs/index.html")
+        shelf = re.search(r'<section class="shelf" id="diagnostic-codes">(.*?)</section>', room)
+        diagnostics_shelf = shelf.group(1) if shelf else ""
+        shelf = re.search(r'<section class="shelf" id="standard-library">(.*?)</section>', room)
+        library_shelf = shelf.group(1) if shelf else ""
         results = {
             "a link between documents leads to the published page": 'href="Ref.html#93-arraylistt"' in guide,
             "a link to a repository file leads to a page that shows it":
@@ -297,6 +318,18 @@ def documents_build() -> None:
             "a heading has the id GitHub gives it": 'id="93-arraylistt"' in read("docs/Ref.html"),
             "a table cell keeps an escaped bar": "<code>x|y</code>" in read("docs/Ref.html"),
             "the documentation has a home page": 'href="Guide.html"' in read("docs/index.html"),
+            "the diagnostic shelf links the overview without listing every code":
+                'href="diagnostics/README.html">Index of codes</a>' in diagnostics_shelf
+                and "E0101" not in diagnostics_shelf and "W0001" not in diagnostics_shelf,
+            "diagnostic codes remain in the directory, index, search, and their own pages":
+                all(f'href="diagnostics/{code}.html"' in room
+                    and f'href="{code}.html"' in read("docs/diagnostics/README.html")
+                    and f"{code}:" in read("assets/search.json")
+                    and f"{code}:" in read(f"docs/diagnostics/{code}.html") for code in ("E0101", "W0001")),
+            "the library shelf still groups module pages by package":
+                'class="packages"' in library_shelf and 'Std.Collections<small>1</small>' in library_shelf,
+            "the library shelf still lists standalone modules":
+                'href="../stdlib/Program.html">Program</a>' in library_shelf,
             "a partial is expanded with the path to the top": '<a href="./">Home</a> <a href="docs/">Docs</a>' in front,
             "a markdown include renders that section": '<h2 id="a-table">' in front and "<table>" in front,
             "an include without code leaves out the section's code and keeps its prose":

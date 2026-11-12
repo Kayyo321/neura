@@ -125,13 +125,28 @@ body.front {
   background: var(--ground) url("grain.png");
 }
 
+body.front::before,
 body.front::after {
   content: "";
   position: fixed;
-  inset: 0;
   z-index: 30;
-  border: 3px solid var(--ink);
   pointer-events: none;
+}
+
+/* Mobile browser bars change the visible height while scrolling. Keep the side rails tall enough for the
+   largest viewport, and anchor the bottom rule separately so it does not wait for a full frame to resize. */
+body.front::before {
+  inset: 0 0 auto;
+  height: 100vh;
+  height: 100lvh;
+  border: 3px solid var(--ink);
+  border-bottom: 0;
+}
+
+body.front::after {
+  inset: auto 0 0;
+  height: 3px;
+  background: var(--ink);
 }
 
 ::selection {
@@ -513,12 +528,27 @@ figcaption {
   overflow-wrap: anywhere;
 }
 
-.prose.agent-skill .actions {
+.prose.agent-skill .skill-actions {
   margin-top: 1.5rem;
 }
 
-.button[hidden] {
-  display: none;
+.skill-actions .button {
+  display: inline-grid;
+}
+
+/* Keep the control's size and focus in place while its feedback changes. */
+.skill-copy-label,
+.skill-copy-feedback {
+  grid-area: 1 / 1;
+}
+
+.skill-copy-feedback,
+[data-copy-state] .skill-copy-label {
+  visibility: hidden;
+}
+
+[data-copy-state] .skill-copy-feedback {
+  visibility: visible;
 }
 
 button.button {
@@ -1689,6 +1719,7 @@ pre.numbered .line:target > a {
 }
 
 @media print {
+  body.front::before,
   body.front::after,
   .masthead,
   .docs-side,
@@ -1712,6 +1743,7 @@ pre.numbered .line:target > a {
     background: #161bb4 url("grit-light.png");
   }
 
+  body.front::before,
   body.front::after {
     display: none;
   }

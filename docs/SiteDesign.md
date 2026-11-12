@@ -82,7 +82,7 @@ Below 80 rem the contents column is left out; a heading's own link still gives i
 
 The search box opens on `/` or Ctrl+K and reads `assets/search.json` the first time it is used. Results are ranked by how closely they match: a whole name, then a name's start, then a word's start, then any part, and pages before sections before library members. The arrow keys choose a result and Enter opens it.
 
-The Reading Room, `docs/index.html`, is the documentation's home: its name, a large search box, and a shelf for each section in two columns, each headed by its plate and listing each document with its first sentence.
+The Reading Room, `docs/index.html`, is the documentation's home: its name, a large search box, and a shelf for each section in two columns, each headed by its plate and listing its overview documents with their first sentences. Standard library modules are grouped by package; individual diagnostic codes are reached through the index of codes, the directory, or search.
 
 ## Plates
 

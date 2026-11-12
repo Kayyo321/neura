@@ -33,7 +33,6 @@
           <p class="actions">
             <a class="button" href="docs/Install.html">Install</a>
             <a class="button pale" href="docs/lang/Tutorial.html">Learn</a>
-            <a class="button pale" href="#write-neura-with-an-ai-agent" data-copy-prompt>Copy Neura Language Skill</a>
             <a href="docs/">Reading Room</a>
           </p>
         </div>
@@ -69,12 +68,18 @@
     </section>
 
     <!-- The prompt that installs the Neura language skill (prompts/neura/) in a coding agent, included from the
-         README. assets/copy-prompt.js makes each data-copy-prompt control copy it; without the script, the
-         hero's control is a link to this section and the button below stays hidden. -->
+         README. assets/copy-prompt.js places the copy control immediately above the prompt; without clipboard
+         support, the control stays hidden and the prompt can still be selected and copied. -->
     <section class="section" id="agent-skill">
       <div class="prose agent-skill">
 <!-- markdown: README.md#write-neura-with-an-ai-agent -->
-        <p class="actions"><button class="button" type="button" data-copy-prompt hidden>Copy Neura Language Skill</button></p>
+        <div class="skill-actions" hidden>
+          <button class="button" type="button" aria-label="Copy Neura Language Skill" data-copy-prompt>
+            <span class="skill-copy-label">Copy Neura Language Skill</span>
+            <span class="skill-copy-feedback" aria-hidden="true"></span>
+          </button>
+          <span class="visually-hidden" role="status" data-copy-status></span>
+        </div>
       </div>
     </section>
 
