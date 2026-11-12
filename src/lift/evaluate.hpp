@@ -130,7 +130,10 @@ inline std::uint64_t evaluate(const Instruction& in, std::uint64_t a, std::uint6
                 failed = (y < 0 && x > std::numeric_limits<std::int64_t>::max() + y) ||
                          (y > 0 && x < std::numeric_limits<std::int64_t>::min() + y);
             } else {
-                const auto difference = x - y;
+                // Exact for operands within the width; for operands with
+                // bits above it, the two's-complement wrapped difference.
+                const auto difference =
+                    static_cast<std::int64_t>(static_cast<std::uint64_t>(x) - static_cast<std::uint64_t>(y));
                 failed = difference < signed_min(w) || difference > signed_max(w);
             }
         } else {
@@ -162,7 +165,13 @@ inline std::uint64_t evaluate(const Instruction& in, std::uint64_t a, std::uint6
             if (x == signed_min(w) && y == -1) {
                 failed = true;
             } else {
-                r = static_cast<std::uint64_t>(x / y) & m;
+                // Division by -1 is negation in wrapping arithmetic. That is
+                // x / y for every x but INT64_MIN, which only operands with
+                // bits above a width below 64 give, and on which the
+                // hardware division overflows.
+                const auto quotient =
+                    y == -1 ? std::uint64_t{0} - static_cast<std::uint64_t>(x) : static_cast<std::uint64_t>(x / y);
+                r = quotient & m;
             }
         } else {
             r = a / b;

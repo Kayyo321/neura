@@ -530,17 +530,8 @@ void check_instruction(const lift::Instruction& in, const std::string& label) {
         const auto program = compile_or_fail(region, label);
         if (!program) return;
         const auto values = edge_values(std::clamp<unsigned>(in.width, 1, 64));
-        const bool division = in.op == lift::Opcode::Divide || in.op == lift::Opcode::Remainder;
         for (const auto a : values) {
             for (const auto b : values) {
-                // lift::evaluate divides sign-extended values. Operands with
-                // bits above their width (no region's are) can make that the
-                // hardware's INT64_MIN / -1, which the oracle itself cannot
-                // evaluate.
-                if (division && in.is_signed && in.width < 64 &&
-                    lift::sign_extend(a, in.width) == INT64_MIN && lift::sign_extend(b, in.width) == -1) {
-                    continue;
-                }
                 std::vector<std::uint64_t> regs(region.register_count, 0x5EED5EED5EED5EEDULL);
                 std::vector<std::uint8_t> init(region.register_count, 0);
                 regs[0] = a;
