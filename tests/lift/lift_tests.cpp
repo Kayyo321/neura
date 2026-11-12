@@ -1050,7 +1050,7 @@ std::vector<std::uint64_t> dense_float_set(const FloatShape& s) {
     // Exponents 0, 1, 2, p - 1, p, and p + 1 below 1 (p = fraction + 1),
     // with mantissas that make ties (1 + 2^-p), round-up ties (with an odd
     // neighbour), and near-cancellation.
-    for (const std::int64_t d : {0L, 1L, 2L, f, f + 1, f + 2}) {
+    for (const std::int64_t d : {std::int64_t{0}, std::int64_t{1}, std::int64_t{2}, f, f + 1, f + 2}) {
         for (const std::uint64_t m : {std::uint64_t{0}, std::uint64_t{1}, half, ones, half | 1}) {
             magnitudes.insert(s.value(-d, m));
         }

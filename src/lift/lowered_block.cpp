@@ -134,7 +134,7 @@ float integer_to_single(std::uint64_t value, bool is_signed, unsigned width) {
 class Compiler {
 public:
     Compiler(const nvr::Image& image, const nvr::Block& block, LoweredBlock& out)
-        : image_(image), block_(block), out_(out) {
+        : image_(image), out_(out) {
         for (const auto& input : block.inputs) {
             out_.input_widths.push_back(nvr::lane_count(image.types.at(input.type)));
         }
@@ -324,7 +324,6 @@ private:
     }
 
     const nvr::Image& image_;
-    const nvr::Block& block_;
     LoweredBlock& out_;
     std::map<const Expression*, std::uint32_t> registers_;
     std::map<std::uint32_t, std::uint32_t> traps_;

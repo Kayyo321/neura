@@ -349,7 +349,11 @@ def capture(args):
                 record(f"{name}.quantum={quantum}",
                        [neura, "run", "--stats", "--virtual-time", "--task-quantum", str(quantum), image])
         for name, source in SCHEDULE_TESTS:
-            record(f"{name}.explored", [neura, "test", "--stats", "--schedules", "25", str(ROOT / source)])
+            # Under --virtual-time, as the suite runs them: the service tests
+            # give a dependency a 50 ms budget, and on real time a slower tier
+            # can reach that deadline at a different point of the program.
+            record(f"{name}.explored",
+                   [neura, "test", "--stats", "--virtual-time", "--schedules", "25", str(ROOT / source)])
         # One image run once per argument list (a fleet of runs).
         lists = work / "each-lists.txt"
         lists.write_text("".join(f"{n}\n" for n in (1, 7, 27, 97, 871, 6171, 2, 3, 0, 100)))
