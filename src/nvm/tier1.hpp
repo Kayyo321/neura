@@ -35,22 +35,25 @@ struct TierOptions {
     // every run that shares the cache (the tests of `neura test`, the
     // members of a fleet or of `run --each`, and parallel items). Proving a
     // hint (regenerating the block and the unrefined overflow analysis)
-    // costs about as much as a few hundred reference steps of its graph.
-    std::uint32_t hint_after = 256;
+    // takes well under a millisecond for most graphs, so a hint is proven
+    // early, while a block that runs only once or a few times, as start-up
+    // code does, is not proven at all.
+    std::uint32_t hint_after = 4;
     std::uint32_t search_after = 2000;
-    // What lifting a block may cost, in proportion to the time the block
-    // has already spent on tier 0 (about 1.6 ns per graph edge per step):
-    // the refined overflow analysis may spend about half of that, and a
-    // search an eighth, so a block that never repays its proof costs a
-    // bounded share more than it would on tier 0. When an attempt runs out,
-    // the block is tried again once it has run eight times as often, with
-    // eight times the allowance.
+    // What lifting a block may cost: at least `minimum_proof_work` (about
+    // 16 ms, which settles the refined analysis of a binary64 multiply or
+    // divide graph at the first attempt), and beyond that in proportion to
+    // the time the block has already spent on tier 0 (about 1.6 ns per
+    // graph edge per step): the refined overflow analysis may spend about
+    // twice that, and a search an eighth. When an attempt runs out, the
+    // block is tried again once it has run eight times as often, with eight
+    // times the allowance.
     //
     // The overflow analysis counts its work in units of about 15 ns
     // (lift/overflow.hpp): one unit per `steps_per_work` edge-steps. A
     // search is given `search_picoseconds` of wall time per edge-step.
-    std::uint64_t steps_per_work = 16;
-    std::uint64_t minimum_proof_work = 256;
+    std::uint64_t steps_per_work = 4;
+    std::uint64_t minimum_proof_work = std::uint64_t{1} << 20;
     std::uint64_t search_picoseconds = 200;
     // Wall time the searches of one image may take in total.
     std::chrono::milliseconds search_budget{250};

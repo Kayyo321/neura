@@ -268,8 +268,9 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
                             std::chrono::duration_cast<std::chrono::steady_clock::duration>(allowed));
     }
 
-    // The overflow analysis may use work in proportion to the steps the
-    // block has run: a graph that needs much of it is proven only once the
+    // The overflow analysis may use a fixed minimum of work, and beyond it
+    // work in proportion to the steps the block has run times its edges
+    // (TierOptions): a graph that needs more is proven only once the
     // block has run often enough for the lifted form to repay the proof, and
     // a run that ends sooner never pays for it. The proof found does not
     // depend on the work allowed, only whether one is found.
