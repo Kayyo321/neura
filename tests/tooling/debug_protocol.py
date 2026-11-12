@@ -90,7 +90,7 @@ class Client:
 class DebugProtocol(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='neura-dap-')
-        self.root = pathlib.Path(self.directory.name)
+        self.root = pathlib.Path(self.directory.name).resolve()
         self.client = Client()
         self.capabilities = self.client.request('initialize', {'adapterID': 'neura',
                                                 'linesStartAt1': True, 'columnsStartAt1': True})

@@ -16,7 +16,7 @@ ROOT = pathlib.Path(__file__).resolve().parents[2]
 class TestProtocol(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="neura-test-protocol-")
-        self.directory = pathlib.Path(self.temp.name)
+        self.directory = pathlib.Path(self.temp.name).resolve()
         self.source = self.directory / "suite with spaces.nra"
         self.source.write_text('''let check = import:Std.Test;
 let console = import:Std.Io.Console;

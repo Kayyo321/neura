@@ -90,7 +90,7 @@ def params(path, line=0, character=0):
 class LanguageServerTests(unittest.TestCase):
     def setUp(self):
         self.directory = tempfile.TemporaryDirectory(prefix='neura-lsp-')
-        self.root = pathlib.Path(self.directory.name)
+        self.root = pathlib.Path(self.directory.name).resolve()
         self.client = Client(self.root)
 
     def tearDown(self):
@@ -244,6 +244,25 @@ class LanguageServerTests(unittest.TestCase):
         self.assertEqual([lens['command']['title'] for lens in lenses], ['Run', 'Build', 'Debug'])
         self.client.notify('workspace/didChangeConfiguration', {'settings': {'neura': {'codeLens': {'enabled': False}}}})
         self.assertEqual(self.client.request('textDocument/codeLens', params(path)), [])
+
+    def test_entry_points_preserve_open_symlink_uri(self):
+        actual = self.root / 'actual'
+        actual.mkdir()
+        alias = self.root / 'alias'
+        alias.symlink_to(actual, target_is_directory=True)
+        path = alias / 'app.nra'
+        source = ('let program = import:Std.Program;\n'
+                  'let App = module:program.Entry (\n'
+                  ' export let.override main = func(args: string[]) -> program.ExitCode {\n'
+                  '  return program.ExitCode.Ok;\n'
+                  ' };\n'
+                  ');\n')
+        self.client.open(path, source)
+        entries = self.client.request('neura/entryPoints', params(path))
+        self.assertEqual(len(entries), 1)
+        self.assertEqual(entries[0]['uri'], path.as_uri())
+        lenses = self.client.request('textDocument/codeLens', params(path))
+        self.assertEqual([lens['command']['title'] for lens in lenses], ['Run', 'Build', 'Debug'])
 
     def test_formatting_and_readonly_property_classification(self):
         path = self.root / 'accessors.nra'

@@ -1233,7 +1233,7 @@ Json AnalysisSession::entries() const {
             }
         if (entry)
             result.emplace_back(Json{{"name", symbol.qualified},
-                                     {"uri", path_uri(symbol.file)},
+                                     {"uri", location(symbol.selection)["uri"]},
                                      {"range", location(symbol.selection)["range"]},
                                      {"kind", "application"}});
     }

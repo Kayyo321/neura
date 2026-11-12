@@ -14,7 +14,7 @@ NEURA = pathlib.Path(sys.argv.pop(1)).resolve()
 class Coverage(unittest.TestCase):
     def setUp(self):
         self.temp = tempfile.TemporaryDirectory(prefix="neura-coverage-")
-        self.directory = pathlib.Path(self.temp.name)
+        self.directory = pathlib.Path(self.temp.name).resolve()
         self.source = self.directory / "coverage.nra"
         self.source.write_text('''let choose = func(flag: bool) -> int32 {
     if (flag) {
