@@ -43,7 +43,7 @@ class Lexer {
 public:
     Lexer(std::string_view source, const std::string& file) : source_(source), file_(file) {}
 
-    std::vector<Token> run() {
+    std::vector<Token> run(std::vector<Diagnostic>* diagnostics = nullptr) {
         if (source_.starts_with("\xEF\xBB\xBF")) {
             offset_ = line_start_ = 3;
         }
@@ -76,7 +76,10 @@ public:
                               {file_, start.line, start.column, start.offset, width},
                               std::move(documentation)});
         }
-        if (!errors_.empty()) throw combined();
+        if (!errors_.empty()) {
+            if (!diagnostics) throw combined();
+            diagnostics->insert(diagnostics->end(), errors_.begin(), errors_.end());
+        }
         tokens.push_back({TokenKind::End, {}, location()});
         return tokens;
     }
@@ -376,6 +379,11 @@ private:
 
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
+}
+
+std::vector<Token> lex_recovering(std::string_view source, const std::string& file,
+                                  std::vector<Diagnostic>& diagnostics) {
+    return Lexer(source, file).run(&diagnostics);
 }
 
 std::string decode_string_literal(std::string_view literal) {

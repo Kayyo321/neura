@@ -250,5 +250,7 @@ struct ParsedFile {
 };
 
 ParsedFile parse(const std::vector<Token>& tokens);
+// Retains valid declarations around recovered syntax errors for editor use.
+ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics);
 
 } // namespace neura

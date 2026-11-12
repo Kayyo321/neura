@@ -29,6 +29,11 @@ struct ConversionOptions {
     // this with the test functions, which take no arguments and return void.
     // The first start function is the image's entry.
     std::vector<SymbolId> entries;
+    // Preserve an executable stop boundary after every source statement.
+    // Debuggers opt in; ordinary builds retain their existing graphs, step
+    // counts and image bytes. SMAP then names the statement whose effects
+    // have not yet happened, rather than a later failure in a merged block.
+    bool debug_statements = false;
 };
 
 // What an image function implements.
@@ -80,6 +85,7 @@ struct BuildOptions {
     bool optimize = true;
     bool source_map = true;
     bool lift_hints = true;
+    bool debug_statements = false;
 };
 
 // The pipeline shared by `neura build` from source and from .nir: verify the

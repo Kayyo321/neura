@@ -165,3 +165,10 @@ Verification is part of the compiler and decompiler workflow. Each check should 
 Use exhaustive evaluation for small input spaces and targeted boundary and differential tests for larger ones. A solver can prove equivalence for a supported encoding, such as fixed-width bit vectors, provided the model covers the executor's semantics and the relevant state and effects. A bounded stateful proof needs an explicit step or memory bound. General stateful equivalence may require invariants or an inductive argument. Report test coverage, bounded proofs, and unresolved results with their respective scope.
 
 Open language decisions are listed in [Feature status](Status#open-language-decisions).
+
+
+## Editor analysis boundary
+
+Editor analysis reuses the frontend through session-owned source maps and immutable unsaved-file overlays. Recovering lexer/parser APIs return partial syntax and diagnostics; strict CLI wrappers continue to reject invalid input. Analysis does not cross into native linking or program execution. Semantic references and transforms use compiler symbols, and candidate refactor edits are validated before an editor applies them.
+
+The debugger inspects runtime state at cooperative execution boundaries. Its frame, heap, task, and source snapshots are observational; they do not add source-language rules or change ordinary execution. Optional source/name metadata can be absent, in which case tools describe the available block-level provenance rather than inferring unavailable lexical lifetime information.

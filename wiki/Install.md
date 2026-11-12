@@ -35,7 +35,7 @@ sh install.sh
 
 | Option | Effect |
 | --- | --- |
-| `--version <version>` | Install that version, such as `0.1.0-rc.1`, in place of the latest release. Release candidates are installed only this way. |
+| `--version <version>` | Install that version, such as `0.1.0-rc.1`, in place of the latest release. Use this for an initial release candidate installation; an installed tool can also opt into candidates with `neura update --nightly`. |
 | `--source <url or directory>` | Read the release from another HTTPS location or from a local directory that holds `neura-release.txt` and the archives. |
 | `--force` | Replace an installed copy of the same version. |
 
@@ -163,14 +163,24 @@ The running `neura` resolves the real path of its executable. If that path is `<
 ## Update
 
 ```sh
-neura update [--check] [--source <https-url-or-directory>] [--require-attestation]
+neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]
 ```
 
 `neura update --check` reports whether a newer release exists and changes nothing. `neura update` installs it. Neither asks a question.
 
+The default channel follows the latest stable GitHub release. Add `--nightly` to include published prereleases, including release candidates:
+
+```sh
+neura update --check --nightly
+neura update --nightly
+```
+
+`--nightly` selects the highest semantic version across stable releases and prereleases, regardless of publication date. For example, `0.2.1-rc.10` is newer than `0.2.1-rc.2`, `0.2.1` is newer than either, and `0.2.2-rc.1` is newer than `0.2.1`. Drafts, unpublished releases, and tags without a valid semantic version are ignored. It never downgrades an installation. This flag applies to this invocation only; automatic update notices continue to follow stable releases. Older tools that do not recognize the flag must install a candidate with `install.sh --version <version>` first.
+
 | Option | Meaning |
 | --- | --- |
 | `--check` | Report only. |
+| `--nightly` | Include GitHub prereleases when selecting the newest version. Works with `--check` and `--require-attestation`. A non-default `--source` overrides GitHub discovery and continues to read exactly that source's metadata. |
 | `--source <location>` | Where `neura-release.txt` and the archives are. An `https://` URL, or a local directory. The default is `https://github.com/Kayyo321/neura/releases/latest/download`. A URL with any other scheme, including `http://`, is rejected. |
 | `--require-attestation` | Fail unless build provenance is verified. Without `gh` on `PATH` this fails before anything is downloaded, and with a `gh` that is not signed in it fails before anything is installed. With a local directory source, it also runs the check that is otherwise skipped. |
 
@@ -185,7 +195,7 @@ neura update [--check] [--source <https-url-or-directory>] [--require-attestatio
 
 1. Determines the install method. Anything but `archive` ends with status 3.
 2. Takes the lock `<root>/.update-lock`, created with `O_CREAT|O_EXCL`. If the file exists, the update stops with status 1 and says so. A lock more than an hour old gets a message telling you to delete it; `neura` never removes a lock it did not create. It also removes `.staging-*` directories in `<root>` that are more than a day old.
-3. Fetches `neura-release.txt` from the source. For an `https://` source it runs `curl` as a child process with an argument vector, never a shell, restricted to HTTPS (also after redirects) and TLS 1.2 or newer, with a 30 second limit, writing to a temporary file in `<root>`. `curl` reads no `.curlrc`.
+3. Fetches `neura-release.txt` from the source. With `--nightly` and the default source, first queries the GitHub releases API, following pages of 20 releases (at most 100 pages, 1 MiB per page, and 120 seconds total), and pins the source to the selected tag. An API failure, an exceeded bound, or metadata that names a different version aborts the check. For an `https://` source it runs `curl` as a child process with an argument vector, never a shell, restricted to HTTPS (also after redirects) and TLS 1.2 or newer, with a 30 second limit, writing to a temporary file in `<root>`. `curl` reads no `.curlrc`.
 4. Parses the metadata strictly (see [the format](#release-metadata)). It rejects unknown line kinds, a repeated target, malformed digests, file names that contain `/` or start with `.` or `-`, and sizes above 1 GiB.
 5. Compares versions by semantic version precedence ([semver.org section 11](https://semver.org/#spec-item-11)): the numeric fields compare as numbers, a prerelease is lower than the release it precedes, and the dot-separated prerelease identifiers compare as the specification says. If the release is not newer, it prints `neura <version> is up to date` and exits 0. With `--check` and a newer release it prints both versions and exits 4.
 6. Picks the asset for the host target. A release without one is an error.
@@ -284,7 +294,7 @@ To turn the notice and the check off, set `NEURA_NO_UPDATE_CHECK=1` in your envi
 | SHA-256 against the FIPS 180-4 vectors; semantic version precedence; the marker, release metadata, and update-check parsers | `lifecycle-unit-sha256`, `lifecycle-unit-semver`, `lifecycle-unit-release-metadata`, `lifecycle-unit-marker` |
 | `VERSION`, `Std.Core.Version`, and `neura --version` agree | `version-consistency` |
 | Archive and metadata scripts, `install.sh` layout and refusals, the installed tool, `doctor`, no output or state file without terminals | `lifecycle-install` |
-| `update` and `update --check` from local directories: success, up to date, each rejected archive and metadata, each fault step with rollback, the lock, unmanaged and package-manager installs, rejected sources | `lifecycle-update` |
+| `update` and `update --check` from local directories: success, up to date, each rejected archive and metadata, each fault step with rollback, the lock, unmanaged and package-manager installs, rejected sources; `--nightly` API pagination, selection, failures, and candidate installation through a fixture `curl` | `lifecycle-update` |
 | `uninstall`: `--dry-run`, the refusal without `--yes`, what is removed and what is left | `lifecycle-uninstall` |
 
 The CTest entries above run on Linux and macOS, on x86-64 and arm64. The release workflow then runs [the lifecycle checks](ReleaseProcess#what-the-release-workflow-checks) on each packed archive, and for a release candidate runs the one-line install command against the published files, which covers a download over HTTPS and `gh attestation verify`.

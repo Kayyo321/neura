@@ -175,7 +175,7 @@ Three commands manage the installed tool; [Install](Install) describes the insta
 | Command | Does |
 | --- | --- |
 | `neura doctor` | Prints `ok`, `warn`, or `FAIL` for each check of the install and its optional tools (the standard library, native launchers, libclang, a C compiler, the GPU backend, `curl`, `tar`, `gh`). Exits with status 1 if a check failed. Uses no network. |
-| `neura update [--check] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release after checking the archive's size and SHA-256 and, where `gh` is available, its build provenance. `--check` reports without changing anything. |
+| `neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release after checking the archive's size and SHA-256 and, where `gh` is available, its build provenance. `--check` reports without changing anything. `--nightly` includes published GitHub prereleases, selecting the highest semantic version. |
 | `neura uninstall [--dry-run] [--yes]` | Removes an archive install and nothing else. |
 
 `update` and `uninstall` apply only to an install made by the release archive's `install.sh`. A source build, a copy, or a package manager's install exits with status 3.
@@ -191,7 +191,7 @@ How many errors a run reports depends on the stage that finds them:
 
 Every error has a code: `E` and four digits, whose hundreds digit names the area. `E01xx` is the lexer, `E02xx` the parser, `E03xx` names, `E04xx` types and bindings, `E05xx` classes and lifecycle, `E06xx` concurrency, `E07xx` modules and imports, `E08xx` the backend, and `E09xx` [tags](Tags). A warning has a code, `W` and four digits, and a name. Errors that report the same mistake share a code, and `E0899` is the one code for errors that only a compiler defect can cause. A code is never reused for another error. [Diagnostic codes](Diagnostics) lists them. `neura explain <CODE>` (or `neura --explain <CODE>`) prints a code's page: the rule, a program that breaks it, and the program fixed. `neura explain --list` prints each code and its title, with the name of each warning; `neura explain <name>` also takes a warning's name. `neura tags` prints the catalogue of [tags](Tags), and `neura tags <Name>` one tag's signature, targets, status, and meaning. The pages are part of the `neura` binary, so `explain` reads no files. `explain` exits with status 0; a code that is not registered is an error that names the closest registered code.
 
-`--error-format` chooses the form. Every command accepts it.
+`--error-format` chooses the form for the compilation and artifact commands. Editor protocol commands reserve their output for their protocol.
 
 | Form | Output |
 | --- | --- |
@@ -271,3 +271,17 @@ The [NVM specification](NVM#toolchain-and-distribution) defines how `neura build
 Diagnostics should identify the source file, line and column, the offending span, a clear explanation and, where possible, a correction. For example, passing a `string` to a function expecting `int32` should report both types and the argument location. [Diagnostics](#diagnostics) defines their formats, columns, and warning options.
 
 A formatter should produce stable, idempotent output consistent with [Coding style](CodingStyle). Editor integration should eventually expose diagnostics, navigation and completion; debugger support should include source locations, stepping and local variables. These are tooling goals, not promises of first-release support.
+
+
+## Editor tooling research candidate
+
+The `0.2.1-rc.1` tooling candidate adds these interfaces for the VS Code extension. They are capability-negotiated: `neura capabilities --json` returns a versioned feature object.
+
+- `neura lsp --stdio` speaks LSP with UTF-16 positions. It analyzes unsaved sources and imports using per-session overlays, recovers partial syntax, and provides diagnostics, tokens, completion, hover, symbols, navigation, rename, hierarchy, refactoring, and formatting. Editor requests never link or run a program. C header analysis requires a trusted session.
+- `neura fmt [--check | --write] <file.nra>...` shares the editor formatter. `--stdin --stdin-filepath <file>` formats unsaved text. It preserves token spellings, comments and documentation attachment; malformed input is rejected before writes. `--check` reports files that need formatting without changing them.
+- `neura test --list --format=json --workspace-root <directory> <files>...` returns version 1 discovery records. IDs combine workspace-relative source identity and qualified function name. Discovery performs semantic checking but no native linking, initialization, or test execution.
+- Repeatable `test --filter <exact-id>` selects tests. `--reporter=json` emits version 1 `runStart`, `testStart`, `output`, `testResult`, `coverage`, and `summary` events, with program output framed separately. Ordinary human output is unchanged. `--coverage <file.json>` observes actual CPU block entries and includes zero-count mapped lines; its declared granularity is `mapped-block-line`, not statement or branch coverage.
+- `neura debug --stdio` speaks DAP and drives actual unoptimized NVM execution. It supports source/test launch, breakpoints, stepping, traps, typed frame/heap inspection and read-only expressions. Task state comes from the runtime. Source maps currently identify blocks, so stepping and visible frame slots have block/frame granularity rather than exact lexical live ranges. Calls/getters/assignments are rejected in watch evaluation; native execution, optimized attach, and reverse debugging are unavailable. Console input uses the `neura/input` request.
+- `neura inspect-image --json <image.nvr> [--graph N] [--limit N]` validates an image and returns source/function/block/graph summaries. Selected graph details use wire IDs; exact integer biases/weights are strings. Graph output is bounded and explicitly reports truncation.
+
+The compiler's strict build/check behavior and image execution contract are unchanged. The normal command line and editor share the parser, resolver, diagnostics, formatter, and runtime rather than maintaining a separate editor language implementation.

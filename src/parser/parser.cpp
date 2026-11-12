@@ -12,7 +12,7 @@ class Parser {
 public:
     explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
 
-    ParsedFile file() {
+    ParsedFile file(std::vector<Diagnostic>* diagnostics = nullptr) {
         ParsedFile result;
         result.file = current().span.file;
         while (!at_end()) {
@@ -24,9 +24,12 @@ public:
             }
         }
         if (!errors_.empty()) {
-            auto first = errors_.front();
-            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
-            throw first;
+            if (diagnostics) diagnostics->insert(diagnostics->end(), errors_.begin(), errors_.end());
+            else {
+                auto first = errors_.front();
+                for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+                throw first;
+            }
         }
         result.untyped_variadic = std::move(untyped_variadic_);
         return result;
@@ -1695,6 +1698,12 @@ ParsedFile parse(const std::vector<Token>& tokens) {
         throw std::invalid_argument("parser requires an end-of-file token");
     }
     return Parser(tokens).file();
+}
+
+ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagnostic>& diagnostics) {
+    if (tokens.empty() || tokens.back().kind != TokenKind::End)
+        throw std::invalid_argument("parser requires an end-of-file token");
+    return Parser(tokens).file(&diagnostics);
 }
 
 } // namespace neura

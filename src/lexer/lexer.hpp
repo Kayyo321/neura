@@ -24,6 +24,9 @@ struct Token {
 };
 
 std::vector<Token> lex(std::string_view source, const std::string& file);
+// Editor mode retains valid tokens when another token is malformed.
+std::vector<Token> lex_recovering(std::string_view source, const std::string& file,
+                                  std::vector<Diagnostic>& diagnostics);
 // Decode a string token that has already passed lexical validation.
 std::string decode_string_literal(std::string_view literal);
 
