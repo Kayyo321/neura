@@ -223,7 +223,7 @@ class LanguageServerTests(unittest.TestCase):
                     'range': {'start': {'line': 0, 'character': 30}, 'end': {'line': 0, 'character': 30}},
                     'context': {'diagnostics': diagnostics}})
         self.assertTrue(actions)
-        change = next(a for a in actions if a['kind'] == 'quickfix')['edit']['documentChanges'][0]
+        change = next(a for a in actions if a['kind'] == 'quickfix' and 'edit' in a)['edit']['documentChanges'][0]
         self.assertEqual(change['textDocument']['version'], 1)
         self.assertEqual(change['edits'][0]['newText'], ';')
 
