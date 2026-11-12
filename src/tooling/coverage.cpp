@@ -38,7 +38,7 @@ Json LineCoverage::report() const {
     for (const auto& [path, counts] : lines_) {
         Json statements = Json::Array{};
         for (const auto& [line, count] : counts)
-            statements.push_back(Json{{"line", line}, {"count", count}});
+            statements.items().emplace_back(Json::Object{{"line", line}, {"count", count}});
         files.push_back(Json{{"path", path}, {"statements", std::move(statements)}});
     }
     return Json{{"version", 1}, {"granularity", "mapped-block-line"},

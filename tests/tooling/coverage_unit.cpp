@@ -1,9 +1,20 @@
 #include "tooling/coverage.hpp"
 
-#include <cassert>
+#include <cstdio>
+#include <stdexcept>
+#include <string>
 #include <filesystem>
 
-int main() {
+namespace {
+void check(bool condition, const char* expression, int line) {
+    if (!condition)
+        throw std::runtime_error("coverage check failed at line " + std::to_string(line) + ": " + expression);
+}
+} // namespace
+
+#define CHECK(expression) check(static_cast<bool>(expression), #expression, __LINE__)
+
+int main() try {
     neura::nvr::Image image;
     image.source_map = std::vector<neura::nvr::SourceLocation>{
         {0, 0, "source.nra", 5, 1}, {0, 1, "source.nra", 5, 8},
@@ -16,14 +27,17 @@ int main() {
     coverage.block(1, 0); // Standard library is excluded from project coverage.
     coverage.block(99, 99); // Missing source locations cannot invent hits.
     const auto report = coverage.report();
-    assert(report["version"].integer() == 1);
-    assert(report["granularity"].string() == "mapped-block-line");
-    assert(report["files"].size() == 1);
+    CHECK(report["version"].integer() == 1);
+    CHECK(report["granularity"].string() == "mapped-block-line");
+    CHECK(report["files"].size() == 1);
     const auto& statements = report["files"][0]["statements"];
-    assert(statements.size() == 2);
-    assert(statements[0]["line"].integer() == 5);
-    assert(statements[0]["count"].integer() == 3);
-    assert(statements[1]["line"].integer() == 9);
-    assert(statements[1]["count"].integer() == 0);
-    assert(!report["files"][0].contains("branches"));
+    CHECK(statements.size() == 2);
+    CHECK(statements[0]["line"].integer() == 5);
+    CHECK(statements[0]["count"].integer() == 3);
+    CHECK(statements[1]["line"].integer() == 9);
+    CHECK(statements[1]["count"].integer() == 0);
+    CHECK(!report["files"][0].contains("branches"));
+} catch (const std::exception& error) {
+    std::fprintf(stderr, "%s\n", error.what());
+    return 1;
 }
