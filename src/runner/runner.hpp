@@ -4,6 +4,7 @@
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
 
+#include <chrono>
 #include <filesystem>
 #include <memory>
 #include <optional>
@@ -35,8 +36,11 @@ struct RunOptions {
     // --virtual-time: timers, deadlines, and the clock services follow a
     // clock that moves only when every task is parked.
     bool virtual_time = false;
-    // --tier-stats: report blocks lifted and steps per execution tier.
+    // --tier-stats: report blocks lifted and steps per execution tier, and
+    // where the wall time went from `started` (read before the image was;
+    // when unset, when run() begins) to the report.
     bool tier_stats = false;
+    std::optional<std::chrono::steady_clock::time_point> started{};
 };
 
 // Writes scheduler events as JSON lines (docs/lang/Concurrency.md section
@@ -74,6 +78,9 @@ std::vector<std::uint8_t> read_file(const std::filesystem::path& path);
 void write_file(const std::filesystem::path& path, const std::vector<std::uint8_t>& bytes);
 std::string image_costs(const nvr::Image& image);
 void provide_native_library(const nvr::Image& image, nvm::StandardServices& services);
+// Whether --tier-stats can time runs with these limits: not with a graph
+// device, nor with parallel workers, whose time overlaps the run's.
+bool times_runs(const nvm::RunLimits& limits);
 
 int run(const nvr::Image& image, Host& host, std::span<const std::string> arguments,
         const RunOptions& options, std::string_view name, std::size_t image_bytes);

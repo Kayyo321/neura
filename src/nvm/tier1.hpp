@@ -6,6 +6,7 @@
 #include "lift/lowered_block.hpp"
 #include "nvr/image.hpp"
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
@@ -175,6 +176,11 @@ public:
         // again once the block has run `retry_after` times.
         bool settled = true;
         std::uint64_t retry_after = 0;
+        // The time this call spent proving a hint (or a form whose proof
+        // ran out of work before) and searching, as added to the
+        // statistics' proving and searching times.
+        std::chrono::steady_clock::duration proving{};
+        std::chrono::steady_clock::duration searching{};
     };
     // The lowered form of a block with neurons that has run `runs` times,
     // lifting it now unless that was done or tried before. A failure is
@@ -284,6 +290,88 @@ private:
 // per tier. Not one of the invariants of docs/runtime/NVM.md: the figures
 // depend on thresholds, the time budget, and thread timing.
 std::string describe(const TierStatistics& statistics);
+
+// The wall time of a command's runs by what they were doing, for the last
+// line of `neura run --tier-stats` (docs/runtime/NVM.md, "Controls"). It is
+// one timeline: every moment from its start belongs to the category current
+// then, and the clock is read only when the category changes, never per
+// step. The executions that share a timeline (RunLimits::tier_times) run on
+// one thread, one after another or nested (a parallel item evaluated in
+// order, a callback). Nothing reads the times but the report: they change
+// nothing a run does.
+class TierTimes {
+public:
+    using Clock = std::chrono::steady_clock;
+    enum class Category : std::uint8_t {
+        // Reading and validating the image and setting up an execution, up
+        // to its first step.
+        Load,
+        // Steps evaluated by reference, declined lifted steps included.
+        Tier0,
+        // Lifted, wired, and empty steps with their commits, and forming
+        // regions and compiling them to native code.
+        Tier1,
+        // Inside tier 2 regions, interpreted or native.
+        Regions,
+        Collection,
+        // From a host request, poll, or wait leaving the execution to the
+        // execution's next step.
+        Host,
+        // Everything else: scheduling decisions, the runner's work between
+        // and after runs, and the statistics.
+        Other,
+    };
+
+    explicit TierTimes(Clock::time_point start) : start_(start), since_(start) {}
+
+    Category current() const { return current_; }
+    // Ends the current interval and starts one of `next`. Returns the
+    // category of the interval it ended.
+    Category enter(Category next) {
+        if (next == current_) return next;
+        const auto now = Clock::now();
+        spent_[static_cast<std::size_t>(current_)] += now - since_;
+        since_ = now;
+        return std::exchange(current_, next);
+    }
+    // Moves time TierCache::resolve measured inside the current interval
+    // to proving and searching.
+    void lifted(Clock::duration proving, Clock::duration searching) {
+        spent_[static_cast<std::size_t>(current_)] -= proving + searching;
+        proving_ += proving;
+        searching_ += searching;
+    }
+
+    // Enters a category for a scope and returns to the one before it at
+    // the scope's end. A null timeline does nothing.
+    class Scope {
+    public:
+        Scope(TierTimes* times, Category category)
+            : times_(times), previous_(times ? times->enter(category) : category) {}
+        ~Scope() {
+            if (times_) times_->enter(previous_);
+        }
+        Scope(const Scope&) = delete;
+        Scope& operator=(const Scope&) = delete;
+
+    private:
+        TierTimes* times_;
+        Category previous_;
+    };
+
+    // The line, with the timeline ending at `end`: the total from the start
+    // to `end` and each category in milliseconds. `other` is the total less
+    // every other category, never below zero.
+    std::string describe(Clock::time_point end) const;
+
+private:
+    Clock::time_point start_;
+    Clock::time_point since_;
+    Category current_ = Category::Load;
+    std::array<Clock::duration, 7> spent_{};
+    Clock::duration proving_{};
+    Clock::duration searching_{};
+};
 
 // The highest tier the process allows: NEURA_TIER=0, 1, or 2 lowers it for
 // every execution (the test suite uses it), and nothing raises it.

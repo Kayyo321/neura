@@ -65,6 +65,11 @@
         // Charge the step and check the inputs, deferring their lanes.
         if (auto event = begin_active_step<false, true>()) return event;
         auto& plan = *active_plan_;
+        if (times_) {
+            const bool lowered = plan.tier == BlockPlan::Tier::Lifted || plan.tier == BlockPlan::Tier::Wired ||
+                                 plan.tier == BlockPlan::Tier::Empty;
+            times_->enter(lowered ? TierTimes::Category::Tier1 : TierTimes::Category::Tier0);
+        }
         switch (plan.tier) {
         case BlockPlan::Tier::Empty:
             ++tier_steps_.empty;
@@ -79,12 +84,14 @@
             const auto runs = tier_->count(frame.function, frame.block);
             if (runs < plan.threshold) break;
             const auto resolved = tier_->resolve(frame.function, frame.block, runs);
+            if (times_) times_->lifted(resolved.proving, resolved.searching);
             if (!resolved.settled) {
                 plan.threshold = resolved.retry_after;
                 break;
             }
             use_lowered(plan, resolved.block);
             if (!resolved.block) break;
+            time_as(TierTimes::Category::Tier1);
             [[fallthrough]];
         }
         case BlockPlan::Tier::Lifted: {
@@ -95,6 +102,7 @@
                                             tier_registers_);
             if (!exit) {
                 // The lowered block declines: the reference evaluator decides.
+                time_as(TierTimes::Category::Tier0);
                 ++tier_steps_.declined;
                 return finish_reference_step(scratch, true);
             }

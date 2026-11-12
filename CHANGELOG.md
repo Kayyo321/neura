@@ -17,6 +17,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ## Unreleased
 
+### Added
+
+- `neura run --tier-stats` (and `run --each` and `neura test` with it) ends with a line that divides the command's wall time among loading the image, proving, searching, tier 0, tier 1, regions, garbage collection, host services, and the rest ([controls](docs/runtime/NVM.md#controls)). The existing lines are unchanged.
+
 ### Changed
 
 - Native code for tier 2 regions now computes `float32` and `float64` arithmetic, comparisons, and conversions with the processor's scalar instructions instead of calling the runtime for each operation (x86-64 and AArch64). Results are bit for bit those of the reference evaluator, including canonical NaNs; only speed changes ([native compilation](docs/runtime/NVM.md#native-compilation)).

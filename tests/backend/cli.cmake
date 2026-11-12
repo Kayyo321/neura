@@ -155,6 +155,82 @@ if(NOT image_strings MATCHES "hello-world[.]nra")
     message(FATAL_ERROR "the source map should label hello-world.nra")
 endif()
 
+# --tier-stats ends with one line of wall time (docs/runtime/NVM.md,
+# "Controls"): every category, in order, none negative (no minus sign), and
+# summing to the total within the rounding of ten figures to 0.1 ms.
+function(expect_tier_time label stderr)
+    set(ms "[0-9]+[.][0-9]")
+    string(CONCAT line "tier: time: total ${ms} ms: load ${ms}, proving ${ms}, searching ${ms}, tier 0 ${ms}, "
+                       "tier 1 ${ms}, regions ${ms}, collection ${ms}, host ${ms}, other ${ms}")
+    if(NOT stderr MATCHES "\n(${line})\n$")
+        message(FATAL_ERROR "${label}: the last line is not the wall-time line\n${stderr}")
+    endif()
+    string(REGEX MATCHALL "${ms}" figures "${CMAKE_MATCH_1}")
+    set(sum 0)
+    set(total "")
+    foreach(figure IN LISTS figures)
+        string(REPLACE "." "" tenths "${figure}")
+        string(REGEX REPLACE "^0+([0-9])" "\\1" tenths "${tenths}")
+        if(total STREQUAL "")
+            set(total "${tenths}")
+        else()
+            math(EXPR sum "${sum} + ${tenths}")
+        endif()
+    endforeach()
+    math(EXPR difference "${sum} - ${total}")
+    if(difference GREATER 5 OR difference LESS -5)
+        message(FATAL_ERROR "${label}: the categories sum to ${sum} tenths of a ms, the total is ${total}\n${stderr}")
+    endif()
+endfunction()
+
+# The step-count lines of a fixed run are those of the runtime without the
+# time line, which follows them.
+string(CONCAT hello_tier_lines
+    "tier: blocks 59, hinted 1, attempted 0, lifted 0 (0 by hint, 0 by search), hints rejected 0; proving 0.0 ms, searching 0.0 ms\n"
+    "tier: steps 24: tier 2 0.0% (in regions 0), tier 1 91.7% (lifted 0, wired 0, empty 22), tier 0 8.3% (reference 2, declined 0)\n"
+    "tier: jit off\n"
+    "tier: tier 0 steps 1 in function 2 block 9: below the threshold\n"
+    "tier: tier 0 steps 1 in function 0 block 11: below the threshold\n")
+foreach(tier IN ITEMS 2 0)
+    if(tier STREQUAL "0")
+        set(expected_lines "tier: tier 0\n")
+    else()
+        set(expected_lines "${hello_tier_lines}")
+    endif()
+    neura(tier_stats "${TEST_DIR}" run --tier=${tier} --jit=off --tier-stats "${TEST_DIR}/hello.nvr")
+    if(NOT tier_stats_status STREQUAL "0" OR NOT tier_stats_stdout STREQUAL "Hello, World!\n")
+        message(FATAL_ERROR "--tier-stats at tier ${tier} changed the run\n${tier_stats_stdout}${tier_stats_stderr}")
+    endif()
+    string(FIND "${tier_stats_stderr}" "${expected_lines}tier: time: " at)
+    if(NOT at EQUAL 0)
+        message(FATAL_ERROR "--tier-stats at tier ${tier}: expected\n${expected_lines}followed by the time line, "
+                            "got\n${tier_stats_stderr}")
+    endif()
+    expect_tier_time("--tier-stats at tier ${tier}" "${tier_stats_stderr}")
+endforeach()
+neura(no_tier_stats "${TEST_DIR}" run --tier=2 --jit=off "${TEST_DIR}/hello.nvr")
+if(no_tier_stats_stderr MATCHES "tier:")
+    message(FATAL_ERROR "a run without --tier-stats printed tier statistics\n${no_tier_stats_stderr}")
+endif()
+# A run that collects, lifts, and forms regions; members of `run --each`,
+# which share one timeline; and `neura test`.
+build_image("${TEST_DIR}/binary-trees.nvr" "${SOURCE_DIR}/tests/bench-wall/neura/binary-trees.nra")
+neura(trees "${TEST_DIR}" run --tier-stats "${TEST_DIR}/binary-trees.nvr" -- 8)
+if(NOT trees_status STREQUAL "0")
+    message(FATAL_ERROR "binary-trees with --tier-stats failed\n${trees_stderr}")
+endif()
+expect_tier_time("binary-trees with --tier-stats" "${trees_stderr}")
+file(WRITE "${TEST_DIR}/tree-sizes.txt" "4\n6\n8\n")
+neura(trees_each "${TEST_DIR}" run --tier-stats --each "${TEST_DIR}/tree-sizes.txt" "${TEST_DIR}/binary-trees.nvr")
+expect_tier_time("run --each with --tier-stats" "${trees_each_stderr}")
+neura(tier_test "${TEST_DIR}" test --tier-stats ${roots} "${SOURCE_DIR}/examples/testing/math-tests.nra")
+expect_tier_time("test with --tier-stats" "${tier_test_stderr}")
+# With parallel workers, whose time overlaps the run's, the line is omitted.
+neura(tier_workers "${TEST_DIR}" run --tier-stats --parallel-workers 2 "${TEST_DIR}/hello.nvr")
+if(NOT tier_workers_stderr MATCHES "tier: steps" OR tier_workers_stderr MATCHES "tier: time:")
+    message(FATAL_ERROR "--tier-stats with parallel workers\n${tier_workers_stderr}")
+endif()
+
 # The .nir listing route matches the source listing in both modes.
 foreach(mode IN ITEMS "" --no-optimize)
     neura(from_source "${TEST_DIR}" emit-ir ${mode} "${hello}")

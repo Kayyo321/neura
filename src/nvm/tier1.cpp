@@ -128,6 +128,27 @@ std::string describe(const TierStatistics& s) {
     return out;
 }
 
+std::string TierTimes::describe(Clock::time_point end) const {
+    auto spent = spent_;
+    spent[static_cast<std::size_t>(current_)] += end - since_;
+    const auto of = [&](Category category) { return spent[static_cast<std::size_t>(category)]; };
+    const auto total = end - start_;
+    const auto counted = of(Category::Load) + proving_ + searching_ + of(Category::Tier0) + of(Category::Tier1) +
+                         of(Category::Regions) + of(Category::Collection) + of(Category::Host);
+    const auto other = std::max(total - counted, Clock::duration::zero());
+    const auto milliseconds = [](Clock::duration duration) {
+        char text[32];
+        std::snprintf(text, sizeof text, "%.1f",
+                      std::chrono::duration<double, std::milli>(std::max(duration, Clock::duration::zero())).count());
+        return std::string(text);
+    };
+    return "tier: time: total " + milliseconds(total) + " ms: load " + milliseconds(of(Category::Load)) +
+           ", proving " + milliseconds(proving_) + ", searching " + milliseconds(searching_) + ", tier 0 " +
+           milliseconds(of(Category::Tier0)) + ", tier 1 " + milliseconds(of(Category::Tier1)) + ", regions " +
+           milliseconds(of(Category::Regions)) + ", collection " + milliseconds(of(Category::Collection)) +
+           ", host " + milliseconds(of(Category::Host)) + ", other " + milliseconds(other) + "\n";
+}
+
 bool tier_eager() {
     static const bool enabled = [] {
         const char* text = std::getenv("NEURA_TIER_EAGER");
@@ -274,6 +295,10 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
 
     const std::lock_guard lock(mutex_);
     (hint ? hint_spent_ : search_spent_) += time;
+    const auto spent = [&](Resolution resolution) {
+        (hint ? resolution.proving : resolution.searching) = time;
+        return resolution;
+    };
     auto& found = entry(function, block);
     const bool by_hint = retry ? found.from_hint : hint != nullptr;
     if (result.block) {
@@ -283,7 +308,7 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         accepted_.emplace(key, result.block);
         statistics_.block_reasons.erase({function, block});
         ++(by_hint ? statistics_.lifted_by_hint : statistics_.lifted_by_search);
-        return {found.lowered.get(), true};
+        return spent({found.lowered.get(), true});
     }
     if (result.exhausted) {
         // Not decided: try again once the block has run eight times as
@@ -302,7 +327,7 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         const auto share = std::max(result.progress, 1.0 / 256);
         const auto factor = std::clamp<std::uint64_t>(static_cast<std::uint64_t>(std::ceil(2.0 / share)), 8, 512);
         found.next_attempt = std::max<std::uint64_t>(runs * factor, 256);
-        return {nullptr, false, found.next_attempt};
+        return spent({nullptr, false, found.next_attempt});
     }
     // A failure is final for its source: a failed hint is not tried again
     // (the block may still be searched for), and a failed search is not
@@ -323,13 +348,13 @@ TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t b
         if (searchable) {
             found.state = Entry::State::Unknown;
             found.next_attempt = std::max<std::uint64_t>(runs + 1, options_.search_after);
-            return {nullptr, false, found.next_attempt};
+            return spent({nullptr, false, found.next_attempt});
         }
     } else {
         searched_.emplace(key, reason_class(result.rejection));
     }
     found.state = Entry::State::Settled;
-    return {nullptr, true};
+    return spent({nullptr, true});
 }
 
 void TierCache::add_reference_steps(std::uint32_t function, std::uint32_t block, std::uint64_t steps) {

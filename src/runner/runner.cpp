@@ -355,11 +355,22 @@ void print_profile(const nvr::Image& image, const nvm::RunResult& result) {
 
 } // namespace
 
+bool times_runs(const nvm::RunLimits& limits) {
+    return !limits.graph_device && limits.parallel_workers <= 1;
+}
+
 int run(const nvr::Image& image, Host& host, std::span<const std::string> arguments,
         const RunOptions& options, std::string_view name, std::size_t image_bytes) {
+    // --tier-stats: the timeline starts when the caller started reading
+    // the image, or here.
+    std::optional<nvm::TierTimes> times;
+    if (options.tier_stats && times_runs(options.limits)) {
+        times.emplace(options.started.value_or(std::chrono::steady_clock::now()));
+    }
     TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
+    if (times) limits.tier_times = &*times;
     // One cache of lifted blocks for the run, so that its statistics can be
     // reported; the run would otherwise keep its own.
     std::optional<nvm::TierCache> tiers;
@@ -416,6 +427,8 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     }
     if (options.tier_stats) {
         std::cerr << (tiers ? nvm::describe(tiers->statistics()) : std::string("tier: tier 0\n"));
+        // The timeline ends here, after the other statistics.
+        if (times) std::cerr << times->describe(std::chrono::steady_clock::now());
     }
     if (options.limits.profile) {
         print_profile(image, result);
