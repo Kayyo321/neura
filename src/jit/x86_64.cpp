@@ -236,6 +236,36 @@ void Emitter::pop(Reg value) {
 
 void Emitter::ret() { byte(0xC3); }
 
+// The mandatory prefix precedes REX.
+void Emitter::sse(std::uint8_t prefix, bool w, std::uint8_t opcode, unsigned reg, unsigned rm) {
+    if (prefix != 0) byte(prefix);
+    rex(w, reg, rm);
+    byte(0x0F);
+    byte(opcode);
+    byte(static_cast<std::uint8_t>(0xC0 | ((reg & 7U) << 3) | (rm & 7U)));
+}
+
+void Emitter::movq_to_xmm(Xmm to, Reg from) { sse(0x66, true, 0x6E, to, from); }
+void Emitter::movd_to_xmm(Xmm to, Reg from) { sse(0x66, false, 0x6E, to, from); }
+void Emitter::movq_from_xmm(Reg to, Xmm from) { sse(0x66, true, 0x7E, from, to); }
+void Emitter::movd_from_xmm(Reg to, Xmm from) { sse(0x66, false, 0x7E, from, to); }
+
+void Emitter::scalar(SseOp op, bool single, Xmm to, Xmm from) {
+    sse(single ? 0xF3 : 0xF2, false, static_cast<std::uint8_t>(op), to, from);
+}
+
+void Emitter::compare_scalar(bool single, Xmm to, Xmm from, std::uint8_t predicate) {
+    sse(single ? 0xF3 : 0xF2, false, 0xC2, to, from);
+    byte(predicate);
+}
+
+void Emitter::ucomis(bool single, Xmm a, Xmm b) { sse(single ? 0 : 0x66, false, 0x2E, a, b); }
+
+void Emitter::convert_from_integer(bool single, Xmm to, Reg from) { sse(single ? 0xF3 : 0xF2, true, 0x2A, to, from); }
+void Emitter::truncate_to_integer(bool single, Reg to, Xmm from) { sse(single ? 0xF3 : 0xF2, true, 0x2C, to, from); }
+
+void Emitter::convert_scalar(bool to_single, Xmm to, Xmm from) { sse(to_single ? 0xF2 : 0xF3, false, 0x5A, to, from); }
+
 namespace {
 
 // Register use of the generated code (System V AMD64 calling convention):
@@ -437,6 +467,92 @@ public:
             e_.div(rcx);
         }
         if (remainder) e_.mov(rax, rdx);
+    }
+
+    // The float operations: baseline SSE2 only (no SSE4, AVX, or FMA), on
+    // xmm0 and xmm1.
+    void to_xmm(FloatFormat format, Xmm to, Scratch from) {
+        if (format == FloatFormat::Binary32) {
+            e_.movd_to_xmm(to, scratch(from));
+        } else {
+            e_.movq_to_xmm(to, scratch(from));
+        }
+    }
+
+    void from_xmm(FloatFormat format, Scratch to, Xmm from) {
+        if (format == FloatFormat::Binary32) {
+            e_.movd_from_xmm(scratch(to), from);
+        } else {
+            e_.movq_from_xmm(scratch(to), from);
+        }
+    }
+
+    // to = the canonical quiet NaN when xmm0 holds a NaN, which SSE leaves
+    // with its payload (or makes the negative default NaN). ucomis of a NaN
+    // is unordered, which sets PF.
+    void canonicalize(FloatFormat format, Scratch to) {
+        const bool single = format == FloatFormat::Binary32;
+        e_.ucomis(single, xmm0, xmm0);
+        const auto skip = e_.jcc(np);
+        e_.mov_immediate(scratch(to), single ? 0x7FC00000ULL : 0x7FF8000000000000ULL);
+        e_.patch(skip, e_.size());
+    }
+
+    void float_alu(FloatAlu op, FloatFormat format, Scratch to, Scratch from) override {
+        to_xmm(format, xmm0, to);
+        to_xmm(format, xmm1, from);
+        SseOp sse = SseOp::add;
+        switch (op) {
+        case FloatAlu::Add: sse = SseOp::add; break;
+        case FloatAlu::Sub: sse = SseOp::sub; break;
+        case FloatAlu::Mul: sse = SseOp::mul; break;
+        case FloatAlu::Div: sse = SseOp::div; break;
+        }
+        e_.scalar(sse, format == FloatFormat::Binary32, xmm0, xmm1);
+        from_xmm(format, to, xmm0);
+        canonicalize(format, to);
+    }
+
+    void float_compare(FloatCond cond, FloatFormat format, Scratch to, Scratch a, Scratch b) override {
+        // cmpsd predicates: 0 equal (ordered), 4 not equal (unordered), 1
+        // less than and 2 less or equal (ordered); greater swaps the
+        // operands.
+        std::uint8_t predicate = 0;
+        bool swap = false;
+        switch (cond) {
+        case FloatCond::Eq: predicate = 0; break;
+        case FloatCond::Ne: predicate = 4; break;
+        case FloatCond::Lt: predicate = 1; break;
+        case FloatCond::Le: predicate = 2; break;
+        case FloatCond::Gt: predicate = 1; swap = true; break;
+        case FloatCond::Ge: predicate = 2; swap = true; break;
+        }
+        to_xmm(format, xmm0, swap ? b : a);
+        to_xmm(format, xmm1, swap ? a : b);
+        e_.compare_scalar(format == FloatFormat::Binary32, xmm0, xmm1, predicate);
+        // The low 32 bits of the mask are all ones or zero.
+        e_.movd_from_xmm(scratch(to), xmm0);
+        e_.shift_immediate(ShiftOp::shr, scratch(to), 31);
+    }
+
+    void float_convert(FloatFormat to, Scratch value) override {
+        const bool to_single = to == FloatFormat::Binary32;
+        to_xmm(to_single ? FloatFormat::Binary64 : FloatFormat::Binary32, xmm0, value);
+        e_.convert_scalar(to_single, xmm0, xmm0);
+        from_xmm(to, value, xmm0);
+        canonicalize(to, value);
+    }
+
+    void float_from_integer(FloatFormat format, Scratch value) override {
+        e_.convert_from_integer(format == FloatFormat::Binary32, xmm0, scratch(value));
+        from_xmm(format, value, xmm0);
+    }
+
+    // cvttsd2si gives the integer indefinite, INT64_MIN, for NaN and
+    // out-of-range values.
+    void float_to_integer(FloatFormat format, Scratch value) override {
+        to_xmm(format, xmm0, value);
+        e_.truncate_to_integer(format == FloatFormat::Binary32, scratch(value), xmm0);
     }
 
     void load_context(Scratch to, std::uint32_t offset) override {

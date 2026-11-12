@@ -17,6 +17,10 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ## Unreleased
 
+### Changed
+
+- Native code for tier 2 regions now computes `float32` and `float64` arithmetic, comparisons, and conversions with the processor's scalar instructions instead of calling the runtime for each operation (x86-64 and AArch64). Results are bit for bit those of the reference evaluator, including canonical NaNs; only speed changes ([native compilation](docs/runtime/NVM.md#native-compilation)).
+
 ## [0.2.0] - 2026-11-11
 
 This version adds assign-once `last` bindings, target-typed `new`, anonymous classes in type positions, accessors on exported fields, and `#` tags to the language; requires a `;` after every declaration; gives every diagnostic a code, a rendered source snippet, and a page that `neura explain` prints; runs parts of the standard library on built-in C kernels; and adds two execution tiers above the reference evaluator: blocks proven to compute typed operations run as native operations, and regions of them run together, as machine code the runner generates on x86-64 Linux. The standard library is rewritten in the new style, and some of its zero-argument methods are now fields. The [release checklist](docs/Release.md) maps each feature to its tests.
