@@ -100,6 +100,11 @@ PROGRAMS = [
     ("wall-sha256", "tests/bench-wall/neura/sha256.nra", ["2000"], False),
     ("wall-binary-trees", "tests/bench-wall/neura/binary-trees.nra", ["8"], False),
     ("wall-collatz", "tests/bench-wall/neura/collatz.nra", ["500"], False),
+    ("wall-dispatch", "tests/bench-wall/neura/dispatch.nra", ["20"], False),
+    ("wall-closures", "tests/bench-wall/neura/closures.nra", ["15"], False),
+    ("wall-object-churn", "tests/bench-wall/neura/object-churn.nra", ["70"], False),
+    ("wall-parse-results", "tests/bench-wall/neura/parse-results.nra", ["10"], False),
+    ("wall-text-split", "tests/bench-wall/neura/text-split.nra", ["500"], False),
 ]
 
 # Programs rerun under each limit in the sweep.

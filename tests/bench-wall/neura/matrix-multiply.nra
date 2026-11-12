@@ -1,4 +1,4 @@
-// sizes: quick 40 full 90
+// sizes: quick 40 full 90 long 1100
 // Multiplies two n by n int64 matrices with the textbook triple loop and
 // folds the product into a checksum. The size is the first argument;
 // java/MatrixMultiply.java prints the same line.

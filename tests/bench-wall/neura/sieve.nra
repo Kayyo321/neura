@@ -1,4 +1,4 @@
-// sizes: quick 300000 full 3000000
+// sizes: quick 300000 full 3000000 long 140000000
 // Sieve of Eratosthenes over 2 to n: the number of primes and their sum. The
 // size is the first argument; java/Sieve.java prints the same line.
 let console = import:Std.Io.Console;

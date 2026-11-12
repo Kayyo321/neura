@@ -1,4 +1,4 @@
-// sizes: quick 8 full 9
+// sizes: quick 8 full 9 long 11
 // Fannkuch-redux: over every permutation of 0 to n - 1, the most prefix
 // reversals needed to bring 0 to the front, and the alternating checksum of
 // the counts. The size is the first argument; java/Fannkuch.java prints the

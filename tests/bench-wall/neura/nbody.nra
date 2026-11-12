@@ -1,4 +1,4 @@
-// sizes: quick 250 full 2500
+// sizes: quick 250 full 2500 long 35000000
 // N-body simulation of the Jovian planets around the sun with a symplectic
 // integrator: the system's energy before and after n steps, as float64 bit
 // patterns. The size is the first argument; java/NBody.java prints the same

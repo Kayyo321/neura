@@ -1,4 +1,4 @@
-// sizes: quick 13 full 16
+// sizes: quick 13 full 16 long 19
 // Allocates and walks perfect binary trees: a stretch tree one level deeper
 // than n, a long-lived tree of depth n, and many short-lived trees of each
 // depth from 4 to n in steps of 2, printing each node count. The size is the

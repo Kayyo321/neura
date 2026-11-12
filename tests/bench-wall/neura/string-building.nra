@@ -1,4 +1,4 @@
-// sizes: quick 40000 full 400000
+// sizes: quick 40000 full 400000 long 25000000
 // Builds one string from n pieces "item <i>;" with a StringBuilder, then
 // folds its bytes into a checksum: the byte length and the checksum. The
 // size is the first argument; java/StringBuilding.java prints the same line.

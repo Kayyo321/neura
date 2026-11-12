@@ -1,0 +1,112 @@
+// sizes: quick 60 full 600 long 150000
+// Builds 1000 shapes of five classes behind one interface, chosen by a small
+// pseudo-random generator, then for n rounds calls the interface's two
+// methods on every shape and folds the results into a checksum. Cube
+// extends Square and overrides one of its methods. The size is the first
+// argument; java/Dispatch.java prints the same line.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let Dispatch = module:program.Entry (
+    const Shapes: int = 1000;
+    const Mask: int64 = 1073741823;
+
+    let Shape = interface (
+        let weight = func() -> int64;
+        let mix = func(value: int64) -> int64;
+    );
+
+    let Square = class implements Shape (
+        export last side: int64;
+
+        export let init = func(length: int64) {
+            side = length;
+        };
+
+        export let weight = func() -> int64 => side * side;
+
+        export let mix = func(value: int64) -> int64 => value + side;
+    );
+
+    let Cube = class:Square (
+        export let init = func(length: int64) {
+            super.init(length);
+        };
+
+        export let.override weight = func() -> int64 => side * side * side;
+    );
+
+    let Rectangle = class implements Shape (
+        export last width: int64;
+        export last height: int64;
+
+        export let init = func(across: int64, down: int64) {
+            width = across;
+            height = down;
+        };
+
+        export let weight = func() -> int64 => width * height;
+
+        export let mix = func(value: int64) -> int64 => value ^ width;
+    );
+
+    let Triangle = class implements Shape (
+        export last base: int64;
+        export last height: int64;
+
+        export let init = func(across: int64, down: int64) {
+            base = across;
+            height = down;
+        };
+
+        export let weight = func() -> int64 => base * height / 2;
+
+        export let mix = func(value: int64) -> int64 => value * 3 + height;
+    );
+
+    let Circle = class implements Shape (
+        export last radius: int64;
+
+        export let init = func(length: int64) {
+            radius = length;
+        };
+
+        export let weight = func() -> int64 => 3 * radius * radius;
+
+        export let mix = func(value: int64) -> int64 => (value >> 1) + radius;
+    );
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        last shapes: Shape[list] = [];
+        let seed: int64 = 12345;
+        for (let i = 0; i < Shapes; i = i + 1) {
+            seed = (seed * 1103515245 + 12345) & 2147483647;
+            last kind = seed % 5;
+            last a = (seed >> 8) % 100 + 1;
+            last b = (seed >> 16) % 100 + 1;
+            if (kind == 0) {
+                shapes.append(new Square(a));
+            } else if (kind == 1) {
+                shapes.append(new Cube(a));
+            } else if (kind == 2) {
+                shapes.append(new Rectangle(a, b));
+            } else if (kind == 3) {
+                shapes.append(new Triangle(a, b));
+            } else {
+                shapes.append(new Circle(a));
+            }
+        }
+        let checksum: int64 = 0;
+        for (let round = 0; round < n; round = round + 1) {
+            for (let i = 0; i < shapes.length; i = i + 1) {
+                last shape = shapes[i];
+                checksum = (checksum * 31 + shape.weight() + shape.mix(checksum & 1023)) & Mask;
+            }
+        }
+        console.println("dispatch {} {}", shapes.length, checksum);
+        return program.ExitCode.Ok;
+    };
+);

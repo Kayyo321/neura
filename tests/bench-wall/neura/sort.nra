@@ -1,4 +1,4 @@
-// sizes: quick 30000 full 250000
+// sizes: quick 30000 full 250000 long 15000000
 // Sorts n pseudo-random int32 values with Std.Collections.Sorting.sort and
 // Int32.compare, checks the order, and folds the sorted values into a
 // checksum. The size is the first argument; java/Sort.java prints the same

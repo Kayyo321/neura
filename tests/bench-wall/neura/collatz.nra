@@ -1,4 +1,4 @@
-// sizes: quick 10000 full 100000
+// sizes: quick 10000 full 100000 long 8000000
 // Collatz chain lengths for every start from 1 to n: the longest chain, the
 // start that gives it, and the total length of all chains. The size is the
 // first argument; java/Collatz.java prints the same line.

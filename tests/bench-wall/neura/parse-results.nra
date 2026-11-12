@@ -1,0 +1,158 @@
+// sizes: quick 50 full 500 long 70000
+// Generates 1000 pseudo-random `key=value` records, half of them malformed
+// (no separator, a bad digit, an empty or too long number, an unknown key),
+// then parses every record n times with functions that return Optional and
+// Result values and matches on them: the count of each outcome and a
+// checksum of the parsed values and error offsets. The size is the first
+// argument; java/ParseResults.java prints the same line.
+let console = import:Std.Io.Console;
+let errors = import:Std.Core.Error;
+let int32s = import:Std.Core.Int32;
+let optional = import:Std.Core.Optional;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ParseResults = module:program.Entry (
+    const Records: int = 1000;
+    const Mask: int64 = 1073741823;
+
+    let Keys: string[] = ["id", "size", "count", "weight"];
+
+    // The offset of the `=` after a non-empty key, or None.
+    let separator_of = func(line: string) -> optional.Optional<int> {
+        for (let i = 0; i < line.byte_length; i = i + 1) {
+            if (line.byte_at(i) == 61) {
+                if (i == 0) {
+                    return optional.Optional<int>.None;
+                }
+                return optional.Optional<int>.Some(i);
+            }
+        }
+        return optional.Optional<int>.None;
+    };
+
+    let parse_error = func(kind: errors.ParseErrorKind, offset: int, message: string) -> result.Result<int32> {
+        return result.Result<int32>.Err(errors.Error.Parse { kind: kind, offset: offset, message: message });
+    };
+
+    // The decimal int32 in bytes start to end of the line: an optional minus
+    // sign and one to nine digits.
+    let parse_int = func(line: string, start: int, end: int) -> result.Result<int32> {
+        let at = start;
+        let negative = false;
+        if (at < end && line.byte_at(at) == 45) {
+            negative = true;
+            at = at + 1;
+        }
+        if (at == end) {
+            return parse_error(errors.ParseErrorKind.Empty, at, "empty number");
+        }
+        if (end - at > 9) {
+            return parse_error(errors.ParseErrorKind.OutOfRange, at, "too many digits");
+        }
+        let value: int32 = 0;
+        while (at < end) {
+            last digit = line.byte_at(at);
+            if (digit < 48 || digit > 57) {
+                return parse_error(errors.ParseErrorKind.InvalidCharacter, at, "invalid digit");
+            }
+            value = value * 10 + ((digit - 48) as int32);
+            at = at + 1;
+        }
+        if (negative) {
+            return result.Result<int32>.Ok(-value);
+        }
+        return result.Result<int32>.Ok(value);
+    };
+
+    // The weight of a known key, or None.
+    let key_weight = func(key: string) -> optional.Optional<int64> {
+        if (key == "id") {
+            return optional.Optional<int64>.Some(1);
+        }
+        if (key == "size") {
+            return optional.Optional<int64>.Some(3);
+        }
+        if (key == "count") {
+            return optional.Optional<int64>.Some(5);
+        }
+        if (key == "weight") {
+            return optional.Optional<int64>.Some(7);
+        }
+        return optional.Optional<int64>.None;
+    };
+
+    let error_offset = func(failure: errors.Error) -> int64 {
+        match (failure) {
+            errors.Error.Parse { kind: _, offset, message: _ } => {
+                return offset as int64;
+            },
+            _ => {
+                return 0;
+            },
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        last lines: string[list] = [];
+        let seed: int64 = 12345;
+        for (let i = 0; i < Records; i = i + 1) {
+            seed = (seed * 1103515245 + 12345) & 2147483647;
+            last key = Keys[(seed % 4) as int];
+            last number = (seed >> 4) % 1000000;
+            last kind = (seed >> 24) % 10;
+            if (kind == 0) {
+                lines.append(key + number.to_string());
+            } else if (kind == 1) {
+                lines.append(key + "=" + number.to_string() + "x");
+            } else if (kind == 2) {
+                lines.append(key + "=");
+            } else if (kind == 3) {
+                lines.append("colour=" + number.to_string());
+            } else if (kind == 4) {
+                lines.append(key + "=" + number.to_string() + "0000000000");
+            } else if (kind == 5) {
+                lines.append(key + "=-" + number.to_string());
+            } else {
+                lines.append(key + "=" + number.to_string());
+            }
+        }
+        let parsed = 0;
+        let missing = 0;
+        let invalid = 0;
+        let unknown = 0;
+        let checksum: int64 = 0;
+        for (let round = 0; round < n; round = round + 1) {
+            for (let i = 0; i < lines.length; i = i + 1) {
+                last line = lines[i];
+                match (separator_of(line)) {
+                    optional.Optional.None => {
+                        missing = missing + 1;
+                    },
+                    optional.Optional.Some(at) => {
+                        match (parse_int(line, at + 1, line.byte_length)) {
+                            result.Result.Ok(value) => {
+                                match (key_weight(line.slice(0, at))) {
+                                    optional.Optional.Some(weight) => {
+                                        parsed = parsed + 1;
+                                        checksum = (checksum * 31 + (value as int64) * weight + (round as int64)) & Mask;
+                                    },
+                                    optional.Optional.None => {
+                                        unknown = unknown + 1;
+                                    },
+                                }
+                            },
+                            result.Result.Err(failure) => {
+                                invalid = invalid + 1;
+                                checksum = (checksum * 31 + error_offset(failure)) & Mask;
+                            },
+                        }
+                    },
+                }
+            }
+        }
+        console.println("parse-results {} {} {} {} {}", parsed, missing, invalid, unknown, checksum);
+        return program.ExitCode.Ok;
+    };
+);
