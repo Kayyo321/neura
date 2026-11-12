@@ -1,25 +1,42 @@
-// The "Copy Neura Language Skill" controls of the front page. Each copies the prompt that installs the Neura
+// The "Copy Neura Language Skill" control of the front page. It copies the prompt that installs the Neura
 // language skill in a coding agent: the code block under the heading "Write Neura with an AI agent", which the
-// build includes from README.md. The page works without this script: the hero's control is then a link to that
-// heading, and the button below the prompt stays hidden. The script requests nothing.
+// build includes from README.md. Without clipboard support the button stays hidden and the prompt remains
+// selectable. The script requests nothing.
 (() => {
-  const heading = document.getElementById("write-neura-with-an-ai-agent");
-  const block = heading && heading.closest(".agent-skill") && heading.closest(".agent-skill").querySelector("pre code");
-  if (!block || !navigator.clipboard) return;
-  const prompt = block.textContent.replace(/\n$/, "");
+  const section = document.querySelector(".agent-skill");
+  const block = section && section.querySelector("pre");
+  const actions = section && section.querySelector(".skill-actions");
+  if (!block || !actions || !navigator.clipboard?.writeText) return;
+  const prompt = block.querySelector("code").textContent.replace(/\n$/, "");
+  const control = actions.querySelector("[data-copy-prompt]");
+  const feedback = actions.querySelector(".skill-copy-feedback");
+  const status = actions.querySelector("[data-copy-status]");
+  let copying = false;
+  let reset;
 
-  document.querySelectorAll("[data-copy-prompt]").forEach((control) => {
-    const label = control.textContent;
-    control.hidden = false;
-    control.addEventListener("click", (event) => {
-      event.preventDefault();
-      navigator.clipboard.writeText(prompt).then(
-        () => {
-          control.textContent = "Copied";
-          setTimeout(() => (control.textContent = label), 1600);
-        },
-        () => heading.scrollIntoView(),
-      );
-    });
+  block.before(actions);
+  actions.hidden = false;
+  control.addEventListener("click", async () => {
+    if (copying) return;
+    copying = true;
+    clearTimeout(reset);
+    control.dataset.copyState = "pending";
+    feedback.textContent = "Copying…";
+    status.textContent = "";
+    try {
+      await navigator.clipboard.writeText(prompt);
+      feedback.textContent = "Copied";
+      status.textContent = "Neura language skill prompt copied.";
+    } catch {
+      feedback.textContent = "Select prompt to copy";
+      status.textContent = "Could not copy. Select the prompt below and copy it manually.";
+    } finally {
+      copying = false;
+      control.dataset.copyState = "complete";
+      reset = setTimeout(() => {
+        delete control.dataset.copyState;
+        status.textContent = "";
+      }, 2400);
+    }
   });
 })();
