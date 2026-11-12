@@ -77,6 +77,10 @@ struct EditorDocument {
     std::vector<Token> tokens;
     ParsedFile syntax;
     std::vector<Diagnostic> syntax_diagnostics;
+    // Coordinates belong to this text snapshot, never to its buffer address.
+    std::vector<std::size_t> line_starts;
+    Json position(std::size_t offset) const;
+    Json range(const Span &span) const;
 };
 
 struct InlayOptions {
@@ -125,6 +129,8 @@ class AnalysisSession {
   private:
     std::string analyzed_;
     bool workspace_indexed_{};
+    std::map<std::pair<std::string, std::string>, std::vector<std::size_t>> symbol_names_;
+    void rebuild_symbol_index();
     void parse_document(EditorDocument &document);
     void index_syntax(EditorDocument &document);
     void index_compiler();

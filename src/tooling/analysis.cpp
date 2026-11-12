@@ -132,9 +132,10 @@ std::string signature(const Declaration &d) {
 Span named_span(const EditorDocument &doc, const Span &span, std::string_view name, bool last = false) {
     Span result = span;
     result.length = name.size();
-    for (const auto &token : doc.tokens) {
-        if (token.span.offset < span.offset)
-            continue;
+    const auto first = std::lower_bound(doc.tokens.begin(), doc.tokens.end(), span.offset,
+                                        [](const Token &token, std::size_t offset) { return token.span.offset < offset; });
+    for (auto it = first; it != doc.tokens.end(); ++it) {
+        const auto &token = *it;
         if (token.span.offset > span.offset + span.length)
             break;
         if (token.text == name) {
@@ -309,7 +310,31 @@ Json source_range(std::string_view source, const Span &span) {
                 {"end", source_position(source, span.offset + span.length)}};
 }
 
+Json EditorDocument::position(std::size_t offset) const {
+    offset = std::min(offset, source.size());
+    if (line_starts.empty())
+        return source_position(source, offset);
+    const auto after = std::upper_bound(line_starts.begin(), line_starts.end(), offset);
+    const auto line = static_cast<std::size_t>(after - line_starts.begin() - 1);
+    const auto start = line_starts[line];
+    auto result = source_position(std::string_view(source).substr(start, offset - start), offset - start);
+    result["line"] = line + static_cast<std::size_t>(result["line"].integer());
+    return result;
+}
+Json EditorDocument::range(const Span &span) const {
+    return Json{{"start", position(span.offset)}, {"end", position(span.offset + span.length)}};
+}
+
 void AnalysisSession::parse_document(EditorDocument &document) {
+    document.line_starts.assign(1, 0);
+    for (std::size_t i = 0; i < document.source.size(); ++i) {
+        if (document.source[i] == '\r') {
+            if (i + 1 < document.source.size() && document.source[i + 1] == '\n')
+                ++i;
+            document.line_starts.push_back(i + 1);
+        } else if (document.source[i] == '\n')
+            document.line_starts.push_back(i + 1);
+    }
     document.syntax_diagnostics.clear();
     document.tokens = lex_recovering(document.source, document.path, document.syntax_diagnostics);
     document.syntax = parse_recovering(document.tokens, document.syntax_diagnostics);
@@ -403,6 +428,7 @@ void AnalysisSession::analyze(std::string_view uri) {
     analyzed_ = active->path;
     diagnostics.clear();
     symbols.clear();
+    symbol_names_.clear();
     references.clear();
     program.reset();
     sources.clear();
@@ -439,6 +465,7 @@ void AnalysisSession::analyze(std::string_view uri) {
     }
     for (auto &[path, doc] : documents)
         index_syntax(doc);
+    rebuild_symbol_index();
     if (program)
         index_compiler();
     // Lexically resolved references remain useful in an incomplete function.
@@ -453,7 +480,7 @@ void AnalysisSession::analyze(std::string_view uri) {
             if (token.kind != TokenKind::Identifier || occupied.contains({path, token.span.offset}))
                 continue;
             const auto previous = token.span.offset
-                                      ? doc.source.substr(0, token.span.offset).find_last_not_of(" \t\r\n")
+                                      ? doc.source.find_last_not_of(" \t\r\n", token.span.offset - 1)
                                       : std::string::npos;
             if (previous != std::string::npos && doc.source[previous] == '.')
                 continue;
@@ -577,7 +604,7 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
             if (tag.name == "Immutable")
                 mods |= modifier("readonly");
         }
-        auto selected = d.name_span.value_or(named_span(doc, d.span, d.name));
+        const auto selected = d.name_span ? *d.name_span : named_span(doc, d.span, d.name);
         const auto id = add(d.name, selected, d.span, scope, parent, kind, type, mods, signature(d),
                             d.type ? syntax_type(*d.type) : "", &d);
         for (const auto &generic : d.generics)
@@ -613,7 +640,10 @@ std::optional<std::size_t> AnalysisSession::resolve_name(const EditorDocument &d
                                                          std::size_t offset) const {
     std::optional<std::size_t> result;
     std::size_t length = std::numeric_limits<std::size_t>::max();
-    for (std::size_t i = 0; i < symbols.size(); ++i) {
+    const auto candidates = symbol_names_.find({doc.path, std::string(name)});
+    if (candidates == symbol_names_.end())
+        return result;
+    for (const auto i : candidates->second) {
         const auto &s = symbols[i];
         if (s.file != doc.path || s.name != name || !contains(s.scope, offset))
             continue;
@@ -628,6 +658,16 @@ std::optional<std::size_t> AnalysisSession::resolve_name(const EditorDocument &d
     return result;
 }
 
+void AnalysisSession::rebuild_symbol_index() {
+    symbol_names_.clear();
+    for (std::size_t i = 0; i < symbols.size(); ++i)
+        symbol_names_[{symbols[i].file, symbols[i].name}].push_back(i);
+    for (auto &[key, candidates] : symbol_names_)
+        std::sort(candidates.begin(), candidates.end(), [&](auto a, auto b) {
+            return std::tie(symbols[a].selection.offset, a) < std::tie(symbols[b].selection.offset, b);
+        });
+}
+
 void AnalysisSession::index_compiler() {
     if (!program)
         return;
@@ -638,15 +678,27 @@ void AnalysisSession::index_compiler() {
             continue;
         std::optional<std::size_t> best;
         std::size_t distance = std::numeric_limits<std::size_t>::max();
-        for (std::size_t i = 0; i < symbols.size(); ++i) {
+        const auto candidates = symbol_names_.find({original.span.file, original.name});
+        const auto consider = [&](std::size_t i) {
             const auto &s = symbols[i];
-            if (s.file != original.span.file || s.name != original.name)
-                continue;
             const auto delta = s.selection.offset > original.span.offset ? s.selection.offset - original.span.offset
                                                                          : original.span.offset - s.selection.offset;
-            if (delta < distance) {
+            if (delta < distance || (delta == distance && (!best || i < *best))) {
                 best = i;
                 distance = delta;
+            }
+        };
+        if (candidates != symbol_names_.end()) {
+            const auto &indices = candidates->second;
+            const auto next = std::lower_bound(indices.begin(), indices.end(), original.span.offset,
+                [&](std::size_t i, std::size_t at) { return symbols[i].selection.offset < at; });
+            if (next != indices.end())
+                consider(*next);
+            if (next != indices.begin()) {
+                const auto previous_offset = symbols[*std::prev(next)].selection.offset;
+                const auto previous = std::lower_bound(indices.begin(), next, previous_offset,
+                    [&](std::size_t i, std::size_t at) { return symbols[i].selection.offset < at; });
+                consider(*previous);
             }
         }
         if (!best) {
@@ -664,6 +716,10 @@ void AnalysisSession::index_compiler() {
             symbol.token_type = symbol_token(original.kind);
             symbols.push_back(std::move(symbol));
             best = symbols.size() - 1;
+            auto &indices = symbol_names_[{original.span.file, original.name}];
+            const auto next = std::lower_bound(indices.begin(), indices.end(), symbols[*best].selection.offset,
+                [&](std::size_t i, std::size_t at) { return symbols[i].selection.offset < at; });
+            indices.insert(next, *best);
         }
         ids[id] = *best;
         auto &s = symbols[*best];
@@ -767,9 +823,10 @@ void AnalysisSession::index_compiler() {
             return;
         bool hit = false;
         Span selection;
-        for (const auto &token : doc->second.tokens) {
-            if (token.span.offset < node.span.offset)
-                continue;
+        const auto first = std::lower_bound(doc->second.tokens.begin(), doc->second.tokens.end(), node.span.offset,
+            [](const Token &token, std::size_t at) { return token.span.offset < at; });
+        for (auto it = first; it != doc->second.tokens.end(); ++it) {
+            const auto &token = *it;
             if (token.span.offset + token.span.length > node.span.offset + node.span.length)
                 break;
             if (token.text == s.name) {
@@ -835,7 +892,7 @@ Json AnalysisSession::location(const Span &span) const {
     const auto found = documents.find(span.file);
     if (found == documents.end())
         return Json{};
-    return Json{{"uri", found->second.uri}, {"range", source_range(found->second.source, span)}};
+    return Json{{"uri", found->second.uri}, {"range", found->second.range(span)}};
 }
 Json AnalysisSession::diagnostics_for(const EditorDocument &doc) const {
     Json::Array result;
@@ -858,7 +915,7 @@ Json AnalysisSession::diagnostics_for(const EditorDocument &doc) const {
             for (const auto &help : data->helps)
                 message += "\n\nHelp: " + help;
         }
-        Json item{{"range", source_range(doc.source, d.span)},
+        Json item{{"range", doc.range(d.span)},
                   {"severity", d.severity() == Severity::Warning ? 2 : 1},
                   {"source", "neura"},
                   {"message", message},
@@ -931,9 +988,11 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
     std::function<void(const Expr &)> expression;
     std::function<void(const TypeSyntax &)> type;
     type = [&](const TypeSyntax &t) {
-        for (const auto &token : doc.tokens)
-            if (token.span.offset >= t.span.offset && token.span.offset < t.span.offset + t.span.length &&
-                token.kind == TokenKind::Identifier) {
+        const auto first = std::lower_bound(doc.tokens.begin(), doc.tokens.end(), t.span.offset,
+            [](const Token &token, std::size_t at) { return token.span.offset < at; });
+        for (auto it = first; it != doc.tokens.end() && it->span.offset < t.span.offset + t.span.length; ++it) {
+            const auto &token = *it;
+            if (token.kind == TokenKind::Identifier) {
                 int kind = 1;
                 if (auto id = resolve_name(doc, token.text, token.span.offset)) {
                     const auto &target = symbols[*id];
@@ -942,6 +1001,7 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
                 }
                 put(token.span, kind, 0, 1);
             }
+        }
         for (const auto &a : t.arguments)
             type(a);
         if (t.anonymous)
@@ -1049,8 +1109,8 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
     for (const auto &[offset, mark] : marks) {
         if (offset < consumed)
             continue;
-        const auto start = source_position(doc.source, offset),
-                   end = source_position(doc.source, offset + mark.span.length);
+        const auto start = doc.position(offset),
+                   end = doc.position(offset + mark.span.length);
         if (start["line"].integer() != end["line"].integer())
             continue;
         const auto line = start["line"].integer(), character = start["character"].integer(),
@@ -1078,6 +1138,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset) 
                      (doc.source[start - 1] >= '0' && doc.source[start - 1] <= '9') || doc.source[start - 1] == '_'))
         --start;
     const auto prefix = doc.source.substr(start, offset - start);
+    const auto replacement_range = doc.range(Span{doc.path, 1, 1, start, offset - start});
     const auto before = start ? doc.source.find_last_not_of(" \t\r\n", start - 1) : std::string::npos;
     if (before != std::string::npos && doc.source[before] == '#') {
         for (const auto &tag : tag_registry()) {
@@ -1157,7 +1218,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset) 
                   {"kind", kind},
                   {"detail", symbol.detail},
                   {"documentation", Json{{"kind", "markdown"}, {"value", symbol.documentation}}},
-                  {"textEdit", Json{{"range", source_range(doc.source, Span{doc.path, 1, 1, start, offset - start})},
+                  {"textEdit", Json{{"range", replacement_range},
                                     {"newText", symbol.name}}}};
         if (symbol.modifiers & modifier("deprecated"))
             item["tags"] = Json::Array{1};
@@ -1187,8 +1248,8 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
         Json result{{"name", s.name},
                     {"detail", s.detail},
                     {"kind", s.kind},
-                    {"range", source_range(doc.source, s.span)},
-                    {"selectionRange", source_range(doc.source, s.selection)}};
+                    {"range", doc.range(s.span)},
+                    {"selectionRange", doc.range(s.selection)}};
         if (!nested.empty())
             result["children"] = nested;
         if (s.modifiers & modifier("deprecated"))
@@ -1280,7 +1341,7 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
         const auto &type = program->symbols[s.compiler_id].type;
         if (type.kind == TypeKind::Callable || type.kind == TypeKind::Module)
             continue;
-        result.emplace_back(Json{{"position", source_position(doc.source, s.selection.offset + s.selection.length)},
+        result.emplace_back(Json{{"position", doc.position(s.selection.offset + s.selection.length)},
                                  {"label", ": " + s.type_name},
                                  {"kind", 1},
                                  {"paddingLeft", false},
@@ -1294,7 +1355,7 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 roles[reference.span.offset + reference.span.length] |= reference.token_type == 24 ? 1u : 2u;
         for (const auto &[offset, role] : roles)
             result.emplace_back(
-                Json{{"position", source_position(doc.source, offset)},
+                Json{{"position", doc.position(offset)},
                      {"label", role == 3   ? " (get, set)"
                                : role == 1 ? " (get)"
                                            : " (set)"},
@@ -1385,7 +1446,7 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                     parameter.name.starts_with('$') ||
                     (argument.kind == Expr::Kind::Name && argument.text == parameter.name))
                     continue;
-                result.emplace_back(Json{{"position", source_position(doc.source, argument.span.offset)},
+                result.emplace_back(Json{{"position", doc.position(argument.span.offset)},
                                          {"label", parameter.name + ":"},
                                          {"kind", 2},
                                          {"paddingRight", true},
@@ -1416,7 +1477,7 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                             label += ", ";
                         label += name;
                     }
-                    result.emplace_back(Json{{"position", source_position(doc.source, node.span.offset)},
+                    result.emplace_back(Json{{"position", doc.position(node.span.offset)},
                                              {"label", label + " "},
                                              {"kind", 1},
                                              {"tooltip", "Values captured by this closure, resolved by the compiler"}});
@@ -1496,7 +1557,7 @@ Json AnalysisSession::workspace_edit(const std::vector<DiagnosticEdit> &edits) c
         if (doc == documents.end() || doc->second.library)
             continue;
         by_file[edit.span.file].emplace_back(
-            Json{{"range", source_range(doc->second.source, edit.span)}, {"newText", edit.replacement}});
+            Json{{"range", doc->second.range(edit.span)}, {"newText", edit.replacement}});
     }
     Json::Array changes;
     for (const auto &[path, file_edits] : by_file) {
