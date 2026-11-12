@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """Editor requests must work while a document is incomplete."""
 import pathlib
+import subprocess
 import tempfile
 import unittest
 
-from lsp_protocol import Client, params
+from lsp_protocol import BINARY, Client, params
 
 
 class EditorRegressionTests(unittest.TestCase):
@@ -56,12 +57,33 @@ class EditorRegressionTests(unittest.TestCase):
         self.assertIn('Tools', self.labels('let tools = import:Too<cursor>'))
 
     def test_module_override_candidates_include_inherited_data(self):
-        source = ('let Grand = module (export let inherited = func -> int => 1;);\n'
+        source = ('let Shared = class ();\n'
+                  'let Grand = module (export let inherited = func -> int => 1;);\n'
                   'let Base = module:Grand (export let needed = func -> int; export let setting = 1; '
+                  'export let Thing = class (); export let View = interface (); '
+                  'export let Mode = enum (One); export let Nested = module (); export let Alias = Shared; '
+                  'export last last_value: int = 1; export const Limit = 2; '
                   'let private = 2;);\n'
                   'let App = module:Base (\n export let.override inherited = func -> int => 2;\n'
                   ' export let.override <cursor>\n);')
-        self.assertEqual(self.labels(source), {'needed', 'setting'})
+        self.assertEqual(self.labels(source), {'needed', 'setting', 'Alias', 'last_value', 'Limit'})
+        # Check the actual language boundary as well as the suggestion list:
+        # fresh nominal definitions fail, while an alias preserves identity.
+        path = self.root / 'override-check.nra'
+        for definition in ['class ()', 'interface ()', 'enum (One)', 'module ()']:
+            with self.subTest(definition=definition):
+                path.write_text(f'let Base = module (export let Thing = {definition};); '
+                                f'let Child = module:Base (export let.override Thing = {definition};);')
+                result = subprocess.run([str(BINARY), 'check', str(path), '--error-format=short'],
+                                        capture_output=True, text=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertIn('E0502', result.stderr)
+        path.write_text('let Shared = class (); let Base = module (export let Alias = Shared; '
+                        'export last last_value: int = 1; export const Limit = 2;); '
+                        'let Child = module:Base (export let.override Alias = Shared; '
+                        'export let.override last_value = 2; export const.override Limit = 3;);')
+        result = subprocess.run([str(BINARY), 'check', str(path)], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_class_override_candidates_filter_forbidden_members(self):
         source = ('let View = interface (let required = func -> int;);\n'

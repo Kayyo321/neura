@@ -1535,7 +1535,11 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             auto inherited = members(enclosing, 0);
             for (const auto &target : inherited) {
                 const auto &candidate = *target.declaration;
-                if (!exported(target) || candidate.static_member || candidate.last || !candidate.generics.empty() ||
+                // A new nominal definition has a new type identity, so it
+                // cannot replace its inherited namesake. Binding aliases can
+                // preserve that identity and remain valid override candidates.
+                if ((candidate.kind != Declaration::Kind::Binding && candidate.kind != Declaration::Kind::Function) ||
+                    !exported(target) || candidate.static_member || !candidate.generics.empty() ||
                     !candidate.overloads.empty() || candidate.cast_target || candidate.name == "init" || candidate.name == "deinit" ||
                     std::any_of(container.members.begin(), container.members.end(), [&](const Declaration &own) {
                         return own.name == candidate.name;
