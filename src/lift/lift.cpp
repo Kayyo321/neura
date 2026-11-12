@@ -20,37 +20,70 @@ LiftResult rejected(std::string why) {
 // the selector) exactly 0 or 1. The unrefined analysis first: its intervals
 // are sound but wider, and it settles most graphs at a fraction of the cost.
 std::string prove_graph(const nvr::Graph& graph, std::uint64_t work, double* progress = nullptr,
-                        std::shared_ptr<const OverflowProof>* partial = nullptr) {
+                        std::shared_ptr<const OverflowProof>* partial = nullptr, const ProofAdvice* advice = nullptr) {
     std::vector<std::uint32_t> lanes(graph.outputs.size());
     std::iota(lanes.begin(), lanes.end(), 0U);
     if (const auto quick = prove_no_overflow(graph, false);
         quick.safe && lanes_are_bits(quick, graph, lanes, nullptr, false)) {
         return {};
     }
-    // An earlier attempt that ran out of work: resume it, or, when it
-    // settled every node and ran out on the lanes, take its intervals.
+    // With advice, the analysis first lets the cuts it names stand
+    // (decisive); a graph not proven so is analysed again with the next
+    // use: the search after every advised cut, and last without advice, as
+    // the analysis has always run. An earlier attempt that ran out of work
+    // continues with its use.
     const auto* earlier = partial ? partial->get() : nullptr;
-    const auto overflow = earlier && earlier->safe ? *earlier : prove_no_overflow(graph, true, &work, earlier);
-    if (partial && (overflow.exhausted || overflow.safe)) *partial = std::make_shared<const OverflowProof>(overflow);
-    if (overflow.exhausted) {
-        if (progress) {
-            *progress = static_cast<double>(overflow.node) /
-                        static_cast<double>(std::max<std::size_t>(graph.nodes.size(), 1));
+    if (advice && advice->instance.empty()) advice = nullptr;
+    auto use = !advice ? AdviceUse::none : earlier ? earlier->advice_use : AdviceUse::decisive;
+    // A use that lets advice stand is cheap where the advice is right; where
+    // it is not, it is given up after an allowance in proportion to the
+    // graph's edges, as if it had failed.
+    std::uint64_t edges = 0;
+    for (const auto& node : graph.nodes) edges += node.edges.size();
+    for (;;) {
+        const auto allowance = use == AdviceUse::decisive ? edges * 256
+                               : use == AdviceUse::first  ? edges * 4096
+                                                          : std::numeric_limits<std::uint64_t>::max();
+        const bool limited = allowance < work;
+        auto left = limited ? allowance : work;
+        const auto before = left;
+        // An earlier attempt that ran out of work: resume it, or, when it
+        // settled every node and ran out on the lanes, take its intervals.
+        const auto* resume = earlier && earlier->advice_use == use ? earlier : nullptr;
+        const auto* given = use == AdviceUse::none ? nullptr : advice;
+        const auto overflow =
+            resume && resume->safe ? *resume : prove_no_overflow(graph, true, &left, resume, given, use);
+        std::string failure;
+        if (overflow.exhausted) {
+            failure = exhausted_work;
+        } else if (!overflow.safe) {
+            failure = "overflow not excluded";
+        } else if (!lanes_are_bits(overflow, graph, lanes, nullptr, true, &left, given)) {
+            failure = left == 0 ? exhausted_work : "an output lane not proven 0 or 1";
         }
-        return exhausted_work;
+        work -= before - left;
+        if (failure == exhausted_work && limited) {
+            // The use's allowance ran out, not the caller's work.
+            failure = "the advice did not settle the graph";
+        } else {
+            if (partial && (overflow.exhausted || overflow.safe)) {
+                *partial = std::make_shared<const OverflowProof>(overflow);
+            }
+            if (overflow.exhausted && progress) {
+                *progress = static_cast<double>(overflow.node) /
+                            static_cast<double>(std::max<std::size_t>(graph.nodes.size(), 1));
+            }
+            if (failure.empty() || failure == exhausted_work || use == AdviceUse::none) return failure;
+        }
+        use = use == AdviceUse::decisive ? AdviceUse::first : AdviceUse::none;
+        earlier = nullptr;
     }
-    if (!overflow.safe) {
-        return "overflow not excluded";
-    }
-    if (!lanes_are_bits(overflow, graph, lanes, nullptr, true, &work)) {
-        return work == 0 ? exhausted_work : "an output lane not proven 0 or 1";
-    }
-    return {};
 }
 
 } // namespace
 
-std::string GraphProofs::verdict(const nvr::Graph& graph, std::uint32_t index, std::uint64_t work, double* progress) {
+std::string GraphProofs::verdict(const nvr::Graph& graph, std::uint32_t index, std::uint64_t work, double* progress,
+                                 const ProofAdvice* advice) {
     // An analysis that ran out of work is resumed where it stopped, so
     // attempts with more work (or another block of the same graph) pay only
     // for the nodes not yet settled. Two threads may prove one graph at
@@ -62,7 +95,7 @@ std::string GraphProofs::verdict(const nvr::Graph& graph, std::uint32_t index, s
         if (const auto it = verdicts_.find(index); it != verdicts_.end()) return it->second;
         if (const auto it = partials_.find(index); it != partials_.end()) partial = it->second;
     }
-    auto verdict = prove_graph(graph, work, progress, &partial);
+    auto verdict = prove_graph(graph, work, progress, &partial, advice);
     const std::lock_guard lock(mutex_);
     if (verdict == exhausted_work) {
         auto& kept = partials_[index];
@@ -122,13 +155,16 @@ LiftResult lift_and_prove(const nvr::Image& image, std::uint32_t function, std::
     // reads, and at most one exit, which the runtime takes without a
     // selector: the lowering above already required every graph output lane
     // to be read, so there is nothing for regeneration to establish.
-    if (!trivial && !prove_structure(image, block, graph, form)) {
+    // Regeneration also records the gadgets that built the graph: advice for
+    // the overflow proof, which establishes everything itself.
+    ProofAdvice advice;
+    if (!trivial && !prove_structure(image, block, graph, form, nullptr, &advice)) {
         return rejected("structural proof failed");
     }
 
     double progress = 1.0;
-    if (auto failure = proofs ? proofs->verdict(graph, block.graph, work, &progress)
-                              : prove_graph(graph, work, &progress);
+    if (auto failure = proofs ? proofs->verdict(graph, block.graph, work, &progress, &advice)
+                              : prove_graph(graph, work, &progress, nullptr, &advice);
         !failure.empty()) {
         auto result = rejected(std::move(failure));
         if (result.rejection == exhausted_work) {

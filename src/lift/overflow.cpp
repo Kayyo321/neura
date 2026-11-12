@@ -4,17 +4,22 @@
 
 #include <algorithm>
 #include <array>
+#include <functional>
 #include <bit>
 #include <limits>
 #include <map>
 #include <numeric>
 #include <optional>
-#include <unordered_map>
 
 namespace neura::lift {
 namespace {
 
 bool within_bits(const Interval& interval) { return interval.lo >= 0 && interval.hi <= 1; }
+
+// range() from a cut the advice names: the enumeration it may make per
+// group of terms before conditioning (and so its work), and its rounds.
+constexpr std::uint64_t advice_budget = 256;
+constexpr int advice_rounds = 2;
 
 // checked_multiply and checked_add for the inner loops, which use the result
 // only on success: the compiler builtins decide exactly what those decide,
@@ -46,12 +51,14 @@ std::optional<Interval> scale(std::int64_t k, const Interval& interval) {
 
 class Analysis {
 public:
-    Analysis(const nvr::Graph& graph, OverflowProof& proof, std::uint64_t* budget = nullptr)
+    Analysis(const nvr::Graph& graph, OverflowProof& proof, std::uint64_t* budget = nullptr,
+             const ProofAdvice* advice = nullptr, AdviceUse use = AdviceUse::none)
         : graph_(graph), proof_(proof), values_(std::size_t{graph.input_lanes} + graph.nodes.size(), 0),
-          budget_(budget) {
+          budget_(budget), advice_(advice), decisive_(use == AdviceUse::decisive) {
         if (proof_.group_of.size() != values_.size()) proof_.group_of.assign(values_.size(), nvr::absent);
         const auto wires = values_.size();
         cone_marks_.assign(wires, 0);
+        start_marks_.assign(wires, 0);
         cone_position_.assign(wires, -1);
         variable_of_.assign(wires, -1);
         visited_.assign(wires, 0);
@@ -60,9 +67,139 @@ public:
         last_use_wire_.assign(wires, -1);
         top_key_wire_.assign(wires, -1);
         last_edge_wire_.assign(wires, -1);
+        other_index_.assign(wires, -1);
     }
 
     const nvr::Node& node(std::uint32_t wire) const { return graph_.nodes[wire - graph_.input_lanes]; }
+
+    // The wires the advice names as bounding the gadget instances of
+    // `wires`: the instance's input signals, where a signal of one wire is
+    // that wire and a signal summing several is replaced by the inputs of the
+    // instances that built its wires, which a cut through the separate wires
+    // would treat as independent. Nothing without advice, or when the advice
+    // names a wire or instance the graph does not have, or nests too deep,
+    // or names too many wires. The cut is only where range() starts; it
+    // decides nothing by itself.
+    std::optional<std::vector<std::uint32_t>> advice_cut(std::initializer_list<std::uint32_t> wires) const {
+        if (!advice_) return std::nullopt;
+        const auto& advice = *advice_;
+        const auto count = static_cast<std::uint32_t>(values_.size());
+        const auto inputs = graph_.input_lanes;
+        if (advice.instance.size() != graph_.nodes.size()) return std::nullopt;
+        std::vector<std::uint32_t> cut;
+        const auto instance_of = [&](std::uint32_t wire) -> std::uint32_t {
+            if (wire < inputs || wire >= count) return nvr::absent;
+            const auto i = advice.instance[wire - inputs];
+            return i < advice.inputs.size() ? i : nvr::absent;
+        };
+        bool valid = true;
+        // Each instance adds its inputs once.
+        std::vector<std::uint32_t> seen;
+        const std::function<void(std::uint32_t, int)> add = [&](std::uint32_t instance, int depth) {
+            if (std::find(seen.begin(), seen.end(), instance) != seen.end()) return;
+            seen.push_back(instance);
+            if (seen.size() > advice_instances) {
+                valid = false;
+                return;
+            }
+            for (const auto& signal : advice.inputs[instance]) {
+                // A signal whose wires are exactly an established group is
+                // one variable of range() already.
+                const auto g =
+                    signal.empty() || signal.front() >= count ? nvr::absent : proof_.group_of[signal.front()];
+                const bool group = g != nvr::absent && proof_.groups[g].members.size() == signal.size() &&
+                                   std::all_of(signal.begin(), signal.end(), [&](std::uint32_t wire) {
+                                       return wire < count && proof_.group_of[wire] == g;
+                                   });
+                for (const auto wire : signal) {
+                    if (wire >= count) {
+                        valid = false;
+                        return;
+                    }
+                    const auto inner = instance_of(wire);
+                    if (signal.size() == 1 || group || inner == nvr::absent || depth >= advice_depth) {
+                        if (std::find(cut.begin(), cut.end(), wire) == cut.end()) cut.push_back(wire);
+                    } else {
+                        add(inner, depth + 1);
+                    }
+                    if (!valid || cut.size() > advice_wires) {
+                        valid = false;
+                        return;
+                    }
+                }
+            }
+        };
+        for (const auto wire : wires) {
+            const auto instance = instance_of(wire);
+            if (instance == nvr::absent) return std::nullopt;
+            add(instance, 0);
+            if (!valid) return std::nullopt;
+        }
+        std::sort(cut.begin(), cut.end());
+        cut.erase(std::unique(cut.begin(), cut.end()), cut.end());
+        return cut;
+    }
+
+    // Whether the advice names different gadget instances for wires a and
+    // b: the halves of a selection come from one instance, so a pair from
+    // two is not tried as a group. Without advice for both, they are tried.
+    bool apart(std::uint32_t a, std::uint32_t b) const {
+        if (!advice_ || !decisive_) return false;
+        const auto& advice = *advice_;
+        const auto inputs = graph_.input_lanes;
+        if (advice.instance.size() != graph_.nodes.size() || a < inputs || b < inputs) return false;
+        const auto x = advice.instance[a - inputs];
+        const auto y = advice.instance[b - inputs];
+        return x != nvr::absent && y != nvr::absent && x != y;
+    }
+
+    // The range of the virtual sum `sum` of wires a and b from the cut the
+    // advice names for both, or nothing without one.
+    std::optional<Interval> pair_range(const nvr::Node& sum, std::uint32_t a, std::uint32_t b) {
+        const auto cut = advice_cut({a, b});
+        if (!cut) return std::nullopt;
+        return range(sum, advice_budget, decisive_ ? 1 : advice_rounds, &*cut);
+    }
+
+    // The kept result for key_ (with its hash), if any.
+    const std::optional<Interval>* memo_find(std::uint64_t hash) const {
+        if (memo_.empty()) return nullptr;
+        const auto mask = memo_.size() - 1;
+        for (auto slot = static_cast<std::size_t>(hash) & mask;; slot = (slot + 1) & mask) {
+            const auto& entry = memo_[slot];
+            if (entry.length == std::numeric_limits<std::uint32_t>::max()) return nullptr;
+            if (entry.hash == hash && entry.length == key_.size() &&
+                std::equal(key_.begin(), key_.end(), memo_keys_.begin() + entry.offset)) {
+                return &entry.result;
+            }
+        }
+    }
+
+    // Keeps `result` for key_, while the kept keys fit max_enumerated_words.
+    void memo_keep(std::uint64_t hash, std::optional<Interval> result) {
+        if (memo_keys_.size() + key_.size() > max_enumerated_words) return;
+        if (2 * (memo_count_ + 1) > memo_.size()) {
+            std::vector<MemoEntry> grown(std::max<std::size_t>(64, 2 * memo_.size()));
+            const auto mask = grown.size() - 1;
+            for (const auto& entry : memo_) {
+                if (entry.length == std::numeric_limits<std::uint32_t>::max()) continue;
+                auto slot = static_cast<std::size_t>(entry.hash) & mask;
+                while (grown[slot].length != std::numeric_limits<std::uint32_t>::max()) slot = (slot + 1) & mask;
+                grown[slot] = entry;
+            }
+            memo_ = std::move(grown);
+        }
+        const auto mask = memo_.size() - 1;
+        auto slot = static_cast<std::size_t>(hash) & mask;
+        while (memo_[slot].length != std::numeric_limits<std::uint32_t>::max()) slot = (slot + 1) & mask;
+        memo_[slot] = {hash, static_cast<std::uint32_t>(memo_keys_.size()), static_cast<std::uint32_t>(key_.size()),
+                       result};
+        memo_keys_.insert(memo_keys_.end(), key_.begin(), key_.end());
+        ++memo_count_;
+    }
+
+    // Whether the advice's cuts stand without the search (prove_no_overflow).
+    bool decisive() const { return decisive_; }
 
     // Whether the case analysis ran out of the caller's work.
     bool exhausted() const { return exhausted_; }
@@ -136,7 +273,8 @@ public:
     std::optional<Interval> grouped_sum(const nvr::Node& reader) const {
         std::int64_t lo = reader.bias;
         std::int64_t hi = reader.bias;
-        std::vector<std::uint32_t> done;
+        auto& done = done_;
+        done.clear();
         for (const auto& edge : reader.edges) {
             const auto g = proof_.group_of[edge.source];
             std::optional<Interval> term;
@@ -175,7 +313,14 @@ public:
     // computed is computed instead of left free, and a free neuron can be
     // replaced by its sources; both only remove assignments, so every range
     // found is sound and their intersection is kept.
-    std::optional<Interval> range(const nvr::Node& top, std::uint64_t budget, int rounds) {
+    //
+    // With `start`, the cut starts at those wires instead of `top`'s
+    // sources: every other wire between them and `top` is computed, and an
+    // input lane reached on the way is cut. Any such cut bounds the cone, so
+    // what is found is as sound as from any other; a start that leaves more
+    // than `start_cone` wires to compute is not tried.
+    std::optional<Interval> range(const nvr::Node& top, std::uint64_t budget, int rounds,
+                                  const std::vector<std::uint32_t>* start = nullptr) {
         work_ = budget * 256;
         const auto inputs = graph_.input_lanes;
         // Wire marks, reset on return: 1 cut, 2 computed. Every computed
@@ -204,7 +349,33 @@ public:
             cone.push_back(wire);
             for (const auto& edge : node(wire).edges) add_cut(edge.source);
         };
-        for (const auto& edge : top.edges) add_cut(edge.source);
+        if (start) {
+            for (const auto wire : *start) start_marks_[wire] = 1;
+            std::vector<std::uint32_t> pending;
+            for (const auto& edge : top.edges) pending.push_back(edge.source);
+            bool too_large = false;
+            while (!pending.empty()) {
+                const auto wire = pending.back();
+                pending.pop_back();
+                if (mark[wire] != 0) continue;
+                if (wire < inputs || start_marks_[wire] != 0) {
+                    add_cut(wire);
+                    continue;
+                }
+                if (cone.size() >= start_cone) {
+                    too_large = true;
+                    break;
+                }
+                mark[wire] = 2;
+                touched.push_back(wire);
+                cone.push_back(wire);
+                for (const auto& edge : node(wire).edges) pending.push_back(edge.source);
+            }
+            for (const auto wire : *start) start_marks_[wire] = 0;
+            if (too_large) return std::nullopt;
+        } else {
+            for (const auto& edge : top.edges) add_cut(edge.source);
+        }
         std::optional<Interval> best;
         std::vector<Variable> variables;
         std::vector<std::uint32_t> groups;
@@ -1045,14 +1216,22 @@ private:
     // the value evaluating it again would give, without overflow. The
     // caller's work (budget_) is charged for the nodes evaluated.
     //
-    // Results are kept in enumerated_, keyed by everything they depend on:
-    // the nodes evaluated, in order; the terms (source, weight); each free
-    // variable (wire, group, lo, hi); and the value of every other wire
-    // those nodes and terms read, in reading order. The graph never changes
-    // and a group's members never change once it exists, so the same key
-    // gives the same evaluations, hence the same range or the same
-    // overflow. A result found again charges work_ what finding it charges
-    // and nothing to budget_; one that ran out of work is not kept.
+    // Results are kept by a key that states the whole computation with the
+    // wires renamed, so that isomorphic gadget instances (the cells of a
+    // column multiplier, the steps of a long division) share one result.
+    // A wire read is named by its role: the i-th evaluated node in stored
+    // order, the f-th free variable, or the e-th other wire in the order
+    // first read. The key lists the counts; each free variable's range;
+    // each evaluated node's activation, bias and edges (name of the source,
+    // weight) in stored order; the terms (name, weight) in order; and the
+    // value of each other wire, which stays fixed during the enumeration (a
+    // group member other than its carrier is 0). That is everything the
+    // evaluations read, in the order they read it, with checked arithmetic
+    // in the same order, so two equal keys describe the same evaluations up
+    // to the renaming and give the same range or the same overflow; the
+    // nominal work, (nodes + 1) per assignment, follows from the key too. A
+    // result found again charges work_ what finding it charges and nothing
+    // to budget_; one that ran out of work is not kept.
     std::optional<Interval> enumerate(const nvr::Node& top, const std::vector<std::size_t>& terms,
                                       const std::vector<std::size_t>& free, const std::vector<Variable>& variables) {
         std::uint64_t assignments = 1;
@@ -1093,42 +1272,54 @@ private:
                 for (const auto wire : a.needed_) a.needed_position_[wire] = -1;
             }
         } reset{*this, free, variables};
-        // The key: what the evaluations below read.
+        // The key: what the evaluations below read, with wires renamed.
         auto& key = key_;
         key.clear();
         key.push_back(static_cast<std::int64_t>(needed.size()));
-        key.insert(key.end(), needed.begin(), needed.end());
         key.push_back(static_cast<std::int64_t>(terms.size()));
-        for (const auto k : terms) {
-            key.push_back(top.edges[k].source);
-            key.push_back(top.edges[k].weight);
-        }
         key.push_back(static_cast<std::int64_t>(free.size()));
         for (const auto v : free) {
-            key.push_back(variables[v].wire);
-            key.push_back(variables[v].group);
             key.push_back(variables[v].lo);
             key.push_back(variables[v].hi);
         }
-        const auto read = [&](std::uint32_t wire) {
-            if (needed_position_[wire] >= 0 || free_index_[wire] >= 0) return;
-            key.push_back(wire);
-            key.push_back(values_[wire]);
+        auto& others = others_;
+        others.clear();
+        const auto name = [&](std::uint32_t wire) -> std::int64_t {
+            if (const auto p = needed_position_[wire]; p >= 0) return p;
+            const auto base = static_cast<std::int64_t>(needed.size());
+            if (const auto f = free_index_[wire]; f >= 0) return base + f;
+            if (other_index_[wire] < 0) {
+                other_index_[wire] = static_cast<std::int32_t>(others.size());
+                others.push_back(wire);
+            }
+            return base + static_cast<std::int64_t>(free.size()) + other_index_[wire];
         };
         for (const auto wire : needed) {
-            for (const auto& edge : node(wire).edges) read(edge.source);
+            const auto& n = node(wire);
+            key.push_back(n.activation == nvr::Activation::Relu ? 1 : 0);
+            key.push_back(n.bias);
+            key.push_back(static_cast<std::int64_t>(n.edges.size()));
+            for (const auto& edge : n.edges) {
+                key.push_back(name(edge.source));
+                key.push_back(edge.weight);
+            }
         }
-        for (const auto k : terms) read(top.edges[k].source);
-        if (const auto it = enumerated_.find(key); it != enumerated_.end()) {
+        for (const auto k : terms) {
+            key.push_back(name(top.edges[k].source));
+            key.push_back(top.edges[k].weight);
+        }
+        for (const auto wire : others) {
+            key.push_back(values_[wire]);
+            other_index_[wire] = -1;
+        }
+        const auto hash = KeyHash{}(key);
+        if (const auto found = memo_find(hash)) {
             if (work_ < assignments * per_assignment) return std::nullopt;
             work_ -= assignments * per_assignment;
-            return it->second;
+            return *found;
         }
         const auto keep = [&](std::optional<Interval> result) {
-            if (enumerated_words_ + key.size() <= max_enumerated_words) {
-                enumerated_words_ += key.size();
-                enumerated_.emplace(key, result);
-            }
+            memo_keep(hash, result);
             return result;
         };
         // For each variable i, the nodes (by position) that depend on a
@@ -1234,9 +1425,16 @@ private:
             return static_cast<std::size_t>(hash);
         }
     };
+    // The most wires range() computes from a given start.
+    static constexpr std::size_t start_cone = 4096;
+    // How deep advice_cut() follows signals of several wires, and the most
+    // wires its cut may have.
+    static constexpr int advice_depth = 8;
+    static constexpr std::size_t advice_wires = 64;
+    static constexpr std::size_t advice_instances = 64;
     // The deepest conditioning of sum_range.
     static constexpr int max_depth = 8;
-    // The most key words enumerated_ holds; beyond it, results are not kept.
+    // The most key words memo_keys_ holds; beyond it, results are not kept.
     static constexpr std::size_t max_enumerated_words = std::size_t{1} << 21;
 
     const nvr::Graph& graph_;
@@ -1249,6 +1447,7 @@ private:
     // position of each cone wire in the cone, valid during a round; and the
     // group marks of whole_groups(), all -1 between rounds.
     std::vector<std::uint8_t> cone_marks_;
+    std::vector<std::uint8_t> start_marks_;
     std::vector<std::int32_t> cone_position_;
     std::vector<std::int32_t> group_slot_;
     std::array<SumScratch, max_depth + 1> sums_;
@@ -1266,8 +1465,21 @@ private:
     std::vector<std::size_t> level_;
     std::vector<std::vector<std::uint32_t>> changed_;
     std::vector<std::uint32_t> all_;
-    std::unordered_map<std::vector<std::int64_t>, std::optional<Interval>, KeyHash> enumerated_;
-    std::size_t enumerated_words_ = 0;
+    std::vector<std::int32_t> other_index_;
+    // grouped_sum's groups read whole so far.
+    mutable std::vector<std::uint32_t> done_;
+    std::vector<std::uint32_t> others_;
+    // The kept results of enumerate(): an open-addressing table of entries
+    // whose keys lie in memo_keys_. An entry with `length` none is empty.
+    struct MemoEntry {
+        std::uint64_t hash = 0;
+        std::uint32_t offset = 0;
+        std::uint32_t length = std::numeric_limits<std::uint32_t>::max();
+        std::optional<Interval> result;
+    };
+    std::vector<MemoEntry> memo_;
+    std::vector<std::int64_t> memo_keys_;
+    std::size_t memo_count_ = 0;
     // eliminate()'s per-key tables, by wire and by variable, all clear
     // (-1) between calls, and its state buffers.
     std::vector<std::int64_t> last_use_wire_;
@@ -1287,6 +1499,8 @@ private:
     std::vector<std::uint32_t> table_;
     std::uint64_t work_ = 0;
     std::uint64_t* budget_ = nullptr;
+    const ProofAdvice* advice_ = nullptr;
+    bool decisive_ = false;
     bool exhausted_ = false;
 };
 
@@ -1361,14 +1575,17 @@ bool one_hot_bit(const nvr::Graph& graph, const OverflowProof& proof, std::uint3
 } // namespace
 
 OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint64_t* work,
-                                const OverflowProof* resume) {
+                                const OverflowProof* resume, const ProofAdvice* advice, AdviceUse use) {
     const bool exact = refine;
     OverflowProof proof;
     // A refined analysis that ran out of work kept every node it settled:
     // continue from the first one it did not. Each node's result depends
     // only on the nodes before it, so the proof is the one an unbounded
     // run finds.
-    const bool resuming = refine && resume && resume->exhausted &&
+    if (use == AdviceUse::none) advice = nullptr;
+    if (!advice || !refine) use = AdviceUse::none;
+    proof.advice_use = use;
+    const bool resuming = refine && resume && resume->exhausted && resume->advice_use == use &&
                           resume->wires.size() == std::size_t{graph.input_lanes} + resume->node &&
                           resume->group_of.size() == std::size_t{graph.input_lanes} + graph.nodes.size();
     for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
@@ -1387,7 +1604,7 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
         proof.group_of = resume->group_of;
         first = resume->node;
     }
-    Analysis analysis(graph, proof, work);
+    Analysis analysis(graph, proof, work, refine ? advice : nullptr, use);
     if (!resuming) analysis.find_step_pairs();
     auto& wires = proof.wires;
     wires.reserve(std::size_t{graph.input_lanes} + graph.nodes.size());
@@ -1421,11 +1638,12 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
             if (b != a + 1 || a < graph.input_lanes || node.edges[e].weight != node.edges[e + 1].weight ||
                 proof.group_of[a] != nvr::absent || proof.group_of[b] != nvr::absent ||
                 analysis.node(a).activation != nvr::Activation::Relu ||
-                analysis.node(b).activation != nvr::Activation::Relu) {
+                analysis.node(b).activation != nvr::Activation::Relu || analysis.apart(a, b)) {
                 continue;
             }
             const nvr::Node sum{nvr::Activation::Identity, 0, {{a, 1}, {b, 1}}};
-            auto range = analysis.range(sum, 256, 4);
+            auto range = analysis.pair_range(sum, a, b);
+            if (!(range && within_bits(*range))) range = analysis.range(sum, 256, 4);
             if (exact && !(range && within_bits(*range))) range = analysis.exact_range(sum, 256, 3);
             if (range && within_bits(*range)) {
                 analysis.add_group({{a, 1}, {b, 1}}, *range);
@@ -1444,20 +1662,26 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
                                                                       : grouped->hi;
             return low >= 0 && high <= 1;
         };
+        // Whether the node is settled changes only when a group is added.
+        bool is_settled = exact && node.edges.size() <= 6 && settled();
         for (std::size_t e = 0; exact && node.edges.size() <= 6 && e < node.edges.size(); ++e) {
-            for (std::size_t f = e + 1; f < node.edges.size() && !settled(); ++f) {
+            for (std::size_t f = e + 1; f < node.edges.size() && !is_settled; ++f) {
                 const auto a = node.edges[e].source;
                 const auto b = node.edges[f].source;
                 if (a < graph.input_lanes || node.edges[e].weight != node.edges[f].weight ||
                     proof.group_of[a] != nvr::absent || proof.group_of[b] != nvr::absent ||
                     analysis.node(a).activation != nvr::Activation::Relu ||
-                    analysis.node(b).activation != nvr::Activation::Relu) {
+                    analysis.node(b).activation != nvr::Activation::Relu || analysis.apart(a, b)) {
                     continue;
                 }
                 const nvr::Node sum{nvr::Activation::Identity, 0, {{a, 1}, {b, 1}}};
-                auto range = analysis.range(sum, 256, 4);
+                auto range = analysis.pair_range(sum, a, b);
+                if (!(range && within_bits(*range))) range = analysis.range(sum, 256, 4);
                 if (!(range && within_bits(*range))) range = analysis.exact_range(sum, 256, 3);
-                if (range && within_bits(*range)) analysis.add_group({{a, 1}, {b, 1}}, *range);
+                if (range && within_bits(*range)) {
+                    analysis.add_group({{a, 1}, {b, 1}}, *range);
+                    is_settled = settled();
+                }
             }
         }
         // The final sum once more, with each group read whole as k * its
@@ -1477,11 +1701,26 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
         // keeps the intervals of later nodes, and their overflow checks,
         // from compounding the looseness.
         if (refine && !within_bits(wires.back()) && !node.edges.empty()) {
-            if (const auto range = analysis.range(node, 256, 4)) {
-                wires.back().lo = std::max(wires.back().lo, range->lo);
-                wires.back().hi = std::min(wires.back().hi, range->hi);
+            // The cut the advice names first. When it gives a range, that is
+            // the range of the node over every assignment of its gadget's
+            // inputs, which the search narrows only where those inputs are
+            // correlated; a decisive analysis lets it stand.
+            bool advised = false;
+            if (const auto cut = analysis.advice_cut({static_cast<std::uint32_t>(graph.input_lanes + n)})) {
+                const auto rounds = analysis.decisive() ? 1 : advice_rounds;
+                if (const auto range = analysis.range(node, advice_budget, rounds, &*cut)) {
+                    wires.back().lo = std::max(wires.back().lo, range->lo);
+                    wires.back().hi = std::min(wires.back().hi, range->hi);
+                    advised = analysis.decisive();
+                }
             }
-            if (exact && !within_bits(wires.back())) {
+            if (!within_bits(wires.back()) && !advised) {
+                if (const auto range = analysis.range(node, 256, 4)) {
+                    wires.back().lo = std::max(wires.back().lo, range->lo);
+                    wires.back().hi = std::min(wires.back().hi, range->hi);
+                }
+            }
+            if (exact && !within_bits(wires.back()) && !advised) {
                 if (const auto range = analysis.exact_range(node, 256, 3)) {
                     wires.back().lo = std::max(wires.back().lo, range->lo);
                     wires.back().hi = std::min(wires.back().hi, range->hi);
@@ -1506,7 +1745,7 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
 }
 
 bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::span<const std::uint32_t> lanes,
-                    BitEvidence* evidence, bool use_cases, std::uint64_t* work) {
+                    BitEvidence* evidence, bool use_cases, std::uint64_t* work, const ProofAdvice* advice) {
     if (!proof.safe) {
         return false;
     }
@@ -1528,9 +1767,17 @@ bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::sp
         if (use_cases && wire >= graph.input_lanes) {
             if (!cases) {
                 copy = proof;
-                cases.emplace(graph, copy, work);
+                cases.emplace(graph, copy, work, advice);
             }
             const auto& top = graph.nodes[wire - graph.input_lanes];
+            if (const auto cut = cases->advice_cut({wire})) {
+                const auto range = cases->range(top, std::uint64_t{1} << 14, advice_rounds, &*cut);
+                if (cases->exhausted()) return false;
+                if (range && within_bits(*range)) {
+                    if (evidence) ++evidence->cases;
+                    continue;
+                }
+            }
             const auto range = cases->range(top, std::uint64_t{1} << 14, 48);
             if (cases->exhausted()) return false;
             if (range && within_bits(*range)) {

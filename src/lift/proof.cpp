@@ -219,9 +219,11 @@ private:
 std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& original,
                                  const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values,
                                  const ExpressionPtr& condition, std::optional<std::size_t> exit_when_true,
-                                 nvr::Graph& graph, Checks* checks, const std::vector<ExpressionPtr>* schedule) {
+                                 nvr::Graph& graph, Checks* checks, const std::vector<ExpressionPtr>* schedule,
+                                 backend::GadgetAdvice* advice) {
     ImageTables tables(image);
     BlockSynthesizer synth(tables);
+    if (advice) synth.circuit().record_gadgets();
     std::vector<Word> inputs;
     for (const auto& value : original.inputs) {
         Operand operand;
@@ -327,16 +329,18 @@ std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& orig
     }
     block.graph = original.graph;
     graph = tables.graph_;
+    if (advice) *advice = synth.circuit().gadget_advice();
     return block;
 }
 
 bool replay_matches(const nvr::Image& image, const nvr::Block& original, const nvr::Graph& graph,
                     const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values, const ExpressionPtr& condition,
                     std::optional<std::size_t> exit_when_true, Checks* checks,
-                    const std::vector<ExpressionPtr>* schedule) {
+                    const std::vector<ExpressionPtr>* schedule, backend::GadgetAdvice* advice) {
     nvr::Graph regenerated;
     Checks found;
-    const auto block = replay(image, original, values, condition, exit_when_true, regenerated, &found, schedule);
+    const auto block =
+        replay(image, original, values, condition, exit_when_true, regenerated, &found, schedule, advice);
     if (!block || !(*block == original) || !(regenerated == graph)) {
         return false;
     }
@@ -399,7 +403,7 @@ nvr::Graph dispatch_circuit(const nvr::Block& block, const std::map<std::size_t,
 }
 
 bool prove_structure(const nvr::Image& image, const nvr::Block& block, const nvr::Graph& graph,
-                     const LiftedForm& form, Checks* checks) {
+                     const LiftedForm& form, Checks* checks, backend::GadgetAdvice* advice) {
     // The gadgets assume well-typed operands; an ill-typed form describes no
     // block. The check also makes the order list exactly the form's values,
     // so the proof covers exactly what a lowering computes.
@@ -416,7 +420,7 @@ bool prove_structure(const nvr::Image& image, const nvr::Block& block, const nvr
         return dispatch_circuit(block, form.dispatch) == graph;
     }
     return replay_matches(image, block, graph, form.computation_order(), form.condition, form.exit_when_true,
-                          checks, form.shared ? &form.schedule : nullptr);
+                          checks, form.shared ? &form.schedule : nullptr, advice);
 }
 
 nvr::Graph expression_circuit(const nvr::Image& image, const std::vector<unsigned>& input_widths,

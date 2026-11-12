@@ -1319,4 +1319,184 @@ NEURA_TEST(overflow, elimination_proves_small_float_circuits_and_accepts_nothing
               << " true but not proven\n";
 }
 
+NEURA_TEST(overflow, advice_finds_proofs_and_never_makes_a_false_one) {
+    // The gadget advice the circuit library records only tells the analysis
+    // which cut to try first. Small float circuits, their advice, and
+    // graphs edited to overflow or to give a lane outside [0, 1] are proven
+    // with the true advice and with advice that is wrong in every way it can
+    // be: a cut missing a real dependency, signals of several wires named as
+    // single wires, advice of the neighbouring neuron, and random wires and
+    // instances, some outside the graph. Whatever is accepted must hold on
+    // every input; and the unedited circuits are proven with true advice.
+    const auto exhaustive = [](const nvr::Graph& graph) {
+        std::vector<std::int64_t> inputs(graph.input_lanes);
+        std::vector<std::int64_t> scratch;
+        std::vector<std::int64_t> lanes(graph.outputs.size());
+        for (std::uint64_t bits = 0; bits < (std::uint64_t{1} << graph.input_lanes); ++bits) {
+            for (std::uint32_t i = 0; i < graph.input_lanes; ++i) inputs[i] = static_cast<std::int64_t>((bits >> i) & 1U);
+            if (nvm::evaluate_outputs(graph, inputs, scratch, lanes)) return false;
+            for (const auto lane : lanes) {
+                if (lane != 0 && lane != 1) return false;
+            }
+        }
+        return true;
+    };
+    // Proven by every use of the advice, or by the runtime's chain of them
+    // (GraphProofs).
+    const auto proven = [](const nvr::Graph& graph, const lift::ProofAdvice* advice) {
+        std::vector<std::uint32_t> lanes(graph.outputs.size());
+        std::iota(lanes.begin(), lanes.end(), 0U);
+        bool any = false;
+        for (const auto use : {lift::AdviceUse::decisive, lift::AdviceUse::first, lift::AdviceUse::none}) {
+            std::uint64_t work = std::uint64_t{1} << 22;
+            const auto proof = lift::prove_no_overflow(graph, true, &work, nullptr, advice, use);
+            any = any || (proof.safe && lift::lanes_are_bits(proof, graph, lanes, nullptr, true, &work, advice));
+        }
+        lift::GraphProofs proofs;
+        return any || proofs.verdict(graph, 0, std::uint64_t{1} << 22, nullptr, advice).empty();
+    };
+    std::mt19937_64 random(0xad71ce);
+    // The wrong advice derived from the true one.
+    const auto variants = [&](const lift::ProofAdvice& truth, const nvr::Graph& graph) {
+        std::vector<lift::ProofAdvice> out;
+        auto missing = truth;
+        for (auto& inputs : missing.inputs) {
+            for (auto& signal : inputs) {
+                if (!signal.empty()) signal.pop_back();
+            }
+        }
+        out.push_back(missing);
+        auto single = truth;
+        for (auto& inputs : single.inputs) {
+            std::vector<std::vector<std::uint32_t>> split;
+            for (const auto& signal : inputs) {
+                for (const auto wire : signal) split.push_back({wire});
+            }
+            inputs = split;
+        }
+        out.push_back(single);
+        auto shifted = truth;
+        if (!shifted.instance.empty()) std::rotate(shifted.instance.begin(), shifted.instance.begin() + 1, shifted.instance.end());
+        out.push_back(shifted);
+        auto garbage = truth;
+        const auto wires = graph.input_lanes + static_cast<std::uint32_t>(graph.nodes.size());
+        for (auto& instance : garbage.instance) instance = static_cast<std::uint32_t>(random() % (garbage.inputs.size() + 2));
+        for (auto& inputs : garbage.inputs) {
+            for (auto& signal : inputs) {
+                for (auto& wire : signal) wire = static_cast<std::uint32_t>(random() % (wires + 3));
+            }
+        }
+        out.push_back(garbage);
+        return out;
+    };
+    std::size_t graphs = 0;
+    std::size_t accepted_false = 0;
+    std::size_t unsafe_graphs = 0;
+    std::size_t truth_proven = 0;
+    for (const FloatFormat format : {FloatFormat{2, 2}, FloatFormat{3, 2}, FloatFormat{2, 3}}) {
+        for (int op = 0; op < 4; ++op) {
+            backend::Circuit circuit;
+            circuit.record_gadgets();
+            backend::Word a;
+            backend::Word b;
+            for (unsigned i = 0; i < format.width(); ++i) a.push_back(circuit.input());
+            for (unsigned i = 0; i < format.width(); ++i) b.push_back(circuit.input());
+            const auto result = op == 0   ? backend::float_add(circuit, a, b, format)
+                                : op == 1 ? backend::float_subtract(circuit, a, b, format)
+                                : op == 2 ? backend::float_multiply(circuit, a, b, format)
+                                          : backend::float_divide(circuit, a, b, format);
+            for (const auto& lane : result) circuit.output(lane);
+            const auto graph = circuit.finish();
+            const auto truth = circuit.gadget_advice();
+            check(truth.instance.size() == graph.nodes.size(), "the advice covers every neuron");
+            const auto label = std::to_string(format.exponent_bits) + "/" + std::to_string(format.fraction_bits) +
+                               " op " + std::to_string(op);
+            {
+                std::vector<std::uint32_t> lanes(graph.outputs.size());
+                std::iota(lanes.begin(), lanes.end(), 0U);
+                const auto proof = lift::prove_no_overflow(graph, true, nullptr, nullptr, &truth,
+                                                           lift::AdviceUse::decisive);
+                check(proof.safe && lift::lanes_are_bits(proof, graph, lanes, nullptr, true, nullptr, &truth),
+                      label + ": proven with its advice standing");
+            }
+            truth_proven += 1;
+            // Edited graphs: one bias or weight changed by one, and one
+            // node that overflows when two lanes are 1 together.
+            std::vector<nvr::Graph> edited;
+            for (int edit = 0; edit < 8 && !graph.nodes.empty(); ++edit) {
+                auto changed = graph;
+                auto& node = changed.nodes[random() % changed.nodes.size()];
+                if (node.edges.empty() || random() % 2 == 0) {
+                    node.bias += random() % 2 ? 1 : -1;
+                } else {
+                    node.edges[random() % node.edges.size()].weight += random() % 2 ? 1 : -1;
+                }
+                edited.push_back(std::move(changed));
+            }
+            auto overflowing = graph;
+            overflowing.nodes.push_back({nvr::Activation::Identity, 0,
+                                         {{graph.outputs[0], std::int64_t{1} << 62}, {graph.outputs[1], std::int64_t{1} << 62}}});
+            std::sort(overflowing.nodes.back().edges.begin(), overflowing.nodes.back().edges.end(),
+                      [](const nvr::Edge& x, const nvr::Edge& y) { return x.source < y.source; });
+            overflowing.outputs.push_back(overflowing.input_lanes + static_cast<std::uint32_t>(graph.nodes.size()));
+            edited.push_back(overflowing);
+            for (const auto& changed : edited) {
+                ++graphs;
+                const bool truth_holds = exhaustive(changed);
+                unsafe_graphs += truth_holds ? 0 : 1;
+                auto advices = variants(truth, changed);
+                advices.push_back(truth);
+                // The advice of the original graph, and of a graph one node
+                // longer, whatever the edit.
+                auto longer = truth;
+                longer.instance.push_back(nvr::absent);
+                advices.push_back(longer);
+                for (const auto& advice : advices) {
+                    if (proven(changed, &advice) && !truth_holds) {
+                        ++accepted_false;
+                        check(false, label + ": a graph whose lanes are not all bits was accepted with advice");
+                    }
+                }
+            }
+        }
+    }
+    check(unsafe_graphs >= 12, "the edits include graphs that overflow or give a lane outside [0, 1]");
+    check(accepted_false == 0, "advice never makes a false proof");
+    std::cout << "  " << truth_proven << " small float graphs proven with their advice; " << graphs
+              << " edited graphs (" << unsafe_graphs << " not all bits) tried with 6 kinds of advice, none falsely accepted\n";
+}
+
+NEURA_TEST(overflow, enumerations_are_shared_only_between_identical_computations) {
+    // The case analysis keeps each enumeration's range under a key in which
+    // wires are renamed, so that isomorphic gadgets share one result. Four
+    // copies of an exclusive-or gadget, s = x + y - k * relu(x + y - b),
+    // over separate inputs: two identical (k = 2, b = 1), one whose weight
+    // differs (k = 3) and one whose bias differs (b = 0). Each sum must get
+    // its own exact range: [0, 1], [0, 1], [-1, 1], and [-2, 0].
+    nvr::Graph graph;
+    graph.input_lanes = 8;
+    const auto gadget = [&](std::uint32_t x, std::int64_t k, std::int64_t b) {
+        const auto conjunction = graph.input_lanes + static_cast<std::uint32_t>(graph.nodes.size());
+        graph.nodes.push_back({nvr::Activation::Relu, -b, {{x, 1}, {x + 1, 1}}});
+        graph.nodes.push_back({nvr::Activation::Identity, 0, {{x, 1}, {x + 1, 1}, {conjunction, -k}}});
+        return conjunction + 1;
+    };
+    const auto first = gadget(0, 2, 1);
+    const auto same = gadget(2, 2, 1);
+    const auto weight = gadget(4, 3, 1);
+    const auto bias = gadget(6, 2, 0);
+    graph.outputs = {first, same, weight, bias};
+    const auto proof = lift::prove_no_overflow(graph);
+    check(proof.safe, "the gadgets cannot overflow");
+    const auto expect = [&](std::uint32_t wire, std::int64_t lo, std::int64_t hi, const std::string& what) {
+        check(proof.wires[wire].lo == lo && proof.wires[wire].hi == hi,
+              what + ": [" + std::to_string(proof.wires[wire].lo) + ", " + std::to_string(proof.wires[wire].hi) +
+                  "], expected [" + std::to_string(lo) + ", " + std::to_string(hi) + "]");
+    };
+    expect(first, 0, 1, "the first gadget");
+    expect(same, 0, 1, "an identical gadget");
+    expect(weight, -1, 1, "a gadget with another weight");
+    expect(bias, -2, 0, "a gadget with another bias");
+}
+
 } // namespace neura::testing

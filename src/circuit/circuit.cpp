@@ -42,6 +42,74 @@ Signal operator*(std::int64_t factor, const Signal& signal) { return combine(sig
 Signal operator+(const Signal& left, std::int64_t right) { return left + Signal::of(right); }
 Signal operator-(std::int64_t left, const Signal& right) { return Signal::of(left) - right; }
 
+Circuit::Gadget::Gadget(Circuit& circuit, std::initializer_list<const Signal*> inputs, bool opaque)
+    : circuit_(&circuit) {
+    if (!circuit.recording_) return;
+    std::vector<Signal> signals;
+    signals.reserve(inputs.size());
+    for (const auto* input : inputs) signals.push_back(*input);
+    open(std::move(signals), opaque);
+}
+
+Circuit::Gadget::Gadget(Circuit& circuit, const std::vector<Signal>& inputs, bool opaque) : circuit_(&circuit) {
+    if (!circuit.recording_) return;
+    open(inputs, opaque);
+}
+
+void Circuit::Gadget::open(std::vector<Signal> inputs, bool opaque) {
+    auto& c = *circuit_;
+    // Inside an opaque instance, its neurons stay its own.
+    if (!c.open_.empty() && c.open_.back().second) return;
+    c.open_.emplace_back(static_cast<std::uint32_t>(c.instances_.size()), opaque);
+    c.instances_.push_back(std::move(inputs));
+    open_ = true;
+}
+
+Circuit::Gadget::~Gadget() {
+    if (open_) circuit_->open_.pop_back();
+}
+
+void Circuit::created() {
+    if (recording_) neuron_instance_.push_back(open_.empty() ? nvr::absent : open_.back().first);
+}
+
+GadgetAdvice Circuit::gadget_advice() const {
+    // The neurons and wires of finish().
+    std::vector<std::uint8_t> needed(neurons_.size(), 0);
+    for (auto wire : outputs_) {
+        if ((wire & neuron_wire) != 0) needed[wire & ~neuron_wire] = 1;
+    }
+    for (std::size_t i = neurons_.size(); i-- > 0;) {
+        if (!needed[i]) continue;
+        for (const auto& [wire, weight] : neurons_[i].input.terms) {
+            if ((wire & neuron_wire) != 0) needed[wire & ~neuron_wire] = 1;
+        }
+    }
+    std::vector<std::uint32_t> position(neurons_.size(), nvr::absent);
+    std::uint32_t kept = 0;
+    for (std::size_t i = 0; i < neurons_.size(); ++i) {
+        if (needed[i]) position[i] = inputs_ + kept++;
+    }
+    GadgetAdvice advice;
+    if (!recording_ || neuron_instance_.size() != neurons_.size()) return advice;
+    advice.instance.reserve(kept);
+    for (std::size_t i = 0; i < neurons_.size(); ++i) {
+        if (needed[i]) advice.instance.push_back(neuron_instance_[i]);
+    }
+    advice.inputs.reserve(instances_.size());
+    for (const auto& inputs : instances_) {
+        auto& mapped = advice.inputs.emplace_back();
+        for (const auto& signal : inputs) {
+            auto& wires = mapped.emplace_back();
+            for (const auto& [wire, weight] : signal.terms) {
+                const auto final = (wire & neuron_wire) == 0 ? wire : position[wire & ~neuron_wire];
+                if (final != nvr::absent) wires.push_back(final);
+            }
+        }
+    }
+    return advice;
+}
+
 Signal Circuit::input() {
     return Signal::wire(inputs_++);
 }
@@ -51,6 +119,7 @@ Signal Circuit::relu(const Signal& value) {
         return Signal::of(std::max<std::int64_t>(0, value.constant));
     }
     neurons_.push_back({nvr::Activation::Relu, value});
+    created();
     return Signal::wire(neuron_wire | static_cast<WireId>(neurons_.size() - 1));
 }
 
@@ -59,6 +128,7 @@ WireId Circuit::materialize(const Signal& value) {
         return value.terms.front().first;
     }
     neurons_.push_back({nvr::Activation::Identity, value});
+    created();
     return neuron_wire | static_cast<WireId>(neurons_.size() - 1);
 }
 
@@ -68,6 +138,7 @@ Signal Circuit::compact(const Signal& value) {
 }
 
 Signal Circuit::logical_and(const Signal& a, const Signal& b) {
+    const Gadget gadget(*this, {&a, &b});
     if (a.is_constant()) {
         return a.constant == 0 ? Signal::of(0) : b;
     }
@@ -81,6 +152,7 @@ Signal Circuit::logical_and(const Signal& a, const Signal& b) {
 }
 
 Signal Circuit::logical_or(const Signal& a, const Signal& b) {
+    const Gadget gadget(*this, {&a, &b});
     if (a.is_constant()) {
         return a.constant != 0 ? Signal::of(1) : b;
     }
@@ -94,6 +166,7 @@ Signal Circuit::logical_or(const Signal& a, const Signal& b) {
 }
 
 Signal Circuit::logical_xor(const Signal& a, const Signal& b) {
+    const Gadget gadget(*this, {&a, &b});
     if (a.is_constant()) {
         return a.constant == 0 ? b : logical_not(b);
     }
@@ -107,6 +180,7 @@ Signal Circuit::logical_xor(const Signal& a, const Signal& b) {
 }
 
 Signal Circuit::choose(const Signal& select, const Signal& when_true, const Signal& when_false) {
+    const Gadget gadget(*this, {&select, &when_true, &when_false}, true);
     if (select.is_constant()) {
         return select.constant != 0 ? when_true : when_false;
     }
@@ -125,6 +199,7 @@ Signal Circuit::choose(const Signal& select, const Signal& when_true, const Sign
 }
 
 Signal Circuit::all(const std::vector<Signal>& bits) {
+    const Gadget gadget(*this, bits);
     std::vector<const Signal*> open;
     for (const auto& bit : bits) {
         if (bit.is_constant(0)) {
@@ -148,6 +223,7 @@ Signal Circuit::all(const std::vector<Signal>& bits) {
 }
 
 Signal Circuit::any(const std::vector<Signal>& bits) {
+    const Gadget gadget(*this, bits);
     std::vector<const Signal*> open;
     for (const auto& bit : bits) {
         if (bit.is_constant()) {
@@ -172,6 +248,7 @@ Signal Circuit::any(const std::vector<Signal>& bits) {
 }
 
 Signal Circuit::at_least(const Signal& value, std::int64_t threshold) {
+    const Gadget gadget(*this, {&value});
     if (value.is_constant()) {
         return Signal::of(value.constant >= threshold ? 1 : 0);
     }
@@ -264,6 +341,7 @@ struct BitSum {
 
 // One column of an adder: the sum bit and carry of three bits.
 BitSum full_add(Circuit& circuit, const Signal& a, const Signal& b, const Signal& c) {
+    const Circuit::Gadget gadget(circuit, {&a, &b, &c}, true);
     std::int64_t known = 0;
     std::vector<const Signal*> open;
     for (const auto* bit : {&a, &b, &c}) {
@@ -344,8 +422,10 @@ struct Column {
 };
 
 // Splits an integer-valued signal in [0, maximum] into its low bit and the
-// remaining value divided by two.
-Column split(Circuit& circuit, Signal value, std::int64_t maximum) {
+// remaining value divided by two. `parts`, when given, are the signals that
+// sum to `value` (a multiplier column's carry and partial products), which
+// gadget recording names as the inputs of the column's sum.
+Column split(Circuit& circuit, Signal value, std::int64_t maximum, const std::vector<Signal>* parts = nullptr) {
     Column result;
     if (maximum <= 1) {
         result.bit = value;
@@ -354,7 +434,9 @@ Column split(Circuit& circuit, Signal value, std::int64_t maximum) {
     }
     // One identity neuron sums the column, so each threshold below reads
     // that wire instead of every partial product.
+    const Circuit::Gadget column = parts ? Circuit::Gadget(circuit, *parts) : Circuit::Gadget(circuit, {&value});
     value = circuit.compact(value);
+    const Circuit::Gadget digits(circuit, {&value}, true);
     const auto bits = static_cast<int>(std::bit_width(static_cast<std::uint64_t>(maximum)));
     for (int t = bits - 1; t >= 1; --t) {
         const auto place = std::int64_t{1} << t;
@@ -374,17 +456,20 @@ Checked unsigned_multiply(Circuit& circuit, const Word& a, const Word& b) {
     Signal carry;
     std::int64_t carry_max = 0;
     std::vector<Signal> carry_bits;
+    std::vector<Signal> parts;
     for (std::size_t k = 0; k < width; ++k) {
         Signal column = carry;
         std::int64_t maximum = carry_max;
+        parts.assign(circuit.recording() ? 1 : 0, carry);
         for (std::size_t i = 0; i <= k; ++i) {
             const auto product = circuit.logical_and(a[k - i], b[i]);
             if (!product.is_constant(0)) {
                 column = column + product;
                 maximum += 1;
+                if (circuit.recording()) parts.push_back(product);
             }
         }
-        auto split_column = split(circuit, column, maximum);
+        auto split_column = split(circuit, column, maximum, circuit.recording() ? &parts : nullptr);
         result.value.push_back(split_column.bit);
         carry = split_column.carry;
         carry_max = split_column.carry_max;
@@ -449,9 +534,11 @@ Word multiply_full(Circuit& circuit, const Word& a, const Word& b) {
     Word result;
     Signal carry;
     std::int64_t carry_max = 0;
+    std::vector<Signal> parts;
     for (std::size_t k = 0; k < width; ++k) {
         Signal column = carry;
         std::int64_t maximum = carry_max;
+        parts.assign(circuit.recording() ? 1 : 0, carry);
         for (std::size_t i = 0; i < b.size(); ++i) {
             if (k < i || k - i >= a.size()) {
                 continue;
@@ -460,9 +547,10 @@ Word multiply_full(Circuit& circuit, const Word& a, const Word& b) {
             if (!product.is_constant(0)) {
                 column = column + product;
                 maximum += 1;
+                if (circuit.recording()) parts.push_back(product);
             }
         }
-        auto split_column = split(circuit, column, maximum);
+        auto split_column = split(circuit, column, maximum, circuit.recording() ? &parts : nullptr);
         result.push_back(split_column.bit);
         carry = split_column.carry;
         carry_max = split_column.carry_max;
