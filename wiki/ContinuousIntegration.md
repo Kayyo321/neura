@@ -77,7 +77,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 scripts/check-kernels.sh build
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 159
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 172
 ```
 
 To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
