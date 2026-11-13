@@ -355,6 +355,7 @@ public:
 
     // An object of `fields` fields, none initialized.
     std::uint64_t create_object(std::uint32_t layout, std::size_t fields) {
+        reserve_handle();
         return store_new(&new_object(layout, fields)->head);
     }
 
@@ -366,6 +367,7 @@ public:
             for (const auto bits : elements) any |= bits;
         }
         const auto storage = fits(any, width) ? width : ElementWidth::W8;
+        reserve_handle();
         auto* item = new_collection(kind, type, width, storage, elements.size());
         if (storage == ElementWidth::W8) {
             if (!elements.empty()) std::memcpy(item->data, elements.data(), elements.size() * 8);
@@ -380,6 +382,7 @@ public:
     std::uint64_t create_filled(EntryKind kind, std::uint32_t type, ElementWidth width, std::size_t length,
                                 std::uint64_t fill) {
         const auto storage = length == 0 || fits(fill, width) ? width : ElementWidth::W8;
+        reserve_handle();
         auto* item = new_collection(kind, type, width, storage, length);
         if (storage == ElementWidth::W1) {
             if (length != 0) std::memset(item->data, static_cast<int>(fill & 0xffU), length);
@@ -392,6 +395,7 @@ public:
 
     // A text or bytes entry holding `bytes`.
     std::uint64_t create_text(EntryKind kind, std::uint32_t type, std::string_view bytes) {
+        reserve_handle();
         auto* item = new (blocks_.allocate(inline_bytes(bytes.size(), ElementWidth::W1))) ArrayEntry{};
         item->head = {kind, inline_flag, ElementWidth::W1, ElementWidth::W1, type, bytes.size()};
         item->data = reinterpret_cast<unsigned char*>(item + 1);
@@ -551,8 +555,8 @@ public:
     //   elements, count of them at the storage width. Text and bytes are
     //   always inline at W1. An array whose storage widened has flag bit 1
     //   clear and data pointing to a separate buffer of count uint64 words.
-    // List: 16 data (a pointer to a separate buffer, null while capacity is
-    //   zero), 24 capacity (uint64, elements the buffer holds at the storage
+    // List: 16 data (a pointer to a separate buffer; while the capacity is
+    //   zero, to a static block that holds nothing), 24 capacity (uint64, elements the buffer holds at the storage
     //   width), 32 version (uint64). Flag bit 1 is always clear. The buffer
     //   moves when the list grows or widens; the header does not.
     //
@@ -690,9 +694,10 @@ private:
             return sizes[class_of(bytes)];
         }
 
-        // A block of at least `bytes` bytes, aligned to 8; null for 0.
+        // A block of at least `bytes` bytes, aligned to 8. For 0, a static
+        // block that holds nothing, so that no element pointer is null.
         void* allocate(std::size_t bytes) {
-            if (bytes == 0) return nullptr;
+            if (bytes == 0) return empty_;
             if (!pooled || bytes > largest) return ::operator new(bytes);
             const auto c = class_of(bytes);
             const std::size_t size = sizes[c];
@@ -714,9 +719,9 @@ private:
             return block;
         }
 
-        // Frees a block that allocate(`bytes`) returned; nothing for null.
+        // Frees a block that allocate(`bytes`) returned.
         void deallocate(void* block, std::size_t bytes) {
-            if (block == nullptr) return;
+            if (bytes == 0) return;
             if (!pooled || bytes > largest) {
                 ::operator delete(block);
                 return;
@@ -770,6 +775,8 @@ private:
 #endif
         }
 
+        alignas(8) static inline unsigned char empty_[8]{};
+
         std::array<void*, sizes.size()> free_{};
         std::array<unsigned char*, sizes.size()> next_{};
         std::array<unsigned char*, sizes.size()> end_{};
@@ -799,11 +806,19 @@ private:
     ArrayEntry* new_collection(EntryKind kind, std::uint32_t type, ElementWidth declared, ElementWidth storage,
                                std::size_t length) {
         if (kind == EntryKind::List) {
-            auto* item = new (blocks_.allocate(sizeof(ListEntry))) ListEntry{};
-            item->array.head = {kind, 0, declared, storage, type, length};
             const auto w = static_cast<std::size_t>(storage);
             const auto bytes = Blocks::usable(length * w);
-            item->array.data = static_cast<unsigned char*>(blocks_.allocate(bytes));
+            auto* data = static_cast<unsigned char*>(blocks_.allocate(bytes));
+            void* block = nullptr;
+            try {
+                block = blocks_.allocate(sizeof(ListEntry));
+            } catch (...) {
+                blocks_.deallocate(data, bytes);
+                throw;
+            }
+            auto* item = new (block) ListEntry{};
+            item->array.head = {kind, 0, declared, storage, type, length};
+            item->array.data = data;
             item->capacity = bytes / w;
             return &item->array;
         }
@@ -845,14 +860,22 @@ private:
         item.capacity = bytes / w;
     }
 
-    std::uint64_t store_new(Entry* item) {
-        const auto handle = last_ + 1;
-        const auto page = handle >> page_bits;
+    // Makes sure the page of handle last_handle() + 1 exists, before the
+    // entry's blocks are allocated, so that store_new() cannot fail.
+    void reserve_handle() {
+        const auto page = (last_ + 1) >> page_bits;
         if (page >= pages_.size()) pages_.resize(page + 1);
         auto& stored = pages_[page];
         if (!stored) stored = std::make_unique<Page>();
-        stored->entries[handle & page_mask] = item;
-        ++stored->live;
+    }
+
+    // Stores an entry under handle last_handle() + 1, whose page
+    // reserve_handle() made.
+    std::uint64_t store_new(Entry* item) {
+        const auto handle = last_ + 1;
+        auto& stored = *pages_[handle >> page_bits];
+        stored.entries[handle & page_mask] = item;
+        ++stored.live;
         last_ = handle;
         return handle;
     }
@@ -1027,6 +1050,7 @@ private:
 inline std::uint64_t Heap::create(Builder&& built) {
     switch (built.kind_) {
     case EntryKind::Object: {
+        reserve_handle();
         auto* item = new_object(built.type_, built.cells_.size());
         auto* flags = flag_words(*item);
         auto* fields = field_words(*item);
