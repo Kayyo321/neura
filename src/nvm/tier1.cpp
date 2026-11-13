@@ -38,9 +38,28 @@ std::uint8_t tier_ceiling() {
     return ceiling;
 }
 
-bool tier_check_enabled() {
-    static const bool enabled = [] {
+namespace {
+
+// NEURA_TIER_CHECK: 1 or 2, or 0 for any other value.
+int tier_check_mode() {
+    static const int mode = [] {
         const char* text = std::getenv("NEURA_TIER_CHECK");
+        if (text && std::strcmp(text, "1") == 0) return 1;
+        if (text && std::strcmp(text, "2") == 0) return 2;
+        return 0;
+    }();
+    return mode;
+}
+
+} // namespace
+
+bool tier_check_enabled() { return tier_check_mode() == 1; }
+
+bool tier_shadow_enabled() { return tier_check_mode() == 2; }
+
+bool tier_shadow_heap_always() {
+    static const bool enabled = [] {
+        const char* text = std::getenv("NEURA_TIER_CHECK_HEAP");
         return text && std::strcmp(text, "1") == 0;
     }();
     return enabled;

@@ -231,6 +231,45 @@ if(NOT tier_workers_stderr MATCHES "tier: steps" OR tier_workers_stderr MATCHES 
     message(FATAL_ERROR "--tier-stats with parallel workers\n${tier_workers_stderr}")
 endif()
 
+# NEURA_TIER_CHECK=2 (docs/runtime/NVM.md, "Controls"): a run checked against
+# its shadow, recorded or not, prints and records what it does unchecked, and
+# a replayed run, which the oracle does not check, says so in one line on
+# stderr.
+build_image("${TEST_DIR}/regions.nvr" "${tests}/tier/regions.nra")
+set(shadow_runs "regions.nvr" "binary-trees.nvr --max-heap-cells 3000 -- 8")
+foreach(shadow_run IN LISTS shadow_runs)
+    separate_arguments(shadow_arguments UNIX_COMMAND "${shadow_run}")
+    neura(unchecked "${TEST_DIR}" run --stats ${shadow_arguments})
+    set(ENV{NEURA_TIER_EAGER} 1)
+    set(ENV{NEURA_TIER_CHECK} 2)
+    neura(checked "${TEST_DIR}" run --stats ${shadow_arguments})
+    unset(ENV{NEURA_TIER_CHECK})
+    unset(ENV{NEURA_TIER_EAGER})
+    if(NOT checked_status STREQUAL unchecked_status OR NOT checked_stdout STREQUAL unchecked_stdout OR
+       NOT checked_stderr STREQUAL unchecked_stderr)
+        message(FATAL_ERROR "NEURA_TIER_CHECK=2 changed the run of ${shadow_run}: status ${checked_status}, "
+                            "unchecked ${unchecked_status}\n${checked_stdout}${checked_stderr}")
+    endif()
+endforeach()
+neura(unchecked "${TEST_DIR}" run --record "${TEST_DIR}/regions-unchecked.trace" "${TEST_DIR}/regions.nvr")
+set(ENV{NEURA_TIER_EAGER} 1)
+set(ENV{NEURA_TIER_CHECK} 2)
+neura(checked_record "${TEST_DIR}" run --record "${TEST_DIR}/regions.trace" "${TEST_DIR}/regions.nvr")
+neura(checked_replay "${TEST_DIR}" run --replay "${TEST_DIR}/regions.trace" "${TEST_DIR}/regions.nvr")
+unset(ENV{NEURA_TIER_CHECK})
+unset(ENV{NEURA_TIER_EAGER})
+if(NOT checked_record_status STREQUAL "0" OR NOT checked_record_stdout STREQUAL unchecked_stdout OR
+   NOT checked_record_stderr STREQUAL "")
+    message(FATAL_ERROR "NEURA_TIER_CHECK=2 with --record: status ${checked_record_status}\n"
+                        "${checked_record_stdout}${checked_record_stderr}")
+endif()
+same_bytes("a trace recorded under NEURA_TIER_CHECK=2" "${TEST_DIR}/regions-unchecked.trace" "${TEST_DIR}/regions.trace")
+if(NOT checked_replay_status STREQUAL "0" OR NOT checked_replay_stdout STREQUAL unchecked_stdout OR
+   NOT checked_replay_stderr STREQUAL "neura: NEURA_TIER_CHECK=2 is not applied: the run replays a trace\n")
+    message(FATAL_ERROR "NEURA_TIER_CHECK=2 with --replay: status ${checked_replay_status}\n"
+                        "${checked_replay_stdout}${checked_replay_stderr}")
+endif()
+
 # The .nir listing route matches the source listing in both modes.
 foreach(mode IN ITEMS "" --no-optimize)
     neura(from_source "${TEST_DIR}" emit-ir ${mode} "${hello}")

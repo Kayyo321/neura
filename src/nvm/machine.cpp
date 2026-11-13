@@ -311,6 +311,15 @@ std::optional<std::size_t> evaluate_outputs(const nvr::Graph& graph, std::span<c
     return evaluate_loaded_outputs(graph, wires, outputs);
 }
 
+// The code of NEURA_TIER_CHECK=2 (tier_shadow.inc) runs only when a run has a
+// shadow: it is kept out of line and apart from the hot code, so that the
+// paths it hooks into compile as they would without it.
+#if defined(__GNUC__) || defined(__clang__)
+#define NEURA_SHADOW_PATH [[gnu::cold, gnu::noinline]]
+#else
+#define NEURA_SHADOW_PATH
+#endif
+
 class Execution::State {
     struct ParallelItem;
 
@@ -324,6 +333,7 @@ public:
         if (entry_) validate_entry_arguments(image, *entry_, arguments);
         else validate_utf8_arguments(arguments);
         arguments_.assign(arguments.begin(), arguments.end());
+        plan_shadow(true);
     }
 
     State(const nvr::Image& image, std::uint32_t function, std::span<const std::uint64_t> arguments, RunLimits limits)
@@ -333,20 +343,24 @@ public:
         setup_tier();
         validate_call_arguments(image, function, arguments);
         start_arguments_.assign(arguments.begin(), arguments.end());
+        plan_shadow(true);
     }
 
     // An isolated parallel item: one call of `item.function` on the item's
     // argument, with the starting run's transferable constants as globals,
-    // its own heap, and no scheduler. See run_item.
-    State(const nvr::Image& image, RunLimits limits, const ParallelItem& item)
+    // its own heap, and no scheduler. See run_item. `shadowed`: the run
+    // that started it has a shadow (NEURA_TIER_CHECK=2), and so does it.
+    State(const nvr::Image& image, RunLimits limits, const ParallelItem& item, bool shadowed)
         : image_(image), types_(image), limits_(limits), start_function_(item.function), item_(&item) {
         setup_tier();
+        plan_shadow(shadowed);
     }
 
     ~State() {
         stop_parallel_workers();
         stop_tracking_heap();
-        if (tier_) {
+        // A shadow's tier steps are not the run's (NEURA_TIER_CHECK=2).
+        if (tier_ && !shadow_role_) {
             tier_->add_steps(tier_steps_);
             flush_reference_steps();
             flush_region_events();
@@ -406,6 +420,8 @@ public:
 
     void initialize(FleetHeapCells& heap) {
         if (started_) return;
+        // A fleet's member has no shadow (NEURA_TIER_CHECK=2).
+        if (shadow_) shadow_leave_fleet();
         fleet_heap_ = &heap;
         try {
             start();
@@ -415,6 +431,9 @@ public:
     }
 
     Event advance() {
+        // A run with a shadow (NEURA_TIER_CHECK=2) runs this loop with its
+        // sync points in shadowed_advance.
+        if (shadow_) return shadowed_advance();
         if (finished_) {
             return *finished_;
         }
@@ -665,6 +684,19 @@ private:
                     }
                 }
                 if (stored->live == 0 && page < ((last_ + 1) >> page_bits)) stored.reset();
+            }
+        }
+
+        // Calls `visit(handle, entry)` for each stored handle, in handle order.
+        template <typename Visit>
+        void each(Visit&& visit) const {
+            for (std::size_t page = 0; page < pages_.size(); ++page) {
+                if (!pages_[page]) continue;
+                for (std::size_t index = 0; index < page_size; ++index) {
+                    if (const auto* item = pages_[page]->entries[index]) {
+                        visit((static_cast<std::uint64_t>(page) << page_bits) | index, *item);
+                    }
+                }
             }
         }
 
@@ -2187,7 +2219,9 @@ private:
 
     // Evaluates one item to its end in a state of its own. It touches
     // nothing of the run that started it, so any number can run at once.
-    static void run_item(const nvr::Image& image, const RunLimits& parent, ParallelItem& item) {
+    // `shadowed`: the run has a shadow (NEURA_TIER_CHECK=2); the item then
+    // gets one of its own.
+    static void run_item(const nvr::Image& image, const RunLimits& parent, ParallelItem& item, bool shadowed) {
         RunLimits limits;
         limits.max_steps = item.max_steps;
         limits.max_heap_cells = item.max_cells;
@@ -2201,6 +2235,7 @@ private:
         // timeline, which returns to the step that finished them; worker
         // threads are not timed.
         limits.tier_times = parent.parallel_workers <= 1 ? parent.tier_times : nullptr;
+        limits.tier_shadow = shadowed ? parent.tier_shadow : nullptr;
         const TierTimes::Scope timing(limits.tier_times,
                                       limits.tier_times ? limits.tier_times->current() : TierTimes::Category::Other);
         const auto refuse = [&](std::string detail) {
@@ -2210,7 +2245,7 @@ private:
             item.trap.detail = std::move(detail);
         };
         try {
-            State child(image, limits, item);
+            State child(image, limits, item, shadowed);
             const auto event = child.advance();
             if (event.kind == Event::Kind::Completed) {
                 item.result = child.export_value(event.result, image.functions[item.function].result_type);
@@ -2242,7 +2277,7 @@ private:
                     pool.unstarted.pop_front();
                     item->started = true;
                     lock.unlock();
-                    run_item(image_, limits_, *item);
+                    run_item(image_, limits_, *item, false);
                     lock.lock();
                     item->done = true;
                     pool.changed.notify_all();
@@ -2315,7 +2350,7 @@ private:
                 if (!earlier->done) {
                     earlier->started = true;
                     std::erase(parallel_->unstarted, earlier.get());
-                    run_item(image_, limits_, *earlier);
+                    run_item(image_, limits_, *earlier, shadow_ != nullptr);
                     earlier->done = true;
                 }
                 if (earlier->id == id) break;
@@ -3135,6 +3170,7 @@ private:
 
 #include "tier1_steps.inc"
 #include "tier2_steps.inc"
+#include "tier_shadow.inc"
 
     std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
         return commit_exit(block.exits[select(block, plan)]);
@@ -4034,6 +4070,11 @@ private:
     std::optional<Pending> pending_;
     std::uint64_t sequence_ = 0;
     std::uint64_t steps_ = 0;
+    // NEURA_TIER_CHECK=2 (tier_shadow.inc): the shadow and the oracle's
+    // records, and whether this state is itself a shadow. The shadow is
+    // destroyed before the tier cache it shares.
+    bool shadow_role_ = false;
+    std::unique_ptr<Shadow> shadow_;
 };
 
 std::string Execution::State::frame_text(const FrameHeader& frame) const {
@@ -4424,28 +4465,49 @@ std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
 std::uint64_t Execution::tick() const { return state_->tick(); }
 std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }
 std::uint64_t Execution::peak_pending_requests() const { return state_->peak_pending_requests(); }
+// What enters a run from outside (completions, deliveries, clock readings,
+// callbacks) reaches its shadow too (NEURA_TIER_CHECK=2, tier_shadow.inc).
 void Execution::deliver(std::uint64_t sequence, const HostCompletion& completion) {
     state_->deliver(sequence, completion);
+    if (state_->shadow_) state_->shadow_deliver(sequence, completion);
 }
-std::size_t Execution::advance_clock(std::int64_t now) { return state_->advance_clock(now); }
+std::size_t Execution::advance_clock(std::int64_t now) {
+    const auto expired = state_->advance_clock(now);
+    if (state_->shadow_) state_->shadow_advance_clock(now, expired);
+    return expired;
+}
 std::vector<TaskSiteProfile> Execution::task_profile() const { return state_->task_profile(); }
 std::string Execution::location(std::uint32_t function, std::uint32_t block) const {
     return state_->location(function, block);
 }
 
-std::optional<Event> Execution::begin_step(GraphStep& step) { return state_->begin_step(step); }
-
-std::optional<Event> Execution::finish_step(std::span<const std::int64_t> outputs) {
-    return state_->finish_step(outputs);
+std::optional<Event> Execution::begin_step(GraphStep& step) {
+    auto event = state_->begin_step(step);
+    if (event && state_->shadow_) state_->shadow_event(*event);
+    return event;
 }
 
-Event Execution::fail_step(std::size_t node) { return state_->fail_step(node); }
+std::optional<Event> Execution::finish_step(std::span<const std::int64_t> outputs) {
+    auto event = state_->finish_step(outputs);
+    if (event && state_->shadow_) state_->shadow_event(*event);
+    return event;
+}
 
-void Execution::complete(const HostCompletion& completion) { state_->complete(completion); }
+Event Execution::fail_step(std::size_t node) {
+    auto event = state_->fail_step(node);
+    if (state_->shadow_) state_->shadow_event(event);
+    return event;
+}
+
+void Execution::complete(const HostCompletion& completion) {
+    state_->complete(completion);
+    if (state_->shadow_) state_->shadow_complete(completion);
+}
 
 std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::uint32_t version,
                                                     const std::vector<HostValue>& arguments,
                                                     const HostHandler& host) {
+    if (state_->shadow_) return state_->shadow_invoke_callback(name, version, arguments, host);
     return state_->invoke_callback(name, version, arguments, host);
 }
 

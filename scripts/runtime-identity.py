@@ -30,8 +30,18 @@ that the binary can run native code here, and stops if it cannot.
 
 The environment is passed on, so NEURA_TIER_EAGER=1 (lift blocks and form
 regions at their first execution), NEURA_TIER_CHECK=1 (check every lifted
-block and region, native code included, against the slower path), and
-NEURA_JIT apply to a capture.
+block and region, native code included, against the slower path),
+NEURA_TIER_CHECK=2 (check every run against a shadow run at tier 1), and
+NEURA_JIT apply to a capture. Under NEURA_TIER_CHECK=2 a run the oracle
+cannot check (a replay, an explored schedule) prints one line saying so on
+stderr; the capture removes the lines that start with
+`neura: NEURA_TIER_CHECK=2 is not applied: ` from each stderr before writing
+it, so that the capture compares with one made without the variable, and its
+last line counts the cases that printed one, by reason. Nothing is removed
+when NEURA_TIER_CHECK is not 2.
+
+    NEURA_TIER_EAGER=1 NEURA_TIER_CHECK=2 scripts/runtime-identity.py capture --neura build/neura --images DIR --out shadow --extended --jit on
+    scripts/runtime-identity.py compare t0 shadow
 
 Images are built once, by the first capture, so both runs execute the same
 NVR bytes and the comparison isolates the runtime. Each case records the
@@ -254,6 +264,10 @@ EXTENDED_SWEEP = [
 
 RUN_OPTIONS = []
 
+# The line a run prints under NEURA_TIER_CHECK=2 when the oracle cannot check
+# it (docs/runtime/NVM.md, "Controls").
+SHADOW_NOTICE = b"neura: NEURA_TIER_CHECK=2 is not applied: "
+
 
 def run(command, cwd):
     # The capture's run options follow `run` or `test`.
@@ -289,9 +303,19 @@ def capture(args):
             sys.exit(stderr.decode(errors="replace").strip())
     work = out / "work"
     work.mkdir(exist_ok=True)
+    shadowed = os.environ.get("NEURA_TIER_CHECK") == "2"
+    # Cases whose run printed the oracle's notice, by reason.
+    unchecked = {}
 
     def record(case, command, trace=None):
         status, stdout, stderr = run(command, work)
+        if shadowed:
+            lines = stderr.splitlines(keepends=True)
+            notices = [line for line in lines if line.startswith(SHADOW_NOTICE)]
+            if notices:
+                stderr = b"".join(line for line in lines if not line.startswith(SHADOW_NOTICE))
+                for reason in sorted({line[len(SHADOW_NOTICE):].decode(errors="replace").strip() for line in notices}):
+                    unchecked[reason] = unchecked.get(reason, 0) + 1
         # A diagnostic names its file by its path, which is under the
         # capture's own directory: name that directory the same way in every
         # capture.
@@ -376,7 +400,12 @@ def capture(args):
     failing = work / "failing-tests.nra"
     failing.write_text(FAILING_TESTS)
     record("test-failing", [neura, "test", "--stats", "failing-tests.nra"])
-    print(f"captured {len(list(out.glob('*.status')))} cases in {out}")
+    summary = f"captured {len(list(out.glob('*.status')))} cases in {out}"
+    if shadowed:
+        cases = sum(unchecked.values())
+        summary += f"; {cases} cases not checked by the oracle" + (
+            ": " + ", ".join(f"{count} {reason}" for reason, count in sorted(unchecked.items())) if cases else "")
+    print(summary)
 
 
 def compare(args):

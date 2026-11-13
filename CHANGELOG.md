@@ -23,6 +23,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 - Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.
 - Read-only image/graph JSON inspection through `neura inspect-image --json`.
 - `neura update --nightly` includes published prereleases when selecting the newest version. It also works with `--check`; ordinary updates continue to use stable releases.
+- `NEURA_TIER_CHECK=2` runs a second execution of the same program at tier 1 beside every run that would use tier 2, and compares the two (steps, frames, globals, heap, scheduler, events) each time compiled code returns and at every event; the first difference is reported and the process aborts. `NEURA_TIER_CHECK_HEAP=1` compares the heaps at every such point. It is a check for developing the runtime, costs several times the run, and says on standard error when a mode (a graph device, a schedule chooser, parallel workers, a fleet, a replayed trace) keeps it from being applied ([controls](docs/runtime/NVM.md#controls)).
 - `neura run --tier-stats` (and `run --each` and `neura test` with it) ends with a line that divides the command's wall time among loading the image, proving, searching, tier 0, tier 1, regions, garbage collection, host services, and the rest ([controls](docs/runtime/NVM.md#controls)). The existing lines are unchanged.
 
 ### Changed

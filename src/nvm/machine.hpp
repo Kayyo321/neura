@@ -25,6 +25,61 @@ struct TaskDumpRequest;
 class ScheduleChooser;
 class TaskObserver;
 
+// Test hooks of the shadow-run oracle of NEURA_TIER_CHECK=2
+// (docs/runtime/NVM.md, "Controls"; src/nvm/tier_shadow.inc). A run given
+// hooks runs the oracle whatever the environment says, wherever
+// NEURA_TIER_CHECK=2 would. Tests only.
+struct TierShadowHooks {
+    // What the oracle changes in the run itself (not in its shadow) at the
+    // first sync point at or after step `at_step` where there is such a
+    // thing to change, so that a test can see the difference reported. It
+    // changes one thing once, in the run or a parallel item of it.
+    enum class Perturb : std::uint8_t {
+        None,
+        // The first initialized slot of the innermost frame whose type is
+        // not a reference: its lowest bit flips.
+        SlotValue,
+        // The first initialized slot of the innermost frame: uninitialized.
+        SlotInitialized,
+        // The innermost frame's block: the next block of its function.
+        FrameBlock,
+        // The first initialized global whose type is not a reference: its
+        // lowest bit flips.
+        Global,
+        // The first object, by handle, with an initialized field whose type
+        // is not a reference: the field's lowest bit flips.
+        HeapField,
+        // The first object, by handle, with an initialized field: uninitialized.
+        HeapInitialized,
+        // The first list, by handle: its version is one more.
+        ListVersion,
+        // The live heap cells: one more.
+        LiveCells,
+        // The step count: one more.
+        Steps,
+        // The first channel, by handle, holding a value: the lowest bit of
+        // the oldest value flips.
+        ChannelBuffer,
+        // The lowest-numbered task: one more committed select.
+        TaskSelects,
+    };
+    Perturb perturb = Perturb::None;
+    std::uint64_t at_step = 0;
+    // Set once the perturbation is made.
+    bool perturbed = false;
+    // Receives the report of the first difference instead of standard
+    // error, and the run goes on without its shadow; without it, the
+    // report is printed and the process aborts.
+    std::function<void(const std::string&)> report;
+    // Receives the line saying the oracle is not applied to a run instead
+    // of standard error.
+    std::function<void(const std::string&)> notice;
+    // Compares the heaps at every sync point, as NEURA_TIER_CHECK_HEAP=1.
+    bool every_heap = false;
+    // Sync points reached, counted over the run and its parallel items.
+    std::uint64_t syncs = 0;
+};
+
 // Bounds a run enforces. Exhaustion traps at the operation that would exceed
 // the bound, before the allocation, frame, or block it would start.
 struct RunLimits {
@@ -102,6 +157,15 @@ struct RunLimits {
     // order: entry N is the task that ran from tick N. It must outlive the
     // run. Tests and tools compare schedules with it.
     std::vector<std::uint64_t>* schedule = nullptr;
+    // The shadow-run oracle of NEURA_TIER_CHECK=2 with test hooks, or null.
+    // It must outlive the run. It never changes what a run does unless it
+    // is told to perturb it.
+    TierShadowHooks* tier_shadow = nullptr;
+    // Why NEURA_TIER_CHECK=2 cannot check this run, or null: a caller that
+    // gives the run inputs the oracle does not pass to its shadow in order
+    // (`neura run --record` and `--replay`) says so here, and the run says
+    // the oracle is not applied.
+    const char* tier_check_off = nullptr;
 };
 
 // Chooses among the runnable tasks at a scheduling decision

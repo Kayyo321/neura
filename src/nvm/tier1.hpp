@@ -383,6 +383,15 @@ std::uint8_t tier_ceiling();
 // reference evaluator too, and every region execution again block by block
 // at tier 1 (tier2_steps.inc), and abort with a report on any difference.
 bool tier_check_enabled();
+// NEURA_TIER_CHECK=2: run every execution that would run above tier 1 with
+// a shadow execution at tier 1, and compare the two at every point where
+// compiled code returns to the dispatcher and at every event
+// (src/nvm/tier_shadow.inc).
+bool tier_shadow_enabled();
+// NEURA_TIER_CHECK_HEAP=1: under NEURA_TIER_CHECK=2, compare the heaps at
+// every such point, rather than at the end of the run and at points spaced
+// by the steps run in proportion to the heap's size.
+bool tier_shadow_heap_always();
 // NEURA_TIER_EAGER=1: lift every block when it first runs, with ample proof
 // work and search time, and form regions at the first arrival, so that
 // short test runs exercise tiers 1 and 2. It changes only which blocks run

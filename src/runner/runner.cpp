@@ -388,6 +388,9 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     nvm::TaskClock* clock = options.virtual_time && !options.replay ? &virtual_clock : nullptr;
     host.services.set_clock(clock);
     nvm::RunResult result;
+    // NEURA_TIER_CHECK=2 does not check a replayed run. A recorded run is
+    // checked: every input the recorder gives it reaches the shadow too.
+    if (options.replay) limits.tier_check_off = "the run replays a trace";
     if (options.replay) {
         // No service runs: every response comes from the trace. Console
         // output is reproduced from the recorded requests so that the
