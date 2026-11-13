@@ -94,12 +94,10 @@ jobs:
             runner: ubuntu-24.04
             minimum: 173
             exclude: "^$"
-          # neura-libclang-load, a test of the neura-libclang submodule,
-          # expects `char` to be signed, which it is not on arm64.
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
-            minimum: 172
-            exclude: "^neura-libclang-load$"
+            minimum: 173
+            exclude: "^$"
           # macOS has no native launcher, so the six native-* tests are not
           # registered there.
           - triple: aarch64-apple-darwin
