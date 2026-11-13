@@ -472,6 +472,29 @@ public:
         for (std::size_t i = 0; i < count; ++i) visit(load(item.data + i * s, storage));
     }
 
+    // As visit_fields(), from the last position to the first.
+    template <typename Visit>
+    void visit_fields_reverse(Ref ref, std::span<const std::size_t> positions, Visit&& visit) const {
+        const auto& item = object(ref);
+        const auto* flags = flag_words(item);
+        const auto* fields = field_words(item);
+        for (auto at = positions.size(); at-- > 0;) {
+            const auto field = positions[at];
+            if (((flags[field >> 6] >> (field & 63U)) & 1U) != 0) visit(fields[field]);
+        }
+    }
+
+    // As visit_elements(), from the last element to the first.
+    template <typename Visit>
+    void visit_elements_reverse(Ref ref, Visit&& visit) const {
+        const auto& item = sequence(ref);
+        if (text_like(item.head.kind)) return;
+        const auto count = static_cast<std::size_t>(item.head.count);
+        const auto storage = item.head.storage;
+        const auto s = static_cast<std::size_t>(storage);
+        for (auto i = count; i-- > 0;) visit(load(item.data + i * s, storage));
+    }
+
     // Ends a collection: in handle order, clears the mark of every marked
     // entry and, for every unmarked one, calls `dropped(handle, cells)` and
     // frees it. `dropped` must not use the heap.
@@ -1093,6 +1116,18 @@ public:
     template <typename Visit>
     void visit_elements(Visit&& visit) const {
         for (const auto bits : cells_) visit(bits);
+    }
+    // As visit_fields() and visit_elements(), last to first.
+    template <typename Visit>
+    void visit_fields_reverse(std::span<const std::size_t> positions, Visit&& visit) const {
+        for (auto at = positions.size(); at-- > 0;) {
+            const auto field = positions[at];
+            if (initialized_[field]) visit(cells_[field]);
+        }
+    }
+    template <typename Visit>
+    void visit_elements_reverse(Visit&& visit) const {
+        for (auto at = cells_.size(); at-- > 0;) visit(cells_[at]);
     }
 
 private:

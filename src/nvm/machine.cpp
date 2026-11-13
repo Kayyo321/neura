@@ -1119,13 +1119,23 @@ private:
         if (fleet_heap_) fleet_heap_->subtract(cells);
     }
 
-    using TracePlans = std::unordered_map<std::uint32_t, std::vector<std::size_t>>;
+    // The ascending positions of the reference types among `types`, per
+    // layout id or function id. A plan is built the first time it is asked
+    // for (only the ids a program reaches pay for it) and `built` marks it.
+    struct TracePlans {
+        std::vector<std::vector<std::size_t>> plans;
+        std::vector<std::uint8_t> built;
+    };
 
-    const std::vector<std::size_t>& trace_plan(TracePlans& plans, std::uint32_t id,
+    const std::vector<std::size_t>& trace_plan(TracePlans& plans, std::uint32_t id, std::size_t ids,
                                                const std::vector<std::uint32_t>& types) {
-        auto [entry, inserted] = plans.try_emplace(id);
-        auto& plan = entry->second;
-        if (inserted) {
+        if (plans.built.empty()) {
+            plans.plans.resize(ids);
+            plans.built.assign(ids, 0);
+        }
+        auto& plan = plans.plans[id];
+        if (plans.built[id] == 0) {
+            plans.built[id] = 1;
             for (std::size_t i = 0; i < types.size(); ++i) {
                 if (nvr::is_reference(type(types[i]).kind)) plan.push_back(i);
             }
@@ -1162,17 +1172,22 @@ private:
         for (const auto value : marked.buffer) mark(value);
     }
 
-    // Marks what a live entry references.
+    // Marks what a live entry references. The children are pushed last to
+    // first, so the work list pops the first field or element first and the
+    // walk follows allocation order. The marked set is the set reachable from
+    // the roots whatever order the list is drained in, and marking changes
+    // nothing else (no cells, no scheduler state, no output); the sweep runs
+    // in handle order, so live and peak cells and every release are the same.
     void mark_children(Heap::Ref item) {
         const auto mark_one = [&](std::uint64_t handle) { mark(handle); };
         const auto kind = heap_.kind(item);
         if (kind == EntryKind::Object) {
             const auto layout = heap_.type(item);
             const auto& fields = image_.layouts[layout].fields;
-            heap_.visit_fields(item, trace_plan(layout_traces_, layout, fields), mark_one);
+            heap_.visit_fields_reverse(item, trace_plan(layout_traces_, layout, image_.layouts.size(), fields), mark_one);
         } else if ((kind == EntryKind::Array || kind == EntryKind::List) &&
                    nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
-            heap_.visit_elements(item, mark_one);
+            heap_.visit_elements_reverse(item, mark_one);
         }
     }
 
@@ -1183,10 +1198,10 @@ private:
         const auto kind = item.kind();
         if (kind == EntryKind::Object) {
             const auto& fields = image_.layouts[item.type()].fields;
-            item.visit_fields(trace_plan(layout_traces_, item.type(), fields), mark_one);
+            item.visit_fields_reverse(trace_plan(layout_traces_, item.type(), image_.layouts.size(), fields), mark_one);
         } else if ((kind == EntryKind::Array || kind == EntryKind::List) &&
                    nvr::is_reference(type(type(item.type()).reference).kind)) {
-            item.visit_elements(mark_one);
+            item.visit_elements_reverse(mark_one);
         }
     }
 
@@ -1196,7 +1211,7 @@ private:
             const auto* values = frames.slots(index);
             const auto* initialized = frames.initialized(index);
             const auto& slots = image_.functions[function].frame_types;
-            for (const auto slot : trace_plan(frame_traces_, function, slots)) {
+            for (const auto slot : trace_plan(frame_traces_, function, image_.functions.size(), slots)) {
                 if (initialized[slot]) mark(values[slot]);
             }
         }
@@ -1238,6 +1253,10 @@ private:
         if (allocation != nullptr) {
             mark_children(*allocation);
         }
+        // Entries are drained so that the first child of an entry is
+        // processed first. The marked set is what the roots reach, in any
+        // order, and marking has no other effect, so only memory locality
+        // depends on the order.
         while (!mark_work_.empty() || !channel_work_.empty()) {
             if (!channel_work_.empty()) {
                 const auto handle = channel_work_.back();
