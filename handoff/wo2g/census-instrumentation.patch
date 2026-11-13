@@ -1,0 +1,267 @@
+diff --git a/src/nvm/machine.cpp b/src/nvm/machine.cpp
+index 134bd5f..79a9b3d 100644
+--- a/src/nvm/machine.cpp
++++ b/src/nvm/machine.cpp
+@@ -31,6 +31,8 @@
+ #include <unordered_map>
+ #include <unordered_set>
+ #include <utility>
++#include <x86intrin.h>
++#include <fstream>
+ 
+ namespace neura::nvm {
+ 
+@@ -357,6 +359,7 @@ public:
+     }
+ 
+     ~State() {
++        if (census_on_) census_dump();
+         stop_parallel_workers();
+         stop_tracking_heap();
+         // A shadow's tier steps are not the run's (NEURA_TIER_CHECK=2).
+@@ -1285,6 +1288,7 @@ private:
+ 
+     void collect(std::span<const std::uint64_t> temporary_roots, const HeapEntry* allocation) {
+         const TierTimes::Scope timing(times_, TierTimes::Category::Collection);
++        const CensusTimer census_timer(*this, 1000);
+         for (std::size_t i = 0; i < const_values_.size(); ++i) {
+             if (nvr::is_reference(type(image_.constants[i].type).kind)) {
+                 mark(const_values_[i]);
+@@ -1366,6 +1370,7 @@ private:
+     }
+ 
+     std::uint64_t allocate(HeapEntry entry, std::span<const std::uint64_t> temporary_roots = {}) {
++        const CensusTimer census_timer(*this, 1001);
+         if (entry.kind == EntryKind::Text && entry.bytes.size() > max_text_bytes) {
+             fault(TrapKind::InvalidText, "text exceeds the int32 byte length limit");
+         }
+@@ -1516,6 +1521,7 @@ private:
+ 
+     void push_frame(std::uint32_t function, const std::vector<std::uint64_t>& arguments,
+                     std::uint32_t return_slot, std::uint32_t return_block) {
++        const CensusTimer census_timer(*this, 1002);
+         if (frames_.size() >= limits_.max_frames) {
+             fault(TrapKind::FrameLimit, "calling function " + std::to_string(function));
+         }
+@@ -3180,6 +3186,15 @@ private:
+     // output lanes, or from tier 1's values while a tier step commits.
+     std::optional<Event> commit_exit(const nvr::Exit& exit) {
+         auto frame = frames_.back();
++        if (census_on_ && tier2_) {
++            const auto& cblock = image_.functions[frame.function].blocks[frame.block];
++            const auto e = static_cast<std::uint64_t>(&exit - cblock.exits.data());
++            const auto key = (std::uint64_t{frame.function} << 40) | (std::uint64_t{frame.block} << 16) | (e << 8) |
++                             (static_cast<std::uint64_t>(census_cause_) << 4) | static_cast<std::uint64_t>(census_tier_);
++            ++census_[key];
++        }
++        const CensusTimer census_timer(*this, static_cast<std::uint32_t>(exit.kind) * 64 +
++            (exit.kind == nvr::ExitKind::State ? static_cast<std::uint32_t>(exit.operation) : 0));
+ 
+         // Resolve every value against the pre-transition state, then commit.
+         // The buffers are reused: nothing a step does starts another step
+@@ -4051,6 +4066,85 @@ private:
+     std::vector<std::uint8_t> region_initialized_;
+     std::vector<std::uint64_t> region_arguments_;
+     RegionCounts region_counts_;
++    // CENSUS (scratch)
++    int census_cause_ = 0;
++    int census_tier_ = 0;
++    std::unordered_map<std::uint64_t, std::uint64_t> census_;
++    bool census_on_ = std::getenv("NEURA_CENSUS") != nullptr;
++    bool census_time_ = std::getenv("NEURA_CENSUS_TIME") != nullptr;
++    // cycles and counts by key: kind*64 + op for commits; special keys below
++    std::unordered_map<std::uint32_t, std::pair<std::uint64_t, std::uint64_t>> census_cycles_;
++    std::uint64_t census_tsc0_ = __rdtsc();
++    std::chrono::steady_clock::time_point census_clock0_ = std::chrono::steady_clock::now();
++    void census_add(std::uint32_t key, std::uint64_t cycles) {
++        auto& c = census_cycles_[key];
++        c.first += cycles;
++        ++c.second;
++    }
++    struct CensusTimer {
++        State& s;
++        std::uint32_t key;
++        std::uint64_t t0;
++        CensusTimer(State& state, std::uint32_t k) : s(state), key(k), t0(state.census_time_ ? __rdtsc() : 0) {}
++        ~CensusTimer() { if (s.census_time_) s.census_add(key, __rdtsc() - t0); }
++    };
++    void census_dump() {
++        const char* path = std::getenv("NEURA_CENSUS");
++        if (!path || shadow_role_) return;
++        std::ofstream out(path, std::ios::app);
++        const auto names = nvr::decode_names(image_);
++        const auto stats = tier_ ? tier_->statistics() : TierStatistics{};
++        out << "#census steps " << steps_ << "\n";
++        static const char* kinds[] = {"continue", "call", "return", "state", "host", "trap", "messagetrap", "scheduler"};
++        static const char* tiers[] = {"reference", "counting", "lifted", "wired", "empty", "declined"};
++        static const char* causes[] = {"other", "no-region", "no-region-after-leave", "deopt-budget", "deopt-exit",
++                                       "deopt-check", "deopt-selector", "deopt-reference", "deopt-statetrap", "refused"};
++        for (const auto& [key, count] : census_) {
++            const auto f = static_cast<std::uint32_t>(key >> 40);
++            const auto b = static_cast<std::uint32_t>((key >> 16) & 0xffffffU);
++            const auto e = static_cast<std::uint32_t>((key >> 8) & 0xffU);
++            const auto cause = static_cast<int>((key >> 4) & 0xfU);
++            const auto tier = static_cast<int>(key & 0xfU);
++            const auto& block = image_.functions[f].blocks[b];
++            const auto& exit = block.exits[e];
++            auto& plan = block_plan(f, b);
++            std::string detail;
++            if (exit.kind == nvr::ExitKind::State) detail = "op" + std::to_string(static_cast<int>(exit.operation));
++            if (exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::Kernel)
++                detail += ":" + image_.kernels[exit.immediate].name;
++            if (exit.kind == nvr::ExitKind::Call) {
++                detail = "->" + std::to_string(exit.target);
++                if (names && exit.target < names->functions.size()) detail += ":" + names->functions[exit.target];
++            }
++            if (exit.kind == nvr::ExitKind::Host) detail = "import:" + image_.imports[exit.target].name;
++            if (exit.kind == nvr::ExitKind::Scheduler) detail = "sched" + std::to_string(static_cast<int>(exit.scheduler));
++            std::uint32_t calls = 0;
++            for (const auto& x : block.exits) calls += x.kind == nvr::ExitKind::Call;
++            const bool dispatch = plan.lifted && plan.lifted->selection == lift::LoweredBlock::Selection::Dispatch;
++            const auto rr = stats.census_region_reason.find({f, b});
++            const auto br = stats.block_reasons.find({f, b});
++            const char* rstate = plan.region_state == BlockPlan::RegionState::Settled
++                                     ? (plan.region ? "region" : "settled-none")
++                                     : (plan.region_state == BlockPlan::RegionState::Counting ? "counting" : "unknown");
++            out << f << "\t" << b << "\t" << e << "\t" << causes[cause] << "\t" << tiers[tier] << "\t" << count
++                << "\t" << kinds[static_cast<int>(exit.kind)] << "\t" << detail << "\t"
++                << (exit.kind == nvr::ExitKind::Continue && exit.poll ? "poll" : "") << "\t" << block.exits.size()
++                << "\t" << calls << "\t" << (dispatch ? "dispatch" : "") << "\t" << rstate << "\t"
++                << (rr == stats.census_region_reason.end() ? "" : rr->second) << "\t"
++                << (tier_ && tier_->hinted(f, b) ? "hinted" : "nohint") << "\t"
++                << (br == stats.block_reasons.end() ? "" : br->second) << "\t"
++                << (names && f < names->functions.size() ? names->functions[f] : "") << "\t" << task_location(f, b)
++                << "\t" << exit.resume << "\n";
++        }
++        if (census_time_) {
++            const auto tsc = __rdtsc() - census_tsc0_;
++            const auto ns = std::chrono::duration<double, std::nano>(std::chrono::steady_clock::now() - census_clock0_).count();
++            out << "#tsc_per_ns " << (static_cast<double>(tsc) / ns) << "\n";
++            for (const auto& [key, value] : census_cycles_) {
++                out << "#cycles\t" << key << "\t" << value.first << "\t" << value.second << "\n";
++            }
++        }
++    }
+     // Native code (src/jit): whether regions run it, the context it reads
+     // and writes, and an exception a helper caught, rethrown when the code
+     // returns.
+diff --git a/src/nvm/tier1.hpp b/src/nvm/tier1.hpp
+index 52b36c5..bc8d0bc 100644
+--- a/src/nvm/tier1.hpp
++++ b/src/nvm/tier1.hpp
+@@ -135,6 +135,7 @@ struct TierStatistics {
+     std::uint64_t region_blocks = 0;
+     std::uint64_t checks_eliminated = 0;
+     std::map<std::string, std::uint64_t> region_rejections;
++    std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> census_region_reason;
+     RegionCounts region_counts;
+     // Steps each region ran, by (function, entry), and the exits that ended
+     // regions most, by (function, block).
+diff --git a/src/nvm/tier1_steps.inc b/src/nvm/tier1_steps.inc
+index 62cab6a..e260885 100644
+--- a/src/nvm/tier1_steps.inc
++++ b/src/nvm/tier1_steps.inc
+@@ -63,8 +63,10 @@
+ 
+     std::optional<Event> tier_step(std::vector<std::int64_t>& scratch) {
+         // Charge the step and check the inputs, deferring their lanes.
++        const CensusTimer census_step_timer(*this, 1010);
+         if (auto event = begin_active_step<false, true>()) return event;
+         auto& plan = *active_plan_;
++        census_tier_ = static_cast<int>(plan.tier);
+         if (times_) {
+             const bool lowered = plan.tier == BlockPlan::Tier::Lifted || plan.tier == BlockPlan::Tier::Wired ||
+                                  plan.tier == BlockPlan::Tier::Empty;
+@@ -103,6 +105,7 @@
+             if (!exit) {
+                 // The lowered block declines: the reference evaluator decides.
+                 time_as(TierTimes::Category::Tier0);
++                census_tier_ = 5;
+                 ++tier_steps_.declined;
+                 return finish_reference_step(scratch, true);
+             }
+diff --git a/src/nvm/tier2.cpp b/src/nvm/tier2.cpp
+index d4cf9e0..0d25ddd 100644
+--- a/src/nvm/tier2.cpp
++++ b/src/nvm/tier2.cpp
+@@ -1347,6 +1347,7 @@ TierCache::RegionResolution TierCache::region(std::uint32_t function, std::uint3
+         statistics_.checks_eliminated += found.region->eliminated_checks;
+     } else {
+         ++statistics_.region_rejections[formation.reason];
++        statistics_.census_region_reason[{function, block}] = formation.reason;
+     }
+     return {found.region.get(), true, found.refresh_at};
+ }
+diff --git a/src/nvm/tier2_steps.inc b/src/nvm/tier2_steps.inc
+index bf2f605..ca8fec7 100644
+--- a/src/nvm/tier2_steps.inc
++++ b/src/nvm/tier2_steps.inc
+@@ -105,20 +105,38 @@
+     // the current block has no region, or a region deoptimized there, or
+     // the allowance is spent: the next block runs at tier 1.
+     std::uint64_t run_regions(std::uint64_t allowance) {
++        const CensusTimer census_timer(*this, 1020);
+         std::uint64_t total = 0;
++        census_cause_ = 0;
++        bool left = false;
+         while (total < allowance) {
+             if (finished_ || pending_ || active_block_ || !started_ || frames_.empty()) break;
+             if (scheduler_ && scheduler_->deciding) break;
+             auto frame = frames_.back();
+             auto& plan = block_plan(frame.function, frame.block);
+             const auto* region = region_for(frame.function, frame.block, plan);
+-            if (!region) break;
++            if (!region) {
++                census_cause_ = left ? 2 : 1;
++                break;
++            }
+             const auto* native = jit_ ? native_code(plan) : nullptr;
+             time_as(TierTimes::Category::Regions);
++            const auto before = region_counts_;
+             const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native)
+                                              : run_region(*region, allowance - total, native);
+             total += outcome.blocks;
+-            if (outcome.deoptimized) break;
++            if (outcome.deoptimized) {
++                const auto& a = region_counts_;
++                census_cause_ = a.refused != before.refused     ? 9
++                                : a.budget != before.budget     ? 3
++                                : a.exits != before.exits       ? 4
++                                : a.checks != before.checks     ? 5
++                                : a.selectors != before.selectors ? 6
++                                : a.references != before.references ? 7
++                                : a.state_traps != before.state_traps ? 8 : 0;
++                break;
++            }
++            left = true;
+         }
+         return total;
+     }
+@@ -169,6 +187,7 @@
+             for (unsigned i = 0; i < op.width; ++i) {
+                 arguments.push_back(context->registers[region.operands[op.other + i]]);
+             }
++            const CensusTimer census_state(self, 2000 + static_cast<std::uint32_t>(region.exits[op.index]->operation));
+             const auto result = self.state(*region.exits[op.index], arguments);
+             context->status = 0;
+             return result;
+@@ -213,7 +232,10 @@
+         context.outcome = 0;
+         context.status = 0;
+         context.region = &region;
+-        native.run(context);
++        {
++            const CensusTimer census_native(*this, 1031);
++            native.run(context);
++        }
+         done = context.done;
+         next_block = context.next_block;
+         deoptimized = true;
+@@ -355,6 +377,7 @@
+     }
+ 
+     RegionOutcome run_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native) {
++        const CensusTimer census_timer(*this, 1030);
+         auto frame = frames_.back();
+         auto* regs = region_registers_.data();
+         auto* init = region_initialized_.data();

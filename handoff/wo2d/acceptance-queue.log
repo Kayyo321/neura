@@ -1,0 +1,45 @@
+== callgrind-quick start 08:50:10
+== callgrind-quick start 08:50:42
+== callgrind-quick done 0 657 s 09:01:39
+== capture-new start 09:01:39
+== capture-new done 0 1529 s 09:27:08
+== compare start 09:27:08
+-- diff -r base/t0 new/t0
+identical
+-- diff -r base/jit new/jit
+identical
+-- diff -r base/jit-eager new/jit-eager
+identical
+-- diff -r base/eager-check1 new/eager-check1
+identical
+-- diff -r base/check2 new/check2
+identical
+-- diff -r base/eager-check2 new/eager-check2
+identical
+-- diff -r base/ext-t0 new/ext-t0
+identical
+-- diff -r base/ext-default new/ext-default
+identical
+-- runtime-identity compare new/t0 new/jit
+identical: 159 cases, 482 files, sha256 fa231f44009702b4
+exit 0
+-- runtime-identity compare new/t0 new/jit-eager
+identical: 159 cases, 482 files, sha256 fa231f44009702b4
+exit 0
+-- runtime-identity compare new/t0 new/eager-check1
+identical: 159 cases, 482 files, sha256 fa231f44009702b4
+exit 0
+-- runtime-identity compare new/t0 new/check2
+identical: 159 cases, 482 files, sha256 fa231f44009702b4
+exit 0
+-- runtime-identity compare new/t0 new/eager-check2
+identical: 159 cases, 482 files, sha256 fa231f44009702b4
+exit 0
+-- runtime-identity compare new/ext-t0 new/ext-default
+identical: 4817 cases, 14629 files, sha256 fc91066d017e4d8d
+exit 0
+== compare done 0 2 s 09:27:10
+QUEUEDONE callgrind-quick capture-new compare
+== tier-boundary start 09:27:42
+== tier-boundary done 0 95 s 09:29:17
+== callgrind-item8 start 09:29:17
