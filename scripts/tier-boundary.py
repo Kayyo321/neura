@@ -229,6 +229,10 @@ def main():
     parser.add_argument("--jit", default="off,on",
                         help="comma-separated native-code modes to run tier 2 in (off, on, auto)")
     args = parser.parse_args()
+    # A fleet (`run --each`) on a graph device runs without tier 2, so on a
+    # machine with a GPU the sweep would compare nothing. Keep the device
+    # out unless the caller asks for it.
+    os.environ.setdefault("NEURA_GPU", "off")
     modes = [mode for mode in args.jit.split(",") if mode]
     if not modes or any(mode not in ("off", "on", "auto") for mode in modes):
         sys.exit("--jit takes off, on, and auto, separated by commas")
