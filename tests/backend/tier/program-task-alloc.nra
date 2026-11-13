@@ -1,0 +1,58 @@
+// Tasks that call functions which allocate, park (a channel send) and then
+// return: each push of a task's frame charges its cells to the heap, the
+// allocations (text, a list) share that heap, a frame moves to its task's
+// stack while the task waits and back when it runs again, and its return must
+// find its caller as it was. tests/backend/tier_programs_tests.cpp runs it
+// under task quanta 1 to 4 and under heap limits.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+
+let mix = func(value: int) -> int => (value * 31 + 7) % 1009;
+
+let deliver = func(out: channels.Sender<int>, value: int) -> int {
+    let mixed = mix(value);
+    let note = "v" + mixed.to_string();
+    let parts: int[list] = [];
+    parts.append(mixed);
+    parts.append(note.byte_length as int);
+    out.send(mixed);
+    return mixed + parts[1];
+};
+
+let produce = func(out: channels.Sender<int>, count: int) -> int {
+    let total = 0;
+    for (let i: int = 0; i < count; i++) {
+        total = total + deliver(out, i);
+    }
+    return total;
+};
+
+let value_of = func(r: channels.Received<int>) -> int => match (r) {
+    channels.Received.Value(value) => mix(value),
+    channels.Received.Closed => -1,
+    channels.Received.Cancelled => -2,
+};
+
+let consume = func(incoming: channels.Receiver<int>, count: int) -> int {
+    let total = 0;
+    for (let i: int = 0; i < count; i++) {
+        total = total + value_of(incoming.receive());
+    }
+    return total;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let [out, incoming, closer] = channels.open<int>(0);
+        let sent = 0;
+        let taken = 0;
+        scope {
+            let producer = spawn produce(out, 60);
+            taken = consume(incoming, 60);
+            sent = producer.join();
+        }
+        console.print_line("sent " + sent.to_string() + " taken " + taken.to_string());
+        return program.ExitCode.Ok;
+    };
+);

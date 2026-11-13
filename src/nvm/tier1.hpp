@@ -121,6 +121,7 @@ struct RegionCounts {
     // of a call that became the run's trap there.
     std::uint64_t calls = 0;
     std::uint64_t returns = 0;
+    std::uint64_t helpers = 0;
     std::uint64_t traps = 0;
     // Steps run in programs (a part of the steps run in regions).
     std::uint64_t program_steps = 0;

@@ -1,0 +1,181 @@
+// Allocation, growth, text building, freeing, removal and kernel calls
+// inside tier 2 function programs (docs/runtime/NVM.md, "Execution tiers").
+// The first argument picks the case, the second the size:
+//   alloc    objects, arrays, lists (append and repeat) and text in a loop
+//            and in a recursive function, so limits and collections land on
+//            every allocation
+//   kernel   a kernel (square root, CRC-32) called in a loop
+//   text     text slices, concatenation, scalar text, class text and hashes
+//   utf8     bytes turned into text, valid and invalid
+//   free     an object freed and then used
+//   remove   an element removed out of bounds
+//   stub     a function with a block tier 1 never lifts in a short run
+// tests/backend/tier_programs_tests.cpp runs it at every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let math = import:Std.Math.Math;
+let crc = import:Std.Digest.Crc32;
+
+let ProgramHelpers = module:program.Entry (
+    const Mask: int64 = 1048575;
+
+    let Node = class (
+        export let value: int64 = 0;
+        export let next: Node = nil;
+        export let payload: int64[list] = [];
+    );
+
+    let report = func(label: string, value: int64) {
+        console.print_line(label + " " + value.to_string());
+    };
+
+    // A chain of `depth` nodes built by recursion: each frame allocates a
+    // node and a list while the callers' nodes are live only in their slots.
+    let chain = func(depth: int32) -> Node {
+        if (depth == 0) {
+            return nil;
+        }
+        let node = new Node();
+        node.value = depth as int64;
+        node.payload.append(depth as int64);
+        node.payload.append((depth * 2) as int64);
+        node.next = chain(depth - 1);
+        return node;
+    };
+
+    let weigh = func(node: Node) -> int64 {
+        let total: int64 = 0;
+        let at = node;
+        while (at != nil) {
+            total = (total + at.value + (at.payload.length as int64)) & Mask;
+            at = at.next;
+        }
+        return total;
+    };
+
+    let allocate = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            let node = new Node();
+            node.value = i as int64;
+            node.payload.append(i as int64);
+            let repeated = {0 .. (i % 4 + 1)};
+            let pair: int64[] = [i as int64, (i + 1) as int64];
+            let label = "n" + i.to_string();
+            total = (total + node.value + (node.payload.length as int64) + (repeated.length as int64) + pair[1] +
+                     (label.byte_length as int64)) & Mask;
+        }
+        return total;
+    };
+
+    let kernels = func(size: int32) -> int64 {
+        let total: float64 = 0.0;
+        let check: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = total + math.sqrt((i + 1) as float64);
+            let bytes: uint8[list] = [(i % 256) as uint8, ((i * 3) % 256) as uint8];
+            check = (check + (crc.of(bytes) as int64)) & Mask;
+        }
+        return (total as int64) + check;
+    };
+
+    let words = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        let base = "héllo wörld";
+        let node = new Node();
+        for (let i = 0; i < size; i = i + 1) {
+            let part = base.slice(0, 1 + (i % 2) * 2);
+            let both = part + base.slice(7, 8);
+            total = (total + (both.byte_length as int64) + ((i as int64).to_string().byte_length as int64) +
+                     (node.hash_code() as int64 & 7) + (node.to_string().byte_length as int64)) & Mask;
+        }
+        return total;
+    };
+
+    let decode = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            let bytes: uint8[list] = [104, 105];
+            if (i % 2 == 1) {
+                bytes.append(255);
+            }
+            let [valid, text] = string.from_utf8(bytes);
+            if (valid) {
+                total = total + (text.byte_length as int64);
+            } else {
+                total = total + 100;
+            }
+        }
+        return total;
+    };
+
+    let free_then_use = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            let node = new Node();
+            node.value = i as int64;
+            total = total + node.value;
+            if (i == size - 1) {
+                destroy node;
+            }
+            total = total + node.value;
+        }
+        return total;
+    };
+
+    let remove_out_of_bounds = func(size: int32) -> int64 {
+        let values: int64[list] = [];
+        for (let i = 0; i < size; i = i + 1) {
+            values.append(i as int64);
+        }
+        let total: int64 = 0;
+        for (let i = 0; i <= size; i = i + 1) {
+            values.remove_at(values.length - 1 + (i / size));
+            total = total + (values.length as int64);
+        }
+        return total;
+    };
+
+    // A branch the short runs never take: its block is not lifted when the
+    // program forms (a stub), and runs at tier 1 when it is taken.
+    let stubbed = func(size: int32, deep: bool) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = (total + (i as int64) * 3) & Mask;
+            if (deep && i % 5 == 4) {
+                total = (total * 7 + 11 + (i as int64) / 3) & Mask;
+            }
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kind = "alloc";
+        let size = 12;
+        if (args.length > 0) {
+            kind = args[0];
+        }
+        if (args.length > 1) {
+            size = result.value_or<int32>(int32s.parse(args[1]), 12);
+        }
+        if (kind == "alloc") {
+            report("alloc", allocate(size));
+            report("chain", weigh(chain(size % 9 + 1)));
+        } else if (kind == "kernel") {
+            report("kernel", kernels(size));
+        } else if (kind == "text") {
+            report("text", words(size));
+        } else if (kind == "utf8") {
+            report("utf8", decode(size));
+        } else if (kind == "free") {
+            report("free", free_then_use(size));
+        } else if (kind == "remove") {
+            report("remove", remove_out_of_bounds(size));
+        } else {
+            report("stub", stubbed(size, size > 20));
+        }
+        return program.ExitCode.Ok;
+    };
+);

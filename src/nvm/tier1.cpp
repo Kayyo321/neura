@@ -119,8 +119,8 @@ std::string describe(const TierStatistics& s) {
         out += "tier: programs " + std::to_string(s.programs) + " (" + std::to_string(s.program_blocks) +
                " blocks, " + std::to_string(s.program_stubs) + " stubs, " + std::to_string(s.program_entries) +
                " entries); calls " + std::to_string(r.calls) + ", returns " + std::to_string(r.returns) +
-               ", helpers 0, traps in place " + std::to_string(r.traps) + "; steps in programs " +
-               std::to_string(r.program_steps) + "\n";
+               ", helpers " + std::to_string(r.helpers) + ", traps in place " + std::to_string(r.traps) +
+               "; steps in programs " + std::to_string(r.program_steps) + "\n";
         for (const auto& [reason, count] : s.program_rejections) {
             out += "tier: no program " + std::to_string(count) + ": " + reason + "\n";
         }

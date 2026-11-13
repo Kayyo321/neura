@@ -62,6 +62,12 @@
     // times as long as an unchecked one, 2 about 3.5 times, 8 about 3 times.
     static constexpr std::uint64_t shadow_heap_spacing = 2;
 
+    // The most blocks compiled code runs between two sync points: a function
+    // program returns to the dispatcher rarely, so the shadow gives
+    // run_regions this allowance, and the program deoptimizes at its next
+    // checkpoint past it.
+    static constexpr std::uint64_t shadow_sync_blocks = 65536;
+
     // A callback a host service invoked while the run waited for a request,
     // with the host requests it made and their completions, in order.
     struct ShadowCall;
@@ -148,9 +154,10 @@
             // run goes on without sync points.
             if (tier2_) {
                 if (shadow_) shadow_entering();
-                // A program that trapped in place (a call's frame limit) has
-                // finished the run: the next step's event is the sync point.
-                if (run_regions(std::numeric_limits<std::uint64_t>::max()) != 0 && shadow_ && !finished_) {
+                // A program that trapped in place (a call's frame limit, a
+                // helper's fault) has finished the run: the next step's event
+                // is the sync point.
+                if (run_regions(shadow_sync_blocks) != 0 && shadow_ && !finished_) {
                     shadow_returned();
                 }
             }

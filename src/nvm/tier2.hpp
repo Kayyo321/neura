@@ -118,6 +118,15 @@ enum class Code : std::uint8_t {
     // the tag in register `a` (the table's default when no entry has the
     // tag); pc = operands[other + exit]. Never fails.
     Dispatch,
+    // Function programs only. The state operation of exits[index] on
+    // arguments operands[other, other + width) that allocates, grows, frees,
+    // builds text, or calls a kernel: `block` commits (the block's Stores came
+    // before this op), is one step, and the reference state operation runs
+    // after it. A fault is the run's trap in place (the block's step is
+    // charged, the frame stays at `block`), never a deoptimization. The
+    // result goes into slot register `dst` (absent for none) and the program
+    // continues at label `target`, the exit's resume block.
+    Helper,
 };
 
 // Op flags.

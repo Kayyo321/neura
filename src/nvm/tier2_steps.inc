@@ -58,6 +58,18 @@
                 // The cache may have formed the region again with more
                 // blocks.
                 const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
+                if (plan.region && plan.region->program) {
+                    // A program formed while blocks were pending: the cache
+                    // forms it again, and the block enters the new version.
+                    const auto program = tier_->program(function, plan.region_threshold);
+                    const auto* entry = program.region ? program.region->entry_at(block) : nullptr;
+                    if (program.region) use_program(function, *program.region);
+                    plan.region = entry ? program.region : nullptr;
+                    plan.program_entry =
+                        entry ? static_cast<std::uint32_t>(entry - program.region->entries.data()) : 0;
+                    plan.region_threshold = entry ? program.retry_after : 0;
+                    return plan.region;
+                }
                 const auto resolved = tier_->region(function, block, plan.region_threshold);
                 plan.region = resolved.region;
                 plan.region_threshold = resolved.retry_after;
@@ -90,7 +102,7 @@
                     use_program(function, *program.region);
                     const auto* entry = program.region->entry_at(block);
                     plan.region_state = BlockPlan::RegionState::Settled;
-                    plan.region_threshold = 0;
+                    plan.region_threshold = entry ? program.retry_after : 0;
                     plan.region = entry ? program.region : nullptr;
                     plan.program_entry =
                         entry ? static_cast<std::uint32_t>(entry - program.region->entries.data()) : 0;
@@ -118,6 +130,11 @@
     void use_program(std::uint32_t function, const tier2::Region& program) {
         if (function_programs_.size() != image_.functions.size()) function_programs_.resize(image_.functions.size());
         function_programs_[function] = &program;
+        program_image(program);
+    }
+
+    // The register image of `program`, made when the run first uses it.
+    void program_image(const tier2::Region& program) {
         if (program_images_.size() <= program.program_id) program_images_.resize(program.program_id + 1);
         auto& image = program_images_[program.program_id];
         if (!image.empty() || program.register_count == program.slot_widths.size()) return;
@@ -388,8 +405,9 @@
             case tier2::Code::Call:
             case tier2::Code::Return:
             case tier2::Code::Dispatch:
-                // Calls, returns and dispatches are ops of function programs
-                // only (run_program).
+            case tier2::Code::Helper:
+                // Calls, returns, dispatches and helpers are ops of function
+                // programs only (run_program).
                 deopt(op.block, region_counts_.exits);
                 running = false;
                 break;
@@ -496,7 +514,7 @@
         };
         const auto enter = [&](const tier2::Region& next) {
             program = &next;
-            use_program(next.function, next);
+            program_image(next);
             temps = program_images_[next.program_id].data();
             slot_count = next.slot_widths.size();
         };
@@ -672,6 +690,35 @@
                 enter(*callee);
                 code = program->code.data();
                 pc = callee->entries.front().label;
+                break;
+            }
+            case tier2::Code::Helper: {
+                // commit_exit's State case (machine.cpp): the arguments,
+                // read before the assignments the Stores before this op
+                // committed; the block, the step; the reference state
+                // operation, whose fault is the run's trap here, the block
+                // having been charged; the result slot; the resume block.
+                const auto& exit = *program->exits[op.index];
+                auto& arguments = region_arguments_;
+                arguments.clear();
+                for (unsigned i = 0; i < op.width; ++i) arguments.push_back(reg(program->operands[op.other + i]));
+                frames_.back().block = op.block;
+                ++done;
+                ++blocks;
+                flush();
+                try {
+                    const auto result = state(exit, arguments);
+                    if (op.dst != nvr::absent) {
+                        slots[op.dst] = result;
+                        init[op.dst] = 1;
+                    }
+                } catch (const Fault& failure) {
+                    trap(failure);
+                    ++region_counts_.traps;
+                    return {blocks - 1, true};
+                }
+                ++region_counts_.helpers;
+                pc = op.target;
                 break;
             }
             case tier2::Code::Return: {

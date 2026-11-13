@@ -292,6 +292,24 @@ if(NOT calls_replay_status STREQUAL "0" OR NOT calls_replay_stdout STREQUAL call
                         "${calls_replay_stdout}${calls_replay_stderr}")
 endif()
 
+# Allocation, text and kernel calls run as helpers inside programs, and the run
+# prints what tier 0 prints.
+build_image("${TEST_DIR}/program-helpers.nvr" "${tests}/tier/program-helpers.nra")
+foreach(helper_case IN ITEMS alloc kernel text)
+    neura(helpers_t0 "${TEST_DIR}" run --tier=0 "${TEST_DIR}/program-helpers.nvr" -- ${helper_case} 9)
+    set(ENV{NEURA_TIER_PROGRAMS} 1)
+    set(ENV{NEURA_TIER_EAGER} 1)
+    neura(helpers_programs "${TEST_DIR}" run --tier-stats "${TEST_DIR}/program-helpers.nvr" -- ${helper_case} 9)
+    unset(ENV{NEURA_TIER_EAGER})
+    unset(ENV{NEURA_TIER_PROGRAMS})
+    if(NOT helpers_t0_status STREQUAL "0" OR NOT helpers_programs_status STREQUAL "0" OR
+       NOT helpers_programs_stdout STREQUAL helpers_t0_stdout OR
+       NOT helpers_programs_stderr MATCHES "tier: programs [1-9][^\n]*helpers [1-9]")
+        message(FATAL_ERROR "program-helpers ${helper_case} with function programs: status ${helpers_programs_status}\n"
+                            "${helpers_programs_stdout}${helpers_programs_stderr}")
+    endif()
+endforeach()
+
 # The .nir listing route matches the source listing in both modes.
 foreach(mode IN ITEMS "" --no-optimize)
     neura(from_source "${TEST_DIR}" emit-ir ${mode} "${hello}")

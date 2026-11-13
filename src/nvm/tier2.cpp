@@ -184,6 +184,7 @@ private:
         case Code::Switch:
         case Code::Deopt:
         case Code::Call:
+        case Code::Helper:
         case Code::Return:
         case Code::Dispatch:
             return true;
@@ -217,6 +218,7 @@ private:
             break;
         case Code::State:
         case Code::Call:
+        case Code::Helper:
             for (unsigned i = 0; i < op.width; ++i) use(region_.operands[op.other + i]);
             break;
         case Code::Return:
@@ -240,7 +242,9 @@ private:
             return op.dst;
         case Code::State:
         case Code::Call:
-            // A call's result slot is written by the callee's return.
+        case Code::Helper:
+            // A call's result slot is written by the callee's return, a
+            // helper's by the helper itself.
             if (op.dst != none) return op.dst;
             return std::nullopt;
         default:
@@ -260,7 +264,9 @@ private:
         }
         case Code::Jump: return {op.target};
         // The caller goes on at the resume block once the callee returns.
-        case Code::Call: return {op.target};
+        case Code::Call:
+        // A helper goes on at the exit's resume block.
+        case Code::Helper: return {op.target};
         case Code::Dispatch: {
             std::vector<std::uint32_t> next;
             for (unsigned i = 0; i < op.width; ++i) next.push_back(region_.operands[op.other + i]);
@@ -609,7 +615,7 @@ private:
         }
         moved[size()] = static_cast<std::uint32_t>(kept.size());
         for (auto& op : kept) {
-            if (op.code == Code::Jump || op.code == Code::Call) op.target = moved[op.target];
+            if (op.code == Code::Jump || op.code == Code::Call || op.code == Code::Helper) op.target = moved[op.target];
             if (op.code == Code::Dispatch) {
                 for (unsigned i = 0; i < op.width; ++i) {
                     auto& target = region_.operands[op.other + i];
@@ -667,7 +673,9 @@ public:
         // switches name exit code, whose addresses are known when it is
         // emitted).
         for (auto& op : region_.code) {
-            if (op.code == Code::Jump || op.code == Code::Call) op.target = labels_.at(op.target - label_base);
+            if (op.code == Code::Jump || op.code == Code::Call || op.code == Code::Helper) {
+                op.target = labels_.at(op.target - label_base);
+            }
         }
         if (program_) {
             region_.block_labels = labels_;
@@ -702,16 +710,28 @@ private:
     // operations, and in a function program calls and returns too (as
     // deoptimizations under the region check of NEURA_TIER_CHECK=1, which
     // cannot follow a run into another frame).
-    bool takes(const nvr::Exit& exit) const {
+    bool takes(std::uint32_t local, const nvr::Exit& exit) const {
+        if (stub(local)) return false;
         if (internal_exit(exit)) return true;
         if (!program_ || checkable_) return false;
-        return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return;
+        return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return ||
+               exit.kind == nvr::ExitKind::State;
+    }
+
+    // A block of a function program that tier 1 does not run lifted, wired,
+    // or empty: its code is a deoptimization, and none of its exits is an
+    // edge of the program.
+    bool stub(std::uint32_t local) const { return program_ && forms_[local].kind == BlockForm::Kind::None; }
+
+    // A state operation a program runs as a Helper: one that is not inline.
+    bool helper(const nvr::Exit& exit) const {
+        return program_ && !checkable_ && exit.kind == nvr::ExitKind::State && !inline_state_operation(exit);
     }
 
     // An exit after which the program goes on at its resume block in this
     // frame (for a call, once the callee has returned).
-    bool edge(const nvr::Exit& exit) const {
-        return takes(exit) && exit.kind != nvr::ExitKind::Return && in_region(exit.resume);
+    bool edge(std::uint32_t local, const nvr::Exit& exit) const {
+        return takes(local, exit) && exit.kind != nvr::ExitKind::Return && in_region(exit.resume);
     }
 
     // The entries of a function program: block 0, the resume blocks of
@@ -729,7 +749,10 @@ private:
                 const bool resumes = exit.kind == nvr::ExitKind::Continue || exit.kind == nvr::ExitKind::Call ||
                                      exit.kind == nvr::ExitKind::State || exit.kind == nvr::ExitKind::Host ||
                                      exit.kind == nvr::ExitKind::Scheduler;
-                if (!resumes || (edge(exit) && exit.kind != nvr::ExitKind::Call)) continue;
+                // A kernel charges steps the Budget did not count: its resume is
+                // an entry, so a checkpoint, although the program follows it.
+                const bool kernel = exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::Kernel;
+                if (!resumes || (edge(local, exit) && exit.kind != nvr::ExitKind::Call && !kernel)) continue;
                 if (in_region(exit.resume)) entry[local_.at(exit.resume)] = 1;
                 if (exit.kind == nvr::ExitKind::Host && in_region(exit.error_resume)) {
                     entry[local_.at(exit.error_resume)] = 1;
@@ -751,7 +774,7 @@ private:
                     continue;
                 }
                 const auto& exit = exits[next++];
-                if (!edge(exit) || exit.kind == nvr::ExitKind::Call) continue;
+                if (!edge(local, exit) || exit.kind == nvr::ExitKind::Call) continue;
                 const auto target = local_.at(exit.resume);
                 if (state[target] == 1) {
                     head[target] = 1;
@@ -792,7 +815,7 @@ private:
                 for (std::uint32_t local = 0; local < n; ++local) {
                     if (!reached[local]) continue;
                     for (const auto& exit : block(local).exits) {
-                        if (!edge(exit)) continue;
+                        if (!edge(local, exit)) continue;
                         auto out = in[local];
                         assigned(exit, out);
                         const auto target = local_.at(exit.resume);
@@ -814,14 +837,14 @@ private:
             }
             std::vector<std::uint8_t> early(count, 0);
             for (std::uint32_t local = 0; local < n; ++local) {
-                if (!reached[local]) continue;
+                if (!reached[local] || stub(local)) continue;
                 const auto& b = block(local);
                 const auto read = [&](const nvr::Value& value) {
                     if (value.kind == nvr::ValueKind::Slot && !in[local][value.index]) early[value.index] = 1;
                 };
                 for (const auto& input : b.inputs) read(input);
                 for (const auto& exit : b.exits) {
-                    if (!takes(exit)) continue;
+                    if (!takes(local, exit)) continue;
                     for (const auto& assignment : exit.assignments) read(assignment.value);
                     for (const auto& argument : exit.arguments) read(argument);
                 }
@@ -850,7 +873,7 @@ private:
                 if (input.kind == nvr::ValueKind::Slot) slot_register(input.index);
             }
             for (const auto& exit : b.exits) {
-                if (!takes(exit)) continue;
+                if (!takes(local, exit)) continue;
                 for (const auto& assignment : exit.assignments) {
                     slot_register(assignment.slot);
                     if (assignment.value.kind == nvr::ValueKind::Slot) slot_register(assignment.value.index);
@@ -973,10 +996,10 @@ private:
             std::uint64_t steps = 0;
             std::uint64_t polls = 0;
             for (const auto& exit : block(local).exits) {
-                if (!takes(exit)) continue;
+                if (!takes(local, exit)) continue;
                 std::uint64_t s = 0;
                 std::uint64_t p = 0;
-                if (edge(exit)) {
+                if (edge(local, exit)) {
                     const auto target = local_.at(exit.resume);
                     if (!header[target]) std::tie(s, p) = longest(target);
                 }
@@ -1050,6 +1073,15 @@ private:
             op.a = checkpoint_of_[local];
             op.block = image_block;
             emit(op);
+        }
+        if (stub(local)) {
+            // Tier 1 runs this block: nothing of it is compiled.
+            Op op;
+            op.code = Code::Deopt;
+            op.block = image_block;
+            emit(op);
+            ++region_.stubs;
+            return;
         }
         // Lane values: the register of the value at each first lane.
         std::map<std::uint32_t, std::uint32_t> lanes;
@@ -1141,7 +1173,7 @@ private:
                 return dst;
             };
             for (const auto& exit : b.exits) {
-                if (!takes(exit)) continue;
+                if (!takes(local, exit)) continue;
                 const auto lane_value = [&](const nvr::Value& value) {
                     if (value.kind == nvr::ValueKind::Lanes && !lanes.contains(value.index)) {
                         lanes[value.index] = gather(value.index, nvr::lane_count(image_.types[value.type]));
@@ -1266,7 +1298,7 @@ private:
     void emit_exit(std::uint32_t local, std::uint32_t e, const std::map<std::uint32_t, std::uint32_t>& lanes) {
         const auto image_block = blocks_[local];
         const auto& exit = block(local).exits[e];
-        if (!takes(exit)) {
+        if (!takes(local, exit)) {
             Op op;
             op.code = Code::Deopt;
             op.block = image_block;
@@ -1281,7 +1313,7 @@ private:
         std::vector<std::uint32_t> arguments;
         for (const auto& argument : exit.arguments) arguments.push_back(value_register(argument, lanes, image_block));
         std::uint32_t result = none;
-        if (exit.kind == nvr::ExitKind::State) {
+        if (exit.kind == nvr::ExitKind::State && !helper(exit)) {
             // The operation reads only its arguments and heap or global
             // storage, never a slot, so it can run before the assignments
             // commit, while a trap can still deoptimize.
@@ -1319,7 +1351,8 @@ private:
         for (auto& source : sources) protect(source);
         // A call's arguments and a return's value are read before the
         // assignments commit too (commit_exit resolves every value first).
-        const bool transfer = exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return;
+        const bool run_helper = helper(exit);
+        const bool transfer = exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return || run_helper;
         for (auto& argument : arguments) {
             if (transfer) protect(argument);
         }
@@ -1342,6 +1375,22 @@ private:
             op.width = static_cast<std::uint8_t>(arguments.size());
             region_.operands.insert(region_.operands.end(), arguments.begin(), arguments.end());
             op.a = exit.target;
+            op.dst = exit.result_slot;
+            op.target = label_base + local_.at(exit.resume);
+            emit(op);
+            return;
+        }
+        if (run_helper) {
+            // The block commits, then the reference operation runs: a fault
+            // is the run's trap, not a deoptimization (tier2_steps.inc).
+            Op op;
+            op.code = Code::Helper;
+            op.block = image_block;
+            op.index = static_cast<std::uint32_t>(region_.exits.size());
+            region_.exits.push_back(&exit);
+            op.other = static_cast<std::uint32_t>(region_.operands.size());
+            op.width = static_cast<std::uint8_t>(arguments.size());
+            region_.operands.insert(region_.operands.end(), arguments.begin(), arguments.end());
             op.dst = exit.result_slot;
             op.target = label_base + local_.at(exit.resume);
             emit(op);
@@ -1496,16 +1545,19 @@ Formation form_program(const nvr::Image& image, std::uint32_t function,
     for (std::uint32_t b = 0; b < decoded.blocks.size(); ++b) {
         auto f = form(b);
         if (f.kind == BlockForm::Kind::None) {
+            // A block tier 1 does not run lifted, wired, or empty becomes a
+            // stub, unless it is the entry block.
             result.pending = result.pending || f.pending;
-            if (result.reason.empty() || f.pending) {
-                result.reason = f.pending ? "a block of the function is not settled yet"
-                                          : "a block of the function is not lifted, wired, or empty";
-            }
         }
         blocks.push_back(b);
         forms.push_back(f);
     }
-    if (!result.reason.empty()) return result;
+    if (forms.front().kind == BlockForm::Kind::None) {
+        result.pending = forms.front().pending;
+        result.reason = forms.front().pending ? "the entry block of the function is not settled yet"
+                                              : "the entry block of the function is not lifted, wired, or empty";
+        return result;
+    }
     Compiler compiler(image, function, blocks, forms, true, checkable);
     result.region = compiler.compile();
     return result;
@@ -1544,7 +1596,7 @@ std::string describe(const Region& region) {
     };
     static const char* names[] = {"budget", "lift", "mask", "move", "gather", "store", "branch", "switch",
                                   "jump", "checkref", "state", "poll", "complete", "leave", "deopt",
-                                  "call", "return", "dispatch"};
+                                  "call", "return", "dispatch", "helper"};
     for (std::size_t pc = 0; pc < region.code.size(); ++pc) {
         const auto& op = region.code[pc];
         out << "  " << pc << ": " << names[static_cast<int>(op.code)];
@@ -1578,6 +1630,11 @@ std::string describe(const Region& region) {
                 << op.block;
             break;
         case Code::Dispatch: out << " r" << op.a << " table " << op.index << " block " << op.block; break;
+        case Code::Helper:
+            out << " op" << static_cast<int>(region.exits[op.index]->operation) << " -> "
+                << (op.dst == none ? std::string("none") : "r" + std::to_string(op.dst)) << " block " << op.block
+                << " resume at " << op.target;
+            break;
         }
         out << "\n";
     }
@@ -1698,6 +1755,7 @@ void TierCache::add_region_events(const RegionCounts& counts,
     total.native += counts.native;
     total.calls += counts.calls;
     total.returns += counts.returns;
+    total.helpers += counts.helpers;
     total.traps += counts.traps;
     total.program_steps += counts.program_steps;
     for (const auto& [key, value] : steps) statistics_.region_steps[key] += value;
@@ -1709,10 +1767,20 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
     {
         const std::lock_guard lock(mutex_);
         auto& found = programs_[function];
-        if (found.state == RegionEntry::State::Settled) return {found.region.get(), true, 0};
+        if (found.state == RegionEntry::State::Settled &&
+            (found.refresh_at == 0 || arrivals < found.refresh_at || found.refreshing)) {
+            return {found.region.get(), true, found.refresh_at};
+        }
         if (found.state == RegionEntry::State::Forming) return {nullptr, false, std::max<std::uint64_t>(arrivals * 2, 2)};
-        if (arrivals < found.next_attempt) return {nullptr, false, found.next_attempt};
-        found.state = RegionEntry::State::Forming;
+        if (found.state == RegionEntry::State::Settled) {
+            // Formed while blocks it would run were still being lifted: form
+            // it again now; the old program stays valid for the frames that
+            // return into it.
+            found.refreshing = true;
+        } else {
+            if (arrivals < found.next_attempt) return {nullptr, false, found.next_attempt};
+            found.state = RegionEntry::State::Forming;
+        }
     }
     // Prove the hinted blocks that were never tried, at most program_proofs
     // of them, in block order, as tier 1 would once they had run
@@ -1757,6 +1825,21 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
     const std::lock_guard lock(mutex_);
     auto& found = programs_[function];
     const auto patience = std::uint64_t{options_.region_after} * options_.region_patience;
+    if (found.state == RegionEntry::State::Settled) {
+        // A refresh: publish the new program, keep the old one alive, and
+        // refresh again later while blocks are still pending.
+        found.refreshing = false;
+        ++found.refreshes;
+        found.refresh_at = formation.pending && found.refreshes < 4 ? arrivals * 4 : 0;
+        if (!formation.region) return {found.region.get(), true, found.refresh_at};
+        auto region = std::const_pointer_cast<tier2::Region>(formation.region);
+        region->program_id = next_program_id_++;
+        retired_regions_.push_back(std::move(found.region));
+        found.region = std::move(region);
+        ++statistics_.refreshed;
+        if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
+        return {found.region.get(), true, found.refresh_at};
+    }
     if (!formation.region && formation.pending && arrivals < patience) {
         found.state = RegionEntry::State::Unknown;
         found.next_attempt = std::max<std::uint64_t>(arrivals * 2, 2);
@@ -1767,6 +1850,7 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         ++statistics_.program_rejections[formation.reason];
         return {nullptr, true, 0};
     }
+    found.refresh_at = formation.pending ? arrivals * 4 : 0;
     // The cache numbers its programs; a run keeps one register image per
     // number (tier2_steps.inc).
     auto region = std::const_pointer_cast<tier2::Region>(formation.region);
@@ -1778,7 +1862,7 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
     statistics_.program_entries += found.region->entries.size();
     statistics_.checks_eliminated += found.region->eliminated_checks;
     if (std::getenv("NEURA_TIER_DUMP")) std::fputs(tier2::describe(*found.region).c_str(), stderr);
-    return {found.region.get(), true, 0};
+    return {found.region.get(), true, found.refresh_at};
 }
 
 const jit::Program* TierCache::native(const tier2::Region& region) {
