@@ -163,6 +163,11 @@ std::string describe(const Trap& trap, const nvr::Image& image, bool include_ind
     return text;
 }
 
+// Kernel arguments passed as a view into the heap entry instead of a packed
+// copy, over the life of the process. Read by tests only; it decides nothing.
+// Tests declare it themselves, so the public headers do not name it.
+std::atomic<std::uint64_t> kernel_views_in_place{0};
+
 namespace {
 
 struct Fault {
@@ -3668,10 +3673,12 @@ private:
         }
         charge_kernel_steps(kernels::evaluate(info.cost, values.data()));
 
-        // Lay out the C arguments. Read-only text, bytes, and 64-bit integer
-        // views point into the heap entry; other views, writable views, and
-        // states are copied into buffers this state reuses, and writable
-        // ones are copied back only when the kernel succeeds.
+        // Lay out the C arguments. Read-only text, bytes, and views point
+        // into the heap entry when its storage width is the width the
+        // parameter reads; other views (a collection whose storage widened),
+        // writable views, and states are copied into buffers this state
+        // reuses, and writable ones are copied back only when the kernel
+        // succeeds.
         std::array<std::uint64_t, max_kernel_params> sizes{};
         for (std::size_t i = 0; i < info.buffer_count; ++i) {
             sizes[info.buffers[i].param] = kernels::evaluate(info.buffers[i].size, values.data());
@@ -3711,19 +3718,20 @@ private:
                     break;
                 }
                 const auto item = items[p];
-                const auto item_kind = heap_.kind(item);
                 const auto element = kernels::element_kind(kind);
-                const bool in_place = kind == Kind::Text ||
-                                      ((kind == Kind::Bytes || kernels::view_kind(kind)) &&
-                                       (item_kind == EntryKind::Text || item_kind == EntryKind::Bytes)) ||
-                                      ((kind == Kind::ViewI64 || kind == Kind::ViewU64) &&
-                                       (item_kind == EntryKind::Array || item_kind == EntryKind::List));
-                if (in_place) {
+                const bool read_only = kind == Kind::Text || kind == Kind::Bytes || kernels::view_kind(kind);
+                if (read_only) {
+                    // A read-only view whose storage holds each element at
+                    // the width the parameter reads is passed in place.
                     // Valid while the kernel runs: nothing between here and
                     // the copy-back changes the heap.
                     const auto elements = heap_.elements(item);
-                    view(cell, elements.data, elements.length);
-                    break;
+                    const auto needed = kind == Kind::Text || kind == Kind::Bytes ? std::size_t{1} : element_bytes(element);
+                    if (static_cast<std::size_t>(elements.width) == needed) {
+                        kernel_views_in_place.fetch_add(1, std::memory_order_relaxed);
+                        view(cell, elements.data, elements.length);
+                        break;
+                    }
                 }
                 pack(p, item, element);
                 auto& buffer = kernel_buffers_[p];
