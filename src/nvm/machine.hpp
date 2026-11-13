@@ -481,6 +481,17 @@ public:
     // The largest live heap size reached so far, in the cells of
     // RunLimits::max_heap_cells.
     std::uint64_t peak_heap_cells() const;
+    // A live heap entry as the allocator recorded it: its kind (0 object, 1
+    // array, 2 list, 3 text, 4 bytes), its layout or type index, and its
+    // declared element width in bytes. For tests of the allocator.
+    struct HeapEntryWidth {
+        std::uint64_t handle = 0;
+        std::uint8_t kind = 0;
+        std::uint32_t type = 0;
+        std::uint8_t width = 0;
+    };
+    // Every live heap entry, in handle order.
+    std::vector<HeapEntryWidth> heap_entry_widths() const;
     // Steps per image function, in function table order, when
     // RunLimits::profile is set; otherwise empty.
     const std::vector<std::uint64_t>& function_steps() const;

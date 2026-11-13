@@ -516,7 +516,7 @@
             }
             if (global_initialized_[g] && d.differs(globals_[g], other.globals_[g], item)) return d.text;
         }
-        if (d.differs(last_handle_, other.last_handle_, [] { return std::string("last handle"); }) ||
+        if (d.differs(heap_.last_handle(), other.heap_.last_handle(), [] { return std::string("last handle"); }) ||
             d.differs(live_cells_, other.live_cells_, [] { return std::string("live heap cells"); }) ||
             d.differs(peak_cells_, other.peak_cells_, [] { return std::string("peak heap cells"); }) ||
             d.differs(next_collection_, other.next_collection_, [] { return std::string("collection threshold"); })) {
@@ -532,7 +532,8 @@
         }
         if (shadow_compare_scheduler(d, other)) return d.text;
         if (d.differs(sequence_, other.sequence_, [] { return std::string("host requests issued"); }) ||
-            d.differs(last_identity_, other.last_identity_, [] { return std::string("identity numbers given"); }) ||
+            d.differs(heap_.last_identity(), other.heap_.last_identity(),
+                      [] { return std::string("identity numbers given"); }) ||
             shadow_compare_pending(d, other) || shadow_compare_parallel(d, other)) {
             return d.text;
         }
@@ -997,34 +998,41 @@
     // this section, so that a changed heap representation needs changes
     // here only.
 
-    // One live heap entry: its kind, type, cells, the initialized flag of
-    // each cell (objects; empty for collections, whose cells are always
-    // initialized), bytes, list version, and identity number.
-    struct ShadowHeapEntry {
-        std::uint64_t handle = 0;
-        EntryKind kind = EntryKind::Object;
-        std::uint32_t type = 0;
-        std::span<const std::uint64_t> cells;
-        std::span<const std::uint8_t> initialized;
-        std::string_view bytes;
-        std::uint64_t version = 0;
-        std::uint64_t identity = 0;
-    };
-
-    // The live entries in handle order.
-    std::vector<ShadowHeapEntry> shadow_heap(std::size_t expected = 0) const {
-        std::vector<ShadowHeapEntry> entries;
-        entries.reserve(expected);
-        heap_.each([&](std::uint64_t handle, const HeapEntry& item) {
-            entries.push_back({handle, item.kind, item.type, item.cells, item.initialized, item.bytes, item.version,
-                               item.identity});
-        });
-        return entries;
+    // An entry's cells: an object's fields or an array's or list's
+    // elements; none for text and bytes. Its initialized flags: one per
+    // field of an object; none for a collection, whose cells are always
+    // initialized. Its bytes: those of text or bytes; none otherwise.
+    std::size_t shadow_cell_count(Heap::Ref item) const {
+        switch (heap_.kind(item)) {
+        case EntryKind::Object: return heap_.field_count(item);
+        case EntryKind::Array:
+        case EntryKind::List: return heap_.length(item);
+        default: return 0;
+        }
+    }
+    std::size_t shadow_flag_count(Heap::Ref item) const {
+        return heap_.kind(item) == EntryKind::Object ? heap_.field_count(item) : 0;
+    }
+    std::uint64_t shadow_cell(Heap::Ref item, std::size_t cell) const {
+        return heap_.kind(item) == EntryKind::Object ? heap_.field(item, static_cast<std::uint32_t>(cell))
+                                                      : heap_.element(item, cell);
+    }
+    std::string_view shadow_bytes(Heap::Ref item) const {
+        const auto kind = heap_.kind(item);
+        return kind == EntryKind::Text || kind == EntryKind::Bytes ? heap_.text(item) : std::string_view();
     }
 
-    void shadow_heap_flip_cell(std::uint64_t handle, std::size_t cell) { heap_.find(handle)->cells[cell] ^= 1U; }
-    void shadow_heap_clear_flag(std::uint64_t handle, std::size_t cell) { heap_.find(handle)->initialized[cell] = 0; }
-    void shadow_heap_next_version(std::uint64_t handle) { ++heap_.find(handle)->version; }
+    void shadow_heap_flip_cell(std::uint64_t handle, std::size_t cell) {
+        const auto item = heap_.find(handle);
+        const auto field = static_cast<std::uint32_t>(cell);
+        heap_.restore_field(item, field, heap_.field(item, field) ^ 1U, heap_.initialized(item, field));
+    }
+    void shadow_heap_clear_flag(std::uint64_t handle, std::size_t cell) {
+        const auto item = heap_.find(handle);
+        const auto field = static_cast<std::uint32_t>(cell);
+        heap_.restore_field(item, field, heap_.field(item, field), false);
+    }
+    void shadow_heap_next_version(std::uint64_t handle) { heap_.advance_version(heap_.find(handle)); }
 
     static const char* shadow_kind_name(EntryKind kind) {
         switch (kind) {
@@ -1040,50 +1048,65 @@
     // Entry by entry in handle order: presence, kind, type, cells and their
     // initialized flags (an uninitialized cell's bits are not compared),
     // bytes, version, and identity number.
+    // Both heaps are walked in handle order in step, without copying; an
+    // entry that Heap::same finds equal is passed over at once.
     bool shadow_compare_heap(ShadowDiff& d, const State& other) const {
-        const auto mine = shadow_heap(shadow_->heap_entries);
-        const auto theirs = other.shadow_heap(mine.size());
-        shadow_->heap_entries = mine.size();
-        std::size_t i = 0;
-        std::size_t j = 0;
-        while (i < mine.size() || j < theirs.size()) {
-            if (j == theirs.size() || (i < mine.size() && mine[i].handle < theirs[j].handle)) {
-                return d.note("heap handle " + std::to_string(mine[i].handle), "present", "absent");
+        std::size_t entries = 0;
+        auto x = heap_.next_live(0);
+        auto y = other.heap_.next_live(0);
+        while (x != 0 || y != 0) {
+            if (y == 0 || (x != 0 && x < y)) {
+                return d.note("heap handle " + std::to_string(x), "present", "absent");
             }
-            if (i == mine.size() || theirs[j].handle < mine[i].handle) {
-                return d.note("heap handle " + std::to_string(theirs[j].handle), "absent", "present");
+            if (x == 0 || y < x) {
+                return d.note("heap handle " + std::to_string(y), "absent", "present");
             }
-            const auto& a = mine[i++];
-            const auto& b = theirs[j++];
-            const auto item = [&] { return "heap handle " + std::to_string(a.handle); };
-            if ((a.kind != b.kind && d.note(item() + " kind", shadow_kind_name(a.kind), shadow_kind_name(b.kind))) ||
-                d.differs(a.type, b.type, [&] { return item() + " type"; }) ||
-                d.differs(a.cells.size(), b.cells.size(), [&] { return item() + " cells"; }) ||
-                d.differs(a.initialized.size(), b.initialized.size(), [&] { return item() + " initialized flags"; })) {
+            ++entries;
+            const auto a = heap_.find(x);
+            const auto b = other.heap_.find(y);
+            const auto handle = x;
+            x = heap_.next_live(x);
+            y = other.heap_.next_live(y);
+            if (Heap::same(heap_, a, other.heap_, b)) continue;
+            const auto item = [&] { return "heap handle " + std::to_string(handle); };
+            const auto a_kind = heap_.kind(a);
+            const auto b_kind = other.heap_.kind(b);
+            const auto cells = shadow_cell_count(a);
+            const auto flags = shadow_flag_count(a);
+            if ((a_kind != b_kind && d.note(item() + " kind", shadow_kind_name(a_kind), shadow_kind_name(b_kind))) ||
+                d.differs(heap_.type(a), other.heap_.type(b), [&] { return item() + " type"; }) ||
+                d.differs(cells, other.shadow_cell_count(b), [&] { return item() + " cells"; }) ||
+                d.differs(flags, other.shadow_flag_count(b), [&] { return item() + " initialized flags"; })) {
                 return true;
             }
-            const bool same_cells = std::ranges::equal(a.cells, b.cells) && std::ranges::equal(a.initialized, b.initialized);
-            for (std::size_t c = 0; !same_cells && c < a.cells.size(); ++c) {
-                const bool flagged = c < a.initialized.size();
-                const bool set = !flagged || a.initialized[c];
-                if ((!flagged || a.initialized[c] == b.initialized[c]) && (!set || a.cells[c] == b.cells[c])) continue;
+            for (std::size_t c = 0; c < cells; ++c) {
+                const bool flagged = c < flags;
+                const bool a_flag = flagged && heap_.initialized(a, static_cast<std::uint32_t>(c));
+                const bool b_flag = flagged && other.heap_.initialized(b, static_cast<std::uint32_t>(c));
+                const bool set = !flagged || a_flag;
+                const auto a_cell = shadow_cell(a, c);
+                const auto b_cell = other.shadow_cell(b, c);
+                if ((!flagged || a_flag == b_flag) && (!set || a_cell == b_cell)) continue;
                 const auto cell = [&] { return item() + " cell " + std::to_string(c); };
-                if ((flagged && d.differs(a.initialized[c], b.initialized[c], [&] { return cell() + " initialized"; })) ||
-                    d.differs(a.cells[c], b.cells[c], cell)) {
+                if ((flagged && d.differs(a_flag, b_flag, [&] { return cell() + " initialized"; })) ||
+                    d.differs(a_cell, b_cell, cell)) {
                     return true;
                 }
             }
-            if (a.bytes != b.bytes) {
+            const auto a_bytes = shadow_bytes(a);
+            const auto b_bytes = other.shadow_bytes(b);
+            if (a_bytes != b_bytes) {
                 std::size_t at = 0;
-                while (at < a.bytes.size() && at < b.bytes.size() && a.bytes[at] == b.bytes[at]) ++at;
+                while (at < a_bytes.size() && at < b_bytes.size() && a_bytes[at] == b_bytes[at]) ++at;
                 return d.note(item() + " bytes from byte " + std::to_string(at),
-                              std::to_string(a.bytes.size()) + " bytes", std::to_string(b.bytes.size()) + " bytes");
+                              std::to_string(a_bytes.size()) + " bytes", std::to_string(b_bytes.size()) + " bytes");
             }
-            if (d.differs(a.version, b.version, [&] { return item() + " version"; }) ||
-                d.differs(a.identity, b.identity, [&] { return item() + " identity"; })) {
+            if (d.differs(heap_.version(a), other.heap_.version(b), [&] { return item() + " version"; }) ||
+                d.differs(heap_.identity(a), other.heap_.identity(b), [&] { return item() + " identity"; })) {
                 return true;
             }
         }
+        shadow_->heap_entries = entries;
         return false;
     }
 
@@ -1133,22 +1156,23 @@
         case Perturb::HeapField:
         case Perturb::HeapInitialized:
         case Perturb::ListVersion:
-            for (const auto& entry : shadow_heap()) {
+            for (auto handle = heap_.next_live(0); handle != 0; handle = heap_.next_live(handle)) {
+                const auto entry = heap_.find(handle);
                 if (hooks.perturb == Perturb::ListVersion) {
-                    if (entry.kind != EntryKind::List) continue;
-                    shadow_heap_next_version(entry.handle);
+                    if (heap_.kind(entry) != EntryKind::List) continue;
+                    shadow_heap_next_version(handle);
                     done = true;
                     break;
                 }
-                if (entry.kind != EntryKind::Object) continue;
-                const auto& fields = image_.layouts[entry.type].fields;
-                for (std::size_t f = 0; f < entry.initialized.size() && !done; ++f) {
-                    if (!entry.initialized[f]) continue;
+                if (heap_.kind(entry) != EntryKind::Object) continue;
+                const auto& fields = image_.layouts[heap_.type(entry)].fields;
+                for (std::size_t f = 0; f < shadow_flag_count(entry) && !done; ++f) {
+                    if (!heap_.initialized(entry, static_cast<std::uint32_t>(f))) continue;
                     if (hooks.perturb == Perturb::HeapInitialized) {
-                        shadow_heap_clear_flag(entry.handle, f);
+                        shadow_heap_clear_flag(handle, f);
                         done = true;
                     } else if (scalar(fields[f])) {
-                        shadow_heap_flip_cell(entry.handle, f);
+                        shadow_heap_flip_cell(handle, f);
                         done = true;
                     }
                 }

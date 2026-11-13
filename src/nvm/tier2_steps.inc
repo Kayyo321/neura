@@ -525,7 +525,7 @@
             global_initialized_[write.index] = write.old_initialized;
             return;
         }
-        auto& item = entry(write.handle);
-        item.cells[write.index] = write.old_value;
-        if (write.field) item.initialized[write.index] = write.old_initialized;
+        const auto item = entry(write.handle);
+        if (write.field) heap_.restore_field(item, write.index, write.old_value, write.old_initialized != 0);
+        else heap_.set_element(item, write.index, write.old_value);
     }
