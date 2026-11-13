@@ -102,6 +102,22 @@ enum class Code : std::uint8_t {
     Leave,
     // Deoptimize to `block`: tier 1 runs it from its entry state.
     Deopt,
+    // Function programs only (`Region::program`). A call: `block` (the call
+    // block) is complete; its exit is exits[index], its arguments
+    // operands[other, other + width); the callee is function `a`. The
+    // interpreter pushes the callee's frame and continues in the callee's
+    // program, or leaves at its block 0. `target` is the label of the
+    // exit's resume block, where the caller continues after an in-program
+    // Return; `dst` is the result slot (absent for none).
+    Call,
+    // A return of register `a` (absent for a void function): `block` is
+    // complete; the caller continues in the program it called from, at the
+    // label of its return block, or the program leaves.
+    Return,
+    // A dispatch block's exit: the exit dispatch_tables[index] selects for
+    // the tag in register `a` (the table's default when no entry has the
+    // tag); pc = operands[other + exit]. Never fails.
+    Dispatch,
 };
 
 // Op flags.
@@ -172,6 +188,42 @@ struct Region {
     // Overflow checks removed by the region's range analysis (each proven
     // never to fail; the image keeps them).
     std::uint32_t eliminated_checks = 0;
+
+    // A function program (docs: wo2g design, "Function programs"): every
+    // block of the function, entered at any of `entries`. Register r below
+    // the function's slot count is frame slot r of the running frame itself
+    // (no load at entry, no write-back); the other registers are
+    // temporaries, constants and immediates, held per run and program.
+    bool program = false;
+    // A number the cache gives each program, unique in the cache: the index
+    // of the run's register image of the program.
+    std::uint32_t program_id = 0;
+    std::uint32_t parameter_count = 0;
+    struct Entry {
+        std::uint32_t block = 0;
+        std::uint32_t label = 0;
+        // Slots read before any write on some path from this entry: they
+        // must be initialized when the program is entered here.
+        std::vector<std::uint32_t> reads;
+    };
+    // Ascending by block.
+    std::vector<Entry> entries;
+    // The label of every block (by image block).
+    std::vector<std::uint32_t> block_labels;
+    // Lanes of each slot's type, at most 64: an initialized slot must fit
+    // them when the program is entered from the dispatcher.
+    std::vector<std::uint8_t> slot_widths;
+    struct DispatchTable {
+        std::vector<std::pair<std::uint64_t, std::uint32_t>> exits;
+        std::uint32_t fallback = 0;
+    };
+    std::vector<DispatchTable> dispatch_tables;
+    // Blocks compiled as a deoptimization because tier 1 does not run them
+    // lifted, wired or empty.
+    std::uint32_t stubs = 0;
+
+    // The entry of `block`, or null.
+    const Entry* entry_at(std::uint32_t block) const;
 };
 
 // Whether a state operation runs inside a region: one that only reads or
@@ -204,6 +256,15 @@ struct Formation {
 // the region.
 Formation form_region(const nvr::Image& image, std::uint32_t function, std::uint32_t entry,
                       const std::function<BlockForm(std::uint32_t block)>& form, std::size_t max_blocks = 128);
+
+// Forms and compiles the function program of `function` (Region::program):
+// every block, each compiled with its tier-1 form, its calls and returns
+// as Call and Return ops (as deoptimizations when `checkable`, the region
+// check of NEURA_TIER_CHECK=1, is on). No program, with the reason, when a
+// block is not lifted, wired or empty (pending: one is not settled yet), or
+// an exit is one a program cannot run yet.
+Formation form_program(const nvr::Image& image, std::uint32_t function,
+                       const std::function<BlockForm(std::uint32_t block)>& form, bool checkable);
 
 // A readable listing of a region program, for tests and debugging.
 std::string describe(const Region& region);

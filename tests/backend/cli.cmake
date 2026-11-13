@@ -270,6 +270,28 @@ if(NOT checked_replay_status STREQUAL "0" OR NOT checked_replay_stdout STREQUAL 
                         "${checked_replay_stdout}${checked_replay_stderr}")
 endif()
 
+# Function programs (NEURA_TIER_PROGRAMS=1): a run whose console writes happen
+# in called functions records the trace tier 0 records, and replays it.
+build_image("${TEST_DIR}/program-calls.nvr" "${tests}/tier/program-calls.nra")
+neura(calls_t0 "${TEST_DIR}" run --tier=0 --record "${TEST_DIR}/calls-t0.trace" "${TEST_DIR}/program-calls.nvr" -- calls 6)
+set(ENV{NEURA_TIER_PROGRAMS} 1)
+set(ENV{NEURA_TIER_EAGER} 1)
+neura(calls_programs "${TEST_DIR}" run --tier-stats --record "${TEST_DIR}/calls-programs.trace"
+      "${TEST_DIR}/program-calls.nvr" -- calls 6)
+neura(calls_replay "${TEST_DIR}" run --replay "${TEST_DIR}/calls-t0.trace" "${TEST_DIR}/program-calls.nvr" -- calls 6)
+unset(ENV{NEURA_TIER_EAGER})
+unset(ENV{NEURA_TIER_PROGRAMS})
+if(NOT calls_t0_status STREQUAL "0" OR NOT calls_programs_status STREQUAL "0" OR
+   NOT calls_programs_stdout STREQUAL calls_t0_stdout OR NOT calls_programs_stderr MATCHES "tier: programs [1-9]")
+    message(FATAL_ERROR "program-calls with function programs: status ${calls_programs_status}\n"
+                        "${calls_programs_stdout}${calls_programs_stderr}")
+endif()
+same_bytes("a trace recorded with function programs" "${TEST_DIR}/calls-t0.trace" "${TEST_DIR}/calls-programs.trace")
+if(NOT calls_replay_status STREQUAL "0" OR NOT calls_replay_stdout STREQUAL calls_t0_stdout)
+    message(FATAL_ERROR "program-calls replayed with function programs: status ${calls_replay_status}\n"
+                        "${calls_replay_stdout}${calls_replay_stderr}")
+endif()
+
 # The .nir listing route matches the source listing in both modes.
 foreach(mode IN ITEMS "" --no-optimize)
     neura(from_source "${TEST_DIR}" emit-ir ${mode} "${hello}")

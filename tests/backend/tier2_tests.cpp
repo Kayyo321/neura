@@ -19,6 +19,9 @@ namespace {
 // Lifts every block and forms every region the first time it runs.
 nvm::TierOptions eager_regions() {
     nvm::TierOptions options;
+    // These tests are about regions: they keep regions when
+    // NEURA_TIER_PROGRAMS=1 would form function programs instead.
+    options.programs = nvm::TierOptions::Programs::Off;
     options.hint_after = 1;
     options.search_after = 1;
     options.minimum_proof_work = std::uint64_t{1} << 30;

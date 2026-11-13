@@ -115,6 +115,16 @@ std::string describe(const TierStatistics& s) {
         top(s.region_deopts, "deoptimized");
         top(s.region_leaves, "left");
     }
+    if (s.programs != 0 || !s.program_rejections.empty()) {
+        out += "tier: programs " + std::to_string(s.programs) + " (" + std::to_string(s.program_blocks) +
+               " blocks, " + std::to_string(s.program_stubs) + " stubs, " + std::to_string(s.program_entries) +
+               " entries); calls " + std::to_string(r.calls) + ", returns " + std::to_string(r.returns) +
+               ", helpers 0, traps in place " + std::to_string(r.traps) + "; steps in programs " +
+               std::to_string(r.program_steps) + "\n";
+        for (const auto& [reason, count] : s.program_rejections) {
+            out += "tier: no program " + std::to_string(count) + ": " + reason + "\n";
+        }
+    }
     if (!s.jit_mode.empty()) {
         if (!s.jit_off.empty() && s.jit_compiled == 0 && s.jit_failures.empty()) {
             out += s.jit_mode == "off" ? std::string("tier: jit off\n")
@@ -176,8 +186,20 @@ bool tier_eager() {
     return enabled;
 }
 
+bool tier_programs_enabled() {
+    static const bool enabled = [] {
+        const char* text = std::getenv("NEURA_TIER_PROGRAMS");
+        return text && std::strcmp(text, "1") == 0;
+    }();
+    return enabled;
+}
+
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
+    if (options_.programs == TierOptions::Programs::Environment) {
+        options_.programs = tier_programs_enabled() ? TierOptions::Programs::On : TierOptions::Programs::Off;
+    }
+    if (tier_check_enabled()) options_.checkable = true;
     if (tier_eager()) {
         options_.hint_after = 1;
         options_.search_after = 1;
@@ -194,6 +216,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     entries_ = std::vector<Entry>(total);
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     regions_ = std::vector<RegionEntry>(total);
+    programs_ = std::vector<RegionEntry>(image.functions.size());
     region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();

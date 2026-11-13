@@ -148,7 +148,11 @@
             // run goes on without sync points.
             if (tier2_) {
                 if (shadow_) shadow_entering();
-                if (run_regions(std::numeric_limits<std::uint64_t>::max()) != 0 && shadow_) shadow_returned();
+                // A program that trapped in place (a call's frame limit) has
+                // finished the run: the next step's event is the sync point.
+                if (run_regions(std::numeric_limits<std::uint64_t>::max()) != 0 && shadow_ && !finished_) {
+                    shadow_returned();
+                }
             }
             if (auto event = step(wires_)) {
                 const bool ended = event->kind == Event::Kind::Completed || event->kind == Event::Kind::Trapped;
@@ -664,6 +668,7 @@
     // Every frame from the bottom: its function, block, return slot and
     // block, and each slot's initialized flag and, when initialized, value.
     // An uninitialized slot's bits cannot be read, so they are not compared.
+    // FrameHeader::called_from is tier machinery and not compared.
     template <typename Prefix>
     bool shadow_compare_frames(ShadowDiff& d, const FrameStack& mine, const FrameStack& theirs,
                                const Prefix& prefix) const {
