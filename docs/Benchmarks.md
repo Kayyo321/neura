@@ -124,6 +124,30 @@ Full sizes on a 4-core Intel Xeon virtual machine at 2.10 GHz running Linux x86-
 
 The float programs (`mandelbrot`, `nbody`, `spectral-norm`) and `matrix-multiply` gain the most: in 0.2.0 the proofs of their blocks failed or took longer than the run, so they ran on the reference evaluator. `binary-trees` and `sha256` are unchanged, because their time is in calls, allocation, and state operations, which leave a region. At these sizes a Java run is mostly the start of the JVM, and about half of a float program's Neura run is the proving of its blocks, so the ratios say little about steady speed; the long sizes are for that.
 
+Long sizes on the same machine, one run of each program while other work ran on it, so the times are good to perhaps a tenth:
+
+| Program | Size | Steps | 0.2.1 (s) | Java (s) | 0.2.1 / Java |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| binary-trees | 19 | 1914011930 | 140.1 | 1.93 | 73 |
+| closures | 200000 | 6132004525 | 217.4 | 2.56 | 85 |
+| collatz | 8000000 | 4934339417 | 11.2 | 3.15 | 4 |
+| dispatch | 150000 | 2460462296 | 107.0 | 3.30 | 32 |
+| fannkuch | 11 | 9417572451 | 105.1 | 3.30 | 32 |
+| hash-map | 2400000 | 673452337 | 22.5 | 2.49 | 9 |
+| mandelbrot | 6000 | 14583983433 | 16.9 | 3.60 | 5 |
+| matrix-multiply | 1100 | 10680679456 | 72.6 | 2.35 | 31 |
+| nbody | 35000000 | 35210002196 | 676.0 | 2.76 | 245 |
+| object-churn | 100000 | 5872678432 | 249.7 | 2.42 | 103 |
+| parse-results | 70000 | 6249474408 | 262.8 | 2.30 | 114 |
+| sha256 | 300000000 | 18801572041 | 1291.3 | 2.75 | 470 |
+| sieve | 140000000 | 2038449781 | 34.4 | 1.98 | 17 |
+| sort | 15000000 | 5789817239 | 179.9 | 3.31 | 54 |
+| spectral-norm | 4500 | 8100990976 | 215.6 | 3.51 | 61 |
+| string-building | 25000000 | 4477778702 | 103.9 | 2.77 | 37 |
+| text-split | 2000000 | 2985816673 | 376.8 | 3.00 | 126 |
+
+The geometric mean of the ratios is 45. Where a program's steps run in regions of integer code the ratio is single digits (`collatz`, `mandelbrot`, `hash-map`); where they leave regions for calls, allocation, and state operations it is in the tens and hundreds, and `sha256`, which reads and writes an array element in most of its steps, is the slowest.
+
 ## Reading the results
 
 - Compare times from one machine. Run on an otherwise idle machine and state the CPU, the operating system, and the Java version with any figures you publish.
