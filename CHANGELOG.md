@@ -37,6 +37,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- `neura run --task-dump` wrote the dump twice, the first time naming a block the task had already left, when a check failed inside a tier 2 region (an index out of bounds, for example) and tier 1 ran the block again and trapped. The dump is now written once, when the failure becomes the run's trap, as at tier 0.
 - Editor tooling in 0.2.1-rc.2: readable documentation hovers, valid outline names and ranges, completion for declaration modifiers, eligible inherited overrides, promoted exports, import paths and typed/primitive/collection receivers, and quiet formatting of incomplete editor buffers. CLI formatting continues to reject invalid source.
 - The website places one skill-copy button above its prompt with feedback that keeps the page in place, keeps the front page's frame fitted during mobile scrolling, and gives diagnostic codes a compact Reading Room overview.
 - The compiler no longer reads freed memory while lowering three constructs, which 0.2.0 does: an accessor whose body declares names (the `W0005` and `E0405` messages were built from a freed field name), a generic enum applied to an anonymous class (`Optional<class (...)>.None` with many fields could crash the compiler), and a target-typed `new` of an anonymous class whose field initializer declares many names (it could be rejected with a wrong `E0403` or crash). Programs that compiled are compiled to the same image.

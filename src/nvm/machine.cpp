@@ -172,6 +172,11 @@ namespace {
 
 struct Fault {
     Trap trap;
+    // The run has tasks and asked for a task dump on a trap: the dump is
+    // written when the fault becomes the run's trap (State::trap), not when
+    // it is raised, since a region that catches a fault and deoptimizes
+    // has not trapped.
+    bool dump = false;
 };
 
 bool checked_add(std::int64_t a, std::int64_t b, std::int64_t& result) {
@@ -504,10 +509,7 @@ public:
         try {
             apply_completion(frames_, pending, completion);
         } catch (const Fault& fault) {
-            Event event;
-            event.kind = Event::Kind::Trapped;
-            event.trap = fault.trap;
-            set_finished(std::move(event));
+            trap(fault);
         }
     }
 
@@ -573,10 +575,7 @@ public:
                 }
             }
         } catch (const Fault& fault) {
-            Event event;
-            event.kind = Event::Kind::Trapped;
-            event.trap = fault.trap;
-            set_finished(std::move(event));
+            trap(fault);
             restore();
             return std::nullopt;
         }
@@ -1010,10 +1009,7 @@ private:
             if (!finished_) make_runnable(id, task);
             scheduler_->current = running;
         } catch (const Fault& fault) {
-            Event event;
-            event.kind = Event::Kind::Trapped;
-            event.trap = fault.trap;
-            set_finished(std::move(event));
+            trap(fault);
         }
     }
 
@@ -1036,7 +1032,12 @@ private:
         stop_tracking_heap();
     }
 
+    // A fault becomes the run's trap: the event, and the task dump that
+    // --task-dump asks for on a trap.
     Event trap(const Fault& failure) {
+        if (failure.dump && limits_.task_dump && limits_.task_dump->on_trap && limits_.task_dump->write) {
+            limits_.task_dump->write(dump_tasks(limits_.task_dump->format));
+        }
         Event event;
         event.kind = Event::Kind::Trapped;
         event.trap = failure.trap;
@@ -1049,7 +1050,8 @@ private:
         trap.kind = kind;
         trap.reason = reason;
         trap.detail = std::move(detail);
-        if (scheduler_ && kind != TrapKind::Deadlock) {
+        const bool dump = scheduler_ && kind != TrapKind::Deadlock;
+        if (dump) {
             // The trapping task and its spawn chain. A long chain keeps its
             // ends: the task itself and the tasks nearest the root.
             constexpr std::size_t shown = 4;
@@ -1077,9 +1079,6 @@ private:
                                " by task " + std::to_string(task.parent);
             }
             trap.detail += ")";
-            if (limits_.task_dump && limits_.task_dump->on_trap && limits_.task_dump->write) {
-                limits_.task_dump->write(dump_tasks(limits_.task_dump->format));
-            }
         }
         if (!frames_.empty()) {
             const auto top = frames_.size() - 1;
@@ -1089,7 +1088,7 @@ private:
                 trap.callers.emplace_back(frames_.header(index).function, frames_.header(index).block);
             }
         }
-        throw Fault{std::move(trap)};
+        throw Fault{std::move(trap), dump};
     }
 
     const nvr::Type& type(std::uint32_t index) const { return image_.types[index]; }

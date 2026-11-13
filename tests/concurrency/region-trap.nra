@@ -1,0 +1,31 @@
+// A task image whose loop traps (an index out of bounds) after it has run
+// long enough to run in a tier 2 region: --task-dump must print one dump,
+// the same at every tier (docs/runtime/NVM.md, "Why the result does not
+// depend on the tier"). programs.cmake runs it.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let work = func(n: int) -> int {
+    let values: int[list] = [];
+    for (let i: int = 0; i < 3000; i++) {
+        values.append(i);
+    }
+    let total = 0;
+    for (let i: int = 0; i < n; i++) {
+        total = total + values[i];
+    }
+    return total;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        let sum = 0;
+        scope {
+            let first = spawn work(10);
+            sum = first.join();
+        }
+        console.print_line(sum.to_string());
+        console.print_line(work(3001).to_string());
+        return program.ExitCode.Ok;
+    };
+);
