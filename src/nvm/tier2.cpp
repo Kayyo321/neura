@@ -1058,6 +1058,10 @@ private:
         std::uint32_t if_true = 0;
         std::uint32_t if_false = 0;
         std::optional<std::uint32_t> selector;
+        // A dispatch block of a function program: the register of its tag
+        // (the lowered block's input 0) and its table.
+        std::optional<std::uint32_t> dispatch_tag;
+        const lift::LoweredBlock* dispatch_block = nullptr;
         std::vector<std::uint32_t> input_regs;
         if (form.kind == BlockForm::Kind::Lifted) {
             const auto& lowered = *form.lifted;
@@ -1087,7 +1091,14 @@ private:
                 if_true = lowered.exit_if_true;
                 if_false = lowered.exit_if_false;
                 break;
-            case lift::LoweredBlock::Selection::Dispatch: fixed_exit = none; break;
+            case lift::LoweredBlock::Selection::Dispatch:
+                if (program_ && !checkable_ && !regs.empty()) {
+                    dispatch_tag = regs[0];
+                    dispatch_block = &lowered;
+                } else {
+                    fixed_exit = none;
+                }
+                break;
             }
         } else if (form.kind == BlockForm::Kind::Wired) {
             const auto& graph = image_.graphs[b.graph];
@@ -1170,6 +1181,35 @@ private:
             switch_first = region_.operands.size();
             region_.operands.resize(region_.operands.size() + b.exits.size(), none);
             emit(op);
+        }
+        std::size_t dispatch_first = 0;
+        if (dispatch_tag) {
+            // As lift::execute selects a dispatch block's exit
+            // (lowered_block.cpp): the table's exit for the tag, else the
+            // default exit, which is compiled as a deoptimization.
+            Op op;
+            op.code = Code::Dispatch;
+            op.a = *dispatch_tag;
+            op.block = image_block;
+            op.index = static_cast<std::uint32_t>(region_.dispatch_tables.size());
+            region_.dispatch_tables.push_back({dispatch_block->dispatch, dispatch_block->dispatch_default});
+            op.width = static_cast<std::uint8_t>(std::min<std::size_t>(b.exits.size(), 255));
+            op.other = static_cast<std::uint32_t>(region_.operands.size());
+            dispatch_first = region_.operands.size();
+            region_.operands.resize(region_.operands.size() + b.exits.size(), none);
+            emit(op);
+            for (std::uint32_t e = 0; e < b.exits.size(); ++e) {
+                region_.operands[dispatch_first + e] = static_cast<std::uint32_t>(region_.code.size());
+                if (e == dispatch_block->dispatch_default || b.exits[e].kind != nvr::ExitKind::Call) {
+                    Op deopt;
+                    deopt.code = Code::Deopt;
+                    deopt.block = image_block;
+                    emit(deopt);
+                } else {
+                    emit_exit(local, e, lanes);
+                }
+            }
+            return;
         }
         std::vector<std::uint32_t> wanted;
         if (fixed_exit) {
@@ -1461,8 +1501,6 @@ Formation form_program(const nvr::Image& image, std::uint32_t function,
                 result.reason = f.pending ? "a block of the function is not settled yet"
                                           : "a block of the function is not lifted, wired, or empty";
             }
-        } else if (f.kind == BlockForm::Kind::Lifted && f.lifted->selection == lift::LoweredBlock::Selection::Dispatch) {
-            if (result.reason.empty()) result.reason = "the function has a dispatch block";
         }
         blocks.push_back(b);
         forms.push_back(f);

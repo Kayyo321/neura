@@ -114,6 +114,7 @@ NEURA_TEST(tier, function_programs_have_their_entries_and_early_reads) {
           "calls and returns ran inside programs");
     std::size_t formed = 0;
     std::size_t later_reads = 0;
+    std::size_t dispatches = 0;
     for (std::uint32_t function = 0; function < image.functions.size(); ++function) {
         const auto formation = nvm::tier2::form_program(image, function, [&](std::uint32_t block) {
             nvm::tier2::BlockForm form;
@@ -149,6 +150,7 @@ NEURA_TEST(tier, function_programs_have_their_entries_and_early_reads) {
             for (const auto slot : program.entries[e].reads) later_reads += slot >= program.parameter_count;
         }
         for (const auto& op : program.code) {
+            dispatches += op.code == nvm::tier2::Code::Dispatch;
             if (op.code == nvm::tier2::Code::Call) {
                 check(program.entry_at(program.exits[op.index]->resume) != nullptr, "a call's resume is an entry");
             }
@@ -157,6 +159,9 @@ NEURA_TEST(tier, function_programs_have_their_entries_and_early_reads) {
     }
     check(formed > 3, "the program's functions formed programs");
     check(later_reads > 0, "a loop head or a resume reads a local its entry 0 does not");
+    // Interface calls and the closure call go through dispatch blocks, which
+    // programs run as Dispatch ops.
+    check(dispatches >= 2, "dispatch blocks are Dispatch ops in programs");
 }
 
 NEURA_TEST(tier, calls_and_returns_in_programs_match_tier_0_at_every_step_and_frame_limit) {

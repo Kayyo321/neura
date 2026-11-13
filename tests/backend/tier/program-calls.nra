@@ -87,6 +87,15 @@ let ProgramCalls = module:program.Entry (
         return total;
     };
 
+    // A closure called in a loop: a call through the closure's dispatch.
+    let apply = func(step: func(int64) -> int64, count: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < count; i = i + 1) {
+            total = step(total);
+        }
+        return total;
+    };
+
     let loop = func(size: int32) -> int64 {
         let total: int64 = 0;
         for (let i = 0; i < size; i = i + 1) {
@@ -160,6 +169,8 @@ let ProgramCalls = module:program.Entry (
             }
             report("even", even);
             report("shapes", shapes(size, 4));
+            let offset: int64 = (size as int64) + 3;
+            report("closure", apply(func(x: int64) -> int64 => add(x, offset), size * 5));
         } else {
             report("trap", trap(kind, size));
         }
