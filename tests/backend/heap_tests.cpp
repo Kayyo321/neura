@@ -556,7 +556,7 @@ NEURA_TEST(heap, lists_grow_and_shrink_at_every_width) {
         check(heap.find(handle) == ref, "growth keeps the Ref");
         check_view(heap, ref, expected, width, label(EntryKind::List, width, 600));
         check_equal(heap.version(ref), std::uint64_t{600}, "versions");
-        for (const std::size_t index : {std::size_t{599}, std::size_t{0}, std::size_t{300}, std::size_t{1}}) {
+        for (const std::size_t index : {std::size_t{599}, std::size_t{0}, std::size_t{300}, std::size_t{1}, std::size_t{594}}) {
             heap.remove(ref, index);
             expected.erase(expected.begin() + static_cast<std::ptrdiff_t>(index));
             check(elements_of(heap, ref) == expected, label(EntryKind::List, width) + ": remove " + std::to_string(index));
@@ -697,6 +697,9 @@ NEURA_TEST(heap, a_value_wider_than_the_storage_widens_the_collection) {
                         break;
                     }
                     check(elements_of(heap, ref) == expected, what + ": every element reads back exactly");
+                    std::vector<std::uint64_t> visited;
+                    heap.visit_elements(ref, [&](std::uint64_t bits) { visited.push_back(bits); });
+                    check(visited == expected, what + ": visit_elements of a widened collection");
                     check_view(heap, ref, expected, ElementWidth::W8, what + ": widened");
                     check(heap.declared_width(ref) == width, what + ": the declared width stays");
                     check(heap.find(handle) == ref, what + ": the Ref and the handle stay valid");
