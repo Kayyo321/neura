@@ -32,6 +32,16 @@
 #include <sanitizer/asan_interface.h>
 #endif
 
+// The element accessors are inlined into the executor's state operations;
+// widening and list growth, which are rare, are kept out of them.
+#if defined(__GNUC__) || defined(__clang__)
+#define NEURA_HEAP_INLINE [[gnu::always_inline]] inline
+#define NEURA_HEAP_OUT_OF_LINE [[gnu::noinline]]
+#else
+#define NEURA_HEAP_INLINE inline
+#define NEURA_HEAP_OUT_OF_LINE
+#endif
+
 namespace neura::nvm {
 
 // The heap of one execution (docs/runtime/NVM.md, "Heap and objects" and
@@ -223,17 +233,20 @@ public:
 
     // Element `index` (below length()): an array or list element's bits, or
     // a text or bytes entry's byte zero-extended.
-    std::uint64_t element(Ref ref, std::size_t index) const {
+    NEURA_HEAP_INLINE std::uint64_t element(Ref ref, std::size_t index) const {
         const auto& item = sequence(ref);
         const auto width = item.head.storage;
         return load(item.data + index * static_cast<std::size_t>(width), width);
     }
 
     // Stores element `index` (below length()) of an array or list.
-    void set_element(Ref ref, std::size_t index, std::uint64_t bits) {
+    NEURA_HEAP_INLINE void set_element(Ref ref, std::size_t index, std::uint64_t bits) {
         auto& item = sequence(ref);
-        if (!fits(bits, item.head.storage)) widen(ref);
-        const auto width = item.head.storage;
+        auto width = item.head.storage;
+        if (!fits(bits, width)) [[unlikely]] {
+            widen(ref);
+            width = ElementWidth::W8;
+        }
         store(bits, item.data + index * static_cast<std::size_t>(width), width);
     }
 
@@ -664,11 +677,11 @@ private:
     static bool text_like(EntryKind kind) { return kind == EntryKind::Text || kind == EntryKind::Bytes; }
 
     // Whether `bits` has no bit above `width` bytes.
-    static bool fits(std::uint64_t bits, ElementWidth width) {
+    NEURA_HEAP_INLINE static bool fits(std::uint64_t bits, ElementWidth width) {
         return width == ElementWidth::W8 || (bits >> (8 * static_cast<unsigned>(width))) == 0;
     }
 
-    static void store(std::uint64_t bits, unsigned char* out, ElementWidth width) {
+    NEURA_HEAP_INLINE static void store(std::uint64_t bits, unsigned char* out, ElementWidth width) {
         switch (width) {
         case ElementWidth::W1: { const auto v = static_cast<std::uint8_t>(bits); std::memcpy(out, &v, 1); break; }
         case ElementWidth::W2: { const auto v = static_cast<std::uint16_t>(bits); std::memcpy(out, &v, 2); break; }
@@ -677,7 +690,7 @@ private:
         }
     }
 
-    static std::uint64_t load(const unsigned char* in, ElementWidth width) {
+    NEURA_HEAP_INLINE static std::uint64_t load(const unsigned char* in, ElementWidth width) {
         switch (width) {
         case ElementWidth::W1: return *in;
         case ElementWidth::W2: { std::uint16_t v = 0; std::memcpy(&v, in, 2); return v; }
@@ -855,7 +868,7 @@ private:
     // Moves the elements of an array or list to eight-byte storage. The
     // header stays; a list keeps its capacity, an array's inline elements
     // are left unused until it is freed.
-    void widen(Ref ref) {
+    NEURA_HEAP_OUT_OF_LINE void widen(Ref ref) {
         auto& item = sequence(ref);
         const auto from = item.head.storage;
         const auto length = static_cast<std::size_t>(item.head.count);
@@ -872,7 +885,7 @@ private:
 
     // Gives a full list room for at least one more element: at least twice
     // the capacity, and at least four elements.
-    void grow(ListEntry& item) {
+    NEURA_HEAP_OUT_OF_LINE void grow(ListEntry& item) {
         const auto w = static_cast<std::size_t>(item.array.head.storage);
         const auto capacity = static_cast<std::size_t>(item.capacity);
         const auto bytes = Blocks::usable(std::max<std::size_t>(capacity * 2, 4) * w);
