@@ -117,7 +117,7 @@ class AnalysisSession {
     Json location(const Span &span) const;
     Json diagnostics_for(const EditorDocument &document) const;
     Json semantic_tokens(const EditorDocument &document) const;
-    Json completion(const EditorDocument &document, std::size_t offset) const;
+    Json completion(const EditorDocument &document, std::size_t offset, bool override_only = false) const;
     Json document_symbols(const EditorDocument &document) const;
     Json code_lenses(const EditorDocument &document) const;
     Json inlay_hints(const EditorDocument &document, const Json &range, InlayOptions options = {}) const;

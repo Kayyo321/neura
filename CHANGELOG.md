@@ -26,6 +26,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Fixed
 
+- Editor tooling in 0.2.1-rc.2: readable documentation hovers, valid outline names and ranges, completion for declaration modifiers, eligible inherited overrides, promoted exports, import paths and typed/primitive/collection receivers, and quiet formatting of incomplete editor buffers. CLI formatting continues to reject invalid source.
 - The website places one skill-copy button above its prompt with feedback that keeps the page in place, keeps the front page's frame fitted during mobile scrolling, and gives diagnostic codes a compact Reading Room overview.
 
 ## [0.2.0] - 2026-11-11

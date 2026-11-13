@@ -101,4 +101,4 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 
 ## Editor tooling candidate
 
-The isolated `0.2.1-rc.1` research branch adds LSP, formatting, exact test discovery/reporting, mapped-block line coverage, DAP source debugging, and graph inspection. See [Tooling](Tooling.md#editor-tooling-research-candidate) for interfaces and present limits. This tooling candidate is separate from stable release work; it changes no language syntax or runtime semantics.
+The `0.2.1-rc.2` research candidate provides LSP, formatting, exact test discovery/reporting, mapped-block line coverage, DAP source debugging, and graph inspection. See [Tooling](Tooling.md#editor-tooling-research-candidate) for interfaces and present limits. The candidate also covers incomplete-buffer formatting, declaration/import completion, promoted-name completion, readable documentation hovers, and valid outline ranges with editor protocol regression tests. This tooling candidate is separate from stable release work; it changes no language syntax or runtime semantics.
