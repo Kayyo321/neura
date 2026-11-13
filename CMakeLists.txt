@@ -113,6 +113,7 @@ set(neura_nvm_sources
     src/jit/aarch64.cpp
     src/jit/compiler.cpp
     src/jit/jit.cpp
+    src/jit/x64.cpp
     src/jit/x86_64.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
@@ -602,6 +603,15 @@ if(BUILD_TESTING)
         add_test(NAME ir-optimization-${suite}
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+
+    # The x86-64 encoder of tier 3 (src/jit/x64.cpp): every instruction form
+    # against an assembler's bytes, labels and relaxation, and small functions
+    # run on x86-64 Linux. It links the runtime for jit::Program only.
+    add_executable(neura_x64_tests tests/jit/x64_tests.cpp)
+    target_link_libraries(neura_x64_tests PRIVATE neura_nvm)
+    target_include_directories(neura_x64_tests PRIVATE tests)
+    neura_target_defaults(neura_x64_tests)
+    add_test(NAME backend-x64 COMMAND neura_x64_tests)
 
     add_executable(neura_backend_tests
         tests/backend/allocation_fault.cpp
