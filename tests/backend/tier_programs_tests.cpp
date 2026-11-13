@@ -23,7 +23,7 @@ nvm::TierOptions eager_programs() {
     options.search_after = 1;
     options.minimum_proof_work = std::uint64_t{1} << 30;
     options.region_after = 1;
-    options.programs = true;
+    options.programs = nvm::TierOptions::Programs::On;
     return options;
 }
 

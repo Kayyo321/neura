@@ -65,11 +65,13 @@ struct TierOptions {
     std::uint32_t region_after = 1000;
     std::uint32_t region_patience = 8;
     // Function programs (tier2.hpp, Region::program): formed in place of
-    // regions only when this is set (NEURA_TIER_PROGRAMS=1 sets it for every
-    // cache of the process). When a function's program is formed, at most
+    // regions when this is On, or when it is Environment (the default) and
+    // NEURA_TIER_PROGRAMS=1 is set. Off keeps regions whatever the
+    // environment says. When a function's program is formed, at most
     // `program_proofs` of its hinted blocks that were never tried are
     // proven then, so that blocks which have not run yet are not left out.
-    bool programs = false;
+    enum class Programs : std::uint8_t { Environment, Off, On };
+    Programs programs = Programs::Environment;
     std::uint32_t program_proofs = 32;
     // Programs are compiled for the region check of NEURA_TIER_CHECK=1:
     // calls and returns as deoptimizations (set from the environment).
@@ -120,6 +122,8 @@ struct RegionCounts {
     std::uint64_t calls = 0;
     std::uint64_t returns = 0;
     std::uint64_t traps = 0;
+    // Steps run in programs (a part of the steps run in regions).
+    std::uint64_t program_steps = 0;
 };
 
 struct TierStatistics {
@@ -240,7 +244,7 @@ public:
     // function's blocks get regions. Settled and pending as for region().
     // Only when TierOptions::programs is set.
     RegionResolution program(std::uint32_t function, std::uint64_t arrivals);
-    bool programs() const { return options_.programs; }
+    bool programs() const { return options_.programs == TierOptions::Programs::On; }
     std::uint64_t count_region(std::uint32_t function, std::uint32_t block) {
         return region_counts_[first_entry_[function] + block].fetch_add(1, std::memory_order_relaxed) + 1;
     }

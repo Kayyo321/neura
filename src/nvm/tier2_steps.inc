@@ -514,6 +514,7 @@
                 function_steps_[frames_.back().function] += done;
             }
             tier_steps_.region += done;
+            region_counts_.program_steps += done;
             block_plan(program->function, program->entry).region_steps += done;
             done = 0;
         };

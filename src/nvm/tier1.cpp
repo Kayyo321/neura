@@ -119,7 +119,8 @@ std::string describe(const TierStatistics& s) {
         out += "tier: programs " + std::to_string(s.programs) + " (" + std::to_string(s.program_blocks) +
                " blocks, " + std::to_string(s.program_stubs) + " stubs, " + std::to_string(s.program_entries) +
                " entries); calls " + std::to_string(r.calls) + ", returns " + std::to_string(r.returns) +
-               ", helpers 0, traps in place " + std::to_string(r.traps) + "\n";
+               ", helpers 0, traps in place " + std::to_string(r.traps) + "; steps in programs " +
+               std::to_string(r.program_steps) + "\n";
         for (const auto& [reason, count] : s.program_rejections) {
             out += "tier: no program " + std::to_string(count) + ": " + reason + "\n";
         }
@@ -195,7 +196,9 @@ bool tier_programs_enabled() {
 
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
-    if (tier_programs_enabled()) options_.programs = true;
+    if (options_.programs == TierOptions::Programs::Environment) {
+        options_.programs = tier_programs_enabled() ? TierOptions::Programs::On : TierOptions::Programs::Off;
+    }
     if (tier_check_enabled()) options_.checkable = true;
     if (tier_eager()) {
         options_.hint_after = 1;

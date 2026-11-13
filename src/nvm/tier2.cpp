@@ -1699,6 +1699,7 @@ void TierCache::add_region_events(const RegionCounts& counts,
     total.calls += counts.calls;
     total.returns += counts.returns;
     total.traps += counts.traps;
+    total.program_steps += counts.program_steps;
     for (const auto& [key, value] : steps) statistics_.region_steps[key] += value;
     for (const auto& [key, value] : deopts) statistics_.region_deopts[key] += value;
     for (const auto& [key, value] : leaves) statistics_.region_leaves[key] += value;
