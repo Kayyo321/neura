@@ -611,6 +611,7 @@ if(BUILD_TESTING)
         tests/backend/reference_tests.cpp
         tests/backend/tier_tests.cpp
         tests/backend/tier2_tests.cpp
+        tests/backend/tier_programs_tests.cpp
         tests/backend/tier_shadow_tests.cpp
         tests/backend/vm_tests.cpp
         tests/jit/jit_tests.cpp

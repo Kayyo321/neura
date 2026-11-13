@@ -392,7 +392,9 @@ public:
         }
         tier_ = limits_.tier_cache;
         tier_check_ = tier_check_enabled();
-        tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2;
+        // Regions and programs skip prepare_step, so a block observer (which
+        // sees every step) runs below tier 2.
+        tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2 && !limits_.block_observer;
         // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
         // compilation"). --jit=on fails here, before the run starts, when
         // the platform cannot run it.
@@ -636,6 +638,12 @@ private:
         std::size_t base = 0;
         // The first frame of a callback: its return ends invoke_callback.
         bool boundary = false;
+        // Tier machinery (tier2_steps.inc): the function program (a
+        // tier2::Region) whose Call pushed this frame, where the caller goes
+        // on when the frame returns inside a program; null when tier 1 or the
+        // dispatcher pushed it. Nothing but run_program reads it: it is not
+        // compared by the shadow oracle, dumped, traced, or shown.
+        const void* called_from = nullptr;
     };
 
     // One frame of a FrameStack: its header and its slots. Valid until a
@@ -659,6 +667,8 @@ private:
         std::size_t size() const { return headers_.size(); }
         bool empty() const { return headers_.empty(); }
         const FrameHeader& header(std::size_t index) const { return headers_[index]; }
+        // The innermost frame's FrameHeader::called_from.
+        void set_called_from(const void* program) { headers_.back().called_from = program; }
 
         Frame operator[](std::size_t index) {
             auto& header = headers_[index];
@@ -677,7 +687,7 @@ private:
         void push(std::uint32_t function, std::size_t slot_count, std::span<const std::uint64_t> arguments,
                   std::uint32_t return_slot, std::uint32_t return_block) {
             const auto base = slots_.size();
-            headers_.push_back(FrameHeader{function, 0, return_slot, return_block, base, false});
+            headers_.push_back(FrameHeader{function, 0, return_slot, return_block, base, false, nullptr});
             // Shrinking never frees, so growth past a popped frame only
             // value-initializes: every new slot is zero and uninitialized.
             slots_.resize(base + slot_count);
@@ -2815,6 +2825,8 @@ private:
         RegionState region_state = RegionState::Unknown;
         std::uint64_t region_threshold = 0;
         const tier2::Region* region = nullptr;
+        // For a function program (region->program): the entry at this block.
+        std::uint32_t program_entry = 0;
         // Its native code (src/jit), or null, for `native_region`.
         const tier2::Region* native_region = nullptr;
         const jit::Program* native = nullptr;
@@ -3936,6 +3948,11 @@ private:
     std::vector<std::uint64_t> region_registers_;
     std::vector<std::uint8_t> region_initialized_;
     std::vector<std::uint64_t> region_arguments_;
+    // Function programs (tier2_steps.inc): the run's register image of each
+    // program the run has entered, by program number, and the program of
+    // each function the run has been given.
+    std::vector<std::vector<std::uint64_t>> program_images_;
+    std::vector<const tier2::Region*> function_programs_;
     RegionCounts region_counts_;
     // Native code (src/jit): whether regions run it, the context it reads
     // and writes, and an exception a helper caught, rethrown when the code

@@ -64,6 +64,16 @@ struct TierOptions {
     // a region formed without them is formed again later.
     std::uint32_t region_after = 1000;
     std::uint32_t region_patience = 8;
+    // Function programs (tier2.hpp, Region::program): formed in place of
+    // regions only when this is set (NEURA_TIER_PROGRAMS=1 sets it for every
+    // cache of the process). When a function's program is formed, at most
+    // `program_proofs` of its hinted blocks that were never tried are
+    // proven then, so that blocks which have not run yet are not left out.
+    bool programs = false;
+    std::uint32_t program_proofs = 32;
+    // Programs are compiled for the region check of NEURA_TIER_CHECK=1:
+    // calls and returns as deoptimizations (set from the environment).
+    bool checkable = false;
 };
 
 // Steps of one execution by how the block was evaluated. `lifted` ran a
@@ -105,6 +115,11 @@ struct RegionCounts {
     // Entries that ran the region's native code (the rest ran the region
     // interpreter).
     std::uint64_t native = 0;
+    // Function programs: calls and returns run inside a program, and faults
+    // of a call that became the run's trap there.
+    std::uint64_t calls = 0;
+    std::uint64_t returns = 0;
+    std::uint64_t traps = 0;
 };
 
 struct TierStatistics {
@@ -152,6 +167,13 @@ struct TierStatistics {
     std::uint64_t jit_compiled = 0;
     std::uint64_t jit_bytes = 0;
     std::map<std::string, std::uint64_t> jit_failures;
+    // Function programs formed, their blocks, stubs and entries, and why
+    // functions got none.
+    std::uint64_t programs = 0;
+    std::uint64_t program_blocks = 0;
+    std::uint64_t program_stubs = 0;
+    std::uint64_t program_entries = 0;
+    std::map<std::string, std::uint64_t> program_rejections;
 };
 
 // The lifted blocks of one validated image, shared by every execution of it:
@@ -213,6 +235,12 @@ public:
         std::uint64_t retry_after = 0;
     };
     RegionResolution region(std::uint32_t function, std::uint32_t block, std::uint64_t arrivals);
+    // The function program of `function` (Region::program), formed now that
+    // one of its blocks has had `arrivals` dispatcher arrivals, or null: the
+    // function's blocks get regions. Settled and pending as for region().
+    // Only when TierOptions::programs is set.
+    RegionResolution program(std::uint32_t function, std::uint64_t arrivals);
+    bool programs() const { return options_.programs; }
     std::uint64_t count_region(std::uint32_t function, std::uint32_t block) {
         return region_counts_[first_entry_[function] + block].fetch_add(1, std::memory_order_relaxed) + 1;
     }
@@ -279,6 +307,9 @@ private:
         bool refreshing = false;
     };
     std::vector<RegionEntry> regions_;
+    // Function programs, by function, and the next program number.
+    std::vector<RegionEntry> programs_;
+    std::uint32_t next_program_id_ = 0;
     // Regions replaced by a refresh, which runs may still hold.
     std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;
     // Native code by region; null where compilation failed.
@@ -397,5 +428,8 @@ bool tier_shadow_heap_always();
 // short test runs exercise tiers 1 and 2. It changes only which blocks run
 // lifted or in regions, and when.
 bool tier_eager();
+
+// NEURA_TIER_PROGRAMS=1: caches form function programs (TierOptions::programs).
+bool tier_programs_enabled();
 
 } // namespace neura::nvm
