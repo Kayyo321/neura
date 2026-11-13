@@ -868,4 +868,93 @@ NEURA_TEST(heap, published_layout_matches_the_operations) {
     check_equal(Heap::first_field_offset(130), Heap::initialized_offset() + 24, "three initialized words");
 }
 
+namespace {
+
+struct Walks {
+    std::vector<std::uint64_t> each;
+    std::vector<std::uint64_t> next;
+    std::vector<std::pair<std::uint64_t, std::uint64_t>> dropped;
+    std::size_t pages = 0;
+};
+
+// The live entries by for_each() and by next_live(), in order.
+void walk(const Heap& heap, Walks& walks) {
+    heap.for_each([&](std::uint64_t handle, Heap::Ref) { walks.each.push_back(handle); });
+    for (auto h = heap.next_live(0); h != 0; h = heap.next_live(h)) walks.next.push_back(h);
+}
+
+// Three entries that stay live, then `cycles` allocations of garbage that
+// sweeps (every 100 allocations) and free() (every seventh) drop.
+Walks after_cycles(std::size_t cycles) {
+    Heap heap;
+    const std::array<std::uint64_t, 3> keep{heap.create_object(1, 2), heap.create_text(EntryKind::Text, 2, "kept"),
+                                           heap.create_filled(EntryKind::List, 3, ElementWidth::W4, 3, 7)};
+    const auto mark_kept = [&](std::size_t count) {
+        for (std::size_t i = 0; i < count; ++i) heap.mark(live(heap, keep[i]));
+    };
+    for (std::size_t i = 0; i < cycles; ++i) {
+        const auto h = heap.create_filled(EntryKind::Array, 1, ElementWidth::W1, i % 50, 1);
+        if (i % 7 == 0) heap.free(h);
+        if (i % 100 == 99) {
+            mark_kept(3);
+            heap.sweep([](std::uint64_t, std::uint64_t) {});
+        }
+    }
+    mark_kept(3);
+    heap.sweep([](std::uint64_t, std::uint64_t) {});
+    Walks walks;
+    walk(heap, walks);
+    // Nothing left to drop but keep[2]: the pages are the first and the
+    // page of the next handle.
+    mark_kept(2);
+    heap.sweep([&](std::uint64_t handle, std::uint64_t cells) { walks.dropped.emplace_back(handle, cells); });
+    walks.pages = heap.last_sweep_pages();
+    return walks;
+}
+
+} // namespace
+
+NEURA_TEST(heap, walks_do_not_grow_with_the_handles_ever_assigned) {
+    const auto few = after_cycles(1000);
+    const auto many = after_cycles(100000);
+    const std::vector<std::uint64_t> kept{1, 2, 3};
+    check(few.each == kept && many.each == kept, "for_each visits the live entries only");
+    check(few.next == kept && many.next == kept, "next_live visits the live entries only");
+    check(few.dropped == many.dropped &&
+              few.dropped == std::vector<std::pair<std::uint64_t, std::uint64_t>>{{3, 4}},
+          "a sweep drops the same entry with the same cells");
+    check_equal(few.pages, std::size_t{2}, "pages a sweep visits after 10^3 cycles");
+    check_equal(many.pages, few.pages, "pages a sweep visits after 10^5 cycles");
+}
+
+NEURA_TEST(heap, walks_skip_released_pages_between_live_ones) {
+    // Ten full pages (handles 1 to 2560, pages 0 to 10); live entries are
+    // left in the first, a middle, and the last page, freed one by one.
+    Heap heap;
+    for (int i = 0; i < 2560; ++i) heap.create_object(1, 1);
+    const std::vector<std::uint64_t> kept{1, 1280, 2560};
+    for (std::uint64_t h = 1; h <= 2560; ++h) {
+        if (std::find(kept.begin(), kept.end(), h) == kept.end()) heap.free(h);
+    }
+    Walks walks;
+    walk(heap, walks);
+    check(walks.each == kept && walks.next == kept, "the walks find the three entries in handle order");
+    check_equal(heap.next_live(300), std::uint64_t{1280}, "next_live from inside a released page");
+    check_equal(heap.next_live(1279), std::uint64_t{1280}, "next_live from the handle before");
+    check_equal(heap.next_live(2560), std::uint64_t{0}, "nothing after the last");
+    check_equal(heap.next_live(std::numeric_limits<std::uint64_t>::max()), std::uint64_t{0}, "the largest handle");
+    for (const auto h : kept) heap.mark(live(heap, h));
+    std::vector<std::uint64_t> dropped;
+    heap.sweep([&](std::uint64_t handle, std::uint64_t) { dropped.push_back(handle); });
+    check(dropped.empty(), "nothing dropped");
+    check_equal(heap.last_sweep_pages(), std::size_t{3}, "the sweep visits the three pages with entries");
+    heap.mark(live(heap, 2560));
+    heap.sweep([&](std::uint64_t handle, std::uint64_t) { dropped.push_back(handle); });
+    check(dropped == std::vector<std::uint64_t>{1, 1280}, "a sweep drops in handle order");
+    check_equal(heap.create_object(1, 0), std::uint64_t{2561}, "handles keep counting");
+    walks = {};
+    walk(heap, walks);
+    check(walks.each == (std::vector<std::uint64_t>{2560, 2561}) && walks.next == walks.each, "walks after the sweep");
+}
+
 } // namespace neura::testing

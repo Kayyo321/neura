@@ -135,13 +135,16 @@ public:
     // the live entries in handle order, for comparing two heaps entry by
     // entry.
     std::uint64_t next_live(std::uint64_t handle) const {
-        for (auto h = handle + 1; h != 0 && h <= last_; ++h) {
-            const auto page = h >> page_bits;
-            if (!pages_[page]) {
-                h |= page_mask;
-                continue;
+        const auto from = handle + 1;
+        if (from == 0 || from > last_) return 0;
+        const auto first = static_cast<std::size_t>(from >> page_bits);
+        for (auto at = std::lower_bound(live_pages_.begin(), live_pages_.end(), first); at != live_pages_.end(); ++at) {
+            const auto page = *at;
+            const auto& stored = pages_[page];
+            if (!stored) continue;
+            for (auto index = page == first ? static_cast<std::size_t>(from & page_mask) : 0; index < page_size; ++index) {
+                if (stored->entries[index]) return (static_cast<std::uint64_t>(page) << page_bits) | index;
             }
-            if (pages_[page]->entries[h & page_mask]) return h;
         }
         return 0;
     }
@@ -150,7 +153,7 @@ public:
     // visitor must not change the heap.
     template <typename Visit>
     void for_each(Visit&& visit) const {
-        for (std::size_t page = 0; page < pages_.size(); ++page) {
+        for (const auto page : live_pages_) {
             if (!pages_[page]) continue;
             for (std::size_t index = 0; index < page_size; ++index) {
                 if (auto* item = pages_[page]->entries[index]) {
@@ -413,7 +416,12 @@ public:
         auto& stored = pages_[page];
         auto& item = stored->entries[handle & page_mask];
         release(std::exchange(item, nullptr));
-        if (--stored->live == 0 && page < ((last_ + 1) >> page_bits)) stored.reset();
+        if (--stored->live == 0 && page < ((last_ + 1) >> page_bits)) {
+            stored.reset();
+            // The page's index stays in live_pages_ until it is compacted,
+            // once at least half of the list is released pages.
+            if (++released_pages_ * 2 > live_pages_.size()) compact_pages();
+        }
     }
 
     // --- Collection -----------------------------------------------------
@@ -456,9 +464,15 @@ public:
     // frees it. `dropped` must not use the heap.
     template <typename Dropped>
     void sweep(Dropped&& dropped) {
-        for (std::size_t page = 0; page < pages_.size(); ++page) {
+        // Visits only the pages that exist, in ascending order, and drops
+        // the released ones from live_pages_ as it goes.
+        std::size_t kept = 0;
+        swept_pages_ = 0;
+        for (std::size_t at = 0; at < live_pages_.size(); ++at) {
+            const auto page = live_pages_[at];
             auto& stored = pages_[page];
             if (!stored) continue;
+            ++swept_pages_;
             for (std::size_t index = 0; index < page_size; ++index) {
                 auto& item = stored->entries[index];
                 if (!item) continue;
@@ -470,9 +484,19 @@ public:
                 release(std::exchange(item, nullptr));
                 --stored->live;
             }
-            if (stored->live == 0 && page < ((last_ + 1) >> page_bits)) stored.reset();
+            if (stored->live == 0 && page < ((last_ + 1) >> page_bits)) {
+                stored.reset();
+                continue;
+            }
+            live_pages_[kept++] = page;
         }
+        live_pages_.resize(kept);
+        released_pages_ = 0;
     }
+
+    // The pages the last sweep() visited: those that existed. For tests of
+    // the cost of a collection; it decides nothing.
+    std::size_t last_sweep_pages() const { return swept_pages_; }
 
     // --- Comparison -----------------------------------------------------
 
@@ -866,7 +890,21 @@ private:
         const auto page = (last_ + 1) >> page_bits;
         if (page >= pages_.size()) pages_.resize(page + 1);
         auto& stored = pages_[page];
-        if (!stored) stored = std::make_unique<Page>();
+        if (!stored) {
+            live_pages_.push_back(static_cast<std::size_t>(page));
+            try {
+                stored = std::make_unique<Page>();
+            } catch (...) {
+                live_pages_.pop_back();
+                throw;
+            }
+        }
+    }
+
+    // Removes the indices of released pages from live_pages_.
+    void compact_pages() {
+        std::erase_if(live_pages_, [this](std::size_t page) { return !pages_[page]; });
+        released_pages_ = 0;
     }
 
     // Stores an entry under handle last_handle() + 1, whose page
@@ -932,6 +970,14 @@ private:
 
     Blocks blocks_;
     std::vector<std::unique_ptr<Page>> pages_;
+    // The indices of the pages that exist, ascending, so that the walks in
+    // handle order (sweep, for_each, next_live) skip released pages. A page
+    // is appended when its first handle is reserved, which is above every
+    // page before it. The index of a page that free() releases stays until
+    // a sweep or compact_pages() removes it; released_pages_ counts those.
+    std::vector<std::size_t> live_pages_;
+    std::size_t released_pages_ = 0;
+    std::size_t swept_pages_ = 0;
     std::uint64_t last_ = 0;
     std::uint64_t last_identity_ = 0;
 };
