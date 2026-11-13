@@ -5,10 +5,21 @@
 #include "fixtures.hpp"
 #include "nvm/heap.hpp"
 
+#include "neura_digest.h"
+#include "neura_hash.h"
+
 #include <algorithm>
+#include <atomic>
 #include <fstream>
+#include <limits>
+#include <span>
 #include <string>
 #include <vector>
+
+namespace neura::nvm {
+// Kernel arguments passed in place (src/nvm/machine.cpp); for tests only.
+extern std::atomic<std::uint64_t> kernel_views_in_place;
+} // namespace neura::nvm
 
 namespace neura::testing {
 namespace {
@@ -294,6 +305,247 @@ export let Main = module : program.Entry (
     check(run.event.kind == nvm::Event::Kind::Completed, describe(run, image));
     const auto widths = check_declared_widths(run, image);
     check(has(widths, 1) && has(widths, 4) && has(widths, 8), "collections of widths 1, 4, and 8 are live");
+}
+
+namespace {
+
+// A function that allocates a collection of `type_index` from `elements`
+// (constants), calls kernel 0 on it, and returns the kernel's result slot
+// (`result_type`) or, for a void kernel, the collection.
+nvr::Function kernel_function(std::uint32_t collection_type, std::uint32_t result_type,
+                              const std::vector<nvr::Value>& elements, std::vector<nvr::Value> arguments) {
+    const nvr::Value collection{ValueKind::Slot, collection_type, 0};
+    for (auto& argument : arguments) {
+        if (argument.kind == ValueKind::Slot) argument = collection;
+    }
+    nvr::Function function;
+    function.result_type = result_type == 0 ? collection_type : result_type;
+    function.frame_types = {collection_type, result_type == 0 ? collection_type : result_type};
+    auto call = state_block(Op::Kernel, 2, result_type == 0 ? nvr::absent : 1, std::move(arguments), 0);
+    function.blocks = {state_block(Op::AllocateCollection, 1, 0, elements, collection_type), std::move(call),
+                       return_block({result_type == 0 ? collection : nvr::Value{ValueKind::Slot, result_type, 1}})};
+    return function;
+}
+
+struct KernelRun {
+    nvm::Event event;
+    std::uint64_t in_place = 0;
+    std::vector<std::uint64_t> collection;
+};
+
+// Runs function 0 of `image` from its start and reads the collection in
+// slot 0 of the innermost frame (after a trap) or the returned one (when
+// `returns_collection`).
+KernelRun run_kernel_image(const nvr::Image& image, std::uint32_t collection_type, bool returns_collection) {
+    const auto before = nvm::kernel_views_in_place.load();
+    nvm::Execution execution(image, std::uint32_t{0}, std::span<const std::uint64_t>{});
+    KernelRun run;
+    run.event = execution.advance();
+    run.in_place = nvm::kernel_views_in_place.load() - before;
+    std::uint64_t handle = 0;
+    if (run.event.kind == nvm::Event::Kind::Trapped) {
+        const auto snapshot = execution.debug_snapshot();
+        check(!snapshot.threads.empty() && !snapshot.threads[0].frames.empty(), "the trapped frame is kept");
+        handle = snapshot.threads[0].frames[0].slots[0].bits;
+    } else if (returns_collection) {
+        handle = run.event.result;
+    }
+    if (handle != 0) {
+        for (const auto& child : execution.debug_children(collection_type, handle, 0, 1000)) {
+            run.collection.push_back(child.bits);
+        }
+    }
+    return run;
+}
+
+// Gives `image` an entry function of the entry signature that returns 0,
+// after its other functions; the tests start function 0 directly.
+void add_entry(nvr::Image& image) {
+    const auto text = static_cast<std::uint32_t>(image.types.size());
+    image.types.push_back({Kind::Text});
+    image.types.push_back({Kind::Array, 0, text});
+    image.types.push_back({Kind::Signed, 32});
+    image.constants.push_back({text + 2, {0, 0, 0, 0}});
+    nvr::Function entry;
+    entry.parameter_count = 1;
+    entry.result_type = text + 2;
+    entry.frame_types = {text + 1};
+    entry.blocks = {return_block({{ValueKind::Constant, text + 2, static_cast<std::uint32_t>(image.constants.size() - 1)}})};
+    image.entry = static_cast<std::uint32_t>(image.functions.size());
+    image.functions.push_back(std::move(entry));
+}
+
+std::string describe_event(const nvm::Event& event, const nvr::Image& image) {
+    Finished run;
+    run.event = event;
+    return describe(run, image);
+}
+
+std::vector<std::uint8_t> le_bytes(std::uint64_t bits, unsigned bytes) {
+    std::vector<std::uint8_t> out;
+    for (unsigned i = 0; i < bytes; ++i) out.push_back(static_cast<std::uint8_t>(bits >> (8 * i)));
+    return out;
+}
+
+} // namespace
+
+NEURA_TEST(heap, narrow_read_only_kernel_views_run_in_place) {
+    // types: 0 void, 1 uint8, 2 uint8[list], 3 uint32, 4 uint8[], 5 int64,
+    // 6 int64[list]
+    nvr::Image base;
+    base.types = {{Kind::Void},          {Kind::Unsigned, 8}, {Kind::List, 0, 1}, {Kind::Unsigned, 32},
+                  {Kind::Array, 0, 1},   {Kind::Signed, 64},  {Kind::List, 0, 5}};
+    base.graphs = {nvr::Graph{}};
+    const std::vector<std::uint8_t> bytes{0xff, 0x80, 0x01, 0x00, 0x7f, 0x10, 0xfe};
+    const std::vector<std::int64_t> integers{-5, 3, std::numeric_limits<std::int64_t>::min(), 0, 1};
+    std::vector<nvr::Value> byte_elements;
+    std::vector<nvr::Value> integer_elements;
+    for (const auto b : bytes) {
+        byte_elements.push_back({ValueKind::Constant, 1, static_cast<std::uint32_t>(base.constants.size())});
+        base.constants.push_back({1, {b}});
+    }
+    for (const auto i : integers) {
+        integer_elements.push_back({ValueKind::Constant, 5, static_cast<std::uint32_t>(base.constants.size())});
+        base.constants.push_back({5, le_bytes(static_cast<std::uint64_t>(i), 8)});
+    }
+    const neura_view_u8 view{bytes.data(), bytes.size()};
+    const neura_bytes byte_view{bytes.data(), bytes.size()};
+    const neura_view_i64 integer_view{integers.data(), integers.size()};
+    struct Case {
+        const char* label;
+        nvr::KernelEntry kernel;
+        std::uint32_t collection;
+        bool bytes;
+        std::uint32_t expected;
+    };
+    for (const auto& c : {Case{"hash.list_u8 of a uint8 list", {"neura.hash.list_u8", 1, {2}, 3}, 2, true,
+                               neura_k_hash_list_u8(view)},
+                          Case{"hash.list_u8 of a uint8 array", {"neura.hash.list_u8", 1, {4}, 3}, 4, true,
+                               neura_k_hash_list_u8(view)},
+                          Case{"crc32 of a uint8 list", {"neura.digest.crc32", 1, {2}, 3}, 2, true,
+                               neura_k_digest_crc32(byte_view)},
+                          Case{"hash.list_i64 of an int64 list", {"neura.hash.list_i64", 1, {6}, 3}, 6, false,
+                               neura_k_hash_list_i64(integer_view)}}) {
+        auto image = base;
+        image.kernels = {c.kernel};
+        image.functions = {kernel_function(c.collection, 3, c.bytes ? byte_elements : integer_elements,
+                                           {{ValueKind::Slot, c.collection, 0}})};
+        add_entry(image);
+        image = nvr::load(nvr::encode(image));
+        const auto run = run_kernel_image(image, c.collection, false);
+        check(run.event.kind == nvm::Event::Kind::Completed, std::string(c.label) + ": " + describe_event(run.event, image));
+        check_equal(run.event.result, std::uint64_t{c.expected}, std::string(c.label) + ": the kernel's result");
+        check_equal(run.in_place, std::uint64_t{1}, std::string(c.label) + ": the view is passed in place");
+    }
+}
+
+NEURA_TEST(heap, writable_kernel_views_are_copied_and_written_back_on_success_only) {
+    // types: 0 void, 1 int64, 2 int64[list], 3 text
+    nvr::Image base;
+    base.types = {{Kind::Void}, {Kind::Signed, 64}, {Kind::List, 0, 1}, {Kind::Text}};
+    base.graphs = {nvr::Graph{}};
+    std::vector<nvr::Value> elements;
+    for (const std::int64_t v : {9, -1, 7, 0, 3}) {
+        elements.push_back({ValueKind::Constant, 1, static_cast<std::uint32_t>(base.constants.size())});
+        base.constants.push_back({1, le_bytes(static_cast<std::uint64_t>(v), 8)});
+    }
+    const auto text = static_cast<std::uint32_t>(base.constants.size());
+    base.constants.push_back({3, {'a', ',', 'b'}});
+    base.constants.push_back({3, {}});
+    base.constants.push_back({1, le_bytes(10, 8)});
+
+    auto sort = base;
+    sort.kernels = {{"neura.sort.i64", 1, {2}, 0}};
+    sort.functions = {kernel_function(2, 0, elements, {{ValueKind::Slot, 2, 0}})};
+    add_entry(sort);
+    sort = nvr::load(nvr::encode(sort));
+    const auto sorted = run_kernel_image(sort, 2, true);
+    check(sorted.event.kind == nvm::Event::Kind::Completed, "sort: " + describe_event(sorted.event, sort));
+    const auto bits = [](std::int64_t v) { return static_cast<std::uint64_t>(v); };
+    check(sorted.collection == std::vector<std::uint64_t>{bits(-1), 0, 3, 7, 9}, "sort writes the list back");
+    check_equal(sorted.in_place, std::uint64_t{0}, "a writable view is copied");
+
+    // An empty separator traps after the offsets were packed: the list
+    // keeps its elements.
+    auto split = base;
+    split.kernels = {{"neura.text.split", 1, {3, 3, 1, 2}, 1}};
+    split.functions = {kernel_function(2, 1, elements,
+                                       {{ValueKind::Constant, 3, text}, {ValueKind::Constant, 3, text + 1},
+                                        {ValueKind::Constant, 1, text + 2}, {ValueKind::Slot, 2, 0}})};
+    add_entry(split);
+    split = nvr::load(nvr::encode(split));
+    const auto failed = run_kernel_image(split, 2, false);
+    check(failed.event.kind == nvm::Event::Kind::Trapped && failed.event.trap.kind == nvm::TrapKind::Program,
+          "split: " + describe_event(failed.event, split));
+    check(failed.collection == std::vector<std::uint64_t>{9, bits(-1), 7, 0, 3}, "a failed kernel leaves the list unchanged");
+    check_equal(failed.in_place, std::uint64_t{2}, "the two texts are passed in place, the offsets are copied");
+}
+
+NEURA_TEST(heap, narrow_collections_through_state_operations) {
+    // For each narrow element type: allocate a list of boundary values,
+    // append past several growth steps, write, remove, and read it back
+    // through the debugger; and repeat a value into an array.
+    struct Element {
+        nvr::Type type;
+        std::vector<std::uint64_t> values;
+    };
+    const auto max = ~std::uint64_t{0};
+    for (const auto& element : {Element{{Kind::Signed, 8}, {0x80, 0x7f, 0xff, 0}},
+                                Element{{Kind::Unsigned, 8}, {0xff, 0x80, 1}},
+                                Element{{Kind::Signed, 16}, {0x8000, 0x7fff, 0xffff, 1}},
+                                Element{{Kind::Signed, 32}, {0x8000'0000, 0x7fff'ffff, 0xffff'ffff, 1}},
+                                Element{{Kind::Float, 32}, {0x3f80'0000, 0xffff'ffff, 0x8000'0000}},
+                                Element{{Kind::Bool}, {1, 0}},
+                                Element{{Kind::Unsigned, 64}, {max, 0x8000'0000'0000'0000ULL, 1}}}) {
+        const auto width = element.type.kind == Kind::Bool ? 8U : element.type.width;
+        const auto what = std::string("element of ") + std::to_string(width) + " bits, kind " +
+                          std::to_string(static_cast<int>(element.type.kind));
+        // types: 0 void, 1 element, 2 element[list], 3 uint64, 4 element[]
+        nvr::Image image;
+        image.types = {{Kind::Void}, element.type, {Kind::List, 0, 1}, {Kind::Unsigned, 64}, {Kind::Array, 0, 1}};
+        image.graphs = {nvr::Graph{}};
+        std::vector<nvr::Value> values;
+        for (const auto v : element.values) {
+            values.push_back({ValueKind::Constant, 1, static_cast<std::uint32_t>(image.constants.size())});
+            image.constants.push_back({1, le_bytes(v, width / 8)});
+        }
+        const auto index = [&](std::uint64_t i) {
+            image.constants.push_back({3, le_bytes(i, 8)});
+            return nvr::Value{ValueKind::Constant, 3, static_cast<std::uint32_t>(image.constants.size() - 1)};
+        };
+        const nvr::Value list{ValueKind::Slot, 2, 0};
+        std::vector<std::uint64_t> expected = element.values;
+        nvr::Function function;
+        function.result_type = 2;
+        function.frame_types = {2, 4};
+        function.blocks.push_back(state_block(Op::AllocateCollection, 1, 0, values, 2));
+        for (std::uint32_t i = 0; i < 40; ++i) {
+            const auto v = i % values.size();
+            function.blocks.push_back(state_block(Op::AppendElement, i + 2, nvr::absent, {list, values[v]}));
+            expected.push_back(element.values[v]);
+        }
+        auto next = static_cast<std::uint32_t>(function.blocks.size()) + 1;
+        function.blocks.push_back(state_block(Op::WriteElement, next++, nvr::absent, {list, index(5), values[0]}));
+        expected[5] = element.values[0];
+        function.blocks.push_back(state_block(Op::RemoveElement, next++, nvr::absent, {list, index(0)}));
+        expected.erase(expected.begin());
+        function.blocks.push_back(
+            state_block(Op::RepeatCollection, next++, 1, {index(3), values[values.size() - 1]}, 4));
+        function.blocks.push_back(return_block({list}));
+        image.functions = {std::move(function)};
+        add_entry(image);
+        image = nvr::load(nvr::encode(image));
+        nvm::Execution execution(image, std::uint32_t{0}, std::span<const std::uint64_t>{});
+        const auto event = execution.advance();
+        check(event.kind == nvm::Event::Kind::Completed, what + ": " + describe_event(event, image));
+        std::vector<std::uint64_t> read;
+        for (const auto& child : execution.debug_children(2, event.result, 0, 1000)) read.push_back(child.bits);
+        check(read == expected, what + ": every element reads back its bits");
+        // The list holds 1 + n + 40 cells after the appends and one fewer
+        // after the removal; the array of 3 then adds 4.
+        check_equal(execution.peak_heap_cells(), std::uint64_t{element.values.size() + 44},
+                    what + ": cells count one per element");
+    }
 }
 
 } // namespace neura::testing
