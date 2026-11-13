@@ -2462,7 +2462,9 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         throw Diagnostic(expr.span, "expression is not callable").with_code("E0423");
     resolve(target);
     if (const auto bound = scheduler_bindings_.find(target); bound != scheduler_bindings_.end()) {
-        auto replacements = type_arguments(symbol(target).generics, expr.type_arguments, expr.span, context);
+        // A copy: type() can add symbols.
+        const auto generics = symbol(target).generics;
+        auto replacements = type_arguments(generics, expr.type_arguments, expr.span, context);
         arguments(result, expr, 1, target, replacements, context);
         result.op = IrOp::SchedulerCall;
         result.symbol = no_symbol;
@@ -3029,8 +3031,9 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
             symbol(target.symbol).kind != SymbolKind::Enum)
             throw Diagnostic(expr.span, "a parameterized type reference requires a generic enum").with_code("E0417");
-        target.type = apply_arguments(target.type,
-            type_arguments(symbol(target.symbol).generics, expr.type_arguments, expr.span, context));
+        // A copy: type() can add symbols.
+        const auto generics = symbol(target.symbol).generics;
+        target.type = apply_arguments(target.type, type_arguments(generics, expr.type_arguments, expr.span, context));
         target.span = expr.span;
         return target;
     }
@@ -5178,7 +5181,9 @@ IrNode Lowering::construct_structural(const Expr& expr, Context& context, const 
         place.symbol = field;
         place.operands.push_back(instance);
         expected_origin_ = ExpectedOrigin{member.type->span, "expected because of this type", &*member.type, true};
-        auto initial = value(*member.initializer, context, &symbol(field).type);
+        // A copy: lowering the initializer can add symbols.
+        const auto field_type = symbol(field).type;
+        auto initial = value(*member.initializer, context, &field_type);
         auto store = node(IrOp::Store, member.span);
         store.operands.push_back(std::move(place));
         store.operands.push_back(std::move(initial));

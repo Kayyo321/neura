@@ -1,0 +1,43 @@
+// A target-typed 'new' of a fields-only anonymous class whose field
+// initializer is a lambda with many locals is accepted. Lowering the lambda
+// adds a symbol for each local while the field's type is being checked.
+let make = func() -> int {
+    let made: class (
+        export let f: func() -> int = func() -> int {
+            let l0 = 0;
+            let l1 = 1;
+            let l2 = 2;
+            let l3 = 3;
+            let l4 = 4;
+            let l5 = 5;
+            let l6 = 6;
+            let l7 = 7;
+            let l8 = 8;
+            let l9 = 9;
+            let l10 = 10;
+            let l11 = 11;
+            let l12 = 12;
+            let l13 = 13;
+            let l14 = 14;
+            let l15 = 15;
+            let l16 = 16;
+            let l17 = 17;
+            let l18 = 18;
+            let l19 = 19;
+            let l20 = 20;
+            let l21 = 21;
+            let l22 = 22;
+            let l23 = 23;
+            let l24 = 24;
+            let l25 = 25;
+            let l26 = 26;
+            let l27 = 27;
+            let l28 = 28;
+            let l29 = 29;
+            let l30 = 30;
+            let l31 = 31;
+            return l31;
+        };
+    ) = new;
+    return made.f();
+};
