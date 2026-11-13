@@ -37,8 +37,6 @@ The qualification script runs ten checks and prints `PASS`, `FAIL`, or `NOT RUN`
 9. An installation of the previous published release updates to this one with `neura update`, and then builds and runs Hello World. The check is reported as not run when the previous release has no archive for the target, as for the first release, and in a trial started by hand, whose `-dev` version sorts before every published candidate.
 10. `neura uninstall --yes` leaves nothing behind, and installing again works.
 
-One test is left out on arm64: `neura-libclang-load`, which belongs to the `neura-libclang` submodule and expects `char` to be signed.
-
 Started by hand (`gh workflow run release.yml --ref <branch>`), the workflow builds and qualifies that branch as a `-dev` version and publishes nothing. Use this to try a change to the workflow before spending a tag on it.
 
 ## Before the first candidate
