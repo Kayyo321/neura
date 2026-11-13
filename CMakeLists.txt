@@ -59,6 +59,16 @@ else()
 endif()
 configure_file(src/cli/version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/version.hpp" @ONLY)
 
+# Under AddressSanitizer the NVM heap (src/nvm/heap.hpp) takes every entry
+# from operator new, so that the sanitizer checks each one. This option
+# keeps its size-class pool instead, to check the pool's own code; it has no
+# effect in a build without the sanitizer. Every target that includes the
+# heap must see the same setting, so it applies to the whole build.
+option(NEURA_HEAP_POOL_UNDER_SANITIZERS "Keep the NVM heap's size-class pool under AddressSanitizer" OFF)
+if(NEURA_HEAP_POOL_UNDER_SANITIZERS)
+    add_compile_definitions(NEURA_HEAP_POOL_UNDER_SANITIZERS=1)
+endif()
+
 function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
