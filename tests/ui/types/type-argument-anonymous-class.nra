@@ -1,0 +1,41 @@
+// A generic enum applied to a fields-only anonymous class with many fields
+// is accepted. Lowering the type argument adds a symbol for each field.
+let Optional = enum<T> (None, Some(T));
+
+let empty = func() -> bool {
+    let value = Optional<class (
+        export let a0: int;
+        export let a1: int;
+        export let a2: int;
+        export let a3: int;
+        export let a4: int;
+        export let a5: int;
+        export let a6: int;
+        export let a7: int;
+        export let a8: int;
+        export let a9: int;
+        export let a10: int;
+        export let a11: int;
+        export let a12: int;
+        export let a13: int;
+        export let a14: int;
+        export let a15: int;
+        export let a16: int;
+        export let a17: int;
+        export let a18: int;
+        export let a19: int;
+        export let a20: int;
+        export let a21: int;
+        export let a22: int;
+        export let a23: int;
+        export let a24: int;
+        export let a25: int;
+        export let a26: int;
+        export let a27: int;
+        export let a28: int;
+        export let a29: int;
+        export let a30: int;
+        export let a31: int;
+    )>.None;
+    return true;
+};

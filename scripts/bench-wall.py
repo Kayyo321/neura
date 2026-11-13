@@ -3,22 +3,30 @@
 
 Each program in tests/bench-wall/neura/ is built once with `neura build` and
 run with `neura run --stats` several times; the result is the median wall
-time of the process, the program's output, and the `steps` and `peak heap
-cells` it reports. When `javac` and `java` are on PATH, the counterpart in
-tests/bench-wall/java/ is compiled and run the same number of times with the
-same size, and its output must match the Neura program's byte for byte.
-Without them the run is Neura-only and says so.
+time of the process, the median of its peak resident memory, the program's
+output, and the `steps` and `peak heap cells` it reports. When `javac` and
+`java` are on PATH, the counterpart in tests/bench-wall/java/ is compiled
+on its own and run the same number of times with the same size, and its
+output must match the Neura program's byte for byte. Without them the run is
+Neura-only and says so. The wall time of the one `neura build` and the one
+`javac` of each program is recorded too.
 
-Every program's first line names two sizes, `// sizes: quick <n> full <n>`.
---quick uses the first, which keeps each program to a few seconds on the
-reference evaluator; the default uses the second. The method is described in
-docs/Benchmarks.md.
+Every program's first line names three sizes,
+`// sizes: quick <n> full <n> long <n>`. --quick uses the first, which keeps
+each program to a few seconds on the reference evaluator; the default uses
+the second, about ten times the work; --long uses the third, which keeps the
+Java program busy for a few seconds, so that start-up does not dominate it.
+The method is described in docs/Benchmarks.md.
 
     scripts/bench-wall.py --quick
     scripts/bench-wall.py --neura build/neura --runs 7 --only nbody,sieve
+    scripts/bench-wall.py --long --runs 3
     scripts/bench-wall.py --size sieve=1000000 --out-dir /tmp/bench
 
-Results go to <out-dir>/bench-wall.json and <out-dir>/bench-wall.md.
+Results go to <out-dir>/bench-wall.json and <out-dir>/bench-wall.md. Peak
+resident memory is the `ru_maxrss` of each measured process alone, read with
+os.wait4 when it exits, in KiB in the JSON (`median_peak_rss_kib`) and in MiB
+in the table.
 """
 
 import argparse
@@ -31,12 +39,15 @@ import shutil
 import statistics
 import subprocess
 import sys
+import tempfile
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 BENCH = ROOT / "tests" / "bench-wall"
-SIZES = re.compile(r"^// sizes: quick (\d+) full (\d+)$", re.MULTILINE)
+SIZES = re.compile(r"^// sizes: quick (\d+) full (\d+) long (\d+)$", re.MULTILINE)
+SIZES_FORMAT = "// sizes: quick <n> full <n> long <n>"
+MODES = ("quick", "full", "long")
 STATS = re.compile(r"^stats: steps (\d+), peak heap cells (\d+)", re.MULTILINE)
 
 
@@ -47,9 +58,21 @@ def java_class(name):
 
 
 def timed(command, cwd):
-    started = time.perf_counter()
-    process = subprocess.run(command, cwd=cwd, capture_output=True)
-    return time.perf_counter() - started, process
+    """Runs `command` to completion: its wall time, the completed process,
+    and its peak resident memory in KiB. The memory is the child's own
+    ru_maxrss from os.wait4, not a maximum over every child so far."""
+    with tempfile.TemporaryFile() as stdout, tempfile.TemporaryFile() as stderr:
+        started = time.perf_counter()
+        child = subprocess.Popen(command, cwd=cwd, stdout=stdout, stderr=stderr)
+        _, status, usage = os.wait4(child.pid, 0)
+        elapsed = time.perf_counter() - started
+        child.returncode = os.waitstatus_to_exitcode(status)
+        stdout.seek(0)
+        stderr.seek(0)
+        process = subprocess.CompletedProcess(command, child.returncode, stdout.read(), stderr.read())
+    # Linux reports ru_maxrss in KiB, macOS in bytes.
+    rss_kib = usage.ru_maxrss // 1024 if sys.platform == "darwin" else usage.ru_maxrss
+    return elapsed, process, rss_kib
 
 
 def fail(message):
@@ -60,12 +83,17 @@ def parse_args():
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--neura", default=str(ROOT / "build" / "neura"), help="the neura executable")
     parser.add_argument("--runs", type=int, default=5, help="runs per program and language (default 5)")
-    parser.add_argument("--quick", action="store_true", help="use each program's quick size")
+    sizes = parser.add_mutually_exclusive_group()
+    sizes.add_argument("--quick", action="store_true", help="use each program's quick size")
+    sizes.add_argument("--long", action="store_true", help="use each program's long size")
     parser.add_argument("--only", help="comma-separated program names")
     parser.add_argument("--size", action="append", default=[], metavar="NAME=N",
                         help="override one program's size; repeatable")
     parser.add_argument("--max-steps", type=int, default=10**12,
                         help="--max-steps for neura run (default 10^12; neura's own default is 10^8)")
+    parser.add_argument("--max-heap-cells", type=int, default=2**32,
+                        help="--max-heap-cells for neura run (default 2^32; neura's own default is 2^26, which "
+                             "some long sizes exceed)")
     parser.add_argument("--no-java", action="store_true", help="skip Java even when it is installed")
     parser.add_argument("--run-option", action="append", default=[], metavar="OPTION",
                         help="pass OPTION to neura run, for example --run-option=--tier=0 (repeatable)")
@@ -78,6 +106,7 @@ def parse_args():
     args = parser.parse_args()
     if args.runs < 1:
         parser.error("--runs must be positive")
+    args.mode = "quick" if args.quick else "long" if args.long else "full"
     return args
 
 
@@ -96,8 +125,8 @@ def programs(args):
             continue
         match = SIZES.search(source.read_text())
         if not match:
-            fail(f"{source} has no '// sizes: quick <n> full <n>' line")
-        size = overrides.get(name, int(match.group(1) if args.quick else match.group(2)))
+            fail(f"{source} has no '{SIZES_FORMAT}' line")
+        size = overrides.get(name, int(match.group(MODES.index(args.mode) + 1)))
         found.append((name, source, size))
     if selected is not None:
         missing = selected - {name for name, _, _ in found}
@@ -121,11 +150,14 @@ def find_java(args):
 
 
 def median_run(command, cwd, runs, label):
+    """Runs `command` `runs` times: the median wall time, every wall time,
+    the output, the stats, and every peak resident memory in KiB."""
     times = []
+    memory = []
     output = None
     stats = None
     for index in range(runs):
-        elapsed, process = timed(command, cwd)
+        elapsed, process, rss_kib = timed(command, cwd)
         if process.returncode != 0:
             fail(f"{label} exited {process.returncode}\n{process.stdout.decode(errors='replace')}"
                  f"{process.stderr.decode(errors='replace')}")
@@ -141,7 +173,21 @@ def median_run(command, cwd, runs, label):
                 fail(f"{label} reported different stats on run {index + 1}")
             stats = current
         times.append(elapsed)
-    return statistics.median(times), times, output, stats
+        memory.append(rss_kib)
+    return statistics.median(times), times, output, stats, memory
+
+
+def memory_fields(memory):
+    """The JSON fields of the peak resident memory of a set of runs."""
+    return {"median_peak_rss_kib": statistics.median(memory), "peak_rss_kib": memory}
+
+
+def timed_build(command, cwd, label):
+    """Runs one build command: its wall time in seconds."""
+    elapsed, process, _ = timed(command, cwd)
+    if process.returncode != 0:
+        fail(f"{label} failed\n{process.stdout.decode(errors='replace')}{process.stderr.decode(errors='replace')}")
+    return elapsed
 
 
 def main():
@@ -157,46 +203,50 @@ def main():
     java, java_note = (None, "not run: tiers compared") if args.compare_tiers else find_java(args)
     print(f"neura: {neura}")
     print(f"java: {java_note}")
-    print(f"mode: {'quick' if args.quick else 'full'}, {args.runs} runs, median wall time")
+    print(f"mode: {args.mode}, {args.runs} runs, median wall time")
     if java:
         classes.mkdir(parents=True, exist_ok=True)
-        sources = [str(BENCH / "java" / f"{java_class(name)}.java") for name, _, _ in selected]
-        compiled = subprocess.run([java[0], "-d", str(classes), *sources], capture_output=True, text=True)
-        if compiled.returncode != 0:
-            fail(f"javac failed\n{compiled.stdout}{compiled.stderr}")
 
     results = []
     native = None
     for name, source, size in selected:
         image = images / f"{name}.nvr"
-        built = subprocess.run([str(neura), "build", str(source), "-o", str(image)], capture_output=True, text=True)
-        if built.returncode != 0:
-            fail(f"{name}: neura build failed\n{built.stderr}")
-        command = [str(neura), "run", "--stats", "--max-steps", str(args.max_steps), *args.run_option, str(image),
-                   "--", str(size)]
+        build_seconds = timed_build([str(neura), "build", str(source), "-o", str(image)], out,
+                                    f"{name}: neura build")
+        command = [str(neura), "run", "--stats", "--max-steps", str(args.max_steps), "--max-heap-cells",
+                   str(args.max_heap_cells), *args.run_option, str(image), "--", str(size)]
         if args.compare_tiers:
             if native is None:
                 native = native_available(neura, out, image)
                 print(f"native code: {'compared (--jit=on)' if native else 'not available here'}", flush=True)
-            results.append(compare_tiers(command, out, args.runs, name, size, native))
+            entry = compare_tiers(command, out, args.runs, name, size, native)
+            entry["build_seconds"] = build_seconds
+            results.append(entry)
             continue
-        seconds, times, output, stats = median_run(command, out, args.runs, f"{name} (neura)")
+        seconds, times, output, stats, memory = median_run(command, out, args.runs, f"{name} (neura)")
         entry = {
             "name": name,
             "size": size,
             "neura": {"median_seconds": seconds, "seconds": times,
-                      "steps": stats[0] if stats else None, "peak_heap_cells": stats[1] if stats else None},
+                      "steps": stats[0] if stats else None, "peak_heap_cells": stats[1] if stats else None,
+                      **memory_fields(memory), "build_seconds": build_seconds},
             "output": output.decode(errors="replace"),
         }
-        line = f"{name:16} size {size:>8}  neura {seconds:8.3f} s"
+        line = f"{name:16} size {size:>10}  neura {seconds:8.3f} s {mib(memory_fields(memory)):>7} MiB"
         if stats:
-            line += f"  steps {stats[0]:>12}"
+            line += f"  steps {stats[0]:>14}"
         if java:
+            # Each program is compiled on its own, so the time is that program's.
+            java_build = timed_build([java[0], "-d", str(classes), str(BENCH / "java" / f"{java_class(name)}.java")],
+                                     out, f"{name}: javac")
             java_command = [java[1], "-cp", str(classes), java_class(name), str(size)]
-            java_seconds, java_times, java_output, _ = median_run(java_command, out, args.runs, f"{name} (java)")
-            entry["java"] = {"median_seconds": java_seconds, "seconds": java_times}
+            java_seconds, java_times, java_output, _, java_memory = median_run(java_command, out, args.runs,
+                                                                               f"{name} (java)")
+            entry["java"] = {"median_seconds": java_seconds, "seconds": java_times, **memory_fields(java_memory),
+                             "build_seconds": java_build}
             entry["outputs_match"] = java_output == output
-            line += f"  java {java_seconds:8.3f} s  ratio {seconds / java_seconds:8.1f}"
+            line += (f"  java {java_seconds:8.3f} s {mib(memory_fields(java_memory)):>7} MiB  "
+                     f"ratio {seconds / java_seconds:8.1f}")
             if java_output != output:
                 line += "  OUTPUT DIFFERS"
         print(line, flush=True)
@@ -204,9 +254,10 @@ def main():
 
     report = {
         "date": datetime.datetime.now(datetime.timezone.utc).isoformat(timespec="seconds"),
-        "mode": "quick" if args.quick else "full",
+        "mode": args.mode,
         "runs": args.runs,
         "max_steps": args.max_steps,
+        "max_heap_cells": args.max_heap_cells,
         "neura": str(neura),
         "neura_version": subprocess.run([str(neura), "--version"], capture_output=True, text=True).stdout.strip(),
         "java": java_note,
@@ -273,7 +324,14 @@ def compare_tiers(command, cwd, runs, name, size, native):
                         "region_percent": shares["jit"][0],
                         "regions_compiled": compiled[0] if compiled else None,
                         "code_bytes": compiled[1] if compiled else None}
+    for key in timed_runs:
+        entry[key].update(memory_fields(timed_runs[key][4]))
     return entry
+
+
+def mib(fields):
+    """The median peak resident memory of `memory_fields` in MiB, as text."""
+    return f"{fields['median_peak_rss_kib'] / 1024:.1f}"
 
 
 def native_available(neura, cwd, image):
@@ -331,10 +389,12 @@ def markdown(report):
         "",
     ]
     if java:
-        lines += ["| Program | Size | Neura (s) | Steps | Java (s) | Neura / Java | Same output |",
-                  "| --- | ---: | ---: | ---: | ---: | ---: | --- |"]
+        lines += ["| Program | Size | Neura (s) | Steps | Java (s) | Neura / Java | Same output | Neura RSS (MiB) | "
+                  "Java RSS (MiB) | Neura build (s) | Java build (s) |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | --- | ---: | ---: | ---: | ---: |"]
     else:
-        lines += ["| Program | Size | Neura (s) | Steps | Peak heap cells |", "| --- | ---: | ---: | ---: | ---: |"]
+        lines += ["| Program | Size | Neura (s) | Steps | Peak heap cells | Neura RSS (MiB) | Neura build (s) |",
+                  "| --- | ---: | ---: | ---: | ---: | ---: | ---: |"]
     for entry in report["results"]:
         neura = entry["neura"]
         steps = "" if neura["steps"] is None else str(neura["steps"])
@@ -343,12 +403,13 @@ def markdown(report):
             if "java" in entry:
                 seconds = entry["java"]["median_seconds"]
                 same = "yes" if entry["outputs_match"] else "no"
-                row += f" {seconds:.3f} | {neura['median_seconds'] / seconds:.1f} | {same} |"
+                row += (f" {seconds:.3f} | {neura['median_seconds'] / seconds:.1f} | {same} | {mib(neura)} | "
+                        f"{mib(entry['java'])} | {neura['build_seconds']:.3f} | {entry['java']['build_seconds']:.3f} |")
             else:
-                row += " | | |"
+                row += f" | | | {mib(neura)} | | {neura['build_seconds']:.3f} | |"
         else:
             cells = "" if neura["peak_heap_cells"] is None else str(neura["peak_heap_cells"])
-            row += f" {cells} |"
+            row += f" {cells} | {mib(neura)} | {neura['build_seconds']:.3f} |"
         lines.append(row)
     return "\n".join(lines) + "\n"
 

@@ -386,6 +386,9 @@ class PreviewHandler(http.server.SimpleHTTPRequestHandler):
         # URL path does not hold, so nothing the client sent can break the header line, and start it with a single
         # slash, so that it cannot name another host.
         location = "/" + quote(location.lstrip("/"), safe=PATH_CHARACTERS)
+        # The encoding above leaves no line break to remove. Removing them here as well states the property where
+        # the header is written, in the form code scanning recognizes (CodeQL py/http-response-splitting).
+        location = location.replace("\r", "").replace("\n", "")
         self.send_response(302)
         self.send_header("Location", location)
         self.send_header("Content-Length", "0")

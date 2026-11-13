@@ -1,0 +1,73 @@
+// sizes: quick 100 full 1000 long 100000
+// Object churn in a generic list: for n rounds, copies the surviving
+// particles into a new Std.Collections.ArrayList, adds 256 new ones, replaces
+// every third new one, and filters the generation into the next list of
+// survivors. Most particles die in the round they are made; one in sixteen
+// survives for 64 rounds. The survivors fold into a checksum. The size is
+// the first argument; java/ObjectChurn.java prints the same line with
+// java.util.ArrayList.
+let array_list = import:Std.Collections.ArrayList;
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+export let ObjectChurn = module:program.Entry (
+    const Batch: int = 256;
+    const Lifetime: int = 64;
+    const Mask: int64 = 1073741823;
+
+    let Particle = class (
+        export last value: int64;
+        export last born: int;
+        export let visits: int = 0;
+
+        export let init = func(start: int64, round: int) {
+            value = start;
+            born = round;
+        };
+    );
+
+    let Random = class (
+        let seed: int64 = 12345;
+
+        export let next = func() -> int64 {
+            seed = (seed * 1103515245 + 12345) & 2147483647;
+            return seed;
+        };
+    );
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        last random: Random = new;
+        let survivors = array_list.create<Particle>();
+        let checksum: int64 = 0;
+        for (let round = 0; round < n; round = round + 1) {
+            last generation = array_list.create<Particle>();
+            for (let i = 0; i < survivors.size(); i = i + 1) {
+                generation.add(survivors.get(i));
+            }
+            last first_new = generation.size();
+            for (let i = 0; i < Batch; i = i + 1) {
+                generation.add(new Particle(random.next() % 100000, round));
+            }
+            for (let i = first_new; i < generation.size(); i = i + 3) {
+                generation.set(i, new Particle(random.next() % 100000, round));
+            }
+            last next = array_list.create<Particle>();
+            let total: int64 = 0;
+            for (let i = 0; i < generation.size(); i = i + 1) {
+                last particle = generation.get(i);
+                particle.visits = particle.visits + 1;
+                if (particle.value % 16 == 0 && round - particle.born < Lifetime) {
+                    next.add(particle);
+                    total = (total + particle.value + (particle.visits as int64)) & Mask;
+                }
+            }
+            survivors = next;
+            checksum = (checksum * 31 + (survivors.size() as int64) + total) & Mask;
+        }
+        console.println("object-churn {} {}", survivors.size(), checksum);
+        return program.ExitCode.Ok;
+    };
+);

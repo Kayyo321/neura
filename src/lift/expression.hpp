@@ -26,11 +26,15 @@ struct Expression {
     std::uint32_t type = 0;
     // "+", "-", "*", "/", "%", "==", "!=", "<", "<=", ">", ">=", "&&", "||",
     // "!", "neg", "index" (a signed index widened to uint64 after a bounds
-    // check), and "+~", an addition whose overflow is not checked, as in
-    // generated code that proves it cannot overflow. Integers also have the
+    // check), and "+~" and "-~", an addition and a subtraction whose
+    // overflow is not checked: the result is the exact sum or difference
+    // reduced modulo 2^width, as in generated code that wraps on purpose or
+    // proves it cannot overflow. Integers also have the
     // bitwise "&", "|", "^", and "~", and the shifts "<<" and ">>" (a count
     // of at least the width fails; ">>" of a signed value fills with its
-    // sign), as docs/lang/Numbers.md defines them.
+    // sign), as docs/lang/Numbers.md defines them. "hash" is the value hash
+    // of a Boolean, integer, or float operand as a uint32, as the converter
+    // builds it for hash_code (lift::value_hash in evaluate.hpp).
     std::string op;
     std::vector<std::shared_ptr<const Expression>> operands;
     // Input: position in the block's input list.

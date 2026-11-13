@@ -160,7 +160,8 @@ void Lowering::lower_accessors(SymbolId field) {
             .help("remove the clause; only an exported instance field can have 'get' and 'set' accessors");
     }
     const auto field_type = symbol(field).type;
-    const auto& name = symbol(field).name;
+    // A copy: lowering the accessor bodies adds symbols.
+    const auto name = symbol(field).name;
     for (const auto kind : {AccessorKind::Get, AccessorKind::Set}) {
         const auto function = accessor(field, kind);
         const auto found = function == no_symbol ? accessor_clauses_.end() : accessor_clauses_.find(function);

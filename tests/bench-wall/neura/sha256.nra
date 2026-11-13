@@ -1,4 +1,4 @@
-// sizes: quick 50000 full 500000
+// sizes: quick 50000 full 500000 long 300000000
 // SHA-256 (FIPS 180-4) written out over uint32 words, applied to an n-byte
 // message whose byte i is i mod 251: the digest in hexadecimal. The size is
 // the first argument; java/Sha256.java prints the same line.

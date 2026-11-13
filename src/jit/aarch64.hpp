@@ -93,6 +93,27 @@ public:
     void stp(Reg a, Reg b, Reg base, std::int32_t offset);
     void ldp(Reg a, Reg b, Reg base, std::int32_t offset);
 
+    // csel to, a, b, cond: to = cond ? a : b
+    void csel(Reg to, Reg a, Reg b, Cond cond);
+
+    // Scalar floating point on the vector registers' low halves: D (binary64)
+    // or, with `single`, S (binary32) registers.
+    // fmov d, x / fmov s, w
+    void fmov_to_fp(bool single, Reg to, Reg from);
+    // fmov x, d / fmov w, s (zero-extending)
+    void fmov_from_fp(bool single, Reg to, Reg from);
+    void fadd(bool single, Reg to, Reg a, Reg b);
+    void fsub(bool single, Reg to, Reg a, Reg b);
+    void fmul(bool single, Reg to, Reg a, Reg b);
+    void fdiv(bool single, Reg to, Reg a, Reg b);
+    void fcmp(bool single, Reg a, Reg b);
+    // fcvt s, d (to_single) or fcvt d, s
+    void fcvt(bool to_single, Reg to, Reg from);
+    // scvtf d, x / scvtf s, x
+    void scvtf(bool single, Reg to, Reg from);
+    // fcvtzs x, d / fcvtzs x, s
+    void fcvtzs(bool single, Reg to, Reg from);
+
 private:
     void emit(std::uint32_t word) { code.push_back(word); }
     void three(std::uint32_t base, Reg to, Reg a, Reg b);

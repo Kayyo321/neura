@@ -1,4 +1,4 @@
-// sizes: quick 24 full 80
+// sizes: quick 24 full 80 long 6000
 // Escape-time Mandelbrot set over an n by n grid of [-1.5, 0.5] x [-1, 1]
 // with 50 iterations: the number of points inside and a checksum of the
 // bitmap in row order. The size is the first argument; java/Mandelbrot.java

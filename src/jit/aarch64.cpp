@@ -206,6 +206,44 @@ void Emitter::ldp_post(Reg a, Reg b, Reg base, std::int32_t offset) { emit(pair(
 void Emitter::stp(Reg a, Reg b, Reg base, std::int32_t offset) { emit(pair(0xA9000000, a, b, base, offset)); }
 void Emitter::ldp(Reg a, Reg b, Reg base, std::int32_t offset) { emit(pair(0xA9400000, a, b, base, offset)); }
 
+void Emitter::csel(Reg to, Reg a, Reg b, Cond cond) {
+    emit(0x9A800000 | (std::uint32_t{b} << 16) | (std::uint32_t{cond} << 12) | (std::uint32_t{a} << 5) | to);
+}
+
+namespace {
+
+// The type field (bits 22-23) of a scalar floating-point instruction: 00
+// single, 01 double.
+std::uint32_t fp_type(bool single) { return single ? 0 : 0x00400000U; }
+
+} // namespace
+
+void Emitter::fmov_to_fp(bool single, Reg to, Reg from) {
+    emit((single ? 0x1E270000U : 0x9E670000U) | (std::uint32_t{from} << 5) | to);
+}
+
+void Emitter::fmov_from_fp(bool single, Reg to, Reg from) {
+    emit((single ? 0x1E260000U : 0x9E660000U) | (std::uint32_t{from} << 5) | to);
+}
+
+void Emitter::fadd(bool single, Reg to, Reg a, Reg b) { three(0x1E202800 | fp_type(single), to, a, b); }
+void Emitter::fsub(bool single, Reg to, Reg a, Reg b) { three(0x1E203800 | fp_type(single), to, a, b); }
+void Emitter::fmul(bool single, Reg to, Reg a, Reg b) { three(0x1E200800 | fp_type(single), to, a, b); }
+void Emitter::fdiv(bool single, Reg to, Reg a, Reg b) { three(0x1E201800 | fp_type(single), to, a, b); }
+void Emitter::fcmp(bool single, Reg a, Reg b) { three(0x1E202000 | fp_type(single), 0, a, b); }
+
+void Emitter::fcvt(bool to_single, Reg to, Reg from) {
+    emit((to_single ? 0x1E624000U : 0x1E22C000U) | (std::uint32_t{from} << 5) | to);
+}
+
+void Emitter::scvtf(bool single, Reg to, Reg from) {
+    emit((single ? 0x9E220000U : 0x9E620000U) | (std::uint32_t{from} << 5) | to);
+}
+
+void Emitter::fcvtzs(bool single, Reg to, Reg from) {
+    emit((single ? 0x9E380000U : 0x9E780000U) | (std::uint32_t{from} << 5) | to);
+}
+
 namespace {
 
 // Register use of the generated code (AAPCS64; x18, the platform register,
@@ -437,6 +475,84 @@ public:
             e_.udiv(quotient, a, b);
         }
         if (remainder) e_.msub(a, quotient, b, a);
+    }
+
+    // The float operations, on v0 and v1 (scalar instructions only, no
+    // fused multiply-add).
+    static constexpr Reg v0 = 0;
+    static constexpr Reg v1 = 1;
+
+    // to = the canonical quiet NaN when v0 holds a NaN, which the processor
+    // leaves with its payload (FPCR.DN is clear in the default
+    // environment). fcmp of a NaN is unordered, which sets V.
+    void canonicalize(FloatFormat format, Scratch to) {
+        const bool single = format == FloatFormat::Binary32;
+        e_.fcmp(single, v0, v0);
+        e_.mov_immediate(ip0, single ? 0x7FC00000ULL : 0x7FF8000000000000ULL);
+        e_.csel(scratch(to), ip0, scratch(to), vs);
+    }
+
+    void float_alu(FloatAlu op, FloatFormat format, Scratch to, Scratch from) override {
+        const bool single = format == FloatFormat::Binary32;
+        e_.fmov_to_fp(single, v0, scratch(to));
+        e_.fmov_to_fp(single, v1, scratch(from));
+        switch (op) {
+        case FloatAlu::Add: e_.fadd(single, v0, v0, v1); break;
+        case FloatAlu::Sub: e_.fsub(single, v0, v0, v1); break;
+        case FloatAlu::Mul: e_.fmul(single, v0, v0, v1); break;
+        case FloatAlu::Div: e_.fdiv(single, v0, v0, v1); break;
+        }
+        e_.fmov_from_fp(single, scratch(to), v0);
+        canonicalize(format, to);
+    }
+
+    void float_compare(FloatCond cond, FloatFormat format, Scratch to, Scratch a, Scratch b) override {
+        const bool single = format == FloatFormat::Binary32;
+        e_.fmov_to_fp(single, v0, scratch(a));
+        e_.fmov_to_fp(single, v1, scratch(b));
+        e_.fcmp(single, v0, v1);
+        // Unordered sets C and V and clears N and Z, so each of these
+        // conditions is false then, except ne.
+        Cond c = eq;
+        switch (cond) {
+        case FloatCond::Eq: c = eq; break;
+        case FloatCond::Ne: c = ne; break;
+        case FloatCond::Lt: c = mi; break;
+        case FloatCond::Le: c = ls; break;
+        case FloatCond::Gt: c = gt; break;
+        case FloatCond::Ge: c = ge; break;
+        }
+        e_.cset(scratch(to), c);
+    }
+
+    void float_convert(FloatFormat to, Scratch value) override {
+        const bool to_single = to == FloatFormat::Binary32;
+        e_.fmov_to_fp(!to_single, v0, scratch(value));
+        e_.fcvt(to_single, v0, v0);
+        e_.fmov_from_fp(to_single, scratch(value), v0);
+        canonicalize(to, value);
+    }
+
+    void float_from_integer(FloatFormat format, Scratch value) override {
+        const bool single = format == FloatFormat::Binary32;
+        e_.scvtf(single, v0, scratch(value));
+        e_.fmov_from_fp(single, scratch(value), v0);
+    }
+
+    // fcvtzs saturates (to INT64_MIN below the range, INT64_MAX above it)
+    // and gives 0 for NaN; NaN and INT64_MAX, which no truncation is
+    // exactly, become INT64_MIN.
+    void float_to_integer(FloatFormat format, Scratch value) override {
+        const bool single = format == FloatFormat::Binary32;
+        const auto d = scratch(value);
+        e_.fmov_to_fp(single, v0, d);
+        e_.fcvtzs(single, d, v0);
+        e_.fcmp(single, v0, v0);
+        e_.mov_immediate(ip0, 0x8000000000000000ULL);
+        e_.csel(d, ip0, d, vs);
+        e_.mvn(ip1, ip0);
+        e_.cmp(d, ip1);
+        e_.csel(d, ip0, d, eq);
     }
 
     void load_context(Scratch to, std::uint32_t offset) override { e_.ldr(scratch(to), context, offset); }

@@ -19,6 +19,7 @@ namespace neura::nvm {
 class GraphDevice;
 class Fleet;
 class TierCache;
+class TierTimes;
 
 struct TaskDumpRequest;
 class ScheduleChooser;
@@ -65,6 +66,12 @@ struct RunLimits {
     // tier, it never changes what a run does. Only at tier 2; NEURA_JIT in
     // the environment combines with it (jit::combine).
     jit::Mode jit = jit::Mode::Auto;
+    // The wall-time timeline of `--tier-stats` (src/nvm/tier1.hpp), or null:
+    // nothing is timed. The run, and parallel items evaluated in order on
+    // its thread, move it between categories; it must outlive the run and
+    // must not be shared with another thread. It never changes what a run
+    // does.
+    TierTimes* tier_times = nullptr;
     std::uint64_t max_tasks = 65'536;
     std::uint64_t task_quantum = 1'024;
     // Values buffered in all channels, and overlapping host requests issued

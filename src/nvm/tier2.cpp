@@ -58,6 +58,7 @@ unsigned instruction_arity(const lift::Instruction& in) {
     case lift::Opcode::BitNot:
     case lift::Opcode::Index:
     case lift::Opcode::ConvertInteger:
+    case lift::Opcode::ValueHash:
     case lift::Opcode::FloatNegate:
     case lift::Opcode::FloatFromInteger:
     case lift::Opcode::FloatToInteger:
@@ -92,6 +93,7 @@ unsigned result_bits(const lift::Instruction& in, unsigned a, unsigned b) {
     case Opcode::Add:
     case Opcode::AddWrapping:
     case Opcode::Subtract:
+    case Opcode::SubtractWrapping:
     case Opcode::Negate:
     case Opcode::Multiply:
     case Opcode::BitNot:
@@ -123,6 +125,7 @@ unsigned result_bits(const lift::Instruction& in, unsigned a, unsigned b) {
     case Opcode::BitOr:
     case Opcode::BitXor: return std::max(a, b);
     case Opcode::Index: return a;
+    case Opcode::ValueHash: return 32;
     case Opcode::ConvertInteger:
     case Opcode::FloatToInteger: return std::min(in.to_width, std::uint8_t{64});
     case Opcode::FloatAdd:

@@ -57,9 +57,11 @@ public:
     // work is exhausted_work and is not remembered, but what the analysis
     // settled is, and the next call resumes it.
     // `progress`, when given, receives the share of the graph's nodes an
-    // exhausted analysis settled.
+    // exhausted analysis settled. `advice` tells the analysis where to look
+    // first (overflow.hpp).
     std::string verdict(const nvr::Graph& graph, std::uint32_t index,
-                        std::uint64_t work = std::numeric_limits<std::uint64_t>::max(), double* progress = nullptr);
+                        std::uint64_t work = std::numeric_limits<std::uint64_t>::max(), double* progress = nullptr,
+                        const ProofAdvice* advice = nullptr);
 
 private:
     std::mutex mutex_;

@@ -57,6 +57,7 @@
             if (plan.region_threshold != 0 && tier_->count_region(function, block) >= plan.region_threshold) {
                 // The cache may have formed the region again with more
                 // blocks.
+                const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
                 const auto resolved = tier_->region(function, block, plan.region_threshold);
                 plan.region = resolved.region;
                 plan.region_threshold = resolved.retry_after;
@@ -75,6 +76,8 @@
         case BlockPlan::RegionState::Counting: {
             const auto arrivals = tier_->count_region(function, block);
             if (arrivals < plan.region_threshold) return nullptr;
+            // Forming a region is timed as tier 1 (--tier-stats).
+            const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
             const auto resolved = tier_->region(function, block, arrivals);
             if (!resolved.settled) {
                 plan.region_threshold = resolved.retry_after;
@@ -111,6 +114,7 @@
             const auto* region = region_for(frame.function, frame.block, plan);
             if (!region) break;
             const auto* native = jit_ ? native_code(plan) : nullptr;
+            time_as(TierTimes::Category::Regions);
             const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native)
                                              : run_region(*region, allowance - total, native);
             total += outcome.blocks;
@@ -123,6 +127,8 @@
     // time any run asks (src/jit), or null: the region interpreter runs it.
     const jit::Program* native_code(BlockPlan& plan) {
         if (plan.native_region != plan.region) {
+            // Compiling is timed as tier 1 (--tier-stats).
+            const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
             plan.native = plan.region ? tier_->native(*plan.region) : nullptr;
             plan.native_region = plan.region;
         }

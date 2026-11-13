@@ -147,7 +147,8 @@ void usage(std::ostream& out) {
            "  --jit=off|on|auto        tier 2 runs its regions as native code: on fails the run when this platform\n"
            "                           cannot, auto (the default) uses it where it is enabled by default, off\n"
            "                           interprets them; the result is the same (--deny-native does not apply)\n"
-           "  --tier-stats             print the blocks lifted, the regions formed, and the steps each tier ran\n"
+           "  --tier-stats             print the blocks lifted, the regions formed, the steps each tier ran, and\n"
+           "                           where the wall time went\n"
            "  --replay <file>          (run) answer host requests from a trace instead of services; a trace of a\n"
            "                           concurrent run carries its own quantum and limits, which replace the options\n"
            "\n"
@@ -1264,13 +1265,26 @@ std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image
     return cache;
 }
 
-void report_tiers(const Options& options, const std::unique_ptr<neura::nvm::TierCache>& cache) {
+// --tier-stats: the timeline of the runs of one command, from `started`, or
+// none when they cannot be timed (neura::runner::times_runs).
+std::optional<neura::nvm::TierTimes> tier_times(const neura::nvm::RunLimits& limits,
+                                                std::optional<std::chrono::steady_clock::time_point> started,
+                                                bool device) {
+    std::optional<neura::nvm::TierTimes> times;
+    if (started && !device && neura::runner::times_runs(limits)) times.emplace(*started);
+    return times;
+}
+
+void report_tiers(const Options& options, const std::unique_ptr<neura::nvm::TierCache>& cache,
+                  const std::optional<neura::nvm::TierTimes>& times) {
     if (!options.tier_stats) return;
     std::cerr << (cache ? neura::nvm::describe(cache->statistics()) : std::string("tier: tier 0\n"));
+    if (times) std::cerr << times->describe(std::chrono::steady_clock::now());
 }
 
 int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
-             std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes, neura::nvm::GraphDevice* device) {
+             std::span<neura::cli::ArgumentList> lists, std::size_t image_bytes, neura::nvm::GraphDevice* device,
+             std::optional<std::chrono::steady_clock::time_point> started) {
     const auto& path = options.files.front();
     const auto bindings = neura::nvm::bind(image, host.registry);
     const auto report_prefix = path.string() + ": " + options.each->string() + ':';
@@ -1302,6 +1316,9 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     auto limits = options.limits;
     limits.task_dump = dumps.request();
     const auto tiers = tier_cache(image, limits, device);
+    // Without a device the members run one after another on one timeline.
+    auto times = tier_times(limits, started, device != nullptr);
+    if (times) limits.tier_times = &*times;
     if (device) {
         neura::nvm::Fleet fleet(image, {limits, device});
         for (auto& list : lists) {
@@ -1327,11 +1344,13 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
                   << ", peak heap cells " << peak_heap_cells << ", host requests " << requests.text()
                   << ", " << image_costs(image) << ", image bytes " << image_bytes << '\n';
     }
-    report_tiers(options, tiers);
+    report_tiers(options, tiers, times);
     return first_status;
 }
 
 int run(const Options& options) {
+    // --tier-stats times the command from before the image is read.
+    const auto started = options.tier_stats ? std::optional(std::chrono::steady_clock::now()) : std::nullopt;
     const auto& path = options.files.front();
     std::size_t image_bytes = 0;
     const auto image = load_image(path, &image_bytes);
@@ -1343,12 +1362,15 @@ int run(const Options& options) {
 #endif
     Host host(options.capabilities);
     provide_native_library(image, host.services);
-    if (options.each) return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device()), options.stats);
+    if (options.each) {
+        return gpu.finish(run_each(options, image, host, lists, image_bytes, gpu.device(), started), options.stats);
+    }
     neura::runner::RunOptions run_options{options.limits, options.stats, options.record, options.replay,
                                           options.task_dump, options.trace_events, options.trace_wall_time};
     run_options.limits.graph_device = gpu.device();
     run_options.virtual_time = options.virtual_time;
     run_options.tier_stats = options.tier_stats;
+    run_options.started = started;
     const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
     return gpu.finish(status, options.stats);
 }
@@ -1463,6 +1485,9 @@ int run_tests(const Options& options) {
         }
     }
     auto conversion = neura::backend::convert(program, conversion_options);
+    // --tier-stats times the tests from the loading of their built image.
+    std::optional<neura::nvm::TierTimes> times;
+    if (options.tier_stats) times.emplace(std::chrono::steady_clock::now());
     auto image = neura::nvr::load(neura::nvr::encode(conversion.image));
     std::unique_ptr<neura::tooling::LineCoverage> coverage;
     if (options.test_coverage) {
@@ -1587,6 +1612,9 @@ int run_tests(const Options& options) {
                                   ? false
                                   : gpu.device() != nullptr;
     const auto tiers = tier_cache(image, limits, fleet_device ? gpu.device() : nullptr);
+    // Without a device the tests run one after another on one timeline.
+    if (fleet_device || !neura::runner::times_runs(limits)) times.reset();
+    if (times) limits.tier_times = &*times;
     // One test, alone, under a chooser (null: the reference scheduler) and
     // its own virtual clock when virtual time is on.
     const auto run_test = [&](std::size_t i, neura::nvm::ScheduleChooser* chooser, std::uint64_t quantum,
@@ -1698,7 +1726,7 @@ int run_tests(const Options& options) {
     if (reporter) reporter->event("summary", {{"total", ran}, {"passed", ran - failed}, {"failed", failed}});
     else std::cout << ran << " test(s), " << ran - failed << " passed, " << failed << " failed\n";
     std::cout.flush();
-    report_tiers(options, tiers);
+    report_tiers(options, tiers, times);
     return gpu.finish(failed == 0 ? 0 : 1, options.stats);
 }
 

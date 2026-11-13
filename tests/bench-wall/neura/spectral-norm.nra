@@ -1,4 +1,4 @@
-// sizes: quick 20 full 64
+// sizes: quick 20 full 64 long 4500
 // Spectral norm of the infinite matrix A(i, j) = 1 / ((i + j)(i + j + 1) / 2
 // + i + 1), truncated to n by n, by ten rounds of the power method on A^T A,
 // as a float64 bit pattern. The size is the first argument;

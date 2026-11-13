@@ -6,6 +6,8 @@
 // - every integer instruction compiled inline, and those that call
 //   lift::evaluate, against lift::evaluate on edge values of every width,
 //   in and out of machine registers;
+// - every float instruction compiled inline against lift::evaluate, bit
+//   for bit, on edge patterns and pseudo-random operands;
 // - random region programs (loops, branches, switches, budgets, polls,
 //   gathers, stores) against a transcription of the region interpreter,
 //   down to every register and initialized flag;
@@ -28,9 +30,14 @@
 #include "nvm/tier2.hpp"
 #include "nvr/format.hpp"
 
+#include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <functional>
 #include <map>
+#include <memory>
 #include <random>
+#include <sstream>
 
 namespace neura::testing {
 namespace {
@@ -148,6 +155,47 @@ std::map<std::string, std::function<void(X86&)>> x86_cases() {
     c["pop r12"] = [](X86& e) { e.pop(r12); };
     c["pop rbp"] = [](X86& e) { e.pop(rbp); };
     c["ret"] = [](X86& e) { e.ret(); };
+    // The float operations.
+    c["movq xmm0, rax"] = [](X86& e) { e.movq_to_xmm(xmm0, rax); };
+    c["movq xmm1, rcx"] = [](X86& e) { e.movq_to_xmm(xmm1, rcx); };
+    c["movq xmm1, r11"] = [](X86& e) { e.movq_to_xmm(xmm1, r11); };
+    c["movd xmm0, eax"] = [](X86& e) { e.movd_to_xmm(xmm0, rax); };
+    c["movd xmm1, r11d"] = [](X86& e) { e.movd_to_xmm(xmm1, r11); };
+    c["movq rax, xmm0"] = [](X86& e) { e.movq_from_xmm(rax, xmm0); };
+    c["movq rdx, xmm1"] = [](X86& e) { e.movq_from_xmm(rdx, xmm1); };
+    c["movq r11, xmm0"] = [](X86& e) { e.movq_from_xmm(r11, xmm0); };
+    c["movd eax, xmm0"] = [](X86& e) { e.movd_from_xmm(rax, xmm0); };
+    c["movd ecx, xmm0"] = [](X86& e) { e.movd_from_xmm(rcx, xmm0); };
+    c["movd r11d, xmm1"] = [](X86& e) { e.movd_from_xmm(r11, xmm1); };
+    c["addsd xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::add, false, xmm0, xmm1); };
+    c["subsd xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::sub, false, xmm0, xmm1); };
+    c["mulsd xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::mul, false, xmm0, xmm1); };
+    c["divsd xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::div, false, xmm0, xmm1); };
+    c["addss xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::add, true, xmm0, xmm1); };
+    c["subss xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::sub, true, xmm0, xmm1); };
+    c["mulss xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::mul, true, xmm0, xmm1); };
+    c["divss xmm0, xmm1"] = [](X86& e) { e.scalar(SseOp::div, true, xmm0, xmm1); };
+    c["cmpeqsd xmm0, xmm1"] = [](X86& e) { e.compare_scalar(false, xmm0, xmm1, 0); };
+    c["cmpneqsd xmm0, xmm1"] = [](X86& e) { e.compare_scalar(false, xmm0, xmm1, 4); };
+    c["cmpltsd xmm0, xmm1"] = [](X86& e) { e.compare_scalar(false, xmm0, xmm1, 1); };
+    c["cmplesd xmm0, xmm1"] = [](X86& e) { e.compare_scalar(false, xmm0, xmm1, 2); };
+    c["cmpeqss xmm0, xmm1"] = [](X86& e) { e.compare_scalar(true, xmm0, xmm1, 0); };
+    c["cmpneqss xmm0, xmm1"] = [](X86& e) { e.compare_scalar(true, xmm0, xmm1, 4); };
+    c["cmpltss xmm0, xmm1"] = [](X86& e) { e.compare_scalar(true, xmm0, xmm1, 1); };
+    c["cmpless xmm0, xmm1"] = [](X86& e) { e.compare_scalar(true, xmm0, xmm1, 2); };
+    c["ucomisd xmm0, xmm0"] = [](X86& e) { e.ucomis(false, xmm0, xmm0); };
+    c["ucomiss xmm0, xmm0"] = [](X86& e) { e.ucomis(true, xmm0, xmm0); };
+    c["ucomisd xmm0, xmm1"] = [](X86& e) { e.ucomis(false, xmm0, xmm1); };
+    c["cvtsi2sd xmm0, rax"] = [](X86& e) { e.convert_from_integer(false, xmm0, rax); };
+    c["cvtsi2ss xmm0, rcx"] = [](X86& e) { e.convert_from_integer(true, xmm0, rcx); };
+    c["cvtsi2sd xmm0, r11"] = [](X86& e) { e.convert_from_integer(false, xmm0, r11); };
+    c["cvttsd2si rax, xmm0"] = [](X86& e) { e.truncate_to_integer(false, rax, xmm0); };
+    c["cvttss2si rdx, xmm0"] = [](X86& e) { e.truncate_to_integer(true, rdx, xmm0); };
+    c["cvttsd2si r11, xmm0"] = [](X86& e) { e.truncate_to_integer(false, r11, xmm0); };
+    c["cvtss2sd xmm0, xmm0"] = [](X86& e) { e.convert_scalar(false, xmm0, xmm0); };
+    c["cvtsd2ss xmm0, xmm0"] = [](X86& e) { e.convert_scalar(true, xmm0, xmm0); };
+    c[".att_syntax; jnp .+4096"] = [](X86& e) { e.patch(e.jcc(CC::np), 4096); };
+    c[".att_syntax; jp .+4096"] = [](X86& e) { e.patch(e.jcc(CC::p), 4096); };
     return c;
 }
 
@@ -240,6 +288,41 @@ std::map<std::string, std::function<void(A64&)>> aarch64_cases() {
     c["ldp x29, x30, [sp], #96"] = [](A64& e) { e.ldp_post(29, 30, sp, 96); };
     c["stp x19, x20, [sp, #16]"] = [](A64& e) { e.stp(19, 20, sp, 16); };
     c["ldp x27, x28, [sp, #80]"] = [](A64& e) { e.ldp(27, 28, sp, 80); };
+    // The float operations.
+    c["fmov d0, x9"] = [](A64& e) { e.fmov_to_fp(false, 0, 9); };
+    c["fmov s0, w9"] = [](A64& e) { e.fmov_to_fp(true, 0, 9); };
+    c["fmov d1, x10"] = [](A64& e) { e.fmov_to_fp(false, 1, 10); };
+    c["fmov s1, w12"] = [](A64& e) { e.fmov_to_fp(true, 1, 12); };
+    c["fmov x9, d0"] = [](A64& e) { e.fmov_from_fp(false, 9, 0); };
+    c["fmov w9, s0"] = [](A64& e) { e.fmov_from_fp(true, 9, 0); };
+    c["fmov x11, d0"] = [](A64& e) { e.fmov_from_fp(false, 11, 0); };
+    c["fadd d0, d0, d1"] = [](A64& e) { e.fadd(false, 0, 0, 1); };
+    c["fsub d0, d0, d1"] = [](A64& e) { e.fsub(false, 0, 0, 1); };
+    c["fmul d0, d0, d1"] = [](A64& e) { e.fmul(false, 0, 0, 1); };
+    c["fdiv d0, d0, d1"] = [](A64& e) { e.fdiv(false, 0, 0, 1); };
+    c["fadd s0, s0, s1"] = [](A64& e) { e.fadd(true, 0, 0, 1); };
+    c["fsub s0, s0, s1"] = [](A64& e) { e.fsub(true, 0, 0, 1); };
+    c["fmul s0, s0, s1"] = [](A64& e) { e.fmul(true, 0, 0, 1); };
+    c["fdiv s0, s0, s1"] = [](A64& e) { e.fdiv(true, 0, 0, 1); };
+    c["fcmp d0, d1"] = [](A64& e) { e.fcmp(false, 0, 1); };
+    c["fcmp s0, s1"] = [](A64& e) { e.fcmp(true, 0, 1); };
+    c["fcmp d0, d0"] = [](A64& e) { e.fcmp(false, 0, 0); };
+    c["fcmp s0, s0"] = [](A64& e) { e.fcmp(true, 0, 0); };
+    c["fcvt d0, s0"] = [](A64& e) { e.fcvt(false, 0, 0); };
+    c["fcvt s0, d0"] = [](A64& e) { e.fcvt(true, 0, 0); };
+    c["scvtf d0, x9"] = [](A64& e) { e.scvtf(false, 0, 9); };
+    c["scvtf s0, x10"] = [](A64& e) { e.scvtf(true, 0, 10); };
+    c["fcvtzs x9, d0"] = [](A64& e) { e.fcvtzs(false, 9, 0); };
+    c["fcvtzs x11, s0"] = [](A64& e) { e.fcvtzs(true, 11, 0); };
+    c["csel x9, x16, x9, vs"] = [](A64& e) { e.csel(9, 16, 9, vs); };
+    c["csel x10, x16, x10, eq"] = [](A64& e) { e.csel(10, 16, 10, eq); };
+    c["cset x9, mi"] = [](A64& e) { e.cset(9, mi); };
+    c["cset x9, ge"] = [](A64& e) { e.cset(9, ge); };
+    c["cset x9, ne"] = [](A64& e) { e.cset(9, ne); };
+    c["mvn x17, x16"] = [](A64& e) { e.mvn(17, 16); };
+    c["cmp x9, x17"] = [](A64& e) { e.cmp(9, 17); };
+    c["movz x16, #0x7ff8, lsl #48"] = [](A64& e) { e.mov_immediate(16, 0x7FF8000000000000ULL); };
+    c["movz x16, #0x7fc0, lsl #16"] = [](A64& e) { e.mov_immediate(16, 0x7FC00000ULL); };
     return c;
 }
 
@@ -348,7 +431,7 @@ std::uint64_t test_poll(jit::Context* context, std::uint32_t, std::uint64_t, std
 }
 
 Ending run_native(const jit::Program& program, const Region& region, std::vector<std::uint64_t>& regs,
-                  std::vector<std::uint8_t>& init, Machine& machine) {
+                  std::vector<std::uint8_t>& init, Machine& machine, jit::Helper lift = jit::evaluate_helper) {
     jit::Context context;
     context.registers = regs.data();
     context.initialized = init.data();
@@ -357,7 +440,7 @@ Ending run_native(const jit::Program& program, const Region& region, std::vector
     context.allowance = machine.allowance;
     context.polls = machine.scheduler ? &machine.polls : nullptr;
     context.quantum = machine.quantum;
-    context.lift = jit::evaluate_helper;
+    context.lift = lift;
     context.poll = test_poll;
     context.region = &region;
     program.run(context);
@@ -447,17 +530,8 @@ void check_instruction(const lift::Instruction& in, const std::string& label) {
         const auto program = compile_or_fail(region, label);
         if (!program) return;
         const auto values = edge_values(std::clamp<unsigned>(in.width, 1, 64));
-        const bool division = in.op == lift::Opcode::Divide || in.op == lift::Opcode::Remainder;
         for (const auto a : values) {
             for (const auto b : values) {
-                // lift::evaluate divides sign-extended values. Operands with
-                // bits above their width (no region's are) can make that the
-                // hardware's INT64_MIN / -1, which the oracle itself cannot
-                // evaluate.
-                if (division && in.is_signed && in.width < 64 &&
-                    lift::sign_extend(a, in.width) == INT64_MIN && lift::sign_extend(b, in.width) == -1) {
-                    continue;
-                }
                 std::vector<std::uint64_t> regs(region.register_count, 0x5EED5EED5EED5EEDULL);
                 std::vector<std::uint8_t> init(region.register_count, 0);
                 regs[0] = a;
@@ -525,7 +599,8 @@ NEURA_TEST(jit, every_instruction_matches_lift_evaluate) {
                              Opcode::NotEqual,   Opcode::Less,      Opcode::LessEqual, Opcode::Greater,
                              Opcode::GreaterEqual, Opcode::And,     Opcode::Or,        Opcode::Not,
                              Opcode::BitAnd,     Opcode::BitOr,     Opcode::BitXor,    Opcode::BitNot,
-                             Opcode::ShiftLeft,  Opcode::ShiftRight, Opcode::Index,    Opcode::Constant};
+                             Opcode::ShiftLeft,  Opcode::ShiftRight, Opcode::Index,    Opcode::Constant,
+                             Opcode::SubtractWrapping, Opcode::ValueHash};
     for (const auto op : binary) {
         for (const auto width : widths) {
             for (const bool is_signed : {false, true}) {
@@ -555,7 +630,8 @@ NEURA_TEST(jit, every_instruction_matches_lift_evaluate) {
             }
         }
     }
-    // Float operations call lift::evaluate through the helper.
+    // Float operations on the integer edge values (float_operations_match_
+    // lift_evaluate_bit_for_bit checks them on float values).
     if (lift::float_lowering_supported()) {
         const Opcode floats[] = {Opcode::FloatAdd,  Opcode::FloatSubtract, Opcode::FloatMultiply,
                                  Opcode::FloatDivide, Opcode::FloatLess,  Opcode::FloatEqual,
@@ -575,6 +651,466 @@ NEURA_TEST(jit, every_instruction_matches_lift_evaluate) {
     check(instruction_runs > 200000 && instruction_failures > 10000 && instruction_failures < instruction_runs,
           "the edge values exercise both outcomes: " + std::to_string(instruction_runs) + " runs, " +
               std::to_string(instruction_failures) + " failing");
+}
+
+// --- Float operations ---------------------------------------------------------
+
+namespace {
+
+using lift::FloatType;
+
+bool hardware_format(FloatType format) { return format == FloatType::Binary32 || format == FloatType::Binary64; }
+
+std::string format_name(FloatType format) {
+    switch (format) {
+    case FloatType::Binary16: return "binary16";
+    case FloatType::BFloat16: return "bfloat16";
+    case FloatType::Binary32: return "binary32";
+    case FloatType::Binary64: return "binary64";
+    case FloatType::None: break;
+    }
+    return "none";
+}
+
+std::string hex64(std::uint64_t value) {
+    char text[24];
+    std::snprintf(text, sizeof text, "0x%016llx", static_cast<unsigned long long>(value));
+    return text;
+}
+
+double float_value(std::uint64_t bits, FloatType format) {
+    if (format == FloatType::Binary64) {
+        double value = 0;
+        std::memcpy(&value, &bits, 8);
+        return value;
+    }
+    const auto word = static_cast<std::uint32_t>(bits);
+    float value = 0;
+    std::memcpy(&value, &word, 4);
+    return value;
+}
+
+std::uint64_t double_bits(double value) {
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &value, 8);
+    return bits;
+}
+
+std::uint64_t single_bits(float value) {
+    std::uint32_t bits = 0;
+    std::memcpy(&bits, &value, 4);
+    return bits;
+}
+
+// Whether the generated code hands an operand to lift::evaluate: every
+// instruction of a 16-bit format, and a truncation to an integer that is
+// NaN, outside [-2^63, 2^63), or -2^63 itself (which the hardware's
+// conversion reports as it reports the others). Everything else of
+// binary32 and binary64 is inline.
+bool calls_helper(const lift::Instruction& in, std::uint64_t a) {
+    switch (in.op) {
+    case lift::Opcode::FloatFromInteger: return !hardware_format(in.to_format);
+    case lift::Opcode::FloatToInteger: {
+        if (!hardware_format(in.format)) return true;
+        const double t = std::trunc(float_value(a, in.format));
+        return std::isnan(t) || t <= -9223372036854775808.0 || t >= 9223372036854775808.0;
+    }
+    default: return !hardware_format(in.format);
+    }
+}
+
+// Whether generated code calls the lift helper anywhere: call qword ptr
+// [r13 + 80] on x86-64, blr x16 on AArch64 (the only helper a one-
+// instruction region calls).
+bool code_calls_helper(const std::vector<std::uint8_t>& code, jit::Arch arch) {
+    if (arch == jit::Arch::X86_64) {
+        const std::uint8_t call[] = {0x41, 0xFF, 0x55, 0x50};
+        return std::search(code.begin(), code.end(), std::begin(call), std::end(call)) != code.end();
+    }
+    for (std::size_t i = 0; i + 4 <= code.size(); i += 4) {
+        const auto word = static_cast<std::uint32_t>(code[i]) | (static_cast<std::uint32_t>(code[i + 1]) << 8) |
+                          (static_cast<std::uint32_t>(code[i + 2]) << 16) |
+                          (static_cast<std::uint32_t>(code[i + 3]) << 24);
+        if (word == 0xD63F0200U) return true;
+    }
+    return false;
+}
+
+std::uint64_t lift_helper_calls = 0;
+
+std::uint64_t counting_helper(jit::Context* context, std::uint32_t index, std::uint64_t a, std::uint64_t b) {
+    ++lift_helper_calls;
+    return jit::evaluate_helper(context, index, a, b);
+}
+
+// Runs and failed checks of FloatRun.
+std::uint64_t float_runs = 0;
+std::uint64_t float_failures = 0;
+std::uint64_t float_helper_runs = 0;
+
+// One float instruction compiled for the host, in and out of machine
+// registers, run on operand pairs against lift::evaluate: the same 64 bits
+// in the destination, the same failures with the destination untouched,
+// and the helper called exactly where calls_helper says. The code for both
+// processors calls a helper only where the instruction may need one.
+class FloatRun {
+public:
+    FloatRun(const lift::Instruction& in, std::string label) : in_(in), label_(std::move(label)) {
+        for (const bool pinned : {false, true}) {
+            regions_[pinned] = instruction_region(in, pinned);
+            for (const auto arch : {jit::Arch::X86_64, jit::Arch::AArch64}) {
+                const auto generated = jit::generate(regions_[pinned], arch);
+                check(generated.failure.empty() && !generated.code.empty(),
+                      label_ + ": no code: " + generated.failure);
+                const bool may_call = !hardware_format(in.op == lift::Opcode::FloatFromInteger ? in.to_format
+                                                                                               : in.format) ||
+                                      in.op == lift::Opcode::FloatToInteger;
+                check_equal(code_calls_helper(generated.code, arch), may_call,
+                            label_ + (arch == jit::Arch::X86_64 ? " x86-64" : " AArch64") + " calls the helper");
+            }
+        }
+        if (!native_runs_here()) return;
+        for (const bool pinned : {false, true}) programs_[pinned] = compile_or_fail(regions_[pinned], label_);
+    }
+
+    FloatRun(const FloatRun&) = delete;
+    FloatRun& operator=(const FloatRun&) = delete;
+
+    void run(std::uint64_t a, std::uint64_t b, bool pinned) {
+        constexpr std::uint64_t untouched = 0x5EED5EED5EED5EEDULL;
+        const auto& region = regions_[pinned];
+        regs_.assign(region.register_count, untouched);
+        init_.assign(region.register_count, 0);
+        regs_[0] = a;
+        regs_[1] = b;
+        Machine machine;
+        const auto calls = lift_helper_calls;
+        const auto ending = run_native(*programs_[pinned], region, regs_, init_, machine, counting_helper);
+        const bool called = lift_helper_calls != calls;
+        bool failed = false;
+        const auto expected = lift::evaluate(in_, a, b, failed);
+        const auto want_ending = failed ? Ending{jit::Outcome::Checks, 7, 0} : Ending{jit::Outcome::Leave, 9, 1};
+        const auto want_value = failed ? untouched : expected;
+        const bool want_call = calls_helper(in_, a);
+        ++float_runs;
+        float_failures += failed;
+        float_helper_runs += called;
+        if (ending == want_ending && regs_[2] == want_value && called == want_call) return;
+        std::ostringstream message;
+        message << label_ << (pinned ? " pinned" : "") << " on " << hex64(a) << ", " << hex64(b) << ": expected "
+                << (failed ? "failure" : hex64(expected)) << (want_call ? " through the helper" : " inline")
+                << ", got " << ending << " with " << hex64(regs_[2]) << (called ? " through the helper" : " inline");
+        fail(message.str());
+    }
+
+    void run(std::uint64_t a, std::uint64_t b) {
+        run(a, b, false);
+        run(a, b, true);
+    }
+
+private:
+    lift::Instruction in_;
+    std::string label_;
+    Region regions_[2];
+    std::unique_ptr<jit::Program> programs_[2];
+    std::vector<std::uint64_t> regs_;
+    std::vector<std::uint8_t> init_;
+};
+
+// The bit patterns of a format's special values: zeros, infinities, quiet
+// and signaling NaNs of both signs with payloads, the smallest and largest
+// subnormals and normals, and one and its neighbours.
+std::vector<std::uint64_t> special_patterns(FloatType format) {
+    if (format == FloatType::Binary64) {
+        return {0,
+                0x8000000000000000ULL,
+                0x7FF0000000000000ULL,
+                0xFFF0000000000000ULL,
+                0x7FF8000000000000ULL,
+                0xFFF8000000000000ULL,
+                0x7FF8000000000001ULL,
+                0x7FFC000000000000ULL,
+                0x7FFFFFFFFFFFFFFFULL,
+                0xFFFFFFFFFFFFFFFFULL,
+                0x7FF0000000000001ULL,
+                0x7FF4000000000000ULL,
+                0x7FF7FFFFFFFFFFFFULL,
+                0xFFF0000000000001ULL,
+                0xFFF4000000000123ULL,
+                0x0000000000000001ULL,
+                0x8000000000000001ULL,
+                0x000FFFFFFFFFFFFFULL,
+                0x800FFFFFFFFFFFFFULL,
+                0x0010000000000000ULL,
+                0x8010000000000000ULL,
+                0x7FEFFFFFFFFFFFFFULL,
+                0xFFEFFFFFFFFFFFFFULL,
+                0x3FF0000000000000ULL,
+                0x3FF0000000000001ULL,
+                0x3FEFFFFFFFFFFFFFULL,
+                0xBFF0000000000000ULL,
+                0xBFF0000000000001ULL};
+    }
+    return {0,           0x80000000,  0x7F800000, 0xFF800000, 0x7FC00000, 0xFFC00000, 0x7FC00001,
+            0x7FE00000,  0x7FFFFFFF,  0xFFFFFFFF, 0x7F800001, 0x7FA00000, 0x7FBFFFFF, 0xFF800001,
+            0xFFA00123,  0x00000001,  0x80000001, 0x007FFFFF, 0x807FFFFF, 0x00800000, 0x80800000,
+            0x7F7FFFFF,  0xFF7FFFFF,  0x3F800000, 0x3F800001, 0x3F7FFFFF, 0xBF800000, 0xBF800001};
+}
+
+// Edge patterns of a binary32 or binary64 format: the special patterns;
+// values whose sums and products round to even, overflow, or underflow;
+// and, at each power of two 2^k for k in `powers`, the values just inside
+// and outside the integer ranges it bounds (±2^k, ±(2^k ± 1), ±(2^k ± 0.5),
+// and the neighbours of ±2^k). A binary32 operand also comes with bits
+// above its 32: the code must ignore them as the reference does.
+std::vector<std::uint64_t> float_edges(FloatType format, const std::vector<int>& powers) {
+    const bool single = format == FloatType::Binary32;
+    std::vector<double> values{0.5,    0.25,    0.75,    1.5,    2.5,     3.0,     0.1,     1.0 / 3.0, 0.9999999,
+                               1e-300, 1e300,   1e-40,   1e38,   3.4e38,  1e-45,   0.375,   -0.5,      -1.5,
+                               -2.5,   -0.9999999, -0.1, -1e-40, -1e300};
+    // Rounding ties against 1.0 and their neighbours.
+    for (const int k : {-53, -52, -24, -23}) {
+        values.push_back(std::ldexp(1.0, k));
+        values.push_back(std::ldexp(1.5, k));
+        values.push_back(std::ldexp(3.0, k));
+    }
+    // Overflow and underflow.
+    for (const int k : {127, 128, 1023, -126, -127, -149, -150, -1022, -1023, -1074}) {
+        values.push_back(std::ldexp(1.0, k));
+        values.push_back(std::ldexp(1.5, k));
+    }
+    for (const int k : powers) {
+        for (const double sign : {1.0, -1.0}) {
+            const double p = sign * std::ldexp(1.0, k);
+            for (const double offset : {0.0, 1.0, -1.0, 0.5, -0.5}) values.push_back(p + offset);
+            values.push_back(std::nextafter(p, 0.0));
+            values.push_back(std::nextafter(p, sign * HUGE_VAL));
+            if (single) {
+                const auto f = static_cast<float>(p);
+                values.push_back(std::nextafterf(f, 0.0F));
+                values.push_back(std::nextafterf(f, static_cast<float>(sign * HUGE_VAL)));
+            }
+        }
+    }
+    auto patterns = special_patterns(format);
+    for (const double v : values) patterns.push_back(single ? single_bits(static_cast<float>(v)) : double_bits(v));
+    if (single) {
+        for (const auto p : special_patterns(format)) {
+            patterns.push_back(p | 0xFFFFFFFF00000000ULL);
+            patterns.push_back(p | 0xA5A5A5A500000000ULL);
+        }
+        for (const auto v : {1.0F, -2.5F, 3.0e9F, -3.0e9F}) patterns.push_back(single_bits(v) | 0x1234567800000000ULL);
+    }
+    std::sort(patterns.begin(), patterns.end());
+    patterns.erase(std::unique(patterns.begin(), patterns.end()), patterns.end());
+    return patterns;
+}
+
+// A random float of `format` with an exponent within `spread` of `center`,
+// a random sign and fraction; one in sixteen has the zero exponent and one
+// in sixteen the all-ones one (zeros, subnormals, infinities, and NaNs),
+// and one in four a fraction with its low half clear, so that sums and
+// products are often exact or ties. One binary32 value in eight has random
+// bits above its 32.
+std::uint64_t biased_float(std::mt19937_64& rng, FloatType format, int center, int spread) {
+    const bool single = format == FloatType::Binary32;
+    const unsigned fraction_bits = single ? 23 : 52;
+    const int top = single ? 255 : 2047;
+    int exponent = 0;
+    switch (rng() % 16) {
+    case 0: exponent = 0; break;
+    case 1: exponent = top; break;
+    default:
+        exponent = std::clamp(center + static_cast<int>(rng() % (2 * static_cast<unsigned>(spread) + 1)) - spread, 0,
+                              top);
+        break;
+    }
+    auto fraction = rng() & lift::mask_of(fraction_bits);
+    if (rng() % 4 == 0) fraction &= ~lift::mask_of(fraction_bits / 2);
+    const auto sign = rng() % 2;
+    auto bits = (sign << (single ? 31 : 63)) | (static_cast<std::uint64_t>(exponent) << fraction_bits) | fraction;
+    if (single && rng() % 8 == 0) bits |= rng() << 32;
+    return bits;
+}
+
+int exponent_bias(FloatType format) { return format == FloatType::Binary32 ? 127 : 1023; }
+
+// Integer operands of a conversion to float: the edge values of the width,
+// every power of two with its neighbours and negations, and the values
+// where binary32 and binary64 rounding ties or carries into the next
+// power, below and above 2^63 (where the unsigned conversion halves its
+// operand).
+std::vector<std::uint64_t> integer_edges(unsigned width) {
+    auto values = edge_values(width);
+    for (unsigned k = 0; k <= 64; ++k) {
+        const std::uint64_t p = k < 64 ? std::uint64_t{1} << k : 0;
+        for (const std::uint64_t v : {p, p - 1, p + 1}) {
+            values.push_back(v);
+            values.push_back(0 - v);
+        }
+    }
+    for (const std::uint64_t v :
+         {0x20000000000001ULL, 0x20000000000003ULL, 0x1000001ULL, 0x1000003ULL, 0x8000000000000400ULL,
+          0x8000000000000401ULL, 0x8000000000000BFFULL, 0x8000000000000C00ULL, 0xFFFFFFFFFFFFFBFFULL,
+          0xFFFFFFFFFFFFFC00ULL, 0xFFFFFFFFFFFFFE00ULL, 0x8000008000000000ULL, 0x8000008000000001ULL,
+          0x8000018000000000ULL, 0xFFFFFF7FFFFFFFFFULL, 0xFFFFFF8000000000ULL, 0x7FFFFFFFFFFFFDFFULL,
+          0x7FFFFFFFFFFFFE00ULL, 0x7FFFFFBFFFFFFFFFULL, 0x7FFFFFC000000000ULL, 0x0123456789ABCDEFULL}) {
+        values.push_back(v);
+        values.push_back(0 - v);
+    }
+    std::sort(values.begin(), values.end());
+    values.erase(std::unique(values.begin(), values.end()), values.end());
+    return values;
+}
+
+std::vector<int> all_powers() {
+    std::vector<int> powers;
+    for (int k = 0; k <= 65; ++k) powers.push_back(k);
+    return powers;
+}
+
+lift::Instruction float_instruction(lift::Opcode op, FloatType format) {
+    lift::Instruction in;
+    in.op = op;
+    in.format = format;
+    in.width = static_cast<std::uint8_t>(format == FloatType::Binary32 ? 32 : format == FloatType::Binary64 ? 64 : 16);
+    return in;
+}
+
+constexpr int random_pairs = 100000;
+
+} // namespace
+
+// Each float instruction compiled inline (binary32 and binary64 operations,
+// conversions between them, and conversions to and from integers of every
+// width) against lift::evaluate, bit for bit, on edge patterns and on
+// pseudo-random pairs from a fixed seed: raw 64-bit patterns and floats
+// with nearby exponents. Where native code does not run, the code for both
+// processors is still generated and checked not to call the helper.
+NEURA_TEST(jit, float_operations_match_lift_evaluate_bit_for_bit) {
+    if (!lift::float_lowering_supported()) return;
+    using lift::Opcode;
+    const bool execute = native_runs_here();
+    std::mt19937_64 rng(20261112);
+    const FloatType formats[] = {FloatType::Binary32, FloatType::Binary64};
+    const std::vector<int> pair_powers{0, 1, 8, 16, 23, 24, 31, 32, 52, 53, 63, 64};
+
+    // Binary operations: every pair of edge patterns, then random pairs.
+    const Opcode binary[] = {Opcode::FloatAdd,      Opcode::FloatSubtract,  Opcode::FloatMultiply,
+                             Opcode::FloatDivide,   Opcode::FloatEqual,     Opcode::FloatNotEqual,
+                             Opcode::FloatLess,     Opcode::FloatLessEqual, Opcode::FloatGreater,
+                             Opcode::FloatGreaterEqual};
+    for (const auto op : binary) {
+        for (const auto format : formats) {
+            FloatRun run(float_instruction(op, format), opcode_name(op) + " " + format_name(format));
+            if (!execute) continue;
+            const auto edges = float_edges(format, pair_powers);
+            for (const auto a : edges) {
+                for (const auto b : edges) run.run(a, b);
+            }
+            const int top = format == FloatType::Binary32 ? 255 : 2047;
+            for (int i = 0; i < random_pairs; ++i) {
+                run.run(rng(), rng(), i % 2 != 0);
+                const int center = static_cast<int>(rng() % static_cast<unsigned>(top + 1));
+                const int spread = rng() % 4 == 0 ? 30 : 3;
+                run.run(biased_float(rng, format, center, spread), biased_float(rng, format, center, spread), i % 2 == 0);
+            }
+        }
+    }
+
+    // Negation and conversion between the formats.
+    for (const auto format : formats) {
+        const auto edges = float_edges(format, all_powers());
+        const auto other = format == FloatType::Binary32 ? FloatType::Binary64 : FloatType::Binary32;
+        auto convert = float_instruction(Opcode::FloatConvert, format);
+        convert.to_format = other;
+        for (const auto& in : {float_instruction(Opcode::FloatNegate, format), convert}) {
+            FloatRun run(in, opcode_name(in.op) + " " + format_name(format) + " to " + format_name(in.to_format));
+            if (!execute) continue;
+            for (const auto a : edges) run.run(a, 0);
+            for (int i = 0; i < random_pairs; ++i) {
+                run.run(rng(), rng(), i % 2 != 0);
+                const int center = static_cast<int>(rng() % static_cast<unsigned>(exponent_bias(format) * 2 + 2));
+                run.run(biased_float(rng, format, center, 3), rng(), i % 2 == 0);
+            }
+        }
+    }
+
+    // Truncation to integers of every width and signedness.
+    for (const auto format : formats) {
+        const auto edges = float_edges(format, all_powers());
+        for (const bool to_signed : {false, true}) {
+            std::vector<std::unique_ptr<FloatRun>> runs(65);
+            for (unsigned to = 1; to <= 64; ++to) {
+                auto in = float_instruction(Opcode::FloatToInteger, format);
+                in.to_width = static_cast<std::uint8_t>(to);
+                in.to_signed = to_signed;
+                runs[to] = std::make_unique<FloatRun>(in, "to integer " + format_name(format) + " to " +
+                                                              std::to_string(to) + (to_signed ? "s" : "u"));
+                if (!execute) continue;
+                for (const auto a : edges) runs[to]->run(a, 0);
+            }
+            if (!execute) continue;
+            for (int i = 0; i < random_pairs; ++i) {
+                const auto to = 1 + static_cast<unsigned>(rng() % 64);
+                runs[to]->run(rng(), rng(), i % 2 != 0);
+                const auto to2 = 1 + static_cast<unsigned>(rng() % 64);
+                const int spread = rng() % 4 == 0 ? 80 : 3;
+                runs[to2]->run(biased_float(rng, format, exponent_bias(format) + static_cast<int>(to2), spread), rng(),
+                               i % 2 == 0);
+            }
+        }
+    }
+
+    // Conversion from integers of every width and signedness.
+    for (const auto format : formats) {
+        for (const bool is_signed : {false, true}) {
+            std::vector<std::unique_ptr<FloatRun>> runs(65);
+            for (unsigned width = 1; width <= 64; ++width) {
+                lift::Instruction in;
+                in.op = Opcode::FloatFromInteger;
+                in.width = static_cast<std::uint8_t>(width);
+                in.is_signed = is_signed;
+                in.to_format = format;
+                runs[width] = std::make_unique<FloatRun>(in, "from integer " + std::to_string(width) +
+                                                                 (is_signed ? "s" : "u") + " to " +
+                                                                 format_name(format));
+                if (!execute) continue;
+                for (const auto a : integer_edges(width)) runs[width]->run(a, 0);
+            }
+            if (!execute) continue;
+            for (int i = 0; i < random_pairs; ++i) {
+                const auto width = 1 + static_cast<unsigned>(rng() % 64);
+                runs[width]->run(rng(), rng(), i % 2 != 0);
+                const auto width2 = 1 + static_cast<unsigned>(rng() % 64);
+                auto value = rng() >> (rng() % 64);
+                if (rng() % 2) value = 0 - value;
+                runs[width2]->run(value, rng(), i % 2 == 0);
+            }
+        }
+    }
+
+    // The 16-bit formats stay on the helper, and agree with it.
+    for (const auto format : {FloatType::Binary16, FloatType::BFloat16}) {
+        auto to_integer = float_instruction(Opcode::FloatToInteger, format);
+        to_integer.to_width = 32;
+        to_integer.to_signed = true;
+        auto convert = float_instruction(Opcode::FloatConvert, format);
+        convert.to_format = FloatType::Binary64;
+        for (const auto& in : {float_instruction(Opcode::FloatNegate, format),
+                               float_instruction(Opcode::FloatLess, format), to_integer, convert}) {
+            FloatRun run(in, opcode_name(in.op) + " " + format_name(format));
+            if (!execute) continue;
+            for (std::uint64_t a = 0; a < 0x10000; a += 7) run.run(a, 0x3C00);
+        }
+    }
+
+    if (execute) {
+        check(float_runs > 8000000 && float_failures > 500000 && float_helper_runs > 100000,
+              "the float operands exercise every outcome: " + std::to_string(float_runs) + " runs, " +
+                  std::to_string(float_failures) + " failing, " + std::to_string(float_helper_runs) +
+                  " through the helper");
+    }
 }
 
 namespace {

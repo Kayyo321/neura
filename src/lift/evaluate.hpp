@@ -35,6 +35,38 @@ inline std::int64_t signed_max(unsigned width) {
     return width >= 64 ? std::numeric_limits<std::int64_t>::max() : (std::int64_t{1} << (width - 1)) - 1;
 }
 
+// The value hash of a scalar: a Boolean (width 1) hashes to 1231 when true
+// and 1237 when false; a float first has any NaN replaced by its format's
+// canonical quiet NaN; then a 64-bit value is folded to the exclusive or of
+// its halves, and a narrower one is extended to 32 bits, with its sign when
+// it is a signed integer.
+inline std::uint64_t value_hash(std::uint64_t a, unsigned width, bool is_signed, FloatType format) {
+    if (width == 1) return (a & 1U) != 0 ? 1231 : 1237;
+    if (format != FloatType::None) {
+        unsigned exponent = 11;
+        unsigned fraction = 52;
+        if (format == FloatType::Binary16) {
+            exponent = 5;
+            fraction = 10;
+        } else if (format == FloatType::BFloat16) {
+            exponent = 8;
+            fraction = 7;
+        } else if (format == FloatType::Binary32) {
+            exponent = 8;
+            fraction = 23;
+        }
+        const auto exponent_mask = ((std::uint64_t{1} << exponent) - 1) << fraction;
+        const auto fraction_mask = (std::uint64_t{1} << fraction) - 1;
+        if ((a & exponent_mask) == exponent_mask && (a & fraction_mask) != 0) {
+            a = exponent_mask | (std::uint64_t{1} << (fraction - 1));
+        }
+        is_signed = false;
+    }
+    if (width >= 64) return (a ^ (a >> 32)) & 0xffffffffU;
+    if (is_signed) return static_cast<std::uint64_t>(sign_extend(a, width)) & 0xffffffffU;
+    return a & mask_of(width);
+}
+
 // Whether `op` is a float operation (evaluated by evaluate_float).
 inline bool float_opcode(Opcode op) {
     switch (op) {
@@ -86,6 +118,9 @@ inline std::uint64_t evaluate(const Instruction& in, std::uint64_t a, std::uint6
     case Opcode::AddWrapping:
         r = (a + b) & m;
         break;
+    case Opcode::SubtractWrapping:
+        r = (a - b) & m;
+        break;
     case Opcode::Subtract:
         r = (a - b) & m;
         if (in.is_signed) {
@@ -95,7 +130,10 @@ inline std::uint64_t evaluate(const Instruction& in, std::uint64_t a, std::uint6
                 failed = (y < 0 && x > std::numeric_limits<std::int64_t>::max() + y) ||
                          (y > 0 && x < std::numeric_limits<std::int64_t>::min() + y);
             } else {
-                const auto difference = x - y;
+                // Exact for operands within the width; for operands with
+                // bits above it, the two's-complement wrapped difference.
+                const auto difference =
+                    static_cast<std::int64_t>(static_cast<std::uint64_t>(x) - static_cast<std::uint64_t>(y));
                 failed = difference < signed_min(w) || difference > signed_max(w);
             }
         } else {
@@ -127,7 +165,13 @@ inline std::uint64_t evaluate(const Instruction& in, std::uint64_t a, std::uint6
             if (x == signed_min(w) && y == -1) {
                 failed = true;
             } else {
-                r = static_cast<std::uint64_t>(x / y) & m;
+                // Division by -1 is negation in wrapping arithmetic. That is
+                // x / y for every x but INT64_MIN, which only operands with
+                // bits above a width below 64 give, and on which the
+                // hardware division overflows.
+                const auto quotient =
+                    y == -1 ? std::uint64_t{0} - static_cast<std::uint64_t>(x) : static_cast<std::uint64_t>(x / y);
+                r = quotient & m;
             }
         } else {
             r = a / b;
@@ -192,6 +236,9 @@ inline std::uint64_t evaluate(const Instruction& in, std::uint64_t a, std::uint6
         } else {
             r = (in.is_signed ? static_cast<std::uint64_t>(sign_extend(a, w) >> b) : a >> b) & m;
         }
+        break;
+    case Opcode::ValueHash:
+        r = value_hash(a, w, in.is_signed, in.format);
         break;
     case Opcode::Index:
         r = a;

@@ -7,6 +7,10 @@
 #include <utility>
 #include <vector>
 
+namespace neura::backend {
+struct GadgetAdvice;
+} // namespace neura::backend
+
 namespace neura::lift {
 
 using Checks = std::vector<std::pair<std::uint32_t, ExpressionPtr>>;
@@ -21,9 +25,11 @@ using Checks = std::vector<std::pair<std::uint32_t, ExpressionPtr>>;
 // pass a modified copy.
 //
 // `checks`, when given, receives the checks in evaluation order: (reason,
-// value or condition whose computation registered it).
+// value or condition whose computation registered it). `advice`, when
+// given, receives the gadget instances the circuit library recorded while
+// regenerating the graph (the overflow proof's advice, never evidence).
 bool prove_structure(const nvr::Image& image, const nvr::Block& block, const nvr::Graph& graph,
-                     const LiftedForm& form, Checks* checks = nullptr);
+                     const LiftedForm& form, Checks* checks = nullptr, backend::GadgetAdvice* advice = nullptr);
 
 // Rebuilds a block from lifted operations: inputs in their order, values in
 // the given order, the condition last, exits as `original` lists them.
@@ -35,13 +41,14 @@ std::optional<nvr::Block> replay(const nvr::Image& image, const nvr::Block& orig
                                  const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values,
                                  const ExpressionPtr& condition, std::optional<std::size_t> exit_when_true,
                                  nvr::Graph& graph, Checks* checks,
-                                 const std::vector<ExpressionPtr>* schedule = nullptr);
+                                 const std::vector<ExpressionPtr>* schedule = nullptr,
+                                 backend::GadgetAdvice* advice = nullptr);
 
 // replay() compared with `original` and `graph`.
 bool replay_matches(const nvr::Image& image, const nvr::Block& original, const nvr::Graph& graph,
                     const std::vector<std::pair<std::uint32_t, ExpressionPtr>>& values, const ExpressionPtr& condition,
                     std::optional<std::size_t> exit_when_true, Checks* checks,
-                    const std::vector<ExpressionPtr>* schedule = nullptr);
+                    const std::vector<ExpressionPtr>* schedule = nullptr, backend::GadgetAdvice* advice = nullptr);
 
 // The graph of a dispatch block that takes Call exit e for each layout in
 // `exits[e]` and the last exit (an invalid-dispatch trap) otherwise, built

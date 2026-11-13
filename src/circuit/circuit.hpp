@@ -3,6 +3,7 @@
 #include "nvr/image.hpp"
 
 #include <cstdint>
+#include <initializer_list>
 #include <utility>
 #include <vector>
 
@@ -42,8 +43,47 @@ Signal operator-(std::int64_t left, const Signal& right);
 // Lanes of a fixed-width value, least significant first.
 using Word = std::vector<Signal>;
 
+// Which gadget instance built each neuron of a finished graph, and the
+// signals that instance was given: where the overflow analysis of src/lift
+// may look first for the wires that bound a neuron. It is advice only; the
+// analysis establishes every fact itself.
+struct GadgetAdvice {
+    // By graph node: the instance that built it, or nvr::absent.
+    std::vector<std::uint32_t> instance;
+    // By instance: its input signals, each as the graph wires of its terms.
+    // A wire of a dropped neuron is left out.
+    std::vector<std::vector<std::vector<std::uint32_t>>> inputs;
+};
+
 class Circuit {
 public:
+    // Records, from now on, the gadget instance of each new neuron
+    // (gadget_advice). Recording changes no neuron, wire, or output; it is
+    // off unless asked for.
+    void record_gadgets() { recording_ = true; }
+    bool recording() const { return recording_; }
+
+    // A gadget instance, open while the object lives: the neurons created
+    // meanwhile belong to it, unless an instance opened inside it is open.
+    // An opaque instance keeps every neuron created inside it, including
+    // those of gadgets it calls. Without recording it does nothing.
+    class Gadget {
+    public:
+        Gadget(Circuit& circuit, std::initializer_list<const Signal*> inputs, bool opaque = false);
+        Gadget(Circuit& circuit, const std::vector<Signal>& inputs, bool opaque = false);
+        ~Gadget();
+        Gadget(const Gadget&) = delete;
+        Gadget& operator=(const Gadget&) = delete;
+
+    private:
+        void open(std::vector<Signal> inputs, bool opaque);
+        Circuit* circuit_;
+        bool open_ = false;
+    };
+
+    // The advice recorded for the graph finish() returns.
+    GadgetAdvice gadget_advice() const;
+
     // A new input lane. Lanes are numbered in the order they are created.
     Signal input();
     std::uint32_t input_count() const { return inputs_; }
@@ -84,9 +124,19 @@ private:
         Signal input;
     };
 
+    // Records the instance of the neuron just created.
+    void created();
+
     std::uint32_t inputs_ = 0;
     std::vector<Neuron> neurons_;
     std::vector<WireId> outputs_;
+    // Gadget recording: each neuron's instance (by neuron, when recording),
+    // each instance's inputs, and the open instances, innermost last, with
+    // whether each is opaque.
+    bool recording_ = false;
+    std::vector<std::uint32_t> neuron_instance_;
+    std::vector<std::vector<Signal>> instances_;
+    std::vector<std::pair<std::uint32_t, bool>> open_;
 };
 
 // Result of an integer operation and the condition under which the

@@ -27,8 +27,10 @@ enum class Opcode : std::uint8_t {
     Divide,
     Remainder,
     Negate,
-    // Addition without an overflow check ("+~").
+    // Addition and subtraction without an overflow check ("+~", "-~"):
+    // the result modulo 2^width.
     AddWrapping,
+    SubtractWrapping,
     Equal,
     NotEqual,
     Less,
@@ -50,6 +52,10 @@ enum class Opcode : std::uint8_t {
     Index,
     // Integer to integer; a value outside the target range fails.
     ConvertInteger,
+    // The value hash of docs/lang/Stdlib.md's hash_code for a Boolean,
+    // integer, or float operand, as a uint32 (value_hash in evaluate.hpp).
+    // It reads only bits, so it does not depend on the float environment.
+    ValueHash,
     // binary32 and binary64 only, by hardware arithmetic.
     // Arithmetic, binary32 and binary64 only, by hardware arithmetic, with
     // every NaN result replaced by the canonical quiet NaN.

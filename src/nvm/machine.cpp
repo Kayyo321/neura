@@ -357,6 +357,8 @@ public:
     // run without a shared cache keeps its own and gives it to its parallel
     // items.
     void setup_tier() {
+        // Setting up an execution is part of loading for --tier-stats.
+        time_as(TierTimes::Category::Load);
         if (limits_.graph_device || std::min(limits_.tier, tier_ceiling()) < 1) {
             limits_.tier_cache = nullptr;
             return;
@@ -386,6 +388,13 @@ public:
             jit_context_.state = &State::jit_state;
             jit_context_.poll = &State::jit_poll;
         }
+    }
+
+    // --tier-stats: the wall time from here on belongs to `category`. The
+    // clock is read only when that changes the category, so a run of steps
+    // at one tier is one interval.
+    void time_as(TierTimes::Category category) {
+        if (times_) times_->enter(category);
     }
 
     // A concurrent image needs a positive quantum; reject it before any run state exists.
@@ -419,7 +428,13 @@ public:
             // Regions run while the current block has one; the block where
             // the last one stopped, and any block without one, runs at tier 1.
             if (tier2_) run_regions(std::numeric_limits<std::uint64_t>::max());
-            if (auto event = step(wires_)) return std::move(*event);
+            if (auto event = step(wires_)) {
+                // A request, poll, or wait leaves for the host until the
+                // next step; after the last event the time is the runner's.
+                const bool ended = event->kind == Event::Kind::Completed || event->kind == Event::Kind::Trapped;
+                time_as(ended ? TierTimes::Category::Other : TierTimes::Category::Host);
+                return std::move(*event);
+            }
         }
     }
 
@@ -480,6 +495,9 @@ public:
         }
         const auto saved = pending_;
         const auto restore = [&] { pending_ = saved; };
+        // The callback's steps are timed as steps; the host's time resumes
+        // when it returns.
+        const TierTimes::Scope timing(times_, TierTimes::Category::Host);
         try {
             const auto found = std::ranges::find_if(image_.callbacks, [&](const nvr::Callback& callback) {
                 return callback.name == name && callback.interface_version == version;
@@ -521,6 +539,7 @@ public:
                     return std::nullopt;
                 }
                 if (event->kind == Event::Kind::HostRequest) {
+                    time_as(TierTimes::Category::Host);
                     complete(host(event->request));
                     if (finished_) {
                         restore();
@@ -1233,6 +1252,7 @@ private:
     }
 
     void collect(std::span<const std::uint64_t> temporary_roots, const HeapEntry* allocation) {
+        const TierTimes::Scope timing(times_, TierTimes::Category::Collection);
         for (std::size_t i = 0; i < const_values_.size(); ++i) {
             if (nvr::is_reference(type(image_.constants[i].type).kind)) {
                 mark(const_values_[i]);
@@ -2177,6 +2197,12 @@ private:
         // the run has no cache, and its items stay on the reference tier.
         limits.tier = parent.tier_cache ? parent.tier : 0;
         limits.tier_cache = parent.tier_cache;
+        // Items evaluated in order on the run's thread continue its
+        // timeline, which returns to the step that finished them; worker
+        // threads are not timed.
+        limits.tier_times = parent.parallel_workers <= 1 ? parent.tier_times : nullptr;
+        const TierTimes::Scope timing(limits.tier_times,
+                                      limits.tier_times ? limits.tier_times->current() : TierTimes::Category::Other);
         const auto refuse = [&](std::string detail) {
             item.trapped = true;
             item.trap = {};
@@ -2992,6 +3018,7 @@ private:
                 if (!started_) start();
             }
             if (scheduler_ && scheduler_->deciding) {
+                time_as(TierTimes::Category::Other);
                 if (auto event = decide()) return event;
             }
             prepare_step(Defer);
@@ -3096,6 +3123,7 @@ private:
         if (tier_) return tier_step(scratch);
         GraphStep current;
         if (auto event = begin_step(current)) return event;
+        time_as(TierTimes::Category::Tier0);
         const auto& graph = image_.graphs[current.graph];
         if (limits_.graph_device && !graph.nodes.empty()) {
             GraphJob job{current.graph, current.inputs, lanes(outputs_, current.output_count)};
@@ -3977,6 +4005,8 @@ private:
     TierCache* tier_ = nullptr;
     bool tier_check_ = false;
     TierSteps tier_steps_;
+    // --tier-stats: the wall-time timeline, or null (time_as).
+    TierTimes* times_ = limits_.tier_times;
     // Tier 2 (tier2_steps.inc): whether regions run, the registers and
     // initialized flags of the running region, the arguments of an inline
     // state operation, and the events for --tier-stats.

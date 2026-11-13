@@ -687,6 +687,12 @@ if(BUILD_TESTING)
         add_test(NAME decompiler-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+    # decompiler-behavior takes a few minutes in a Release build and more than
+    # an hour under the address and undefined-behavior sanitizers, so that
+    # configuration sets a longer limit, as it does for backend-reference.
+    set(NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT 3600 CACHE STRING
+        "CTest limit, in seconds, for the decompiler-behavior test")
+    set_tests_properties(decompiler-behavior PROPERTIES TIMEOUT "${NEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT}")
 
     # Lifted blocks (src/lift): the structural and overflow proofs, and the
     # lowered blocks against the reference evaluator over a program corpus.

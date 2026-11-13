@@ -1,5 +1,6 @@
 #pragma once
 
+#include "circuit/circuit.hpp"
 #include "nvr/image.hpp"
 
 #include <cstddef>
@@ -65,6 +66,18 @@ struct WireGroup {
     Interval range;
 };
 
+// How the refined analysis uses advice (prove_no_overflow).
+enum class AdviceUse {
+    // Not at all: the analysis as it runs without advice.
+    none,
+    // The cut the advice names is tried first, then the search.
+    first,
+    // A range found from the advice's cut stands: the search is not run
+    // after it, and two sources are tried as the halves of a selection only
+    // when the advice names one gadget instance for both.
+    decisive,
+};
+
 struct OverflowProof {
     bool safe = false;
     // When not safe: the case analysis ran out of the work it was given, so
@@ -78,6 +91,8 @@ struct OverflowProof {
     // Wire groups, and each wire's group or nvr::absent.
     std::vector<WireGroup> groups;
     std::vector<std::uint32_t> group_of;
+    // How the analysis used its advice (prove_no_overflow).
+    AdviceUse advice_use = AdviceUse::none;
 };
 
 // With `refine` off, the analysis skips both refinements above except the
@@ -86,16 +101,42 @@ struct OverflowProof {
 // lift library tries it first and refines only when it is not enough.
 //
 // `work`, when given, bounds the case analysis: each node it evaluates for
-// one assignment costs one unit, taken from *work. When it runs out, the
-// proof stops as `exhausted`. The bound changes only whether an answer is
-// found, never which: a proof found within it is the proof found without.
+// one assignment costs one unit, taken from *work. A node whose sources keep
+// their values from the previous assignment is not evaluated again, and an
+// enumeration the analysis has already made is not made again, so neither
+// costs anything. When it runs out, the proof stops as `exhausted`. The
+// bound changes only whether an answer is found, never which: a proof found
+// within it is the proof found without.
 //
 // `resume`, when given, is an earlier refined analysis of the same graph
 // that ran out of work: it kept the intervals and groups of every node it
 // settled (`wires` then ends before `node`), and the analysis continues
 // from there. A resumed proof is the proof an unbounded analysis finds.
+//
+// `advice`, when given, names for each node the wires that bound the gadget
+// instance that built it (backend::GadgetAdvice, recorded while the runtime
+// regenerates the block). The refined analysis tries those cuts first; it
+// establishes every interval and group itself, so advice that is absent,
+// wrong, or names another graph changes only how long the proof takes and
+// whether one is found, never makes a false proof.
+//
+// `use` says how (AdviceUse). The decisive uses are much faster where the
+// advice is right and may fail to prove a graph where it is not, so a
+// caller that sees the analysis fail runs it again with the next use, down
+// to AdviceUse::none. Every use establishes every fact itself. A resumed
+// analysis must use the same setting.
+//
+// Precondition: every node reads only earlier wires, its edges name
+// strictly ascending sources (so no wire twice), and the graph has fewer
+// than 2^31 wires, as the loader requires of a graph it accepts. For a graph
+// that does not meet it, the proof is not safe and `node` names the first
+// node that breaks it (0 when there are too many wires); nothing else is
+// analysed. lanes_are_bits accepts no lane of such a graph either, nor of a
+// proof whose wires or group entries do not match the graph's wire count.
+using ProofAdvice = backend::GadgetAdvice;
 OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine = true, std::uint64_t* work = nullptr,
-                                const OverflowProof* resume = nullptr);
+                                const OverflowProof* resume = nullptr, const ProofAdvice* advice = nullptr,
+                                AdviceUse use = AdviceUse::none);
 
 // How lanes_are_bits established each lane.
 struct BitEvidence {
@@ -119,6 +160,7 @@ struct BitEvidence {
 // case analysis as for prove_no_overflow; when it runs out the result is
 // false and *work is zero.
 bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::span<const std::uint32_t> lanes,
-                    BitEvidence* evidence = nullptr, bool cases = true, std::uint64_t* work = nullptr);
+                    BitEvidence* evidence = nullptr, bool cases = true, std::uint64_t* work = nullptr,
+                    const ProofAdvice* advice = nullptr);
 
 } // namespace neura::lift

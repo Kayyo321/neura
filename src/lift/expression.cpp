@@ -118,6 +118,11 @@ public:
                 }
             } else if (e->op == "~") {
                 if (!is_integer(type) || !same_shape(type, from)) return "'~' not on an integer of its type";
+            } else if (e->op == "hash") {
+                if (!(from.kind == nvr::TypeKind::Bool || is_integer(from) || is_floating(from)) ||
+                    type.kind != nvr::TypeKind::Unsigned || type.width != 32) {
+                    return "'hash' not from a scalar to uint32";
+                }
             } else if (e->op == "neg") {
                 if (!(is_integer(type) || is_floating(type)) || !same_shape(type, from)) return "'neg' changes its type";
             } else {
@@ -159,7 +164,7 @@ public:
                 if (op != "+" && op != "-" && op != "*" && op != "/") return "an unknown float operation";
                 if (!same_shape(type, a)) return "a float operation that changes its type";
             } else {
-                if (op != "+" && op != "+~" && op != "-" && op != "*" && op != "/" && op != "%" && op != "&" &&
+                if (op != "+" && op != "+~" && op != "-" && op != "-~" && op != "*" && op != "/" && op != "%" && op != "&" &&
                     op != "|" && op != "^" && op != "<<" && op != ">>") {
                     return "an unknown integer operation";
                 }

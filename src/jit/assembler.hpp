@@ -26,10 +26,23 @@ namespace neura::jit {
 //   T2.
 // - call() takes `a` in T0 and `b` in T1 and returns in T0. It clobbers T1
 //   to T3. Pinned registers keep their values across it.
+// - Float values are bit patterns in the scratch registers: a binary32
+//   operand is the low 32 bits (the bits above are ignored) and a binary32
+//   result is zero-extended. The float operations compute in the first two
+//   vector registers (xmm0 and xmm1, v0 and v1), which are their own
+//   temporaries: no value lives in a vector register between operations,
+//   nothing else uses one, and call() may clobber them. They rely on the
+//   default floating-point environment (no region that computes floats is
+//   entered in another) and never change it.
 enum class Scratch : std::uint8_t { T0, T1, T2, T3 };
 
 enum class Cond : std::uint8_t { Eq, Ne, ULt, ULe, UGt, UGe, SLt, SLe, SGt, SGe };
 enum class Alu : std::uint8_t { Add, Sub, And, Or, Xor, Mul };
+enum class FloatFormat : std::uint8_t { Binary32, Binary64 };
+enum class FloatAlu : std::uint8_t { Add, Sub, Mul, Div };
+// Ordered comparisons: false when either operand is NaN, except Ne, which
+// is then true.
+enum class FloatCond : std::uint8_t { Eq, Ne, Lt, Le, Gt, Ge };
 enum class Shift : std::uint8_t { Left, LogicalRight, ArithmeticRight };
 enum class Overflow : std::uint8_t { Unsigned, Signed };
 
@@ -98,6 +111,22 @@ public:
     // 64-bit values. T1 must not be zero, and a signed division must not
     // be of the smallest value by -1. Clobbers T2.
     virtual void divide(bool is_signed, bool remainder) = 0;
+
+    // to = to op from, rounded to nearest even, with every NaN result
+    // replaced by the canonical quiet NaN (0x7fc00000, 0x7ff8000000000000).
+    virtual void float_alu(FloatAlu op, FloatFormat format, Scratch to, Scratch from) = 0;
+    // to = (a cond b) ? 1 : 0; `to` may be a or b.
+    virtual void float_compare(FloatCond cond, FloatFormat format, Scratch to, Scratch a, Scratch b) = 0;
+    // value = value converted from the other format to `to` (binary32 to
+    // binary64 exactly, binary64 to binary32 rounded to nearest even), with
+    // a NaN replaced by the canonical quiet NaN.
+    virtual void float_convert(FloatFormat to, Scratch value) = 0;
+    // value = the signed 64-bit integer `value`, rounded to nearest even.
+    virtual void float_from_integer(FloatFormat format, Scratch value) = 0;
+    // value = the float `value` truncated toward zero, as a signed 64-bit
+    // integer, when that is at least -2^63 and below 2^63; otherwise (and
+    // for NaN) INT64_MIN, which the truncation -2^63 gives too.
+    virtual void float_to_integer(FloatFormat format, Scratch value) = 0;
 
     virtual void load_context(Scratch to, std::uint32_t offset) = 0;
     virtual void load_context_byte(Scratch to, std::uint32_t offset) = 0;

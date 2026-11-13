@@ -801,7 +801,9 @@ void check_tagged_use(const IrProgram& program, SymbolId target, const Span& use
                      (item.kind == SymbolKind::Field && within(program, scope, item.owner));
     if (has_tag(item, TagId::Deprecated) && !own && !inside_tagged(program, scope, TagId::Deprecated))
         deprecated_use(program, target, use, scope, lookup, what);
-    if (has_tag(item, TagId::Experimental) && !own && !inside_tagged(program, scope, TagId::Experimental))
+    // `lookup` can add symbols to the program, so the symbol is read again.
+    if (has_tag(program.symbols[target], TagId::Experimental) && !own &&
+        !inside_tagged(program, scope, TagId::Experimental))
         experimental_use(program, target, use, scope, what);
 }
 

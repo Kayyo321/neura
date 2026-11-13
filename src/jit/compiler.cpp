@@ -13,9 +13,16 @@
 //   the width), and the same failure conditions, tested with the
 //   processor's carry and overflow flags where they are exactly those
 //   conditions.
-// - Everything else of a lowered instruction (float operations, widths
-//   outside 1 to 64, and a signed division by -1) calls lift::evaluate
-//   itself, so it is the interpreter's code by construction.
+// - Float operations of binary32 and binary64 follow lift::evaluate_float
+//   (src/lift/lowered_block.cpp): the hardware's arithmetic, comparison,
+//   and conversion instructions, each rounding to nearest even (a region
+//   that computes floats is entered only in the default floating-point
+//   environment), with the reference's operand bits, canonical NaN
+//   results, and failure conditions.
+// - Everything else of a lowered instruction (16-bit float formats, widths
+//   outside 1 to 64, a signed division by -1, and a float truncation
+//   outside the signed 64-bit range) calls lift::evaluate itself, so it is
+//   the interpreter's code by construction.
 // - Budget, Poll, CheckRef, and State do what the interpreter does, the
 //   last three through helpers that run the interpreter's own code.
 #include "assembler.hpp"
@@ -27,6 +34,7 @@
 
 #include <algorithm>
 #include <map>
+#include <optional>
 #include <string>
 #include <tuple>
 
@@ -329,6 +337,7 @@ private:
         case lift::Opcode::Add:
         case lift::Opcode::AddWrapping:
         case lift::Opcode::Subtract:
+        case lift::Opcode::SubtractWrapping:
         case lift::Opcode::Negate:
         case lift::Opcode::Multiply:
         case lift::Opcode::Equal:
@@ -364,7 +373,13 @@ private:
         check_register(op.a);
         check_register(op.b);
         const auto fail = stub(op.block, Outcome::Checks);
-        if (!inline_instruction(in)) {
+        if (lift::float_opcode(in.op)) {
+            if (inline_float(in)) {
+                float_operation(in, op, fail);
+            } else {
+                evaluate(op, fail);
+            }
+        } else if (!inline_instruction(in)) {
             evaluate(op, fail);
         } else if (in.op == lift::Opcode::Divide || in.op == lift::Opcode::Remainder) {
             division(in, op, fail);
@@ -416,6 +431,171 @@ private:
         }
     }
 
+    // The format the hardware computes, for binary32 and binary64.
+    static std::optional<FloatFormat> hardware_format(lift::FloatType type) {
+        if (type == lift::FloatType::Binary32) return FloatFormat::Binary32;
+        if (type == lift::FloatType::Binary64) return FloatFormat::Binary64;
+        return std::nullopt;
+    }
+
+    // Whether the float instruction is compiled inline: binary32 and
+    // binary64 operations, conversions between the two, and conversions
+    // between them and integers of 1 to 64 bits. 16-bit formats call
+    // lift::evaluate.
+    static bool inline_float(const lift::Instruction& in) {
+        using lift::Opcode;
+        switch (in.op) {
+        case Opcode::FloatAdd:
+        case Opcode::FloatSubtract:
+        case Opcode::FloatMultiply:
+        case Opcode::FloatDivide:
+        case Opcode::FloatNegate:
+        case Opcode::FloatEqual:
+        case Opcode::FloatNotEqual:
+        case Opcode::FloatLess:
+        case Opcode::FloatLessEqual:
+        case Opcode::FloatGreater:
+        case Opcode::FloatGreaterEqual:
+            return hardware_format(in.format).has_value();
+        case Opcode::FloatConvert:
+            return hardware_format(in.format) && hardware_format(in.to_format) && in.format != in.to_format;
+        case Opcode::FloatFromInteger:
+            return hardware_format(in.to_format) && in.width >= 1 && in.width <= 64;
+        case Opcode::FloatToInteger:
+            return hardware_format(in.format) && in.to_width >= 1 && in.to_width <= 64;
+        default:
+            return false;
+        }
+    }
+
+    // The float instruction `in` (inline_float) on registers op.a and op.b
+    // as lift::evaluate_float computes it, its result stored in op.dst;
+    // branches to `fail` where it sets `failed`.
+    void float_operation(const lift::Instruction& in, const Op& op, Label fail) {
+        using lift::Opcode;
+        switch (in.op) {
+        case Opcode::FloatAdd:
+        case Opcode::FloatSubtract:
+        case Opcode::FloatMultiply:
+        case Opcode::FloatDivide: {
+            // The operands' low 32 bits for binary32, a canonical NaN for
+            // any NaN result.
+            const auto alu = in.op == Opcode::FloatAdd        ? FloatAlu::Add
+                             : in.op == Opcode::FloatSubtract ? FloatAlu::Sub
+                             : in.op == Opcode::FloatMultiply ? FloatAlu::Mul
+                                                              : FloatAlu::Div;
+            m_.load(T0, op.a);
+            m_.load(T1, op.b);
+            m_.float_alu(alu, *hardware_format(in.format), T0, T1);
+            m_.store(op.dst, T0);
+            return;
+        }
+        case Opcode::FloatNegate:
+            // a ^ the format's sign bit: the bits above a binary32 value
+            // are kept, and a NaN keeps its payload.
+            m_.load(T0, op.a);
+            m_.move_immediate(T3, std::uint64_t{1} << (in.format == lift::FloatType::Binary32 ? 31 : 63));
+            m_.alu(Alu::Xor, T0, T3);
+            m_.store(op.dst, T0);
+            return;
+        case Opcode::FloatEqual:
+        case Opcode::FloatNotEqual:
+        case Opcode::FloatLess:
+        case Opcode::FloatLessEqual:
+        case Opcode::FloatGreater:
+        case Opcode::FloatGreaterEqual: {
+            // The decoded values compare as the format's own values do.
+            const auto cond = in.op == Opcode::FloatEqual       ? FloatCond::Eq
+                              : in.op == Opcode::FloatNotEqual  ? FloatCond::Ne
+                              : in.op == Opcode::FloatLess      ? FloatCond::Lt
+                              : in.op == Opcode::FloatLessEqual ? FloatCond::Le
+                              : in.op == Opcode::FloatGreater   ? FloatCond::Gt
+                                                                : FloatCond::Ge;
+            m_.load(T0, op.a);
+            m_.load(T1, op.b);
+            m_.float_compare(cond, *hardware_format(in.format), T0, T0, T1);
+            m_.store(op.dst, T0);
+            return;
+        }
+        case Opcode::FloatConvert:
+            m_.load(T0, op.a);
+            m_.float_convert(*hardware_format(in.to_format), T0);
+            m_.store(op.dst, T0);
+            return;
+        case Opcode::FloatFromInteger:
+            float_from_integer(in, op);
+            return;
+        case Opcode::FloatToInteger:
+            float_to_integer(in, op, fail);
+            return;
+        default:
+            break;
+        }
+        throw GenerationError("a float instruction the generator cannot compile inline");
+    }
+
+    // A signed operand is sign-extended from its width and converted. An
+    // unsigned one is converted as a signed 64-bit value when it is below
+    // 2^63 (whatever its width: the reference does not mask it); otherwise
+    // as integer_to_double and integer_to_single do: (v >> 1) | (v & 1) is
+    // converted and then doubled with a float addition.
+    void float_from_integer(const lift::Instruction& in, const Op& op) {
+        const auto format = *hardware_format(in.to_format);
+        m_.load(T0, op.a);
+        if (in.is_signed) {
+            sign_extend(T0, in.width);
+            m_.float_from_integer(format, T0);
+        } else {
+            const auto large = m_.label();
+            const auto done = m_.label();
+            m_.branch_if_bit(T0, 63, large);
+            m_.float_from_integer(format, T0);
+            m_.jump(done);
+            m_.bind(large);
+            m_.move(T1, T0);
+            m_.move_immediate(T3, 1);
+            m_.alu(Alu::And, T1, T3);
+            m_.shift_immediate(Shift::LogicalRight, T0, 1);
+            m_.alu(Alu::Or, T0, T1);
+            m_.float_from_integer(format, T0);
+            m_.move(T1, T0);
+            m_.float_alu(FloatAlu::Add, format, T0, T1);
+            m_.bind(done);
+        }
+        m_.store(op.dst, T0);
+    }
+
+    // The reference truncates, fails unless low <= t < high (the width's
+    // range; NaN fails), and gives (int64) t, masked when signed. Where
+    // the hardware's truncation i is not INT64_MIN, t is exactly i, so the
+    // bounds are those of the integer range. INT64_MIN (NaN, a truncation
+    // outside [-2^63, 2^63), or -2^63 itself) calls lift::evaluate.
+    void float_to_integer(const lift::Instruction& in, const Op& op, Label fail) {
+        const unsigned to = in.to_width;
+        const auto slow = m_.label();
+        const auto done = m_.label();
+        m_.load(T0, op.a);
+        m_.float_to_integer(*hardware_format(in.format), T0);
+        m_.move_immediate(T3, std::uint64_t{1} << 63);
+        m_.branch_if(Cond::Eq, T0, T3, slow);
+        if (in.to_signed) {
+            if (to < 64) signed_range(T0, lift::signed_min(to), lift::signed_max(to), fail);
+            mask(T0, to);
+        } else {
+            m_.move_immediate(T3, 0);
+            m_.branch_if(Cond::SLt, T0, T3, fail);
+            if (to < 64) {
+                m_.move_immediate(T3, lift::mask_of(to));
+                m_.branch_if(Cond::UGt, T0, T3, fail);
+            }
+        }
+        m_.store(op.dst, T0);
+        m_.jump(done);
+        m_.bind(slow);
+        evaluate(op, fail);
+        m_.bind(done);
+    }
+
     // The integer instruction `in` on registers op.a and op.b, as
     // lift::evaluate computes it; branches to `fail` where it sets
     // `failed`. Returns the scratch register holding the result.
@@ -464,6 +644,12 @@ private:
         case Opcode::AddWrapping:
             operands();
             m_.alu(Alu::Add, T0, T1);
+            mask(T0, w);
+            return T0;
+        case Opcode::SubtractWrapping:
+            // r = (a - b) & m.
+            operands();
+            m_.alu(Alu::Sub, T0, T1);
             mask(T0, w);
             return T0;
         case Opcode::Subtract:

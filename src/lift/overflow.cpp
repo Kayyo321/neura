@@ -3,16 +3,75 @@
 #include "checked.hpp"
 
 #include <algorithm>
+#include <array>
+#include <functional>
+#include <bit>
 #include <limits>
 #include <map>
-#include <optional>
-#include <set>
 #include <numeric>
+#include <optional>
 
 namespace neura::lift {
 namespace {
 
 bool within_bits(const Interval& interval) { return interval.lo >= 0 && interval.hi <= 1; }
+
+// The number of values in `interval` when it is not empty and holds at most
+// 256, else nothing. hi - lo is computed in unsigned arithmetic, where it is
+// exact for hi >= lo even when it exceeds INT64_MAX.
+std::optional<std::uint64_t> few_values(const Interval& interval) {
+    if (interval.hi < interval.lo) return std::nullopt;
+    const auto width = static_cast<std::uint64_t>(interval.hi) - static_cast<std::uint64_t>(interval.lo);
+    if (width > 255) return std::nullopt;
+    return width + 1;
+}
+
+// The first node that breaks prove_no_overflow's precondition (a node that
+// reads itself or a later wire, or whose edges do not name strictly
+// ascending sources), or 0 when the graph has more wires than an int32_t
+// counts; nothing when the graph meets it. Wire indices, positions and
+// counts are then all below 2^31, which bounds every narrowing of one to
+// std::int32_t or std::uint32_t in this file.
+std::optional<std::size_t> malformed_node(const nvr::Graph& graph) {
+    if (std::size_t{graph.input_lanes} + graph.nodes.size() >
+        static_cast<std::size_t>(std::numeric_limits<std::int32_t>::max())) {
+        return std::size_t{0};
+    }
+    for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
+        const auto& edges = graph.nodes[n].edges;
+        for (std::size_t e = 0; e < edges.size(); ++e) {
+            if (edges[e].source >= graph.input_lanes + n || (e > 0 && edges[e].source <= edges[e - 1].source)) {
+                return n;
+            }
+        }
+    }
+    return std::nullopt;
+}
+
+// range() from a cut the advice names: the enumeration it may make per
+// group of terms before conditioning (and so its work), and its rounds.
+constexpr std::uint64_t advice_budget = 256;
+constexpr int advice_rounds = 2;
+
+// checked_multiply and checked_add for the inner loops, which use the result
+// only on success: the compiler builtins decide exactly what those decide,
+// whether the true result is representable, without a division. On failure
+// `result` is unspecified.
+bool multiply_fits(std::int64_t a, std::int64_t b, std::int64_t& result) {
+#if defined(__GNUC__) || defined(__clang__)
+    return !__builtin_mul_overflow(a, b, &result);
+#else
+    return checked_multiply(a, b, result);
+#endif
+}
+
+bool add_fits(std::int64_t a, std::int64_t b, std::int64_t& result) {
+#if defined(__GNUC__) || defined(__clang__)
+    return !__builtin_add_overflow(a, b, &result);
+#else
+    return checked_add(a, b, result);
+#endif
+}
 
 // Checked k * [lo, hi].
 std::optional<Interval> scale(std::int64_t k, const Interval& interval) {
@@ -24,13 +83,155 @@ std::optional<Interval> scale(std::int64_t k, const Interval& interval) {
 
 class Analysis {
 public:
-    Analysis(const nvr::Graph& graph, OverflowProof& proof, std::uint64_t* budget = nullptr)
+    Analysis(const nvr::Graph& graph, OverflowProof& proof, std::uint64_t* budget = nullptr,
+             const ProofAdvice* advice = nullptr, AdviceUse use = AdviceUse::none)
         : graph_(graph), proof_(proof), values_(std::size_t{graph.input_lanes} + graph.nodes.size(), 0),
-          budget_(budget) {
+          budget_(budget), advice_(advice), decisive_(use == AdviceUse::decisive) {
         if (proof_.group_of.size() != values_.size()) proof_.group_of.assign(values_.size(), nvr::absent);
+        const auto wires = values_.size();
+        cone_marks_.assign(wires, 0);
+        start_marks_.assign(wires, 0);
+        cone_position_.assign(wires, -1);
+        variable_of_.assign(wires, -1);
+        visited_.assign(wires, 0);
+        free_index_.assign(wires, -1);
+        needed_position_.assign(wires, -1);
+        last_use_wire_.assign(wires, -1);
+        top_key_wire_.assign(wires, -1);
+        last_edge_wire_.assign(wires, -1);
+        other_index_.assign(wires, -1);
     }
 
     const nvr::Node& node(std::uint32_t wire) const { return graph_.nodes[wire - graph_.input_lanes]; }
+
+    // The wires the advice names as bounding the gadget instances of
+    // `wires`: the instance's input signals, where a signal of one wire is
+    // that wire and a signal summing several is replaced by the inputs of the
+    // instances that built its wires, which a cut through the separate wires
+    // would treat as independent. Nothing without advice, or when the advice
+    // names a wire or instance the graph does not have, or nests too deep,
+    // or names too many wires. The cut is only where range() starts; it
+    // decides nothing by itself.
+    std::optional<std::vector<std::uint32_t>> advice_cut(std::initializer_list<std::uint32_t> wires) const {
+        if (!advice_) return std::nullopt;
+        const auto& advice = *advice_;
+        const auto count = static_cast<std::uint32_t>(values_.size());
+        const auto inputs = graph_.input_lanes;
+        if (advice.instance.size() != graph_.nodes.size()) return std::nullopt;
+        std::vector<std::uint32_t> cut;
+        const auto instance_of = [&](std::uint32_t wire) -> std::uint32_t {
+            if (wire < inputs || wire >= count) return nvr::absent;
+            const auto i = advice.instance[wire - inputs];
+            return i < advice.inputs.size() ? i : nvr::absent;
+        };
+        bool valid = true;
+        // Each instance adds its inputs once.
+        std::vector<std::uint32_t> seen;
+        const std::function<void(std::uint32_t, int)> add = [&](std::uint32_t instance, int depth) {
+            if (std::find(seen.begin(), seen.end(), instance) != seen.end()) return;
+            seen.push_back(instance);
+            if (seen.size() > advice_instances) {
+                valid = false;
+                return;
+            }
+            for (const auto& signal : advice.inputs[instance]) {
+                // A signal whose wires are exactly an established group is
+                // one variable of range() already.
+                const auto g =
+                    signal.empty() || signal.front() >= count ? nvr::absent : proof_.group_of[signal.front()];
+                const bool group = g != nvr::absent && proof_.groups[g].members.size() == signal.size() &&
+                                   std::all_of(signal.begin(), signal.end(), [&](std::uint32_t wire) {
+                                       return wire < count && proof_.group_of[wire] == g;
+                                   });
+                for (const auto wire : signal) {
+                    if (wire >= count) {
+                        valid = false;
+                        return;
+                    }
+                    const auto inner = instance_of(wire);
+                    if (signal.size() == 1 || group || inner == nvr::absent || depth >= advice_depth) {
+                        if (std::find(cut.begin(), cut.end(), wire) == cut.end()) cut.push_back(wire);
+                    } else {
+                        add(inner, depth + 1);
+                    }
+                    if (!valid || cut.size() > advice_wires) {
+                        valid = false;
+                        return;
+                    }
+                }
+            }
+        };
+        for (const auto wire : wires) {
+            const auto instance = instance_of(wire);
+            if (instance == nvr::absent) return std::nullopt;
+            add(instance, 0);
+            if (!valid) return std::nullopt;
+        }
+        std::sort(cut.begin(), cut.end());
+        cut.erase(std::unique(cut.begin(), cut.end()), cut.end());
+        return cut;
+    }
+
+    // Whether the advice names different gadget instances for wires a and
+    // b: the halves of a selection come from one instance, so a pair from
+    // two is not tried as a group. Without advice for both, they are tried.
+    bool apart(std::uint32_t a, std::uint32_t b) const {
+        if (!advice_ || !decisive_) return false;
+        const auto& advice = *advice_;
+        const auto inputs = graph_.input_lanes;
+        if (advice.instance.size() != graph_.nodes.size() || a < inputs || b < inputs) return false;
+        const auto x = advice.instance[a - inputs];
+        const auto y = advice.instance[b - inputs];
+        return x != nvr::absent && y != nvr::absent && x != y;
+    }
+
+    // The range of the virtual sum `sum` of wires a and b from the cut the
+    // advice names for both, or nothing without one.
+    std::optional<Interval> pair_range(const nvr::Node& sum, std::uint32_t a, std::uint32_t b) {
+        const auto cut = advice_cut({a, b});
+        if (!cut) return std::nullopt;
+        return range(sum, advice_budget, decisive_ ? 1 : advice_rounds, &*cut);
+    }
+
+    // The kept result for key_ (with its hash), if any.
+    const std::optional<Interval>* memo_find(std::uint64_t hash) const {
+        if (memo_.empty()) return nullptr;
+        const auto mask = memo_.size() - 1;
+        for (auto slot = static_cast<std::size_t>(hash) & mask;; slot = (slot + 1) & mask) {
+            const auto& entry = memo_[slot];
+            if (entry.length == std::numeric_limits<std::uint32_t>::max()) return nullptr;
+            if (entry.hash == hash && entry.length == key_.size() &&
+                std::equal(key_.begin(), key_.end(), memo_keys_.begin() + entry.offset)) {
+                return &entry.result;
+            }
+        }
+    }
+
+    // Keeps `result` for key_, while the kept keys fit max_enumerated_words.
+    void memo_keep(std::uint64_t hash, std::optional<Interval> result) {
+        if (memo_keys_.size() + key_.size() > max_enumerated_words) return;
+        if (2 * (memo_count_ + 1) > memo_.size()) {
+            std::vector<MemoEntry> grown(std::max<std::size_t>(64, 2 * memo_.size()));
+            const auto mask = grown.size() - 1;
+            for (const auto& entry : memo_) {
+                if (entry.length == std::numeric_limits<std::uint32_t>::max()) continue;
+                auto slot = static_cast<std::size_t>(entry.hash) & mask;
+                while (grown[slot].length != std::numeric_limits<std::uint32_t>::max()) slot = (slot + 1) & mask;
+                grown[slot] = entry;
+            }
+            memo_ = std::move(grown);
+        }
+        const auto mask = memo_.size() - 1;
+        auto slot = static_cast<std::size_t>(hash) & mask;
+        while (memo_[slot].length != std::numeric_limits<std::uint32_t>::max()) slot = (slot + 1) & mask;
+        memo_[slot] = {hash, static_cast<std::uint32_t>(memo_keys_.size()), static_cast<std::uint32_t>(key_.size()),
+                       result};
+        memo_keys_.insert(memo_keys_.end(), key_.begin(), key_.end());
+        ++memo_count_;
+    }
+
+    // Whether the advice's cuts stand without the search (prove_no_overflow).
+    bool decisive() const { return decisive_; }
 
     // Whether the case analysis ran out of the caller's work.
     bool exhausted() const { return exhausted_; }
@@ -80,23 +281,36 @@ public:
 
     // The factor k with which `reader` reads every member of group `g` as k *
     // coefficient, 0 when it reads none of them, or nothing when it reads
-    // them otherwise.
+    // them otherwise. Reading the group in proportion takes exactly one edge
+    // from each member: a member read twice is not, whatever the number of
+    // edges.
     std::optional<std::int64_t> factor(const nvr::Node& reader, std::uint32_t g) const {
         const auto& members = proof_.groups[g].members;
+        if (members.size() > 64) return std::nullopt;
         std::optional<std::int64_t> k;
-        std::size_t found = 0;
+        // The members read so far, by index.
+        std::uint64_t found = 0;
         for (const auto& edge : reader.edges) {
             if (proof_.group_of[edge.source] != g) continue;
-            ++found;
             const auto it = std::find_if(members.begin(), members.end(),
                                          [&](const auto& m) { return m.first == edge.source; });
-            if (edge.weight % it->second != 0) return std::nullopt;
-            const auto ratio = edge.weight / it->second;
+            if (it == members.end()) return std::nullopt;
+            const auto bit = std::uint64_t{1} << static_cast<std::size_t>(it - members.begin());
+            if ((found & bit) != 0) return std::nullopt;
+            found |= bit;
+            const auto coefficient = it->second;
+            // weight / coefficient is undefined for a zero coefficient and
+            // overflows for INT64_MIN / -1, whose ratio 2^63 is no factor.
+            if (coefficient == 0 || (coefficient == -1 && edge.weight == std::numeric_limits<std::int64_t>::min()) ||
+                edge.weight % coefficient != 0) {
+                return std::nullopt;
+            }
+            const auto ratio = edge.weight / coefficient;
             if (k && *k != ratio) return std::nullopt;
             k = ratio;
         }
         if (found == 0) return std::int64_t{0};
-        if (found != members.size()) return std::nullopt;
+        if (static_cast<std::size_t>(std::popcount(found)) != members.size()) return std::nullopt;
         return k;
     }
 
@@ -104,14 +318,15 @@ public:
     std::optional<Interval> grouped_sum(const nvr::Node& reader) const {
         std::int64_t lo = reader.bias;
         std::int64_t hi = reader.bias;
-        std::set<std::uint32_t> done;
+        auto& done = done_;
+        done.clear();
         for (const auto& edge : reader.edges) {
             const auto g = proof_.group_of[edge.source];
             std::optional<Interval> term;
             if (g != nvr::absent) {
-                if (done.contains(g)) continue;
+                if (std::find(done.begin(), done.end(), g) != done.end()) continue;
                 if (const auto k = factor(reader, g)) {
-                    done.insert(g);
+                    done.push_back(g);
                     term = scale(*k, proof_.groups[g].range);
                     if (!term) return std::nullopt;
                 }
@@ -143,99 +358,167 @@ public:
     // computed is computed instead of left free, and a free neuron can be
     // replaced by its sources; both only remove assignments, so every range
     // found is sound and their intersection is kept.
-    std::optional<Interval> range(const nvr::Node& top, std::uint64_t budget, int rounds) {
+    //
+    // With `start`, the cut starts at those wires instead of `top`'s
+    // sources: every other wire between them and `top` is computed, and an
+    // input lane reached on the way is cut. Any such cut bounds the cone, so
+    // what is found is as sound as from any other; a start that leaves more
+    // than `start_cone` wires to compute is not tried.
+    std::optional<Interval> range(const nvr::Node& top, std::uint64_t budget, int rounds,
+                                  const std::vector<std::uint32_t>* start = nullptr) {
+        // Every caller passes a budget of at most 2^14: at most 2^22.
         work_ = budget * 256;
         const auto inputs = graph_.input_lanes;
-        std::set<std::uint32_t> cut;
-        std::set<std::uint32_t> computed;
-        const auto expand = [&](std::uint32_t wire) {
-            cut.erase(wire);
-            computed.insert(wire);
-            for (const auto& edge : node(wire).edges) {
-                if (!computed.contains(edge.source)) cut.insert(edge.source);
+        // Wire marks, reset on return: 1 cut, 2 computed. Every computed
+        // wire is reachable from `top` through computed wires (the cut only
+        // moves down), so the cone below is the computed wires, which
+        // enumerate() reads as cone_marks_ == 2.
+        auto& mark = cone_marks_;
+        std::vector<std::uint32_t> touched;
+        struct Reset {
+            std::vector<std::uint8_t>& mark;
+            const std::vector<std::uint32_t>& touched;
+            ~Reset() {
+                for (const auto wire : touched) mark[wire] = 0;
             }
+        } reset{mark, touched};
+        std::vector<std::uint32_t> cut;
+        std::vector<std::uint32_t> cone;
+        const auto add_cut = [&](std::uint32_t wire) {
+            if (mark[wire] != 0) return;
+            mark[wire] = 1;
+            touched.push_back(wire);
+            cut.push_back(wire);
         };
-        for (const auto& edge : top.edges) cut.insert(edge.source);
-        std::optional<Interval> best;
-        for (int round = 0; round < rounds; ++round) {
-            // A neuron computed from cut and computed wires alone is not free.
-            for (bool changed = true; changed;) {
-                changed = false;
-                for (const auto wire : cut) {
-                    if (wire >= inputs && !node(wire).edges.empty() &&
-                        std::all_of(node(wire).edges.begin(), node(wire).edges.end(), [&](const nvr::Edge& e) {
-                            return cut.contains(e.source) || computed.contains(e.source);
-                        })) {
-                        cut.erase(wire);
-                        computed.insert(wire);
-                        changed = true;
-                        break;
-                    }
-                }
-            }
-            // The nodes between the cut and `top`, in stored order.
-            std::set<std::uint32_t> cone;
+        const auto expand = [&](std::uint32_t wire) {
+            mark[wire] = 2;
+            cone.push_back(wire);
+            for (const auto& edge : node(wire).edges) add_cut(edge.source);
+        };
+        if (start) {
+            for (const auto wire : *start) start_marks_[wire] = 1;
             std::vector<std::uint32_t> pending;
             for (const auto& edge : top.edges) pending.push_back(edge.source);
+            bool too_large = false;
             while (!pending.empty()) {
                 const auto wire = pending.back();
                 pending.pop_back();
-                if (cut.contains(wire) || cone.contains(wire)) continue;
-                cone.insert(wire);
+                if (mark[wire] != 0) continue;
+                if (wire < inputs || start_marks_[wire] != 0) {
+                    add_cut(wire);
+                    continue;
+                }
+                if (cone.size() >= start_cone) {
+                    too_large = true;
+                    break;
+                }
+                mark[wire] = 2;
+                touched.push_back(wire);
+                cone.push_back(wire);
                 for (const auto& edge : node(wire).edges) pending.push_back(edge.source);
             }
+            for (const auto wire : *start) start_marks_[wire] = 0;
+            if (too_large) return std::nullopt;
+        } else {
+            for (const auto& edge : top.edges) add_cut(edge.source);
+        }
+        std::optional<Interval> best;
+        std::vector<Variable> variables;
+        std::vector<std::uint32_t> groups;
+        std::vector<std::uint64_t> depends;
+        std::vector<std::vector<std::size_t>> term_variables;
+        for (int round = 0; round < rounds; ++round) {
+            // The cut in ascending order, without the wires expanded since.
+            std::erase_if(cut, [&](std::uint32_t wire) { return mark[wire] != 1; });
+            std::sort(cut.begin(), cut.end());
+            // A neuron computed from cut and computed wires alone is not
+            // free. Moving a wire from the cut to the computed set changes no
+            // other wire's condition, so one pass finds them all.
+            std::size_t remaining = 0;
+            for (const auto wire : cut) {
+                if (wire >= inputs && !node(wire).edges.empty() &&
+                    std::all_of(node(wire).edges.begin(), node(wire).edges.end(),
+                                [&](const nvr::Edge& e) { return mark[e.source] != 0; })) {
+                    mark[wire] = 2;
+                    cone.push_back(wire);
+                } else {
+                    cut[remaining++] = wire;
+                }
+            }
+            cut.resize(remaining);
+            std::sort(cone.begin(), cone.end());
+            // Groups that may be one variable: every member in the cut, and
+            // `top` and every cone node reading them in proportion. A node
+            // that reads no member reads the group in proportion 0.
+            whole_groups(top, cut, cone, groups);
             // Free variables: whole wire groups, and other wires over their
             // intervals, which must be small.
-            std::vector<Variable> variables;
-            std::map<std::uint32_t, std::size_t> variable_of;
+            variables.clear();
             std::optional<std::uint32_t> too_wide;
             for (const auto wire : cut) {
-                if (variable_of.contains(wire)) continue;
+                if (variable_of_[wire] >= 0) continue;
                 const auto g = proof_.group_of[wire];
-                if (g != nvr::absent && whole_group(g, cut, cone, top)) {
+                if (g != nvr::absent && group_slot_[g] == 1 && few_values(proof_.groups[g].range)) {
                     const auto& group = proof_.groups[g];
-                    for (const auto& member : group.members) variable_of[member.first] = variables.size();
+                    for (const auto& member : group.members) {
+                        variable_of_[member.first] = static_cast<std::int32_t>(variables.size());
+                    }
                     variables.push_back({group.members.front().first, g, group.range.lo, group.range.hi});
                     continue;
                 }
                 const auto& interval = proof_.wires[wire];
-                if (interval.hi - interval.lo > 255 || interval.hi < interval.lo) {
+                if (!few_values(interval)) {
                     too_wide = wire;
                     break;
                 }
-                variable_of[wire] = variables.size();
+                variable_of_[wire] = static_cast<std::int32_t>(variables.size());
                 variables.push_back({wire, nvr::absent, interval.lo, interval.hi});
             }
+            for (const auto g : groups) group_slot_[g] = -1;
             if (too_wide) {
+                for (const auto wire : cut) variable_of_[wire] = -1;
                 if (*too_wide < inputs) return best;
                 expand(*too_wide);
                 continue;
             }
-            std::map<std::uint32_t, std::vector<std::size_t>> depends;
-            for (const auto wire : cone) {
-                std::set<std::size_t> found;
-                for (const auto& edge : node(wire).edges) {
-                    if (const auto v = variable_of.find(edge.source); v != variable_of.end()) {
-                        found.insert(v->second);
+            // The variables each cone node depends on, as a bit set per
+            // node; the cone is in stored order, so a node's sources come
+            // before it.
+            const auto words = (variables.size() + 63) / 64;
+            depends.assign(cone.size() * words, 0);
+            for (std::size_t i = 0; i < cone.size(); ++i) {
+                cone_position_[cone[i]] = static_cast<std::int32_t>(i);
+                auto* found = depends.data() + i * words;
+                for (const auto& edge : node(cone[i]).edges) {
+                    if (const auto v = variable_of_[edge.source]; v >= 0) {
+                        found[static_cast<std::size_t>(v) / 64] |= std::uint64_t{1} << (v % 64);
                     } else {
-                        const auto& d = depends.at(edge.source);
-                        found.insert(d.begin(), d.end());
+                        const auto* d = depends.data() + static_cast<std::size_t>(cone_position_[edge.source]) * words;
+                        for (std::size_t w = 0; w < words; ++w) found[w] |= d[w];
                     }
                 }
-                depends[wire].assign(found.begin(), found.end());
             }
-            std::vector<std::vector<std::size_t>> term_variables;
-            for (const auto& edge : top.edges) {
-                if (const auto v = variable_of.find(edge.source); v != variable_of.end()) {
-                    term_variables.push_back({v->second});
-                } else {
-                    term_variables.push_back(depends.at(edge.source));
+            term_variables.resize(top.edges.size());
+            for (std::size_t k = 0; k < top.edges.size(); ++k) {
+                auto& list = term_variables[k];
+                list.clear();
+                const auto source = top.edges[k].source;
+                if (const auto v = variable_of_[source]; v >= 0) {
+                    list.push_back(static_cast<std::size_t>(v));
+                    continue;
+                }
+                const auto* d = depends.data() + static_cast<std::size_t>(cone_position_[source]) * words;
+                for (std::size_t w = 0; w < words; ++w) {
+                    for (auto bits = d[w]; bits != 0; bits &= bits - 1) {
+                        list.push_back(w * 64 + static_cast<std::size_t>(std::countr_zero(bits)));
+                    }
                 }
             }
+            for (const auto wire : cut) variable_of_[wire] = -1;
             std::vector<std::size_t> all_terms(top.edges.size());
             for (std::size_t k = 0; k < all_terms.size(); ++k) all_terms[k] = k;
             std::vector<std::uint8_t> fixed(variables.size(), 0);
-            const auto sum = sum_range(top, all_terms, term_variables, variables, fixed, cone, budget, 0);
+            const auto sum = sum_range(top, all_terms, term_variables, variables, fixed, budget, 0);
             std::int64_t lo = top.bias;
             std::int64_t hi = top.bias;
             if (!sum || !checked_add(lo, sum->lo, lo) || !checked_add(hi, sum->hi, hi)) return best;
@@ -244,7 +527,7 @@ public:
                 hi = std::max<std::int64_t>(hi, 0);
             }
             best = best ? Interval{std::max(best->lo, lo), std::min(best->hi, hi)} : Interval{lo, hi};
-            if (within_bits(*best) || best->hi - best->lo <= 0) return best;
+            if (within_bits(*best) || best->hi <= best->lo) return best;
             // Refine: expand the deepest free neuron, every member of a group.
             const auto deepest = std::find_if(variables.rbegin(), variables.rend(),
                                               [&](const Variable& v) { return v.wire >= inputs; });
@@ -288,6 +571,7 @@ public:
     // work and the state bound is the same answer, so neither bound decides
     // what is proven, only whether.
     std::optional<Interval> exact_range(const nvr::Node& top, std::size_t max_states, int rounds) {
+        // Every caller passes at most 2^12 states: at most 2^24.
         work_ = static_cast<std::uint64_t>(max_states) * 4096;
         const auto inputs = graph_.input_lanes;
         // Wire marks, reset on return: 1 cut, 2 computed. Every computed
@@ -372,7 +656,7 @@ public:
                 const auto g = proof_.group_of[wire];
                 if (g != nvr::absent) {
                     const auto i = group_index(g);
-                    if (group_ok[i]) {
+                    if (group_ok[i] && few_values(proof_.groups[g].range)) {
                         const auto& group = proof_.groups[g];
                         for (const auto& member : group.members) {
                             variable_of_[member.first] = static_cast<std::int32_t>(variables.size());
@@ -382,7 +666,7 @@ public:
                     }
                 }
                 const auto& interval = proof_.wires[wire];
-                if (interval.hi - interval.lo > 255 || interval.hi < interval.lo) {
+                if (!few_values(interval)) {
                     usable = false;
                     break;
                 }
@@ -402,7 +686,7 @@ public:
                         hi = std::max<std::int64_t>(hi, 0);
                     }
                     best = best ? Interval{std::max(best->lo, lo), std::min(best->hi, hi)} : Interval{lo, hi};
-                    if (within_bits(*best) || best->hi - best->lo <= 0) return best;
+                    if (within_bits(*best) || best->hi <= best->lo) return best;
                 }
             }
             // One level down: every free neuron is replaced by its sources.
@@ -434,12 +718,17 @@ public:
     }
 
 private:
+    // range() and exact_range() make a variable only of an interval that
+    // few_values() accepts, so lo <= hi and values() is 1 to 256: every loop
+    // over its values runs at most 256 times, stepping by one from lo and
+    // stopping at hi without incrementing past it.
     struct Variable {
         // The wire that carries the value: the wire, or a group's first member.
         std::uint32_t wire;
         std::uint32_t group = nvr::absent;
         std::int64_t lo = 0;
         std::int64_t hi = 0;
+        std::uint64_t values() const { return static_cast<std::uint64_t>(hi) - static_cast<std::uint64_t>(lo) + 1; }
     };
 
     // The range of the sum of `top`'s weighted terms (without its bias) over
@@ -458,61 +747,122 @@ private:
                                       const std::vector<std::uint32_t>& order, std::size_t max_states) {
         constexpr std::int64_t none = -1;
         const auto end = static_cast<std::int64_t>(order.size());
-        // Keys: a cone wire w is w; variable v is -(v + 1).
+        // Keys: a cone wire w is w; variable v is -(v + 1). Per-key tables
+        // are indexed by wire or by variable, and reset on return.
         const auto key_of = [&](std::uint32_t wire) -> std::int64_t {
+            // v and wire are below 2^31 (malformed_node), so the key is exact.
             const auto v = variable_of_[wire];
             return v >= 0 ? -static_cast<std::int64_t>(v) - 1 : static_cast<std::int64_t>(wire);
         };
-        std::map<std::int64_t, std::int64_t> last_use;
+        if (last_use_variable_.size() < variables.size()) last_use_variable_.resize(variables.size(), none);
+        if (top_key_variable_.size() < variables.size()) top_key_variable_.resize(variables.size(), -1);
+        if (last_edge_variable_.size() < variables.size()) last_edge_variable_.resize(variables.size(), -1);
+        const auto last_use = [&](std::int64_t key) -> std::int64_t& {
+            return key < 0 ? last_use_variable_[static_cast<std::size_t>(-key - 1)]
+                           : last_use_wire_[static_cast<std::size_t>(key)];
+        };
+        const auto top_key = [&](std::int64_t key) -> std::int32_t& {
+            return key < 0 ? top_key_variable_[static_cast<std::size_t>(-key - 1)]
+                           : top_key_wire_[static_cast<std::size_t>(key)];
+        };
+        const auto last_edge = [&](std::int64_t key) -> std::int32_t& {
+            return key < 0 ? last_edge_variable_[static_cast<std::size_t>(-key - 1)]
+                           : last_edge_wire_[static_cast<std::size_t>(key)];
+        };
+        // `top`'s terms by key: top_keys_ lists the keys ascending, each
+        // with its terms (wire, weight) in edge order in top_terms_.
+        top_keys_.clear();
+        top_terms_.clear();
+        top_order_.clear();
+        for (std::size_t e = 0; e < top.edges.size(); ++e) top_order_.emplace_back(key_of(top.edges[e].source), e);
+        std::stable_sort(top_order_.begin(), top_order_.end(),
+                         [](const auto& x, const auto& y) { return x.first < y.first; });
+        for (const auto& [key, e] : top_order_) {
+            if (top_keys_.empty() || top_keys_.back().key != key) {
+                top_key(key) = static_cast<std::int32_t>(top_keys_.size());
+                const auto at = static_cast<std::uint32_t>(top_terms_.size());
+                top_keys_.push_back({key, at, at});
+            }
+            top_terms_.emplace_back(top.edges[e].source, top.edges[e].weight);
+            ++top_keys_.back().end;
+        }
         for (std::int64_t pos = 0; pos < end; ++pos) {
             for (const auto& edge : node(order[static_cast<std::size_t>(pos)]).edges) {
-                last_use[key_of(edge.source)] = pos;
+                last_use(key_of(edge.source)) = pos;
             }
         }
-        const auto last = [&](std::int64_t key) {
-            const auto it = last_use.find(key);
-            return it == last_use.end() ? none : it->second;
-        };
-        // `top`'s terms by key.
-        std::map<std::int64_t, std::vector<std::pair<std::uint32_t, std::int64_t>>> top_terms;
-        for (const auto& edge : top.edges) top_terms[key_of(edge.source)].emplace_back(edge.source, edge.weight);
+        struct Reset {
+            Analysis& a;
+            const std::vector<std::uint32_t>& order;
+            ~Reset() {
+                for (const auto wire : order) {
+                    for (const auto& edge : a.node(wire).edges) {
+                        const auto v = a.variable_of_[edge.source];
+                        if (v >= 0) {
+                            a.last_use_variable_[static_cast<std::size_t>(v)] = none;
+                        } else {
+                            a.last_use_wire_[edge.source] = none;
+                        }
+                    }
+                }
+                for (const auto& entry : a.top_keys_) {
+                    if (entry.key < 0) {
+                        a.top_key_variable_[static_cast<std::size_t>(-entry.key - 1)] = -1;
+                    } else {
+                        a.top_key_wire_[static_cast<std::size_t>(entry.key)] = -1;
+                    }
+                }
+            }
+        } reset{*this, order};
+        const auto last = [&](std::int64_t key) { return last_use(key); };
         const auto contribution = [&](std::int64_t key, std::int64_t value, std::int64_t& out) {
             out = 0;
-            const auto it = top_terms.find(key);
-            if (it == top_terms.end()) return true;
-            for (const auto& [wire, weight] : it->second) {
+            const auto index = top_key(key);
+            if (index < 0) return true;
+            const auto& entry = top_keys_[static_cast<std::size_t>(index)];
+            for (auto t = entry.begin; t < entry.end; ++t) {
+                const auto [wire, weight] = top_terms_[t];
                 std::int64_t actual = value;
                 if (key < 0) {
                     const auto& variable = variables[static_cast<std::size_t>(-key - 1)];
                     if (variable.group != nvr::absent && wire != variable.wire) actual = 0;
                 }
                 std::int64_t product = 0;
-                if (!checked_multiply(actual, weight, product) || !checked_add(out, product, out)) return false;
+                if (!multiply_fits(actual, weight, product) || !add_fits(out, product, out)) return false;
             }
             return true;
         };
         // Terms over variables no cone node reads are independent of the
-        // rest and add their ranges directly.
+        // rest and add their ranges directly, in ascending key order.
         Interval independent{0, 0};
-        for (const auto& [key, terms] : top_terms) {
+        for (const auto& entry : top_keys_) {
+            const auto key = entry.key;
             if (key >= 0 || last(key) != none) continue;
             const auto& variable = variables[static_cast<std::size_t>(-key - 1)];
             std::int64_t lo = std::numeric_limits<std::int64_t>::max();
             std::int64_t hi = std::numeric_limits<std::int64_t>::min();
-            for (auto value = variable.lo; value <= variable.hi; ++value) {
+            for (auto value = variable.lo;; ++value) {
                 std::int64_t part = 0;
                 if (!contribution(key, value, part)) return std::nullopt;
                 lo = std::min(lo, part);
                 hi = std::max(hi, part);
+                if (value == variable.hi) break;
             }
             if (!checked_add(independent.lo, lo, independent.lo) || !checked_add(independent.hi, hi, independent.hi)) {
                 return std::nullopt;
             }
         }
 
-        std::vector<std::int64_t> frontier;
-        std::vector<std::int64_t> rows;
-        std::vector<Interval> sums{Interval{0, 0}};
+        // The states: rows_ holds count() rows of `width` values,
+        // state_sums_ the range beside each. The order of the rows decides nothing:
+        // every step treats each row alike, and merging keeps one row per
+        // distinct value, so only the set of rows and their ranges matter.
+        auto& frontier = frontier_;
+        frontier.clear();
+        auto& rows = rows_;
+        auto& sums = state_sums_;
+        rows.clear();
+        sums.assign(1, Interval{0, 0});
         std::size_t width = 0;
         const auto count = [&]() { return sums.size(); };
         const auto slot_of = [&](std::int64_t key) -> std::size_t {
@@ -534,64 +884,83 @@ private:
             }
             return true;
         };
-        // Sorts the rows and merges equal ones, uniting their ranges.
-        std::vector<std::size_t> index;
-        const auto merge = [&]() {
+        // Copies the rows into rows_spare_ with column `skip` left out (none
+        // to keep every column), keeping one row per distinct value with the
+        // union of the ranges of the rows equal to it, and makes the result
+        // the states. Equal rows are found by hashing.
+        const auto rebuild = [&](std::size_t skip) {
             const auto n = count();
-            if (n < 2) return;
-            index.resize(n);
-            std::iota(index.begin(), index.end(), std::size_t{0});
-            const auto row = [&](std::size_t i) { return rows.data() + i * width; };
-            std::sort(index.begin(), index.end(), [&](std::size_t a, std::size_t b) {
-                return std::lexicographical_compare(row(a), row(a) + width, row(b), row(b) + width);
-            });
-            std::vector<std::int64_t> merged_rows;
-            std::vector<Interval> merged_sums;
-            merged_rows.reserve(rows.size());
-            merged_sums.reserve(n);
-            for (std::size_t k = 0; k < n; ++k) {
-                const auto i = index[k];
-                if (!merged_sums.empty() &&
-                    std::equal(row(i), row(i) + width, merged_rows.end() - static_cast<std::ptrdiff_t>(width))) {
-                    auto& range = merged_sums.back();
-                    range.lo = std::min(range.lo, sums[i].lo);
-                    range.hi = std::max(range.hi, sums[i].hi);
-                    continue;
+            const auto kept = skip < width ? width - 1 : width;
+            const auto before = std::min(skip, width);
+            auto& out = rows_spare_;
+            auto& out_sums = sums_spare_;
+            out.resize(n * kept);
+            out_sums.clear();
+            std::size_t capacity = 16;
+            while (capacity < 2 * n) capacity *= 2;
+            constexpr auto empty = std::numeric_limits<std::uint32_t>::max();
+            table_.assign(capacity, empty);
+            std::size_t distinct = 0;
+            for (std::size_t i = 0; i < n; ++i) {
+                // The row without the column, written where it goes if new.
+                const auto* row = rows.data() + i * width;
+                auto* target = out.data() + distinct * kept;
+                std::copy_n(row, before, target);
+                if (before < width) std::copy(row + before + 1, row + width, target + before);
+                std::uint64_t hash = 0x9e3779b97f4a7c15ULL;
+                for (std::size_t c = 0; c < kept; ++c) {
+                    hash = (hash ^ static_cast<std::uint64_t>(target[c])) * 0xff51afd7ed558ccdULL;
+                    hash ^= hash >> 32;
                 }
-                merged_rows.insert(merged_rows.end(), row(i), row(i) + width);
-                merged_sums.push_back(sums[i]);
+                for (auto slot = static_cast<std::size_t>(hash) & (capacity - 1);; slot = (slot + 1) & (capacity - 1)) {
+                    const auto index = table_[slot];
+                    if (index == empty) {
+                        // distinct <= count() <= max_states (introduce).
+                        table_[slot] = static_cast<std::uint32_t>(distinct);
+                        out_sums.push_back(sums[i]);
+                        ++distinct;
+                        break;
+                    }
+                    const auto* other = out.data() + static_cast<std::size_t>(index) * kept;
+                    if (std::equal(target, target + kept, other)) {
+                        auto& range = out_sums[index];
+                        range.lo = std::min(range.lo, sums[i].lo);
+                        range.hi = std::max(range.hi, sums[i].hi);
+                        break;
+                    }
+                }
             }
-            rows = std::move(merged_rows);
-            sums = std::move(merged_sums);
+            out.resize(distinct * kept);
+            std::swap(rows, out);
+            std::swap(sums, out_sums);
+        };
+        // Merges equal rows, uniting their ranges.
+        const auto merge = [&]() {
+            if (count() < 2) return;
+            rebuild(std::numeric_limits<std::size_t>::max());
         };
         // Drops column `column` and merges.
         const auto drop = [&](std::size_t column) {
-            const auto n = count();
-            std::vector<std::int64_t> kept;
-            kept.reserve(n * (width - 1));
-            for (std::size_t i = 0; i < n; ++i) {
-                for (std::size_t c = 0; c < width; ++c) {
-                    if (c != column) kept.push_back(rows[i * width + c]);
-                }
-            }
-            rows = std::move(kept);
+            rebuild(column);
             frontier.erase(frontier.begin() + static_cast<std::ptrdiff_t>(column));
             --width;
-            merge();
         };
         // Appends a column: each row repeated once per value of `variable`,
         // or (no variable) one value for every row.
         const auto introduce = [&](std::int64_t key) -> bool {
             const auto& variable = variables[static_cast<std::size_t>(-key - 1)];
-            const auto values = static_cast<std::uint64_t>(variable.hi - variable.lo + 1);
+            const auto values = variable.values();
             const auto n = count();
-            if (n * values > max_states || !charge(n * values)) return false;
-            std::vector<std::int64_t> grown;
-            std::vector<Interval> grown_sums;
+            // n * values > max_states, decided without forming the product.
+            if (values > max_states || n > max_states / values || !charge(n * values)) return false;
+            auto& grown = rows_spare_;
+            auto& grown_sums = sums_spare_;
+            grown.clear();
+            grown_sums.clear();
             grown.reserve(n * values * (width + 1));
             grown_sums.reserve(n * values);
             for (std::size_t i = 0; i < n; ++i) {
-                for (auto value = variable.lo; value <= variable.hi; ++value) {
+                for (auto value = variable.lo;; ++value) {
                     std::int64_t part = 0;
                     Interval range = sums[i];
                     if (!contribution(key, value, part) || !checked_add(range.lo, part, range.lo) ||
@@ -602,24 +971,25 @@ private:
                                  rows.begin() + static_cast<std::ptrdiff_t>((i + 1) * width));
                     grown.push_back(value);
                     grown_sums.push_back(range);
+                    if (value == variable.hi) break;
                 }
             }
-            rows = std::move(grown);
-            sums = std::move(grown_sums);
+            std::swap(rows, grown);
+            std::swap(sums, grown_sums);
             frontier.push_back(key);
             ++width;
             return true;
         };
         const auto append_constant = [&](std::int64_t key, std::int64_t value) {
             const auto n = count();
-            std::vector<std::int64_t> grown;
-            grown.reserve(n * (width + 1));
+            auto& grown = rows_spare_;
+            grown.resize(n * (width + 1));
             for (std::size_t i = 0; i < n; ++i) {
-                grown.insert(grown.end(), rows.begin() + static_cast<std::ptrdiff_t>(i * width),
-                             rows.begin() + static_cast<std::ptrdiff_t>((i + 1) * width));
-                grown.push_back(value);
+                std::copy_n(rows.begin() + static_cast<std::ptrdiff_t>(i * width), width,
+                            grown.begin() + static_cast<std::ptrdiff_t>(i * (width + 1)));
+                grown[i * (width + 1) + width] = value;
             }
-            rows = std::move(grown);
+            std::swap(rows, grown);
             frontier.push_back(key);
             ++width;
         };
@@ -640,8 +1010,8 @@ private:
                 auto* row = rows.data() + i * width;
                 for (const auto& read : reads) {
                     std::int64_t product = 0;
-                    if (!checked_multiply(row[read.slot], read.weight, product) ||
-                        !checked_add(row[sum_slot], product, row[sum_slot])) {
+                    if (!multiply_fits(row[read.slot], read.weight, product) ||
+                        !add_fits(row[sum_slot], product, row[sum_slot])) {
                         return false;
                     }
                 }
@@ -649,7 +1019,6 @@ private:
             reads.clear();
             return true;
         };
-        std::map<std::int64_t, std::size_t> last_edge;
         for (std::int64_t pos = 0; pos < end; ++pos) {
             const auto wire = order[static_cast<std::size_t>(pos)];
             const auto& n = node(wire);
@@ -658,16 +1027,21 @@ private:
             // and no later edge of it reads the variable, summed out at once,
             // so a node with many sources adds one column, not one per source.
             append_constant(running, n.bias);
-            last_edge.clear();
-            for (std::size_t e = 0; e < n.edges.size(); ++e) last_edge[key_of(n.edges[e].source)] = e;
             for (std::size_t e = 0; e < n.edges.size(); ++e) {
+                last_edge(key_of(n.edges[e].source)) = static_cast<std::int32_t>(e);
+            }
+            bool failed = false;
+            for (std::size_t e = 0; e < n.edges.size() && !failed; ++e) {
                 const auto& edge = n.edges[e];
                 const auto key = key_of(edge.source);
                 auto slot = slot_of(key);
                 if (slot == frontier.size()) {
                     // Only a free variable can be new here: a cone node is
                     // computed before its readers, and stays until its last.
-                    if (key >= 0 || !apply() || !introduce(key)) return std::nullopt;
+                    if (key >= 0 || !apply() || !introduce(key)) {
+                        failed = true;
+                        break;
+                    }
                     slot = frontier.size() - 1;
                 }
                 bool zero = false;
@@ -677,12 +1051,16 @@ private:
                     zero = variable.group != nvr::absent && edge.source != variable.wire;
                 }
                 if (!zero) reads.push_back({slot, edge.weight});
-                if (last_edge.at(key) == e && last(key) == pos) {
-                    if (!apply()) return std::nullopt;
+                if (last_edge(key) == static_cast<std::int32_t>(e) && last(key) == pos) {
+                    if (!apply()) {
+                        failed = true;
+                        break;
+                    }
                     drop(slot);
                 }
             }
-            if (!apply()) return std::nullopt;
+            for (const auto& edge : n.edges) last_edge(key_of(edge.source)) = -1;
+            if (failed || !apply()) return std::nullopt;
             const auto states = count();
             if (!charge(states)) return std::nullopt;
             const auto key = static_cast<std::int64_t>(wire);
@@ -719,20 +1097,38 @@ private:
         return total;
     }
 
-    // Whether group `g` lies whole in the cut and every reader reads it in
-    // proportion.
-    bool whole_group(std::uint32_t g, const std::set<std::uint32_t>& cut, const std::set<std::uint32_t>& cone,
-                     const nvr::Node& top) const {
-        const auto& members = proof_.groups[g].members;
-        if (members.front().second != 1) return false;
-        for (const auto& member : members) {
-            if (!cut.contains(member.first)) return false;
+    // The groups with a member in range()'s cut, listed in `groups`, each
+    // marked in group_slot_ 1 when it may be one free variable and 0 when
+    // not; the caller resets the marks to -1. A group may be one variable
+    // when its first coefficient is 1, every member is in the cut, and
+    // `top` and every node of the cone read it in proportion. A node that
+    // reads no member reads it in proportion 0, and a node that reads a
+    // member of a group lying whole in the cut reads that member from the
+    // cut, so only the cone's edges from cut wires need checking.
+    void whole_groups(const nvr::Node& top, const std::vector<std::uint32_t>& cut,
+                      const std::vector<std::uint32_t>& cone, std::vector<std::uint32_t>& groups) {
+        if (group_slot_.size() < proof_.groups.size()) group_slot_.resize(proof_.groups.size(), -1);
+        const auto& mark = cone_marks_;
+        groups.clear();
+        for (const auto wire : cut) {
+            const auto g = proof_.group_of[wire];
+            if (g == nvr::absent || group_slot_[g] != -1) continue;
+            groups.push_back(g);
+            const auto& members = proof_.groups[g].members;
+            const bool whole =
+                members.front().second == 1 &&
+                std::all_of(members.begin(), members.end(), [&](const auto& m) { return mark[m.first] == 1; }) &&
+                factor(top, g);
+            group_slot_[g] = whole ? 1 : 0;
         }
-        if (!factor(top, g)) return false;
         for (const auto wire : cone) {
-            if (!factor(node(wire), g)) return false;
+            const auto& reader = node(wire);
+            for (const auto& edge : reader.edges) {
+                const auto g = proof_.group_of[edge.source];
+                if (g == nvr::absent || mark[edge.source] != 1 || group_slot_[g] != 1) continue;
+                if (!factor(reader, g)) group_slot_[g] = 0;
+            }
         }
-        return true;
     }
 
     void assign(const Variable& variable, std::int64_t value) {
@@ -753,66 +1149,110 @@ private:
     std::optional<Interval> sum_range(const nvr::Node& top, const std::vector<std::size_t>& terms,
                                       const std::vector<std::vector<std::size_t>>& term_variables,
                                       const std::vector<Variable>& variables, std::vector<std::uint8_t>& fixed,
-                                      const std::set<std::uint32_t>& cone, std::uint64_t budget, int depth) {
-        std::map<std::size_t, std::size_t> parent;
+                                      std::uint64_t budget, int depth) {
+        // Union-find over the free variables the terms read, identified by
+        // their indices: each joins the set of its term's first free
+        // variable. Each depth of the conditioning has its own buffers, all
+        // reset on return.
+        auto& s = sums_[static_cast<std::size_t>(depth)];
+        constexpr std::size_t none = std::numeric_limits<std::size_t>::max();
+        if (s.parent.size() < variables.size()) s.parent.resize(variables.size(), none);
+        s.touched.clear();
+        struct Reset {
+            SumScratch& s;
+            ~Reset() {
+                for (const auto v : s.touched) s.parent[v] = none;
+            }
+        } reset{s};
         const auto root = [&](std::size_t v) {
-            while (parent.at(v) != v) v = parent[v] = parent.at(parent.at(v));
+            while (s.parent[v] != v) {
+                s.parent[v] = s.parent[s.parent[v]];
+                v = s.parent[v];
+            }
             return v;
         };
         for (const auto k : terms) {
-            std::optional<std::size_t> first;
+            std::size_t first = none;
             for (const auto v : term_variables[k]) {
                 if (fixed[v]) continue;
-                parent.try_emplace(v, v);
-                if (first) {
-                    parent[root(v)] = root(*first);
+                if (s.parent[v] == none) {
+                    s.parent[v] = v;
+                    s.touched.push_back(v);
+                }
+                if (first != none) {
+                    const auto joined = root(first);
+                    s.parent[root(v)] = joined;
                 } else {
                     first = v;
                 }
             }
         }
-        std::map<std::size_t, std::vector<std::size_t>> groups;
+        // The terms by the root of their first free variable, ascending, in
+        // term order within a root; terms without one last.
+        s.keyed.clear();
         for (const auto k : terms) {
             const auto it = std::find_if(term_variables[k].begin(), term_variables[k].end(),
                                          [&](std::size_t v) { return !fixed[v]; });
-            groups[it == term_variables[k].end() ? variables.size() : root(*it)].push_back(k);
+            s.keyed.emplace_back(it == term_variables[k].end() ? variables.size() : root(*it), k);
         }
+        std::stable_sort(s.keyed.begin(), s.keyed.end(),
+                         [](const auto& x, const auto& y) { return x.first < y.first; });
+        // The free variables by root, ascending within a root.
+        s.members.clear();
+        std::sort(s.touched.begin(), s.touched.end());
+        for (const auto v : s.touched) s.members.emplace_back(root(v), v);
+        std::stable_sort(s.members.begin(), s.members.end(),
+                         [](const auto& x, const auto& y) { return x.first < y.first; });
         Interval total{0, 0};
-        for (const auto& [id, group] : groups) {
-            std::vector<std::size_t> free;
-            if (id < variables.size()) {
-                for (const auto& entry : parent) {
-                    if (root(entry.first) == id) free.push_back(entry.first);
-                }
+        std::size_t member = 0;
+        for (std::size_t begin = 0; begin < s.keyed.size();) {
+            const auto id = s.keyed[begin].first;
+            auto end = begin;
+            s.group.clear();
+            for (; end < s.keyed.size() && s.keyed[end].first == id; ++end) s.group.push_back(s.keyed[end].second);
+            begin = end;
+            s.free.clear();
+            while (member < s.members.size() && s.members[member].first < id) ++member;
+            for (; member < s.members.size() && s.members[member].first == id; ++member) {
+                s.free.push_back(s.members[member].second);
             }
+            // Each factor is at most 256 and the product stops growing once
+            // it passes budget (at most 2^14), so it stays below 2^23.
             std::uint64_t assignments = 1;
-            for (const auto v : free) {
-                assignments *= static_cast<std::uint64_t>(variables[v].hi - variables[v].lo + 1);
+            for (const auto v : s.free) {
+                assignments *= variables[v].values();
                 if (assignments > budget) break;
             }
             std::optional<Interval> found;
             if (assignments <= budget) {
-                found = enumerate(top, group, free, variables, cone);
-            } else if (depth < 8) {
-                // Condition on the variable the most terms of the group read.
-                std::map<std::size_t, std::size_t> reads;
-                for (const auto k : group) {
+                found = enumerate(top, s.group, s.free, variables);
+            } else if (depth < max_depth) {
+                // Condition on the variable the most terms of the group
+                // read, the first such variable on a tie.
+                if (s.reads.size() < variables.size()) s.reads.resize(variables.size(), 0);
+                s.counted.clear();
+                for (const auto k : s.group) {
                     for (const auto v : term_variables[k]) {
-                        if (!fixed[v]) ++reads[v];
+                        if (fixed[v]) continue;
+                        if (s.reads[v]++ == 0) s.counted.push_back(v);
                     }
                 }
-                const auto pick = std::max_element(reads.begin(), reads.end(), [](const auto& x, const auto& y) {
-                                      return x.second < y.second;
-                                  })->first;
+                std::sort(s.counted.begin(), s.counted.end());
+                auto pick = s.counted.front();
+                for (const auto v : s.counted) {
+                    if (s.reads[v] > s.reads[pick]) pick = v;
+                }
+                for (const auto v : s.counted) s.reads[v] = 0;
                 fixed[pick] = 1;
-                for (auto value = variables[pick].lo; value <= variables[pick].hi; ++value) {
+                for (auto value = variables[pick].lo;; ++value) {
                     assign(variables[pick], value);
-                    const auto part = sum_range(top, group, term_variables, variables, fixed, cone, budget, depth + 1);
+                    const auto part = sum_range(top, s.group, term_variables, variables, fixed, budget, depth + 1);
                     if (!part) {
                         found.reset();
                         break;
                     }
                     found = found ? Interval{std::min(found->lo, part->lo), std::max(found->hi, part->hi)} : *part;
+                    if (value == variables[pick].hi) break;
                 }
                 fixed[pick] = 0;
             }
@@ -824,50 +1264,173 @@ private:
     }
 
     // The range of the sum of `terms` over every assignment of `free`, with
-    // other variables at their current values.
+    // other variables at their current values. The nodes between are those
+    // of range()'s cone (cone_marks_ 2) that the terms read.
+    //
+    // Each assignment costs the work of evaluating every such node, as
+    // charged to work_, which bounds this range() call and so decides what
+    // it finds. The evaluation itself is incremental: the free variables
+    // advance as an odometer, the first fastest, and after the first
+    // assignment only the nodes that depend on a variable that changed are
+    // evaluated again; every other node keeps the value it had, which is
+    // the value evaluating it again would give, without overflow. The
+    // caller's work (budget_) is charged for the nodes evaluated.
+    //
+    // Results are kept by a key that states the whole computation with the
+    // wires renamed, so that isomorphic gadget instances (the cells of a
+    // column multiplier, the steps of a long division) share one result.
+    // A wire read is named by its role: the i-th evaluated node in stored
+    // order, the f-th free variable, or the e-th other wire in the order
+    // first read. The key lists the counts; each free variable's range;
+    // each evaluated node's activation, bias and edges (name of the source,
+    // weight) in stored order; the terms (name, weight) in order; and the
+    // value of each other wire, which stays fixed during the enumeration (a
+    // group member other than its carrier is 0). That is everything the
+    // evaluations read, in the order they read it, with checked arithmetic
+    // in the same order, so two equal keys describe the same evaluations up
+    // to the renaming and give the same range or the same overflow; the
+    // nominal work, (nodes + 1) per assignment, follows from the key too. A
+    // result found again charges work_ what finding it charges and nothing
+    // to budget_; one that ran out of work is not kept.
     std::optional<Interval> enumerate(const nvr::Node& top, const std::vector<std::size_t>& terms,
-                                      const std::vector<std::size_t>& free, const std::vector<Variable>& variables,
-                                      const std::set<std::uint32_t>& cone) {
+                                      const std::vector<std::size_t>& free, const std::vector<Variable>& variables) {
+        // sum_range() calls this only when the product is at most its budget.
         std::uint64_t assignments = 1;
-        for (const auto v : free) assignments *= static_cast<std::uint64_t>(variables[v].hi - variables[v].lo + 1);
+        for (const auto v : free) assignments *= variables[v].values();
         // The cone nodes these terms read, in stored order.
-        std::set<std::uint32_t> needed;
-        std::vector<std::uint32_t> pending;
-        for (const auto k : terms) pending.push_back(top.edges[k].source);
-        while (!pending.empty()) {
-            const auto wire = pending.back();
-            pending.pop_back();
-            if (!cone.contains(wire) || needed.contains(wire)) continue;
-            needed.insert(wire);
-            for (const auto& edge : node(wire).edges) pending.push_back(edge.source);
+        if (++epoch_ == 0) {
+            std::fill(visited_.begin(), visited_.end(), 0);
+            epoch_ = 1;
         }
+        auto& needed = needed_;
+        needed.clear();
+        pending_.clear();
+        for (const auto k : terms) pending_.push_back(top.edges[k].source);
+        while (!pending_.empty()) {
+            const auto wire = pending_.back();
+            pending_.pop_back();
+            if (cone_marks_[wire] != 2 || visited_[wire] == epoch_) continue;
+            visited_[wire] = epoch_;
+            needed.push_back(wire);
+            for (const auto& edge : node(wire).edges) pending_.push_back(edge.source);
+        }
+        std::sort(needed.begin(), needed.end());
+        // Below 2^31 (malformed_node); times assignments (at most 2^14), below 2^45.
+        const auto per_assignment = static_cast<std::uint64_t>(needed.size()) + 1;
+        auto& choice = choice_;
+        choice.resize(free.size());
+        for (std::size_t i = 0; i < free.size(); ++i) {
+            choice[i] = variables[free[i]].lo;
+            assign(variables[free[i]], choice[i]);
+            free_index_[variables[free[i]].wire] = static_cast<std::int32_t>(i);
+        }
+        for (std::size_t i = 0; i < needed.size(); ++i) needed_position_[needed[i]] = static_cast<std::int32_t>(i);
+        struct Reset {
+            Analysis& a;
+            const std::vector<std::size_t>& free;
+            const std::vector<Variable>& variables;
+            ~Reset() {
+                for (const auto v : free) a.free_index_[variables[v].wire] = -1;
+                for (const auto wire : a.needed_) a.needed_position_[wire] = -1;
+            }
+        } reset{*this, free, variables};
+        // The key: what the evaluations below read, with wires renamed.
+        auto& key = key_;
+        key.clear();
+        key.push_back(static_cast<std::int64_t>(needed.size()));
+        key.push_back(static_cast<std::int64_t>(terms.size()));
+        key.push_back(static_cast<std::int64_t>(free.size()));
+        for (const auto v : free) {
+            key.push_back(variables[v].lo);
+            key.push_back(variables[v].hi);
+        }
+        auto& others = others_;
+        others.clear();
+        const auto name = [&](std::uint32_t wire) -> std::int64_t {
+            if (const auto p = needed_position_[wire]; p >= 0) return p;
+            const auto base = static_cast<std::int64_t>(needed.size());
+            if (const auto f = free_index_[wire]; f >= 0) return base + f;
+            if (other_index_[wire] < 0) {
+                other_index_[wire] = static_cast<std::int32_t>(others.size());
+                others.push_back(wire);
+            }
+            return base + static_cast<std::int64_t>(free.size()) + other_index_[wire];
+        };
+        for (const auto wire : needed) {
+            const auto& n = node(wire);
+            key.push_back(n.activation == nvr::Activation::Relu ? 1 : 0);
+            key.push_back(n.bias);
+            key.push_back(static_cast<std::int64_t>(n.edges.size()));
+            for (const auto& edge : n.edges) {
+                key.push_back(name(edge.source));
+                key.push_back(edge.weight);
+            }
+        }
+        for (const auto k : terms) {
+            key.push_back(name(top.edges[k].source));
+            key.push_back(top.edges[k].weight);
+        }
+        for (const auto wire : others) {
+            key.push_back(values_[wire]);
+            other_index_[wire] = -1;
+        }
+        const auto hash = KeyHash{}(key);
+        if (const auto found = memo_find(hash)) {
+            if (work_ < assignments * per_assignment) return std::nullopt;
+            work_ -= assignments * per_assignment;
+            return *found;
+        }
+        const auto keep = [&](std::optional<Interval> result) {
+            memo_keep(hash, result);
+            return result;
+        };
+        // For each variable i, the nodes (by position) that depend on a
+        // variable at most i, in stored order: after the odometer changes
+        // variables 0 to i, exactly these change.
+        const auto variables_free = free.size();
+        auto& level = level_;
+        level.assign(needed.size(), variables_free);
+        for (std::size_t i = 0; i < needed.size(); ++i) {
+            for (const auto& edge : node(needed[i]).edges) {
+                if (const auto p = needed_position_[edge.source]; p >= 0) {
+                    level[i] = std::min(level[i], level[static_cast<std::size_t>(p)]);
+                } else if (const auto f = free_index_[edge.source]; f >= 0) {
+                    level[i] = std::min(level[i], static_cast<std::size_t>(f));
+                }
+            }
+        }
+        if (changed_.size() < variables_free) changed_.resize(variables_free);
+        for (std::size_t j = 0; j < variables_free; ++j) {
+            changed_[j].clear();
+            for (std::size_t i = 0; i < needed.size(); ++i) {
+                if (level[i] <= j) changed_[j].push_back(static_cast<std::uint32_t>(i));
+            }
+        }
+        all_.resize(needed.size());
+        std::iota(all_.begin(), all_.end(), 0U);
         std::int64_t lo = std::numeric_limits<std::int64_t>::max();
         std::int64_t hi = std::numeric_limits<std::int64_t>::min();
-        std::vector<std::int64_t> choice(free.size());
-        for (std::size_t i = 0; i < free.size(); ++i) choice[i] = variables[free[i]].lo;
-        // The same nodes in the same stored order, as a flat list: the loop
-        // below visits them once per assignment.
-        const std::vector<std::uint32_t> ordered(needed.begin(), needed.end());
+        const std::vector<std::uint32_t>* evaluate = &all_;
         for (std::uint64_t count = 0; count < assignments; ++count) {
-            if (work_ < ordered.size() + 1) return std::nullopt;
-            work_ -= ordered.size() + 1;
+            if (work_ < per_assignment) return std::nullopt;
+            work_ -= per_assignment;
+            const auto units = static_cast<std::uint64_t>(evaluate->size()) + 1;
             if (budget_) {
-                if (*budget_ < ordered.size() + 1) {
+                if (*budget_ < units) {
                     *budget_ = 0;
                     exhausted_ = true;
                     return std::nullopt;
                 }
-                *budget_ -= ordered.size() + 1;
+                *budget_ -= units;
             }
-            for (std::size_t i = 0; i < free.size(); ++i) assign(variables[free[i]], choice[i]);
-            for (const auto wire : ordered) {
+            for (const auto position : *evaluate) {
+                const auto wire = needed[position];
                 const auto& n = node(wire);
                 std::int64_t sum = n.bias;
                 for (const auto& edge : n.edges) {
                     std::int64_t product = 0;
-                    if (!checked_multiply(values_[edge.source], edge.weight, product) ||
-                        !checked_add(sum, product, sum)) {
-                        return std::nullopt;
+                    if (!multiply_fits(values_[edge.source], edge.weight, product) || !add_fits(sum, product, sum)) {
+                        return keep(std::nullopt);
                     }
                 }
                 values_[wire] = n.activation == nvr::Activation::Relu ? std::max<std::int64_t>(sum, 0) : sum;
@@ -875,20 +1438,66 @@ private:
             std::int64_t sum = 0;
             for (const auto k : terms) {
                 std::int64_t product = 0;
-                if (!checked_multiply(values_[top.edges[k].source], top.edges[k].weight, product) ||
-                    !checked_add(sum, product, sum)) {
-                    return std::nullopt;
+                if (!multiply_fits(values_[top.edges[k].source], top.edges[k].weight, product) ||
+                    !add_fits(sum, product, sum)) {
+                    return keep(std::nullopt);
                 }
             }
             lo = std::min(lo, sum);
             hi = std::max(hi, sum);
-            for (std::size_t i = 0; i < free.size(); ++i) {
-                if (++choice[i] <= variables[free[i]].hi) break;
-                choice[i] = variables[free[i]].lo;
+            if (count + 1 == assignments) break;
+            for (std::size_t i = 0; i < variables_free; ++i) {
+                const auto& variable = variables[free[i]];
+                if (choice[i] < variable.hi) {
+                    assign(variable, ++choice[i]);
+                    evaluate = &changed_[i];
+                    break;
+                }
+                choice[i] = variable.lo;
+                assign(variable, choice[i]);
             }
         }
-        return Interval{lo, hi};
+        return keep(Interval{lo, hi});
     }
+
+    // sum_range's buffers for one depth of conditioning; `parent` is all
+    // `none` between calls, `reads` all 0.
+    struct SumScratch {
+        std::vector<std::size_t> parent;
+        std::vector<std::size_t> touched;
+        std::vector<std::pair<std::size_t, std::size_t>> keyed;
+        std::vector<std::pair<std::size_t, std::size_t>> members;
+        std::vector<std::size_t> group;
+        std::vector<std::size_t> free;
+        std::vector<std::size_t> reads;
+        std::vector<std::size_t> counted;
+    };
+    struct TopKey {
+        std::int64_t key;
+        std::uint32_t begin;
+        std::uint32_t end;
+    };
+    struct KeyHash {
+        std::size_t operator()(const std::vector<std::int64_t>& key) const {
+            std::uint64_t hash = 0x9e3779b97f4a7c15ULL;
+            for (const auto value : key) {
+                hash = (hash ^ static_cast<std::uint64_t>(value)) * 0xff51afd7ed558ccdULL;
+                hash ^= hash >> 32;
+            }
+            return static_cast<std::size_t>(hash);
+        }
+    };
+    // The most wires range() computes from a given start.
+    static constexpr std::size_t start_cone = 4096;
+    // How deep advice_cut() follows signals of several wires, and the most
+    // wires its cut may have.
+    static constexpr int advice_depth = 8;
+    static constexpr std::size_t advice_wires = 64;
+    static constexpr std::size_t advice_instances = 64;
+    // The deepest conditioning of sum_range.
+    static constexpr int max_depth = 8;
+    // The most key words memo_keys_ holds; beyond it, results are not kept.
+    static constexpr std::size_t max_enumerated_words = std::size_t{1} << 21;
 
     const nvr::Graph& graph_;
     OverflowProof& proof_;
@@ -896,8 +1505,64 @@ private:
     // exact_range's wire marks and variables, all clear between calls.
     std::vector<std::uint8_t> marks_;
     std::vector<std::int32_t> variable_of_;
+    // range()'s wire marks (1 cut, 2 cone), all clear between calls; the
+    // position of each cone wire in the cone, valid during a round; and the
+    // group marks of whole_groups(), all -1 between rounds.
+    std::vector<std::uint8_t> cone_marks_;
+    std::vector<std::uint8_t> start_marks_;
+    std::vector<std::int32_t> cone_position_;
+    std::vector<std::int32_t> group_slot_;
+    std::array<SumScratch, max_depth + 1> sums_;
+    // enumerate()'s buffers: wires visited in the current epoch; each free
+    // carrier's variable and each evaluated node's position, all -1
+    // between calls.
+    std::vector<std::uint32_t> visited_;
+    std::uint32_t epoch_ = 0;
+    std::vector<std::uint32_t> needed_;
+    std::vector<std::uint32_t> pending_;
+    std::vector<std::int64_t> choice_;
+    std::vector<std::int32_t> free_index_;
+    std::vector<std::int32_t> needed_position_;
+    std::vector<std::int64_t> key_;
+    std::vector<std::size_t> level_;
+    std::vector<std::vector<std::uint32_t>> changed_;
+    std::vector<std::uint32_t> all_;
+    std::vector<std::int32_t> other_index_;
+    // grouped_sum's groups read whole so far.
+    mutable std::vector<std::uint32_t> done_;
+    std::vector<std::uint32_t> others_;
+    // The kept results of enumerate(): an open-addressing table of entries
+    // whose keys lie in memo_keys_. An entry with `length` none is empty.
+    struct MemoEntry {
+        std::uint64_t hash = 0;
+        std::uint32_t offset = 0;
+        std::uint32_t length = std::numeric_limits<std::uint32_t>::max();
+        std::optional<Interval> result;
+    };
+    std::vector<MemoEntry> memo_;
+    std::vector<std::int64_t> memo_keys_;
+    std::size_t memo_count_ = 0;
+    // eliminate()'s per-key tables, by wire and by variable, all clear
+    // (-1) between calls, and its state buffers.
+    std::vector<std::int64_t> last_use_wire_;
+    std::vector<std::int64_t> last_use_variable_;
+    std::vector<std::int32_t> top_key_wire_;
+    std::vector<std::int32_t> top_key_variable_;
+    std::vector<std::int32_t> last_edge_wire_;
+    std::vector<std::int32_t> last_edge_variable_;
+    std::vector<TopKey> top_keys_;
+    std::vector<std::pair<std::uint32_t, std::int64_t>> top_terms_;
+    std::vector<std::pair<std::int64_t, std::size_t>> top_order_;
+    std::vector<std::int64_t> frontier_;
+    std::vector<std::int64_t> rows_;
+    std::vector<std::int64_t> rows_spare_;
+    std::vector<Interval> state_sums_;
+    std::vector<Interval> sums_spare_;
+    std::vector<std::uint32_t> table_;
     std::uint64_t work_ = 0;
     std::uint64_t* budget_ = nullptr;
+    const ProofAdvice* advice_ = nullptr;
+    bool decisive_ = false;
     bool exhausted_ = false;
 };
 
@@ -918,6 +1583,7 @@ std::optional<std::vector<std::pair<std::uint32_t, int>>> pattern(const nvr::Gra
         required.emplace_back(edge.source, edge.weight == 1 ? 1 : 0);
         ones += edge.weight == 1 ? 1 : 0;
     }
+    // ones counts edges, fewer than 2^31 (malformed_node).
     if (node.bias != 1 - ones) return std::nullopt;
     return required;
 }
@@ -972,24 +1638,24 @@ bool one_hot_bit(const nvr::Graph& graph, const OverflowProof& proof, std::uint3
 } // namespace
 
 OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint64_t* work,
-                                const OverflowProof* resume) {
+                                const OverflowProof* resume, const ProofAdvice* advice, AdviceUse use) {
     const bool exact = refine;
     OverflowProof proof;
     // A refined analysis that ran out of work kept every node it settled:
     // continue from the first one it did not. Each node's result depends
     // only on the nodes before it, so the proof is the one an unbounded
     // run finds.
-    const bool resuming = refine && resume && resume->exhausted &&
+    if (use == AdviceUse::none) advice = nullptr;
+    if (!advice || !refine) use = AdviceUse::none;
+    proof.advice_use = use;
+    const bool resuming = refine && resume && resume->exhausted && resume->advice_use == use &&
+                          resume->node <= graph.nodes.size() &&
                           resume->wires.size() == std::size_t{graph.input_lanes} + resume->node &&
                           resume->group_of.size() == std::size_t{graph.input_lanes} + graph.nodes.size();
-    for (std::size_t n = 0; n < graph.nodes.size(); ++n) {
-        for (const auto& edge : graph.nodes[n].edges) {
-            if (edge.source >= graph.input_lanes + n) {
-                // Not a valid graph: a node reads itself or a later wire.
-                proof.node = n;
-                return proof;
-            }
-        }
+    if (const auto bad = malformed_node(graph)) {
+        // Not a valid graph: see the precondition in overflow.hpp.
+        proof.node = *bad;
+        return proof;
     }
     std::size_t first = 0;
     if (resuming) {
@@ -998,7 +1664,7 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
         proof.group_of = resume->group_of;
         first = resume->node;
     }
-    Analysis analysis(graph, proof, work);
+    Analysis analysis(graph, proof, work, refine ? advice : nullptr, use);
     if (!resuming) analysis.find_step_pairs();
     auto& wires = proof.wires;
     wires.reserve(std::size_t{graph.input_lanes} + graph.nodes.size());
@@ -1032,11 +1698,12 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
             if (b != a + 1 || a < graph.input_lanes || node.edges[e].weight != node.edges[e + 1].weight ||
                 proof.group_of[a] != nvr::absent || proof.group_of[b] != nvr::absent ||
                 analysis.node(a).activation != nvr::Activation::Relu ||
-                analysis.node(b).activation != nvr::Activation::Relu) {
+                analysis.node(b).activation != nvr::Activation::Relu || analysis.apart(a, b)) {
                 continue;
             }
             const nvr::Node sum{nvr::Activation::Identity, 0, {{a, 1}, {b, 1}}};
-            auto range = analysis.range(sum, 256, 4);
+            auto range = analysis.pair_range(sum, a, b);
+            if (!(range && within_bits(*range))) range = analysis.range(sum, 256, 4);
             if (exact && !(range && within_bits(*range))) range = analysis.exact_range(sum, 256, 3);
             if (range && within_bits(*range)) {
                 analysis.add_group({{a, 1}, {b, 1}}, *range);
@@ -1055,20 +1722,26 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
                                                                       : grouped->hi;
             return low >= 0 && high <= 1;
         };
+        // Whether the node is settled changes only when a group is added.
+        bool is_settled = exact && node.edges.size() <= 6 && settled();
         for (std::size_t e = 0; exact && node.edges.size() <= 6 && e < node.edges.size(); ++e) {
-            for (std::size_t f = e + 1; f < node.edges.size() && !settled(); ++f) {
+            for (std::size_t f = e + 1; f < node.edges.size() && !is_settled; ++f) {
                 const auto a = node.edges[e].source;
                 const auto b = node.edges[f].source;
                 if (a < graph.input_lanes || node.edges[e].weight != node.edges[f].weight ||
                     proof.group_of[a] != nvr::absent || proof.group_of[b] != nvr::absent ||
                     analysis.node(a).activation != nvr::Activation::Relu ||
-                    analysis.node(b).activation != nvr::Activation::Relu) {
+                    analysis.node(b).activation != nvr::Activation::Relu || analysis.apart(a, b)) {
                     continue;
                 }
                 const nvr::Node sum{nvr::Activation::Identity, 0, {{a, 1}, {b, 1}}};
-                auto range = analysis.range(sum, 256, 4);
+                auto range = analysis.pair_range(sum, a, b);
+                if (!(range && within_bits(*range))) range = analysis.range(sum, 256, 4);
                 if (!(range && within_bits(*range))) range = analysis.exact_range(sum, 256, 3);
-                if (range && within_bits(*range)) analysis.add_group({{a, 1}, {b, 1}}, *range);
+                if (range && within_bits(*range)) {
+                    analysis.add_group({{a, 1}, {b, 1}}, *range);
+                    is_settled = settled();
+                }
             }
         }
         // The final sum once more, with each group read whole as k * its
@@ -1088,11 +1761,26 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
         // keeps the intervals of later nodes, and their overflow checks,
         // from compounding the looseness.
         if (refine && !within_bits(wires.back()) && !node.edges.empty()) {
-            if (const auto range = analysis.range(node, 256, 4)) {
-                wires.back().lo = std::max(wires.back().lo, range->lo);
-                wires.back().hi = std::min(wires.back().hi, range->hi);
+            // The cut the advice names first. When it gives a range, that is
+            // the range of the node over every assignment of its gadget's
+            // inputs, which the search narrows only where those inputs are
+            // correlated; a decisive analysis lets it stand.
+            bool advised = false;
+            if (const auto cut = analysis.advice_cut({static_cast<std::uint32_t>(graph.input_lanes + n)})) {
+                const auto rounds = analysis.decisive() ? 1 : advice_rounds;
+                if (const auto range = analysis.range(node, advice_budget, rounds, &*cut)) {
+                    wires.back().lo = std::max(wires.back().lo, range->lo);
+                    wires.back().hi = std::min(wires.back().hi, range->hi);
+                    advised = analysis.decisive();
+                }
             }
-            if (exact && !within_bits(wires.back())) {
+            if (!within_bits(wires.back()) && !advised) {
+                if (const auto range = analysis.range(node, 256, 4)) {
+                    wires.back().lo = std::max(wires.back().lo, range->lo);
+                    wires.back().hi = std::min(wires.back().hi, range->hi);
+                }
+            }
+            if (exact && !within_bits(wires.back()) && !advised) {
                 if (const auto range = analysis.exact_range(node, 256, 3)) {
                     wires.back().lo = std::max(wires.back().lo, range->lo);
                     wires.back().hi = std::min(wires.back().hi, range->hi);
@@ -1117,8 +1805,13 @@ OverflowProof prove_no_overflow(const nvr::Graph& graph, bool refine, std::uint6
 }
 
 bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::span<const std::uint32_t> lanes,
-                    BitEvidence* evidence, bool use_cases, std::uint64_t* work) {
-    if (!proof.safe) {
+                    BitEvidence* evidence, bool use_cases, std::uint64_t* work, const ProofAdvice* advice) {
+    // `proof` must be a safe proof of this graph: the graph meets
+    // prove_no_overflow's precondition and the proof has an interval and a
+    // group entry per wire.
+    const auto wire_count = std::size_t{graph.input_lanes} + graph.nodes.size();
+    if (!proof.safe || malformed_node(graph) || proof.wires.size() != wire_count ||
+        proof.group_of.size() != wire_count) {
         return false;
     }
     OverflowProof copy;
@@ -1139,9 +1832,17 @@ bool lanes_are_bits(const OverflowProof& proof, const nvr::Graph& graph, std::sp
         if (use_cases && wire >= graph.input_lanes) {
             if (!cases) {
                 copy = proof;
-                cases.emplace(graph, copy, work);
+                cases.emplace(graph, copy, work, advice);
             }
             const auto& top = graph.nodes[wire - graph.input_lanes];
+            if (const auto cut = cases->advice_cut({wire})) {
+                const auto range = cases->range(top, std::uint64_t{1} << 14, advice_rounds, &*cut);
+                if (cases->exhausted()) return false;
+                if (range && within_bits(*range)) {
+                    if (evidence) ++evidence->cases;
+                    continue;
+                }
+            }
             const auto range = cases->range(top, std::uint64_t{1} << 14, 48);
             if (cases->exhausted()) return false;
             if (range && within_bits(*range)) {
