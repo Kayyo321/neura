@@ -551,6 +551,12 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-doc-examples.py"
         --neura "$<TARGET_FILE:neura>" --root "${CMAKE_CURRENT_SOURCE_DIR}"
     )
+    # A few generated programs, each compared across every execution mode and under limit sweeps (scripts/program-fuzz.py).
+    add_test(NAME program-fuzz COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/program-fuzz.py" run
+        --neura "$<TARGET_FILE:neura>" --quick --jobs 3
+    )
+    set_tests_properties(program-fuzz PROPERTIES TIMEOUT 600)
     add_test(NAME nir-link COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"

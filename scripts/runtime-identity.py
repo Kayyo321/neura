@@ -53,6 +53,7 @@ including their detail text and caller lists, are covered.
 
 import argparse
 import hashlib
+import importlib.util
 import json
 import os
 import subprocess
@@ -229,6 +230,27 @@ def extended_programs():
     return programs
 
 
+# --extended: generated programs (scripts/program-fuzz.py), seeds 1 to 40, each run with its own arguments.
+GENERATED_SEEDS = range(1, 41)
+
+
+def generated_programs(images):
+    """The generated programs as cases: each source is written next to the images, and its arguments come from the
+    generator, so that every capture runs the same programs."""
+    spec = importlib.util.spec_from_file_location("program_fuzz", ROOT / "scripts" / "program-fuzz.py")
+    fuzz = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(fuzz)
+    programs = []
+    sources = images / "generated"
+    sources.mkdir(parents=True, exist_ok=True)
+    for seed in GENERATED_SEEDS:
+        source, arguments, _ = fuzz.build_program(seed)
+        path = sources / f"program-{seed}.nra"
+        path.write_text(source)
+        programs.append((f"x-generated-{seed}", str(path), arguments, False))
+    return programs
+
+
 # --extended: a step limit at every position of a small loop's first blocks,
 # and on programs whose blocks run lifted, so a step limit trap lands on
 # every kind of block. x-tier-regions (tests/backend/tier/regions.nra) has
@@ -295,7 +317,7 @@ def capture(args):
     out = Path(args.out).resolve()
     out.mkdir(parents=True, exist_ok=True)
     RUN_OPTIONS[:] = args.run_option + ([f"--jit={args.jit}"] if args.jit else [])
-    programs = PROGRAMS + (extended_programs() if args.extended else [])
+    programs = PROGRAMS + (extended_programs() + generated_programs(images) if args.extended else [])
     build_images(neura, images, programs)
     if "--jit=on" in RUN_OPTIONS:
         # Every case would fail the same way: say why once instead.

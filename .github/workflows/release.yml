@@ -92,21 +92,21 @@ jobs:
         include:
           - triple: x86_64-linux-gnu
             runner: ubuntu-24.04
-            minimum: 173
+            minimum: 174
             exclude: "^$"
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
-            minimum: 173
+            minimum: 174
             exclude: "^$"
           # macOS has no native launcher, so the six native-* tests are not
           # registered there.
           - triple: aarch64-apple-darwin
             runner: macos-15
-            minimum: 167
+            minimum: 168
             exclude: "^$"
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
-            minimum: 167
+            minimum: 168
             exclude: "^$"
     env:
       NEURA_LIBCLANG_REQUIRED: "1"

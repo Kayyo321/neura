@@ -125,7 +125,7 @@ jobs:
       # native-container, native-policy, native-install, native-c-import).
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 167
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 168
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
