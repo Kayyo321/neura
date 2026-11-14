@@ -113,6 +113,8 @@ set(neura_nvm_sources
     src/jit/aarch64.cpp
     src/jit/compiler.cpp
     src/jit/jit.cpp
+    src/jit/mir_check.cpp
+    src/jit/regalloc.cpp
     src/jit/x64.cpp
     src/jit/x86_64.cpp
 )
@@ -612,6 +614,16 @@ if(BUILD_TESTING)
     target_include_directories(neura_x64_tests PRIVATE tests)
     neura_target_defaults(neura_x64_tests)
     add_test(NAME backend-x64 COMMAND neura_x64_tests)
+
+    # The register allocator of tier 3 (src/jit/regalloc.cpp) and its
+    # independent checker (src/jit/mir_check.cpp): hand-built functions,
+    # random functions checked by the checker and allocated twice for
+    # determinism, the move sequencer, and allocations the checker must reject.
+    add_executable(neura_regalloc_tests tests/jit/regalloc_tests.cpp)
+    target_link_libraries(neura_regalloc_tests PRIVATE neura_nvm)
+    target_include_directories(neura_regalloc_tests PRIVATE tests)
+    neura_target_defaults(neura_regalloc_tests)
+    add_test(NAME backend-regalloc COMMAND neura_regalloc_tests)
 
     add_executable(neura_backend_tests
         tests/backend/allocation_fault.cpp
