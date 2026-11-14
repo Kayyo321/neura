@@ -391,6 +391,10 @@ struct DebugSnapshot {
     std::vector<DebugValue> globals;
 };
 
+namespace tier3 {
+struct Program;
+}
+
 class Execution {
 public:
     // Throws std::invalid_argument when an argument is not valid UTF-8.
@@ -427,6 +431,33 @@ public:
     // The most tasks that were live at once, counting the root. Zero for a
     // serial image.
     std::uint64_t peak_tasks() const;
+
+    // Tests only (tests/backend/tier3_ir_tests.cpp). The frames of the run,
+    // outermost first, as the tier machinery keeps them (return slot and
+    // block, and the program a frame returns into); and a native program
+    // (src/nvm/tier3.hpp) run from the entry `entry` on the current frames
+    // as the dispatcher would run it, with no allowance and no checks of the
+    // entry. The ending: the outcome and reason as the numbers of
+    // tier3::Outcome and tier3::Reason, the block the run goes on at, and
+    // the blocks the activation completed.
+    struct Tier3Frame {
+        std::uint32_t function = 0;
+        std::uint32_t block = 0;
+        std::uint32_t return_slot = 0;
+        std::uint32_t return_block = 0;
+        bool boundary = false;
+        const void* called_from = nullptr;
+        std::vector<std::uint64_t> slots;
+        std::vector<std::uint8_t> initialized;
+    };
+    struct Tier3Ending {
+        unsigned outcome = 0;
+        unsigned reason = 0;
+        std::uint32_t next_block = 0;
+        std::uint64_t blocks = 0;
+    };
+    std::vector<Tier3Frame> tier3_frames() const;
+    Tier3Ending tier3_run(const tier3::Program& program, std::uint32_t entry);
 
     struct GraphStep {
         std::uint32_t graph = 0;

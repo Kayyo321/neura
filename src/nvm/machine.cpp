@@ -7,6 +7,7 @@
 #include "scalar_text.hpp"
 #include "tier1.hpp"
 #include "tier2.hpp"
+#include "tier3.hpp"
 #include "lift/evaluate.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -400,6 +401,10 @@ public:
         // Regions and programs skip prepare_step, so a block observer (which
         // sees every step) runs below tier 2.
         tier2_ = std::min(limits_.tier, tier_ceiling()) >= 2 && !limits_.block_observer;
+        // Tier 3 runs function programs: it is on when the cache turns
+        // them native (docs/runtime/NVM.md, "Execution tiers").
+        tier3_ = tier2_ && tier_->native_enabled();
+        if (tier3_) tier_->note_native();
         // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
         // compilation"). --jit=on fails here, before the run starts, when
         // the platform cannot run it.
@@ -3114,6 +3119,7 @@ private:
 
 #include "tier1_steps.inc"
 #include "tier2_steps.inc"
+#include "tier3_steps.inc"
 #include "tier_shadow.inc"
 
     std::optional<Event> commit_step(const nvr::Block& block, const BlockPlan& plan) {
@@ -3981,6 +3987,12 @@ private:
     std::vector<std::vector<std::uint64_t>> program_images_;
     std::vector<const tier2::Region*> function_programs_;
     RegionCounts region_counts_;
+    // Tier 3 (tier3_steps.inc): whether function programs run as native
+    // programs, the context they run in, and the events for --tier-stats.
+    bool tier3_ = false;
+    tier3::Context tier3_context_;
+    NativeCounts native_counts_;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> native_deopts_;
     // Native code (src/jit): whether regions run it, the context it reads
     // and writes, and an exception a helper caught, rethrown when the code
     // returns.
@@ -4392,6 +4404,10 @@ std::vector<DebugValue> Execution::debug_children(std::uint32_t type, std::uint6
 }
 
 std::uint64_t Execution::peak_tasks() const { return state_->peak_tasks(); }
+std::vector<Execution::Tier3Frame> Execution::tier3_frames() const { return state_->tier3_frames(); }
+Execution::Tier3Ending Execution::tier3_run(const tier3::Program& program, std::uint32_t entry) {
+    return state_->tier3_run(program, entry);
+}
 std::uint64_t Execution::tick() const { return state_->tick(); }
 std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }
 std::uint64_t Execution::peak_pending_requests() const { return state_->peak_pending_requests(); }

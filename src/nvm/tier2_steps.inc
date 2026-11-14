@@ -166,10 +166,13 @@
             auto& plan = block_plan(frame.function, frame.block);
             const auto* region = region_for(frame.function, frame.block, plan);
             if (!region) break;
-            // Function programs run on the interpreter (no native code yet).
+            // Function programs run as native programs (tier 3) when they
+            // have one, else on the interpreter.
             const auto* native = jit_ && !region->program ? native_code(plan) : nullptr;
+            const auto* code = region->program ? tier3_code(*region, false) : nullptr;
             time_as(TierTimes::Category::Regions);
             const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native, plan.program_entry)
+                                 : code      ? run_native_program(*code, plan.program_entry, allowance - total)
                                  : region->program ? run_program(*region, plan.program_entry, allowance - total)
                                                    : run_region(*region, allowance - total, native);
             total += outcome.blocks;
@@ -550,6 +553,11 @@
             const auto& op = code[pc++];
             switch (op.code) {
             case tier2::Code::Budget: {
+                // A checkpoint of a program that has native code (or has
+                // just reached the threshold for it): the frame is canonical
+                // here, so the activation ends as a Leave at this block, and
+                // the dispatcher enters the native program there.
+                if (tier3_ && tier3_code(*program, true)) return end(op.block, false, region_counts_.leaves);
                 const auto& checkpoint = program->checkpoints[op.a];
                 const auto used = steps_ + done;
                 const bool steps_fit = used <= limits_.max_steps && limits_.max_steps - used >= checkpoint.steps;
@@ -674,8 +682,11 @@
                 }
                 load_frame();
                 const auto* callee = op.a < function_programs_.size() ? function_programs_[op.a] : nullptr;
+                // A callee with native code runs there: the dispatcher enters
+                // it at its first block.
                 bool enters = callee != nullptr && (!callee->uses_float || float_default) &&
-                              !callee->entries.empty() && callee->entries.front().block == 0;
+                              !callee->entries.empty() && callee->entries.front().block == 0 &&
+                              !(tier3_ && tier3_code(*callee, false));
                 if (enters) {
                     // Entry 0's checks: its early reads are parameters, which
                     // the push initialized, and the parameters fit their
@@ -747,7 +758,7 @@
                 ++region_counts_.returns;
                 load_frame();
                 const auto* resumed = static_cast<const tier2::Region*>(header.called_from);
-                if (!resumed || (resumed->uses_float && !float_default)) {
+                if (!resumed || (resumed->uses_float && !float_default) || (tier3_ && tier3_code(*resumed, false))) {
                     return end(header.return_block, false, region_counts_.leaves);
                 }
                 enter(*resumed);
@@ -760,6 +771,7 @@
     }
 
     void flush_region_events() {
+        flush_native_events();
         if (region_counts_.entries == 0 && region_counts_.refused == 0 && region_counts_.budget == 0) return;
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> steps;
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> deopts;

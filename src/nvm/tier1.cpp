@@ -1,5 +1,7 @@
 #include "tier1.hpp"
 
+#include "tier3.hpp"
+
 #include "lift/lift.hpp"
 
 #include <cmath>
@@ -125,6 +127,28 @@ std::string describe(const TierStatistics& s) {
             out += "tier: no program " + std::to_string(count) + ": " + reason + "\n";
         }
     }
+    if (!s.native_mode.empty()) {
+        const auto& n = s.native;
+        out += "tier: native programs " + std::to_string(s.native_programs) + " (" + std::to_string(s.native_bytes) +
+               " bytes of code, " + std::to_string(s.native_inlined) + " calls inlined, " +
+               std::to_string(s.native_failed) + " not compiled); entered " + std::to_string(n.entered) + ", left " +
+               std::to_string(n.left) + ", refused " + std::to_string(n.refused) + "; deoptimized: budget " +
+               std::to_string(n.budget) + ", checks " + std::to_string(n.checks) + ", guards " +
+               std::to_string(n.guards) + ", selectors " + std::to_string(n.selectors) + ", references " +
+               std::to_string(n.references) + ", state traps " + std::to_string(n.state_traps) + ", exits " +
+               std::to_string(n.exits) + "; traps in place " + std::to_string(n.traps) + "; steps in native code " +
+               std::to_string(n.steps) + "\n";
+        for (const auto& [reason, count] : s.native_rejections) {
+            out += "tier: no native program " + std::to_string(count) + ": " + reason + "\n";
+        }
+        std::vector<std::pair<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>>> ends;
+        for (const auto& [block, count] : s.native_deopts) ends.emplace_back(count, block);
+        std::sort(ends.begin(), ends.end(), std::greater<>());
+        for (std::size_t i = 0; i < ends.size() && i < 5; ++i) {
+            out += "tier: native deoptimized " + std::to_string(ends[i].first) + " times at function " +
+                   std::to_string(ends[i].second.first) + " block " + std::to_string(ends[i].second.second) + "\n";
+        }
+    }
     if (!s.jit_mode.empty()) {
         if (!s.jit_off.empty() && s.jit_compiled == 0 && s.jit_failures.empty()) {
             out += s.jit_mode == "off" ? std::string("tier: jit off\n")
@@ -194,10 +218,23 @@ bool tier_programs_enabled() {
     return enabled;
 }
 
+bool tier3_interp_enabled() {
+    static const bool enabled = [] {
+        const char* text = std::getenv("NEURA_TIER3");
+        return text && std::strcmp(text, "interp") == 0;
+    }();
+    return enabled;
+}
+
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
+    if (options_.tier3 == TierOptions::Tier3::Environment) {
+        options_.tier3 = tier3_interp_enabled() ? TierOptions::Tier3::Interp : TierOptions::Tier3::Off;
+    }
     if (options_.programs == TierOptions::Programs::Environment) {
-        options_.programs = tier_programs_enabled() ? TierOptions::Programs::On : TierOptions::Programs::Off;
+        options_.programs = tier_programs_enabled() || options_.tier3 == TierOptions::Tier3::Interp
+                                ? TierOptions::Programs::On
+                                : TierOptions::Programs::Off;
     }
     if (tier_check_enabled()) options_.checkable = true;
     if (tier_eager()) {
@@ -206,6 +243,7 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         options_.minimum_proof_work = std::uint64_t{1} << 32;
         options_.search_budget = std::chrono::milliseconds(60'000);
         options_.region_after = 1;
+        options_.native_after = 1;
     }
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
@@ -217,6 +255,11 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     regions_ = std::vector<RegionEntry>(total);
     programs_ = std::vector<RegionEntry>(image.functions.size());
+    // A function has at most five programs over its life: the first and four
+    // refreshes (TierCache::program).
+    native_capacity_ = 5 * image.functions.size() + 8;
+    native_arrivals_ = std::make_unique<std::atomic<std::uint64_t>[]>(native_capacity_);
+    native_programs_ = std::make_unique<std::atomic<const tier3::Program*>[]>(native_capacity_);
     region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();

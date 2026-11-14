@@ -106,6 +106,9 @@ set(neura_nvm_sources
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
+    src/nvm/tier3_build.cpp
+    src/nvm/tier3_interp.cpp
+    src/nvm/tier3_verify.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
     # The native code generator of tier 2 (docs/runtime/NVM.md, "Native
@@ -651,6 +654,7 @@ if(BUILD_TESTING)
         tests/backend/tier2_tests.cpp
         tests/backend/tier_programs_tests.cpp
         tests/backend/tier_shadow_tests.cpp
+        tests/backend/tier3_ir_tests.cpp
         tests/backend/vm_tests.cpp
         tests/jit/jit_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
@@ -696,7 +700,7 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm heap host nir conversion generics layered fleet placement concurrency tier jit)
+    foreach(suite IN ITEMS circuits floats format vm heap host nir conversion generics layered fleet placement concurrency tier tier3 jit)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
