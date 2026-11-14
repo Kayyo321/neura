@@ -590,6 +590,33 @@ NEURA_TEST(tier, allocation_in_programs_of_a_task_image_charges_frame_cells) {
     }
 }
 
+NEURA_TEST(tier, operand_counts_above_255_run_on_the_interpreter_like_tier_0) {
+    // A list literal, an array literal, a text list and a call take 300
+    // operands, more than Op::width counts: formation declines those exits
+    // (a deoptimization, counted as an exit), so the interpreter runs the
+    // blocks, in programs and in programs run by the tier 3 IR interpreter.
+    const auto image = build_program({tier_program(environment, "wide-operands")});
+    const auto reference = run_captured(image, limits_at(0), std::nullopt, {"all"});
+    check(reference.result.completed, "the wide operands run at tier 0");
+    check_equal(reference.output, std::string{"list 135150\narray 135150\ntext 2300\ncall 943\n"},
+                "tier 0 output");
+    for (const bool interpreted : {false, true}) {
+        for (const char* kind : {"all", "list", "array", "text", "call"}) {
+            auto options = eager_programs();
+            if (interpreted) {
+                options.tier3 = nvm::TierOptions::Tier3::Interp;
+                options.native_after = 1;
+            }
+            nvm::TierCache cache(image, options);
+            const std::string label = std::string(kind) + (interpreted ? " on the tier 3 interpreter" : " in programs");
+            compare_with_tier_0(image, cache, label, {kind});
+            if (programs_run()) {
+                check(cache.statistics().region_counts.exits > 0, label + ": the wide exits were declined");
+            }
+        }
+    }
+}
+
 NEURA_TEST(tier, the_shadow_oracle_syncs_inside_a_long_loop_of_a_program_and_finds_a_planted_difference) {
     // A loop of about half a million blocks that runs in one program: the
     // oracle looks every shadow_sync_blocks blocks, not once at the end.

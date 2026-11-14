@@ -5,6 +5,7 @@
 #include "lift/evaluate.hpp"
 
 #include <algorithm>
+#include <cassert>
 #include <functional>
 #include <map>
 #include <optional>
@@ -703,6 +704,16 @@ private:
     // index until the labels are known.
     static constexpr std::uint32_t label_base = 0x40000000U;
 
+    // The largest operand or lane count Op::width holds.
+    static constexpr std::size_t max_count = 255;
+
+    // A count as an Op::width. Formation never stores one that does not fit:
+    // takes() declines an exit with too many arguments.
+    static std::uint8_t width_of_count(std::size_t count) {
+        assert(count <= max_count);
+        return static_cast<std::uint8_t>(count);
+    }
+
     const nvr::Block& block(std::uint32_t local) const { return function_.blocks[blocks_[local]]; }
     bool in_region(std::uint32_t image_block) const { return local_.contains(image_block); }
 
@@ -710,8 +721,12 @@ private:
     // operations, and in a function program calls and returns too (as
     // deoptimizations under the region check of NEURA_TIER_CHECK=1, which
     // cannot follow a run into another frame).
+    //
+    // An exit with more arguments than Op::width holds is not taken: it is a
+    // deoptimization, and the interpreter runs the block.
     bool takes(std::uint32_t local, const nvr::Exit& exit) const {
         if (stub(local)) return false;
+        if (exit.arguments.size() > max_count) return false;
         if (internal_exit(exit)) return true;
         if (!program_ || checkable_) return false;
         return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return ||
@@ -1156,7 +1171,7 @@ private:
                     op.code = Code::Mask;
                     op.dst = dst;
                     op.a = reg;
-                    op.width = static_cast<std::uint8_t>(count);
+                    op.width = width_of_count(count);
                     emit(op);
                     return dst;
                 }
@@ -1165,7 +1180,7 @@ private:
                 op.code = Code::Gather;
                 op.dst = dst;
                 op.index = static_cast<std::uint32_t>(region_.gathers.size());
-                op.width = static_cast<std::uint8_t>(count);
+                op.width = width_of_count(count);
                 for (std::uint32_t i = 0; i < count; ++i) {
                     region_.gathers.push_back(sources.at(graph.outputs.at(first + i)));
                 }
@@ -1322,7 +1337,7 @@ private:
             op.index = static_cast<std::uint32_t>(region_.exits.size());
             region_.exits.push_back(&exit);
             op.other = static_cast<std::uint32_t>(region_.operands.size());
-            op.width = static_cast<std::uint8_t>(arguments.size());
+            op.width = width_of_count(arguments.size());
             region_.operands.insert(region_.operands.end(), arguments.begin(), arguments.end());
             op.block = image_block;
             if (exit.result_slot != none) {
@@ -1372,7 +1387,7 @@ private:
             op.index = static_cast<std::uint32_t>(region_.exits.size());
             region_.exits.push_back(&exit);
             op.other = static_cast<std::uint32_t>(region_.operands.size());
-            op.width = static_cast<std::uint8_t>(arguments.size());
+            op.width = width_of_count(arguments.size());
             region_.operands.insert(region_.operands.end(), arguments.begin(), arguments.end());
             op.a = exit.target;
             op.dst = exit.result_slot;
@@ -1389,7 +1404,7 @@ private:
             op.index = static_cast<std::uint32_t>(region_.exits.size());
             region_.exits.push_back(&exit);
             op.other = static_cast<std::uint32_t>(region_.operands.size());
-            op.width = static_cast<std::uint8_t>(arguments.size());
+            op.width = width_of_count(arguments.size());
             region_.operands.insert(region_.operands.end(), arguments.begin(), arguments.end());
             op.dst = exit.result_slot;
             op.target = label_base + local_.at(exit.resume);
