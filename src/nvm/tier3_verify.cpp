@@ -239,6 +239,8 @@ private:
             }
         }
         for (std::uint32_t id = 0; id < n; ++id) {
+            // An instruction in no block is dead: it reads nothing.
+            if (block_of_[id] == none) continue;
             for (const auto v : uses(f_.insts[id])) {
                 if (v >= n || block_of_[v] == none) {
                     fail("V1", "instruction " + std::to_string(id) + " reads a value that is not defined");
@@ -1073,6 +1075,7 @@ std::string describe(const Function& f) {
         const auto& block = f.blocks[b];
         out << "b" << b;
         if (block.entry != none) out << " (entry " << block.entry << ")";
+        if (block.preheader) out << " (preheader)";
         if (block.origin_block != none) out << " [image block " << block.origin_block << (block.image_start ? ", start" : "") << "]";
         out << " preds";
         for (const auto p : block.preds) out << " b" << p;
@@ -1095,6 +1098,7 @@ std::string describe(const Function& f) {
             }
             if (in.op == Op::Lift) out << " op" << static_cast<int>(in.lifted.op);
             if (in.state != none) out << " state " << in.state;
+            if (in.guard != none) out << " guard %" << in.guard;
             if (in.op == Op::Jump || in.op == Op::Branch || in.op == Op::Switch || in.op == Op::Dispatch) {
                 out << " ->";
                 for (const auto s : block.succs) out << " b" << s;

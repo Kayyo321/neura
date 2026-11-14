@@ -88,6 +88,10 @@ struct TierOptions {
     enum class Tier3 : std::uint8_t { Environment, Off, Interp };
     Tier3 tier3 = Tier3::Environment;
     std::uint32_t native_after = 1000;
+    // Whether tier 3's passes (tier3_passes.cpp) run on a built program;
+    // NEURA_TIER3_PASSES=0 turns them off whatever this says. A test turns
+    // them off to compare a run with and without.
+    bool native_passes = true;
 };
 
 // Steps of one execution by how the block was evaluated. `lifted` ran a
@@ -498,5 +502,10 @@ bool tier_eager();
 bool tier_programs_enabled();
 // NEURA_TIER3: "interp" runs tier 3 on the IR interpreter (TierOptions::tier3).
 bool tier3_interp_enabled();
+// NEURA_TIER3_AFTER=N (a testing aid, read once): lift and form as
+// NEURA_TIER_EAGER=1 does, but turn a program native at its Nth checkpoint
+// arrival, so that a loop is handed to native code in its middle; 0 when
+// unset.
+std::uint32_t tier3_after();
 
 } // namespace neura::nvm

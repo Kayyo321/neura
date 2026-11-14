@@ -1352,12 +1352,19 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
     tier3::BuildResult built;
     try {
         built = tier3::build(image_, program, tier3::verify_enabled());
+        if (built.program && options_.native_passes && tier3::passes_enabled()) tier3::optimize(image_, built.program->ir, tier3::verify_enabled());
     } catch (const std::exception& error) {
         built.reason = std::string("internal error: ") + error.what();
     }
     const tier3::Program* published = nullptr;
     if (std::getenv("NEURA_TIER_DUMP")) {
-        const auto text = built.program ? tier3::describe(built.program->ir) : "no native program: " + built.reason + "\n";
+        std::string text = "no native program: " + built.reason + "\n";
+        if (built.program) {
+            text = tier3::describe(built.program->ir);
+            for (const auto& [name, count] : built.program->ir.pass_counts) {
+                text += "pass " + name + " " + std::to_string(count) + "\n";
+            }
+        }
         std::fputs(("tier 3 program " + std::to_string(program.program_id) + " of function " +
                     std::to_string(program.function) + ":\n" + text).c_str(), stderr);
     }

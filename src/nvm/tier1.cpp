@@ -226,6 +226,20 @@ bool tier3_interp_enabled() {
     return enabled;
 }
 
+std::uint32_t tier3_after() {
+    static const std::uint32_t value = [] {
+        const char* text = std::getenv("NEURA_TIER3_AFTER");
+        if (!text || *text == '\0') return std::uint32_t{0};
+        std::uint64_t number = 0;
+        for (const char* c = text; *c != '\0'; ++c) {
+            if (*c < '0' || *c > '9' || number > 1'000'000) return std::uint32_t{0};
+            number = number * 10 + static_cast<std::uint64_t>(*c - '0');
+        }
+        return static_cast<std::uint32_t>(number);
+    }();
+    return value;
+}
+
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
     if (options_.tier3 == TierOptions::Tier3::Environment) {
@@ -237,13 +251,13 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
                                 : TierOptions::Programs::Off;
     }
     if (tier_check_enabled()) options_.checkable = true;
-    if (tier_eager()) {
+    if (tier_eager() || tier3_after() != 0) {
         options_.hint_after = 1;
         options_.search_after = 1;
         options_.minimum_proof_work = std::uint64_t{1} << 32;
         options_.search_budget = std::chrono::milliseconds(60'000);
         options_.region_after = 1;
-        options_.native_after = 1;
+        options_.native_after = tier3_after() != 0 ? tier3_after() : 1;
     }
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;

@@ -5,6 +5,7 @@
 #include "tier2.hpp"
 
 #include <cstdint>
+#include <map>
 #include <memory>
 #include <string>
 #include <vector>
@@ -33,6 +34,31 @@ namespace neura::nvm::tier3 {
 // - Budget. `Budget(P)` deoptimizes when C + K + P exceeds the room, the
 //   steps left before the step limit or the caller's allowance; P is the
 //   longest run of completed blocks to the next Budget or ending.
+// - Passes (tier3_passes.cpp, run on the built IR by `optimize`): constant
+//   folding, copy propagation, value numbering, range analysis, check
+//   elimination, loop-invariant code motion with guarded loop entries, dead
+//   code removal, and the lengths of the Budgets. Each keeps every
+//   observable of the IR interpreter's run: the exits taken, the frames at
+//   every ending, the steps, and the traps. What they make that the builder
+//   does not (every form is the IR interpreter's, and tier3_interp.cpp
+//   defines it):
+//   - A Lift of Add or Subtract whose check was proven away is AddWrapping or
+//     SubtractWrapping. A Lift of Multiply, Negate, Divide, Remainder,
+//     ShiftLeft, ShiftRight, Index or ConvertInteger whose check was proven
+//     away has no Checked flag and no state; it computes the result of
+//     lift::evaluate, and the proof is that evaluate reports no failure for
+//     its operands. A division of that kind runs only where the proof holds
+//     (the passes never move it), so a code generator may use the hardware
+//     division.
+//   - A Const may have a float type: a folded float operation.
+//   - A value a Mask of which was dropped may be wider than the Mask's type
+//     (its interval fits the narrower width).
+//   - A preheader (Block::preheader) holds phis, hoisted pure ops, hoisted
+//     Checked Lifts, Guards, and a Jump to the loop head. A hoisted Checked
+//     Lift and a Guard name a state that is the head's entry state with the
+//     head's phis replaced by their preheader operands: the failing check
+//     deoptimizes to the loop head with the step count of the preheader.
+//   - A Guard's operand is a comparison Lift (i1) in the preheader.
 
 inline constexpr std::uint32_t none = nvr::absent;
 
@@ -60,7 +86,13 @@ enum class Op : std::uint8_t {
     // Checks: no effect; each names a frame state to deoptimize to.
     Budget,        // operands[0] = C, imm = P
     SwitchCheck,   // deoptimizes (Selectors) when operands[0] >= imm
-    Guard,         // deoptimizes (Guards) when operands[0] & 1 is 0
+    // Deoptimizes (Guards) when operands[0] & 1 is 0, to the frame state `state`. A Guard stands in a
+    // loop's preheader and asserts a fact the loop's eliminated checks rest on: the loop head's entry
+    // state (the head's own state with each of its phis replaced by what the preheader gives it) is
+    // its state, so tier 1 re-runs the loop from its head, where it traps exactly as the reference
+    // does when the fact does not hold. An operation whose check a guard replaced names it in
+    // `guard`, and the guard dominates the operation (V10).
+    Guard,
     // Effects.
     StateCall,     // an inline state operation of exits[imm] on the extras (Fault: StateTraps), or, with
                    // CheckReference, a reference check of operands[0] against type imm (Fault: References)
@@ -97,7 +129,12 @@ struct Inst {
     lift::Instruction lifted;
     std::uint32_t state = none;
     // For an op whose check a guard replaced: the Guard that covers it (none
-    // otherwise). It dominates the op (verifier rule V10).
+    // otherwise). It dominates the op (verifier rule V10). A NotEqual
+    // comparison that exits an induction loop and whose true edge the
+    // analysis reads as "the variable is below the bound" names the Guard
+    // that asserts the variable starts at or below it, and its `imm` says
+    // which: bit 0 is the operand holding the variable, bit 1 set when it
+    // counts down, bit 2 set when the order is signed.
     std::uint32_t guard = none;
     // The image block whose execution the op belongs to, its function, and
     // the position of the program op it came from (program order).
@@ -121,6 +158,9 @@ struct Block {
     bool image_start = false;
     // For the block an entry starts at: the index of the program entry.
     std::uint32_t entry = none;
+    // A preheader the passes made: a block with one successor, the loop head,
+    // that every entry into the loop passes through.
+    bool preheader = false;
 };
 
 struct StateSlot {
@@ -193,6 +233,9 @@ struct Function {
     // The deepest inlining (none yet): a native activation is entered only
     // with room for the frames it may materialize.
     std::uint32_t max_inline_depth = 0;
+    // What the passes did, by kind (tier3_passes.cpp lists the names), for
+    // the tests and for NEURA_TIER_DUMP.
+    std::map<std::string, std::uint64_t> pass_counts;
 };
 
 // A native program: the IR of one function program.
@@ -217,6 +260,15 @@ std::vector<std::string> verify(const nvr::Image& image, const Function& functio
 
 // NEURA_TIER3_VERIFY=1.
 bool verify_enabled();
+
+// Runs the passes over a built `function` (the pipeline of tier3_passes.cpp:
+// fold and propagate, number values, analyse ranges, eliminate checks, hoist
+// out of loops, number again, remove dead values, recompute the Budgets),
+// verifying after each pass when `verify` is set; a violation prints the
+// pass and the IR and aborts. `NEURA_TIER3_PASSES=0` (a testing aid, read
+// once) turns the pipeline off in TierCache::compile_native.
+void optimize(const nvr::Image& image, Function& function, bool verify);
+bool passes_enabled();
 
 // A readable listing, for tests and debugging.
 std::string describe(const Function& function);

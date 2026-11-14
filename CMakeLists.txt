@@ -108,6 +108,9 @@ set(neura_nvm_sources
     src/nvm/tier2.cpp
     src/nvm/tier3_build.cpp
     src/nvm/tier3_interp.cpp
+    src/nvm/tier3_licm.cpp
+    src/nvm/tier3_passes.cpp
+    src/nvm/tier3_range.cpp
     src/nvm/tier3_verify.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
@@ -660,6 +663,7 @@ if(BUILD_TESTING)
         tests/backend/tier_programs_tests.cpp
         tests/backend/tier_shadow_tests.cpp
         tests/backend/tier3_ir_tests.cpp
+        tests/backend/tier3_pass_tests.cpp
         tests/backend/vm_tests.cpp
         tests/jit/jit_tests.cpp
         tests/ir-optimization/concurrency_support.cpp

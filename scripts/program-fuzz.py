@@ -35,6 +35,9 @@ every mode against the reference:
     NEURA_TIER3=interp NEURA_TIER_EAGER=1 NEURA_TIER3_VERIFY=1    function programs run as tier 3 IR on
                                                the IR interpreter, verified as they are built, without and
                                                with NEURA_TIER_CHECK=2
+    NEURA_TIER3=interp NEURA_TIER3_AFTER=7 NEURA_TIER3_VERIFY=1   the same, a program turning native at its seventh
+                                               checkpoint arrival, so that loops are handed to native code in the middle
+    NEURA_TIER3=interp NEURA_TIER_EAGER=1 NEURA_TIER3_PASSES=0    the same without tier 3's passes
 
 and then repeats the comparison under sweeps of limits that land a trap on every
 block, so that a deoptimization or a trap in place is exercised at each of them:
@@ -906,7 +909,8 @@ def coverage(args):
 
 # Environment variables the tier machinery reads: cleared for every run so that the modes below are the only ones.
 TIER_VARIABLES = ["NEURA_TIER", "NEURA_TIER_EAGER", "NEURA_TIER_CHECK", "NEURA_TIER_PROGRAMS", "NEURA_TIER_CHECK_HEAP",
-                  "NEURA_TIER_DUMP", "NEURA_JIT", "NEURA_RUN_OPTIONS", "NEURA_TIER3", "NEURA_TIER3_VERIFY"]
+                  "NEURA_TIER_DUMP", "NEURA_JIT", "NEURA_RUN_OPTIONS", "NEURA_TIER3", "NEURA_TIER3_VERIFY",
+                  "NEURA_TIER3_AFTER", "NEURA_TIER3_PASSES"]
 
 REFERENCE_OPTIONS = ["--tier=0"]
 
@@ -925,6 +929,10 @@ MODES = [
     ("tier3-interp", ["--jit=on"], {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1"}),
     ("tier3-interp-check2", ["--jit=on"],
      {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER_CHECK": "2"}),
+    # A program turns native at its 7th checkpoint arrival, so a loop is handed to native code in its middle.
+    ("tier3-interp-after", ["--jit=on"], {"NEURA_TIER3": "interp", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
+    ("tier3-interp-passes-off", ["--jit=on"],
+     {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER3_PASSES": "0"}),
 ]
 
 QUICK_SEEDS = [1, 2, 5]
