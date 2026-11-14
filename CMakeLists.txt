@@ -562,7 +562,12 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/program-fuzz.py" run
         --neura "$<TARGET_FILE:neura>" --quick --jobs 3
     )
-    set_tests_properties(program-fuzz PROPERTIES TIMEOUT 600)
+    # The quick fuzz run takes a few minutes in a Release build. Under the
+    # address and undefined-behavior sanitizers every run is several times
+    # slower, so that configuration sets a longer limit.
+    set(NEURA_PROGRAM_FUZZ_TEST_TIMEOUT 600 CACHE STRING
+        "CTest limit, in seconds, for the program-fuzz test")
+    set_tests_properties(program-fuzz PROPERTIES TIMEOUT "${NEURA_PROGRAM_FUZZ_TEST_TIMEOUT}")
     add_test(NAME nir-link COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
