@@ -115,13 +115,31 @@
         return tier3_self(context).const_values_[index];
     }
 
+    // The helper's arguments, copied word by word: native code has just
+    // stored them as separate words, and a wide load would span two of those
+    // stores and wait for both. Vectorization is off for the loop so that it
+    // stays 8-byte loads and stores. The vector is resized only when the count
+    // changes and keeps its capacity.
+    void tier3_copy_arguments(const std::uint64_t* arguments, std::uint32_t count) {
+        if (region_arguments_.size() != count) region_arguments_.resize(count);
+        std::uint64_t* target = region_arguments_.data();
+#if defined(__clang__)
+#pragma clang loop vectorize(disable) interleave(disable)
+#elif defined(__GNUC__) && __GNUC__ >= 14
+#pragma GCC novector
+#endif
+        for (std::uint32_t i = 0; i < count; ++i) {
+            target[i] = arguments[i];
+        }
+    }
+
     // An inline state operation: its Fault is the deoptimization the program
     // interpreter makes, any other exception is kept for the executor.
     static tier3::Status tier3_state(tier3::Context* context, const nvr::Exit* exit, const std::uint64_t* arguments,
                                      std::uint32_t count, std::uint64_t* result) {
         auto& self = tier3_self(context);
         try {
-            self.region_arguments_.assign(arguments, arguments + count);
+            self.tier3_copy_arguments(arguments, count);
             *result = self.state(*exit, self.region_arguments_);
             return tier3::Status::Ok;
         } catch (const Fault&) {
@@ -156,7 +174,7 @@
         auto& self = tier3_self(context);
         self.tier3_flush(*context);
         try {
-            self.region_arguments_.assign(arguments, arguments + count);
+            self.tier3_copy_arguments(arguments, count);
             *result = self.state(*exit, self.region_arguments_);
         } catch (const Fault& failure) {
             self.trap(failure);
@@ -254,7 +272,7 @@
                                     const tier2::Region* caller) {
         auto& self = tier3_self(context);
         self.tier3_flush(*context);
-        self.region_arguments_.assign(arguments, arguments + count);
+        self.tier3_copy_arguments(arguments, count);
         try {
             self.push_frame(callee, self.region_arguments_, exit->result_slot, exit->resume);
         } catch (const Fault& failure) {
