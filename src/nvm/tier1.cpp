@@ -133,6 +133,7 @@ std::string describe(const TierStatistics& s) {
         const auto& n = s.native;
         out += "tier: native programs " + std::to_string(s.native_programs) + " (" + std::to_string(s.native_bytes) +
                " bytes of code, " + std::to_string(s.native_inlined) + " calls inlined, " +
+               std::to_string(s.native_class_tests) + " dispatch sites with class tests, " +
                std::to_string(s.native_failed) + " not compiled); entered " + std::to_string(n.entered) + ", left " +
                std::to_string(n.left) + ", refused " + std::to_string(n.refused) + "; deoptimized: budget " +
                std::to_string(n.budget) + ", checks " + std::to_string(n.checks) + ", guards " +
@@ -285,7 +286,8 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     // refreshes (TierCache::program).
     native_capacity_ = 5 * image.functions.size() + 8;
     native_arrivals_ = std::make_unique<std::atomic<std::uint64_t>[]>(native_capacity_);
-    native_programs_ = std::make_unique<std::atomic<const tier3::Program*>[]>(native_capacity_);
+    native_programs_ = std::make_unique<std::atomic<const tier3::Program*>[]>(native_capacity_ * tier3::variant_count);
+    dispatch_records_ = std::make_unique<std::atomic<tier3::DispatchRecord*>[]>(native_capacity_);
     region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();

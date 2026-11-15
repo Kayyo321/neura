@@ -8,6 +8,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <map>
 #include <memory>
 #include <mutex>
@@ -218,6 +219,13 @@ struct Entry {
     std::uint32_t ir_block = 0;
 };
 
+// The variants of a native program; a cache holds at most one native program
+// per program version and variant. Standard inlines; Profile (--profile)
+// and Checkable (NEURA_TIER_CHECK=1) do not, so that every frame is the
+// reference's at every call and return.
+enum class Variant : std::uint8_t { Standard, Profile, Checkable };
+inline constexpr unsigned variant_count = 3;
+
 struct Function {
     std::vector<Inst> insts;
     std::vector<Block> blocks;
@@ -226,6 +234,10 @@ struct Function {
     std::vector<Entry> entries;
     std::vector<const nvr::Exit*> exits;
     std::vector<tier2::Region::DispatchTable> dispatch_tables;
+    // For each dispatch table: the index in `programs` of the program it
+    // came from, and its index in that program's dispatch_tables (the
+    // speculation record of its Dispatch op).
+    std::vector<std::pair<std::uint32_t, std::uint32_t>> dispatch_origins;
     // programs[0] is the function's own program.
     std::vector<const tier2::Region*> programs;
     const tier2::Region* region = nullptr;
@@ -235,9 +247,21 @@ struct Function {
     std::uint32_t parameter_count = 0;
     std::vector<ValueType> slot_types;
     bool uses_float = false;
-    // The deepest inlining (none yet): a native activation is entered only
-    // with room for the frames it may materialize.
+    // The deepest inlining: a native activation is entered only with room
+    // for the frames it may materialize.
     std::uint32_t max_inline_depth = 0;
+    // What the inliner did: calls inlined (at every level), and dispatch
+    // sites given class tests from recorded tags.
+    std::uint64_t inlined_calls = 0;
+    std::uint64_t class_tested_dispatches = 0;
+    // The variant it is built for. Machine code of the standard variant
+    // pushes and pops the frames of its calls itself where there is room;
+    // the profile variant leaves them to the helpers, which add the steps
+    // to the running function at every call and return (--profile).
+    Variant variant = Variant::Standard;
+    // The slot count of each function the program calls (not inlined): the
+    // size of the frame a call pushes.
+    std::map<std::uint32_t, std::uint32_t> call_frames;
     // What the passes did, by kind (tier3_passes.cpp lists the names), for
     // the tests and for NEURA_TIER_DUMP.
     std::map<std::string, std::uint64_t> pass_counts;
@@ -275,6 +299,37 @@ struct Program {
     mutable std::unique_ptr<std::atomic<const std::uint8_t*>[]> lazy_entries;
     mutable std::vector<std::unique_ptr<jit::Program>> lazy_code;
 };
+
+// The speculation record of one Dispatch op of a function program: the first
+// `size` distinct tags the program interpreter and the IR interpreter
+// selected there, in the order they were first seen, each held as the tag
+// plus one (0 is empty), and whether a further distinct tag came. Relaxed
+// atomics: runs sharing a cache record concurrently. The records decide only
+// what the inliner inlines (tier3_inline.cpp); nothing a run observes
+// depends on them.
+struct DispatchRecord {
+    static constexpr unsigned size = 8;
+    std::atomic<std::uint64_t> tags[size] = {};
+    std::atomic<std::uint8_t> megamorphic = 0;
+
+    void record(std::uint64_t tag);
+    // The recorded tags in recording order; false when megamorphic.
+    bool read(std::vector<std::uint64_t>& tags) const;
+};
+
+// What the inliner reads from the cache: the published function program of a
+// function (null when it has none), and the speculation record of a dispatch
+// table of a program (null when there is none).
+struct InlineSource {
+    std::function<const tier2::Region*(std::uint32_t function)> program;
+    std::function<const DispatchRecord*(const tier2::Region& program, std::uint32_t table)> record;
+};
+
+// Inlines calls into `function` (the IR of a function program, built and not
+// yet optimized), as tier3_inline.cpp describes: direct calls, and the calls
+// of dispatch and closure sites behind class tests on recorded tags. Verifies
+// the result when `verify` is set; a violation prints it and aborts.
+void inline_calls(const nvr::Image& image, Function& function, const InlineSource& source, bool verify);
 
 struct BuildResult {
     std::unique_ptr<Program> program;
@@ -366,7 +421,55 @@ struct Helpers {
     // popped, the caller's result slot written, `next_block` is the caller's
     // return block.
     Status (*ret)(Context*, std::uint64_t value, bool has_value, std::uint64_t blocks);
+    // Records `tag` in the speculation record of dispatch table `table` of
+    // `program` (DispatchRecord).
+    void (*record)(Context*, const tier2::Region* program, std::uint32_t table, std::uint64_t tag);
 };
+
+// The frame stack of a run as native code sees it (machine.cpp, FrameStack):
+// `size` frame headers of `capacity` at `headers`, and the slot and
+// initialized-flag arenas, `slot_size` used of `slot_capacity`. These are
+// the stack's own storage, which only the stack grows (by doubling); native
+// code pushes a frame without growing it and pops one, exactly as
+// FrameStack::push and pop_back do, and calls a helper otherwise.
+struct FrameRecord {
+    void* headers = nullptr;
+    std::uint64_t size = 0;
+    std::uint64_t capacity = 0;
+    std::uint64_t* slots = nullptr;
+    std::uint8_t* initialized = nullptr;
+    std::uint64_t slot_size = 0;
+    std::uint64_t slot_capacity = 0;
+};
+
+// The offsets native code uses in a FrameRecord and in a frame header
+// (FrameStack's FrameHeader, which machine.cpp asserts them for).
+namespace frame_offsets {
+inline constexpr std::int32_t headers = 0;
+inline constexpr std::int32_t size = 8;
+inline constexpr std::int32_t capacity = 16;
+inline constexpr std::int32_t slots = 24;
+inline constexpr std::int32_t initialized = 32;
+inline constexpr std::int32_t slot_size = 40;
+inline constexpr std::int32_t slot_capacity = 48;
+inline constexpr std::int32_t header_bytes = 40;
+inline constexpr std::int32_t function = 0;
+inline constexpr std::int32_t block = 4;
+inline constexpr std::int32_t return_slot = 8;
+inline constexpr std::int32_t return_block = 12;
+inline constexpr std::int32_t base = 16;
+inline constexpr std::int32_t boundary = 24;
+inline constexpr std::int32_t called_from = 32;
+} // namespace frame_offsets
+
+static_assert(std::is_standard_layout_v<FrameRecord>);
+static_assert(offsetof(FrameRecord, headers) == frame_offsets::headers &&
+              offsetof(FrameRecord, size) == frame_offsets::size &&
+              offsetof(FrameRecord, capacity) == frame_offsets::capacity &&
+              offsetof(FrameRecord, slots) == frame_offsets::slots &&
+              offsetof(FrameRecord, initialized) == frame_offsets::initialized &&
+              offsetof(FrameRecord, slot_size) == frame_offsets::slot_size &&
+              offsetof(FrameRecord, slot_capacity) == frame_offsets::slot_capacity);
 
 // How a helper of native code went (Context::status).
 enum class NativeStatus : std::uint32_t {
@@ -413,6 +516,10 @@ struct NativeHelpers {
     // lift::evaluate of the Lift instruction `inst` of the running program:
     // its result; Fault when its check fails.
     std::uint64_t (*evaluate)(Context*, std::uint32_t inst, std::uint64_t a, std::uint64_t b);
+    // What `call` does after the push, for a frame of `callee` native code
+    // pushed itself (with C in the context): the address of the callee's
+    // native entry 0, with `program` set to it, or Left.
+    std::uint64_t (*enter)(Context*, std::uint32_t callee);
 };
 
 // What a native activation chain reads and writes. The fields up to
@@ -446,6 +553,12 @@ struct Context {
     // Where the ending went on.
     std::uint32_t next_block = 0;
     NativeHelpers functions{};
+    // The frame stack (FrameRecord), the frame limit, and the calls and
+    // returns native code made by pushing and popping frames itself.
+    FrameRecord* frames = nullptr;
+    std::uint64_t max_frames = 0;
+    std::uint64_t inline_calls = 0;
+    std::uint64_t inline_returns = 0;
 
     void* owner = nullptr;
     const Helpers* helpers = nullptr;
@@ -484,6 +597,11 @@ inline constexpr std::int32_t ret = 120;
 inline constexpr std::int32_t leave = 128;
 inline constexpr std::int32_t deoptimize = 136;
 inline constexpr std::int32_t evaluate = 144;
+inline constexpr std::int32_t enter = 152;
+inline constexpr std::int32_t frames = 160;
+inline constexpr std::int32_t max_frames = 168;
+inline constexpr std::int32_t inline_calls = 176;
+inline constexpr std::int32_t inline_returns = 184;
 } // namespace offsets
 
 static_assert(std::is_standard_layout_v<Context>);
@@ -502,7 +620,11 @@ static_assert(offsetof(Context, functions) + offsetof(NativeHelpers, state) == o
               offsetof(Context, functions) + offsetof(NativeHelpers, ret) == offsets::ret &&
               offsetof(Context, functions) + offsetof(NativeHelpers, leave) == offsets::leave &&
               offsetof(Context, functions) + offsetof(NativeHelpers, deoptimize) == offsets::deoptimize &&
-              offsetof(Context, functions) + offsetof(NativeHelpers, evaluate) == offsets::evaluate);
+              offsetof(Context, functions) + offsetof(NativeHelpers, evaluate) == offsets::evaluate &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, enter) == offsets::enter);
+static_assert(offsetof(Context, frames) == offsets::frames && offsetof(Context, max_frames) == offsets::max_frames &&
+              offsetof(Context, inline_calls) == offsets::inline_calls &&
+              offsetof(Context, inline_returns) == offsets::inline_returns);
 
 inline constexpr std::uint32_t max_native_depth = 256;
 

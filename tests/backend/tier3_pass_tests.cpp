@@ -1847,6 +1847,8 @@ NEURA_TEST(tier3, a_loop_handed_to_native_code_in_its_middle_runs_the_guard_and_
     check_equal(off.statistics().native.guards, std::uint64_t{0}, "no guards without the passes");
     // The loop that starts below the index range traps at its first
     // iteration: the failed guard hands it to tier 1, which traps there.
+    // NEURA_TIER3_AFTER makes the program native only later, after the trap.
+    if (nvm::tier3_after() != 0) return;
     nvm::TierCache traps(image, native_options(1, true));
     compare_with_tier_0(image, traps, "a negative index", {"window", "300", "-101"});
     check(traps.statistics().native.guards > 0, "the guard failed before the trap");

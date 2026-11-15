@@ -185,6 +185,10 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
                 const auto found = std::lower_bound(table.exits.begin(), table.exits.end(), tag,
                                                     [](const auto& entry, std::uint64_t key) { return entry.first < key; });
                 const auto exit = found != table.exits.end() && found->first == tag ? found->second : table.fallback;
+                if (helpers.record != nullptr && in.imm < fn.dispatch_origins.size()) {
+                    const auto [program, index] = fn.dispatch_origins[in.imm];
+                    helpers.record(&context, fn.programs[program], index, tag);
+                }
                 next = current.succs.at(exit);
                 break;
             }

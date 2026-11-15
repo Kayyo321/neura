@@ -1,0 +1,216 @@
+// Calls tier 3 inlines (docs/runtime/NVM.md, "Execution tiers"): small
+// functions called in a loop three levels deep, a callee with a loop of its
+// own, traps inside inlined callees
+// (overflow, index, nil), a dispatch whose receivers change after the loop
+// was compiled, a dispatch with one implementation, a closure call, and a
+// recursion whose frames grow the frame arenas. The first argument picks
+// the case, the second the size. tests/backend/tier3_inline_tests.cpp runs
+// it at every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Tier3Inline = module:program.Entry (
+    const Mask: int64 = 1048575;
+
+    let Shape = interface (
+        let weight = func(scale: int64) -> int64;
+    );
+
+    let Square = class implements Shape (
+        export last side: int64;
+        export let init = func(length: int64) {
+            side = length;
+        };
+        export let weight = func(scale: int64) -> int64 => side * side + scale;
+    );
+
+    let Stick = class implements Shape (
+        export last length: int64;
+        export let init = func(size: int64) {
+            length = size;
+        };
+        export let weight = func(scale: int64) -> int64 => length - scale;
+    );
+
+    let Ring = class implements Shape (
+        export last radius: int64;
+        export let init = func(size: int64) {
+            radius = size;
+        };
+        export let weight = func(scale: int64) -> int64 => radius * 3 + scale * 2;
+    );
+
+    // An interface with one implementation: its dispatch table has one entry.
+    let Meter = interface (
+        let read = func(at: int64) -> int64;
+    );
+
+    let Gauge = class implements Meter (
+        export last base: int64;
+        export let init = func(start: int64) {
+            base = start;
+        };
+        export let read = func(at: int64) -> int64 => (base + at * 7) & Mask;
+    );
+
+    let report = func(label: string, value: int64) {
+        console.print_line(label + " " + value.to_string());
+    };
+
+    let add = func(a: int64, b: int64) -> int64 => (a + b) & Mask;
+
+    let twist = func(value: int64) -> int64 {
+        let shifted = (value << 3) & Mask;
+        return add(shifted, value >> 2);
+    };
+
+    let mix = func(total: int64, i: int64) -> int64 {
+        if (i % 4 == 0) {
+            return add(total, twist(i));
+        }
+        return twist(add(total, i));
+    };
+
+    // Calls three levels deep in a loop.
+    let calls = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = mix(total, i as int64);
+        }
+        return total;
+    };
+
+    // A callee with a loop of its own: its loop head keeps its checkpoint
+    // inside the caller, where native code can deoptimize and tier 1 goes on
+    // in the inlined frame.
+    let spin = func(base: int64, rounds: int32) -> int64 {
+        let total = base;
+        for (let i = 0; i < rounds; i = i + 1) {
+            total = (total * 3 + (i as int64)) & Mask;
+        }
+        return total;
+    };
+
+    let spins = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = add(total, spin(total, 5));
+        }
+        return total;
+    };
+
+    // Traps two and three levels below the loop.
+    let overflow_inner = func(value: int32) -> int32 => value * 65536 * 65536;
+    let overflow_middle = func(value: int32) -> int32 => overflow_inner(value) + 1;
+    let index_inner = func(values: int64[list], at: int32) -> int64 => values[at];
+    let index_middle = func(values: int64[list], at: int32) -> int64 => index_inner(values, at) + 1;
+    let nil_inner = func(shape: Shape, scale: int64) -> int64 => shape.weight(scale);
+    let nil_middle = func(shape: Shape, scale: int64) -> int64 => nil_inner(shape, scale) + 1;
+
+    let trap = func(kind: string, size: int32) -> int64 {
+        let total: int64 = 0;
+        let values: int64[list] = [1, 2, 3];
+        let square: Shape = new Square(2);
+        for (let i = 0; i <= size; i = i + 1) {
+            let at = 1;
+            let factor = 0;
+            if (i == size) {
+                at = 3;
+                factor = 3;
+            }
+            if (kind == "overflow") {
+                total = total + (overflow_middle(factor) as int64);
+            } else if (kind == "index") {
+                total = total + index_middle(values, at);
+            } else {
+                let shape = square;
+                if (i == size) {
+                    shape = nil;
+                }
+                total = total + nil_middle(shape, 1);
+            }
+        }
+        return total;
+    };
+
+    let weigh = func(all: Shape[list], first: int32, last: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = first; i < last; i = i + 1) {
+            total = add(total, all[i].weight(i as int64));
+        }
+        return total;
+    };
+
+    // Squares first; sticks and rings after `size` of them, when the loop may
+    // already run with class tests for squares only.
+    let dispatch = func(size: int32) -> int64 {
+        let all: Shape[list] = [];
+        for (let i = 0; i < size; i = i + 1) {
+            all.append(new Square((i % 7) as int64));
+        }
+        for (let i = 0; i < size; i = i + 1) {
+            if (i % 2 == 0) {
+                all.append(new Stick((i % 11) as int64));
+            } else {
+                all.append(new Ring((i % 5) as int64));
+            }
+        }
+        let squares = weigh(all, 0, size);
+        return add(squares, weigh(all, size, size * 2));
+    };
+
+    let single = func(size: int32) -> int64 {
+        let meter: Meter = new Gauge(5);
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = add(total, meter.read(i as int64));
+        }
+        return total;
+    };
+
+    let apply = func(step: func(int64) -> int64, count: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < count; i = i + 1) {
+            total = step(total);
+        }
+        return total;
+    };
+
+    // A recursion whose every level calls an inlined function.
+    let descend = func(depth: int32) -> int64 {
+        if (depth == 0) {
+            return 0;
+        }
+        return add(descend(depth - 1), twist(depth as int64));
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kind = "calls";
+        let size = 20;
+        if (args.length > 0) {
+            kind = args[0];
+        }
+        if (args.length > 1) {
+            size = result.value_or<int32>(int32s.parse(args[1]), 20);
+        }
+        if (kind == "calls") {
+            report("calls", calls(size));
+        } else if (kind == "spins") {
+            report("spins", spins(size));
+        } else if (kind == "dispatch") {
+            report("dispatch", dispatch(size));
+        } else if (kind == "single") {
+            report("single", single(size));
+        } else if (kind == "closure") {
+            let offset: int64 = (size as int64) + 3;
+            report("closure", apply(func(x: int64) -> int64 => add(x, offset), size));
+        } else if (kind == "descend") {
+            report("descend", descend(size));
+        } else {
+            report("trap", trap(kind, size));
+        }
+        return program.ExitCode.Ok;
+    };
+);

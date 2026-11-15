@@ -607,6 +607,7 @@
                 const auto found = std::lower_bound(table.exits.begin(), table.exits.end(), tag,
                                                     [](const auto& entry, std::uint64_t key) { return entry.first < key; });
                 const auto exit = found != table.exits.end() && found->first == tag ? found->second : table.fallback;
+                if (tier3_) tier3_record(*program, op.index, tag);
                 pc = program->operands[op.other + exit];
                 break;
             }

@@ -561,6 +561,9 @@ bool copy_phis(Function& f, Counts& counts) {
         auto& block = f.blocks[b];
         std::size_t phis = 0;
         while (phis < block.insts.size() && f.insts[block.insts[phis]].op == Op::Phi) ++phis;
+        // A Budget stays the first op after the phis: it is where a
+        // checkpoint starts (compute_budgets, V8).
+        if (phis < block.insts.size() && f.insts[block.insts[phis]].op == Op::Budget) continue;
         std::vector<std::uint32_t> made;
         for (std::size_t k = 0; k < phis; ++k) {
             const auto id = block.insts[k];

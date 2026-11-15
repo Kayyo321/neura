@@ -586,6 +586,16 @@ private:
                     fail("V3", at(id) + " has a frame state chain that ends in another function's frame");
                     good = false;
                 }
+                if (state.program < f_.programs.size() && f_.programs[state.program] != nullptr &&
+                    f_.programs[state.program]->function != state.function) {
+                    fail("V3", at(id) + " has a frame state whose program is another function's");
+                    good = false;
+                }
+                if (state.caller != none && !called_at(state)) {
+                    fail("V3", at(id) + " has an inlined frame whose caller's block is not a call of it with its "
+                                        "return slot and block");
+                    good = false;
+                }
                 s = state.caller;
             }
             if (good && depth > f_.max_inline_depth + 1) {
@@ -624,6 +634,24 @@ private:
                 }
             }
         }
+    }
+
+    // An inlined frame's caller level stands at its call block: a block of
+    // the caller's function with a call exit to the frame's function whose
+    // result slot and resume block are the frame's return slot and block.
+    bool called_at(const FrameState& state) const {
+        if (state.caller >= f_.states.size()) return false;
+        const auto& caller = f_.states[state.caller];
+        if (caller.function >= image_.functions.size()) return false;
+        const auto& blocks = image_.functions[caller.function].blocks;
+        if (caller.block >= blocks.size()) return false;
+        for (const auto& exit : blocks[caller.block].exits) {
+            if (exit.kind == nvr::ExitKind::Call && exit.target == state.function &&
+                exit.result_slot == state.return_slot && exit.resume == state.return_block) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // --- V4: effects keep their program order -----------------------------------

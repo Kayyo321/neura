@@ -107,6 +107,7 @@ set(neura_nvm_sources
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
     src/nvm/tier3_build.cpp
+    src/nvm/tier3_inline.cpp
     src/nvm/tier3_interp.cpp
     src/nvm/tier3_licm.cpp
     src/nvm/tier3_passes.cpp
@@ -664,6 +665,7 @@ if(BUILD_TESTING)
         tests/backend/tier2_tests.cpp
         tests/backend/tier_programs_tests.cpp
         tests/backend/tier_shadow_tests.cpp
+        tests/backend/tier3_inline_tests.cpp
         tests/backend/tier3_ir_tests.cpp
         tests/backend/tier3_native_tests.cpp
         tests/backend/tier3_pass_tests.cpp

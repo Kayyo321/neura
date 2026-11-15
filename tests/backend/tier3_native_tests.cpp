@@ -283,7 +283,8 @@ NEURA_TEST(tier3, machine_code_of_a_loop_entered_in_its_middle_deoptimizes_exact
     check(passing.statistics().native.steps > 0, "machine code ran the loop");
     check_equal(off.statistics().native.guards, std::uint64_t{0}, "no guards without the passes");
     check(off.statistics().native.steps > 0, "machine code ran the loop without the passes");
-    check(traps.statistics().native.guards > 0, "the guard failed before the trap");
+    // NEURA_TIER3_AFTER makes the program native only after that trap.
+    if (nvm::tier3_after() == 0) check(traps.statistics().native.guards > 0, "the guard failed before the trap");
 }
 
 NEURA_TEST(tier3, the_statistics_line_reports_machine_code_entries_and_bytes) {

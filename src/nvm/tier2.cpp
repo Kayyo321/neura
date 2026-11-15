@@ -1849,6 +1849,7 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
         if (!formation.region) return {found.region.get(), true, found.refresh_at};
         auto region = std::const_pointer_cast<tier2::Region>(formation.region);
         region->program_id = next_program_id_++;
+        make_dispatch_records(*region);
         retired_regions_.push_back(std::move(found.region));
         found.region = std::move(region);
         ++statistics_.refreshed;
@@ -1870,6 +1871,7 @@ TierCache::RegionResolution TierCache::program(std::uint32_t function, std::uint
     // number (tier2_steps.inc).
     auto region = std::const_pointer_cast<tier2::Region>(formation.region);
     region->program_id = next_program_id_++;
+    make_dispatch_records(*region);
     found.region = std::move(region);
     ++statistics_.programs;
     statistics_.program_blocks += found.region->blocks.size();

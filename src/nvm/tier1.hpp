@@ -24,6 +24,8 @@ struct Region;
 }
 namespace tier3 {
 struct Program;
+struct DispatchRecord;
+enum class Variant : std::uint8_t;
 }
 
 // Tier 1 of the executor (docs/runtime/NVM.md, "Execution tiers"): blocks
@@ -94,6 +96,10 @@ struct TierOptions {
     // NEURA_TIER3_PASSES=0 turns them off whatever this says. A test turns
     // them off to compare a run with and without.
     bool native_passes = true;
+    // Whether the standard variant of a native program inlines calls
+    // (tier3_inline.cpp). A test turns it off to compare a run with and
+    // without.
+    bool native_inlining = true;
 };
 
 // Steps of one execution by how the block was evaluated. `lifted` ran a
@@ -216,13 +222,15 @@ struct TierStatistics {
     // Tier 3: empty when no run used it; else its back end ("interp", or
     // "native" once a run ran machine code), why a run asking for machine
     // code ran the IR interpreter, the native programs made, their bytes of
-    // code and inlined calls, the function programs that got none, and what
-    // the runs did in them.
+    // code, the calls inlined into them and the dispatch sites given class
+    // tests, the function programs that got none, and what the runs did in
+    // them.
     std::string native_mode;
     std::string native_off;
     std::uint64_t native_programs = 0;
     std::uint64_t native_bytes = 0;
     std::uint64_t native_inlined = 0;
+    std::uint64_t native_class_tests = 0;
     std::uint64_t native_failed = 0;
     std::map<std::string, std::uint64_t> native_rejections;
     NativeCounts native;
@@ -301,7 +309,8 @@ public:
     // function program is built, verified, and published the first time the
     // count has reached native_after and some run asks (compile_native); a
     // failure is remembered and never retried. Published programs are
-    // immutable and live as long as the cache.
+    // immutable and live as long as the cache. There is one native program
+    // per program version and variant (tier3::Variant).
     bool native_enabled() const { return options_.tier3 != TierOptions::Tier3::Off && programs(); }
     // Whether native programs get machine code (TierOptions::Tier3::Native
     // where tier 3 has a code generator and executable memory), and why not
@@ -309,8 +318,12 @@ public:
     bool machine_code() const { return machine_code_; }
     const std::string& machine_code_off() const { return machine_code_off_; }
     std::uint64_t count_native(std::uint32_t program_id);
-    const tier3::Program* native_code(const tier2::Region& program) const;
-    const tier3::Program* compile_native(const tier2::Region& program);
+    const tier3::Program* native_code(const tier2::Region& program, tier3::Variant variant) const;
+    const tier3::Program* compile_native(const tier2::Region& program, tier3::Variant variant);
+    // The speculation record of dispatch table `table` of `program`
+    // (tier3::DispatchRecord), or null: programs have them only while tier 3
+    // is on.
+    tier3::DispatchRecord* dispatch_record(const tier2::Region& program, std::uint32_t table) const;
     // A run uses tier 3: with machine code (`machine`), or on the IR
     // interpreter, for `off` when machine code was asked for.
     void note_native(bool machine, const std::string& off);
@@ -395,9 +408,16 @@ private:
     // Tier 3, by program number: arrivals at its checkpoints, and its state:
     // null (not tried), `forming`, `failed`, or the published program.
     std::unique_ptr<std::atomic<std::uint64_t>[]> native_arrivals_;
+    // By program number and variant (number * tier3::variant_count +
+    // variant).
     std::unique_ptr<std::atomic<const tier3::Program*>[]> native_programs_;
     std::size_t native_capacity_ = 0;
     std::vector<std::unique_ptr<tier3::Program>> native_owned_;
+    // The speculation records of each program's dispatch tables, by program
+    // number, made when the program is published (with tier 3 on).
+    std::unique_ptr<std::atomic<tier3::DispatchRecord*>[]> dispatch_records_;
+    std::vector<std::unique_ptr<tier3::DispatchRecord[]>> dispatch_owned_;
+    void make_dispatch_records(const tier2::Region& program);
     bool machine_code_ = false;
     std::string machine_code_off_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;

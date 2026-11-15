@@ -42,6 +42,9 @@ every mode against the reference:
                                                (x86-64 Linux; elsewhere the IR interpreter), its register
                                                allocations checked, without and with NEURA_TIER_CHECK=2
     NEURA_TIER3=native with NEURA_TIER3_AFTER=7, and with NEURA_TIER3_PASSES=0, as for interp
+    NEURA_TIER3=interp and native, NEURA_TIER3_AFTER=7 NEURA_TIER3_VERIFY=1, without --profile (and so against a
+                                               reference without it): the variant of native programs that inlines
+                                               calls, which --profile turns off
 
 and then repeats the comparison under sweeps of limits that land a trap on every
 block, so that a deoptimization or a trap in place is exercised at each of them:
@@ -918,6 +921,9 @@ TIER_VARIABLES = ["NEURA_TIER", "NEURA_TIER_EAGER", "NEURA_TIER_CHECK", "NEURA_T
 
 REFERENCE_OPTIONS = ["--tier=0"]
 
+# A mode option, not passed to neura: the mode and its reference run without --profile.
+NO_PROFILE = "no-profile"
+
 # (name, run options, environment)
 MODES = [
     ("jit-off", ["--jit=off"], {}),
@@ -943,6 +949,11 @@ MODES = [
     ("tier3-native-after", ["--jit=on"], {"NEURA_TIER3": "native", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
     ("tier3-native-passes-off", ["--jit=on"],
      {"NEURA_TIER3": "native", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER3_PASSES": "0"}),
+    # Without --profile, whose variant of native programs inlines nothing: compared with tier 0 without it.
+    ("tier3-interp-inline", [NO_PROFILE, "--jit=on"],
+     {"NEURA_TIER3": "interp", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
+    ("tier3-native-inline", [NO_PROFILE, "--jit=on"],
+     {"NEURA_TIER3": "native", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
 ]
 
 QUICK_SEEDS = [1, 2, 5]
@@ -980,7 +991,9 @@ class Runner:
         env["NEURA_GPU"] = "off"
         env.update(environment)
         self.runs += 1
-        command = [self.neura, "run", "--stats", "--profile", *options, str(image), "--", *arguments]
+        profile = [] if NO_PROFILE in options else ["--profile"]
+        options = [option for option in options if option != NO_PROFILE]
+        command = [self.neura, "run", "--stats", *profile, *options, str(image), "--", *arguments]
         try:
             result = subprocess.run(command, capture_output=True, env=env, stdin=subprocess.DEVNULL,
                                     timeout=self.timeout)
@@ -1075,14 +1088,20 @@ def check_seed(seed, coarse, runner, work, modes):
                 result.failures.append(Failure(seed, "reference", kind, value, reference, reference,
                                                "the tier 0 reference run exceeded the time limit"))
             return reference
+        unprofiled = None
         for name, mode_options, environment in modes:
             if (name, kind) in reported:
                 continue
+            expected = reference
+            if NO_PROFILE in mode_options:
+                if unprofiled is None:
+                    unprofiled = runner.run(image, arguments, [NO_PROFILE] + REFERENCE_OPTIONS + extra, {})
+                expected = unprofiled
             actual = runner.run(image, arguments, mode_options + extra, environment)
-            if actual.key() != reference.key():
+            if actual.key() != expected.key():
                 reported.add((name, kind))
                 what = "exceeded the time limit" if actual.status is None else "differs from tier 0"
-                result.failures.append(Failure(seed, name, kind, value, reference, actual, what))
+                result.failures.append(Failure(seed, name, kind, value, expected, actual, what))
         return reference
 
     base = compare("base", None, [])
@@ -1171,8 +1190,10 @@ def write_failure(report, failure, neura, script):
         f"\"$NEURA\" build \"$WORK/program-{failure.seed}.nra\" -o \"$WORK/program.nvr\" || exit 2",
     ]
     if failure.mode != "build":
-        reference = f"\"$NEURA\" run --stats --profile {' '.join(REFERENCE_OPTIONS)} {extra} \"$WORK/program.nvr\" -- {given}"
-        actual = f"env {exports} \"$NEURA\" run --stats --profile {' '.join(options)} {extra} \"$WORK/program.nvr\" -- {given}"
+        profile = "" if NO_PROFILE in options else "--profile"
+        options = [option for option in options if option != NO_PROFILE]
+        reference = f"\"$NEURA\" run --stats {profile} {' '.join(REFERENCE_OPTIONS)} {extra} \"$WORK/program.nvr\" -- {given}"
+        actual = f"env {exports} \"$NEURA\" run --stats {profile} {' '.join(options)} {extra} \"$WORK/program.nvr\" -- {given}"
         lines += [
             f"{reference} > \"$WORK/reference.out\" 2> \"$WORK/reference.err\"; echo $? > \"$WORK/reference.status\"",
             f"{actual} > \"$WORK/actual.out\" 2> \"$WORK/actual.err\"; echo $? > \"$WORK/actual.status\"",

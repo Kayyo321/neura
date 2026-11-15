@@ -18,6 +18,9 @@
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
+#include <memory>
+#include <type_traits>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -682,59 +685,108 @@ private:
 
     // The frames of one task, outermost first. Every frame's slots and
     // initialized flags live in two arenas, one frame after another, so a
-    // call or return only moves the end of the arenas.
+    // call or return only moves the end of the arenas. The headers and the
+    // arenas are arrays the stack grows itself, by doubling; its record
+    // (tier3::FrameRecord) publishes them, so that native code of tier 3
+    // pushes and pops frames in them exactly as push and pop_back do.
     class FrameStack {
     public:
-        std::size_t size() const { return headers_.size(); }
-        bool empty() const { return headers_.empty(); }
+        FrameStack() = default;
+        FrameStack(FrameStack&& other) noexcept { *this = std::move(other); }
+        FrameStack& operator=(FrameStack&& other) noexcept {
+            headers_ = std::move(other.headers_);
+            slots_ = std::move(other.slots_);
+            initialized_ = std::move(other.initialized_);
+            record_ = std::exchange(other.record_, tier3::FrameRecord{});
+            return *this;
+        }
+        FrameStack(const FrameStack&) = delete;
+        FrameStack& operator=(const FrameStack&) = delete;
+
+        std::size_t size() const { return record_.size; }
+        bool empty() const { return record_.size == 0; }
         const FrameHeader& header(std::size_t index) const { return headers_[index]; }
         // The innermost frame's FrameHeader::called_from.
-        void set_called_from(const void* program) { headers_.back().called_from = program; }
+        void set_called_from(const void* program) { headers_[record_.size - 1].called_from = program; }
 
         Frame operator[](std::size_t index) {
             auto& header = headers_[index];
             return Frame{header.function, header.block, header.return_slot, header.return_block, header.boundary,
-                         slots_.data() + header.base, initialized_.data() + header.base};
+                         slots_.get() + header.base, initialized_.get() + header.base};
         }
-        Frame back() { return (*this)[headers_.size() - 1]; }
+        Frame back() { return (*this)[record_.size - 1]; }
         // Slot values and flags of a frame, for reading in const contexts.
-        const std::uint64_t* slots(std::size_t index) const { return slots_.data() + headers_[index].base; }
-        const std::uint8_t* initialized(std::size_t index) const {
-            return initialized_.data() + headers_[index].base;
-        }
+        const std::uint64_t* slots(std::size_t index) const { return slots_.get() + headers_[index].base; }
+        const std::uint8_t* initialized(std::size_t index) const { return initialized_.get() + headers_[index].base; }
 
         // Pushes a frame of `slot_count` slots whose first slots hold the
         // arguments. The other slots are zero and uninitialized.
         void push(std::uint32_t function, std::size_t slot_count, std::span<const std::uint64_t> arguments,
                   std::uint32_t return_slot, std::uint32_t return_block) {
-            const auto base = slots_.size();
-            headers_.push_back(FrameHeader{function, 0, return_slot, return_block, base, false, nullptr});
-            // Shrinking never frees, so growth past a popped frame only
-            // value-initializes: every new slot is zero and uninitialized.
-            slots_.resize(base + slot_count);
-            initialized_.resize(base + slot_count);
-            std::ranges::copy(arguments, slots_.begin() + static_cast<std::ptrdiff_t>(base));
-            std::fill_n(initialized_.begin() + static_cast<std::ptrdiff_t>(base), arguments.size(), std::uint8_t{1});
+            const auto base = record_.slot_size;
+            reserve(record_.size + 1, base + slot_count);
+            headers_[record_.size] = FrameHeader{function, 0, return_slot, return_block, base, false, nullptr};
+            std::fill_n(slots_.get() + base, slot_count, std::uint64_t{0});
+            std::fill_n(initialized_.get() + base, slot_count, std::uint8_t{0});
+            std::ranges::copy(arguments, slots_.get() + base);
+            std::fill_n(initialized_.get() + base, arguments.size(), std::uint8_t{1});
+            ++record_.size;
+            record_.slot_size = base + slot_count;
         }
 
         void pop_back() {
-            const auto base = headers_.back().base;
-            headers_.pop_back();
-            slots_.resize(base);
-            initialized_.resize(base);
+            --record_.size;
+            record_.slot_size = headers_[record_.size].base;
         }
 
         void clear() {
-            headers_.clear();
-            slots_.clear();
-            initialized_.clear();
+            record_.size = 0;
+            record_.slot_size = 0;
         }
 
+        // What native code reads and writes (tier3::FrameRecord).
+        tier3::FrameRecord* record() { return &record_; }
+
     private:
-        std::vector<FrameHeader> headers_;
-        std::vector<std::uint64_t> slots_;
-        std::vector<std::uint8_t> initialized_;
+        // Room for `frames` headers and `slots` slots, keeping what is there.
+        void reserve(std::size_t frames, std::size_t slots) {
+            if (frames > record_.capacity) {
+                const auto capacity = std::max<std::size_t>({frames, 2 * record_.capacity, 16});
+                auto grown = std::make_unique<FrameHeader[]>(capacity);
+                std::copy_n(headers_.get(), record_.size, grown.get());
+                headers_ = std::move(grown);
+                record_.headers = headers_.get();
+                record_.capacity = capacity;
+            }
+            if (slots > record_.slot_capacity) {
+                const auto capacity = std::max<std::size_t>({slots, 2 * record_.slot_capacity, 256});
+                auto grown_slots = std::make_unique_for_overwrite<std::uint64_t[]>(capacity);
+                auto grown_flags = std::make_unique_for_overwrite<std::uint8_t[]>(capacity);
+                std::copy_n(slots_.get(), record_.slot_size, grown_slots.get());
+                std::copy_n(initialized_.get(), record_.slot_size, grown_flags.get());
+                slots_ = std::move(grown_slots);
+                initialized_ = std::move(grown_flags);
+                record_.slots = slots_.get();
+                record_.initialized = initialized_.get();
+                record_.slot_capacity = capacity;
+            }
+        }
+
+        std::unique_ptr<FrameHeader[]> headers_;
+        std::unique_ptr<std::uint64_t[]> slots_;
+        std::unique_ptr<std::uint8_t[]> initialized_;
+        tier3::FrameRecord record_;
     };
+
+    static_assert(std::is_standard_layout_v<FrameHeader> && sizeof(FrameHeader) == tier3::frame_offsets::header_bytes);
+    static_assert(offsetof(FrameHeader, function) == tier3::frame_offsets::function &&
+                  offsetof(FrameHeader, block) == tier3::frame_offsets::block &&
+                  offsetof(FrameHeader, return_slot) == tier3::frame_offsets::return_slot &&
+                  offsetof(FrameHeader, return_block) == tier3::frame_offsets::return_block &&
+                  offsetof(FrameHeader, base) == tier3::frame_offsets::base &&
+                  offsetof(FrameHeader, boundary) == tier3::frame_offsets::boundary &&
+                  offsetof(FrameHeader, called_from) == tier3::frame_offsets::called_from);
+    static_assert(sizeof(std::size_t) == 8);
 
     enum class TaskState {
         Running, Runnable, Joining, LeavingScope, Finished,

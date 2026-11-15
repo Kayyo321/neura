@@ -222,6 +222,9 @@ private:
         f_->programs.push_back(&region_);
         f_->exits = region_.exits;
         f_->dispatch_tables = region_.dispatch_tables;
+        for (std::uint32_t table = 0; table < region_.dispatch_tables.size(); ++table) {
+            f_->dispatch_origins.emplace_back(0, table);
+        }
         for (const auto type : fn.frame_types) {
             const auto& t = image_.types[type];
             ValueType v;
@@ -828,6 +831,7 @@ private:
             in.state = state;
             in.type = slot_type_or(exit.result_slot, integer(64));
             set_extras(in, arguments);
+            if (call) f_->call_frames[op.a] = static_cast<std::uint32_t>(image_.functions.at(op.a).frame_types.size());
             const auto id = emit(std::move(in));
             if (op.dst != none) write(op.dst, id, true);
             if (call) {
@@ -1379,21 +1383,40 @@ std::uint64_t TierCache::count_native(std::uint32_t program_id) {
     return native_arrivals_[program_id].fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
-const tier3::Program* TierCache::native_code(const tier2::Region& program) const {
+const tier3::Program* TierCache::native_code(const tier2::Region& program, tier3::Variant variant) const {
     if (program.program_id >= native_capacity_) return nullptr;
-    const auto* found = native_programs_[program.program_id].load(std::memory_order_acquire);
+    const auto* found =
+        native_programs_[program.program_id * tier3::variant_count + static_cast<unsigned>(variant)].load(
+            std::memory_order_acquire);
     return found == nullptr || found == native_forming || found == native_failed ? nullptr : found;
 }
 
-const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
+const tier3::Program* TierCache::compile_native(const tier2::Region& program, tier3::Variant variant) {
     if (program.program_id >= native_capacity_) return nullptr;
-    auto& slot = native_programs_[program.program_id];
+    auto& slot = native_programs_[program.program_id * tier3::variant_count + static_cast<unsigned>(variant)];
     const tier3::Program* expected = nullptr;
     // The first thread to ask builds it; the others go on interpreting.
-    if (!slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) return native_code(program);
+    if (!slot.compare_exchange_strong(expected, native_forming, std::memory_order_acq_rel)) {
+        return native_code(program, variant);
+    }
     tier3::BuildResult built;
     try {
         built = tier3::build(image_, program, tier3::verify_enabled());
+        if (built.program) built.program->ir.variant = variant;
+        // Only the standard variant inlines: the profile and checkable
+        // variants keep every call and return the reference's.
+        if (built.program && variant == tier3::Variant::Standard && options_.native_inlining) {
+            tier3::InlineSource source;
+            source.program = [this](std::uint32_t function) -> const tier2::Region* {
+                const std::lock_guard lock(mutex_);
+                const auto& found = programs_[function];
+                return found.state == RegionEntry::State::Settled ? found.region.get() : nullptr;
+            };
+            source.record = [this](const tier2::Region& region, std::uint32_t table) -> const tier3::DispatchRecord* {
+                return dispatch_record(region, table);
+            };
+            tier3::inline_calls(image_, built.program->ir, source, tier3::verify_enabled());
+        }
         if (built.program && options_.native_passes && tier3::passes_enabled()) tier3::optimize(image_, built.program->ir, tier3::verify_enabled());
     } catch (const std::exception& error) {
         built.reason = std::string("internal error: ") + error.what();
@@ -1435,6 +1458,8 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
         const std::lock_guard lock(mutex_);
         if (built.program) {
             published = built.program.get();
+            statistics_.native_inlined += built.program->ir.inlined_calls;
+            statistics_.native_class_tests += built.program->ir.class_tested_dispatches;
             native_owned_.push_back(std::move(built.program));
             ++statistics_.native_programs;
             statistics_.native_bytes += bytes;
@@ -1445,6 +1470,19 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
     }
     slot.store(published ? published : native_failed, std::memory_order_release);
     return published;
+}
+
+tier3::DispatchRecord* TierCache::dispatch_record(const tier2::Region& program, std::uint32_t table) const {
+    if (program.program_id >= native_capacity_ || table >= program.dispatch_tables.size()) return nullptr;
+    auto* records = dispatch_records_[program.program_id].load(std::memory_order_acquire);
+    return records == nullptr ? nullptr : records + table;
+}
+
+// Under the cache's mutex, when `program` is published.
+void TierCache::make_dispatch_records(const tier2::Region& program) {
+    if (!native_enabled() || program.dispatch_tables.empty() || program.program_id >= native_capacity_) return;
+    dispatch_owned_.push_back(std::make_unique<tier3::DispatchRecord[]>(program.dispatch_tables.size()));
+    dispatch_records_[program.program_id].store(dispatch_owned_.back().get(), std::memory_order_release);
 }
 
 void TierCache::note_native(bool machine, const std::string& off) {

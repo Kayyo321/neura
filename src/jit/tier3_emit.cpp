@@ -43,6 +43,7 @@ namespace {
 
 namespace t3 = nvm::tier3;
 namespace off = nvm::tier3::offsets;
+namespace frame_off = nvm::tier3::frame_offsets;
 using x64::Alu;
 using x64::Assembler;
 using x64::Bit;
@@ -667,6 +668,7 @@ private:
         case Kind::Call: return call(inst, ia, step);
         case Kind::Return: {
             if (inst.uses.empty()) a_.alu(Alu::xor_, S32, x64::rsi, x64::rsi);
+            if (f_.variant == t3::Variant::Standard) inline_pop();
             a_.mov(S64, x64::rdx, counter);
             a_.mov(S64, x64::rdi, context);
             call_helper(off::ret);
@@ -800,16 +802,150 @@ private:
 
     // A call not inlined: the push through the call helper, then the
     // callee's native code, which continues C in r12.
+    // The largest frame native code pushes itself; a larger one is pushed
+    // by the call helper.
+    static constexpr std::uint32_t max_inline_frame = 64;
+
+    // The callee's frame pushed in place, exactly as FrameStack::push does:
+    // the header (block 0, the return slot and block, the base, not a
+    // boundary, called from this program), every slot zero and
+    // uninitialized, the arguments (on the stack) in the first slots with
+    // their flags set, and the stack's sizes. Only where the stack has room
+    // for it without growing and the frame limit lets it be pushed (else
+    // `slow`); the innermost frame in the context becomes the callee's.
+    void inline_push(const Step& step, std::uint32_t count, std::uint32_t slots, Label slow) {
+        const auto& exit = *f_.exits[step.index];
+        const auto record = x64::rax, size = x64::rcx, base = x64::rdx, end = x64::rsi, header = x64::rdi,
+                   t = x64::r8, values = x64::r9, flags = x64::r10;
+        a_.mov(S64, record, Mem::at(context, off::frames));
+        a_.mov(S64, size, Mem::at(record, frame_off::size));
+        a_.alu(Alu::cmp, S64, size, Mem::at(record, frame_off::capacity));
+        a_.jcc(Cond::ae, slow);
+        a_.alu(Alu::cmp, S64, size, Mem::at(context, off::max_frames));
+        a_.jcc(Cond::ae, slow);
+        a_.mov(S64, base, Mem::at(record, frame_off::slot_size));
+        a_.lea(S64, end, Mem::at(base, static_cast<std::int32_t>(slots)));
+        a_.alu(Alu::cmp, S64, end, Mem::at(record, frame_off::slot_capacity));
+        a_.jcc(Cond::a, slow);
+        a_.lea(S64, header, Mem::at(size, size, 4));
+        a_.shift(Shift::shl, S64, header, Imm8{3});
+        a_.alu(Alu::add, S64, header, Mem::at(record, frame_off::headers));
+        a_.mov(S32, Mem::at(header, frame_off::function), imm32(step.imm));
+        a_.mov(S32, Mem::at(header, frame_off::block), Imm32{0});
+        a_.mov(S32, Mem::at(header, frame_off::return_slot), imm32(exit.result_slot));
+        a_.mov(S32, Mem::at(header, frame_off::return_block), imm32(exit.resume));
+        a_.mov(S64, Mem::at(header, frame_off::base), base);
+        a_.mov(S8, Mem::at(header, frame_off::boundary), Imm32{0});
+        a_.mov_constant(t, reinterpret_cast<std::uint64_t>(f_.programs.front()));
+        a_.mov(S64, Mem::at(header, frame_off::called_from), t);
+        a_.mov(S64, values, Mem::at(record, frame_off::slots));
+        a_.lea(S64, values, Mem::at(values, base, 8));
+        a_.mov(S64, flags, Mem::at(record, frame_off::initialized));
+        a_.alu(Alu::add, S64, flags, base);
+        for (std::uint32_t i = 0; i < slots; ++i) {
+            const auto at = static_cast<std::int32_t>(8 * i);
+            if (i < count) {
+                a_.mov(S64, t, Mem::at(x64::rsp, at));
+                a_.mov(S64, Mem::at(values, at), t);
+            } else {
+                a_.mov(S64, Mem::at(values, at), Imm32{0});
+            }
+            a_.mov(S8, Mem::at(flags, static_cast<std::int32_t>(i)), Imm32{i < count ? 1 : 0});
+        }
+        a_.alu(Alu::add, S64, size, Imm32{1});
+        a_.mov(S64, Mem::at(record, frame_off::size), size);
+        a_.mov(S64, Mem::at(record, frame_off::slot_size), end);
+        a_.mov(S64, Mem::at(context, off::slots), values);
+        a_.mov(S64, Mem::at(context, off::flags), flags);
+        a_.lea(S64, t, Mem::at(header, frame_off::block));
+        a_.mov(S64, Mem::at(context, off::block), t);
+        a_.alu(Alu::add, S64, Mem::at(context, off::inline_calls), Imm32{1});
+    }
+
+    // A return to a native caller with the innermost frame popped in place,
+    // exactly as commit_exit's Return does: when the frame is not the last
+    // nor a callback's (else the return helper, which deoptimizes), the
+    // stack's sizes go back to the caller's, the caller's result slot gets
+    // the value (in rsi) and its flag, and its block is the return block.
+    // The return block's step is C's; the value comes back in rax. An
+    // activation the dispatcher entered returns through the helper, which
+    // ends it as a Leave.
+    void inline_pop() {
+        const auto slow = a_.label();
+        const auto record = x64::rax, size = x64::rcx, t = x64::rdx, header = x64::rdi, caller = x64::r8,
+                   at = x64::r9, arena = x64::r10;
+        a_.alu(Alu::cmp, S32, Mem::at(context, off::native_depth), Imm32{1});
+        a_.jcc(Cond::be, slow);
+        a_.mov(S64, record, Mem::at(context, off::frames));
+        a_.mov(S64, size, Mem::at(record, frame_off::size));
+        a_.alu(Alu::cmp, S64, size, Imm32{2});
+        a_.jcc(Cond::b, slow);
+        a_.lea(S64, header, Mem::at(size, size, 4, -1 * 5));
+        a_.shift(Shift::shl, S64, header, Imm8{3});
+        a_.alu(Alu::add, S64, header, Mem::at(record, frame_off::headers));
+        a_.alu(Alu::cmp, S8, Mem::at(header, frame_off::boundary), Imm32{0});
+        a_.jcc(Cond::ne, slow);
+        a_.mov(S64, t, Mem::at(header, frame_off::base));
+        a_.mov(S64, Mem::at(record, frame_off::slot_size), t);
+        a_.alu(Alu::sub, S64, size, Imm32{1});
+        a_.mov(S64, Mem::at(record, frame_off::size), size);
+        a_.lea(S64, caller, Mem::at(header, -frame_off::header_bytes));
+        const auto no_result = a_.label();
+        a_.mov(S32, t, Mem::at(header, frame_off::return_slot));
+        a_.alu(Alu::cmp, S32, t, imm32(nvr::absent));
+        a_.jcc(Cond::e, no_result);
+        a_.mov(S64, at, Mem::at(caller, frame_off::base));
+        a_.alu(Alu::add, S64, at, t);
+        a_.mov(S64, arena, Mem::at(record, frame_off::slots));
+        a_.mov(S64, Mem::at(arena, at, 8), x64::rsi);
+        a_.mov(S64, arena, Mem::at(record, frame_off::initialized));
+        a_.mov(S8, Mem::at(arena, at, 1), Imm32{1});
+        a_.bind(no_result);
+        a_.mov(S32, t, Mem::at(header, frame_off::return_block));
+        a_.mov(S32, Mem::at(caller, frame_off::block), t);
+        a_.mov(S32, Mem::at(context, off::next_block), t);
+        a_.mov(S64, at, Mem::at(caller, frame_off::base));
+        a_.mov(S64, arena, Mem::at(record, frame_off::slots));
+        a_.lea(S64, arena, Mem::at(arena, at, 8));
+        a_.mov(S64, Mem::at(context, off::slots), arena);
+        a_.mov(S64, frame, arena);
+        a_.mov(S64, arena, Mem::at(record, frame_off::initialized));
+        a_.alu(Alu::add, S64, arena, at);
+        a_.mov(S64, Mem::at(context, off::flags), arena);
+        a_.lea(S64, arena, Mem::at(caller, frame_off::block));
+        a_.mov(S64, Mem::at(context, off::block), arena);
+        a_.alu(Alu::add, S64, Mem::at(context, off::inline_returns), Imm32{1});
+        a_.alu(Alu::add, S64, counter, Imm32{1});
+        a_.mov(S64, x64::rax, x64::rsi);
+        a_.mov(S32, x64::rcx, imm32(static_cast<std::uint32_t>(t3::Outcome::Return)));
+        a_.jmp(ret_outcome_);
+        a_.bind(slow);
+    }
+
     void call(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
         const auto count = static_cast<std::uint32_t>(inst.uses.size());
         a_.mov(S64, Mem::at(context, off::C), counter);
         store_arguments(ia, 0, count);
+        const auto frame_size = f_.call_frames.find(static_cast<std::uint32_t>(step.imm));
+        const bool in_place = f_.variant == t3::Variant::Standard && frame_size != f_.call_frames.end() &&
+                              frame_size->second <= max_inline_frame && count <= frame_size->second;
+        const auto pushed = a_.label();
+        if (in_place) {
+            const auto slow = a_.label();
+            inline_push(step, count, frame_size->second, slow);
+            a_.mov(S64, x64::rdi, context);
+            a_.mov(S32, x64::rsi, imm32(step.imm));
+            call_helper(off::enter);
+            a_.jmp(pushed);
+            a_.bind(slow);
+        }
         a_.mov(S64, x64::rdi, context);
         a_.mov(S32, x64::rsi, imm32(step.index));
         a_.mov(S32, x64::rdx, imm32(step.imm));
         a_.mov(S64, x64::rcx, x64::rsp);
         a_.mov(S32, x64::r8, imm32(count));
         call_helper(off::call);
+        if (in_place) a_.bind(pushed);
         check_status(Label{}, false);
         a_.call(Rm(x64::rax));
         // The callee's activation is over: the context's program is ours

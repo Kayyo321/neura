@@ -157,7 +157,8 @@ Fake run(const t3::Program& program, const std::vector<std::uint64_t>& slots, st
     c.run_constants = fake.constants.data();
     c.native_depth = 1;
     c.functions = {&fake_state, &fake_check_reference, &fake_helper,     &fake_call,
-                   &fake_return, &fake_leave,          &fake_deoptimize, &fake_evaluate};
+                   &fake_return, &fake_leave,          &fake_deoptimize, &fake_evaluate,
+                   nullptr};
     std::uint64_t bytes = 0;
     std::string failure;
     program.enter(c, program.entry(0, bytes, failure));

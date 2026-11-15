@@ -30,16 +30,38 @@
 
     bool tier3_ready() const { return tier3_ && !scheduler_ && !tier_check_; }
 
+    // The variant of native programs this run uses (tier3::Variant): under
+    // --profile one that inlines nothing, so that every call and return
+    // attributes its steps as the reference does; under NEURA_TIER_CHECK=1
+    // the checkable one (which tier3_ready keeps from running).
+    tier3::Variant tier3_variant() const {
+        if (limits_.profile) return tier3::Variant::Profile;
+        if (tier_check_) return tier3::Variant::Checkable;
+        return tier3::Variant::Standard;
+    }
+
     // The native code of `program`, or null. At a checkpoint (`count`), an
     // arrival is counted and the program is turned native once the cache's
     // threshold is reached.
     const tier3::Program* tier3_code(const tier2::Region& program, bool count) {
         if (!tier3_ready()) return nullptr;
-        if (const auto* code = tier_->native_code(program)) return code;
+        const auto variant = tier3_variant();
+        if (const auto* code = tier_->native_code(program, variant)) return code;
         if (!count || tier_->count_native(program.program_id) < tier_->options().native_after) return nullptr;
         // Building the program is timed as tier 1 (--tier-stats).
         const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
-        return tier_->compile_native(program);
+        return tier_->compile_native(program, variant);
+    }
+
+    // The speculation record of a Dispatch op (tier3::DispatchRecord): kept
+    // only while tier 3 is on, read only by the inliner.
+    void tier3_record(const tier2::Region& program, std::uint32_t table, std::uint64_t tag) {
+        if (auto* record = tier_->dispatch_record(program, table)) record->record(tag);
+    }
+
+    static void tier3_record_dispatch(tier3::Context* context, const tier2::Region* program, std::uint32_t table,
+                                      std::uint64_t tag) {
+        tier3_self(context).tier3_record(*program, table, tag);
     }
 
     // Adds the blocks and kernel steps since the last flush to the run's
@@ -381,22 +403,42 @@
                 tier3_native_status(context, tier3::NativeStatus::Trapped);
                 return 0;
             }
-            const auto* code = tier3_callee_code(context, callee);
-            if (code == nullptr || !code->machine || context->native_depth >= tier3::max_native_depth) {
-                tier3_leave(context, 0);
-                tier3_native_status(context, tier3::NativeStatus::Left);
-                return 0;
-            }
-            ++context->native_depth;
-            context->program = code;
-            context->region = code->ir.region;
-            tier3_self(context).tier3_values(*context, *code);
-            tier3_native_status(context, tier3::NativeStatus::Ok);
-            return reinterpret_cast<std::uint64_t>(code->machine->address() + code->entry_code.at(0));
+            return tier3_native_entry(context, callee);
         } catch (...) {
             tier3_native_exception(context);
             return 0;
         }
+    }
+
+    // After a push native code made itself (the call block's step is in C,
+    // not yet added to the run's steps: nothing reads them before the next
+    // flush, and no fault can come of the push).
+    static std::uint64_t tier3_native_enter(tier3::Context* context, std::uint32_t callee) {
+        try {
+            context->region = context->program->ir.region;
+            return tier3_native_entry(context, callee);
+        } catch (...) {
+            tier3_native_exception(context);
+            return 0;
+        }
+    }
+
+    // The callee's native code, entered by the caller, once its frame is
+    // pushed: up to the native depth; past it, or without code, the
+    // activation leaves at the callee's block 0.
+    static std::uint64_t tier3_native_entry(tier3::Context* context, std::uint32_t callee) {
+        const auto* code = tier3_callee_code(context, callee);
+        if (code == nullptr || !code->machine || context->native_depth >= tier3::max_native_depth) {
+            tier3_leave(context, 0);
+            tier3_native_status(context, tier3::NativeStatus::Left);
+            return 0;
+        }
+        ++context->native_depth;
+        context->program = code;
+        context->region = code->ir.region;
+        tier3_self(context).tier3_values(*context, *code);
+        tier3_native_status(context, tier3::NativeStatus::Ok);
+        return reinterpret_cast<std::uint64_t>(code->machine->address() + code->entry_code.at(0));
     }
 
     static std::uint64_t tier3_native_return(tier3::Context* context, std::uint64_t value, std::uint64_t blocks) {
@@ -442,13 +484,13 @@
     static constexpr tier3::NativeHelpers tier3_native_helpers_{
         &State::tier3_native_state,  &State::tier3_native_check_reference, &State::tier3_native_helper,
         &State::tier3_native_call,   &State::tier3_native_return,          &State::tier3_native_leave,
-        &State::tier3_native_deoptimize, &State::tier3_native_evaluate,
+        &State::tier3_native_deoptimize, &State::tier3_native_evaluate,         &State::tier3_native_enter,
     };
 
     static constexpr tier3::Helpers tier3_helpers_{
         &State::tier3_frame,   &State::tier3_run_constant, &State::tier3_state,       &State::tier3_check_reference,
         &State::tier3_helper,  &State::tier3_write_back,   &State::tier3_deoptimize,  &State::tier3_leave,
-        &State::tier3_call,    &State::tier3_callee_code,  &State::tier3_return,
+        &State::tier3_call,    &State::tier3_callee_code,  &State::tier3_return,       &State::tier3_record_dispatch,
     };
 
     // A native program entered at entries[entry_index] by the dispatcher: the
@@ -511,9 +553,15 @@
             context.run_constants = const_values_.data();
             context.functions = tier3_native_helpers_;
             context.status = 0;
+            context.frames = frames_.record();
+            context.max_frames = limits_.max_frames;
+            context.inline_calls = 0;
+            context.inline_returns = 0;
             tier3_values(context, code);
             tier3_native_frame(&context);
             code.enter(context, address);
+            region_counts_.calls += context.inline_calls;
+            region_counts_.returns += context.inline_returns;
             result.outcome = static_cast<tier3::Outcome>(context.outcome);
             if (result.outcome == tier3::Outcome::Return) result.outcome = tier3::Outcome::Leave;
         } else {

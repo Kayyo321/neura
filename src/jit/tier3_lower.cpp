@@ -132,7 +132,6 @@ public:
     Lowered run() {
         if (f_.blocks.empty() || f_.entries.empty()) refuse("a function without entries");
         for (const auto& state : f_.states) {
-            if (state.caller != t3::none) refuse("an inlined frame");
             if (state.kernel_steps != t3::none) refuse("inline kernel steps");
         }
         count_uses();
@@ -219,15 +218,29 @@ private:
         }
     }
 
+    // The slot and flag values a frame state names, at every level of its
+    // chain: a deoptimization materializes the inlined frames too.
     template <typename F>
     void for_each_state_value(std::uint32_t s, F&& f) const {
-        const auto& state = f_.states[s];
-        for (const auto& slot : state.slots) {
-            if (slot.kind == t3::StateSlot::Kind::Value) f(static_cast<std::uint32_t>(slot.value));
+        for (std::uint32_t depth = 0; s != t3::none; s = f_.states[s].caller) {
+            if (s >= f_.states.size() || ++depth > 64) refuse("a frame state chain that does not end");
+            const auto& state = f_.states[s];
+            for (const auto& slot : state.slots) {
+                if (slot.kind == t3::StateSlot::Kind::Value) f(static_cast<std::uint32_t>(slot.value));
+            }
+            for (const auto& flag : state.flags) {
+                if (flag.kind == t3::StateFlag::Kind::Value) f(flag.value);
+            }
         }
-        for (const auto& flag : state.flags) {
-            if (flag.kind == t3::StateFlag::Kind::Value) f(flag.value);
+    }
+
+    // The level of a frame state's chain that describes the physical frame.
+    std::uint32_t physical(std::uint32_t s) const {
+        for (std::uint32_t depth = 0; f_.states[s].caller != t3::none; ++depth) {
+            if (depth > 64) refuse("a frame state chain that does not end");
+            s = f_.states[s].caller;
         }
+        return s;
     }
 
     void count_uses() {
@@ -643,8 +656,10 @@ private:
                 if (in.op == Op::Phi) continue;
                 for_each_value_use(in, keep);
                 if (in.state == t3::none) continue;
-                for (const auto& flag : f_.states[in.state].flags) {
-                    if (flag.kind == t3::StateFlag::Kind::Value) keep(flag.value);
+                for (auto s = in.state; s != t3::none; s = f_.states[s].caller) {
+                    for (const auto& flag : f_.states[s].flags) {
+                        if (flag.kind == t3::StateFlag::Kind::Value) keep(flag.value);
+                    }
                 }
             }
         }
@@ -1240,7 +1255,10 @@ private:
         for (std::uint32_t v = 0; v < nv; ++v) {
             if (entry_slot(v) != t3::none) candidates[v].push_back(entry_slot(v));
         }
+        // Only the states of the physical frame name its slots; an inlined
+        // level's slots are another frame's.
         for (const auto& state : f_.states) {
+            if (state.caller != t3::none || state.function != f_.function) continue;
             for (std::uint32_t r = 0; r < state.slots.size(); ++r) {
                 const auto& slot = state.slots[r];
                 if (slot.kind != t3::StateSlot::Kind::Value) continue;
@@ -1279,7 +1297,7 @@ private:
                 const auto check = [&](std::uint32_t v) {
                     if (candidates[v].empty()) return;
                     if (state_id != t3::none) {
-                        const auto& slots = f_.states[state_id].slots;
+                        const auto& slots = f_.states[physical(state_id)].slots;
                         const auto x = value_of_[v];
                         forbid(v, [&](std::uint32_t r) {
                             const auto& entry = slots[r];
@@ -1331,7 +1349,7 @@ private:
                 const auto state_id = step.kind == Kind::Helper || step.kind == Kind::Call ? f_.insts[step.inst].state
                                                                                           : step.state;
                 if (record && state_id != t3::none) {
-                    const auto& entries = f_.states[state_id].slots;
+                    const auto& entries = f_.states[physical(state_id)].slots;
                     for (std::uint32_t r = 0; r < slots; ++r) {
                         if (has(dirty, r) && entries[r].kind == t3::StateSlot::Kind::Unchanged) set(violated, r);
                     }
