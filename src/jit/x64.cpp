@@ -147,7 +147,7 @@ void Assembler::reference(Label target, std::size_t tail, std::int32_t addend) {
     immediate(0, 4);
 }
 
-void Assembler::encode(const Encoding& e, unsigned reg, const Rm& rm) {
+void Assembler::encode(const Encoding& e, unsigned reg, const RawRm& rm) {
     if (e.size16) byte(0x66);
     if (e.prefix != 0) byte(e.prefix);
     unsigned rex = (e.w ? 8U : 0U) | ((reg >> 3) << 2);
@@ -576,17 +576,17 @@ void Assembler::pop(Gpr value) {
 
 // ---- floats ----
 
-void Assembler::sse(std::uint8_t prefix, std::uint8_t opcode, unsigned reg, const Rm& rm, bool wide) {
+void Assembler::sse(std::uint8_t prefix, std::uint8_t opcode, unsigned reg, const RawRm& rm, bool wide) {
     Encoding e{0x0F, opcode};
     e.prefix = prefix;
     e.w = wide;
     encode(e, reg, rm);
 }
 
-void Assembler::movq(Xmm to, Gpr from) { sse(0x66, 0x6E, to.n, from, true); }
-void Assembler::movq(Gpr to, Xmm from) { sse(0x66, 0x7E, from.n, to, true); }
-void Assembler::movd(Xmm to, Gpr from) { sse(0x66, 0x6E, to.n, from); }
-void Assembler::movd(Gpr to, Xmm from) { sse(0x66, 0x7E, from.n, to); }
+void Assembler::movq(Xmm to, Gpr from) { sse(0x66, 0x6E, to.n, Rm(from), true); }
+void Assembler::movq(Gpr to, Xmm from) { sse(0x66, 0x7E, from.n, Rm(to), true); }
+void Assembler::movd(Xmm to, Gpr from) { sse(0x66, 0x6E, to.n, Rm(from)); }
+void Assembler::movd(Gpr to, Xmm from) { sse(0x66, 0x7E, from.n, Rm(to)); }
 
 namespace {
 std::uint8_t scalar_prefix(Prec prec) {
@@ -594,34 +594,34 @@ std::uint8_t scalar_prefix(Prec prec) {
 }
 } // namespace
 
-void Assembler::movs(Prec prec, Xmm to, Xmm from) { sse(scalar_prefix(prec), 0x10, to.n, from); }
-void Assembler::movs(Prec prec, Xmm to, const Mem& from) { sse(scalar_prefix(prec), 0x10, to.n, from); }
-void Assembler::movs(Prec prec, const Mem& to, Xmm from) { sse(scalar_prefix(prec), 0x11, from.n, to); }
+void Assembler::movs(Prec prec, Xmm to, Xmm from) { sse(scalar_prefix(prec), 0x10, to.n, XmmRm(from)); }
+void Assembler::movs(Prec prec, Xmm to, const Mem& from) { sse(scalar_prefix(prec), 0x10, to.n, XmmRm(from)); }
+void Assembler::movs(Prec prec, const Mem& to, Xmm from) { sse(scalar_prefix(prec), 0x11, from.n, XmmRm(to)); }
 
-void Assembler::arith(Fp op, Prec prec, Xmm to, const Rm& from) {
+void Assembler::arith(Fp op, Prec prec, Xmm to, const XmmRm& from) {
     sse(scalar_prefix(prec), static_cast<std::uint8_t>(op), to.n, from);
 }
 
-void Assembler::ucomis(Prec prec, Xmm a, const Rm& b) {
+void Assembler::ucomis(Prec prec, Xmm a, const XmmRm& b) {
     sse(prec == Prec::dbl ? 0x66 : 0x00, 0x2E, a.n, b);
 }
 
-void Assembler::andpd(Xmm to, const Rm& from) { sse(0x66, 0x54, to.n, from); }
-void Assembler::andnpd(Xmm to, const Rm& from) { sse(0x66, 0x55, to.n, from); }
-void Assembler::xorpd(Xmm to, const Rm& from) { sse(0x66, 0x57, to.n, from); }
+void Assembler::andpd(Xmm to, const XmmRm& from) { sse(0x66, 0x54, to.n, from); }
+void Assembler::andnpd(Xmm to, const XmmRm& from) { sse(0x66, 0x55, to.n, from); }
+void Assembler::xorpd(Xmm to, const XmmRm& from) { sse(0x66, 0x57, to.n, from); }
 
 void Assembler::cvtsi2s(Prec prec, Xmm to, Size from_size, const Rm& from) {
     require(from_size == Size::b32 || from_size == Size::b64, "the integer source is 32 or 64 bits");
     sse(scalar_prefix(prec), 0x2A, to.n, from, from_size == Size::b64);
 }
 
-void Assembler::cvtts2si(Prec prec, Size to_size, Gpr to, const Rm& from) {
+void Assembler::cvtts2si(Prec prec, Size to_size, Gpr to, const XmmRm& from) {
     require(to_size == Size::b32 || to_size == Size::b64, "the integer result is 32 or 64 bits");
     sse(scalar_prefix(prec), 0x2C, to.n, from, to_size == Size::b64);
 }
 
-void Assembler::cvtss2sd(Xmm to, const Rm& from) { sse(0xF3, 0x5A, to.n, from); }
-void Assembler::cvtsd2ss(Xmm to, const Rm& from) { sse(0xF2, 0x5A, to.n, from); }
+void Assembler::cvtss2sd(Xmm to, const XmmRm& from) { sse(0xF3, 0x5A, to.n, from); }
+void Assembler::cvtsd2ss(Xmm to, const XmmRm& from) { sse(0xF2, 0x5A, to.n, from); }
 
 // ---- layout ----
 

@@ -134,6 +134,8 @@ public:
 
     void run(Context& context) const { entry_(&context); }
     std::size_t size() const { return size_; }
+    // The first byte of the code, for code with several entry points.
+    const std::uint8_t* address() const { return static_cast<const std::uint8_t*>(memory_); }
 
     // Copies `code` into fresh executable memory, or explains why it could
     // not (mmap or mprotect failed, or the platform has no executable

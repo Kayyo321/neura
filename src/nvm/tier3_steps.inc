@@ -57,7 +57,15 @@
             tier_steps_.region += count;
             region_counts_.program_steps += count;
             native_counts_.steps += count;
-            if (context.region) block_plan(context.region->function, context.region->entry).region_steps += count;
+            if (context.region) {
+                // The plan of the program last flushed to, kept: block_plans_
+                // does not move once made.
+                if (context.region != tier3_plan_region_) {
+                    tier3_plan_ = &block_plan(context.region->function, context.region->entry);
+                    tier3_plan_region_ = context.region;
+                }
+                tier3_plan_->region_steps += count;
+            }
             context.flushed = total;
         }
         tier3_room(context);
@@ -285,6 +293,158 @@
         return tier3::Status::Ok;
     }
 
+    // --- The helpers of machine code (tier3::NativeHelpers) -------------------
+    //
+    // Each does what the IR interpreter does through the helper of the same
+    // name above, for the running activation's program (context->program),
+    // then reports a NativeStatus and leaves the context describing the
+    // innermost frame, which native code reloads. None lets an exception
+    // through native code: one other than a Fault is kept for the executor.
+
+    static void tier3_native_frame(tier3::Context* context) {
+        auto frame = tier3_self(context).frames_.back();
+        context->slots = frame.slots;
+        context->flags = frame.initialized;
+        context->block = &frame.block;
+    }
+
+    static void tier3_native_status(tier3::Context* context, tier3::NativeStatus status) {
+        context->status = static_cast<std::uint32_t>(status);
+        tier3_native_frame(context);
+    }
+
+    static void tier3_native_exception(tier3::Context* context) {
+        tier3_self(context).region_exception_ = std::current_exception();
+        tier3_native_status(context, tier3::NativeStatus::Exception);
+    }
+
+    static tier3::NativeStatus tier3_native_of(tier3::Status status) {
+        switch (status) {
+        case tier3::Status::Ok: return tier3::NativeStatus::Ok;
+        case tier3::Status::Fault: return tier3::NativeStatus::Fault;
+        case tier3::Status::Trapped: return tier3::NativeStatus::Trapped;
+        default: return tier3::NativeStatus::Exception;
+        }
+    }
+
+    // The deoptimization values: one per SSA value of `program`.
+    void tier3_values(tier3::Context& context, const tier3::Program& program) {
+        if (tier3_values_.size() < program.ir.insts.size()) tier3_values_.resize(program.ir.insts.size());
+        context.values = tier3_values_.data();
+    }
+
+    static std::uint64_t tier3_native_state(tier3::Context* context, std::uint32_t exit, const std::uint64_t* arguments,
+                                            std::uint32_t count) {
+        std::uint64_t result = 0;
+        try {
+            const auto status = tier3_state(context, context->program->ir.exits[exit], arguments, count, &result);
+            tier3_native_status(context, tier3_native_of(status));
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return result;
+    }
+
+    static std::uint64_t tier3_native_check_reference(tier3::Context* context, std::uint32_t type, std::uint64_t bits) {
+        try {
+            tier3_native_status(context, tier3_native_of(tier3_check_reference(context, type, bits)));
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return 0;
+    }
+
+    static std::uint64_t tier3_native_helper(tier3::Context* context, std::uint32_t exit, const std::uint64_t* arguments,
+                                             std::uint32_t count) {
+        std::uint64_t result = 0;
+        try {
+            context->region = context->program->ir.region;
+            const auto status = tier3_helper(context, context->program->ir.exits[exit], arguments, count, &result);
+            tier3_native_status(context, tier3_native_of(status));
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return result;
+    }
+
+    // The callee's frame pushed (or the frame limit's trap), then its native
+    // code, entered by the caller: the code a call enters is the IR
+    // interpreter's (tier3_callee_code), up to the native depth; past it, or
+    // without code, the activation leaves at the callee's block 0.
+    static std::uint64_t tier3_native_call(tier3::Context* context, std::uint32_t exit, std::uint32_t callee,
+                                           const std::uint64_t* arguments, std::uint32_t count) {
+        try {
+            const auto& caller = *context->program;
+            context->region = caller.ir.region;
+            if (tier3_call(context, caller.ir.exits[exit], callee, arguments, count, caller.ir.programs[0]) ==
+                tier3::Status::Trapped) {
+                tier3_native_status(context, tier3::NativeStatus::Trapped);
+                return 0;
+            }
+            const auto* code = tier3_callee_code(context, callee);
+            if (code == nullptr || !code->machine || context->native_depth >= tier3::max_native_depth) {
+                tier3_leave(context, 0);
+                tier3_native_status(context, tier3::NativeStatus::Left);
+                return 0;
+            }
+            ++context->native_depth;
+            context->program = code;
+            context->region = code->ir.region;
+            tier3_self(context).tier3_values(*context, *code);
+            tier3_native_status(context, tier3::NativeStatus::Ok);
+            return reinterpret_cast<std::uint64_t>(code->machine->address() + code->entry_code.at(0));
+        } catch (...) {
+            tier3_native_exception(context);
+            return 0;
+        }
+    }
+
+    static std::uint64_t tier3_native_return(tier3::Context* context, std::uint64_t value, std::uint64_t blocks) {
+        try {
+            context->region = context->program->ir.region;
+            tier3_native_status(context, tier3_native_of(tier3_return(context, value, true, blocks)));
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return value;
+    }
+
+    static std::uint64_t tier3_native_leave(tier3::Context* context, std::uint32_t block) {
+        try {
+            context->region = context->program->ir.region;
+            tier3_leave(context, block);
+            tier3_native_status(context, tier3::NativeStatus::Ok);
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return 0;
+    }
+
+    static std::uint64_t tier3_native_deoptimize(tier3::Context* context, std::uint32_t state, std::uint32_t reason) {
+        try {
+            context->region = context->program->ir.region;
+            tier3_deoptimize(context, &context->program->ir, state, static_cast<tier3::Reason>(reason), context->values);
+            tier3_native_status(context, tier3::NativeStatus::Ok);
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return 0;
+    }
+
+    static std::uint64_t tier3_native_evaluate(tier3::Context* context, std::uint32_t inst, std::uint64_t a,
+                                               std::uint64_t b) {
+        bool failed = false;
+        const auto value = lift::evaluate(context->program->ir.insts[inst].lifted, a, b, failed);
+        tier3_native_status(context, failed ? tier3::NativeStatus::Fault : tier3::NativeStatus::Ok);
+        return value;
+    }
+
+    static constexpr tier3::NativeHelpers tier3_native_helpers_{
+        &State::tier3_native_state,  &State::tier3_native_check_reference, &State::tier3_native_helper,
+        &State::tier3_native_call,   &State::tier3_native_return,          &State::tier3_native_leave,
+        &State::tier3_native_deoptimize, &State::tier3_native_evaluate,
+    };
+
     static constexpr tier3::Helpers tier3_helpers_{
         &State::tier3_frame,   &State::tier3_run_constant, &State::tier3_state,       &State::tier3_check_reference,
         &State::tier3_helper,  &State::tier3_write_back,   &State::tier3_deoptimize,  &State::tier3_leave,
@@ -297,10 +457,25 @@
     // block is where the run goes on, and the steps are in the run's.
     RegionOutcome run_native_program(const tier3::Program& code, std::uint32_t entry_index, std::uint64_t allowance) {
         const auto& entered = *code.ir.region;
+        // The machine code of the entry, made now if it is made on first use;
+        // an entry without it is refused.
+        const std::uint8_t* address = nullptr;
+        if (tier3_native_ && code.machine) {
+            std::uint64_t bytes = 0;
+            std::string failure;
+            if (code.entry_code.at(entry_index) == jit::native::lazy) {
+                const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
+                address = code.entry(entry_index, bytes, failure);
+            } else {
+                address = code.entry(entry_index, bytes, failure);
+            }
+            if (bytes != 0 || !failure.empty()) tier_->note_native_entry(bytes, failure);
+        }
         {
             auto frame = frames_.back();
             const auto& entry = entered.entries[entry_index];
             bool refuse = entered.uses_float && !lift::float_environment_is_default();
+            refuse = refuse || (tier3_native_ && code.machine && address == nullptr);
             for (const auto slot : entry.reads) refuse = refuse || !frame.initialized[slot];
             for (std::size_t slot = 0; slot < entered.slot_widths.size() && !refuse; ++slot) {
                 const auto width = entered.slot_widths[slot];
@@ -327,7 +502,23 @@
         context.region = &entered;
         context.next_block = 0;
         tier3_room(context);
-        const auto result = tier3::interpret(context, code, entry_index, false);
+        tier3::Result result;
+        if (tier3_native_ && code.machine) {
+            // The machine code, from the trampoline; an activation the
+            // dispatcher entered ends its Return as a Leave.
+            context.native_depth = 1;
+            context.program = &code;
+            context.run_constants = const_values_.data();
+            context.functions = tier3_native_helpers_;
+            context.status = 0;
+            tier3_values(context, code);
+            tier3_native_frame(&context);
+            code.enter(context, address);
+            result.outcome = static_cast<tier3::Outcome>(context.outcome);
+            if (result.outcome == tier3::Outcome::Return) result.outcome = tier3::Outcome::Leave;
+        } else {
+            result = tier3::interpret(context, code, entry_index, false);
+        }
         std::uint64_t blocks = context.C;
         bool deoptimized = false;
         switch (result.outcome) {

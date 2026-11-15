@@ -2,6 +2,8 @@
 
 #include "tier3.hpp"
 
+#include "jit/tier3_native.hpp"
+
 #include "lift/lift.hpp"
 
 #include <cmath>
@@ -138,6 +140,7 @@ std::string describe(const TierStatistics& s) {
                std::to_string(n.references) + ", state traps " + std::to_string(n.state_traps) + ", exits " +
                std::to_string(n.exits) + "; traps in place " + std::to_string(n.traps) + "; steps in native code " +
                std::to_string(n.steps) + "\n";
+        if (!s.native_off.empty()) out += "tier: native programs on the IR interpreter: " + s.native_off + "\n";
         for (const auto& [reason, count] : s.native_rejections) {
             out += "tier: no native program " + std::to_string(count) + ": " + reason + "\n";
         }
@@ -218,12 +221,14 @@ bool tier_programs_enabled() {
     return enabled;
 }
 
-bool tier3_interp_enabled() {
-    static const bool enabled = [] {
+TierOptions::Tier3 tier3_environment() {
+    static const TierOptions::Tier3 mode = [] {
         const char* text = std::getenv("NEURA_TIER3");
-        return text && std::strcmp(text, "interp") == 0;
+        if (text && std::strcmp(text, "interp") == 0) return TierOptions::Tier3::Interp;
+        if (text && std::strcmp(text, "native") == 0) return TierOptions::Tier3::Native;
+        return TierOptions::Tier3::Off;
     }();
-    return enabled;
+    return mode;
 }
 
 std::uint32_t tier3_after() {
@@ -242,13 +247,20 @@ std::uint32_t tier3_after() {
 
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
-    if (options_.tier3 == TierOptions::Tier3::Environment) {
-        options_.tier3 = tier3_interp_enabled() ? TierOptions::Tier3::Interp : TierOptions::Tier3::Off;
-    }
+    if (options_.tier3 == TierOptions::Tier3::Environment) options_.tier3 = tier3_environment();
     if (options_.programs == TierOptions::Programs::Environment) {
-        options_.programs = tier_programs_enabled() || options_.tier3 == TierOptions::Tier3::Interp
+        options_.programs = tier_programs_enabled() || options_.tier3 != TierOptions::Tier3::Off
                                 ? TierOptions::Programs::On
                                 : TierOptions::Programs::Off;
+    }
+    if (options_.tier3 == TierOptions::Tier3::Native) {
+        if (!jit::native::supported()) {
+            machine_code_off_ = "no tier 3 code generator for this platform";
+        } else if (const auto available = jit::availability(jit::Mode::On); !available.enabled) {
+            machine_code_off_ = available.error;
+        } else {
+            machine_code_ = true;
+        }
     }
     if (tier_check_enabled()) options_.checkable = true;
     if (tier_eager() || tier3_after() != 0) {

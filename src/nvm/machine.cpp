@@ -8,6 +8,8 @@
 #include "tier1.hpp"
 #include "tier2.hpp"
 #include "tier3.hpp"
+
+#include "jit/tier3_native.hpp"
 #include "lift/evaluate.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -404,7 +406,6 @@ public:
         // Tier 3 runs function programs: it is on when the cache turns
         // them native (docs/runtime/NVM.md, "Execution tiers").
         tier3_ = tier2_ && tier_->native_enabled();
-        if (tier3_) tier_->note_native();
         // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
         // compilation"). --jit=on fails here, before the run starts, when
         // the platform cannot run it.
@@ -419,6 +420,16 @@ public:
             jit_context_.check_reference = &State::jit_check_reference;
             jit_context_.state = &State::jit_state;
             jit_context_.poll = &State::jit_poll;
+        }
+        // Native programs run their machine code where the cache made it
+        // and native code is enabled, else the IR interpreter.
+        if (tier3_) {
+            tier3_native_ = jit_ && tier_->machine_code();
+            std::string off;
+            if (tier_->options().tier3 == TierOptions::Tier3::Native && !tier3_native_) {
+                off = !tier_->machine_code() ? tier_->machine_code_off() : "native code is off (--jit=off or NEURA_JIT=off)";
+            }
+            tier_->note_native(tier3_native_, off);
         }
     }
 
@@ -3990,6 +4001,12 @@ private:
     // Tier 3 (tier3_steps.inc): whether function programs run as native
     // programs, the context they run in, and the events for --tier-stats.
     bool tier3_ = false;
+    // Whether they run their machine code (else the IR interpreter), and
+    // the values a deoptimization stub stores, by SSA value.
+    bool tier3_native_ = false;
+    std::vector<std::uint64_t> tier3_values_;
+    const tier2::Region* tier3_plan_region_ = nullptr;
+    BlockPlan* tier3_plan_ = nullptr;
     tier3::Context tier3_context_;
     NativeCounts native_counts_;
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> native_deopts_;

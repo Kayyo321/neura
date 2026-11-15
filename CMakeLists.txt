@@ -121,6 +121,8 @@ set(neura_nvm_sources
     src/jit/jit.cpp
     src/jit/mir_check.cpp
     src/jit/regalloc.cpp
+    src/jit/tier3_emit.cpp
+    src/jit/tier3_lower.cpp
     src/jit/x64.cpp
     src/jit/x86_64.cpp
 )
@@ -663,9 +665,11 @@ if(BUILD_TESTING)
         tests/backend/tier_programs_tests.cpp
         tests/backend/tier_shadow_tests.cpp
         tests/backend/tier3_ir_tests.cpp
+        tests/backend/tier3_native_tests.cpp
         tests/backend/tier3_pass_tests.cpp
         tests/backend/vm_tests.cpp
         tests/jit/jit_tests.cpp
+        tests/jit/tier3_native_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp

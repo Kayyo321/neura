@@ -1,13 +1,18 @@
 #pragma once
 
+#include "jit/jit.hpp"
 #include "lift/lowered_block.hpp"
 #include "nvr/image.hpp"
 #include "tier2.hpp"
 
+#include <atomic>
+#include <cstddef>
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <mutex>
 #include <string>
+#include <type_traits>
 #include <vector>
 
 namespace neura::nvm::tier3 {
@@ -238,9 +243,37 @@ struct Function {
     std::map<std::string, std::uint64_t> pass_counts;
 };
 
-// A native program: the IR of one function program.
+struct Context;
+
+// A native program: the IR of one function program and, where tier 3 has a
+// code generator (x86-64 Linux, src/jit/tier3_native.hpp), its machine code.
+// Without code the IR interpreter runs the IR.
 struct Program {
     Function ir;
+    // The code of entry 0 and the entries that share it, read-only and
+    // executable; null without code.
+    std::unique_ptr<jit::Program> machine;
+    // The offset in `machine` of each IR entry's code (Function::entries),
+    // or jit::native::lazy for an entry whose code is made when a run first
+    // enters there; and the offset of the stub a run calls to enter code.
+    std::vector<std::uint32_t> entry_code;
+    std::uint32_t trampoline = 0;
+    // Whether to check the register allocation of code made later.
+    bool verify = false;
+
+    // The code of IR entry `entry`, made now the first time a lazy entry is
+    // asked for (by one thread; the others wait): null when it could not be
+    // made. `bytes` and `failure` say what this call made, for statistics.
+    const std::uint8_t* entry(std::uint32_t entry, std::uint64_t& bytes, std::string& failure) const;
+    // Runs the code at `address` (an entry's) with `context` filled as
+    // run_native_program fills it; the context's `outcome` says how it ended.
+    void enter(Context& context, const std::uint8_t* address) const;
+
+    // The lazy entries' code: by entry, its address once made (or `failed`),
+    // and the code, kept as long as the program.
+    mutable std::mutex lazy_mutex;
+    mutable std::unique_ptr<std::atomic<const std::uint8_t*>[]> lazy_entries;
+    mutable std::vector<std::unique_ptr<jit::Program>> lazy_code;
 };
 
 struct BuildResult {
@@ -335,28 +368,141 @@ struct Helpers {
     Status (*ret)(Context*, std::uint64_t value, bool has_value, std::uint64_t blocks);
 };
 
+// How a helper of native code went (Context::status).
+enum class NativeStatus : std::uint32_t {
+    Ok = 0,
+    // The operation's check failed: the code deoptimizes.
+    Fault = 1,
+    // An exception other than a Fault, kept for the executor to rethrow.
+    Exception = 2,
+    // A helper's Fault became the run's trap (R3).
+    Trapped = 3,
+    // A call left the activation at the callee's block 0 (it has no native
+    // code to enter, or the native depth is reached).
+    Left = 4,
+};
+
+// The helpers native code calls (System V AMD64, the context first), each a
+// static member of the executor in tier3_steps.inc. Every one sets
+// `status`, catches every exception, and leaves `slots`, `flags` and
+// `block` describing the innermost frame, which native code reloads after
+// it: a push or pop may move the frame arenas.
+struct NativeHelpers {
+    // An inline state operation (exits[exit] of the running program) on
+    // `count` arguments: its result; Fault deoptimizes (StateTraps).
+    std::uint64_t (*state)(Context*, std::uint32_t exit, const std::uint64_t* arguments, std::uint32_t count);
+    // A reference check: Fault deoptimizes (References).
+    std::uint64_t (*check_reference)(Context*, std::uint32_t type, std::uint64_t bits);
+    // R3, with C in the context: its result, or Trapped.
+    std::uint64_t (*helper)(Context*, std::uint32_t exit, const std::uint64_t* arguments, std::uint32_t count);
+    // commit_exit's Call, with C in the context: the callee's frame pushed
+    // (Trapped at the frame limit), then the address of the callee's native
+    // entry 0, with `program` set to it, or Left.
+    std::uint64_t (*call)(Context*, std::uint32_t exit, std::uint32_t callee, const std::uint64_t* arguments,
+                          std::uint32_t count);
+    // commit_exit's Return of `value` with C = `blocks` before the return
+    // block's step: Fault deoptimizes (Exits); on Ok the value comes back
+    // and C in the context counts the return block.
+    std::uint64_t (*ret)(Context*, std::uint64_t value, std::uint64_t blocks);
+    // Ends the activation at block `block` of the innermost frame, with C in
+    // the context.
+    std::uint64_t (*leave)(Context*, std::uint32_t block);
+    // Materializes frame state `state` of the running program from `values`
+    // and ends the activation, for `reason` (a Reason).
+    std::uint64_t (*deoptimize)(Context*, std::uint32_t state, std::uint32_t reason);
+    // lift::evaluate of the Lift instruction `inst` of the running program:
+    // its result; Fault when its check fails.
+    std::uint64_t (*evaluate)(Context*, std::uint32_t inst, std::uint64_t a, std::uint64_t b);
+};
+
+// What a native activation chain reads and writes. The fields up to
+// `functions` are native code's, at the offsets of `offsets` below (asserted
+// after the struct); the rest are the executor's.
 struct Context {
-    void* owner = nullptr;
-    const Helpers* helpers = nullptr;
     // Blocks completed since the dispatcher entered the activation chain,
-    // inline kernel steps, and what has been added to the run's steps.
+    // and inline kernel steps. Native code keeps C in r12 and stores it here
+    // before every helper that reads it.
     std::uint64_t C = 0;
     std::uint64_t K = 0;
-    std::uint64_t flushed = 0;
     // The most C + K + P a Budget lets pass; the executor recomputes it
     // after every flush.
     std::uint64_t room = 0;
-    std::uint64_t allowance = 0;
+    // The innermost frame: its slots, initialized flags and block.
+    std::uint64_t* slots = nullptr;
+    std::uint8_t* flags = nullptr;
+    std::uint32_t* block = nullptr;
+    // The program of the running activation. A native callee's entry saves
+    // it, and its caller restores it when the callee returns.
+    const Program* program = nullptr;
+    // The values a deoptimization stub stores, by SSA value of the running
+    // program, for `deoptimize`; and the run's constant values.
+    std::uint64_t* values = nullptr;
+    const std::uint64_t* run_constants = nullptr;
+    // A NativeStatus.
+    std::uint32_t status = 0;
+    // How the code ended (an Outcome), from the stub that entered it.
+    std::uint32_t outcome = 0;
     std::uint32_t native_depth = 0;
+    // Where the ending went on.
+    std::uint32_t next_block = 0;
+    NativeHelpers functions{};
+
+    void* owner = nullptr;
+    const Helpers* helpers = nullptr;
+    // What has been added to the run's steps.
+    std::uint64_t flushed = 0;
+    std::uint64_t allowance = 0;
     bool float_default = true;
     // The program running (the innermost activation's), for statistics.
     const tier2::Region* region = nullptr;
-    // Where the ending went on, and why it deoptimized.
-    std::uint32_t next_block = 0;
+    // Why it deoptimized.
     Reason reason = Reason::Budget;
     // One value array per native depth, reused.
     std::vector<std::vector<std::uint64_t>> pool;
 };
+
+// The offsets native code uses.
+namespace offsets {
+inline constexpr std::int32_t C = 0;
+inline constexpr std::int32_t K = 8;
+inline constexpr std::int32_t room = 16;
+inline constexpr std::int32_t slots = 24;
+inline constexpr std::int32_t flags = 32;
+inline constexpr std::int32_t block = 40;
+inline constexpr std::int32_t program = 48;
+inline constexpr std::int32_t values = 56;
+inline constexpr std::int32_t run_constants = 64;
+inline constexpr std::int32_t status = 72;
+inline constexpr std::int32_t outcome = 76;
+inline constexpr std::int32_t native_depth = 80;
+inline constexpr std::int32_t next_block = 84;
+inline constexpr std::int32_t state = 88;
+inline constexpr std::int32_t check_reference = 96;
+inline constexpr std::int32_t helper = 104;
+inline constexpr std::int32_t call = 112;
+inline constexpr std::int32_t ret = 120;
+inline constexpr std::int32_t leave = 128;
+inline constexpr std::int32_t deoptimize = 136;
+inline constexpr std::int32_t evaluate = 144;
+} // namespace offsets
+
+static_assert(std::is_standard_layout_v<Context>);
+static_assert(offsetof(Context, C) == offsets::C && offsetof(Context, K) == offsets::K &&
+              offsetof(Context, room) == offsets::room && offsetof(Context, slots) == offsets::slots &&
+              offsetof(Context, flags) == offsets::flags && offsetof(Context, block) == offsets::block &&
+              offsetof(Context, program) == offsets::program && offsetof(Context, values) == offsets::values &&
+              offsetof(Context, run_constants) == offsets::run_constants &&
+              offsetof(Context, status) == offsets::status && offsetof(Context, outcome) == offsets::outcome &&
+              offsetof(Context, native_depth) == offsets::native_depth &&
+              offsetof(Context, next_block) == offsets::next_block);
+static_assert(offsetof(Context, functions) + offsetof(NativeHelpers, state) == offsets::state &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, check_reference) == offsets::check_reference &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, helper) == offsets::helper &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, call) == offsets::call &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, ret) == offsets::ret &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, leave) == offsets::leave &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, deoptimize) == offsets::deoptimize &&
+              offsetof(Context, functions) + offsetof(NativeHelpers, evaluate) == offsets::evaluate);
 
 inline constexpr std::uint32_t max_native_depth = 256;
 

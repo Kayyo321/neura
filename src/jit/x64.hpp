@@ -80,15 +80,21 @@ struct Mem {
     static Mem rip_relative(Label label, std::int32_t addend = 0);
 };
 
-// A register or memory operand of an instruction's r/m field.
-struct Rm {
+// A register of class R (Gpr or Xmm) or a memory operand, for an
+// instruction's r/m field. Each instruction names the class it reads: an Rm
+// is made from a Gpr or a Mem, an XmmRm from an Xmm or a Mem, and nothing
+// else converts, so a general register passed where an XMM register is meant
+// (or the reverse) does not compile.
+template <typename R>
+struct RmOf {
     bool memory;
     std::uint8_t reg;
     Mem mem;
-    Rm(Gpr r) : memory(false), reg(r.n) {}
-    Rm(Xmm r) : memory(false), reg(r.n) {}
-    Rm(const Mem& m) : memory(true), reg(0), mem(m) {}
+    RmOf(R r) : memory(false), reg(r.n) {}
+    RmOf(const Mem& m) : memory(true), reg(0), mem(m) {}
 };
+using Rm = RmOf<Gpr>;
+using XmmRm = RmOf<Xmm>;
 
 // The low nibble of Jcc, SETcc and CMOVcc.
 enum class Cond : std::uint8_t {
@@ -216,17 +222,17 @@ public:
     void movs(Prec prec, Xmm to, const Mem& from);
     void movs(Prec prec, const Mem& to, Xmm from);
     // addsd, subsd, mulsd, divsd, sqrtsd and the ss forms.
-    void arith(Fp op, Prec prec, Xmm to, const Rm& from);
-    void ucomis(Prec prec, Xmm a, const Rm& b);
-    void andpd(Xmm to, const Rm& from);
-    void andnpd(Xmm to, const Rm& from);
-    void xorpd(Xmm to, const Rm& from);
+    void arith(Fp op, Prec prec, Xmm to, const XmmRm& from);
+    void ucomis(Prec prec, Xmm a, const XmmRm& b);
+    void andpd(Xmm to, const XmmRm& from);
+    void andnpd(Xmm to, const XmmRm& from);
+    void xorpd(Xmm to, const XmmRm& from);
     // cvtsi2sd and cvtsi2ss from a 32 or 64-bit integer.
     void cvtsi2s(Prec prec, Xmm to, Size from_size, const Rm& from);
     // cvttsd2si and cvttss2si to a 32 or 64-bit integer.
-    void cvtts2si(Prec prec, Size to_size, Gpr to, const Rm& from);
-    void cvtss2sd(Xmm to, const Rm& from);
-    void cvtsd2ss(Xmm to, const Rm& from);
+    void cvtts2si(Prec prec, Size to_size, Gpr to, const XmmRm& from);
+    void cvtss2sd(Xmm to, const XmmRm& from);
+    void cvtsd2ss(Xmm to, const XmmRm& from);
 
 private:
     struct Encoding;
@@ -257,11 +263,22 @@ private:
         std::size_t final_offset = 0;
     };
 
-    void encode(const Encoding& encoding, unsigned reg, const Rm& rm);
+    // The r/m operand without its class: a register number or memory.
+    struct RawRm {
+        bool memory;
+        std::uint8_t reg;
+        Mem mem;
+        template <typename R>
+        RawRm(const RmOf<R>& rm) : memory(rm.memory), reg(rm.reg), mem(rm.mem) {}
+        RawRm(Gpr r) : memory(false), reg(r.n) {}
+        RawRm(const Mem& m) : memory(true), reg(0), mem(m) {}
+    };
+
+    void encode(const Encoding& encoding, unsigned reg, const RawRm& rm);
     void alu_form(Alu op, Size size, unsigned reg, const Rm& rm, bool store);
     void alu_immediate(Alu op, Size size, const Rm& to, Imm32 value);
     void group_f7(Size size, unsigned digit, const Rm& value);
-    void sse(std::uint8_t prefix, std::uint8_t opcode, unsigned reg, const Rm& rm, bool wide = false);
+    void sse(std::uint8_t prefix, std::uint8_t opcode, unsigned reg, const RawRm& rm, bool wide = false);
     void byte(std::uint8_t value) { raw_.push_back(value); }
     void immediate(std::int64_t value, unsigned bytes);
     void reference(Label target, std::size_t tail, std::int32_t addend);

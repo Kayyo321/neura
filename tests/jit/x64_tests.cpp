@@ -7,7 +7,8 @@
 //   widening cascades, alignment, RIP-relative constants, and random
 //   programs whose jumps are decoded from the output and checked against
 //   their targets and for minimality;
-// - misuse that must throw;
+// - misuse that must throw, and a register of the wrong class in an r/m
+//   operand, which must not compile (the static assertions below);
 // - on x86-64 Linux, small functions assembled, loaded through
 //   jit::Program, and run: a loop, a call to a C++ function under the System V
 //   ABI, floating-point operations, wide multiplication and division, bit
@@ -29,6 +30,7 @@
 #include <random>
 #include <stdexcept>
 #include <string>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -43,6 +45,30 @@ using namespace neura::jit::x64;
 namespace jit = neura::jit;
 
 using Bytes = std::vector<std::uint8_t>;
+
+// The r/m operand of an instruction has a register class: a general register
+// is no XMM operand, and an XMM register no general one.
+static_assert(std::is_convertible_v<Gpr, Rm> && std::is_convertible_v<Mem, Rm>);
+static_assert(std::is_convertible_v<Xmm, XmmRm> && std::is_convertible_v<Mem, XmmRm>);
+static_assert(!std::is_convertible_v<Xmm, Rm> && !std::is_convertible_v<Gpr, XmmRm>);
+template <typename R>
+concept arith_takes = requires(Assembler& a, R r) { a.arith(Fp::add, Prec::dbl, xmm0, r); };
+template <typename R>
+concept ucomis_takes = requires(Assembler& a, R r) { a.ucomis(Prec::dbl, xmm0, r); };
+template <typename R>
+concept cvtts2si_takes = requires(Assembler& a, R r) { a.cvtts2si(Prec::dbl, S64, rax, r); };
+template <typename R>
+concept cvtsi2s_takes = requires(Assembler& a, R r) { a.cvtsi2s(Prec::dbl, xmm0, S64, r); };
+template <typename R>
+concept imul_takes = requires(Assembler& a, R r) { a.imul(S64, rax, r); };
+template <typename R>
+concept shift_takes = requires(Assembler& a, R r) { a.shift(Shift::shl, S64, r, Imm8{1}); };
+static_assert(arith_takes<Xmm> && arith_takes<Mem> && !arith_takes<Gpr>);
+static_assert(ucomis_takes<Xmm> && !ucomis_takes<Gpr>);
+static_assert(cvtts2si_takes<Xmm> && !cvtts2si_takes<Gpr>);
+static_assert(cvtsi2s_takes<Gpr> && !cvtsi2s_takes<Xmm>);
+static_assert(imul_takes<Gpr> && imul_takes<Mem> && !imul_takes<Xmm>);
+static_assert(shift_takes<Gpr> && !shift_takes<Xmm>);
 
 std::size_t checks = 0;
 std::size_t failures = 0;

@@ -2,6 +2,8 @@
 
 #include "tier1.hpp"
 
+#include "jit/tier3_native.hpp"
+
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
@@ -1308,6 +1310,46 @@ BuildResult build(const nvr::Image& image, const tier2::Region& program, bool ch
     return Builder(image, program).run(check);
 }
 
+namespace {
+
+// The address of a lazy entry whose code could not be made.
+const std::uint8_t* const lazy_failed = reinterpret_cast<const std::uint8_t*>(std::uintptr_t{1});
+
+} // namespace
+
+const std::uint8_t* Program::entry(std::uint32_t index, std::uint64_t& bytes, std::string& failure) const {
+    bytes = 0;
+    if (index >= entry_code.size() || !machine) return nullptr;
+    if (entry_code[index] != jit::native::lazy) return machine->address() + entry_code[index];
+    auto& slot = lazy_entries[index];
+    if (const auto* found = slot.load(std::memory_order_acquire)) return found == lazy_failed ? nullptr : found;
+    const std::lock_guard lock(lazy_mutex);
+    if (const auto* found = slot.load(std::memory_order_acquire)) return found == lazy_failed ? nullptr : found;
+    auto generated = jit::native::generate_entry(ir, index, verify);
+    std::unique_ptr<jit::Program> code;
+    if (generated.failure.empty()) {
+        code = jit::Program::load(generated.code.bytes, generated.failure);
+        if (!code) generated.failure = "no executable memory: " + generated.failure;
+    }
+    if (!code) {
+        failure = generated.failure;
+        slot.store(lazy_failed, std::memory_order_release);
+        return nullptr;
+    }
+    const auto* address = code->address() + generated.code.entries.at(index);
+    bytes = generated.code.bytes.size();
+    lazy_code.push_back(std::move(code));
+    slot.store(address, std::memory_order_release);
+    return address;
+}
+
+void Program::enter(Context& context, const std::uint8_t* address) const {
+    using Trampoline = void (*)(Context*, const void*);
+    const auto* base = machine->address();
+    const auto trampoline_code = reinterpret_cast<Trampoline>(const_cast<std::uint8_t*>(base + trampoline));
+    trampoline_code(&context, address);
+}
+
 bool verify_enabled() {
     static const bool enabled = [] {
 #ifndef NDEBUG
@@ -1356,6 +1398,27 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
     } catch (const std::exception& error) {
         built.reason = std::string("internal error: ") + error.what();
     }
+    // Machine code; a program that cannot have it stays on the program
+    // interpreter.
+    std::uint64_t bytes = 0;
+    if (built.program && machine_code_) {
+        auto generated = jit::native::generate(built.program->ir, tier3::verify_enabled());
+        if (generated.failure.empty()) {
+            built.program->machine = jit::Program::load(generated.code.bytes, generated.failure);
+            if (!built.program->machine) generated.failure = "no executable memory: " + generated.failure;
+        }
+        if (!generated.failure.empty()) {
+            built.reason = generated.failure;
+            built.program.reset();
+        } else {
+            built.program->entry_code = std::move(generated.code.entries);
+            built.program->trampoline = generated.code.trampoline;
+            built.program->verify = tier3::verify_enabled();
+            built.program->lazy_entries =
+                std::make_unique<std::atomic<const std::uint8_t*>[]>(built.program->entry_code.size());
+            bytes = generated.code.bytes.size();
+        }
+    }
     const tier3::Program* published = nullptr;
     if (std::getenv("NEURA_TIER_DUMP")) {
         std::string text = "no native program: " + built.reason + "\n";
@@ -1374,6 +1437,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
             published = built.program.get();
             native_owned_.push_back(std::move(built.program));
             ++statistics_.native_programs;
+            statistics_.native_bytes += bytes;
         } else {
             ++statistics_.native_failed;
             ++statistics_.native_rejections[built.reason];
@@ -1383,9 +1447,17 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program) {
     return published;
 }
 
-void TierCache::note_native() {
+void TierCache::note_native(bool machine, const std::string& off) {
     const std::lock_guard lock(mutex_);
-    statistics_.native_mode = "interp";
+    if (machine) statistics_.native_mode = "native";
+    else if (statistics_.native_mode.empty()) statistics_.native_mode = "interp";
+    if (!off.empty()) statistics_.native_off = off;
+}
+
+void TierCache::note_native_entry(std::uint64_t bytes, const std::string& failure) {
+    const std::lock_guard lock(mutex_);
+    statistics_.native_bytes += bytes;
+    if (!failure.empty()) ++statistics_.native_rejections["an entry: " + failure];
 }
 
 void TierCache::add_native_events(const NativeCounts& counts,

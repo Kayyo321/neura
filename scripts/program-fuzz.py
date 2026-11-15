@@ -38,6 +38,10 @@ every mode against the reference:
     NEURA_TIER3=interp NEURA_TIER3_AFTER=7 NEURA_TIER3_VERIFY=1   the same, a program turning native at its seventh
                                                checkpoint arrival, so that loops are handed to native code in the middle
     NEURA_TIER3=interp NEURA_TIER_EAGER=1 NEURA_TIER3_PASSES=0    the same without tier 3's passes
+    NEURA_TIER3=native, the same               tier 3 IR as machine code where tier 3 has a code generator
+                                               (x86-64 Linux; elsewhere the IR interpreter), its register
+                                               allocations checked, without and with NEURA_TIER_CHECK=2
+    NEURA_TIER3=native with NEURA_TIER3_AFTER=7, and with NEURA_TIER3_PASSES=0, as for interp
 
 and then repeats the comparison under sweeps of limits that land a trap on every
 block, so that a deoptimization or a trap in place is exercised at each of them:
@@ -929,10 +933,16 @@ MODES = [
     ("tier3-interp", ["--jit=on"], {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1"}),
     ("tier3-interp-check2", ["--jit=on"],
      {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER_CHECK": "2"}),
+    ("tier3-native", ["--jit=on"], {"NEURA_TIER3": "native", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1"}),
+    ("tier3-native-check2", ["--jit=on"],
+     {"NEURA_TIER3": "native", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER_CHECK": "2"}),
     # A program turns native at its 7th checkpoint arrival, so a loop is handed to native code in its middle.
     ("tier3-interp-after", ["--jit=on"], {"NEURA_TIER3": "interp", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
     ("tier3-interp-passes-off", ["--jit=on"],
      {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER3_PASSES": "0"}),
+    ("tier3-native-after", ["--jit=on"], {"NEURA_TIER3": "native", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
+    ("tier3-native-passes-off", ["--jit=on"],
+     {"NEURA_TIER3": "native", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER3_PASSES": "0"}),
 ]
 
 QUICK_SEEDS = [1, 2, 5]
