@@ -246,6 +246,58 @@ void live_through_loop_test() {
     verified(b.f, "live through a loop");
 }
 
+// Values that only a frame state and the code after a loop read must not take
+// registers that the values the loop computes with need: eight state-only phis
+// and one phi the body reads through a memory operand (so it has no register
+// use), around a body that needs fourteen registers at once. The phi the body
+// reads stays in a register at the loop head; the others do not.
+void state_only_phis_leave_the_loop_registers_test() {
+    Builder b;
+    const auto entry = b.block(), header = b.block(1), body = b.block(1), exit = b.block();
+    b.edge(entry, header);
+    b.edge(header, body);
+    b.edge(header, exit);
+    b.edge(body, header);
+    constexpr std::size_t kState = 8;
+    std::vector<VReg> initial, phis, next;
+    for (std::size_t i = 0; i < kState; ++i) {
+        initial.push_back(b.xmm());
+        phis.push_back(b.xmm());
+        next.push_back(b.xmm());
+        b.inst(entry, {reg(initial[i])}, {});
+    }
+    const auto acc0 = b.xmm(), acc = b.xmm(), acc1 = b.xmm();
+    b.inst(entry, {reg(acc0)}, {});
+    for (std::size_t i = 0; i < kState; ++i) b.phi(header, phis[i], {initial[i], next[i]});
+    b.phi(header, acc, {acc0, acc1});
+    std::vector<Operand> all;
+    for (int i = 0; i < 14; ++i) {
+        const auto t = b.xmm();
+        b.inst(body, {reg(t)}, {});
+        all.push_back(reg(t));
+    }
+    b.inst(body, {}, all);
+    std::vector<Operand> states, after;
+    for (std::size_t i = 0; i < kState; ++i) {
+        b.inst(body, {reg(next[i])}, {});
+        states.push_back(any(phis[i]));
+        after.push_back(any(phis[i]));
+    }
+    b.inst(body, {reg(acc1)}, {any(acc)}, states);
+    b.inst(exit, {}, after);
+    const auto a = verified(b.f, "state-only phis");
+    bool acc_in_register = false;
+    std::size_t state_in_register = 0;
+    for (const auto& [v, l] : a.blocks[header].entry) {
+        if (v == acc.id) acc_in_register = l.kind == LocKind::Reg;
+        for (const auto& phi : phis) {
+            if (v == phi.id && l.kind == LocKind::Reg) ++state_in_register;
+        }
+    }
+    expect(acc_in_register, "state-only phis: the phi the body reads is in a register at the loop head");
+    expect(state_in_register == 0, "state-only phis: no phi that only a state and the exit read is in a register");
+}
+
 // (a, b) = (b, a) around a loop, and (a, b, c) = (b, c, a): the back edge's
 // moves form a cycle that goes through the scratch register.
 void cycle_test(RegClass cls, std::size_t length) {
@@ -1929,6 +1981,7 @@ int main(int argc, char** argv) {
     const auto t0 = std::chrono::steady_clock::now();
     pressure_test();
     live_through_loop_test();
+    state_only_phis_leave_the_loop_registers_test();
     cycle_test(RegClass::Gpr, 2);
     cycle_test(RegClass::Xmm, 2);
     cycle_test(RegClass::Gpr, 3);

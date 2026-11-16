@@ -98,6 +98,7 @@ struct Interval {
     std::vector<Range> ranges;   // sorted, disjoint, never adjacent
     std::vector<Pos> uses;       // every use position, sorted
     std::vector<Pos> reg_uses;   // the use positions that need a register, sorted
+    std::vector<Pos> data_uses;  // the use positions of instructions' operands (not frame states), sorted
     int reg = -1;
     bool spilled = false;        // in the vreg's stack location
     std::size_t cursor = 0;      // the scan's first range that may cover its position
@@ -658,10 +659,11 @@ private:
         std::vector<Pos> open(f_.vreg_count, 0);  // 0: not open
         std::vector<std::uint32_t> opened;
         const auto add_range = [&](std::uint32_t id, Pos from, Pos to) { intervals_[id].ranges.push_back({from, to}); };
-        const auto use_at = [&](std::uint32_t v, Pos end, Pos where, bool needs_register) {
+        const auto use_at = [&](std::uint32_t v, Pos end, Pos where, bool needs_register, bool state = false) {
             if (open[v] == 0) opened.push_back(v);
             open[v] = std::max(open[v], end);
             intervals_[v].uses.push_back(where);
+            if (!state) intervals_[v].data_uses.push_back(where);
             if (needs_register) intervals_[v].reg_uses.push_back(where);
         };
         const auto add_temp = [&](RegClass cls, Pos p) {
@@ -749,7 +751,7 @@ private:
                         use_at(v, p + kRead + 1, p + kRead, use.c == Constraint::Register);
                     }
                 }
-                for (const auto& use : inst.state_uses) use_at(use.vreg.id, p + kWrite + 1, p + kRead, false);
+                for (const auto& use : inst.state_uses) use_at(use.vreg.id, p + kWrite + 1, p + kRead, false, true);
 
                 for (std::uint8_t r = 0; r < 16; ++r) {
                     if (((inst.clobbers_gpr & f_.allocatable_gpr) >> r) & 1U) {
@@ -795,6 +797,8 @@ private:
             it.uses.erase(std::unique(it.uses.begin(), it.uses.end()), it.uses.end());
             std::sort(it.reg_uses.begin(), it.reg_uses.end());
             it.reg_uses.erase(std::unique(it.reg_uses.begin(), it.reg_uses.end()), it.reg_uses.end());
+            std::sort(it.data_uses.begin(), it.data_uses.end());
+            it.data_uses.erase(std::unique(it.data_uses.begin(), it.data_uses.end()), it.data_uses.end());
         }
         for (auto& by_reg : fixed_) {
             for (auto& ranges : by_reg) {
@@ -823,6 +827,13 @@ private:
     static Pos next_reg_use(const Interval& it, Pos from) {
         const auto i = std::lower_bound(it.reg_uses.begin(), it.reg_uses.end(), from);
         return i == it.reg_uses.end() ? kNever : *i;
+    }
+
+    // The first use by an instruction's operand (not a frame state) at or
+    // after `from`, or kNever.
+    static Pos next_data_use(const Interval& it, Pos from) {
+        const auto i = std::lower_bound(it.data_uses.begin(), it.data_uses.end(), from);
+        return i == it.data_uses.end() ? kNever : *i;
     }
 
     // The last use before `pos`, or kNever.
@@ -881,6 +892,9 @@ private:
             const auto r = std::lower_bound(it.reg_uses.begin(), it.reg_uses.end(), pos);
             child.reg_uses.assign(r, it.reg_uses.end());
             it.reg_uses.erase(r, it.reg_uses.end());
+            const auto d = std::lower_bound(it.data_uses.begin(), it.data_uses.end(), pos);
+            child.data_uses.assign(d, it.data_uses.end());
+            it.data_uses.erase(d, it.data_uses.end());
             it.cursor = 0;
         }
         intervals_.push_back(std::move(child));
@@ -925,6 +939,40 @@ private:
         return -1;
     }
 
+    // The end of the innermost loop that contains `pos`, or kNever.
+    Pos innermost_loop_end(Pos pos) const {
+        const auto b = block_containing(pos);
+        for (auto it = loops_.rbegin(); it != loops_.rend(); ++it) {
+            if (std::binary_search(it->body.begin(), it->body.end(), b)) return start_[it->body.back() + 1];
+        }
+        return kNever;
+    }
+
+    // False when the part of a vreg that starts inside a loop is read in that
+    // loop by no instruction (frame states do not count) and needs no
+    // register there: a value that only a deoptimization or code after the
+    // loop reads. It then stays in memory (and returns to a register before
+    // a later register use), so that the loop's registers go to values the
+    // loop computes with.
+    bool used_in_loop(std::uint32_t id) {
+        const Interval& it = intervals_[id];
+        const Pos start = it.start();
+        const Pos loop_end = innermost_loop_end(start);
+        if (loop_end == kNever || it.vreg == kNone) return true;
+        if (next_data_use(it, start) < loop_end) return true;
+        const Pos first = next_reg_use(it, start);
+        if (first < loop_end) return true;
+        if (first == kNever) {
+            intervals_[id].spilled = true;
+            return false;
+        }
+        if (gap_at_or_before(first) <= start) return true;
+        const auto child = split(id, split_position(start, first));
+        intervals_[id].spilled = true;
+        push(child, start);
+        return false;
+    }
+
     void scan(RegClass cls) {
         cls_ = cls;
         regs_.clear();
@@ -945,6 +993,7 @@ private:
             const auto [pos, id] = unhandled_.top();
             unhandled_.pop();
             advance(pos);
+            if (!used_in_loop(id)) continue;
             if (!try_free(id)) allocate_blocked(id);
             if (intervals_[id].reg >= 0) active_.push_back(id);
         }
@@ -1479,5 +1528,74 @@ std::vector<Move> sequentialize(const std::vector<Move>& moves, std::uint32_t sp
 }
 
 Allocation allocate(const Function& function) { return Allocator(function).run(); }
+
+namespace {
+
+std::string place(const Location& l, RegClass cls) {
+    switch (l.kind) {
+    case LocKind::Reg: return std::string(cls == RegClass::Gpr ? "r" : "x") + std::to_string(l.index);
+    case LocKind::Stack: return "S" + std::to_string(l.index);
+    case LocKind::FrameSlot: return "F" + std::to_string(l.index);
+    }
+    return "?";
+}
+
+std::string moves_text(const std::vector<Move>& moves) {
+    std::string text;
+    for (const auto& m : moves) {
+        text += " [" + place(m.from, m.cls) + "->" + place(m.to, m.cls);
+        if (m.vreg != 0xFFFFFFFFU) text += " v" + std::to_string(m.vreg);
+        text += "]";
+    }
+    return text;
+}
+
+}  // namespace
+
+std::string describe(const Function& f, const Allocation& a, const std::function<std::string(std::uint32_t)>& name) {
+    std::string out;
+    const auto cls = [&](std::uint32_t v) { return f.classes[v]; };
+    for (std::size_t b = 0; b < f.blocks.size(); ++b) {
+        const auto& block = f.blocks[b];
+        out += "B" + std::to_string(b) + " depth " + std::to_string(block.loop_depth) + " preds";
+        for (const auto p : block.preds) out += " " + std::to_string(p);
+        out += " succs";
+        for (const auto s : block.succs) out += " " + std::to_string(s);
+        out += "\n  entry:";
+        for (const auto& [v, l] : a.blocks[b].entry) {
+            out += " v" + std::to_string(v) + "@" + place(l, cls(v));
+            if (f.spill_home[v] >= 0) out += "(h" + std::to_string(f.spill_home[v]) + ")";
+        }
+        out += "\n";
+        for (const auto& phi : block.phis) {
+            out += "  phi v" + std::to_string(phi.def.id) + " =";
+            for (const auto& in : phi.inputs) out += " v" + std::to_string(in.id);
+            out += "\n";
+        }
+        for (std::size_t j = 0; j < block.insts.size(); ++j) {
+            const auto& inst = block.insts[j];
+            const auto& ia = a.blocks[b].insts[j];
+            if (!ia.before.empty()) out += "    before:" + moves_text(ia.before) + "\n";
+            out += "  " + name(inst.opcode);
+            for (std::size_t k = 0; k < inst.defs.size(); ++k) {
+                out += (k == 0 ? " d:" : ",") + std::string("v") + std::to_string(inst.defs[k].vreg.id) + "@" +
+                       place(ia.defs[k], inst.defs[k].vreg.cls);
+            }
+            for (std::size_t k = 0; k < inst.uses.size(); ++k) {
+                out += (k == 0 ? " u:" : ",") + std::string("v") + std::to_string(inst.uses[k].vreg.id) + "@" +
+                       place(ia.uses[k], inst.uses[k].vreg.cls);
+            }
+            if (!inst.state_uses.empty()) out += " state:" + std::to_string(inst.state_uses.size());
+            out += "\n";
+            if (!ia.after.empty()) out += "    after:" + moves_text(ia.after) + "\n";
+        }
+        for (std::size_t k = 0; k < a.blocks[b].edges.size(); ++k) {
+            if (!a.blocks[b].edges[k].empty()) {
+                out += "  edge->B" + std::to_string(block.succs[k]) + ":" + moves_text(a.blocks[b].edges[k]) + "\n";
+            }
+        }
+    }
+    return out;
+}
 
 }  // namespace neura::jit::mir

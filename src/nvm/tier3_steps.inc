@@ -642,6 +642,35 @@
         return true;
     }
 
+    // The initialized flags of a frame the dispatcher enters a program with
+    // are what the image proves (tier2.cpp, analyse_flags): 0 or 1 where the
+    // fact says so, and equal where two slots share a fact. A frame that
+    // differs aborts the process, for NEURA_TIER3_VERIFY.
+    template <typename Flags>
+    static void tier3_check_flag_facts(const tier2::Region& program, const tier2::Region::Entry& entry,
+                                       const Flags& initialized) {
+        std::map<std::uint32_t, std::uint32_t> seen;
+        for (std::uint32_t slot = 0; slot < entry.flags.size() && slot < program.slot_widths.size(); ++slot) {
+            const auto fact = entry.flags[slot];
+            if (fact == tier2::Region::flag_unknown) continue;
+            const std::uint32_t flag = initialized[slot] ? 1 : 0;
+            bool wrong = false;
+            if (fact <= 1) {
+                wrong = flag != fact;
+            } else {
+                const auto [it, first] = seen.try_emplace(fact, flag);
+                wrong = !first && it->second != flag;
+            }
+            if (wrong) {
+                std::fprintf(stderr,
+                             "neura: NEURA_TIER3_VERIFY: the frame at function %u block %u has the initialized flag of slot %u "
+                             "as %u, against the fact %u of the image analysis\n",
+                             program.function, entry.block, slot, flag, fact);
+                std::abort();
+            }
+        }
+    }
+
     // A native program entered at entries[entry_index] by the dispatcher: the
     // checks run_program makes, then the IR runs until it ends. At every
     // ending every frame is as tier 1 would have it, the innermost frame's
@@ -670,10 +699,21 @@
             bool refuse = (entered.uses_float || code.ir.uses_float) && !lift::float_environment_is_default();
             refuse = refuse || (tier3_native_ && code.machine && address == nullptr);
             for (const auto slot : entry.reads) refuse = refuse || !frame.initialized[slot];
+            // The machine code of a function program's entry 0 takes the
+            // initialized flag of every slot but a parameter as 0, as a call
+            // leaves the callee's frame (jit/tier3_lower.cpp, simplify_phis).
+            if (tier3_native_ && code.machine && entered.program && entry.block == 0) {
+                for (auto slot = entered.parameter_count; slot < entered.slot_widths.size() && !refuse; ++slot) {
+                    refuse = frame.initialized[slot];
+                }
+            }
             for (std::size_t slot = 0; slot < entered.slot_widths.size() && !refuse; ++slot) {
                 const auto width = entered.slot_widths[slot];
                 refuse = width < 64 && frame.initialized[slot] && (frame.slots[slot] >> width) != 0;
             }
+            // NEURA_TIER3_VERIFY=1: the flags the image proves at this block
+            // (Region::Entry::flags) are the frame's.
+            if (code.verify && tier3_native_ && code.machine) tier3_check_flag_facts(entered, entry, frame.initialized);
             refuse = refuse || frames_.size() + code.ir.max_inline_depth > limits_.max_frames;
             refuse = refuse || !tier3_clean_entry(code.ir, entry_index, frame.slots);
             if (refuse) {

@@ -740,6 +740,60 @@ NEURA_TEST(jit, tier_3_deferred_floats_are_canonical_wherever_their_bits_are_rea
                                    " cases differ; the first: " + tally.first);
 }
 
+// A deferred float sum that only a WriteBack reads (no helper or call, before
+// or after) is still written by a spill between the write-back and the end of
+// the code, so a move into its frame home stores the canonical NaN: the
+// lowering marks its virtual register (Lowered::canon_vreg) for every value
+// live at a write-back, not only for those live at a helper or call.
+NEURA_TEST(jit, tier_3_a_deferred_float_live_at_a_write_back_has_a_canonicalizing_home) {
+    if (!native_runs()) return;
+    for (const auto format : {lift::FloatType::Binary32, lift::FloatType::Binary64}) {
+        const bool dbl = format == lift::FloatType::Binary64;
+        const unsigned width = dbl ? 64 : 32;
+        const t3::ValueType type{dbl ? t3::Type::F64 : t3::Type::F32, static_cast<std::uint8_t>(width)};
+        Builder b(3);
+        b.f.slot_types.assign(3, type);
+        const auto x = b.value(0, t3::Op::EntryLoad, width, 0);
+        const auto y = b.value(0, t3::Op::EntryLoad, width, 1);
+        b.f.insts[x].type = b.f.insts[y].type = type;
+        const auto c = b.value(0, t3::Op::EntryCounter, 64, 0);
+        t3::Inst jump;
+        jump.op = t3::Op::Jump;
+        b.add(0, jump);
+        lift::Instruction add;
+        add.op = Opcode::FloatAdd;
+        add.width = static_cast<std::uint8_t>(width);
+        add.format = format;
+        t3::Inst sum;
+        sum.op = t3::Op::Lift;
+        sum.lifted = add;
+        sum.type = type;
+        sum.operands[0] = x;
+        sum.operands[1] = y;
+        const auto s = b.add(1, sum);
+        const auto c1 = b.value(1, t3::Op::CounterAdd, 64, 1, c);
+        const auto commit = b.state(c1, 3);
+        b.f.states[commit].slots[2] = {t3::StateSlot::Kind::Value, s};
+        b.f.states[commit].flags[2] = {t3::StateFlag::Kind::One, 0};
+        t3::Inst back;
+        back.op = t3::Op::WriteBack;
+        back.flags = t3::Effect;
+        back.state = commit;
+        b.add(1, back);
+        t3::Inst leave;
+        leave.op = t3::Op::Leave;
+        leave.operands[0] = c1;
+        leave.imm = 9;
+        b.add(1, leave);
+        const nvr::Image image;
+        t3::place_canons(image, b.f, false);
+        const auto lowered = jit::native::lower(b.f, {0});
+        bool marked = false;
+        for (const auto format_bits : lowered.canon_vreg) marked = marked || format_bits == width;
+        check(marked, "a float live at a write-back has a canonicalizing home (width " + std::to_string(width) + ")");
+    }
+}
+
 // A float comparison of two slots that a branch reads: fused into ucomis and
 // a conditional jump, where an unordered pair (a NaN) is false for every
 // comparison but NotEqual. Each branch writes its own value to slot 2.

@@ -10,11 +10,13 @@
 // (backend-tier3).
 #include "graph_test_support.hpp"
 
+#include "decompiler/assembly.hpp"
 #include "jit/tier3_native.hpp"
 #include "nvm/tier1.hpp"
 #include "nvm/tier3.hpp"
 
 #include <cfenv>
+#include <cstdlib>
 #include <functional>
 
 namespace neura::testing {
@@ -313,6 +315,46 @@ NEURA_TEST(tier3, the_statistics_line_reports_machine_code_entries_and_bytes) {
     check(off_text.find("tier: native programs on the IR interpreter: native code is off") != std::string::npos,
           "the statistics say why the IR interpreter ran");
     check(off.statistics().native.entered > 0, "the IR interpreter ran the native programs");
+}
+
+// The machine code of a function program's entry 0 takes the initialized
+// flag of every slot but a parameter as 0, as a call leaves the callee's
+// frame; run_native_program refuses entry 0 in a frame where one is set. The
+// back edge of a loop is turned into an edge to block 0 (the compiler's
+// block 0 is an empty block that no edge reaches), so the dispatcher arrives
+// at block 0 with the loop's temporaries initialized.
+NEURA_TEST(tier3, entry_zero_is_refused_where_a_slot_but_a_parameter_is_initialized) {
+    if (!machine_code_runs()) return;
+    const auto built = build_program({tier_program(environment, "entry-flags")});
+    auto text = decompiler::disassemble(built);
+    // The function with four int slots and two parameters: spin. Its loop
+    // body ends in the block that assigns every slot and continues to the
+    // loop head, block 1.
+    const std::string header = " parameters 2 result 2 frame [ 2 2 2 2 ]";
+    const auto function = text.find(header);
+    check(function != std::string::npos, "the function spin is in the image");
+    const std::string back_edge = "exit continue resume 1 assign [ 0 =";
+    const auto edge = text.find(back_edge, function);
+    check(edge != std::string::npos, "its loop body has the back edge");
+    text.replace(edge, back_edge.size(), "exit continue resume 0 assign [ 0 =");
+    const auto image = nvr::load(nvr::encode(decompiler::assemble(text)));
+    // The default thresholds: spin's program forms while a call of it runs in
+    // the interpreter, which then arrives at block 0 again.
+    nvm::TierOptions options;
+    options.programs = nvm::TierOptions::Programs::On;
+    options.tier3 = nvm::TierOptions::Tier3::Native;
+    options.native_after = 1;
+    const std::vector<std::string> arguments{"300"};
+    nvm::TierCache cache(image, options);
+    compare(image, cache, "entry 0 in a frame with initialized temporaries", arguments);
+    const auto statistics = cache.statistics();
+    check(statistics.native.entered > 0, "native programs were entered");
+    // NEURA_TIER_EAGER=1 forms the programs at the first arrival, so that
+    // every call of spin enters entry 0 in a fresh frame and the loop runs
+    // in machine code: no run arrives at block 0 with initialized slots.
+    if (std::getenv("NEURA_TIER_EAGER") == nullptr) {
+        check(statistics.native.refused > 0, "entry 0 was refused in a frame with an initialized temporary");
+    }
 }
 
 } // namespace neura::testing

@@ -66,10 +66,9 @@ inline constexpr std::uint32_t max_frame_bytes = 2048;
 // Whether this build generates tier-3 code: x86-64 Linux.
 bool supported();
 
-// The code of `function`'s entry 0 and of every entry that shares its code
-// (tier3_lower.hpp, entry_units), and the trampoline; every other entry is
-// `lazy`: its code, which is the code its entry reaches, is made by
-// generate_entry when a run first enters there. With `verify`, the register
+// The code of `function`'s entry 0 (tier3_lower.hpp, entry_units) and the
+// trampoline; every other entry is `lazy`: its code, which is the code its
+// entry reaches, is made by generate_entry when a run first enters there. With `verify`, the register
 // allocation is checked (mir::check), and a failure aborts the process with
 // the checker's report.
 Generated generate(const nvm::tier3::Function& function, bool verify);

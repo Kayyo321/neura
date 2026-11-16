@@ -144,12 +144,9 @@ struct Lowered {
 Lowered lower(const nvm::tier3::Function& function, const std::vector<std::uint32_t>& entries);
 
 // The entries of a function, in units each of whose code the allocator can
-// take: the allocator refuses a loop entered other than at its header, so an
-// entry into the middle of a loop (the resume block of a call in a loop, the
-// head of an inner loop) cannot share the code of the loop's other entries.
-// The first unit is entry 0 and every entry that can share its code without
-// adding phis to a loop (an entry at a loop head can not); every other entry
-// is a unit of its own.
+// take: every entry is a unit of its own (the first is entry 0), so that the
+// code of entry 0 knows the initialized flags of a fresh frame, and the
+// allocator takes no loop entered other than at its header.
 std::vector<std::vector<std::uint32_t>> entry_units(const nvm::tier3::Function& function);
 
 // How a Lift (or the compare of a CompareBranch) is compiled: where its

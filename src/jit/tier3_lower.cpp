@@ -26,6 +26,7 @@
 #include <functional>
 #include <map>
 #include <string>
+#include <tuple>
 #include <utility>
 
 namespace neura::jit::native {
@@ -568,6 +569,49 @@ private:
                 }
             }
         }
+        // The initialized flag of a slot that is not a parameter, at entry 0
+        // of a function program (the entry at image block 0), is 0: the
+        // callee's frame is fresh (push_frame initializes the parameters
+        // only), and the dispatcher refuses entry 0 when another slot is
+        // initialized (run_native_program). A slot the entry reads is the
+        // case above (that entry is refused).
+        if (f_.region != nullptr && f_.region->program) {
+            for (const auto e : entries_) {
+                if (e >= f_.region->entries.size() || f_.region->entries[e].block != 0) continue;
+                for (const auto id : f_.blocks[e].insts) {
+                    const auto& in = f_.insts[id];
+                    if (in.op == Op::EntryFlag && in.imm >= f_.region->parameter_count && !known_[id]) {
+                        known_[id] = 1;
+                        known_value_[id] = 0;
+                    }
+                }
+            }
+        }
+        // The flags the image proves at an entry's block (tier2.cpp,
+        // analyse_flags): a flag every frame there has as 0 or as 1 is known,
+        // and the entry flags of slots whose flags are equal in every frame
+        // are one value, which joins the flag phis of the slots a loop
+        // assigns together. A fact is a proof about the frames that arrive at
+        // the block, whichever way they got there.
+        if (f_.region != nullptr && f_.region->program) {
+            for (const auto e : entries_) {
+                if (e >= f_.region->entries.size()) continue;
+                const auto& facts = f_.region->entries[e].flags;
+                std::map<std::uint32_t, std::uint32_t> representative;
+                for (const auto id : f_.blocks[e].insts) {
+                    const auto& in = f_.insts[id];
+                    if (in.op != Op::EntryFlag || in.imm >= facts.size() || known_[id]) continue;
+                    const auto fact = facts[in.imm];
+                    if (fact == nvm::tier2::Region::flag_unknown) continue;
+                    if (fact <= 1) {
+                        known_[id] = 1;
+                        known_value_[id] = fact;
+                    } else if (const auto [it, first] = representative.try_emplace(fact, id); !first) {
+                        canon_[id] = it->second;
+                    }
+                }
+            }
+        }
         std::vector<std::uint32_t> phis;
         for (const auto b : order_) {
             for (const auto id : f_.blocks[b].insts) {
@@ -614,6 +658,74 @@ private:
                 known_[id] = 0;
                 known_value_[id] = 0;
             }
+        }
+        merge_congruent_phis(phis);
+    }
+
+    // Phis of one block that take congruent values on every edge of the unit
+    // are one value (the initialized flags of the slots a loop assigns, each
+    // 0 on entry and 1 after a write, are the usual ones). Congruence is the
+    // greatest one: phis of one block and type start in one class, a known
+    // value is in the class of its type and bits, and a class is split while
+    // its phis' inputs fall in different classes (Alpern, Wegman and Zadeck,
+    // partitioning to find equal values).
+    void merge_congruent_phis(const std::vector<std::uint32_t>& phis) {
+        std::vector<std::uint32_t> candidates;
+        for (const auto id : phis) {
+            if (!known_[id] && canon(id) == id) candidates.push_back(id);
+        }
+        if (candidates.size() < 2) return;
+        // Classes of the values that are not candidates, made on demand.
+        std::map<std::tuple<std::uint8_t, std::uint8_t, std::uint64_t>, std::uint32_t> known_class;
+        std::map<std::tuple<std::uint32_t, std::uint8_t, std::uint8_t>, std::uint32_t> phi_class;
+        std::map<std::uint32_t, std::uint32_t> other_class;
+        std::vector<std::uint32_t> cls(f_.insts.size(), t3::none);
+        std::uint32_t next = 0;
+        for (const auto id : candidates) {
+            const auto& type = f_.insts[id].type;
+            const auto key = std::make_tuple(block_of_[id], static_cast<std::uint8_t>(type.type), type.width);
+            const auto [it, fresh_class] = phi_class.try_emplace(key, next);
+            if (fresh_class) ++next;
+            cls[id] = it->second;
+        }
+        std::vector<std::uint8_t> is_candidate(f_.insts.size(), 0);
+        for (const auto id : candidates) is_candidate[id] = 1;
+        const auto class_of = [&](std::uint32_t input) {
+            const auto x = canon(input);
+            if (is_candidate[x]) return cls[x];
+            if (known_[x]) {
+                const auto& type = f_.insts[x].type;
+                const auto key = std::make_tuple(static_cast<std::uint8_t>(type.type), type.width, known_value_[x]);
+                const auto [it, fresh_class] = known_class.try_emplace(key, next);
+                if (fresh_class) ++next;
+                return it->second;
+            }
+            const auto [it, fresh_class] = other_class.try_emplace(x, next);
+            if (fresh_class) ++next;
+            return it->second;
+        };
+        std::size_t classes = phi_class.size();
+        for (;;) {
+            std::map<std::pair<std::uint32_t, std::vector<std::uint32_t>>, std::uint32_t> refined;
+            std::vector<std::uint32_t> assigned(candidates.size());
+            for (std::size_t k = 0; k < candidates.size(); ++k) {
+                const auto id = candidates[k];
+                const auto& in = f_.insts[id];
+                std::vector<std::uint32_t> signature;
+                for (const auto i : unit_preds_[block_of_[id]]) signature.push_back(class_of(f_.extras[in.extra + i]));
+                const auto [it, inserted] = refined.try_emplace({cls[id], std::move(signature)}, next);
+                if (inserted) ++next;
+                assigned[k] = it->second;
+            }
+            for (std::size_t k = 0; k < candidates.size(); ++k) cls[candidates[k]] = assigned[k];
+            // Classes only split: no split, no change.
+            if (refined.size() == classes) break;
+            classes = refined.size();
+        }
+        std::map<std::uint32_t, std::uint32_t> representative;
+        for (const auto id : candidates) {
+            const auto [it, first] = representative.try_emplace(cls[id], id);
+            if (!first) canon_[id] = it->second;
         }
     }
 
@@ -1706,10 +1818,44 @@ private:
         // call): a move into its home stores the canonical NaN in place of a
         // NaN (Lowered::canon_vreg), which keeps the value a NaN exactly
         // where the reference's is.
+        //
+        // The frame is read as it is only by reference code that runs after
+        // a WriteBack, at a Helper or a Call (an allocation's or append's
+        // slow path writes the frame back itself, in the cold code that
+        // canonicalizes in place, as every WriteBack does for a value in its
+        // home). A spill between the WriteBack and that instruction, which
+        // may hold other instructions, stores into the frame after the
+        // canonical write, and only a value live at the WriteBack or at the
+        // instruction (before or after it) can be spilled there. The other
+        // values' homes are canonicalized where the frame is written, so a
+        // move into one stores the bits as they are.
         out_.canon_vreg.assign(nv, 0);
+        std::vector<std::uint8_t> read_by_reference(nv, 0);
+        {
+            for (std::uint32_t b = 0; b < nb; ++b) {
+                const auto& block = fn.blocks[b];
+                auto here = live_out[b];
+                for (auto j = block.insts.size(); j > 0; --j) {
+                    const auto& inst = block.insts[j - 1];
+                    const auto after = here;
+                    for (const auto& d : inst.defs) clear(here, d.vreg.id);
+                    for (const auto& u : inst.uses) set(here, u.vreg.id);
+                    for (const auto& u : inst.state_uses) set(here, u.vreg.id);
+                    const auto kind = out_.steps[inst.opcode].kind;
+                    if (kind != Kind::WriteBack && kind != Kind::Helper && kind != Kind::Call) continue;
+                    for (std::size_t w = 0; w < words; ++w) {
+                        for (auto bits = here[w] | after[w]; bits != 0; bits &= bits - 1) {
+                            read_by_reference[64 * w + static_cast<unsigned>(__builtin_ctzll(bits))] = 1;
+                        }
+                    }
+                }
+            }
+        }
         for (std::uint32_t v = 0; v < nv; ++v) {
             const auto x = value_of_[v];
-            if (fn.classes[v] == mir::RegClass::Xmm && x < f_.frame_canon.size()) out_.canon_vreg[v] = f_.frame_canon[x];
+            if (fn.classes[v] == mir::RegClass::Xmm && x < f_.frame_canon.size() && read_by_reference[v]) {
+                out_.canon_vreg[v] = f_.frame_canon[x];
+            }
         }
         std::vector<std::vector<std::uint8_t>> allowed(nv);
         for (std::uint32_t v = 0; v < nv; ++v) {
@@ -2066,84 +2212,6 @@ Lowered lower(const nvm::tier3::Function& function, const std::vector<std::uint3
     return Lowering(function, entries).run();
 }
 
-namespace {
-
-// Whether every loop of the code the IR entries `roots` reach is entered
-// only at its header: every retreating edge of a depth-first search from the
-// roots goes to a block that dominates its source, with the roots children
-// of one virtual root. It is the allocator's rule (regalloc.cpp,
-// analyze_cfg), which edge splitting does not change.
-bool reducible(const t3::Function& f, const std::vector<std::uint32_t>& roots) {
-    const auto nb = static_cast<std::uint32_t>(f.blocks.size());
-    const auto root = nb;
-    std::vector<std::uint8_t> state(nb, 0);
-    std::vector<std::uint32_t> post;
-    std::vector<std::pair<std::uint32_t, std::uint32_t>> back;
-    for (const auto r : roots) {
-        if (state[r] != 0) continue;
-        std::vector<std::pair<std::uint32_t, std::size_t>> stack{{r, 0}};
-        state[r] = 1;
-        while (!stack.empty()) {
-            auto& [b, next] = stack.back();
-            const auto& succs = f.blocks[b].succs;
-            if (next < succs.size()) {
-                const auto s = succs[next++];
-                if (state[s] == 0) {
-                    state[s] = 1;
-                    stack.emplace_back(s, 0);
-                } else if (state[s] == 1) {
-                    back.emplace_back(b, s);
-                }
-                continue;
-            }
-            state[b] = 2;
-            post.push_back(b);
-            stack.pop_back();
-        }
-    }
-    // Dominators (Cooper, Harvey and Kennedy) under the virtual root.
-    std::vector<std::uint32_t> number(nb + 1, 0);
-    for (std::size_t i = 0; i < post.size(); ++i) number[post[i]] = static_cast<std::uint32_t>(post.size() - i);
-    std::vector<std::uint32_t> idom(nb + 1, t3::none);
-    idom[root] = root;
-    std::vector<std::uint8_t> is_root(nb, 0);
-    for (const auto r : roots) {
-        idom[r] = root;
-        is_root[r] = 1;
-    }
-    const auto intersect = [&](std::uint32_t a, std::uint32_t b) {
-        while (a != b) {
-            while (number[a] > number[b]) a = idom[a];
-            while (number[b] > number[a]) b = idom[b];
-        }
-        return a;
-    };
-    for (bool changed = true; changed;) {
-        changed = false;
-        for (auto it = post.rbegin(); it != post.rend(); ++it) {
-            const auto b = *it;
-            if (is_root[b]) continue;
-            std::uint32_t next = t3::none;
-            for (const auto p : f.blocks[b].preds) {
-                if (state[p] != 2 || idom[p] == t3::none) continue;
-                next = next == t3::none ? p : intersect(p, next);
-            }
-            if (next != idom[b]) {
-                idom[b] = next;
-                changed = true;
-            }
-        }
-    }
-    for (const auto& [source, target] : back) {
-        auto b = source;
-        while (b != target && b != root) b = idom[b];
-        if (b != target) return false;
-    }
-    return true;
-}
-
-} // namespace
-
 std::vector<std::vector<std::uint32_t>> entry_units(const nvm::tier3::Function& function) {
     const auto count = static_cast<std::uint32_t>(function.entries.size());
     if (count == 0) refuse("a function without entries");
@@ -2152,23 +2220,16 @@ std::vector<std::vector<std::uint32_t>> entry_units(const nvm::tier3::Function& 
             refuse("an entry block without one successor");
         }
     }
-    // Entry 0's unit takes every entry whose code it can share: not an entry
-    // at a loop head (in the unit of the code before the loop, the loop
-    // head's phis would join every value with the entry's load and be live
-    // through the loop), and not one that makes the code irreducible (an
-    // entry inside a loop). Each other entry is a unit of its own.
-    std::vector<std::uint32_t> roots(count);
-    for (std::uint32_t e = 0; e < count; ++e) roots[e] = e;
-    const auto cfg = analyze(function, roots);
-    std::vector<std::vector<std::uint32_t>> units{{0}};
-    for (std::uint32_t e = 1; e < count; ++e) {
-        if (cfg.loops.count(function.blocks[e].succs[0]) == 0) {
-            units[0].push_back(e);
-            if (reducible(function, units[0])) continue;
-            units[0].pop_back();
-        }
-        units.push_back({e});
-    }
+    // Entry 0 is a unit of its own, and so is every other entry: a function
+    // starts at entry 0 with a frame that holds its parameters only, so the
+    // initialized flag of every other slot is known there (simplify_phis),
+    // which a join with an entry's frame, whose flags are the run's, would
+    // lose for every value the code assigns (an entry at a loop head would
+    // also add phis that are live through the loop, and an entry inside a
+    // loop makes the code irreducible). The other entries' code is made when
+    // a run first enters there.
+    std::vector<std::vector<std::uint32_t>> units;
+    for (std::uint32_t e = 0; e < count; ++e) units.push_back({e});
     return units;
 }
 

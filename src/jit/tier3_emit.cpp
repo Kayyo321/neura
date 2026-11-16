@@ -2502,6 +2502,27 @@ Generated generate_units(const nvm::tier3::Function& function, const std::vector
                 result.failure = std::string("the register allocator: ") + error.what();
                 return result;
             }
+            if (std::getenv("NEURA_TIER3_ALLOC_TRACE")) {
+                static const char* const kind_names[] = {
+                    "Const", "RunConst", "EntryLoad", "EntryFlag", "CounterAdd", "Lift", "Mask", "Gather", "Budget",
+                    "SwitchCheck", "Guard", "StateCall", "CheckReference", "WriteBack", "Helper", "Call", "Return",
+                    "Leave", "Deopt", "Branch", "CompareBranch", "Switch", "Dispatch", "Lookup", "CheckNotNil",
+                    "CheckKind", "CheckInit", "CheckIndex", "CheckGlobalInit", "TestKind", "LoadTag", "LoadField",
+                    "LoadLength", "LoadData", "LoadStorage", "LoadElement", "LoadVersion", "LoadGlobal", "Select",
+                    "StoreField", "StoreElement", "StoreGlobal", "Widen", "AllocObject", "Append", "Convert",
+                    "KernelLoad", "KernelAdd", "Canon", "Sqrt", "Abs"};
+                static_assert(std::size(kind_names) == static_cast<std::size_t>(Kind::Abs) + 1,
+                              "one name for every step kind");
+                const auto text = mir::describe(lowered.function, allocation, [&](std::uint32_t op) {
+                    const auto& step = lowered.steps[op];
+                    auto name = std::string(kind_names[static_cast<unsigned>(step.kind)]);
+                    if (step.kind == Kind::Lift) name += "#" + std::to_string(step.inst);
+                    return name;
+                });
+                std::fprintf(stderr, "tier 3 allocation of function %u, unit entries:", function.function);
+                for (const auto e : unit) std::fprintf(stderr, " %u", e);
+                std::fprintf(stderr, "\n%s", text.c_str());
+            }
             if (verify) {
                 const auto problems = mir::check(lowered.function, allocation);
                 if (!problems.empty()) {

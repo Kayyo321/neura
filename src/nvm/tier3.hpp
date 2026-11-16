@@ -386,8 +386,7 @@ struct Context;
 // Without code the IR interpreter runs the IR.
 struct Program {
     Function ir;
-    // The code of entry 0 and the entries that share it, read-only and
-    // executable; null without code.
+    // The code of entry 0, read-only and executable; null without code.
     std::unique_ptr<jit::Program> machine;
     // The offset in `machine` of each IR entry's code (Function::entries),
     // or jit::native::lazy for an entry whose code is made when a run first

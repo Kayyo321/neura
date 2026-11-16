@@ -214,7 +214,15 @@ struct Region {
         // Slots read before any write on some path from this entry: they
         // must be initialized when the program is entered here.
         std::vector<std::uint32_t> reads;
+        // By slot, what every frame that arrives at this block has of the
+        // slot's initialized flag (Builder::analyse_flags): 0 or 1 when the
+        // flag is that on every path from block 0, a number above 1 shared by
+        // the slots whose flags are equal on every path, and `flag_unknown`
+        // when no such fact is proven (including every slot when the
+        // analysis gives up). Empty for a region that is not a program.
+        std::vector<std::uint32_t> flags;
     };
+    static constexpr std::uint32_t flag_unknown = 0xFFFFFFFFU;
     // Ascending by block.
     std::vector<Entry> entries;
     // The label of every block (by image block).

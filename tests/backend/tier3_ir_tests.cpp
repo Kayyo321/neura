@@ -478,7 +478,7 @@ nvm::tier2::Region overwritten_slot_program(const nvr::Image& image) {
     region.slot_widths = {64, 32, 32, 64};
     region.register_count = 6;
     region.immediates = {{4, 7}, {5, 255}};
-    region.entries = {{1, 0, {1}}};
+    region.entries = {{1, 0, {1}, {}}};
     region.block_labels = {100, 0, 4, 7};
     region.checkpoints = {{1, 3, 0}};
     region.exits = {&image.functions[0].blocks[1].exits[0]};
@@ -735,7 +735,7 @@ NEURA_TEST(tier3, a_leave_is_preceded_by_a_write_back_of_the_frame_it_leaves) {
     region.slot_widths = {64, 32, 32};
     region.register_count = 4;
     region.immediates = {{3, 5}};
-    region.entries = {{0, 0, {}}};
+    region.entries = {{0, 0, {}, {}}};
     region.block_labels = {0, 3};
     region.checkpoints = {{0, 1, 0}};
     const auto op = [](nvm::tier2::Code code) {

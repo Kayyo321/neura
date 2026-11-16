@@ -665,6 +665,7 @@ public:
         if (program_) {
             find_entries();
             analyse_entries();
+            analyse_flags();
         } else {
             analyse_assignments();
         }
@@ -800,7 +801,7 @@ private:
             }
         }
         for (std::uint32_t local = 0; local < n; ++local) {
-            if (entry[local] || head[local]) region_.entries.push_back({blocks_[local], 0, {}});
+            if (entry[local] || head[local]) region_.entries.push_back({blocks_[local], 0, {}, {}});
         }
     }
 
@@ -866,6 +867,119 @@ private:
             }
             for (std::uint32_t slot = 0; slot < count; ++slot) {
                 if (early[slot]) entry.reads.push_back(slot);
+            }
+        }
+    }
+
+    // The initialized flags of the slots at the start of each entry's block,
+    // proven over every path of the function from block 0 (Region::Entry::flags).
+    // The flags a frame has at a block are the slots some exit on the way
+    // assigned (an assignment, and the result slot of a call or a state
+    // operation, which is written before the resume block runs) and the
+    // parameters, which a call initializes. The analysis collects the set of
+    // flag vectors that can reach each block, to a fixed point over every exit
+    // of every block, whether or not a program can take it, so that the
+    // frame of an interpreter that arrives at an entry, however it got
+    // there, has one of them. A slot that a host request or a scheduler
+    // operation writes, its result or error slot or an assignment of its exit
+    // (they may be written later, or on one of two paths), has no fact; an
+    // entry's block that more than `max_flag_vectors` vectors reach has none.
+    void analyse_flags() {
+        constexpr std::size_t max_flag_vectors = 256;
+        const auto count = function_.frame_types.size();
+        const auto n = function_.blocks.size();
+        const auto words = (count + 63) / 64;
+        using Vector = std::vector<std::uint64_t>;
+        const auto set = [](Vector& v, std::uint32_t slot) { v[slot / 64] |= std::uint64_t{1} << (slot % 64); };
+        const auto has = [](const Vector& v, std::size_t slot) { return ((v[slot / 64] >> (slot % 64)) & 1U) != 0; };
+        const auto done = [&] {
+            for (auto& entry : region_.entries) entry.flags.assign(count, Region::flag_unknown);
+        };
+        done();
+        if (count == 0 || n == 0 || function_.parameter_count > count) return;
+        Vector odd(words, 0);
+        for (const auto& b : function_.blocks) {
+            for (const auto& exit : b.exits) {
+                if (exit.kind != nvr::ExitKind::Host && exit.kind != nvr::ExitKind::Scheduler) continue;
+                for (const auto& assignment : exit.assignments) {
+                    if (assignment.slot < count) set(odd, assignment.slot);
+                }
+                if (exit.result_slot < count) set(odd, exit.result_slot);
+                if (exit.error_slot < count) set(odd, exit.error_slot);
+            }
+        }
+        std::vector<std::vector<Vector>> reaching(n);
+        std::vector<std::uint32_t> work;
+        std::vector<std::uint8_t> queued(n, 0);
+        bool overflow = false;
+        const auto add = [&](std::uint32_t target, const Vector& v) {
+            if (target >= n) {
+                overflow = true;
+                return;
+            }
+            auto& vectors = reaching[target];
+            for (const auto& known : vectors) {
+                bool same = true;
+                for (std::size_t w = 0; w < words && same; ++w) same = known[w] == v[w];
+                if (same) return;
+            }
+            if (vectors.size() >= max_flag_vectors) {
+                overflow = true;
+                return;
+            }
+            vectors.push_back(v);
+            if (!queued[target]) {
+                queued[target] = 1;
+                work.push_back(target);
+            }
+        };
+        Vector start(words, 0);
+        for (std::uint32_t slot = 0; slot < function_.parameter_count; ++slot) set(start, slot);
+        add(0, start);
+        while (!work.empty() && !overflow) {
+            const auto b = work.back();
+            work.pop_back();
+            queued[b] = 0;
+            const auto vectors = reaching[b];
+            for (const auto& exit : function_.blocks[b].exits) {
+                if (exit.kind == nvr::ExitKind::Return || exit.kind == nvr::ExitKind::Trap ||
+                    exit.kind == nvr::ExitKind::MessageTrap) {
+                    continue;
+                }
+                for (auto v : vectors) {
+                    for (const auto& assignment : exit.assignments) {
+                        if (assignment.slot < count) set(v, assignment.slot);
+                    }
+                    if ((exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::State) &&
+                        exit.result_slot < count) {
+                        set(v, exit.result_slot);
+                    }
+                    add(exit.resume, v);
+                    if (exit.kind == nvr::ExitKind::Host) add(exit.error_resume, v);
+                }
+            }
+        }
+        if (overflow) return;
+        for (auto& entry : region_.entries) {
+            const auto& vectors = reaching[entry.block];
+            if (vectors.empty()) continue;
+            std::vector<std::uint32_t> representatives;  // the first slot of each class
+            for (std::uint32_t slot = 0; slot < count; ++slot) {
+                if (has(odd, slot)) continue;
+                std::size_t ones = 0;
+                for (const auto& v : vectors) ones += has(v, slot) ? 1 : 0;
+                if (ones == 0 || ones == vectors.size()) {
+                    entry.flags[slot] = ones == 0 ? 0U : 1U;
+                    continue;
+                }
+                std::size_t k = 0;
+                for (; k < representatives.size(); ++k) {
+                    bool same = true;
+                    for (const auto& v : vectors) same = same && has(v, slot) == has(v, representatives[k]);
+                    if (same) break;
+                }
+                if (k == representatives.size()) representatives.push_back(slot);
+                entry.flags[slot] = static_cast<std::uint32_t>(k) + 2;
             }
         }
     }
@@ -1588,6 +1702,18 @@ std::string describe(const Region& region) {
             out << " )";
         }
         out << "\n";
+        for (const auto& entry : region.entries) {
+            if (entry.flags.empty()) continue;
+            out << "  flags b" << entry.block << ":";
+            std::map<std::uint32_t, std::string> by_fact;
+            for (std::uint32_t s = 0; s < entry.flags.size(); ++s) {
+                if (entry.flags[s] != Region::flag_unknown) by_fact[entry.flags[s]] += " s" + std::to_string(s);
+            }
+            for (const auto& [fact, slots] : by_fact) {
+                out << (fact == 0 ? " zero(" : fact == 1 ? " one(" : " same(") << slots << " )";
+            }
+            out << "\n";
+        }
     }
     out << "region function " << region.function << " entry " << region.entry << ": " << region.blocks.size()
         << " blocks, " << region.slots.size() << " slot registers, " << region.register_count << " registers\n";

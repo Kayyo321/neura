@@ -3,6 +3,8 @@
 #include "jit/mir.hpp"
 
 #include <cstdint>
+#include <functional>
+#include <string>
 #include <stdexcept>
 #include <vector>
 
@@ -39,6 +41,13 @@ struct AllocationError : std::runtime_error {
 // constraint that cannot hold) or when one instruction needs more registers
 // at once than its class has.
 Allocation allocate(const Function& function);
+
+// A text listing of `function` with its allocation: per block the phis and
+// their locations at entry, each instruction with the locations of its uses
+// and defs and the moves around it, and the moves on each edge. `name` names
+// an instruction's opcode. For NEURA_TIER3_ALLOC_TRACE.
+std::string describe(const Function& function, const Allocation& allocation,
+                     const std::function<std::string(std::uint32_t)>& name);
 
 // Puts a parallel move in an order that runs one move after another: every
 // move of `moves` reads its source before any writes its destination. The
