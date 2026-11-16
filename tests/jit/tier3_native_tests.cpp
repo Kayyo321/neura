@@ -5,8 +5,10 @@
 // bits above it, and a constant second operand, on boundary values, against
 // lift::evaluate: the same result, or a deoptimization exactly where
 // evaluate's check fails; the forms whose check the passes removed, where
-// evaluate does not fail. Also the Budget's comparison, and code that is the
-// same for the same IR. Part of the `jit` suite (backend-jit); it runs where
+// evaluate does not fail. Floats computed with the hardware's NaN read as the
+// reference's bits wherever their bits are read, and float comparisons that
+// branch. Also the Budget's comparison, and code that is the same for the
+// same IR. Part of the `jit` suite (backend-jit); it runs where
 // tier 3 has a code generator (x86-64 Linux).
 #include "backend/fixtures.hpp"
 
@@ -18,6 +20,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cmath>
 #include <initializer_list>
 #include <cstring>
 #include <map>
@@ -592,6 +595,231 @@ NEURA_TEST(jit, tier_3_float_operations_match_evaluate_bit_for_bit) {
                 in.is_signed = is_signed;
                 in.to_format = format;
                 sweep(in, {}, tally, "float from integer " + std::to_string(w));
+            }
+        }
+    }
+    check(tally.failures == 0, std::to_string(tally.failures) + " of " + std::to_string(tally.cases) +
+                                   " cases differ; the first: " + tally.first);
+}
+
+// A binary32 or binary64 sum of two slots computed with the hardware's NaN
+// (Deferred, after tier3::place_canons), read by an integer operation on its
+// bits (a shift: to_bits), by abs (a BitAnd with the magnitude mask), by a
+// write of the frame, and through a negation; and a square root. Each result
+// written back must be the reference's bits: lift::evaluate on the canonical
+// sum, and the correctly rounded root with the canonical NaN.
+NEURA_TEST(jit, tier_3_deferred_floats_are_canonical_wherever_their_bits_are_read) {
+    if (!native_runs()) return;
+    enum class Use { Bits, Abs, Frame, Negate, Root };
+    Tally tally;
+    const std::vector<std::uint64_t> doubles{0,
+                                             0x8000000000000000ULL,
+                                             0x3FF0000000000000ULL,
+                                             0xC000000000000000ULL,
+                                             0x7FF0000000000000ULL,
+                                             0xFFF0000000000000ULL,
+                                             0x7FF8000000000000ULL,
+                                             0xFFF8000000000001ULL,
+                                             0x7FF0000000000001ULL,
+                                             0xFFFFFFFFFFFFFFFFULL,
+                                             0x0000000000000001ULL,
+                                             0x000FFFFFFFFFFFFFULL};
+    const std::vector<std::uint64_t> singles{0,          0x80000000, 0x3F800000, 0xC0000000, 0x7F800000, 0xFF800000,
+                                             0x7FC00000, 0xFFC00001, 0x7F800001, 0xFFFFFFFF, 0x00000001, 0x007FFFFF};
+    for (const auto format : {lift::FloatType::Binary32, lift::FloatType::Binary64}) {
+        const bool dbl = format == lift::FloatType::Binary64;
+        const unsigned width = dbl ? 64 : 32;
+        const t3::ValueType type{dbl ? t3::Type::F64 : t3::Type::F32, static_cast<std::uint8_t>(width)};
+        const auto& values = dbl ? doubles : singles;
+        for (const auto use : {Use::Bits, Use::Abs, Use::Frame, Use::Negate, Use::Root}) {
+            if (use == Use::Root && !dbl) continue;
+            Builder b(3);
+            b.f.slot_types.assign(3, type);
+            const auto x = b.value(0, t3::Op::EntryLoad, width, 0);
+            const auto y = b.value(0, t3::Op::EntryLoad, width, 1);
+            b.f.insts[x].type = b.f.insts[y].type = type;
+            const auto c = b.value(0, t3::Op::EntryCounter, 64, 0);
+            t3::Inst jump;
+            jump.op = t3::Op::Jump;
+            b.add(0, jump);
+            lift::Instruction add;
+            add.op = Opcode::FloatAdd;
+            add.width = static_cast<std::uint8_t>(width);
+            add.format = format;
+            t3::Inst sum;
+            sum.op = t3::Op::Lift;
+            sum.lifted = add;
+            sum.type = type;
+            sum.operands[0] = x;
+            sum.operands[1] = y;
+            const auto s = b.add(1, sum);
+            lift::Instruction read;
+            read.width = static_cast<std::uint8_t>(width);
+            t3::Inst result;
+            result.op = t3::Op::Lift;
+            result.operands[0] = s;
+            switch (use) {
+            case Use::Bits:
+                read.op = Opcode::ShiftRight;
+                result.operands[1] = b.value(1, t3::Op::Const, 1, 1);
+                result.type = {t3::Type::Int, static_cast<std::uint8_t>(width)};
+                break;
+            case Use::Abs:
+                read.op = Opcode::BitAnd;
+                result.operands[1] = b.value(1, t3::Op::Const, width - 1, dbl ? 0x7FFFFFFFFFFFFFFFULL : 0x7FFFFFFFULL);
+                result.type = {t3::Type::Int, static_cast<std::uint8_t>(width)};
+                break;
+            case Use::Negate:
+                read.op = Opcode::FloatNegate;
+                read.format = format;
+                result.type = type;
+                break;
+            case Use::Root:
+                result.op = t3::Op::Sqrt;
+                result.operands[0] = x;
+                result.type = type;
+                break;
+            case Use::Frame: break;
+            }
+            result.lifted = read;
+            const auto r = use == Use::Frame ? s : b.add(1, result);
+            const auto c1 = b.value(1, t3::Op::CounterAdd, 64, 1, c);
+            const auto commit = b.state(c1, 3);
+            b.f.states[commit].slots[2] = {t3::StateSlot::Kind::Value, r};
+            b.f.states[commit].flags[2] = {t3::StateFlag::Kind::One, 0};
+            t3::Inst back;
+            back.op = t3::Op::WriteBack;
+            back.flags = t3::Effect;
+            back.state = commit;
+            b.add(1, back);
+            t3::Inst leave;
+            leave.op = t3::Op::Leave;
+            leave.operands[0] = c1;
+            leave.imm = 9;
+            b.add(1, leave);
+            const nvr::Image image;
+            t3::place_canons(image, b.f, false);
+            const auto compiled = compile(std::move(b.f));
+            check(compiled.program != nullptr, "the function compiles: " + compiled.failure);
+            if (!compiled.program) continue;
+            for (const auto a : values) {
+                for (const auto other : values) {
+                    bool failed = false;
+                    const auto canonical = lift::evaluate(add, a, other, failed);
+                    std::uint64_t expected = canonical;
+                    switch (use) {
+                    case Use::Bits: expected = canonical >> 1; break;
+                    case Use::Abs: expected = canonical & (dbl ? 0x7FFFFFFFFFFFFFFFULL : 0x7FFFFFFFULL); break;
+                    case Use::Negate: expected = lift::evaluate(read, canonical, 0, failed); break;
+                    case Use::Root: {
+                        double v = 0;
+                        std::memcpy(&v, &a, 8);
+                        const double root = std::sqrt(v);
+                        std::memcpy(&expected, &root, 8);
+                        expected = t3::canonical_nan(expected, 64);
+                        break;
+                    }
+                    case Use::Frame: break;
+                    }
+                    const auto fake = run(*compiled.program, {a, other, 0x77});
+                    ++tally.cases;
+                    if (fake.left_at != 9 || fake.slots[2] != expected) {
+                        if (tally.failures == 0) {
+                            tally.first = "use " + std::to_string(static_cast<int>(use)) + " width " +
+                                          std::to_string(width) + " a=" + std::to_string(a) +
+                                          " b=" + std::to_string(other) + ": result " + std::to_string(fake.slots[2]) +
+                                          ", expected " + std::to_string(expected);
+                        }
+                        ++tally.failures;
+                    }
+                }
+            }
+        }
+    }
+    check(tally.failures == 0, std::to_string(tally.failures) + " of " + std::to_string(tally.cases) +
+                                   " cases differ; the first: " + tally.first);
+}
+
+// A float comparison of two slots that a branch reads: fused into ucomis and
+// a conditional jump, where an unordered pair (a NaN) is false for every
+// comparison but NotEqual. Each branch writes its own value to slot 2.
+NEURA_TEST(jit, tier_3_float_comparisons_that_branch_take_the_reference_edge) {
+    if (!native_runs()) return;
+    Tally tally;
+    const std::vector<std::uint64_t> doubles{0, 0x8000000000000000ULL, 0x3FF0000000000000ULL, 0xBFF0000000000000ULL,
+                                             0x7FF0000000000000ULL, 0x7FF8000000000000ULL, 0xFFF8000000000001ULL,
+                                             0x7FF0000000000001ULL};
+    const std::vector<std::uint64_t> singles{0, 0x80000000, 0x3F800000, 0xBF800000, 0x7F800000, 0x7FC00000, 0xFFC00001,
+                                             0x7F800001};
+    for (const auto format : {lift::FloatType::Binary32, lift::FloatType::Binary64}) {
+        const bool dbl = format == lift::FloatType::Binary64;
+        const unsigned width = dbl ? 64 : 32;
+        const t3::ValueType type{dbl ? t3::Type::F64 : t3::Type::F32, static_cast<std::uint8_t>(width)};
+        for (const auto op : {Opcode::FloatEqual, Opcode::FloatNotEqual, Opcode::FloatLess, Opcode::FloatLessEqual,
+                              Opcode::FloatGreater, Opcode::FloatGreaterEqual}) {
+            Builder b(3);
+            b.f.slot_types.assign(3, type);
+            const auto x = b.value(0, t3::Op::EntryLoad, width, 0);
+            const auto y = b.value(0, t3::Op::EntryLoad, width, 1);
+            b.f.insts[x].type = b.f.insts[y].type = type;
+            const auto c = b.value(0, t3::Op::EntryCounter, 64, 0);
+            t3::Inst jump;
+            jump.op = t3::Op::Jump;
+            b.add(0, jump);
+            lift::Instruction compare;
+            compare.op = op;
+            compare.width = 1;
+            compare.format = format;
+            t3::Inst condition;
+            condition.op = t3::Op::Lift;
+            condition.lifted = compare;
+            condition.type = {t3::Type::Int, 1};
+            condition.operands[0] = x;
+            condition.operands[1] = y;
+            const auto holds = b.add(1, condition);
+            t3::Inst branch;
+            branch.op = t3::Op::Branch;
+            branch.operands[0] = holds;
+            b.add(1, branch);
+            b.f.blocks.resize(4);
+            b.f.blocks[1].succs = {2, 3};
+            for (std::uint32_t k = 2; k < 4; ++k) {
+                b.f.blocks[k].preds = {1};
+                const auto value = b.value(k, t3::Op::Const, 2, k);
+                const auto c1 = b.value(k, t3::Op::CounterAdd, 64, 1, c);
+                const auto commit = b.state(c1, 3);
+                b.f.states[commit].slots[2] = {t3::StateSlot::Kind::Value, value};
+                b.f.states[commit].flags[2] = {t3::StateFlag::Kind::One, 0};
+                t3::Inst back;
+                back.op = t3::Op::WriteBack;
+                back.flags = t3::Effect;
+                back.state = commit;
+                b.add(k, back);
+                t3::Inst leave;
+                leave.op = t3::Op::Leave;
+                leave.operands[0] = c1;
+                leave.imm = 9;
+                b.add(k, leave);
+            }
+            const auto compiled = compile(std::move(b.f));
+            check(compiled.program != nullptr, "the function compiles: " + compiled.failure);
+            if (!compiled.program) continue;
+            const auto& values = dbl ? doubles : singles;
+            for (const auto a : values) {
+                for (const auto other : values) {
+                    bool failed = false;
+                    const auto expected = lift::evaluate(compare, a, other, failed) != 0 ? 2U : 3U;
+                    const auto fake = run(*compiled.program, {a, other, 0x77});
+                    ++tally.cases;
+                    if (fake.left_at != 9 || fake.slots[2] != expected) {
+                        if (tally.failures == 0) {
+                            tally.first = "compare " + std::to_string(static_cast<int>(op)) + " width " +
+                                          std::to_string(width) + " a=" + std::to_string(a) + " b=" +
+                                          std::to_string(other) + ": branch " + std::to_string(fake.slots[2]);
+                        }
+                        ++tally.failures;
+                    }
+                }
             }
         }
     }

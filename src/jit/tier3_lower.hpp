@@ -74,6 +74,14 @@ enum class Kind : std::uint8_t {
     // `arguments` helper arguments, then the write-back's values.
     AllocObject,     // defs[0] = a new object of imm fields (layout: the exit's immediate)
     Append,          // the list entry uses[0] gets uses[1]; `checked`: the value may not fit the storage
+    // Floats (design 7). A float value of binary32 or binary64 lives in an
+    // XMM register (binary32 in the low 32 bits, bits 32 to 63 zero).
+    Convert,         // defs[0] = uses[0] moved to the other register file (`width` 32: the low 32 bits)
+    KernelLoad,      // defs[0] = the context's K
+    KernelAdd,       // defs[0] = uses[0] + imm (K, in a function with inline kernels)
+    Canon,           // defs[0] = uses[0] with a NaN of `width` bits replaced by the canonical NaN
+    Sqrt,            // defs[0] = the binary64 square root of uses[0]; canonical unless `checked` is false
+    Abs,             // defs[0] = uses[0] with the sign bit of `width` bits cleared
 };
 
 struct Step {
@@ -125,6 +133,10 @@ struct Lowered {
     std::vector<std::uint32_t> entry_blocks;
     // The largest argument array of a helper call, in words.
     std::uint32_t argument_words = 0;
+    // By virtual register: 32 or 64 for a deferred float value (Function::
+    // frame_canon), which a move into its frame slot stores with the
+    // canonical NaN of that format in place of a NaN; 0 otherwise.
+    std::vector<std::uint8_t> canon_vreg;
 };
 
 // The code of one unit: the blocks the IR entries `entries` reach, entered
@@ -155,6 +167,13 @@ struct LiftShape {
     Use a = Use::Register;
     Use b = Use::None;
     Def def = Def::Register;
+    // The register file of the operands and the result: an XMM register for
+    // a float of binary32 or binary64 (section 7.1), else a general one.
+    bool a_xmm = false;
+    bool b_xmm = false;
+    bool def_xmm = false;
+    // b may be in memory (a stack or frame slot) instead of a register.
+    bool b_memory = false;
     std::uint8_t temps = 0;
     std::uint8_t xmm_temps = 0;
     std::uint64_t clobbers = 0;

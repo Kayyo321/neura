@@ -339,6 +339,13 @@ void compact(Function& f) {
     for (auto& block : f.blocks) {
         for (auto& id : block.insts) id = renumber[id];
     }
+    if (!f.frame_canon.empty()) {
+        std::vector<std::uint8_t> canon(insts.size(), 0);
+        for (std::uint32_t id = 0; id < n && id < f.frame_canon.size(); ++id) {
+            if (renumber[id] != none) canon[renumber[id]] = f.frame_canon[id];
+        }
+        f.frame_canon = std::move(canon);
+    }
     f.insts = std::move(insts);
     f.states = std::move(states);
     f.extras = std::move(extras);

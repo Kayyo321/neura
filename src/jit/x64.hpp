@@ -221,6 +221,8 @@ public:
     void movs(Prec prec, Xmm to, Xmm from);
     void movs(Prec prec, Xmm to, const Mem& from);
     void movs(Prec prec, const Mem& to, Xmm from);
+    // A register move of all 128 bits (no dependency on the destination).
+    void movaps(Xmm to, Xmm from);
     // addsd, subsd, mulsd, divsd, sqrtsd and the ss forms.
     void arith(Fp op, Prec prec, Xmm to, const XmmRm& from);
     void ucomis(Prec prec, Xmm a, const XmmRm& b);

@@ -20,6 +20,7 @@
 #include "jit/tier3_lower.hpp"
 
 #include "lift/evaluate.hpp"
+#include "nvm/tier3_passes.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -60,6 +61,18 @@ bool is_compare(Opcode op) {
     case Opcode::LessEqual:
     case Opcode::Greater:
     case Opcode::GreaterEqual: return true;
+    default: return false;
+    }
+}
+
+bool is_float_compare(Opcode op) {
+    switch (op) {
+    case Opcode::FloatEqual:
+    case Opcode::FloatNotEqual:
+    case Opcode::FloatLess:
+    case Opcode::FloatLessEqual:
+    case Opcode::FloatGreater:
+    case Opcode::FloatGreaterEqual: return true;
     default: return false;
     }
 }
@@ -131,9 +144,6 @@ public:
 
     Lowered run() {
         if (f_.blocks.empty() || f_.entries.empty()) refuse("a function without entries");
-        for (const auto& state : f_.states) {
-            if (state.kernel_steps != t3::none) refuse("inline kernel steps");
-        }
         count_uses();
         find_counters();
         layout();
@@ -144,12 +154,23 @@ public:
         // The constants phis take on edges, made at the end of the edge's
         // predecessor so that they live only across the edge.
         for (std::uint32_t m = 0; m < edge_constants_.size(); ++m) {
-            for (const auto& [v, bits] : edge_constants_[m]) {
+            for (const auto& constant : edge_constants_[m]) {
                 Step step;
                 step.kind = Kind::Const;
-                step.imm = bits;
+                step.imm = constant.bits;
                 current_ = m;
-                emit(std::move(step)).defs.push_back(reg({v, mir::RegClass::Gpr}));
+                emit(std::move(step)).defs.push_back(reg({constant.vreg, constant.cls}));
+            }
+        }
+        for (std::uint32_t m = 0; m < edge_converts_.size(); ++m) {
+            for (const auto& convert : edge_converts_[m]) {
+                Step step;
+                step.kind = Kind::Convert;
+                step.width = convert.width;
+                current_ = m;
+                auto& inst = emit(std::move(step));
+                inst.uses.push_back(reg(convert.from));
+                inst.defs.push_back(reg(convert.to));
             }
         }
         for (std::uint32_t m = 0; m < edge_flags_.size(); ++m) {
@@ -220,12 +241,13 @@ private:
     }
 
     // The slot and flag values a frame state names, at every level of its
-    // chain: a deoptimization materializes the inlined frames too.
+    // chain (a deoptimization materializes the inlined frames too), and K.
     template <typename F>
     void for_each_state_value(std::uint32_t s, F&& f) const {
         for (std::uint32_t depth = 0; s != t3::none; s = f_.states[s].caller) {
             if (s >= f_.states.size() || ++depth > 64) refuse("a frame state chain that does not end");
             const auto& state = f_.states[s];
+            if (state.kernel_steps != t3::none) f(state.kernel_steps);
             for (const auto& slot : state.slots) {
                 if (slot.kind == t3::StateSlot::Kind::Value) f(static_cast<std::uint32_t>(slot.value));
             }
@@ -274,48 +296,50 @@ private:
 
     // ---- the counter C ----------------------------------------------------
 
+    // The values of C: EntryCounter 0, the CounterAdds of C and the phis of
+    // them (a greatest fixed point: every candidate stays unless one of its
+    // inputs is not one). K (EntryCounter 1 and its CounterAdds) is an
+    // ordinary value.
     void find_counters() {
         const auto n = f_.insts.size();
         counter_.assign(n, 0);
+        std::vector<std::uint32_t> candidates;
         for (std::uint32_t id = 0; id < n; ++id) {
             const auto& in = f_.insts[id];
             // An instruction in no block is dead (the passes leave them).
             if (block_of_[id] == t3::none) continue;
-            if ((in.op == Op::EntryCounter && in.imm == 0) || in.op == Op::CounterAdd) counter_[id] = 1;
-            if (in.op == Op::EntryCounter && in.imm != 0) refuse("inline kernel steps");
-        }
-        // A phi is a counter when its inputs are: an optimistic fixed point.
-        std::vector<std::uint32_t> phis;
-        for (std::uint32_t id = 0; id < n; ++id) {
-            const auto& in = f_.insts[id];
-            if (in.op != Op::Phi || block_of_[id] == t3::none) continue;
-            bool any = false;
-            for (std::uint32_t i = 0; i < in.count; ++i) {
-                const auto v = f_.extras[in.extra + i];
-                any = any || (v < n && counter_[v]);
-            }
-            if (any) {
+            if ((in.op == Op::EntryCounter && in.imm == 0) || in.op == Op::CounterAdd || in.op == Op::Phi) {
                 counter_[id] = 1;
-                phis.push_back(id);
+                candidates.push_back(id);
             }
         }
         for (bool changed = true; changed;) {
             changed = false;
-            for (const auto id : phis) {
+            for (const auto id : candidates) {
                 if (!counter_[id]) continue;
                 const auto& in = f_.insts[id];
-                for (std::uint32_t i = 0; i < in.count; ++i) {
-                    const auto v = f_.extras[in.extra + i];
-                    if (v != id && !counter_[v]) {
-                        counter_[id] = 0;
-                        changed = true;
-                        break;
+                bool keep = true;
+                if (in.op == Op::CounterAdd) {
+                    keep = in.operands[0] < n && counter_[in.operands[0]];
+                } else if (in.op == Op::Phi) {
+                    for (std::uint32_t i = 0; i < in.count && keep; ++i) {
+                        const auto v = f_.extras[in.extra + i];
+                        keep = v == id || (v < n && counter_[v]);
                     }
+                }
+                if (!keep) {
+                    counter_[id] = 0;
+                    changed = true;
                 }
             }
         }
-        for (const auto id : phis) {
-            if (!counter_[id]) refuse("a phi joins the block counter with another value");
+        for (const auto id : candidates) {
+            const auto& in = f_.insts[id];
+            if (in.op != Op::Phi || counter_[id]) continue;
+            for (std::uint32_t i = 0; i < in.count; ++i) {
+                const auto v = f_.extras[in.extra + i];
+                if (v < n && counter_[v]) refuse("a phi joins the block counter with another value");
+            }
         }
     }
 
@@ -362,8 +386,14 @@ private:
                 }
                 if (in.state != t3::none) expect(f_.states[in.state].blocks);
                 switch (in.op) {
-                case Op::EntryCounter: current = id; break;
+                case Op::EntryCounter:
+                    if (counter_[id]) current = id;
+                    break;
                 case Op::CounterAdd:
+                    if (!counter_[id]) {
+                        if (counter_[in.operands[0]]) refuse("the block counter as a value");
+                        break;
+                    }
                     expect(in.operands[0]);
                     current = id;
                     break;
@@ -639,7 +669,8 @@ private:
             const auto c = branch.operands[0];
             if (c == t3::none || uses_[c] != 1 || block_of_[c] != b) continue;
             const auto& compare = f_.insts[c];
-            if (compare.op != Op::Lift || (compare.flags & t3::Checked) != 0 || !is_compare(compare.lifted.op)) continue;
+            if (compare.op != Op::Lift || (compare.flags & t3::Checked) != 0) continue;
+            if (!is_compare(compare.lifted.op) && !is_float_compare(compare.lifted.op)) continue;
             if (lift_shape(compare.lifted, lift_step(c)).evaluate) continue;
             fused_[c] = 1;
         }
@@ -674,6 +705,10 @@ private:
                 // A phi's known inputs are made on its edges.
                 if (in.op == Op::Phi) continue;
                 if (in.op == Op::Lift) {
+                    if (const auto x = t3::detail::abs_operand(f_, in); x != t3::none) {
+                        need(x);
+                        continue;
+                    }
                     const auto step = lift_step(id);
                     const auto shape = lift_shape(in.lifted, step);
                     need(in.operands[0]);
@@ -756,31 +791,105 @@ private:
 
     // ---- values -----------------------------------------------------------
 
+    static bool float_type(const t3::ValueType& type) {
+        return type.type == t3::Type::F32 || type.type == t3::Type::F64;
+    }
+
+    // The register file of value `v`'s own virtual register: XMM for a
+    // binary32 or binary64 float, except one a helper or call returns (in
+    // rax) and one the heap code reads or chooses (its bits, in a general
+    // register).
+    mir::RegClass home_class(std::uint32_t v) {
+        v = canon(v);
+        const auto& in = f_.insts[v];
+        if (!float_type(in.type)) return mir::RegClass::Gpr;
+        switch (in.op) {
+        case Op::Helper:
+        case Op::Call:
+        case Op::StateCall:
+        case Op::LoadField:
+        case Op::LoadElement:
+        case Op::LoadGlobal:
+        case Op::Select:
+        case Op::AllocObject: return mir::RegClass::Gpr;
+        default: return mir::RegClass::Xmm;
+        }
+    }
+
+    // The width of the bits a move between register files carries.
+    std::uint8_t move_width(std::uint32_t v) const {
+        return f_.insts[v].type.type == t3::Type::F32 ? 32 : 64;
+    }
+
     mir::VReg vreg(std::uint32_t v) {
         if (v == t3::none || v >= f_.insts.size()) refuse("a missing value");
         v = canon(v);
         if (counter_[v]) refuse("the block counter as a value");
         if (vreg_.empty()) vreg_.assign(f_.insts.size(), t3::none);
+        const auto cls = home_class(v);
         if (vreg_[v] == t3::none) {
             (void)width_of(v);
             vreg_[v] = static_cast<std::uint32_t>(out_.function.classes.size());
-            out_.function.classes.push_back(mir::RegClass::Gpr);
+            out_.function.classes.push_back(cls);
             out_.function.spill_home.push_back(-1);
             value_of_.push_back(v);
         }
-        return {vreg_[v], mir::RegClass::Gpr};
+        return {vreg_[v], cls};
     }
+
+    // Value `v` in a register of file `cls`, for an operand: its own virtual
+    // register, or a copy made here in the other file (a known value is
+    // made here in that file).
+    mir::VReg use_as(std::uint32_t v, mir::RegClass cls) {
+        if (v == t3::none || v >= f_.insts.size()) refuse("a missing value");
+        const auto c = canon(v);
+        if (home_class(c) == cls && (!known(c) || needed_[c])) return vreg(c);
+        if (known(c)) {
+            Step step;
+            step.kind = Kind::Const;
+            step.inst = c;
+            step.imm = known_value(c);
+            const auto copy = fresh(c, cls);
+            emit(std::move(step)).defs.push_back(reg({copy, cls}));
+            return {copy, cls};
+        }
+        const auto source = vreg(c);
+        Step step;
+        step.kind = Kind::Convert;
+        step.inst = c;
+        step.width = move_width(c);
+        const auto copy = fresh(c, cls);
+        auto& inst = emit(std::move(step));
+        inst.uses.push_back(reg(source));
+        inst.defs.push_back(reg({copy, cls}));
+        return {copy, cls};
+    }
+
+    mir::RegClass file(bool xmm) const { return xmm ? mir::RegClass::Xmm : mir::RegClass::Gpr; }
     std::vector<std::uint32_t> value_of_;  // vreg -> IR value
     // By machine block: the constants to make at its end (vreg, bits).
-    std::vector<std::vector<std::pair<std::uint32_t, std::uint64_t>>> edge_constants_;
+    struct EdgeConstant {
+        std::uint32_t vreg;
+        std::uint64_t bits;
+        mir::RegClass cls;
+    };
+    std::vector<std::vector<EdgeConstant>> edge_constants_;
+    // By machine block: the phi inputs to copy into the phi's register file
+    // at its end.
+    struct EdgeConvert {
+        mir::VReg to;
+        mir::VReg from;
+        std::uint8_t width;
+    };
+    std::vector<std::vector<EdgeConvert>> edge_converts_;
     // By machine block: the initialized flags to read again at its end
     // (vreg, slot).
     std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>> edge_flags_;
 
     // A virtual register of its own for a copy of IR value `v`.
-    std::uint32_t fresh(std::uint32_t v) {
+    std::uint32_t fresh(std::uint32_t v, mir::RegClass cls = mir::RegClass::Gpr) {
         const auto id = static_cast<std::uint32_t>(out_.function.classes.size());
-        out_.function.classes.push_back(mir::RegClass::Gpr);
+        out_.function.classes.push_back(cls);
         out_.function.spill_home.push_back(-1);
         value_of_.push_back(v);
         return id;
@@ -867,15 +976,25 @@ private:
                     continue;
                 }
                 if (!known(input)) {
-                    phi.inputs.push_back(vreg(input));
+                    const auto from = vreg(input);
+                    if (from.cls == phi.def.cls) {
+                        phi.inputs.push_back(from);
+                        continue;
+                    }
+                    // An input in the other register file: copied at the end
+                    // of the predecessor.
+                    const mir::VReg to{fresh(canon(input), phi.def.cls), phi.def.cls};
+                    if (edge_converts_.size() < out_.function.blocks.size()) edge_converts_.resize(out_.function.blocks.size());
+                    edge_converts_[preds[k]].push_back({to, from, move_width(canon(input))});
+                    phi.inputs.push_back(to);
                     continue;
                 }
                 // A known input: a constant of its own at the end of the
                 // predecessor.
-                const auto v = fresh(canon(input));
+                const auto v = fresh(canon(input), phi.def.cls);
                 if (edge_constants_.size() < out_.function.blocks.size()) edge_constants_.resize(out_.function.blocks.size());
-                edge_constants_[preds[k]].emplace_back(v, known_value(input));
-                phi.inputs.push_back({v, mir::RegClass::Gpr});
+                edge_constants_[preds[k]].push_back({v, known_value(input), phi.def.cls});
+                phi.inputs.push_back({v, phi.def.cls});
             }
             out_.function.blocks[current_].phis.push_back(std::move(phi));
         }
@@ -927,30 +1046,83 @@ private:
             inst.defs.push_back(in.op == Op::EntryLoad ? any(vreg(id)) : reg(vreg(id)));
             return;
         }
-        case Op::EntryCounter:
-            // r12 holds it: set by the trampoline or the caller at an entry,
-            // and by the callee after a call.
+        case Op::EntryCounter: {
+            // r12 holds C: set by the trampoline or the caller at an entry,
+            // and by the callee after a call. K (in a function with inline
+            // kernels) is in the context there.
+            if (counter_[id]) return;
+            Step step;
+            step.kind = Kind::KernelLoad;
+            step.inst = id;
+            emit(std::move(step)).defs.push_back(reg(vreg(id)));
             return;
+        }
         case Op::Phi: return;
         case Op::Lift: {
             if (fused_[id]) return;
+            if (const auto x = t3::detail::abs_operand(f_, in); x != t3::none) {
+                const auto operand = use_as(x, mir::RegClass::Xmm);
+                Step step;
+                step.kind = Kind::Abs;
+                step.inst = id;
+                step.width = static_cast<std::uint8_t>(in.type.width);
+                auto& inst = emit(std::move(step));
+                inst.uses.push_back(reg(operand));
+                inst.defs.push_back(same(vreg(id)));
+                return;
+            }
             auto step = lift_step(id);
             const auto shape = lift_shape(in.lifted, step);
             const bool checked = (in.flags & t3::Checked) != 0;
             step.reason = static_cast<std::uint8_t>(t3::Reason::Checks);
+            const auto uses = lift_uses(in, shape);
             auto& inst = emit(std::move(step));
-            add_lift_operands(inst, in, shape, true);
+            attach_lift(inst, in, shape, uses, true);
             if (checked) add_state(inst, in.state);
+            if (!inst.defs.empty() && inst.defs[0].vreg.cls != file(shape.def_xmm)) {
+                // A result made in the other register file (lift::evaluate's
+                // bits of a float): copied into the value's own.
+                const auto own = inst.defs[0].vreg;
+                const mir::VReg made{fresh(canon(id), file(shape.def_xmm)), file(shape.def_xmm)};
+                inst.defs[0].vreg = made;
+                Step move;
+                move.kind = Kind::Convert;
+                move.inst = id;
+                move.width = move_width(canon(id));
+                auto& copy = emit(std::move(move));
+                copy.uses.push_back(reg(made));
+                copy.defs.push_back(reg(own));
+            }
+            return;
+        }
+        case Op::Canon:
+        case Op::Sqrt: {
+            const auto operand = use_as(in.operands[0], mir::RegClass::Xmm);
+            Step step;
+            step.kind = in.op == Op::Canon ? Kind::Canon : Kind::Sqrt;
+            step.inst = id;
+            step.width = static_cast<std::uint8_t>(in.type.width);
+            // A Sqrt not Deferred canonicalizes its NaN.
+            step.checked = in.op == Op::Sqrt && (in.flags & t3::Deferred) == 0;
+            auto& inst = emit(std::move(step));
+            if (in.op == Op::Canon) {
+                inst.uses.push_back(reg(operand));
+                inst.defs.push_back(same(vreg(id)));
+            } else {
+                inst.uses.push_back(any(operand));
+                inst.defs.push_back(reg(vreg(id)));
+            }
             return;
         }
         case Op::Mask: {
+            const auto operand = use_as(in.operands[0], mir::RegClass::Gpr);
             Step step;
             step.kind = Kind::Mask;
             step.inst = id;
             step.width = static_cast<std::uint8_t>(std::min<std::uint64_t>(in.imm, 64));
             step.a_width = width_of(in.operands[0]);
             auto& inst = emit(std::move(step));
-            inst.uses.push_back(reg(vreg(in.operands[0])));
+            inst.uses.push_back(reg(operand));
             inst.defs.push_back(same(vreg(id)));
             return;
         }
@@ -962,7 +1134,7 @@ private:
             for (std::uint32_t i = 0; i + 1 < in.count; i += 2) {
                 const auto bit_number = f_.extras[in.extra + i + 1];
                 if (bit_number >= 64) refuse("a gathered bit outside a register");
-                uses.push_back(any(vreg(f_.extras[in.extra + i])));
+                uses.push_back(any(use_as(f_.extras[in.extra + i], mir::RegClass::Gpr)));
                 step.bits.push_back(bit_number);
             }
             if (step.bits.size() > 64) refuse("a gather wider than a register");
@@ -974,9 +1146,18 @@ private:
         }
         case Op::CounterAdd: {
             Step step;
-            step.kind = Kind::CounterAdd;
             step.inst = id;
             step.imm = in.imm;
+            if (!counter_[id]) {
+                // K: an ordinary value.
+                step.kind = Kind::KernelAdd;
+                const auto operand = vreg(in.operands[0]);
+                auto& inst = emit(std::move(step));
+                inst.uses.push_back(reg(operand));
+                inst.defs.push_back(same(vreg(id)));
+                return;
+            }
+            step.kind = Kind::CounterAdd;
             emit(std::move(step));
             return;
         }
@@ -986,18 +1167,22 @@ private:
             step.inst = id;
             step.imm = in.imm;
             step.reason = static_cast<std::uint8_t>(t3::Reason::Budget);
-            add_state(emit(std::move(step)), in.state);
+            auto& inst = emit(std::move(step));
+            // K: C + (K - context.K) + P against the room.
+            if (in.operands[1] != t3::none) inst.uses.push_back(reg(vreg(in.operands[1])));
+            add_state(inst, in.state);
             return;
         }
         case Op::SwitchCheck:
         case Op::Guard: {
+            const auto operand = use_as(in.operands[0], mir::RegClass::Gpr);
             Step step;
             step.kind = in.op == Op::SwitchCheck ? Kind::SwitchCheck : Kind::Guard;
             step.inst = id;
             step.imm = in.imm;
             step.reason = static_cast<std::uint8_t>(in.op == Op::SwitchCheck ? t3::Reason::Selectors : t3::Reason::Guards);
             auto& inst = emit(std::move(step));
-            inst.uses.push_back(reg(vreg(in.operands[0])));
+            inst.uses.push_back(reg(operand));
             add_state(inst, in.state);
             return;
         }
@@ -1008,8 +1193,9 @@ private:
                 step.kind = Kind::CheckReference;
                 step.index = static_cast<std::uint32_t>(in.imm);
                 step.reason = static_cast<std::uint8_t>(t3::Reason::References);
+                const auto operand = use_as(in.operands[0], mir::RegClass::Gpr);
                 auto& inst = emit(std::move(step));
-                inst.uses.push_back(fixed(vreg(in.operands[0]), rdx));
+                inst.uses.push_back(fixed(operand, rdx));
                 inst.clobbers_gpr = caller_saved_gpr;
                 inst.clobbers_xmm = allocatable_xmm;
                 inst.is_call = true;
@@ -1067,6 +1253,8 @@ private:
             if (in.aux >= f_.exits.size()) refuse("an exit out of range");
             auto& inst = emit(std::move(step));
             add_arguments(inst, in);
+            // K, stored into the context before the call.
+            if (in.operands[1] != t3::none) inst.uses.push_back(any(vreg(in.operands[1])));
             inst.defs.push_back(fixed(vreg(id), rax));
             inst.clobbers_gpr = in.op == Op::Helper ? caller_saved_gpr : allocatable_gpr;
             inst.clobbers_xmm = allocatable_xmm;
@@ -1078,8 +1266,12 @@ private:
             step.kind = Kind::Return;
             step.inst = id;
             step.reason = static_cast<std::uint8_t>(t3::Reason::Exits);
+            step.b_constant = in.operands[1] != t3::none;  // whether a value is returned
+            const auto value =
+                in.operands[1] != t3::none ? use_as(in.operands[1], mir::RegClass::Gpr) : mir::VReg{};
             auto& inst = emit(std::move(step));
-            if (in.operands[1] != t3::none) inst.uses.push_back(fixed(vreg(in.operands[1]), rsi));
+            if (in.operands[1] != t3::none) inst.uses.push_back(fixed(value, rsi));
+            if (in.operands[2] != t3::none) inst.uses.push_back(any(vreg(in.operands[2])));
             inst.clobbers_gpr = caller_saved_gpr;
             inst.clobbers_xmm = allocatable_xmm;
             inst.is_call = true;
@@ -1092,6 +1284,7 @@ private:
             step.inst = id;
             step.imm = in.imm;
             auto& inst = emit(std::move(step));
+            if (in.operands[1] != t3::none) inst.uses.push_back(any(vreg(in.operands[1])));
             inst.clobbers_gpr = caller_saved_gpr;
             inst.clobbers_xmm = allocatable_xmm;
             inst.is_call = true;
@@ -1115,22 +1308,25 @@ private:
                 auto step = lift_step(c);
                 step.kind = Kind::CompareBranch;
                 const auto shape = lift_shape(f_.insts[c].lifted, step);
+                const auto uses = lift_uses(f_.insts[c], shape);
                 auto& inst = emit(std::move(step));
-                add_lift_operands(inst, f_.insts[c], shape, false);
+                attach_lift(inst, f_.insts[c], shape, uses, false);
                 return;
             }
+            const auto operand = use_as(c, mir::RegClass::Gpr);
             Step step;
             step.kind = Kind::Branch;
             step.inst = id;
-            emit(std::move(step)).uses.push_back(reg(vreg(c)));
+            emit(std::move(step)).uses.push_back(reg(operand));
             return;
         }
         case Op::Switch: {
+            const auto operand = use_as(in.operands[0], mir::RegClass::Gpr);
             Step step;
             step.kind = Kind::Switch;
             step.inst = id;
             step.imm = f_.blocks[block_of_[id]].succs.size();
-            emit(std::move(step)).uses.push_back(reg(vreg(in.operands[0])));
+            emit(std::move(step)).uses.push_back(reg(operand));
             return;
         }
         case Op::Dispatch: {
@@ -1141,11 +1337,12 @@ private:
             for (const auto& [tag, exit] : table.exits) {
                 if (exit >= succs) refuse("a dispatch exit out of range");
             }
+            const auto operand = use_as(in.operands[0], mir::RegClass::Gpr);
             Step step;
             step.kind = Kind::Dispatch;
             step.inst = id;
             step.imm = in.imm;
-            emit(std::move(step)).uses.push_back(reg(vreg(in.operands[0])));
+            emit(std::move(step)).uses.push_back(reg(operand));
             return;
         }
         default: lower_heap(id, in); return;
@@ -1163,10 +1360,26 @@ private:
     // A heap check, read or write: registers for entries, data, indices and
     // values, a memory operand allowed for a length and a storage width.
     void lower_heap(std::uint32_t id, const t3::Inst& in) {
+        // A float value the heap code stores or chooses, as its bits in a
+        // general register: moved there before the instruction.
+        std::map<std::uint32_t, mir::VReg> bits;
+        const auto in_gpr = [&](std::uint32_t v) {
+            if (v != t3::none && v < f_.insts.size() && home_class(v) == mir::RegClass::Xmm) {
+                bits.emplace(canon(v), use_as(v, mir::RegClass::Gpr));
+            }
+        };
+        for (const auto operand : in.operands) in_gpr(operand);
+        if (in.op == Op::Select) {
+            for (std::uint32_t i = 0; i < in.count; ++i) in_gpr(f_.extras[in.extra + i]);
+        }
+        const auto value = [&](std::uint32_t v) {
+            const auto found = v == t3::none ? bits.end() : bits.find(canon(v));
+            return found != bits.end() ? found->second : vreg(v);
+        };
         Step step;
         step.inst = id;
         step.imm = in.imm;
-        const auto use = [&](mir::Inst& inst, unsigned k) { inst.uses.push_back(reg(vreg(in.operands[k]))); };
+        const auto use = [&](mir::Inst& inst, unsigned k) { inst.uses.push_back(reg(value(in.operands[k]))); };
         const auto def = [&](mir::Inst& inst) { inst.defs.push_back(reg(vreg(id))); };
         switch (in.op) {
         case Op::Lookup: {
@@ -1210,7 +1423,7 @@ private:
             }
             auto& inst = emit(std::move(step));
             use(inst, 0);
-            if (!constant) inst.uses.push_back(any(vreg(in.operands[1])));
+            if (!constant) inst.uses.push_back(any(value(in.operands[1])));
             add_state(inst, in.state);
             return;
         }
@@ -1255,7 +1468,7 @@ private:
             auto& inst = emit(std::move(step));
             use(inst, 0);
             use(inst, 1);
-            inst.uses.push_back(any(vreg(in.operands[2])));
+            inst.uses.push_back(any(value(in.operands[2])));
             if (in.op == Op::StoreElement) use(inst, 3);
             else def(inst);
             return;
@@ -1283,16 +1496,16 @@ private:
             step.imm = in.count;
             auto& inst = emit(std::move(step));
             use(inst, 0);
-            for (std::uint32_t i = 0; i < in.count; ++i) inst.uses.push_back(any(vreg(f_.extras[in.extra + i])));
+            for (std::uint32_t i = 0; i < in.count; ++i) inst.uses.push_back(any(value(f_.extras[in.extra + i])));
             def(inst);
             return;
         }
         case Op::Widen: {
             step.kind = Kind::Widen;
             auto& inst = emit(std::move(step));
-            inst.uses.push_back(fixed(vreg(in.operands[0]), rsi));
-            inst.uses.push_back(fixed(vreg(in.operands[1]), rdx));
-            inst.uses.push_back(fixed(vreg(in.operands[2]), rcx));
+            inst.uses.push_back(fixed(value(in.operands[0]), rsi));
+            inst.uses.push_back(fixed(value(in.operands[1]), rdx));
+            inst.uses.push_back(fixed(value(in.operands[2]), rcx));
             inst.clobbers_gpr = caller_saved_gpr;
             inst.clobbers_xmm = allocatable_xmm;
             inst.is_call = true;
@@ -1354,20 +1567,33 @@ private:
         refuse("an operation the code generator does not handle");
     }
 
-    void add_lift_operands(mir::Inst& inst, const t3::Inst& in, const LiftShape& shape, bool with_def) {
+    // The operands of a Lift (or a fused compare), in the register files its
+    // shape names; copies into the other file are made before it.
+    std::vector<mir::Operand> lift_uses(const t3::Inst& in, const LiftShape& shape) {
         using U = LiftShape::Use;
-        using D = LiftShape::Def;
-        const auto operand = [&](U use, std::uint32_t v) {
+        std::vector<mir::Operand> uses;
+        const auto operand = [&](U use, std::uint32_t v, bool xmm, bool memory) {
             switch (use) {
             case U::None:
             case U::Immediate: return;
-            case U::Register: inst.uses.push_back(reg(vreg(v))); return;
-            case U::Rax: inst.uses.push_back(fixed(vreg(v), rax)); return;
-            case U::Rcx: inst.uses.push_back(fixed(vreg(v), rcx)); return;
+            case U::Register: {
+                const auto r = use_as(v, file(xmm));
+                uses.push_back(memory ? any(r) : reg(r));
+                return;
+            }
+            case U::Rax: uses.push_back(fixed(use_as(v, mir::RegClass::Gpr), rax)); return;
+            case U::Rcx: uses.push_back(fixed(use_as(v, mir::RegClass::Gpr), rcx)); return;
             }
         };
-        operand(shape.a, in.operands[0]);
-        operand(shape.b, in.operands[1]);
+        operand(shape.a, in.operands[0], shape.a_xmm, false);
+        operand(shape.b, in.operands[1], shape.b_xmm, shape.b_memory);
+        return uses;
+    }
+
+    void attach_lift(mir::Inst& inst, const t3::Inst& in, const LiftShape& shape, const std::vector<mir::Operand>& uses,
+                     bool with_def) {
+        using D = LiftShape::Def;
+        inst.uses = uses;
         const auto self = static_cast<std::uint32_t>(&in - f_.insts.data());
         switch (with_def ? shape.def : D::None) {
         case D::None: break;
@@ -1473,6 +1699,17 @@ private:
                 if (vreg_.empty() || x >= vreg_.size() || vreg_[x] == t3::none) continue;
                 candidates[vreg_[x]].push_back(r);
             }
+        }
+        // A deferred float value (Function::frame_canon) may hold the
+        // hardware's NaN, which no frame slot may hold where reference code
+        // reads the frame (a spill can come after the write-back before a
+        // call): a move into its home stores the canonical NaN in place of a
+        // NaN (Lowered::canon_vreg), which keeps the value a NaN exactly
+        // where the reference's is.
+        out_.canon_vreg.assign(nv, 0);
+        for (std::uint32_t v = 0; v < nv; ++v) {
+            const auto x = value_of_[v];
+            if (fn.classes[v] == mir::RegClass::Xmm && x < f_.frame_canon.size()) out_.canon_vreg[v] = f_.frame_canon[x];
         }
         std::vector<std::vector<std::uint8_t>> allowed(nv);
         for (std::uint32_t v = 0; v < nv; ++v) {
@@ -1638,42 +1875,68 @@ LiftShape lift_shape(const lift::Instruction& in, const Step& step) {
         return shape;
     };
     if (is_float_op(in.op)) {
+        // Binary32 and binary64 in XMM registers (design 7.1); the 16-bit
+        // formats through lift::evaluate.
         switch (in.op) {
         case Opcode::FloatAdd:
         case Opcode::FloatSubtract:
         case Opcode::FloatMultiply:
         case Opcode::FloatDivide:
+            if (!hardware_float(in.format)) return evaluate();
+            shape.a_xmm = shape.b_xmm = shape.def_xmm = true;
+            shape.def = D::SameAsA;
+            shape.b_memory = true;
+            if (c) shape.b = U::Immediate;
+            return shape;
         case Opcode::FloatEqual:
         case Opcode::FloatNotEqual:
-        case Opcode::FloatLess:
-        case Opcode::FloatLessEqual:
         case Opcode::FloatGreater:
         case Opcode::FloatGreaterEqual:
             if (!hardware_float(in.format)) return evaluate();
-            shape.xmm_temps = 2;
+            shape.a_xmm = shape.b_xmm = true;
+            shape.b_memory = true;
+            if (c) shape.b = U::Immediate;
+            return shape;
+        case Opcode::FloatLess:
+        case Opcode::FloatLessEqual:
+            // a < b is b > a: ucomis b, a, with b in a register (a temporary
+            // for a constant).
+            if (!hardware_float(in.format)) return evaluate();
+            shape.a_xmm = shape.b_xmm = true;
+            if (c) {
+                shape.b = U::Immediate;
+                shape.xmm_temps = 1;
+            }
             return shape;
         case Opcode::FloatNegate:
             if (in.format == lift::FloatType::None) return evaluate();
             shape.def = D::SameAsA;
+            if (hardware_float(in.format)) shape.a_xmm = shape.def_xmm = true;
             return shape;
         case Opcode::FloatConvert:
             if (!hardware_float(in.format) || !hardware_float(in.to_format) || in.format == in.to_format) {
                 return evaluate();
             }
+            shape.a_xmm = shape.def_xmm = true;
             shape.xmm_temps = 1;
             return shape;
         case Opcode::FloatFromInteger:
             if (!hardware_float(in.to_format) || w == 0 || w > 64) return evaluate();
-            shape.xmm_temps = 1;
+            shape.def_xmm = true;
             shape.temps = 1;
             return shape;
         case Opcode::FloatToInteger:
             if (!hardware_float(in.format) || in.to_width == 0 || in.to_width > 64) return evaluate();
-            shape.xmm_temps = 1;
+            shape.a_xmm = true;
             shape.temps = 1;
             return shape;
         default: return evaluate();
         }
+    }
+    if (in.op == Opcode::ValueHash && in.format != lift::FloatType::None) {
+        if (!hardware_float(in.format)) return evaluate();
+        shape.a_xmm = true;
+        return shape;
     }
     if (w == 0 || w > 64) return evaluate();
     switch (in.op) {
@@ -1793,7 +2056,6 @@ LiftShape lift_shape(const lift::Instruction& in, const Step& step) {
         shape.def = D::SameAsA;
         return shape;
     case Opcode::ValueHash:
-        if (in.format != lift::FloatType::None) return evaluate();
         shape.def = D::SameAsA;
         return shape;
     default: return evaluate();

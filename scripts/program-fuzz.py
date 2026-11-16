@@ -97,7 +97,8 @@ WORDS = ["alpha", "beta", "gamma", "delta", "été", "ñandú", "日本", "omega
 FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
-    "tasks", "channels", "fault-path",
+    "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
+    "sqrt-special",
 ]
 
 
@@ -161,6 +162,8 @@ IMPORTS = {
     "strings": "Std.Text.Strings",
     "builders": "Std.Core.StringBuilder",
     "lists": "Std.Collections.Lists",
+    "float64s": "Std.Core.Float64",
+    "float32s": "Std.Core.Float32",
 }
 
 
@@ -809,6 +812,80 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     p.calls.append(k)
 
 
+# Bit patterns of binary64 for section_nan_bits: NaNs with payloads (quiet and signalling, both signs), the
+# canonical NaN, the hardware's default NaN, zeros, infinities, a subnormal, -1 and ordinary values.
+NAN_BITS64 = ["9221120237041090561", "18444492273895866370", "9218868437227405313", "18443366373989023747",
+              "9221120237041090560", "18444492273895866368", "9219994337134247936", "18446744073709551615"]
+SPECIAL_BITS64 = ["0", "9223372036854775808", "9218868437227405312", "18442240474082181120", "1",
+                  "13830554455654793216", "4609434218613702656", "4611686018427387904", "4503599627370495"]
+NAN_BITS32 = ["2143289345", "4290772994", "2139095041", "4288675843", "2143289344", "4290772992"]
+SPECIAL_BITS32 = ["0", "2147483648", "2139095040", "4286578688", "1", "1069547520"]
+
+
+def section_nan_bits(p, k):
+    """NaNs with payloads, quiet and signalling, of both signs and both formats, through arithmetic, negation and
+    abs into a field, a list element, a call argument and a returned value, read back through to_bits and hash
+    codes, narrowed to binary32, and square roots of special values; the bits are folded into the checksum."""
+    p.feature("floats", "nan", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs", "sqrt-special")
+    p.use("math", "lists", "float64s", "float32s")
+    wide = p.random.sample(NAN_BITS64, 4) + p.random.sample(SPECIAL_BITS64, p.between(3, 5))
+    narrow = p.random.sample(NAN_BITS32, 3) + p.random.sample(SPECIAL_BITS32, p.between(2, 3))
+    op = p.pick(["a + b", "a - b", "a * b", "a / b", "b - a"])
+    other = p.pick(["a * 0.5", "a / b + 1.0", "a - a", "(a + 1.0) * b"])
+    p.declarations.append(fill("""let Cell$k = class (
+    export let wide: float64 = 0.0;
+    export let narrow: float32 = 0.0 as float32;
+);
+
+let s${k}_through = func(x: float64, depth: int32) -> float64 {
+    if (depth <= 0) {
+        return x;
+    }
+    return s${k}_through(x, depth - 1);
+};
+
+let s${k}_fold = func(bits: uint64) -> int64 => ((bits >> 34) as int64) ^ ((bits & 1073741823) as int64);
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let patterns: uint64[] = [$wide];
+    let singles: uint32[] = [$narrow];
+    let cell = new Cell$k();
+    let cells = lists.filled<float64>(4, 0.0);
+    let check: int64 = 0;
+    for (let i: int32 = 0; i < size * $m; i++) {
+        let a = float64.from_bits(patterns[i % patterns.length]);
+        let b = float64.from_bits(patterns[(i * $s + 1) % patterns.length]);
+        let r = $op;
+        let q = $other;
+        let n = -r;
+        let m = float64s.abs(q);
+        cell.wide = r;
+        cells[i % 4] = n;
+        let root = math.sqrt(a);
+        let passed = s${k}_through(q, 1);
+        let x = float32.from_bits(singles[i % singles.length]);
+        let y = float32.from_bits(singles[(i + $t) % singles.length]);
+        let z = x * y;
+        cell.narrow = -z;
+        check = mix(check, s${k}_fold(r.to_bits()) + s${k}_fold(n.to_bits()) + s${k}_fold(m.to_bits()));
+        check = mix(check, s${k}_fold(cell.wide.to_bits()) + s${k}_fold(cells[(i + 3) % 4].to_bits()));
+        check = mix(check, s${k}_fold(root.to_bits()) + s${k}_fold(passed.to_bits()) + (q.hash_code() as int64));
+        check = mix(check, (z.to_bits() as int64) + (cell.narrow.to_bits() as int64) +
+                           ((r as float32).to_bits() as int64) + (float32s.abs(z).to_bits() as int64));
+        check = mix(check, s${k}_fold((x as float64).to_bits()) + (z.hash_code() as int64));
+        if (i % $p == 0) {
+            console.println("s$k nan bits {} {:x} {:x} {:x} {:x}", i, r.to_bits(), n.to_bits(), root.to_bits(),
+                            z.to_bits());
+        }
+    }
+    console.println("s$k nan check {}", check);
+    return check;
+};
+""", k=k, wide=", ".join(wide), narrow=", ".join(narrow), op=op, other=other, m=p.between(2, 5),
+                                s=p.between(2, 5), t=p.between(1, 3), p=p.between(3, 7)))
+    p.calls.append(k)
+
+
 SECTIONS = [
     (section_integers, 100),
     (section_loops, 80),
@@ -849,6 +926,12 @@ def build_program(seed):
         if p.chance(15) and len(p.fault_bits) > 1:
             faults |= 1 << p.between(0, len(p.fault_bits) - 1)
         p.feature("fault-path")
+    # NaN bits come last, from a source of their own, so that the sections above are those of earlier versions.
+    p.random = random.Random(f"nan-bits {seed}")
+    if p.chance(60):
+        k = p.next_id
+        p.next_id += 1
+        section_nan_bits(p, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)
     calls = "\n".join(
         f"        check = mix(check, s{k}_run(size, faults));" for k in p.calls)

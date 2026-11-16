@@ -96,11 +96,16 @@
 
     // The steps a Budget may let pass: what remains of the step limit (the
     // steps already flushed are in `steps_`) and the allowance, in blocks.
+    // The room is for C: the kernel steps the chain charged up to now (the
+    // context's K, part of `flushed`) are taken off. A Budget of a function
+    // without inline kernels, where K does not change, compares C + P with it;
+    // one of a function with them, C + (K - context.K) + P.
     void tier3_room(tier3::Context& context) {
         const auto left = limits_.max_steps - std::min(steps_, limits_.max_steps);
-        const auto limit = left > std::numeric_limits<std::uint64_t>::max() - context.flushed
+        const auto base = context.flushed - std::min(context.K, context.flushed);
+        const auto limit = left > std::numeric_limits<std::uint64_t>::max() - base
                                ? std::numeric_limits<std::uint64_t>::max()
-                               : left + context.flushed;
+                               : left + base;
         context.room = std::min(limit, context.allowance);
     }
 
@@ -189,19 +194,26 @@
             return tier3::Status::Exception;
         }
         ++self.region_counts_.helpers;
+        if (exit->kind == nvr::ExitKind::State && exit->operation == nvr::StateOp::Kernel) ++self.native_counts_.kernel_helpers;
         // A kernel charged steps of its own.
         self.tier3_room(*context);
         return tier3::Status::Ok;
     }
 
     // What the state's frame levels say to write into a frame: the slots and
-    // flags that are not unchanged, and the block.
-    static void tier3_write_level(const tier3::FrameState& state, const std::uint64_t* values, std::uint64_t* slots,
-                                  std::uint8_t* initialized) {
+    // flags that are not unchanged, and the block. A deferred float value is
+    // written canonical (Function::frame_canon).
+    static void tier3_write_level(const tier3::Function& fn, const tier3::FrameState& state, const std::uint64_t* values,
+                                  std::uint64_t* slots, std::uint8_t* initialized) {
         for (std::size_t i = 0; i < state.slots.size(); ++i) {
             const auto& slot = state.slots[i];
-            if (slot.kind == tier3::StateSlot::Kind::Value) slots[i] = values[slot.value];
-            else if (slot.kind == tier3::StateSlot::Kind::Const) slots[i] = slot.value;
+            if (slot.kind == tier3::StateSlot::Kind::Value) {
+                const auto v = static_cast<std::size_t>(slot.value);
+                const auto format = v < fn.frame_canon.size() ? fn.frame_canon[v] : 0;
+                slots[i] = format == 0 ? values[v] : tier3::canonical_nan(values[v], format);
+            } else if (slot.kind == tier3::StateSlot::Kind::Const) {
+                slots[i] = slot.value;
+            }
             const auto& flag = state.flags[i];
             if (flag.kind == tier3::StateFlag::Kind::One) initialized[i] = 1;
             else if (flag.kind == tier3::StateFlag::Kind::Value) initialized[i] = static_cast<std::uint8_t>(values[flag.value] & 1U);
@@ -215,7 +227,7 @@
         const auto* state = &fn->states[state_id];
         while (state->caller != tier3::none) state = &fn->states[state->caller];
         auto frame = self.frames_.back();
-        tier3_write_level(*state, values, frame.slots, frame.initialized);
+        tier3_write_level(*fn, *state, values, frame.slots, frame.initialized);
         frame.block = state->block;
     }
 
@@ -232,7 +244,7 @@
         std::reverse(chain.begin(), chain.end());
         {
             auto frame = self.frames_.back();
-            tier3_write_level(*chain.front(), values, frame.slots, frame.initialized);
+            tier3_write_level(*fn, *chain.front(), values, frame.slots, frame.initialized);
             frame.block = chain.front()->block;
         }
         for (std::size_t level = 1; level < chain.size(); ++level) {
@@ -241,7 +253,7 @@
                               state.return_slot, state.return_block);
             self.frames_.set_called_from(fn->programs[chain[level - 1]->program]);
             auto frame = self.frames_.back();
-            tier3_write_level(state, values, frame.slots, frame.initialized);
+            tier3_write_level(*fn, state, values, frame.slots, frame.initialized);
             frame.block = state.block;
         }
     }
@@ -254,7 +266,9 @@
         tier3_materialize(context, fn, state_id, values);
         const auto& leaf = fn->states[state_id];
         context->C = values[leaf.blocks];
-        context->K = leaf.kernel_steps == tier3::none ? 0 : values[leaf.kernel_steps];
+        // A function without inline kernels leaves K as the chain's callees
+        // charged it.
+        if (leaf.kernel_steps != tier3::none) context->K = values[leaf.kernel_steps];
         context->next_block = leaf.block;
         context->reason = reason;
         self.tier3_flush(*context);
@@ -311,6 +325,8 @@
         }
         const auto* code = self.tier3_code(*program, false);
         if (code == nullptr || self.frames_.size() + code->ir.max_inline_depth > self.limits_.max_frames) return nullptr;
+        if (code->ir.uses_float && !context->float_default) return nullptr;
+        if (!tier3_clean_entry(code->ir, 0, frame.slots)) return nullptr;
         return code;
     }
 
@@ -615,6 +631,17 @@
         &State::tier3_check_heap, &State::tier3_record_dispatch, &State::tier3_inlined_helper,
     };
 
+    // Whether every slot the entry's code takes as clean
+    // (Function::clean_slots) holds no NaN but the canonical NaN of its float
+    // format.
+    static bool tier3_clean_entry(const tier3::Function& fn, std::uint32_t entry, const std::uint64_t* slots) {
+        if (entry >= fn.clean_slots.size()) return true;
+        for (const auto slot : fn.clean_slots[entry]) {
+            if (tier3::canonical_nan(slots[slot], fn.slot_types[slot].width) != slots[slot]) return false;
+        }
+        return true;
+    }
+
     // A native program entered at entries[entry_index] by the dispatcher: the
     // checks run_program makes, then the IR runs until it ends. At every
     // ending every frame is as tier 1 would have it, the innermost frame's
@@ -638,7 +665,9 @@
         {
             auto frame = frames_.back();
             const auto& entry = entered.entries[entry_index];
-            bool refuse = entered.uses_float && !lift::float_environment_is_default();
+            // Native float code (the program's, or an inline sqrt's) runs only
+            // in the default floating-point environment.
+            bool refuse = (entered.uses_float || code.ir.uses_float) && !lift::float_environment_is_default();
             refuse = refuse || (tier3_native_ && code.machine && address == nullptr);
             for (const auto slot : entry.reads) refuse = refuse || !frame.initialized[slot];
             for (std::size_t slot = 0; slot < entered.slot_widths.size() && !refuse; ++slot) {
@@ -646,6 +675,7 @@
                 refuse = width < 64 && frame.initialized[slot] && (frame.slots[slot] >> width) != 0;
             }
             refuse = refuse || frames_.size() + code.ir.max_inline_depth > limits_.max_frames;
+            refuse = refuse || !tier3_clean_entry(code.ir, entry_index, frame.slots);
             if (refuse) {
                 ++region_counts_.refused;
                 ++native_counts_.refused;

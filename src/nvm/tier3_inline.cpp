@@ -148,13 +148,15 @@ struct Callee {
 };
 
 // Where a Call sits in its block: the write-back before it, the counter
-// reload after it, and the jump to the resume block.
+// reload after it (and the kernel step reload, in a function with inline
+// kernels), and the jump to the resume block.
 struct CallSite {
     std::uint32_t block = none;
     std::uint32_t write_back = none;
     std::uint32_t call = none;
     std::uint32_t reload = none;
     std::uint32_t jump = none;
+    std::uint32_t kernel_reload = none;
 };
 
 std::optional<CallSite> call_site(const Function& f, std::uint32_t block) {
@@ -162,19 +164,22 @@ std::optional<CallSite> call_site(const Function& f, std::uint32_t block) {
     for (std::size_t k = 0; k < insts.size(); ++k) {
         if (f.insts[insts[k]].op != Op::Call) continue;
         // The builder's shape: write-back, call, constants (the result's
-        // flag), counter reload, jump.
+        // flag), counter reload, kernel step reload (with inline kernels),
+        // jump.
         if (k == 0 || insts.size() < k + 3) return std::nullopt;
         auto r = k + 1;
         while (r < insts.size() && f.insts[insts[r]].op == Op::Const) ++r;
-        if (r + 2 != insts.size()) return std::nullopt;
+        const bool kernel = f.inline_kernels && r + 3 == insts.size() && f.insts[insts[r + 1]].op == Op::EntryCounter &&
+                            f.insts[insts[r + 1]].imm == 1;
+        if (r + (kernel ? 3 : 2) != insts.size()) return std::nullopt;
         const auto& back = f.insts[insts[k - 1]];
         const auto& reload = f.insts[insts[r]];
-        const auto& jump = f.insts[insts[r + 1]];
+        const auto& jump = f.insts[insts.back()];
         if (back.op != Op::WriteBack || back.state != f.insts[insts[k]].state || reload.op != Op::EntryCounter ||
             reload.imm != 0 || jump.op != Op::Jump || f.blocks[block].succs.size() != 1) {
             return std::nullopt;
         }
-        return CallSite{block, insts[k - 1], insts[k], insts[r], insts[r + 1]};
+        return CallSite{block, insts[k - 1], insts[k], insts[r], insts.back(), kernel ? insts[r + 1] : none};
     }
     return std::nullopt;
 }
@@ -331,7 +336,7 @@ private:
     }
 
     // The callee's code from entry 0 never writes a frame, never calls, and
-    // reads only the block counter at entry.
+    // reads only the counters at entry.
     static bool inlinable(const Function& g) {
         std::vector<std::uint8_t> seen(g.blocks.size(), 0);
         std::vector<std::uint32_t> work{g.entries.front().ir_block};
@@ -347,7 +352,7 @@ private:
                 case Op::Leave:
                 case Op::WriteBack: return false;
                 case Op::EntryCounter:
-                    if (b != g.entries.front().ir_block || in.imm != 0) return false;
+                    if (b != g.entries.front().ir_block || in.imm > 1) return false;
                     break;
                 default: break;
                 }
@@ -363,12 +368,15 @@ private:
     }
 
     // The call's arguments fit the callee's parameters and its returned
-    // values fit the call's result.
+    // values fit the call's result; a callee with inline kernels goes only
+    // into a caller that has them (whose K is an SSA value).
     static bool compatible(const Function& f, const CallSite& site, const Function& g) {
         const auto& call = f.insts[site.call];
+        if (g.inline_kernels && !f.inline_kernels) return false;
         if (call.count != g.parameter_count || g.parameter_count > g.slot_types.size()) return false;
         for (std::uint32_t i = 0; i < call.count; ++i) {
-            if (!fits(f.insts[f.extras[call.extra + i]].type, g.slot_types[i])) return false;
+            const auto& argument = f.insts[f.extras[call.extra + i]];
+            if (!fits(argument.type, g.slot_types[i]) && !constant_fits(argument, g.slot_types[i])) return false;
         }
         const bool has_result = f.exits[call.aux]->result_slot != none;
         for (const auto& block : g.blocks) {
@@ -379,6 +387,13 @@ private:
             if (last.operands[1] == none || !fits(g.insts[last.operands[1]].type, call.type)) return false;
         }
         return true;
+    }
+
+    // A constant, typed by its bits, as the argument of a float parameter
+    // whose width holds them: it becomes a constant of the parameter's type.
+    static bool constant_fits(const Inst& argument, ValueType slot) {
+        return argument.op == Op::Const && argument.type.type == Type::Int &&
+               (slot.type == Type::F32 || slot.type == Type::F64) && argument.type.width <= slot.width;
     }
 
     std::uint32_t add_inst(Function& f, Inst in) {
@@ -405,6 +420,9 @@ private:
         std::vector<std::uint32_t> arguments(f.extras.begin() + f.insts[site.call].extra,
                                              f.extras.begin() + f.insts[site.call].extra + f.insts[site.call].count);
         const auto charged = f.insts[site.call].operands[0];
+        // K at the call (none without inline kernels): the callee's K at its
+        // entry, and throughout a callee without inline kernels.
+        const auto kernel = f.insts[site.call].operands[1];
         const auto x_origin = f.insts[site.call];
 
         const auto oi = static_cast<std::uint32_t>(f.insts.size());
@@ -431,9 +449,14 @@ private:
             const auto slot = static_cast<std::uint32_t>(in.imm);
             switch (in.op) {
             case Op::EntryLoad:
-                if (slot < g.parameter_count) {
+                if (slot < g.parameter_count && !constant_fits(f.insts[arguments[slot]], g.slot_types[slot])) {
                     at_entry[id] = arguments[slot];
                     continue;
+                }
+                if (slot < g.parameter_count) {
+                    value.type = g.slot_types[slot];
+                    value.imm = f.insts[arguments[slot]].imm;
+                    break;
                 }
                 value.type = in.type;
                 value.imm = 0;
@@ -442,7 +465,7 @@ private:
                 value.type = integer(1);
                 value.imm = slot < g.parameter_count ? 1 : 0;
                 break;
-            case Op::EntryCounter: at_entry[id] = charged; continue;
+            case Op::EntryCounter: at_entry[id] = in.imm == 0 ? charged : kernel; continue;
             default: continue;
             }
             const auto made_id = add_inst(f, std::move(value));
@@ -475,6 +498,10 @@ private:
                 in.aux += oe;
             }
             if (in.op == Op::Dispatch) in.imm += od;
+            // The counter checks and the returns of a callee without inline
+            // kernels see the caller's K, which does not change in it.
+            if (in.op == Op::Budget && in.operands[1] == none) in.operands[1] = kernel;
+            if (in.op == Op::Return && in.operands[2] == none) in.operands[2] = kernel;
             // The callee's type tests follow the caller's.
             if (in.op == Op::CheckKind || in.op == Op::TestKind) in.imm += ot;
             f.insts.push_back(std::move(in));
@@ -501,7 +528,7 @@ private:
                 if (flag.kind == StateFlag::Kind::Unchanged) flag = {StateFlag::Kind::One, 0};
             }
             state.blocks = map(state.blocks);
-            state.kernel_steps = map(state.kernel_steps);
+            state.kernel_steps = source.kernel_steps == none ? kernel : map(state.kernel_steps);
             state.program += op;
             if (source.caller != none) {
                 state.caller += os;
@@ -534,7 +561,8 @@ private:
         {
             auto& insts = f.blocks[x].insts;
             std::erase_if(insts, [&](std::uint32_t id) {
-                return id == site.write_back || id == site.call || id == site.reload || id == site.jump;
+                return id == site.write_back || id == site.call || id == site.reload || id == site.jump ||
+                       id == site.kernel_reload;
             });
             insts.insert(insts.end(), made.begin(), made.end());
             insts.push_back(site.jump);
@@ -546,6 +574,7 @@ private:
         const auto join = add_block(f, f.blocks[x]);
         std::vector<std::uint32_t> results;
         std::vector<std::uint32_t> counts;
+        std::vector<std::uint32_t> kernel_counts;
         for (std::uint32_t b = ob; b < ob + g.blocks.size(); ++b) {
             auto& block = f.blocks[b];
             if (block.insts.empty() || f.insts[block.insts.back()].op != Op::Return) continue;
@@ -556,10 +585,12 @@ private:
             jump.origin_function = f.insts[ret].origin_function;
             jump.origin_seq = f.insts[ret].origin_seq;
             const auto value = f.insts[ret].operands[1];
+            kernel_counts.push_back(f.insts[ret].operands[2]);
             auto& add = f.insts[ret];
             add.op = Op::CounterAdd;
             add.type = integer(64);
             add.operands[1] = none;
+            add.operands[2] = none;
             add.imm = 1;
             add.flags = 0;
             add.state = none;
@@ -589,6 +620,10 @@ private:
         }
         phi(site.reload, counts);
         join_insts.push_back(site.reload);
+        if (site.kernel_reload != none) {
+            phi(site.kernel_reload, kernel_counts);
+            join_insts.push_back(site.kernel_reload);
+        }
         if (exit.result_slot == none) {
             // Nothing reads the result of a call without a result slot.
             auto& in = f.insts[site.call];
@@ -662,6 +697,7 @@ private:
         state.kernel_steps = state.kernel_steps == none ? none : edge(state.kernel_steps);
         auto check = f.insts[budget];
         check.operands[0] = edge(check.operands[0]);
+        if (check.operands[1] != none) check.operands[1] = edge(check.operands[1]);
         check.state = static_cast<std::uint32_t>(f.states.size());
         f.states.push_back(std::move(state));
         f.insts.push_back(std::move(check));

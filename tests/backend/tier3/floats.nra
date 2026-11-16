@@ -1,0 +1,469 @@
+// Floats in tier 3 (docs/runtime/NVM.md, "Execution tiers"): NaN payloads of
+// both signs, quiet and signalling, through every float operation, negation
+// and abs, into a field, an element and a global, appended to a list,
+// through to_bits, hash codes, comparisons and conversions, a call argument
+// and a returned value; a NaN made by native code in the frame of a
+// deoptimization; square roots of special values; binary32 throughout.
+// Native code keeps the hardware's NaN of an arithmetic result until its
+// bits are observed, and every observation must be tier 0's. The first argument picks the case, the second the number
+// of rounds. tests/backend/tier3_float_tests.cpp runs it at every tier.
+let console = import:Std.Io.Console;
+let float32s = import:Std.Core.Float32;
+let float64s = import:Std.Core.Float64;
+let int32s = import:Std.Core.Int32;
+let lists = import:Std.Collections.Lists;
+let math = import:Std.Math.Math;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Tier3Floats = module:program.Entry (
+    let Box = class (
+        export let value: float64 = 0.0;
+        export let single: float32 = 0.0 as float32;
+    );
+
+    let stored: float64 = 0.0;
+    let stored_single: float32 = 0.0 as float32;
+
+    // Bit patterns of binary64: NaNs (quiet and signalling, both signs, with
+    // payloads, the canonical NaN and the hardware's default NaN), zeros,
+    // infinities, a subnormal, ordinary values and the largest finite value.
+    let wide_bits: uint64[] = [
+        9221120237041090561, 18444492273895866370, 9218868437227405313, 18443366373989023747,
+        9221120237041090560, 18444492273895866368, 0, 9223372036854775808, 4609434218613702656,
+        13835621005235585024, 9218868437227405312, 18442240474082181120, 1, 9218868437227405311,
+        4890909195324358656
+    ];
+
+    // Bit patterns of binary32, chosen the same way.
+    let narrow_bits: uint32[] = [
+        2143289345, 4290772994, 2139095041, 4288675843, 2143289344, 4290772992, 0, 2147483648,
+        1069547520, 3222274048, 2139095040, 4286578688, 1, 2139095039, 1300234240
+    ];
+
+    // `v` through `depth` calls that are not inlined (recursion never is),
+    // as a call argument and a returned value.
+    let pass_on = func(v: float64, depth: int32) -> float64 {
+        if (depth == 0) {
+            return v;
+        }
+        return pass_on(v, depth - 1);
+    };
+
+    // a + b, returned by a call that is not inlined.
+    let sum_of = func(a: float64, b: float64, depth: int32) -> float64 {
+        if (depth == 0) {
+            return a + b;
+        }
+        return sum_of(a, b, depth - 1);
+    };
+
+    let pass_on_single = func(v: float32, depth: int32) -> float32 {
+        if (depth == 0) {
+            return v;
+        }
+        return pass_on_single(v, depth - 1);
+    };
+
+    let product_of_singles = func(a: float32, b: float32, depth: int32) -> float32 {
+        if (depth == 0) {
+            return a * b;
+        }
+        return product_of_singles(a, b, depth - 1);
+    };
+
+    let flag = func(holds: bool) -> int => holds ? 1 : 0;
+
+    // Every binary64 operation on every pair of values.
+    let wide = func(rounds: int32) {
+        let values = lists.filled<float64>(wide_bits.length, 0.0);
+        for (let k = 0; k < wide_bits.length; k = k + 1) {
+            values[k] = float64.from_bits(wide_bits[k]);
+        }
+        let box = new Box();
+        let cells = lists.filled<float64>(4, 0.0);
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let i = 0; i < values.length; i = i + 1) {
+                for (let j = 0; j < values.length; j = j + 1) {
+                    let a = values[i];
+                    let b = values[j];
+                    let sum = a + b;
+                    let difference = a - b;
+                    let product = a * b;
+                    let quotient = a / b;
+                    console.println("{} {} bits {:x} {:x} {:x} {:x} {:x} {:x} {:x} {:x}", i, j, sum.to_bits(),
+                                    difference.to_bits(), product.to_bits(), quotient.to_bits(), (-sum).to_bits(),
+                                    float64s.abs(product).to_bits(), (-a).to_bits(), float64s.abs(a).to_bits());
+                    box.value = quotient;
+                    cells[(i + j) % 4] = difference;
+                    stored = product;
+                    console.println("{} {} stores {:x} {:x} {:x} {:x} {:x}", i, j, box.value.to_bits(),
+                                    cells[(i + j) % 4].to_bits(), stored.to_bits(),
+                                    pass_on(-quotient, 1).to_bits(), sum_of(a, b, 1).to_bits());
+                    let compared = flag(sum == b) * 1 + flag(sum != b) * 2 + flag(sum < b) * 4 +
+                                   flag(sum <= b) * 8 + flag(sum > b) * 16 + flag(sum >= b) * 32 +
+                                   flag(a == b) * 64 + flag(a != b) * 128 + flag(a < b) * 256;
+                    let branches = 0;
+                    if (sum == b) {
+                        branches = branches + 1;
+                    }
+                    if (sum != b) {
+                        branches = branches + 2;
+                    }
+                    if (a < b) {
+                        branches = branches + 4;
+                    }
+                    if (a <= sum) {
+                        branches = branches + 8;
+                    }
+                    if (sum > b) {
+                        branches = branches + 16;
+                    }
+                    if (b >= a) {
+                        branches = branches + 32;
+                    }
+                    let narrowed = quotient as float32;
+                    console.println("{} {} other {} {} {:x} {:x} {:x} {:x} {:x}", i, j, compared, branches, sum.hash_code(),
+                                    a.hash_code(), narrowed.to_bits(), (narrowed as float64).to_bits(),
+                                    float64s.abs(-difference).to_bits());
+                    console.println("{} {} integers {:x} {:x} {:x} {:x}", i, j, sum.to_bits() >> 1,
+                                    difference.to_bits() ^ 1, product.to_bits() & 18446744073709551614,
+                                    pass_on(product, 1).to_bits());
+                    if (product == product && product < 1.0e18 && product > -1.0e18) {
+                        console.println("{} {} integer {}", i, j, product as int64);
+                    }
+                }
+            }
+        }
+    };
+
+    // Every binary32 operation on every pair of values, and the conversions
+    // both ways.
+    let narrow = func(rounds: int32) {
+        let values = lists.filled<float32>(narrow_bits.length, 0.0 as float32);
+        for (let k = 0; k < narrow_bits.length; k = k + 1) {
+            values[k] = float32.from_bits(narrow_bits[k]);
+        }
+        let box = new Box();
+        let cells = lists.filled<float32>(4, 0.0 as float32);
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let i = 0; i < values.length; i = i + 1) {
+                for (let j = 0; j < values.length; j = j + 1) {
+                    let a = values[i];
+                    let b = values[j];
+                    let sum = a + b;
+                    let difference = a - b;
+                    let product = a * b;
+                    let quotient = a / b;
+                    console.println("{} {} bits {:x} {:x} {:x} {:x} {:x} {:x} {:x} {:x}", i, j, sum.to_bits(),
+                                    difference.to_bits(), product.to_bits(), quotient.to_bits(), (-sum).to_bits(),
+                                    float32s.abs(product).to_bits(), (-a).to_bits(), float32s.abs(a).to_bits());
+                    box.single = quotient;
+                    cells[(i + j) % 4] = difference;
+                    stored_single = product;
+                    console.println("{} {} stores {:x} {:x} {:x} {:x} {:x}", i, j, box.single.to_bits(),
+                                    cells[(i + j) % 4].to_bits(), stored_single.to_bits(),
+                                    pass_on_single(-quotient, 1).to_bits(), product_of_singles(a, b, 1).to_bits());
+                    let compared = flag(sum == b) * 1 + flag(sum != b) * 2 + flag(sum < b) * 4 +
+                                   flag(sum <= b) * 8 + flag(sum > b) * 16 + flag(sum >= b) * 32 +
+                                   flag(a == b) * 64 + flag(a != b) * 128 + flag(a < b) * 256;
+                    let widened = sum as float64;
+                    console.println("{} {} other {} {:x} {:x} {:x} {:x}", i, j, compared, sum.hash_code(),
+                                    a.hash_code(), widened.to_bits(), (widened as float32).to_bits());
+                    console.println("{} {} integers {:x} {:x} {:x}", i, j, sum.to_bits() >> 1, difference.to_bits() ^ 1,
+                                    pass_on_single(product, 1).to_bits());
+                    if (product == product && product < (1.0e9 as float32) && product > (-1.0e9 as float32)) {
+                        console.println("{} {} integer {}", i, j, product as int32);
+                    }
+                }
+            }
+        }
+    };
+
+    // Integers to floats (signed, and unsigned of 2^63 or more, which the
+    // hardware has no instruction for) and floats to integers just inside
+    // their ranges.
+    let integers = func(rounds: int32) {
+        let unsigned: uint64[] = [0, 1, 9223372036854775807, 9223372036854775808, 9223372036854775809,
+                                  9223372036854777856, 9223372036854777857, 18446744073709551615,
+                                  18446744073709550591, 18446744073709550592];
+        let signed: int64[] = [0, -1, -9223372036854775807, 9223372036854775807, 9007199254740993,
+                               -9007199254740993];
+        let inside: float64[] = [2147483647.9, -2147483648.9, 9223372036854774784.0, -9223372036854775808.0,
+                                 18446744073709549568.0, 255.9, -0.9, 0.0];
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let k = 0; k < unsigned.length; k = k + 1) {
+                let u = unsigned[k];
+                console.println("unsigned {} {:x} {:x}", k, (u as float64).to_bits(), (u as float32).to_bits());
+            }
+            for (let k = 0; k < signed.length; k = k + 1) {
+                let s = signed[k];
+                console.println("signed {} {:x} {:x}", k, (s as float64).to_bits(), (s as float32).to_bits());
+            }
+            console.println("to int32 {} {}", inside[0] as int32, inside[1] as int32);
+            console.println("to int64 {} {}", inside[2] as int64, inside[3] as int64);
+            console.println("to uint64 {} uint8 {} {}", inside[4] as uint64, inside[5] as uint8, inside[6] as uint8);
+            console.println("to uint32 {}", inside[7] as uint32);
+        }
+    };
+
+    // Conversions of values that step towards a bound of the target's range
+    // by the spacing of the floats there, the last one just outside it: the
+    // run traps.
+    let outside = func(which: int32) {
+        let bounds: float64[] = [2147483648.0, -2147483649.0, 9223372036854775808.0, 256.0, -1.0,
+                                 18446744073709551616.0];
+        let units: float64[] = [1.0, -1.0, 1024.0, 1.0, -1.0, 2048.0];
+        for (let i = 0; i < 4; i = i + 1) {
+            let v = bounds[which] - ((3 - i) as float64) * units[which];
+            if (which <= 1) {
+                console.println("int32 {}", v as int32);
+            } else if (which == 2) {
+                console.println("int64 {}", v as int64);
+            } else if (which <= 4) {
+                console.println("uint8 {}", v as uint8);
+            } else {
+                console.println("uint64 {}", v as uint64);
+            }
+        }
+    };
+
+    // A NaN that native code makes (the hardware's NaN, not the canonical
+    // one) is in the frame when the code deoptimizes at a block it has no
+    // code for, the first time the late branch runs.
+    let late = func(rounds: int32) {
+        let zeros = lists.filled<float64>(2, 0.0);
+        let total = 0.0;
+        let quotient = 0.0;
+        let single = 0.0 as float32;
+        for (let i = 0; i < rounds; i = i + 1) {
+            quotient = zeros[0] / zeros[1];
+            single = (zeros[0] as float32) / (zeros[1] as float32);
+            total = total + 1.0;
+            if (i == rounds - 1) {
+                console.println("late {:x} {:x} {:x}", quotient.to_bits(), single.to_bits(), total.to_bits());
+            }
+        }
+        console.println("after {:x} {:x}", quotient.to_bits(), single.to_bits());
+    };
+
+    // `start` is a parameter: native code takes its value as no NaN but the
+    // canonical one, which it is not when the caller passes a NaN with a
+    // payload; at the join with the sum, the entry is refused then.
+    let accumulate = func(start: float64, rounds: int32) -> uint64 {
+        let value = start;
+        let total: uint64 = 0;
+        for (let i = 0; i < rounds; i = i + 1) {
+            if (i == rounds / 2) {
+                value = value + 1.0;
+            }
+            total = (total * 31 + (value.to_bits() >> 40)) & 4294967295;
+        }
+        return total;
+    };
+
+    let entries = func(rounds: int32) {
+        let starts: uint64[] = [9221120237041090561, 4609434218613702656, 18443366373989023747, 9221120237041090560,
+                                9218868437227405313];
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let k = 0; k < starts.length; k = k + 1) {
+                console.println("entry {} {:x}", k, accumulate(float64.from_bits(starts[k]), 6));
+            }
+        }
+    };
+
+    // `v` through `depth` calls that are not inlined, as a value returned.
+    let echo = func(v: float64, depth: int32) -> float64 {
+        if (depth <= 0) {
+            return v;
+        }
+        return echo(v, depth - 1);
+    };
+
+    // A quotient of NaNs with payloads (the hardware's NaN is the first
+    // operand's, quieted) is a slot's value across a call, which destroys
+    // every vector register: native code keeps it on its own stack, never in
+    // the frame the callee and tier 1 see.
+    let spilled = func(rounds: int32) {
+        let patterns: uint64[] = [18446744073709551615, 9221120237041090561, 9219994337134247936, 1];
+        for (let i = 0; i < rounds; i = i + 1) {
+            let a = float64.from_bits(patterns[i % patterns.length]);
+            let b = float64.from_bits(patterns[(i * 5 + 1) % patterns.length]);
+            let r = a / b;
+            let q = (a + 1.0) * b;
+            let root = math.sqrt(a);
+            let passed = echo(q, 1);
+            if (i % 2 == 0) {
+                console.println("spilled {} {:x} {:x} {:x}", i, r.to_bits(), root.to_bits(), passed.to_bits());
+            }
+        }
+    };
+
+    // Arithmetic results with NaN payloads appended to lists of both
+    // formats: inline while a list has room, through the append helper when
+    // it grows (its first append among them). The lists are read only after
+    // the loop.
+    let appends = func(rounds: int32) {
+        let grown: float64[list] = [];
+        let grown_single: float32[list] = [];
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let k = 0; k < wide_bits.length; k = k + 1) {
+                let a = float64.from_bits(wide_bits[k]);
+                let b = float64.from_bits(wide_bits[(k * 7 + round) % wide_bits.length]);
+                grown.append(a + b);
+                grown.append(a * b);
+                let c = float32.from_bits(narrow_bits[k]);
+                let d = float32.from_bits(narrow_bits[(k * 7 + round) % narrow_bits.length]);
+                grown_single.append(c - d);
+                grown_single.append(c / d);
+            }
+        }
+        for (let k = 0; k < grown.length; k = k + 1) {
+            console.println("appended {} {:x} {:x}", k, grown[k].to_bits(), grown_single[k].to_bits());
+        }
+    };
+
+    // Arithmetic results that are NaNs with payloads (the hardware keeps the
+    // operand's payload, quieted), stored into elements of both formats, a
+    // field and a global, and appended to a list (the list's growth goes
+    // through the append helper); nothing reads them back inside the loop.
+    let kept = func(rounds: int32) {
+        let elements: float64[] = [0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
+        let singles: float32[] = [0.0 as float32, 0.0 as float32, 0.0 as float32, 0.0 as float32];
+        let listed = lists.filled<float64>(rounds * 4, 0.0);
+        let grown: float64[list] = [];
+        let box = new Box();
+        for (let i = 0; i < rounds * 4; i = i + 1) {
+            let a = float64.from_bits(wide_bits[i % 4]);
+            elements[i % 8] = a + 1.0;
+            singles[i % 4] = float32.from_bits(narrow_bits[i % 4]) * (2.0 as float32);
+            listed[i] = a - 2.0;
+            grown.append(a * 3.0);
+            box.value = a - 1.0;
+            stored = a / 5.0;
+        }
+        for (let i = 0; i < rounds * 4; i = i + 1) {
+            console.println("kept {} {:x} {:x} {:x} {:x}", i, elements[i % 8].to_bits(), singles[i % 4].to_bits(),
+                            listed[i].to_bits(), grown[i].to_bits());
+        }
+        console.println("kept {:x} {:x}", box.value.to_bits(), stored.to_bits());
+    };
+
+    // Square roots of special values: -0, negatives, infinities, NaNs,
+    // subnormals and ordinary values.
+    let roots = func(rounds: int32) {
+        let inputs: uint64[] = [9223372036854775808, 0, 13830554455654793216, 18442240474082181120,
+                                9218868437227405312, 9221120237041090561, 18443366373989023747, 1,
+                                4503599627370495, 4611686018427387904, 9218868437227405311, 4598175219545276416,
+                                13835058055282163712];
+        let total = 0.0;
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let k = 0; k < inputs.length; k = k + 1) {
+                let x = float64.from_bits(inputs[k]);
+                let r = math.sqrt(x);
+                total = total + r * 2.0;
+                console.println("sqrt {} {:x} {:x} {:x}", k, r.to_bits(), (-r).to_bits(), (r * 1.0).to_bits());
+            }
+        }
+        console.println("total {:x}", total.to_bits());
+    };
+
+    // Square roots of the same values summed into one line, for a run short
+    // enough to try at every step limit.
+    let root_steps = func(rounds: int32) {
+        let inputs: uint64[] = [9223372036854775808, 13830554455654793216, 9218868437227405312, 18443366373989023747,
+                                1, 4611686018427387904];
+        let total: uint64 = 0;
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let k = 0; k < inputs.length; k = k + 1) {
+                let r = math.sqrt(float64.from_bits(inputs[k]));
+                total = (total * 31 + (r.to_bits() >> 32)) & 4294967295;
+            }
+        }
+        console.println("root steps {:x}", total);
+    };
+
+    // Square roots and no other float operation: the function's only native
+    // float code is the inline square root, which rounds as the hardware's
+    // rounding mode says.
+    let roots_only = func(rounds: int32) {
+        let inputs: uint64[] = [4611686018427387904, 4613937818241073152, 4617315517961601024, 4619567317775286272,
+                                4621819117588971520, 4622382067542392832];
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let k = 0; k < inputs.length; k = k + 1) {
+                console.println("root {} {:x}", k, math.sqrt(float64.from_bits(inputs[k])).to_bits());
+            }
+        }
+    };
+
+    // No square root: inlined into a function with one.
+    let scaled = func(v: float64, by: float64) -> float64 => v * by;
+
+    // A square root: inlined into a function with one, not into one without.
+    let length = func(x: float64, y: float64) -> float64 => math.sqrt(x * x + y * y);
+
+    // A call that is not inlined, and has no square root, after one.
+    let countdown = func(n: int32) -> float64 {
+        if (n <= 0) {
+            return 0.5;
+        }
+        return countdown(n - 1) + 1.0;
+    };
+
+    // Inline square roots in a caller, a callee and both.
+    let lengths = func(rounds: int32) {
+        let total = 0.0;
+        for (let i = 0; i < rounds; i = i + 1) {
+            let x = (i as float64) * 0.5;
+            total = total + math.sqrt(scaled(x, 3.0)) + length(x, 1.0);
+            total = total + countdown(i % 3);
+        }
+        console.println("lengths {:x}", total.to_bits());
+    };
+
+    // Square roots only in the callee.
+    let plain_lengths = func(rounds: int32) {
+        let total = 0.0;
+        for (let i = 0; i < rounds; i = i + 1) {
+            total = total + length(i as float64, 2.0);
+        }
+        console.println("plain lengths {:x}", total.to_bits());
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kind = args[0];
+        let size = 1;
+        if (args.length > 1) {
+            size = result.value_or<int32>(int32s.parse(args[1]), 1);
+        }
+        if (kind == "wide") {
+            wide(size);
+        } else if (kind == "narrow") {
+            narrow(size);
+        } else if (kind == "integers") {
+            integers(size);
+        } else if (kind == "outside") {
+            outside(size);
+        } else if (kind == "late") {
+            late(size);
+        } else if (kind == "entries") {
+            entries(size);
+        } else if (kind == "spilled") {
+            spilled(size);
+        } else if (kind == "appends") {
+            appends(size);
+        } else if (kind == "kept") {
+            kept(size);
+        } else if (kind == "roots") {
+            roots(size);
+        } else if (kind == "root-steps") {
+            root_steps(size);
+        } else if (kind == "roots-only") {
+            roots_only(size);
+        } else if (kind == "lengths") {
+            lengths(size);
+            plain_lengths(size);
+        }
+        return program.ExitCode.Ok;
+    };
+);

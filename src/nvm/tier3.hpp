@@ -34,12 +34,15 @@ namespace neura::nvm::tier3 {
 //   1 re-runs the block, so the check's failure is the reference's trap); a
 //   helper's and a call's is the state after the block's commit.
 // - Counters. `C` counts the blocks completed since the dispatcher entered
-//   the native activation chain; `K` the steps inline kernels charged (none
-//   yet). Both are SSA values, flushed to the run's steps where reference
-//   code can read them.
-// - Budget. `Budget(P)` deoptimizes when C + K + P exceeds the room, the
-//   steps left before the step limit or the caller's allowance; P is the
-//   longest run of completed blocks to the next Budget or ending.
+//   the native activation chain; `K` the steps inline kernels (Sqrt)
+//   charged. C is an SSA value; K is one in a function with inline kernels
+//   (Function::inline_kernels) and otherwise stays what the context holds.
+//   Both are flushed to the run's steps where reference code can read them.
+// - Budget. `Budget(P)` deoptimizes when C + K + P exceeds the steps left
+//   before the step limit, or C + P the caller's allowance; P is the longest
+//   run of completed blocks and kernel charges to the next Budget or ending.
+//   The context's room is for C with the context's K taken off: a Budget
+//   compares C + P (no inline kernels) or C + (K - context.K) + P with it.
 // - Passes (tier3_passes.cpp, run on the built IR by `optimize`): constant
 //   folding, copy propagation, value numbering, range analysis, check
 //   elimination, loop-invariant code motion with guarded loop entries, dead
@@ -68,6 +71,18 @@ namespace neura::nvm::tier3 {
 
 inline constexpr std::uint32_t none = nvr::absent;
 
+// `bits` with a NaN of the binary32 (`width` 32: the low 32 bits) or binary64
+// format replaced by that format's canonical quiet NaN (Canon).
+inline std::uint64_t canonical_nan(std::uint64_t bits, unsigned width) {
+    if (width == 32) {
+        const auto low = bits & 0xFFFFFFFFULL;
+        return (low & 0x7F800000ULL) == 0x7F800000ULL && (low & 0x007FFFFFULL) != 0 ? 0x7FC00000ULL : bits;
+    }
+    return (bits & 0x7FF0000000000000ULL) == 0x7FF0000000000000ULL && (bits & 0x000FFFFFFFFFFFFFULL) != 0
+               ? 0x7FF8000000000000ULL
+               : bits;
+}
+
 enum class Type : std::uint8_t { Int, F32, F64, Ref, Ptr, None };
 
 struct ValueType {
@@ -90,7 +105,7 @@ enum class Op : std::uint8_t {
     Gather,        // extras: `imm` pairs (value, bit); lane i is bit `bit` of `value`
     CounterAdd,    // operands[0] + imm
     // Checks: no effect; each names a frame state to deoptimize to.
-    Budget,        // operands[0] = C, imm = P
+    Budget,        // operands[0] = C, operands[1] = K (none without inline kernels), imm = P
     SwitchCheck,   // deoptimizes (Selectors) when operands[0] >= imm
     // Deoptimizes (Guards) when operands[0] & 1 is 0, to the frame state `state`. A Guard stands in a
     // loop's preheader and asserts a fact the loop's eliminated checks rest on: the loop head's entry
@@ -103,15 +118,17 @@ enum class Op : std::uint8_t {
     StateCall,     // an inline state operation of exits[imm] on the extras (Fault: StateTraps), or, with
                    // CheckReference, a reference check of operands[0] against type imm (Fault: References)
     WriteBack,     // writes the physical frame from the state: its slots, flags and block
-    Helper,        // exits[aux] on the extras under R3: operands[0] = C (the block's step is in it)
-    Call,          // function imm through exits[aux] on the extras; operands[0] = C (the call block's step in it)
-    Return,        // operands[0] = C before the return block's step, operands[1] = the value (none: void)
+    Helper,        // exits[aux] on the extras under R3: operands[0] = C (the block's step is in it), operands[1] = K
+    Call,          // function imm through exits[aux] on the extras; operands[0] = C (the call block's step in it),
+                   // operands[1] = K
+    Return,        // operands[0] = C before the return block's step, operands[1] = the value (none: void),
+                   // operands[2] = K
     // Terminators.
     Jump,
     Branch,        // operands[0] & 1: succs[0] when set, else succs[1]
     Switch,        // succs[operands[0]]
     Dispatch,      // dispatch_tables[imm] on operands[0]: succs[exit]
-    Leave,         // the activation ends at image block imm; operands[0] = C
+    Leave,         // the activation ends at image block imm; operands[0] = C, operands[1] = K
     Deopt,         // tier 1 runs the state's block; operands[0] = C
 
     // Heap access through the published layout (heap.hpp), the inline form
@@ -156,6 +173,14 @@ enum class Op : std::uint8_t {
     AllocObject,      // a new object of exits[aux] (layout: the exit's immediate; imm: its field count)
     Append,           // the list entry operands[1] (checked) gets operands[2]; extras: the helper's arguments; imm:
                       // the list's declared element width in bytes
+    // Floats (design 7). Canon: operands[0] with a NaN of the value's format
+    // (F32 or F64) replaced by the format's canonical quiet NaN; no other
+    // value changes. Sqrt: the square root of the binary64 operands[0]
+    // rounded to nearest even, a NaN for a negative or NaN operand; with
+    // Deferred, the NaN is the hardware's (the kernel neura.math.sqrt gives
+    // Canon of it). Both pure.
+    Canon,
+    Sqrt,
 };
 
 enum Flag : std::uint16_t {
@@ -163,6 +188,12 @@ enum Flag : std::uint16_t {
     Effect = 2,          // changes state outside the SSA values
     CheckReference = 4,  // StateCall: the reference check
     ReferenceCheck = 8,  // a heap check made for a CheckRef (deoptimization reason References)
+    // A Lift of FloatAdd, FloatSubtract, FloatMultiply or FloatDivide (binary32
+    // or binary64), or a Sqrt, whose NaN result is the hardware's rather than
+    // the canonical NaN: NaN exactly where the reference's is, and equal to
+    // it elsewhere (tier3_float.cpp places the Canons that make every
+    // observed bit the reference's).
+    Deferred = 16,
 };
 
 struct Inst {
@@ -331,6 +362,21 @@ struct Function {
     // What the passes did, by kind (tier3_passes.cpp lists the names), for
     // the tests and for NEURA_TIER_DUMP.
     std::map<std::string, std::uint64_t> pass_counts;
+    // Whether the function has inline kernels (a Sqrt): its K is an SSA
+    // value, which Budget, Helper, Call, Return and Leave name and every
+    // frame state holds. Without them K is not an SSA value at all, and the
+    // context's K stays what the activation chain has charged.
+    bool inline_kernels = false;
+    // By SSA value, after place_canons (tier3_float.cpp): 32 or 64 for a
+    // value whose bits a frame write canonicalizes in that format (a
+    // Deferred result, or a value of only such results and canonical ones);
+    // 0 for a value whose bits are the reference's. Empty before.
+    std::vector<std::uint8_t> frame_canon;
+    // By entry (after place_canons; empty before): the float slots (F32 or
+    // F64) whose value at that entry must be no NaN but the canonical NaN of
+    // the slot's format. The run enters only then: a frame write
+    // canonicalizes a phi of a deferred value and of such an entry value.
+    std::vector<std::vector<std::uint32_t>> clean_slots;
 };
 
 struct Context;
@@ -412,9 +458,8 @@ struct BuildResult {
 BuildResult build(const nvr::Image& image, const tier2::Region& program, bool verify,
                   Variant variant = Variant::Standard);
 
-// The violations of the verifier's rules (V1-V8, V10) in `function`; empty
-// when it is well formed. V9 (floats) passes: nothing yet makes a float
-// value deferred. Each message starts with the rule's name.
+// The violations of the verifier's rules (V1-V10) in `function`; empty when
+// it is well formed. Each message starts with the rule's name.
 std::vector<std::string> verify(const nvr::Image& image, const Function& function);
 
 // NEURA_TIER3_VERIFY=1.
@@ -427,6 +472,12 @@ bool verify_enabled();
 // pass and the IR and aborts. `NEURA_TIER3_PASSES=0` (a testing aid, read
 // once) turns the pipeline off in TierCache::compile_native.
 void optimize(const nvr::Image& image, Function& function, bool verify);
+
+// Marks the float arithmetic and the Sqrts Deferred and places the Canons
+// that make every observed bit the reference's (tier3_float.cpp, design 7.2),
+// then fills Function::frame_canon. Runs last, after the passes; verifies the
+// result when `verify` is set.
+void place_canons(const nvr::Image& image, Function& function, bool verify);
 bool passes_enabled();
 
 // A readable listing, for tests and debugging.
@@ -618,8 +669,10 @@ struct Context {
     // before every helper that reads it.
     std::uint64_t C = 0;
     std::uint64_t K = 0;
-    // The most C + K + P a Budget lets pass; the executor recomputes it
-    // after every flush.
+    // The most C + P a Budget lets pass, the kernel steps K up to now taken
+    // off (a function with inline kernels adds the ones it charged since);
+    // the executor recomputes it after every flush, and machine code takes
+    // off the kernel steps it charged where it stores K without one.
     std::uint64_t room = 0;
     // The innermost frame: its slots, initialized flags and block.
     std::uint64_t* slots = nullptr;

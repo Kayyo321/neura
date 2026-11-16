@@ -50,15 +50,20 @@ bool is_heap_check(Op op);
 // A heap read: no effect and no check; it reads words a write may change.
 bool is_heap_read(Op op);
 
-// The values an instruction reads, including its frame state's.
+// An operand reference as a position: below operand_slots it is
+// operands[position], from it extras[extra + position - operand_slots].
+inline constexpr unsigned operand_slots = sizeof(Inst::operands) / sizeof(Inst::operands[0]);
+
+// The positions of the values an instruction reads (a phi's inputs, and the
+// variable-length operands of the ops that have them, included).
 template <typename Visit>
-void for_each_operand(const Function& f, const Inst& in, Visit&& visit) {
-    for (const auto operand : in.operands) {
-        if (operand != none) visit(operand);
+void for_each_operand_position(const Inst& in, Visit&& visit) {
+    for (unsigned k = 0; k < operand_slots; ++k) {
+        if (in.operands[k] != none) visit(k);
     }
     switch (in.op) {
     case Op::Gather:
-        for (std::uint32_t i = 0; i < in.count; i += 2) visit(f.extras[in.extra + i]);
+        for (std::uint32_t i = 0; i < in.count; i += 2) visit(operand_slots + i);
         break;
     case Op::Phi:
     case Op::StateCall:
@@ -67,10 +72,21 @@ void for_each_operand(const Function& f, const Inst& in, Visit&& visit) {
     case Op::Select:
     case Op::AllocObject:
     case Op::Append:
-        for (std::uint32_t i = 0; i < in.count; ++i) visit(f.extras[in.extra + i]);
+        for (std::uint32_t i = 0; i < in.count; ++i) visit(operand_slots + i);
         break;
     default: break;
     }
+}
+
+// The value at an operand position of `in`.
+inline std::uint32_t operand_value(const Function& f, const Inst& in, unsigned position) {
+    return position < operand_slots ? in.operands[position] : f.extras[in.extra + position - operand_slots];
+}
+
+// The values an instruction reads.
+template <typename Visit>
+void for_each_operand(const Function& f, const Inst& in, Visit&& visit) {
+    for_each_operand_position(in, [&](unsigned position) { visit(operand_value(f, in, position)); });
 }
 
 // The values a frame state (and its callers) names.
@@ -164,5 +180,68 @@ std::uint32_t make_preheader(Function& f, const Loop& loop);
 std::uint32_t preheader_state(Function& f, const Loop& loop, std::uint32_t preheader);
 // The value the preheader gives the header's phi `phi`.
 std::uint32_t entry_operand(const Function& f, const Loop& loop, std::uint32_t phi);
+
+// --- Floats (tier3_float.cpp, design 7.2) ---------------------------------------------------------
+
+// What a value's bits are, measured against the reference's (the program
+// interpreter, whose float arithmetic gives the canonical NaN):
+enum class NanClass : std::uint8_t {
+    // The reference's bits, and no NaN but the canonical NaN: of either
+    // format (a constant that is neither format's NaN), or of binary32 or
+    // binary64.
+    Clean,
+    Clean32,
+    Clean64,
+    // The reference's bits.
+    Exact,
+    // A NaN exactly where the reference's is, which is then its format's
+    // canonical NaN, and the reference's bits elsewhere: Canon in that format
+    // gives the reference's bits (a Deferred result, or a phi of such results
+    // and clean values).
+    Deferred32,
+    Deferred64,
+    // A NaN exactly where the reference's is (in that format), the
+    // reference's bits elsewhere, but no Canon gives the reference's NaN (a
+    // negated Deferred result, a phi of a Deferred result and an exact value).
+    Mixed32,
+    Mixed64,
+    // None of these.
+    Mixed,
+};
+
+// The class of every value (design 7.2): a fixed point over the phis.
+std::vector<NanClass> nan_classes(const Function& f);
+
+// By entry: the float slots whose entry value the classes take as clean and
+// that reach a deferred phi through phis and abs: their Function::clean_slots.
+std::vector<std::vector<std::uint32_t>> clean_slots_needed(const Function& f, const std::vector<NanClass>& classes);
+
+// The format (32 or 64) of a deferred or mixed class; 0 for the others.
+unsigned nan_format(NanClass c);
+// Whether the class is the reference's bits (a clean or exact class).
+bool exact(NanClass c);
+
+// How an op reads one of its operands' bits (design 7.2).
+enum class BitsUse : std::uint8_t {
+    // Not at all (an integer counter), or only as a NaN-insensitive float
+    // operand of the format: any NaN gives the result the reference's NaN
+    // gives.
+    Insensitive32,
+    Insensitive64,
+    // The result is the operand with its sign changed or cleared, or the
+    // operand itself (FloatNegate, abs, a phi).
+    Propagating,
+    // The bits leave the float domain.
+    Sensitive,
+};
+
+// The value operand of an abs (a Lift BitAnd, typed F32 or F64, of a value
+// and the Const that is the magnitude mask of that format), or none.
+std::uint32_t abs_operand(const Function& f, const Inst& in);
+
+// The operand positions of `in` (for_each_operand_position), as a list.
+std::vector<unsigned> value_positions(const Inst& in);
+// How `in` reads its operand at `position`.
+BitsUse bits_use(const Function& f, const Inst& in, unsigned position);
 
 } // namespace neura::nvm::tier3::detail

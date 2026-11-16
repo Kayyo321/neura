@@ -606,6 +606,8 @@ void Assembler::ucomis(Prec prec, Xmm a, const XmmRm& b) {
     sse(prec == Prec::dbl ? 0x66 : 0x00, 0x2E, a.n, b);
 }
 
+void Assembler::movaps(Xmm to, Xmm from) { sse(0x00, 0x28, to.n, XmmRm(from)); }
+
 void Assembler::andpd(Xmm to, const XmmRm& from) { sse(0x66, 0x54, to.n, from); }
 void Assembler::andnpd(Xmm to, const XmmRm& from) { sse(0x66, 0x55, to.n, from); }
 void Assembler::xorpd(Xmm to, const XmmRm& from) { sse(0x66, 0x57, to.n, from); }

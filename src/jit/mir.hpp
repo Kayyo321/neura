@@ -150,6 +150,10 @@ struct Location {
 struct Move {
     Location from, to;
     RegClass cls = RegClass::Gpr;
+    // The virtual register whose location `to` is, where the move gives a
+    // value its location (a split, an edge, a phi, a result); none for a
+    // temporary location.
+    std::uint32_t vreg = 0xFFFFFFFFU;
     friend bool operator==(const Move&, const Move&) = default;
 };
 

@@ -165,6 +165,9 @@ struct NativeCounts {
     std::uint64_t exits = 0;
     std::uint64_t traps = 0;
     std::uint64_t steps = 0;
+    // Kernel exits that native programs ran through the helper (an inline
+    // sqrt is no helper).
+    std::uint64_t kernel_helpers = 0;
     // Allocations and appends native code made inline, and those it left to
     // the reference state operation (a helper).
     std::uint64_t fast_allocations = 0;

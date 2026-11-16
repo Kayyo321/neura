@@ -13,12 +13,17 @@
 //   expression by expression, on the operand values the IR's types allow
 //   (an Int(w) value is below 2^w): the processor's flags where they are
 //   exactly the failure condition (32 and 64 bits), else the sign extension
-//   and range tests of evaluate. Float operations of binary32 and binary64 go
-//   through XMM registers as the region code generator's do (compiler.cpp),
-//   with the canonical NaN; everything else (16-bit float formats, a value
-//   hash of a float, a truncation outside the 64-bit range) calls
-//   lift::evaluate through the evaluate helper, saving the registers the
-//   call would destroy, so it is the interpreter's code by construction.
+//   and range tests of evaluate. Floats of binary32 and binary64 live in XMM
+//   registers (design 7.1; binary32 in the low 32 bits with bits 32 to 63
+//   zero, so that its 8 bytes in memory are its slot encoding) and their
+//   operations are the scalar SSE2 instructions of lift::evaluate_float; a
+//   Deferred result keeps the hardware's NaN (tier3_float.cpp), a Canon and
+//   a frame write of a deferred value replace it by the canonical NaN.
+//   Everything else (16-bit float formats, a truncation outside the 64-bit
+//   range) calls lift::evaluate through the evaluate helper, saving the
+//   registers the call would destroy, so it is the interpreter's code by
+//   construction. Float constants and masks are read from a pool after the
+//   code (16-byte aligned entries).
 #include "jit/tier3_native.hpp"
 
 #include "jit/mir_check.hpp"
@@ -194,6 +199,16 @@ public:
         // Constant data the code reads (the tables of type tests).
         for (std::size_t i = 0; i < data_.size(); ++i) data_[i]();
 
+        // The constant pool: 16 bytes each (the packed forms read 16).
+        if (!pool_.empty()) {
+            a_.align(16);
+            for (const auto& [bits, label] : pool_) {
+                a_.bind(label);
+                a_.data64(bits);
+                a_.data64(0);
+            }
+        }
+
         std::vector<x64::Label> entries;
         for (const auto b : l_.entry_blocks) entries.push_back(block_labels_[b]);
         return entries;
@@ -238,6 +253,14 @@ private:
     }
     std::map<std::pair<std::uint32_t, std::uint32_t>, Label> tails_;
     std::map<std::vector<std::uint64_t>, Label> stubs_;
+    // The constant pool, by the low 8 bytes of an entry (the high 8 are 0).
+    std::map<std::uint64_t, Label> pool_;
+
+    Mem constant(std::uint64_t bits) {
+        auto found = pool_.find(bits);
+        if (found == pool_.end()) found = pool_.emplace(bits, a_.label()).first;
+        return Mem::rip_relative(found->second);
+    }
 
     // ---- locations ----------------------------------------------------------
 
@@ -263,6 +286,11 @@ private:
         if (in_register(l)) return Rm(gpr(l));
         return Rm(memory(l));
     }
+    // An XMM register or memory location as an r/m operand.
+    XmmRm xmm_rm(const mir::Location& l) const {
+        if (in_register(l)) return XmmRm(xmm(l));
+        return XmmRm(memory(l));
+    }
     void load(Gpr to, const mir::Location& l) {
         if (in_register(l)) {
             if (gpr(l) != to) a_.mov(S64, to, gpr(l));
@@ -287,9 +315,24 @@ private:
             return;
         }
         if (from_reg && to_reg) {
-            if (move.from.index != move.to.index) a_.movs(Prec::dbl, xmm(move.to), xmm(move.from));
+            if (move.from.index != move.to.index) a_.movaps(xmm(move.to), xmm(move.from));
         } else if (from_reg) {
             a_.movs(Prec::dbl, memory(move.to), xmm(move.from));
+            const auto format = move.to.kind == mir::LocKind::FrameSlot && move.vreg < l_.canon_vreg.size()
+                                    ? l_.canon_vreg[move.vreg]
+                                    : std::uint8_t{0};
+            if (format != 0) {
+                // A deferred value's home holds no NaN but the canonical one:
+                // stored in place with immediates (no register is free in a
+                // parallel move).
+                const auto skip = a_.label();
+                a_.ucomis(format == 32 ? Prec::single : Prec::dbl, xmm(move.from), xmm(move.from));
+                a_.jcc(Cond::np, skip);
+                const auto bits = format == 32 ? canonical_nan32 : canonical_nan64;
+                a_.mov(S32, memory(move.to), imm32(static_cast<std::uint32_t>(bits)));
+                a_.mov(S32, Mem::at(frame, displacement(8ULL * move.to.index + 4)), imm32(static_cast<std::uint32_t>(bits >> 32)));
+                a_.bind(skip);
+            }
         } else if (to_reg) {
             a_.movs(Prec::dbl, xmm(move.to), memory(move.from));
         } else {
@@ -443,12 +486,21 @@ private:
     Label stub(const mir::Inst& inst, const mir::InstAllocation& ia) {
         const auto& step = l_.steps[inst.opcode];
         if (step.state == t3::none) throw EmitError("a check without a frame state");
-        std::vector<std::pair<mir::Location, std::uint32_t>> values;
-        for (const auto& [use, value] : step.state_values) values.emplace_back(ia.state_uses.at(use), value);
+        // Each value with its location and whether that is an XMM register.
+        struct Named {
+            mir::Location location;
+            std::uint32_t value;
+            bool xmm;
+        };
+        std::vector<Named> values;
+        for (const auto& [use, value] : step.state_values) {
+            values.push_back({ia.state_uses.at(use), value, inst.state_uses.at(use).vreg.cls == mir::RegClass::Xmm});
+        }
         std::vector<std::uint64_t> key{step.state, step.reason, pending_};
-        for (const auto& [location, value] : values) {
-            key.push_back(value);
-            key.push_back((static_cast<std::uint64_t>(location.kind) << 32) | location.index);
+        for (const auto& named : values) {
+            key.push_back(named.value);
+            key.push_back((static_cast<std::uint64_t>(named.xmm) << 40) |
+                          (static_cast<std::uint64_t>(named.location.kind) << 32) | named.location.index);
         }
         const auto constants = step.state_constants;
         const auto pending = pending_;
@@ -461,8 +513,10 @@ private:
             a_.bind(label);
             a_.mov(S64, scratch, Mem::at(context, off::values));
             const auto at = [&](std::uint32_t value) { return Mem::at(scratch, displacement(8ULL * value)); };
-            for (const auto& [location, value] : values) {
-                if (in_register(location)) a_.mov(S64, at(value), gpr(location));
+            for (const auto& named : values) {
+                if (!in_register(named.location)) continue;
+                if (named.xmm) a_.movs(Prec::dbl, at(named.value), xmm(named.location));
+                else a_.mov(S64, at(named.value), gpr(named.location));
             }
             // C: r12 and the steps not yet added to it.
             if (pending == 0) {
@@ -471,10 +525,10 @@ private:
                 a_.lea(S64, x64::rax, Mem::at(counter, displacement(pending)));
                 a_.mov(S64, at(blocks), x64::rax);
             }
-            for (const auto& [location, value] : values) {
-                if (in_register(location)) continue;
-                a_.mov(S64, x64::rax, memory(location));
-                a_.mov(S64, at(value), x64::rax);
+            for (const auto& named : values) {
+                if (in_register(named.location)) continue;
+                a_.mov(S64, x64::rax, memory(named.location));
+                a_.mov(S64, at(named.value), x64::rax);
             }
             for (const auto& [value, bits] : constants) {
                 if (simm32(bits)) {
@@ -498,6 +552,42 @@ private:
         return label;
     }
 
+    // The context's K = uses[index] when the instruction has it (a function
+    // with inline kernels), before a helper, a call, a return or a leave;
+    // the room, which is for C with the context's K taken off, loses the
+    // kernel steps charged since (a callee entered without a flush, or a
+    // caller returned to, compares C + P with it).
+    void store_kernel_steps(const mir::InstAllocation& ia, std::size_t index) {
+        if (index >= ia.uses.size()) return;
+        const auto& location = ia.uses[index];
+        a_.mov(S64, scratch, Mem::at(context, off::K));
+        if (in_register(location)) {
+            a_.alu(Alu::sub, S64, scratch, gpr(location));
+            a_.alu(Alu::add, S64, Mem::at(context, off::room), scratch);
+            a_.mov(S64, Mem::at(context, off::K), gpr(location));
+        } else {
+            a_.alu(Alu::sub, S64, scratch, memory(location));
+            a_.alu(Alu::add, S64, Mem::at(context, off::room), scratch);
+            a_.mov(S64, scratch, memory(location));
+            a_.mov(S64, Mem::at(context, off::K), scratch);
+        }
+    }
+
+    // value = Canon(value) in `width` bits: ucomis finds a NaN (unordered
+    // with itself), and the cold fix loads the canonical NaN.
+    void canonicalize(Xmm value, unsigned width) {
+        const auto fix = a_.label();
+        const auto back = a_.label();
+        a_.ucomis(width == 32 ? Prec::single : Prec::dbl, value, value);
+        a_.jcc(Cond::p, fix);
+        a_.bind(back);
+        cold_.push_back([this, fix, back, value, width] {
+            a_.bind(fix);
+            a_.movs(Prec::dbl, value, constant(width == 32 ? canonical_nan32 : canonical_nan64));
+            a_.jmp(back);
+        });
+    }
+
     // ---- helper calls ---------------------------------------------------------
 
     void call_helper(std::int32_t offset) {
@@ -506,11 +596,13 @@ private:
         a_.mov(S64, frame, Mem::at(context, off::slots));
     }
 
-    void store_arguments(const mir::InstAllocation& ia, std::size_t first, std::size_t count) {
+    void store_arguments(const mir::Inst& inst, const mir::InstAllocation& ia, std::size_t first, std::size_t count) {
         for (std::size_t i = 0; i < count; ++i) {
             const auto& location = ia.uses[first + i];
             const auto to = Mem::at(x64::rsp, static_cast<std::int32_t>(8 * i));
-            if (in_register(location)) {
+            if (in_register(location) && inst.uses[first + i].vreg.cls == mir::RegClass::Xmm) {
+                a_.movs(Prec::dbl, to, xmm(location));
+            } else if (in_register(location)) {
                 a_.mov(S64, to, gpr(location));
             } else {
                 a_.mov(S64, scratch, memory(location));
@@ -547,6 +639,10 @@ private:
     void call_evaluate(std::uint32_t inst, const Gpr* a, const Gpr* b, Gpr result, const Label* fail) {
         static constexpr Gpr saved[] = {x64::rax, x64::rcx, x64::rdx, x64::rsi, x64::rdi, x64::r8, x64::r9, x64::r10};
         for (const auto r : saved) a_.push(r);
+        // And xmm0-xmm14, which hold floats (8 bytes each; 128 keeps rsp
+        // aligned).
+        a_.alu(Alu::sub, S64, x64::rsp, Imm32{128});
+        for (std::uint8_t x = 0; x < 15; ++x) a_.movs(Prec::dbl, Mem::at(x64::rsp, 8 * x), Xmm{x});
         if (b) a_.mov(S64, scratch, *b);
         if (a) a_.mov(S64, x64::rdx, *a);
         if (b) a_.mov(S64, x64::rcx, scratch);
@@ -554,6 +650,8 @@ private:
         a_.mov(S64, x64::rdi, context);
         call_helper(off::evaluate);
         a_.mov(S64, scratch, x64::rax);
+        for (std::uint8_t x = 0; x < 15; ++x) a_.movs(Prec::dbl, Xmm{x}, Mem::at(x64::rsp, 8 * x));
+        a_.alu(Alu::add, S64, x64::rsp, Imm32{128});
         for (auto i = std::size(saved); i > 0; --i) a_.pop(saved[i - 1]);
         if (fail) {
             a_.alu(Alu::cmp, S32, Mem::at(context, off::status), Imm32{0});
@@ -568,7 +666,47 @@ private:
         const auto& step = l_.steps[inst.opcode];
         if (reads_counter(step.kind)) materialize();
         switch (step.kind) {
-        case Kind::Const: a_.mov_constant(gpr(ia.defs[0]), step.imm); return;
+        case Kind::Const:
+            if (inst.defs[0].vreg.cls == mir::RegClass::Xmm) {
+                const auto d = xmm(ia.defs[0]);
+                if (step.imm == 0) a_.xorpd(d, d);
+                else a_.movs(Prec::dbl, d, constant(step.imm));
+                return;
+            }
+            a_.mov_constant(gpr(ia.defs[0]), step.imm);
+            return;
+        case Kind::Convert: {
+            const bool to_xmm = inst.defs[0].vreg.cls == mir::RegClass::Xmm;
+            if (to_xmm) {
+                if (step.width == 32) a_.movd(xmm(ia.defs[0]), gpr(ia.uses[0]));
+                else a_.movq(xmm(ia.defs[0]), gpr(ia.uses[0]));
+            } else {
+                if (step.width == 32) a_.movd(gpr(ia.defs[0]), xmm(ia.uses[0]));
+                else a_.movq(gpr(ia.defs[0]), xmm(ia.uses[0]));
+            }
+            return;
+        }
+        case Kind::KernelLoad: a_.mov(S64, gpr(ia.defs[0]), Mem::at(context, off::K)); return;
+        case Kind::KernelAdd: {
+            const auto d = gpr(ia.defs[0]);
+            if (simm32(step.imm)) {
+                a_.alu(Alu::add, S64, d, imm32(step.imm));
+            } else {
+                a_.mov_constant(scratch, step.imm);
+                a_.alu(Alu::add, S64, d, scratch);
+            }
+            return;
+        }
+        case Kind::Canon: canonicalize(xmm(ia.defs[0]), step.width); return;
+        case Kind::Sqrt: {
+            const auto d = xmm(ia.defs[0]);
+            a_.arith(x64::Fp::sqrt, Prec::dbl, d, xmm_rm(ia.uses[0]));
+            if (step.checked) canonicalize(d, 64);
+            return;
+        }
+        case Kind::Abs:
+            a_.andpd(xmm(ia.defs[0]), constant(step.width == 32 ? 0x7FFFFFFFULL : 0x7FFFFFFFFFFFFFFFULL));
+            return;
         case Kind::RunConst: {
             const auto d = gpr(ia.defs[0]);
             a_.mov(S64, d, Mem::at(context, off::run_constants));
@@ -578,7 +716,9 @@ private:
         }
         case Kind::EntryLoad: {
             const auto& to = ia.defs[0];
-            if (in_register(to)) {
+            if (in_register(to) && inst.defs[0].vreg.cls == mir::RegClass::Xmm) {
+                a_.movs(Prec::dbl, xmm(to), slot(step.index));
+            } else if (in_register(to)) {
                 a_.mov(S64, gpr(to), slot(step.index));
             } else if (!(to.kind == mir::LocKind::FrameSlot && to.index == step.index)) {
                 a_.mov(S64, scratch, slot(step.index));
@@ -612,13 +752,21 @@ private:
         }
         case Kind::Budget: {
             // Deoptimizes when C + P > room (unsigned, wrapping as the
-            // interpreter's sum).
+            // interpreter's sum); with inline kernels, C + (K - context.K) +
+            // P (the room is for C, the chain's K taken off).
+            const bool kernel = !inst.uses.empty();
             if (step.imm + pending_ <= 0x7FFFFFFFULL) {
-                a_.lea(S64, scratch, Mem::at(counter, static_cast<std::int32_t>(step.imm + pending_)));
+                if (kernel) {
+                    a_.lea(S64, scratch, Mem::at(counter, gpr(ia.uses[0]), 1, static_cast<std::int32_t>(step.imm + pending_)));
+                } else {
+                    a_.lea(S64, scratch, Mem::at(counter, static_cast<std::int32_t>(step.imm + pending_)));
+                }
             } else {
                 a_.mov_constant(scratch, step.imm + pending_);
                 a_.alu(Alu::add, S64, scratch, counter);
+                if (kernel) a_.alu(Alu::add, S64, scratch, gpr(ia.uses[0]));
             }
+            if (kernel) a_.alu(Alu::sub, S64, scratch, Mem::at(context, off::K));
             a_.alu(Alu::cmp, S64, scratch, Mem::at(context, off::room));
             a_.jcc(Cond::a, stub(inst, ia));
             return;
@@ -639,7 +787,7 @@ private:
             return;
         case Kind::StateCall: {
             const auto count = static_cast<std::uint32_t>(inst.uses.size());
-            store_arguments(ia, 0, count);
+            store_arguments(inst, ia, 0, count);
             a_.mov(S64, x64::rdi, context);
             a_.mov(S32, x64::rsi, imm32(step.index));
             a_.mov(S64, x64::rdx, x64::rsp);
@@ -655,11 +803,12 @@ private:
             call_helper(off::check_reference);
             check_status(stub(inst, ia), true);
             return;
-        case Kind::WriteBack: return write_back(ia, step);
+        case Kind::WriteBack: return write_back(inst, ia, step);
         case Kind::Helper: {
-            const auto count = static_cast<std::uint32_t>(inst.uses.size());
+            const auto count = f_.insts[step.inst].count;
             a_.mov(S64, Mem::at(context, off::C), counter);
-            store_arguments(ia, 0, count);
+            store_kernel_steps(ia, count);
+            store_arguments(inst, ia, 0, count);
             a_.mov(S64, x64::rdi, context);
             a_.mov(S32, x64::rsi, imm32(step.index));
             a_.mov(S64, x64::rdx, x64::rsp);
@@ -670,7 +819,10 @@ private:
         }
         case Kind::Call: return call(inst, ia, step);
         case Kind::Return: {
-            if (inst.uses.empty()) a_.alu(Alu::xor_, S32, x64::rsi, x64::rsi);
+            // b_constant: whether a value is returned (uses[0], in rsi);
+            // K after it.
+            if (!step.b_constant) a_.alu(Alu::xor_, S32, x64::rsi, x64::rsi);
+            store_kernel_steps(ia, step.b_constant ? 1 : 0);
             if (f_.variant == t3::Variant::Standard) inline_pop();
             a_.mov(S64, x64::rdx, counter);
             a_.mov(S64, x64::rdi, context);
@@ -683,6 +835,7 @@ private:
             return;
         }
         case Kind::Leave:
+            store_kernel_steps(ia, 0);
             a_.mov(S64, Mem::at(context, off::C), counter);
             a_.mov(S64, x64::rdi, context);
             a_.mov(S32, x64::rsi, imm32(step.imm));
@@ -701,6 +854,15 @@ private:
             no_moves_after(ia);
             const auto& in = f_.insts[step.inst].lifted;
             const auto shape = lift_shape(in, step);
+            if (shape.a_xmm) {
+                float_compare(in, step, shape, ia);
+                const auto& succs = l_.function.blocks[block_].succs;
+                // Unordered (PF): Equal is false, NotEqual true.
+                if (in.op == Opcode::FloatEqual) a_.jcc(Cond::p, block_labels_[succs[1]]);
+                if (in.op == Opcode::FloatNotEqual) a_.jcc(Cond::p, block_labels_[succs[0]]);
+                branch(float_condition(in.op), succs[0], succs[1]);
+                return;
+            }
             const auto cc = compare(in, step, shape, ia);
             const auto& succs = l_.function.blocks[block_].succs;
             branch(cc, succs[0], succs[1]);
@@ -739,13 +901,16 @@ private:
     }
 
     // The physical frame from the state: each slot whose entry is not
-    // Unchanged (a value already in its own frame slot needs no store), each
-    // initialized flag, and the block.
-    void write_back(const mir::InstAllocation& ia, const Step& step) { write_back_from(ia, step, 0, Gpr{ia.temps_gpr.at(0)}); }
+    // Unchanged (a value already in its own frame slot needs no store; a
+    // deferred float value is stored canonical), each initialized flag, and
+    // the block.
+    void write_back(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
+        write_back_from(inst, ia, step, 0, Gpr{ia.temps_gpr.at(0)});
+    }
 
     // The write-back of `step`'s state from the uses at `first` on, with the
     // temporary register `t`.
-    void write_back_from(const mir::InstAllocation& ia, const Step& step, std::size_t first, Gpr t) {
+    void write_back_from(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step, std::size_t first, Gpr t) {
         const auto& state = f_.states[step.state];
         const auto constant = [&](std::uint64_t v, std::uint64_t& bits) {
             for (const auto& [value, known] : step.state_constants) {
@@ -771,9 +936,30 @@ private:
             if (entry.kind == t3::StateSlot::Kind::Value && constant(entry.value, bits)) {
                 store_bits(r, bits);
             } else if (entry.kind == t3::StateSlot::Kind::Value) {
+                const bool in_xmm = inst.uses[u].vreg.cls == mir::RegClass::Xmm;
                 const auto& location = ia.uses[u++];
-                if (location.kind == mir::LocKind::FrameSlot && location.index == r) continue;
-                if (in_register(location)) {
+                const bool home = location.kind == mir::LocKind::FrameSlot && location.index == r;
+                const auto v = static_cast<std::uint32_t>(entry.value);
+                const unsigned format = v < f_.frame_canon.size() ? f_.frame_canon[v] : 0U;
+                if (home && format == 0) continue;
+                if (format != 0) {
+                    // Into an XMM register (xmm15 unless it is in one), the
+                    // store (none when it is spilled in its home), then the
+                    // canonical NaN over a NaN.
+                    auto value = x64::xmm15;
+                    if (in_register(location) && in_xmm) value = xmm(location);
+                    else if (in_register(location)) a_.movq(value, gpr(location));
+                    else a_.movs(Prec::dbl, value, memory(location));
+                    if (!home) a_.movs(Prec::dbl, slot(r), value);
+                    const auto skip = a_.label();
+                    a_.ucomis(format == 32 ? Prec::single : Prec::dbl, value, value);
+                    a_.jcc(Cond::np, skip);
+                    a_.mov_constant(scratch, format == 32 ? canonical_nan32 : canonical_nan64);
+                    a_.mov(S64, slot(r), scratch);
+                    a_.bind(skip);
+                } else if (in_register(location) && in_xmm) {
+                    a_.movs(Prec::dbl, slot(r), xmm(location));
+                } else if (in_register(location)) {
                     a_.mov(S64, slot(r), gpr(location));
                 } else {
                     a_.mov(S64, t, memory(location));
@@ -797,6 +983,7 @@ private:
                 flags_base();
                 a_.mov(S8, Mem::at(scratch, displacement(r)), Imm32{static_cast<std::int32_t>(bits & 1U)});
             } else if (entry.kind == t3::StateFlag::Kind::Value) {
+                if (inst.uses[u].vreg.cls == mir::RegClass::Xmm) throw EmitError("an initialized flag in an XMM register");
                 load(t, ia.uses[u++]);
                 a_.alu(Alu::and_, S32, t, Imm32{1});
                 flags_base();
@@ -930,9 +1117,10 @@ private:
     }
 
     void call(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
-        const auto count = static_cast<std::uint32_t>(inst.uses.size());
+        const auto count = f_.insts[step.inst].count;
         a_.mov(S64, Mem::at(context, off::C), counter);
-        store_arguments(ia, 0, count);
+        store_kernel_steps(ia, count);
+        store_arguments(inst, ia, 0, count);
         const auto frame_size = f_.call_frames.find(static_cast<std::uint32_t>(step.imm));
         const bool in_place = f_.variant == t3::Variant::Standard && frame_size != f_.call_frames.end() &&
                               frame_size->second <= max_inline_frame && count <= frame_size->second;
@@ -1074,20 +1262,21 @@ private:
     // argument uses, every allocatable register kept; its result into `d`
     // (when it has one), and on to `done`. A trap or an exception ends the
     // activation.
-    void slow_path(const mir::InstAllocation& ia, const Step& step, std::size_t arguments, Label slow, Label done,
-                   const Gpr* d, Gpr t) {
+    void slow_path(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step, std::size_t arguments,
+                   Label slow, Label done, const Gpr* d, Gpr t) {
         const auto pending = pending_;
-        cold_.push_back([this, ia, step, arguments, slow, done, d_reg = d ? *d : Gpr{0}, has_d = d != nullptr, t, pending] {
+        cold_.push_back([this, inst, ia, step, arguments, slow, done, d_reg = d ? *d : Gpr{0}, has_d = d != nullptr, t,
+                         pending] {
             a_.bind(slow);
-            if (step.inlined) return inlined_slow_path(ia, step, arguments, t, pending);
-            write_back_from(ia, step, arguments + step.arguments, t);
+            if (step.inlined) return inlined_slow_path(inst, ia, step, arguments, t, pending);
+            write_back_from(inst, ia, step, arguments + step.arguments, t);
             if (pending == 0) {
                 a_.mov(S64, Mem::at(context, off::C), counter);
             } else {
                 a_.lea(S64, scratch, Mem::at(counter, displacement(pending)));
                 a_.mov(S64, Mem::at(context, off::C), scratch);
             }
-            store_arguments(ia, arguments, step.arguments);
+            store_arguments(inst, ia, arguments, step.arguments);
             call_saving(off::helper, [&] {
                 a_.mov(S32, x64::rsi, imm32(step.index));
                 a_.lea(S64, x64::rdx, Mem::at(x64::rsp, 64));
@@ -1110,13 +1299,15 @@ private:
     // context, then the helper that materializes the frames, runs the
     // reference operation and leaves at its resume block; the activation
     // ends.
-    void inlined_slow_path(const mir::InstAllocation& ia, const Step& step, std::size_t arguments, Gpr t,
-                           std::uint64_t pending) {
+    void inlined_slow_path(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step, std::size_t arguments,
+                           Gpr t, std::uint64_t pending) {
         a_.mov(S64, t, Mem::at(context, off::values));
         const auto at = [&](std::uint32_t value) { return Mem::at(t, displacement(8ULL * value)); };
         for (const auto& [use, value] : step.state_values) {
             const auto& location = ia.state_uses.at(use);
-            if (in_register(location)) {
+            if (in_register(location) && inst.state_uses.at(use).vreg.cls == mir::RegClass::Xmm) {
+                a_.movs(Prec::dbl, at(value), xmm(location));
+            } else if (in_register(location)) {
                 a_.mov(S64, at(value), gpr(location));
             } else {
                 a_.mov(S64, scratch, memory(location));
@@ -1137,7 +1328,7 @@ private:
             a_.lea(S64, scratch, Mem::at(counter, displacement(pending)));
             a_.mov(S64, Mem::at(context, off::C), scratch);
         }
-        store_arguments(ia, arguments, step.arguments);
+        store_arguments(inst, ia, arguments, step.arguments);
         a_.mov(S64, x64::rdi, context);
         a_.mov(S32, x64::rsi, imm32(step.index));
         a_.mov(S64, x64::rdx, x64::rsp);
@@ -1370,8 +1561,8 @@ private:
             call_helper(o3::set_element);
             check_status(Label{}, false);
             return;
-        case Kind::AllocObject: return allocate(ia, step);
-        case Kind::Append: return append(ia, step);
+        case Kind::AllocObject: return allocate(inst, ia, step);
+        case Kind::Append: return append(inst, ia, step);
         default: break;
         }
         throw EmitError("an unknown machine instruction");
@@ -1382,7 +1573,7 @@ private:
     // a new page or a new chunk; every condition is decided before the first
     // write. What it writes is what Blocks::allocate, the object's
     // initialization, store_new() and the executor's count write.
-    void allocate(const mir::InstAllocation& ia, const Step& step) {
+    void allocate(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
         namespace o3 = nvm::tier3::offsets;
         const auto d = gpr(ia.defs[0]);
         const Gpr words{ia.temps_gpr.at(0)}, h{ia.temps_gpr.at(1)}, t{ia.temps_gpr.at(2)}, page{ia.temps_gpr.at(3)};
@@ -1391,7 +1582,7 @@ private:
         const auto slow = a_.label();
         const auto done = a_.label();
         const auto bytes = H::object_block_bytes(static_cast<std::size_t>(fields));
-        slow_path(ia, step, 0, slow, done, &d, words);
+        slow_path(inst, ia, step, 0, slow, done, &d, words);
         if (bytes > H::allocator_largest()) {
             a_.jmp(slow);
             a_.bind(done);
@@ -1471,7 +1662,7 @@ private:
     // Append (design 6.8): inline when the pool is in use, the cell fits
     // below the collection threshold, the value fits the storage and the
     // list has room; then what append() and the count write.
-    void append(const mir::InstAllocation& ia, const Step& step) {
+    void append(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
         namespace o3 = nvm::tier3::offsets;
         const auto e = gpr(ia.uses[0]);
         const auto v = gpr(ia.uses[1]);
@@ -1479,7 +1670,7 @@ private:
         const auto declared = f_.insts[step.inst].imm;
         const auto slow = a_.label();
         const auto done = a_.label();
-        slow_path(ia, step, 2, slow, done, nullptr, live);
+        slow_path(inst, ia, step, 2, slow, done, nullptr, live);
         a_.alu(Alu::cmp, S64, Mem::at(context, o3::fast_allocation), Imm32{0});
         a_.jcc(Cond::e, slow);
         cells_fit(1, live, slow);
@@ -1582,7 +1773,6 @@ private:
         const auto& ir = f_.insts[step.inst];
         const auto& in = ir.lifted;
         const auto shape = lift_shape(in, step);
-        const auto o = operands(shape, ia);
         const bool checked = (ir.flags & t3::Checked) != 0;
         Label fail_label;
         bool have_fail = false;
@@ -1594,6 +1784,8 @@ private:
             }
             return fail_label;
         };
+        if (shape.a_xmm || shape.b_xmm || shape.def_xmm) return float_xmm(ir, step, shape, ia, fail);
+        const auto o = operands(shape, ia);
         if (shape.evaluate) {
             Label label;
             if (checked) label = fail();
@@ -2058,159 +2250,165 @@ private:
         a_.mov(S64, o.d, t);
     }
 
-    void to_xmm(Xmm to, Gpr from, bool dbl) {
-        if (dbl) a_.movq(to, from);
-        else a_.movd(to, from);
-    }
-    void from_xmm(Gpr to, Xmm from, bool dbl) {
-        if (dbl) a_.movq(to, from);
-        else a_.movd(to, from);
-    }
-
-    // to = the canonical quiet NaN when `value` is a NaN (unordered with
-    // itself).
-    void canonicalize(Gpr to, Xmm value, bool dbl) {
-        const auto skip = a_.label();
-        a_.ucomis(dbl ? Prec::dbl : Prec::single, value, value);
-        a_.jcc(Cond::np, skip);
-        a_.mov_constant(to, dbl ? canonical_nan64 : canonical_nan32);
-        a_.bind(skip);
-    }
-
+    // FloatNegate of a 16-bit format: a ^ the format's sign bit, in a
+    // general register.
     template <typename Fail>
-    void float_op(const lift::Instruction& in, const Step& step, const Operands& o, const Fail& fail) {
-        const auto d = o.d;
+    void float_op(const lift::Instruction& in, const Step&, const Operands& o, const Fail&) {
+        if (in.op != Opcode::FloatNegate) throw EmitError("a float operation the code generator does not compile");
+        const auto sign = std::uint64_t{1} << (float_width(in.format) - 1);
+        if (simm32(sign)) {
+            a_.alu(Alu::xor_, S64, o.d, imm32(sign));
+        } else {
+            a_.mov_constant(scratch, sign);
+            a_.alu(Alu::xor_, S64, o.d, scratch);
+        }
+    }
+
+    // The condition that holds after float_compare when the comparison is
+    // true and the operands are ordered; an unordered result (a NaN) sets
+    // ZF, PF and CF, so `a` and `ae` are false for it, and Equal and
+    // NotEqual test PF too.
+    static Cond float_condition(Opcode op) {
+        switch (op) {
+        case Opcode::FloatEqual: return Cond::e;
+        case Opcode::FloatNotEqual: return Cond::ne;
+        case Opcode::FloatGreater:
+        case Opcode::FloatLess: return Cond::a;
+        default: return Cond::ae;
+        }
+    }
+
+    // ucomis of a binary32 or binary64 comparison: a against b, or b against
+    // a for Less and LessEqual (a < b is b > a).
+    void float_compare(const lift::Instruction& in, const Step& step, const LiftShape& shape,
+                       const mir::InstAllocation& ia) {
+        const auto prec = in.format == lift::FloatType::Binary64 ? Prec::dbl : Prec::single;
+        const auto a = ia.uses.at(0);
+        const bool b_constant = shape.b == LiftShape::Use::Immediate;
+        if (in.op == Opcode::FloatLess || in.op == Opcode::FloatLessEqual) {
+            Xmm b = x64::xmm15;
+            if (b_constant) {
+                b = Xmm{ia.temps_xmm.at(0)};
+                a_.movs(Prec::dbl, b, constant(step.b_value));
+            } else {
+                b = xmm(ia.uses.at(1));
+            }
+            a_.ucomis(prec, b, xmm_rm(a));
+            return;
+        }
+        a_.ucomis(prec, xmm(a), b_constant ? XmmRm(constant(step.b_value)) : xmm_rm(ia.uses.at(1)));
+    }
+
+    // A Lift whose operands or result are floats in XMM registers (design
+    // 7.1), each the scalar SSE2 form of lift::evaluate_float.
+    template <typename Fail>
+    void float_xmm(const t3::Inst& ir, const Step& step, const LiftShape& shape, const mir::InstAllocation& ia,
+                   const Fail& fail) {
+        const auto& in = ir.lifted;
+        const bool dbl = in.format == lift::FloatType::Binary64;
+        const auto prec = dbl ? Prec::dbl : Prec::single;
+        const unsigned width = dbl ? 64 : 32;
+        const auto b = [&]() -> XmmRm {
+            if (shape.b == LiftShape::Use::Immediate) return XmmRm(constant(step.b_value));
+            return xmm_rm(ia.uses.at(1));
+        };
         switch (in.op) {
         case Opcode::FloatAdd:
         case Opcode::FloatSubtract:
         case Opcode::FloatMultiply:
         case Opcode::FloatDivide: {
-            const bool dbl = in.format == lift::FloatType::Binary64;
-            const auto x0 = o.xmm_temps.at(0);
-            const auto x1 = o.xmm_temps.at(1);
-            to_xmm(x0, o.a, dbl);
-            to_xmm(x1, o.b, dbl);
+            const auto d = xmm(ia.defs.at(0));
             const auto op = in.op == Opcode::FloatAdd        ? x64::Fp::add
                             : in.op == Opcode::FloatSubtract ? x64::Fp::sub
                             : in.op == Opcode::FloatMultiply ? x64::Fp::mul
                                                              : x64::Fp::div;
-            a_.arith(op, dbl ? Prec::dbl : Prec::single, x0, x1);
-            from_xmm(d, x0, dbl);
-            canonicalize(d, x0, dbl);
+            a_.arith(op, prec, d, b());
+            // The hardware's NaN stays only in a Deferred result.
+            if ((ir.flags & t3::Deferred) == 0) canonicalize(d, width);
             return;
         }
-        case Opcode::FloatNegate: {
-            // a ^ the format's sign bit: the bits above it are kept, and a
-            // NaN keeps its payload.
-            const auto sign = std::uint64_t{1} << (float_width(in.format) - 1);
-            if (simm32(sign)) {
-                a_.alu(Alu::xor_, S64, d, imm32(sign));
-            } else {
-                a_.mov_constant(scratch, sign);
-                a_.alu(Alu::xor_, S64, d, scratch);
-            }
+        case Opcode::FloatNegate:
+            // The sign bit flipped, of a NaN too.
+            a_.xorpd(xmm(ia.defs.at(0)), constant(dbl ? 0x8000000000000000ULL : 0x80000000ULL));
             return;
-        }
         case Opcode::FloatEqual:
         case Opcode::FloatNotEqual:
         case Opcode::FloatLess:
         case Opcode::FloatLessEqual:
         case Opcode::FloatGreater:
         case Opcode::FloatGreaterEqual: {
-            // IEEE comparisons: ucomis is unordered for a NaN (ZF, PF and
-            // CF set), and -0 equals +0.
-            const bool dbl = in.format == lift::FloatType::Binary64;
-            const auto prec = dbl ? Prec::dbl : Prec::single;
-            const auto x0 = o.xmm_temps.at(0);
-            const auto x1 = o.xmm_temps.at(1);
-            to_xmm(x0, o.a, dbl);
-            to_xmm(x1, o.b, dbl);
-            switch (in.op) {
-            case Opcode::FloatEqual:
-                a_.ucomis(prec, x0, x1);
-                a_.setcc(Cond::e, d);
+            const auto d = gpr(ia.defs.at(0));
+            a_.alu(Alu::xor_, S32, d, d);
+            float_compare(in, step, shape, ia);
+            a_.setcc(float_condition(in.op), d);
+            if (in.op == Opcode::FloatEqual) {
                 a_.setcc(Cond::np, scratch);
                 a_.alu(Alu::and_, S8, d, scratch);
-                break;
-            case Opcode::FloatNotEqual:
-                a_.ucomis(prec, x0, x1);
-                a_.setcc(Cond::ne, d);
+            } else if (in.op == Opcode::FloatNotEqual) {
                 a_.setcc(Cond::p, scratch);
                 a_.alu(Alu::or_, S8, d, scratch);
-                break;
-            case Opcode::FloatLess:
-                a_.ucomis(prec, x1, x0);
-                a_.setcc(Cond::a, d);
-                break;
-            case Opcode::FloatLessEqual:
-                a_.ucomis(prec, x1, x0);
-                a_.setcc(Cond::ae, d);
-                break;
-            case Opcode::FloatGreater:
-                a_.ucomis(prec, x0, x1);
-                a_.setcc(Cond::a, d);
-                break;
-            default:
-                a_.ucomis(prec, x0, x1);
-                a_.setcc(Cond::ae, d);
-                break;
             }
-            a_.movzx(S32, d, S8, d);
             return;
         }
         case Opcode::FloatConvert: {
             // binary32 to binary64 exactly, binary64 to binary32 rounded to
-            // nearest even; a NaN becomes the target's canonical NaN.
-            const bool to_dbl = in.to_format == lift::FloatType::Binary64;
-            const auto x0 = o.xmm_temps.at(0);
-            to_xmm(x0, o.a, !to_dbl);
-            if (to_dbl) a_.cvtss2sd(x0, x0);
-            else a_.cvtsd2ss(x0, x0);
-            from_xmm(d, x0, to_dbl);
-            canonicalize(d, x0, to_dbl);
+            // nearest even; a NaN becomes the target's canonical NaN (the
+            // explicit test: the hardware keeps a quieted payload).
+            const auto a = xmm(ia.uses.at(0));
+            const auto d = xmm(ia.defs.at(0));
+            if (in.to_format == lift::FloatType::Binary64) {
+                a_.cvtss2sd(d, a);
+                canonicalize(d, 64);
+                return;
+            }
+            // Into a zeroed temporary: bits 32 to 63 of a binary32 are zero.
+            const auto t = Xmm{ia.temps_xmm.at(0)};
+            a_.xorpd(t, t);
+            a_.cvtsd2ss(t, a);
+            canonicalize(t, 32);
+            a_.movaps(d, t);
             return;
         }
         case Opcode::FloatFromInteger: {
             // Signed: the sign-extended value. Unsigned: as a signed 64-bit
             // value below 2^63 (whatever its width: the reference does not
             // mask it); else (v >> 1) | (v & 1), converted, then doubled.
-            const bool dbl = in.to_format == lift::FloatType::Binary64;
-            const auto prec = dbl ? Prec::dbl : Prec::single;
-            const auto x0 = o.xmm_temps.at(0);
-            const auto t = o.temps.at(0);
-            a_.mov(S64, t, o.a);
+            const bool to_dbl = in.to_format == lift::FloatType::Binary64;
+            const auto to = to_dbl ? Prec::dbl : Prec::single;
+            const auto d = xmm(ia.defs.at(0));
+            const auto t = Gpr{ia.temps_gpr.at(0)};
+            a_.mov(S64, t, gpr(ia.uses.at(0)));
+            a_.xorpd(d, d);
             if (in.is_signed) {
                 sign_extend(t, in.width, step.a_width <= in.width);
-                a_.cvtsi2s(prec, x0, S64, t);
-            } else {
-                const auto large = a_.label();
-                const auto done = a_.label();
-                a_.bit(Bit::bt, S64, t, Imm8{63});
-                a_.jcc(Cond::b, large);
-                a_.cvtsi2s(prec, x0, S64, t);
-                a_.jmp(done);
-                a_.bind(large);
-                a_.mov(S64, scratch, t);
-                a_.alu(Alu::and_, S32, scratch, Imm32{1});
-                a_.shift(Shift::shr, S64, t, Imm8{1});
-                a_.alu(Alu::or_, S64, t, scratch);
-                a_.cvtsi2s(prec, x0, S64, t);
-                a_.arith(x64::Fp::add, prec, x0, x0);
-                a_.bind(done);
+                a_.cvtsi2s(to, d, S64, t);
+                return;
             }
-            from_xmm(d, x0, dbl);
+            const auto large = a_.label();
+            const auto done = a_.label();
+            a_.bit(Bit::bt, S64, t, Imm8{63});
+            a_.jcc(Cond::b, large);
+            a_.cvtsi2s(to, d, S64, t);
+            a_.jmp(done);
+            a_.bind(large);
+            a_.mov(S64, scratch, t);
+            a_.alu(Alu::and_, S32, scratch, Imm32{1});
+            a_.shift(Shift::shr, S64, t, Imm8{1});
+            a_.alu(Alu::or_, S64, t, scratch);
+            a_.cvtsi2s(to, d, S64, t);
+            a_.arith(x64::Fp::add, to, d, d);
+            a_.bind(done);
             return;
         }
         case Opcode::FloatToInteger: {
             // The truncation t; where it is not INT64_MIN it is exact, and the
             // bounds are those of the target. INT64_MIN (a NaN, a value
             // outside the signed 64-bit range, or -2^63) is lift::evaluate's.
-            const bool dbl = in.format == lift::FloatType::Binary64;
-            const auto x0 = o.xmm_temps.at(0);
-            const auto t = o.temps.at(0);
+            const auto a = xmm(ia.uses.at(0));
+            const auto d = gpr(ia.defs.at(0));
+            const auto t = Gpr{ia.temps_gpr.at(0)};
             const unsigned to = in.to_width;
-            to_xmm(x0, o.a, dbl);
-            a_.cvtts2si(dbl ? Prec::dbl : Prec::single, S64, t, x0);
+            a_.cvtts2si(prec, S64, t, a);
             const auto slow = a_.label();
             const auto done = a_.label();
             // t - 1 overflows exactly when t is INT64_MIN.
@@ -2230,13 +2428,37 @@ private:
             a_.mov(S64, d, t);
             a_.bind(done);
             const auto label = fail();
-            const auto a = o.a;
             const auto inst = step.inst;
-            cold_.push_back([this, slow, done, label, a, d, inst] {
+            cold_.push_back([this, slow, done, label, a, d, inst, dbl] {
                 a_.bind(slow);
-                call_evaluate(inst, &a, nullptr, d, &label);
+                if (dbl) a_.movq(scratch, a);
+                else a_.movd(scratch, a);
+                call_evaluate(inst, &scratch, nullptr, d, &label);
                 a_.jmp(done);
             });
+            return;
+        }
+        case Opcode::ValueHash: {
+            // value_hash: a NaN of the format is its canonical NaN, the sign
+            // ignored; 64 bits fold their halves, fewer are masked.
+            const auto a = xmm(ia.uses.at(0));
+            const auto d = gpr(ia.defs.at(0));
+            const bool hash_dbl = in.format == lift::FloatType::Binary64;
+            if (hash_dbl) a_.movq(d, a);
+            else a_.movd(d, a);
+            const auto skip = a_.label();
+            a_.ucomis(hash_dbl ? Prec::dbl : Prec::single, a, a);
+            a_.jcc(Cond::np, skip);
+            a_.mov_constant(d, hash_dbl ? canonical_nan64 : canonical_nan32);
+            a_.bind(skip);
+            if (in.width >= 64) {
+                a_.mov(S64, scratch, d);
+                a_.shift(Shift::shr, S64, scratch, Imm8{32});
+                a_.alu(Alu::xor_, S64, d, scratch);
+                a_.mov(S32, d, d);
+            } else {
+                mask(d, in.width);
+            }
             return;
         }
         default: break;

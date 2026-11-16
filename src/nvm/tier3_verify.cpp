@@ -1,5 +1,7 @@
 #include "tier3.hpp"
 
+#include "tier3_passes.hpp"
+
 #include <algorithm>
 #include <map>
 #include <sstream>
@@ -21,6 +23,8 @@ bool has_value(Op op) {
     case Op::CounterAdd:
     case Op::Helper:
     case Op::Call:
+    case Op::Canon:
+    case Op::Sqrt:
     case Op::Lookup:
     case Op::TestKind:
     case Op::LoadTag:
@@ -127,8 +131,8 @@ const char* name_of(Op op) {
                                   "checknotnil", "lookup", "checkkind", "checkinit", "checkindex", "checkglobalinit",
                                   "testkind",  "loadtag",  "loadfield", "loadlength", "loaddata",   "loadstorage",
                                   "loadelement", "loadversion", "loadglobal", "select", "storefield", "storeelement",
-                                  "storeglobal", "widen", "allocobject", "append"};
-    static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Op::Append) + 1);
+                                  "storeglobal", "widen", "allocobject", "append", "canon",     "sqrt"};
+    static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Op::Sqrt) + 1);
     return names[static_cast<int>(op)];
 }
 
@@ -160,6 +164,7 @@ public:
         pointers();
         roots();
         budgets();
+        floats();
         guards();
         return violations_;
     }
@@ -458,6 +463,13 @@ private:
             case Op::Mask:
                 operand_bits(in.operands[0], "its operand");
                 if (in.imm == 0 || in.imm > 64) fail("V2", at(id) + " masks to " + std::to_string(in.imm) + " bits");
+                break;
+            case Op::Canon:
+            case Op::Sqrt:
+                operand_bits(in.operands[0], "its operand");
+                if (in.type.type != Type::F64 && (in.op == Op::Sqrt || in.type.type != Type::F32)) {
+                    fail("V2", at(id) + " has the type " + type_name(in.type) + ", not a float");
+                }
                 break;
             case Op::Gather:
                 for (std::uint32_t i = 0; i < in.count; i += 2) operand_bits(f_.extras[in.extra + i], "a lane source");
@@ -1210,6 +1222,99 @@ private:
         }
     }
 
+    // --- V9: floats ---------------------------------------------------------------------------
+
+    // Every operand a use reads as bits is the reference's bits (design 7.2):
+    // a deferred value only where the use reads any NaN of its format as the
+    // reference's NaN, and a frame state names only values whose frame write
+    // gives the reference's bits, canonicalizing exactly the deferred ones.
+    void floats() {
+        const auto classes = detail::nan_classes(f_);
+        clean_entries(classes);
+        const auto name = [](detail::NanClass c) {
+            switch (c) {
+            case detail::NanClass::Clean: return "clean";
+            case detail::NanClass::Clean32: return "clean binary32";
+            case detail::NanClass::Clean64: return "clean binary64";
+            case detail::NanClass::Exact: return "exact";
+            case detail::NanClass::Deferred32: return "deferred binary32";
+            case detail::NanClass::Deferred64: return "deferred binary64";
+            case detail::NanClass::Mixed32: return "a mix of binary32 NaNs";
+            case detail::NanClass::Mixed64: return "a mix of binary64 NaNs";
+            case detail::NanClass::Mixed: return "a mix of NaNs";
+            }
+            return "?";
+        };
+        for (std::uint32_t id = 0; id < f_.insts.size(); ++id) {
+            const auto& in = f_.insts[id];
+            if (block_of_[id] == none || !reachable(block_of_[id])) continue;
+            if ((in.flags & Deferred) != 0 && !((in.op == Op::Lift && float_arithmetic(in.lifted)) || in.op == Op::Sqrt)) {
+                fail("V9", at(id) + " is Deferred but is no float arithmetic or Sqrt");
+            }
+            if (in.op != Op::Phi) {
+                for (const auto position : detail::value_positions(in)) {
+                    const auto v = detail::operand_value(f_, in, position);
+                    if (v >= classes.size()) continue;
+                    const auto c = classes[v];
+                    const auto use = detail::bits_use(f_, in, position);
+                    const bool readable =
+                        detail::exact(c) || use == detail::BitsUse::Propagating ||
+                        (use == detail::BitsUse::Insensitive32 &&
+                         (c == detail::NanClass::Deferred32 || c == detail::NanClass::Mixed32)) ||
+                        (use == detail::BitsUse::Insensitive64 &&
+                         (c == detail::NanClass::Deferred64 || c == detail::NanClass::Mixed64));
+                    if (!readable) {
+                        fail("V9", at(id) + " reads the bits of %" + std::to_string(v) + ", which is " + name(c));
+                    }
+                }
+            }
+            if (in.state == none) continue;
+            for (auto s = in.state; s != none && s < f_.states.size(); s = f_.states[s].caller) {
+                const auto& state = f_.states[s];
+                const auto check = [&](std::uint32_t v) {
+                    if (v >= classes.size()) return;
+                    const auto c = classes[v];
+                    const auto wanted = detail::nan_format(c);
+                    const unsigned canon = v < f_.frame_canon.size() ? f_.frame_canon[v] : 0U;
+                    if (c == detail::NanClass::Mixed32 || c == detail::NanClass::Mixed64 || c == detail::NanClass::Mixed) {
+                        fail("V9", at(id) + " has a frame state naming %" + std::to_string(v) + ", which is " + name(c));
+                    } else if (canon != wanted) {
+                        fail("V9", at(id) + " has a frame state naming %" + std::to_string(v) + ", which is " + name(c) +
+                                       ", but its frame write canonicalizes it in " + std::to_string(canon) + " bits");
+                    }
+                };
+                for (const auto& slot : state.slots) {
+                    if (slot.kind == StateSlot::Kind::Value) check(static_cast<std::uint32_t>(slot.value));
+                }
+                for (const auto& flag : state.flags) {
+                    if (flag.kind == StateFlag::Kind::Value) check(flag.value);
+                }
+            }
+        }
+    }
+
+    // The entries check every float slot whose value the classes take as
+    // clean where it joins a deferred value.
+    void clean_entries(const std::vector<detail::NanClass>& classes) {
+        const auto needed = detail::clean_slots_needed(f_, classes);
+        for (std::uint32_t e = 0; e < needed.size(); ++e) {
+            for (const auto slot : needed[e]) {
+                const bool have = e < f_.clean_slots.size() &&
+                                  std::find(f_.clean_slots[e].begin(), f_.clean_slots[e].end(), slot) != f_.clean_slots[e].end();
+                if (!have) {
+                    fail("V9", "entry " + std::to_string(e) + " does not check that slot " + std::to_string(slot) +
+                                   " holds no NaN but the canonical one, which a deferred phi takes as clean");
+                }
+            }
+        }
+    }
+
+    static bool float_arithmetic(const lift::Instruction& l) {
+        return (l.op == lift::Opcode::FloatAdd || l.op == lift::Opcode::FloatSubtract ||
+                l.op == lift::Opcode::FloatMultiply || l.op == lift::Opcode::FloatDivide) &&
+               (l.format == lift::FloatType::Binary32 || l.format == lift::FloatType::Binary64);
+    }
+
     // --- V10: removed checks have their guard -----------------------------------------------
 
     void guards() {
@@ -1274,6 +1379,7 @@ std::string describe(const Function& f) {
             }
             if ((in.op == Op::LoadField || in.op == Op::StoreField) && in.aux != none) out << " words " << in.aux;
             if (in.op == Op::Lift) out << " op" << static_cast<int>(in.lifted.op);
+            if ((in.flags & Deferred) != 0) out << " deferred";
             if (in.state != none) out << " state " << in.state;
             if (in.guard != none) out << " guard %" << in.guard;
             if (in.op == Op::Jump || in.op == Op::Branch || in.op == Op::Switch || in.op == Op::Dispatch) {

@@ -4,11 +4,54 @@
 #include "lift/evaluate.hpp"
 
 #include <algorithm>
+#include <cmath>
 #include <cstring>
 #include <stdexcept>
 
 namespace neura::nvm::tier3 {
 namespace {
+
+// A Deferred float operation as the hardware computes it: the result of
+// lift::evaluate where it is not a NaN, and the hardware's NaN where it is
+// (native code canonicalizes it only where a use observes its bits).
+std::uint64_t deferred_arithmetic(const lift::Instruction& l, std::uint64_t a, std::uint64_t b) {
+    if (l.format == lift::FloatType::Binary32) {
+        float x = 0;
+        float y = 0;
+        const auto low_a = static_cast<std::uint32_t>(a);
+        const auto low_b = static_cast<std::uint32_t>(b);
+        std::memcpy(&x, &low_a, 4);
+        std::memcpy(&y, &low_b, 4);
+        const float z = l.op == lift::Opcode::FloatAdd        ? x + y
+                        : l.op == lift::Opcode::FloatSubtract ? x - y
+                        : l.op == lift::Opcode::FloatMultiply ? x * y
+                                                              : x / y;
+        std::uint32_t bits = 0;
+        std::memcpy(&bits, &z, 4);
+        return bits;
+    }
+    double x = 0;
+    double y = 0;
+    std::memcpy(&x, &a, 8);
+    std::memcpy(&y, &b, 8);
+    const double z = l.op == lift::Opcode::FloatAdd        ? x + y
+                     : l.op == lift::Opcode::FloatSubtract ? x - y
+                     : l.op == lift::Opcode::FloatMultiply ? x * y
+                                                           : x / y;
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &z, 8);
+    return bits;
+}
+
+std::uint64_t square_root(std::uint64_t a, bool deferred) {
+    double x = 0;
+    std::memcpy(&x, &a, 8);
+    const double r = std::sqrt(x);
+    if (!deferred && std::isnan(r)) return canonical_nan(a, 64);
+    std::uint64_t bits = 0;
+    std::memcpy(&bits, &r, 8);
+    return bits;
+}
 
 // One native activation: the depth it holds in the context, and the program
 // the context names while it runs.
@@ -204,6 +247,10 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
             case Op::EntryCounter: values[id] = in.imm == 0 ? context.C : context.K; break;
             case Op::Phi: break;
             case Op::Lift: {
+                if ((in.flags & Deferred) != 0) {
+                    values[id] = deferred_arithmetic(in.lifted, operand(0), operand(1));
+                    break;
+                }
                 bool failed = false;
                 const auto result = lift::evaluate(in.lifted, operand(0), operand(1), failed);
                 if (failed && (in.flags & Checked) != 0) return deoptimize(in, Reason::Checks);
@@ -221,8 +268,13 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
                 break;
             }
             case Op::CounterAdd: values[id] = operand(0) + in.imm; break;
+            case Op::Canon: values[id] = canonical_nan(operand(0), in.type.width); break;
+            case Op::Sqrt: values[id] = square_root(operand(0), (in.flags & Deferred) != 0); break;
             case Op::Budget:
-                if (operand(0) + in.imm > context.room) return deoptimize(in, Reason::Budget);
+                // C, the kernel steps charged since the room was computed, and P.
+                if (operand(0) + (in.operands[1] != none ? operand(1) - context.K : 0) + in.imm > context.room) {
+                    return deoptimize(in, Reason::Budget);
+                }
                 break;
             case Op::SwitchCheck:
                 if (operand(0) >= in.imm) return deoptimize(in, Reason::Selectors);
@@ -251,6 +303,7 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
             case Op::Helper: {
                 gather_arguments();
                 context.C = operand(0);
+                if (in.operands[1] != none) context.K = operand(1);
                 std::uint64_t result = 0;
                 const auto status = helpers.helper(&context, fn.exits[in.aux], arguments.data(),
                                                    static_cast<std::uint32_t>(arguments.size()), &result);
@@ -262,6 +315,7 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
             case Op::Call: {
                 gather_arguments();
                 context.C = operand(0);
+                if (in.operands[1] != none) context.K = operand(1);
                 const auto callee = static_cast<std::uint32_t>(in.imm);
                 const auto status = helpers.call(&context, fn.exits[in.aux], callee, arguments.data(),
                                                  static_cast<std::uint32_t>(arguments.size()), fn.programs[0]);
@@ -283,6 +337,7 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
             case Op::Return: {
                 const bool has_value = in.operands[1] != none;
                 const auto value = has_value ? values[in.operands[1]] : 0;
+                if (in.operands[2] != none) context.K = operand(2);
                 if (helpers.ret(&context, value, has_value, operand(0)) == Status::Fault) {
                     return deoptimize(in, Reason::Exits);
                 }
@@ -312,6 +367,7 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
             }
             case Op::Leave:
                 context.C = operand(0);
+                if (in.operands[1] != none) context.K = operand(1);
                 helpers.leave(&context, static_cast<std::uint32_t>(in.imm));
                 return {Outcome::Leave, 0};
             case Op::Deopt: return deoptimize(in, Reason::Exits);

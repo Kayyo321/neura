@@ -152,6 +152,7 @@ std::string describe(const TierStatistics& s) {
         }
         out += "; hoisted " + std::to_string(s.native_heap_hoisted) + "\n";
         if (!s.native_off.empty()) out += "tier: native programs on the IR interpreter: " + s.native_off + "\n";
+        out += "tier: native kernel helpers " + std::to_string(n.kernel_helpers) + "\n";
         for (const auto& [reason, count] : s.native_rejections) {
             out += "tier: no native program " + std::to_string(count) + ": " + reason + "\n";
         }

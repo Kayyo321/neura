@@ -468,6 +468,8 @@ def gen_sse():
             for m, r in with_mems(mems_tiny()):
                 add("cvtsi2" + suffix, f"cvtsi2{suffix} xmm{r}, {PTR[size]} ptr {{m}}", f"a.cvtsi2s(Prec::{prec}, xmm{r}, {S[size]}, {{m}});", m)
                 add("cvtt" + suffix + "2si", f"cvtt{suffix}2si {reg(r, size)}, {ptr} ptr {{m}}", f"a.cvtts2si(Prec::{prec}, {S[size]}, {GPR64[r]}, {{m}});", m)
+    for x, y in xpairs:
+        add("movaps", f"movaps xmm{x}, xmm{y}", f"a.movaps(xmm{x}, xmm{y});")
     for mn, fn in (("andpd", "andpd"), ("andnpd", "andnpd"), ("xorpd", "xorpd")):
         for x, y in xpairs:
             add(mn, f"{mn} xmm{x}, xmm{y}", f"a.{fn}(xmm{x}, xmm{y});")

@@ -1287,7 +1287,7 @@ private:
                 }
                 const auto from = location_of(parts[i - 1]);
                 const auto to = location_of(parts[i]);
-                if (!(from == to)) before[b][(pos - start_[b]) / kStride - 1].push_back({from, to, f_.classes[v]});
+                if (!(from == to)) before[b][(pos - start_[b]) / kStride - 1].push_back({from, to, f_.classes[v], v});
             }
         }
 
@@ -1329,7 +1329,7 @@ private:
                         if (!parts_[d].empty()) {
                             const auto to = location_at(d, p + kAfter);
                             if (!(to == Location{LocKind::Reg, def.fixed})) {
-                                after[b][j].push_back({{LocKind::Reg, def.fixed}, to, def.vreg.cls});
+                                after[b][j].push_back({{LocKind::Reg, def.fixed}, to, def.vreg.cls, d});
                             }
                         }
                         break;
@@ -1338,7 +1338,7 @@ private:
                         ia.defs.push_back(to);
                         const auto source = inst.uses[def.same_as].vreg.id;
                         const auto from = location_at(source, p - 1);
-                        if (!(from == to)) pre.push_back({from, to, def.vreg.cls});
+                        if (!(from == to)) pre.push_back({from, to, def.vreg.cls, d});
                         break;
                     }
                     default:
@@ -1362,14 +1362,14 @@ private:
                     if (parts_[v].size() == 1) continue;  // one location throughout
                     const auto from = location_at(v, edge);
                     const auto to = location_at(v, entry);
-                    if (!(from == to)) moves.push_back({from, to, f_.classes[v]});
+                    if (!(from == to)) moves.push_back({from, to, f_.classes[v], v});
                 }
                 for (const auto& phi : blocks[s].phis) {
                     const auto d = phi.def.id;
                     if (parts_[d].empty()) continue;
                     const auto from = location_at(phi.inputs[pred_index_[b][k]].id, edge);
                     const auto to = location_at(d, entry);
-                    if (!(from == to)) moves.push_back({from, to, phi.def.cls});
+                    if (!(from == to)) moves.push_back({from, to, phi.def.cls, d});
                 }
                 out.edges.push_back(ordered(moves, spare, spare_used));
             }
@@ -1399,7 +1399,7 @@ std::vector<Move> sequentialize(const std::vector<Move>& moves, std::uint32_t sp
         if (is_memory(m.from) && is_memory(m.to)) {
             const Location s{LocKind::Reg, scratch(m.cls)};
             out.push_back({m.from, s, m.cls});
-            out.push_back({s, m.to, m.cls});
+            out.push_back({s, m.to, m.cls, m.vreg});
         } else {
             out.push_back(m);
         }

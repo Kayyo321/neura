@@ -5,6 +5,7 @@
 #include "tier1.hpp"
 
 #include "jit/tier3_native.hpp"
+#include "kernels/kernel_binding.hpp"
 
 #include <algorithm>
 #include <cstdint>
@@ -153,6 +154,31 @@ bool control(Code code) {
     }
 }
 
+// Whether `exit` is the kernel exit that native code computes itself (design
+// 7.3): the KERN entry neura.math.sqrt at ABI version 1, whose kernel takes
+// one binary64 argument, charges the constant formula 1 and returns a
+// binary64, called with one binary64 argument. Its kernel is the correctly
+// rounded square root with every NaN canonical (neura_math.c), which is
+// Canon(Sqrt(x)) with the charge K + 1.
+bool inline_sqrt(const nvr::Image& image, const nvr::Exit& exit) {
+    if (exit.kind != nvr::ExitKind::State || exit.operation != nvr::StateOp::Kernel) return false;
+    if (exit.immediate >= image.kernels.size()) return false;
+    const auto& entry = image.kernels[exit.immediate];
+    if (entry.name != "neura.math.sqrt" || entry.abi_version != 1) return false;
+    const auto* info = kernels::find_kernel(entry.name, entry.abi_version);
+    if (info == nullptr || info->param_count != 1 || info->params[0] != kernels::Kind::F64 ||
+        info->result != kernels::Kind::F64 || info->buffer_count != 0 || info->cost.step_count != 1 ||
+        info->cost.steps[0].op != kernels::Op::Const || info->cost.steps[0].value != 1) {
+        return false;
+    }
+    const auto binary64 = [&](std::uint32_t type) {
+        return type < image.types.size() && image.types[type].kind == nvr::TypeKind::Float &&
+               image.types[type].width == 64;
+    };
+    return exit.arguments.size() == 1 && binary64(exit.arguments[0].type) && entry.parameter_types.size() == 1 &&
+           binary64(entry.parameter_types[0]) && binary64(entry.result_type);
+}
+
 // Most (assigned slot, flag) entries all frame states of a function may hold.
 constexpr std::uint64_t max_state_entries = std::uint64_t{1} << 23;
 constexpr std::size_t max_instructions = std::size_t{1} << 21;
@@ -222,6 +248,15 @@ private:
         f_->slot_count = slots_;
         f_->parameter_count = region_.parameter_count;
         f_->uses_float = region_.uses_float;
+        // A function with an inline kernel keeps K as an SSA value, and its
+        // native code depends on the floating-point environment.
+        for (const auto& op : region_.code) {
+            if (op.code == Code::Helper && op.index < region_.exits.size() &&
+                inline_sqrt(image_, *region_.exits[op.index])) {
+                f_->inline_kernels = true;
+                f_->uses_float = true;
+            }
+        }
         f_->programs.push_back(&region_);
         f_->exits = region_.exits;
         f_->dispatch_tables = region_.dispatch_tables;
@@ -595,6 +630,9 @@ private:
         def_[cur_][c_var()] = c;
     }
 
+    // K here, in a function with inline kernels; none otherwise.
+    std::uint32_t kernel_steps() { return f_->inline_kernels ? read(k_var(), cur_) : none; }
+
     // The state at the entry of image block `b`: tier 1 re-runs the block.
     std::uint32_t entry_state(std::uint32_t b) {
         if (const auto it = entry_states_.find(b); it != entry_states_.end()) return it->second;
@@ -615,6 +653,7 @@ private:
             state.flags[r] = {StateFlag::Kind::Value, read_start(flag_var(r), label)};
         }
         state.blocks = read_start(c_var(), label);
+        if (f_->inline_kernels) state.kernel_steps = read_start(k_var(), label);
         const auto id = static_cast<std::uint32_t>(f_->states.size());
         f_->states.push_back(std::move(state));
         entry_states_[b] = id;
@@ -634,6 +673,7 @@ private:
             state.flags[r] = {StateFlag::Kind::Value, read(flag_var(r), cur_)};
         }
         state.blocks = blocks;
+        state.kernel_steps = kernel_steps();
         const auto id = static_cast<std::uint32_t>(f_->states.size());
         f_->states.push_back(std::move(state));
         return id;
@@ -950,6 +990,7 @@ private:
             Inst in;
             in.op = Op::Budget;
             in.operands[0] = read(c_var(), cur_);
+            in.operands[1] = kernel_steps();
             in.flags = Checked;
             in.state = entry_state(op.block);
             emit(std::move(in));
@@ -1066,7 +1107,12 @@ private:
                 back.flags = Effect;
                 back.state = commit_state(op.target, count);
                 emit(std::move(back));
-                terminate(Op::Leave, count, op.target);
+                Inst leave;
+                leave.op = Op::Leave;
+                leave.operands[0] = count;
+                leave.operands[1] = kernel_steps();
+                leave.imm = op.target;
+                emit(std::move(leave));
             }
             return true;
         case Code::Deopt: {
@@ -1083,6 +1129,21 @@ private:
             const bool call = op.code == Code::Call;
             const auto& exit = *region_.exits[op.index];
             const auto arguments = values(op.other, op.width);
+            if (!call && inline_sqrt(image_, exit) && arguments.size() == 1) {
+                // The block's step, the kernel's charge of one step, and the
+                // square root: nothing can fail (the Budget before covers the
+                // charge), so there is no write-back and no frame state.
+                def_[cur_][c_var()] = counter_add(read(c_var(), cur_), 1);
+                def_[cur_][k_var()] = counter_add(read(k_var(), cur_), 1);
+                Inst root;
+                root.op = Op::Sqrt;
+                root.type = {Type::F64, 64};
+                root.operands[0] = arguments[0];
+                const auto id = emit(std::move(root));
+                if (op.dst != none) write(op.dst, id, true);
+                terminate(Op::Jump);
+                return true;
+            }
             if (!call && fast_path(op, exit, arguments)) return true;
             // The block's step, the commit, and the frame the reference sees.
             const auto charged = counter_add(read(c_var(), cur_), 1);
@@ -1096,6 +1157,7 @@ private:
             Inst in;
             in.op = call ? Op::Call : Op::Helper;
             in.operands[0] = charged;
+            in.operands[1] = kernel_steps();
             in.aux = op.index;
             in.imm = call ? op.a : 0;
             in.flags = Effect;
@@ -1112,6 +1174,14 @@ private:
                 reload.type = integer(64);
                 reload.imm = 0;
                 def_[cur_][c_var()] = emit(std::move(reload));
+                if (f_->inline_kernels) {
+                    // And K: the callee's inline kernels may have charged.
+                    Inst kernel;
+                    kernel.op = Op::EntryCounter;
+                    kernel.type = integer(64);
+                    kernel.imm = 1;
+                    def_[cur_][k_var()] = emit(std::move(kernel));
+                }
             }
             terminate(Op::Jump);
             return true;
@@ -1121,6 +1191,7 @@ private:
             in.op = Op::Return;
             in.operands[0] = read(c_var(), cur_);
             if (op.a != none) in.operands[1] = value(op.a);
+            in.operands[2] = kernel_steps();
             in.flags = Checked | Effect;
             in.state = entry_state(op.block);
             emit(std::move(in));
@@ -1391,7 +1462,8 @@ private:
             case Op::Phi:
             case Op::Mask:
             case Op::Gather:
-            case Op::CounterAdd: return true;
+            case Op::CounterAdd:
+            case Op::Sqrt: return true;
             case Op::Lift: return (in.flags & Checked) == 0;
             default: return false;
             }
@@ -1694,6 +1766,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         }
         if (built.program && options_.native_passes && tier3::passes_enabled()) tier3::optimize(image_, built.program->ir, tier3::verify_enabled());
         if (built.program) built.program->ir.check_heap = tier3::verify_enabled();
+        if (built.program) tier3::place_canons(image_, built.program->ir, tier3::verify_enabled());
     } catch (const std::exception& error) {
         built.reason = std::string("internal error: ") + error.what();
     }
@@ -1799,6 +1872,7 @@ void TierCache::add_native_events(const NativeCounts& counts,
     total.exits += counts.exits;
     total.traps += counts.traps;
     total.steps += counts.steps;
+    total.kernel_helpers += counts.kernel_helpers;
     total.fast_allocations += counts.fast_allocations;
     total.fast_appends += counts.fast_appends;
     total.slow_allocations += counts.slow_allocations;
