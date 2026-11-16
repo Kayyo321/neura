@@ -19,6 +19,14 @@ namespace {
 
 constexpr std::uint32_t none = nvr::absent;
 
+// The slots a call's result fills: the result slot, then one more per extra
+// result word of a multi-word callee (NVR 1.7).
+std::uint32_t result_slot_count(const nvr::Image& image, const nvr::Exit& exit) {
+    return exit.kind == nvr::ExitKind::Call
+               ? 1U + static_cast<std::uint32_t>(image.functions[exit.target].more_results.size())
+               : 1U;
+}
+
 bool internal_exit(const nvr::Exit& exit) {
     return exit.kind == nvr::ExitKind::Continue ||
            (exit.kind == nvr::ExitKind::State && inline_state_operation(exit));
@@ -728,6 +736,13 @@ private:
     bool takes(std::uint32_t local, const nvr::Exit& exit) const {
         if (stub(local)) return false;
         if (exit.arguments.size() > max_count) return false;
+        // Tier 2 and tier 3 first decline a block that uses a new operation
+        // (docs/design/Storage030.md, "Images and runtime"): a return of
+        // several words, and a call to a function that returns them, run on
+        // the reference path, which copies every word. The Return and Call
+        // ops carry one value and one result slot.
+        if (exit.kind == nvr::ExitKind::Return && exit.arguments.size() > 1) return false;
+        if (exit.kind == nvr::ExitKind::Call && image_.functions[exit.target].more_results.size() > 0) return false;
         if (internal_exit(exit)) return true;
         if (!program_ || checkable_) return false;
         return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return ||
@@ -817,7 +832,9 @@ private:
             for (const auto& assignment : exit.assignments) set[assignment.slot] = 1;
             if ((exit.kind == nvr::ExitKind::State || exit.kind == nvr::ExitKind::Call) &&
                 exit.result_slot != none) {
-                set[exit.result_slot] = 1;
+                for (std::uint32_t word = 0; word < result_slot_count(image_, exit); ++word) {
+                    if (exit.result_slot + word < set.size()) set[exit.result_slot + word] = 1;
+                }
             }
         };
         for (auto& entry : region_.entries) {
@@ -952,7 +969,9 @@ private:
                     }
                     if ((exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::State) &&
                         exit.result_slot < count) {
-                        set(v, exit.result_slot);
+                        for (std::uint32_t word = 0; word < result_slot_count(image_, exit); ++word) {
+                            if (exit.result_slot + word < count) set(v, exit.result_slot + word);
+                        }
                     }
                     add(exit.resume, v);
                     if (exit.kind == nvr::ExitKind::Host) add(exit.error_resume, v);

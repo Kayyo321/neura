@@ -153,16 +153,26 @@ public:
         const auto result = [&](std::uint32_t slot_index) {
             return slot_index == absent ? std::string() : slot(function, slot_index) + " := ";
         };
+        // A multi-word callee fills consecutive slots from the result slot.
+        const auto call_result = [&](const nvr::Exit& call) {
+            const auto& callee = image_.functions.at(call.target);
+            if (callee.more_results.empty() || call.result_slot == absent) return result(call.result_slot);
+            std::string text;
+            for (std::size_t i = 0; i <= callee.more_results.size(); ++i) {
+                text += (i == 0 ? "" : ", ") + slot(function, call.result_slot + static_cast<std::uint32_t>(i));
+            }
+            return text + " := ";
+        };
         const auto& args = exit.arguments;
         const std::string poll = exit.poll ? "poll [decoded]; " : "";
         switch (exit.kind) {
         case nvr::ExitKind::Continue:
             return with(poll + "goto b" + std::to_string(exit.resume));
         case nvr::ExitKind::Call:
-            return with(poll + result(exit.result_slot) + "call " + function_name(exit.target) + "(" +
+            return with(poll + call_result(exit) + "call " + function_name(exit.target) + "(" +
                         values(function, args, lifted, inputs) + "); goto b" + std::to_string(exit.resume));
         case nvr::ExitKind::Return:
-            return with(args.empty() ? "return" : "return " + value(function, args[0], lifted, inputs));
+            return with(args.empty() ? "return" : "return " + values(function, args, lifted, inputs));
         case nvr::ExitKind::Trap:
             return with("trap " + std::to_string(exit.reason) + " (" + reason_name(exit.reason) + ")");
         case nvr::ExitKind::MessageTrap:
@@ -527,7 +537,13 @@ Decompilation decompile(const nvr::Image& image, const DecompileOptions& options
         for (std::uint32_t p = 0; p < function.parameter_count; ++p) {
             out << (p == 0 ? "" : ", ") << printer.slot(f, p) << ": " << type_name(image, function.frame_types[p]);
         }
-        out << ") -> " << type_name(image, function.result_type);
+        if (function.more_results.empty()) {
+            out << ") -> " << type_name(image, function.result_type);
+        } else {
+            out << ") -> (" << type_name(image, function.result_type);
+            for (const auto word : function.more_results) out << ", " << type_name(image, word);
+            out << ")";
+        }
         if (names && f < names->functions.size() && !names->functions[f].empty()) {
             out << "  // provenance: " << names->functions[f];
         }

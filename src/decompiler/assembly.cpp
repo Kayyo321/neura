@@ -403,7 +403,10 @@ std::string disassemble(const nvr::Image& image) {
     for (std::size_t f = 0; f < image.functions.size(); ++f) {
         const auto& function = image.functions[f];
         out << "\nfunction " << f << " parameters " << function.parameter_count << " result "
-            << function.result_type << " frame " << indices(function.frame_types) << "\n";
+            << function.result_type;
+        // Absent for a single word, so every earlier text keeps its bytes.
+        if (!function.more_results.empty()) out << " more " << indices(function.more_results);
+        out << " frame " << indices(function.frame_types) << "\n";
         for (std::size_t b = 0; b < function.blocks.size(); ++b) {
             const auto& block = function.blocks[b];
             out << "  block " << b << " graph " << block.graph << " selector " << block.selector_start
@@ -644,6 +647,11 @@ nvr::Image assemble(std::string_view text) {
             function.parameter_count = in.index("parameter count");
             in.keyword("result");
             function.result_type = in.index("result type");
+            if (in.peek("more")) {
+                in.keyword("more");
+                if (image.minor_version < 7) in.error("several result words require NVR 1.7");
+                function.more_results = in.indices("result word type");
+            }
             in.keyword("frame");
             function.frame_types = in.indices("frame slot type");
             image.functions.push_back(std::move(function));

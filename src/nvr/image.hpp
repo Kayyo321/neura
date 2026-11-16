@@ -18,7 +18,7 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 6;
+inline constexpr std::uint16_t minor_version = 7;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -190,8 +190,8 @@ struct Exit {
     // State operation code and immediate.
     StateOp operation = StateOp::AllocateObject;
     std::uint32_t immediate = 0;
-    // Call, State, Host, and Scheduler arguments. Return holds its value here: one value
-    // for a nonvoid function and none otherwise. MessageTrap has one text.
+    // Call, State, Host, and Scheduler arguments. Return holds its values here: one per
+    // result word, so none for a void function. MessageTrap has one text.
     std::vector<Value> arguments;
     // Call, State, and Scheduler result slot, Host success slot.
     std::uint32_t result_slot = absent;
@@ -218,6 +218,10 @@ struct Block {
 struct Function {
     std::uint32_t parameter_count = 0;
     std::uint32_t result_type = 0;
+    // Types of the result words after the first (1.7). Empty is the single
+    // word, or void, of every earlier version; a function with more words
+    // has a nonvoid result_type and no void word.
+    std::vector<std::uint32_t> more_results;
     std::vector<std::uint32_t> frame_types;
     std::vector<Block> blocks;
 

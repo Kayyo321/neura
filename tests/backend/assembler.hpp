@@ -81,6 +81,16 @@ inline constexpr std::size_t directory_record = 24;
 // Function 0 frame: slot 0 text[] (arguments), slot 1 uint32 (error code).
 std::vector<Section> hello_sections();
 
+// NVR 1.7 sections (declare minor 7): the entry calls function 1, which returns
+// two words (int32 7, int64 9), and returns the first. `returned_words` is the
+// number of values function 1's return carries; the format wants two, and the
+// fixtures for a wrong count pass one.
+//
+// Types: 0 void, 1 bool, 2 int32, 3 text, 4 text[], 5 int64. Constants: 0 int32 7, 1 int64 9.
+// Function 0 frame: text[], int32, int64: the call writes slots 1 and 2.
+// Function 1: result int32, more_results [int64], an empty frame.
+std::vector<Section> multi_result_sections(unsigned returned_words = 2);
+
 // Replaces the section with `tag`.
 void replace(std::vector<Section>& sections, std::string_view tag, Bytes data);
 

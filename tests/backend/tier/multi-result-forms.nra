@@ -1,0 +1,25 @@
+// The lifted forms of multi-result.nvra. The compiler does not emit
+// multi-word functions yet, so that image is assembled by hand, and its LIFT
+// section is built from this program: the same checked int64 add, compare and
+// increment, compiled the way the converter compiles them
+// (tests/backend/fixtures.cpp, multi_result_image).
+let program = import:Std.Program;
+
+let Forms = module:program.Entry (
+    let add = func(a: int64, b: int64) -> int64 => a + b;
+
+    let loop = func(n: int64) -> int64 {
+        let s: int64 = 0;
+        for (let i: int64 = 0; i < n; i = i + 1) {
+            s = add(s, i);
+        }
+        return s;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (loop(10) == 45) {
+            return program.ExitCode.Ok;
+        }
+        return program.ExitCode.Failure;
+    };
+);

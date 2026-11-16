@@ -106,4 +106,46 @@ std::vector<Section> hello_sections() {
     };
 }
 
+std::vector<Section> multi_result_sections(unsigned returned_words) {
+    Out constants;
+    constants.u32(2);
+    constants.u32(2).u32(4).u32(7);                  // int32 7
+    constants.u32(5).u32(8).u32(9).u32(0);           // int64 9
+
+    Out functions;
+    functions.u32(2);
+    // Function 0: parameters 1, result int32, no more results, frame text[], int32, int64.
+    functions.u32(1).u32(2);
+    functions.u32(0);
+    functions.u32(3).u32(4).u32(2).u32(5);
+    functions.u32(2);
+    // Block 0: call function 1 with no arguments, result slot 1 (and so slot 2), resume 1.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(1).u32(0).u32(1).u32(0).u32(1).u32(1);
+    // Block 1: return slot 1.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(2).u32(0).raw(value(0, 2, 1));
+    // Function 1: parameters 0, result int32, more results [int64], empty frame, one block.
+    functions.u32(0).u32(2);
+    functions.u32(1).u32(5);
+    functions.u32(0);
+    functions.u32(1);
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(2).u32(0);
+    functions.raw(value(1, 2, 0));
+    if (returned_words > 1) functions.raw(value(1, 5, 1));
+
+    Out graphs;
+    graphs.u32(1).u32(0).u32(0).u32(0);
+    Out types;
+    types.u32(6).u8(0).u8(1).u8(3).u8(32).u8(4).u8(7).u32(3).u8(3).u8(64);
+    Out empty;
+    empty.u32(0);
+    return {
+        {"CONS", 1, constants.bytes}, {"FUNC", 1, functions.bytes}, {"GLOB", 1, empty.bytes},
+        {"GRPH", 1, graphs.bytes},    {"IMPT", 1, empty.bytes},     {"LAYO", 1, empty.bytes},
+        {"META", 1, empty.bytes},     {"TYPE", 1, types.bytes},
+    };
+}
+
 } // namespace neura::testing::nvr_bytes

@@ -67,7 +67,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(7), Kind::Unsupported, "format version 1.7 is not supported");
+    expect_rejected(version_bytes(8), Kind::Unsupported, "format version 1.8 is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -417,6 +417,181 @@ NEURA_TEST(format, nil_and_interface_layouts_require_version_1_2) {
     expect_invalid(image, "links form a cycle");
 }
 
+NEURA_TEST(format, multi_word_results_need_version_1_7) {
+    // tests/backend/tier/multi-result.nvra: function 2 returns (int64, float64, text),
+    // function 4 (int64, int64), and function 0 is the entry. Types: 6 int64,
+    // 7 float64, 0 text, 4 void; constant 4 is a float64, constant 6 a text.
+    auto image = multi_result_image(environment);
+    check(image.functions[2].more_results == std::vector<std::uint32_t>({7, 0}), "the assembled result words");
+    check_equal(nvr::required_minor_version(image), std::uint16_t{7}, "result words declare 1.7");
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{7}, "the writer emits 1.7");
+    const auto loaded = nvr::load(bytes);
+    check(loaded == image, "an image with result words round trips through the loader");
+    check(nvr::encode(loaded) == bytes, "and re-encodes to the same bytes");
+
+    // A re-encoded image keeps at least the version it declared, but never less than it needs.
+    auto declared_old = image;
+    declared_old.minor_version = 6;
+    check(nvr::encode(declared_old) == bytes, "a declared 1.6 image with result words is written as 1.7");
+
+    // Without result words the version and the bytes are what they were.
+    check_equal(nvr::required_minor_version(hello_model()), std::uint16_t{0}, "no result words, no 1.7");
+    check_equal(nvr::encode(hello_model())[6], std::uint8_t{0}, "an image without result words keeps its version");
+    check(nvr::encode(logic_model()) == logic_bytes(), "and its bytes");
+    auto empty_list = logic_model();
+    empty_list.minor_version = 7;
+    const auto seven = nvr::encode(empty_list);
+    check_equal(seven[6], std::uint8_t{7}, "a declared 1.7 image keeps 1.7");
+    check(nvr::load(seven) == empty_list, "and carries an empty result word list for every function");
+
+    // The same bytes under a 1.6 header are not a 1.6 image: the function
+    // record has no result word list there.
+    auto old_header = bytes;
+    old_header[6] = 6;
+    bool rejected = false;
+    try {
+        nvr::load(old_header);
+    } catch (const LoadError& error) {
+        rejected = error.kind == Kind::Malformed || error.kind == Kind::Invalid;
+    }
+    check(rejected, "a 1.7 function table under a 1.6 header is rejected as malformed or invalid");
+    auto future = bytes;
+    future[6] = 8;
+    expect_rejected(future, Kind::Unsupported, "format version 1.8 is not supported");
+
+    // Writer checks: a return carries one value per word, and no word is void.
+    auto short_return = image;
+    short_return.functions[2].blocks[0].exits[0].arguments.pop_back();
+    bool threw = false;
+    try {
+        nvr::encode(short_return);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "the writer rejects a return with too few values");
+    auto void_word = image;
+    void_word.functions[2].more_results = {4};
+    threw = false;
+    try {
+        nvr::encode(void_word);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "the writer rejects a void result word");
+    auto void_first = image;
+    void_first.functions[2].result_type = 4;
+    threw = false;
+    try {
+        nvr::encode(void_first);
+    } catch (const std::invalid_argument&) {
+        threw = true;
+    }
+    check(threw, "the writer rejects result words after a void first word");
+}
+
+NEURA_TEST(format, multi_word_results_wire_encoding) {
+    // Built byte by byte from the NVR 1.7 function record in docs/runtime/NVR.md, not by the writer.
+    Header seven;
+    seven.minor = 7;
+    const auto bytes = assemble(multi_result_sections(), seven);
+    const auto image = nvr::load(bytes);
+    check_equal(image.minor_version, std::uint16_t{7}, "the declared version");
+    check(image.functions[1].more_results == std::vector<std::uint32_t>({5}), "the result word list follows the result type");
+    check(image.functions[0].more_results.empty(), "a single-word function has an empty list");
+    check_equal(image.functions[1].blocks[0].exits[0].arguments.size(), std::size_t{2}, "a return carries one value per word");
+    check(nvr::encode(image) == bytes, "the writer reproduces the bytes");
+    const auto run = run_captured(image);
+    check(run.result.completed, "the image runs");
+    check_equal(run.result.status, 7, "the call writes the first word to its result slot");
+
+    // One value fewer than the words: the reader takes two values and runs out of record.
+    expect_rejected(assemble(multi_result_sections(1), seven), Kind::Malformed, "FUNC");
+
+    // The same function table under a 1.6 header has no list: the loader reads a frame
+    // list where the list is, and what follows is not a function table.
+    Header six;
+    six.minor = 6;
+    expect_rejected(assemble(multi_result_sections(), six), Kind::Malformed, "FUNC");
+    // Under 1.6 the writer's output for the same model is the 1.7 bytes, never a 1.6 image with a list.
+    auto declared_six = image;
+    declared_six.minor_version = 6;
+    check(nvr::encode(declared_six) == bytes, "a model with result words is encoded as 1.7");
+}
+
+NEURA_TEST(format, multi_word_results_are_validated) {
+    const auto image = multi_result_image(environment);
+    const auto mutated = [&](const std::function<void(nvr::Image&)>& change, std::string_view fragment,
+                             std::source_location where = std::source_location::current()) {
+        auto copy = image;
+        change(copy);
+        expect_invalid(copy, fragment, where);
+    };
+    // Each returned word is assignable to its word's type.
+    mutated([](nvr::Image& m) { m.functions[2].blocks[0].exits[0].arguments[1] = {nvr::ValueKind::Constant, 0, 6}; },
+            "value 1: type 0 is not assignable to type 7");
+    mutated([](nvr::Image& m) { m.functions[2].blocks[0].exits[0].arguments[2] = {nvr::ValueKind::Constant, 7, 4}; },
+            "value 2: type 7 is not assignable to type 0");
+    mutated([](nvr::Image& m) { m.functions[2].blocks[0].exits[0].arguments[0] = {nvr::ValueKind::Constant, 7, 4}; },
+            "value: type 7 is not assignable to type 6");
+    // A call's words land in consecutive slots from the result slot, each of the word's type.
+    mutated([](nvr::Image& m) { m.functions[1].blocks[2].exits[0].result_slot = 6; }, "do not fit the frame");
+    mutated([](nvr::Image& m) { m.functions[1].blocks[2].exits[0].result_slot = 2; }, "result word 1: type 7 is not assignable to type 6");
+    mutated([](nvr::Image& m) { m.functions[1].blocks[2].exits[0].result_slot = 7; }, "do not fit the frame");
+    mutated([](nvr::Image& m) { m.functions[1].blocks[2].exits[0].result_slot = 99; }, "do not fit the frame");
+    // An absent slot discards every word, which the image already does in function 0.
+    check(image.functions[0].blocks[8].exits[0].result_slot == nvr::absent, "the fixture discards a two-word result");
+    nvr::load(nvr::encode(image));
+
+    // Not the entry, a spawned task, a parallel item, or a callback.
+    mutated([](nvr::Image& m) { m.entry = 4; }, "the entry function cannot return several words");
+    mutated([](nvr::Image& m) { m.callbacks.push_back({"app.callback", 1, 4}); }, "a callback cannot return several words");
+    const auto scheduled = [&](nvr::SchedulerOp operation, std::vector<nvr::Value> arguments, std::uint32_t target) {
+        auto copy = image;
+        copy.transferable_layouts = std::vector<std::uint32_t>{};
+        auto& exit = copy.functions[0].blocks[8].exits[0];
+        exit = {};
+        exit.kind = nvr::ExitKind::Scheduler;
+        exit.scheduler = operation;
+        exit.target = target;
+        exit.arguments = std::move(arguments);
+        exit.resume = 10;
+        return copy;
+    };
+    const nvr::Value zero{nvr::ValueKind::Constant, 6, 2};
+    // The same exits to a function with one result word load, so the rejection below is the result words'.
+    nvr::load(nvr::encode(scheduled(nvr::SchedulerOp::Spawn, {zero, zero}, 3)));
+    expect_invalid(scheduled(nvr::SchedulerOp::Spawn, {zero, zero}, 2), "a spawned task cannot return several words");
+    expect_invalid(scheduled(nvr::SchedulerOp::ParallelStart, {zero, zero, zero}, 4),
+                   "a parallel item cannot return several words");
+}
+
+NEURA_TEST(format, multi_word_results_round_trip_through_the_assembly_text) {
+    const auto image = multi_result_image(environment);
+    const auto text = decompiler::disassemble(image);
+    check(text.find("nvr 1.7 profile") != std::string::npos, "the assembly text declares 1.7");
+    check(text.find("result 6 more [ 7 0 ] frame") != std::string::npos, "the three-word signature is listed");
+    check(text.find("result 6 more [ 6 ] frame") != std::string::npos, "the two-word signature is listed");
+    check(decompiler::assemble(text) == image, "assemble(disassemble(image)) is the image");
+    check(nvr::encode(decompiler::assemble(text)) == nvr::encode(image), "and encodes to the same bytes");
+    // An image without result words has no `more` keyword anywhere.
+    check(decompiler::disassemble(logic_model()).find(" more ") == std::string::npos, "single-word text is unchanged");
+    // The text of a 1.6 image cannot list result words.
+    auto old_text = text;
+    old_text.replace(old_text.find("nvr 1.7"), 7, "nvr 1.6");
+    bool rejected = false;
+    try {
+        decompiler::assemble(old_text);
+    } catch (const decompiler::AssemblyError& error) {
+        rejected = std::string(error.what()).find("require NVR 1.7") != std::string::npos;
+    }
+    check(rejected, "the assembler rejects result words under a 1.6 header");
+    // The decompiled source shows each word and the call's and return's values.
+    const auto source = decompiler::decompile(image).text;
+    check(source.find("-> (int64, float64, text)") != std::string::npos, "the signature lists every word: " + source);
+    check(source.find("return ") != std::string::npos, "returns are listed");
+}
+
 NEURA_TEST(format, writer_reproduces_assembled_fixtures) {
     check(nvr::encode(hello_model()) == assemble(hello_sections()), "writer output matches the hello fixture");
     check(nvr::encode(logic_model()) == logic_bytes(), "writer output matches the logic fixture");
@@ -497,9 +672,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 7;
+    newer_minor.minor = 8;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.7 is not supported; this loader accepts 1.0 through 1.6");
+                    "format version 1.8 is not supported; this loader accepts 1.0 through 1.7");
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");

@@ -3266,8 +3266,14 @@ private:
             }
             auto caller = frames_.back();
             if (return_slot != nvr::absent) {
-                caller.slots[return_slot] = result;
-                caller.initialized[return_slot] = 1;
+                // A multi-word callee (NVR 1.7) writes its words to the
+                // consecutive slots from the result slot; the loader checked
+                // that they fit and take each word's type. The frame header
+                // is unchanged: the count is the number of return values.
+                for (std::size_t word = 0; word < std::max<std::size_t>(arguments.size(), 1); ++word) {
+                    caller.slots[return_slot + word] = word < arguments.size() ? arguments[word] : 0;
+                    caller.initialized[return_slot + word] = 1;
+                }
             }
             caller.block = return_block;
             return std::nullopt;

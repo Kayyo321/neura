@@ -53,7 +53,7 @@ section "NAME" 0300000000...
 | `graph I inputs N outputs [ W... ]` | Followed by its nodes. |
 | `node I identity\|relu BIAS [ SOURCE*WEIGHT... ]` | One neuron of the preceding graph. |
 | `import I "NAME" version V parameters [ T... ] success T error T` | |
-| `function I parameters N result T frame [ T... ]` | Followed by its blocks. |
+| `function I parameters N result T [more [ T... ]] frame [ T... ]` | Followed by its blocks. `more` lists the result words after the first (NVR 1.7) and appears only for a function that has them. |
 | `block I graph G selector S inputs [ VALUE... ]` | Followed by its exits. |
 | `exit KIND FIELDS assign [ SLOT = VALUE... ]` | Kinds `continue call return state host trap`, with the fields of [NVR](NVR#graphs-functions-and-exits). State operations are named, such as `read-field` and `read-version`. |
 | `source-map`, then `location F B "PATH" LINE COLUMN` | The optional source map. |

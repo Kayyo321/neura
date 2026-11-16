@@ -17,19 +17,19 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 through 6 |
+| Minor | u16 | 0 through 7 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |
 
 The section directory immediately follows the header. Each directory record is `tag[4], flags:u32, offset:u64, size:u64`. Tags use four printable ASCII characters and compare bytewise. Offsets are absolute byte offsets. Bit zero of flags means the section is required for execution. Other flag bits are reserved and zero in version 1.0. Sections follow the directory in ascending tag order, without gaps or overlaps. The directory uses the same order and contains each tag at most once.
 
-### Versions 1.0 through 1.6
+### Versions 1.0 through 1.7
 
-Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. Minor version 6 adds the kernel state operation (code 24) and the `KERN` kernel table ([Kernels](#kernels-16)). The graph profile remains 1.
+Minor version 1 adds float and bfloat type kinds (tags 9 and 10), the read-version state operation (code 14), and trap reason 5. Minor version 2 adds an interface vector to each layout record, a nil object constant, a message-trap exit, and state operations 15 through 22. Minor version 3 adds the repeated collection allocation state operation (code 23). Minor version 4 adds the `CALB` callback table and the `NATV` embedded native library. Minor version 5 adds scheduler exits, polls, and the `TRNS` transferable-layout table. Minor version 6 adds the kernel state operation (code 24) and the `KERN` kernel table ([Kernels](#kernels-16)). Minor version 7 adds multi-word function results, so far the only thing it adds: a list of further result word types in every function record, and the return and call rules in [Multi-word results](#multi-word-results-17). The graph profile remains 1.
 
 - A writer emits the lowest minor version whose features the image uses. A writer that re-encodes a loaded image keeps at least the minor version the image declared.
-- The loader accepts major version 1 with minor versions 0 through 6. A feature newer than the version declared by the image makes the image malformed.
+- The loader accepts major version 1 with minor versions 0 through 7. A feature newer than the version declared by the image makes the image malformed.
 - An unknown required section or graph profile produces an unsupported-image error. A recognized version can carry unknown optional sections. The loader keeps their bytes so that re-encoding the image reproduces them; execution ignores them. A known section must carry the required flag given in the table below. Executable sections never reference optional sections.
 
 | Tag | Contents | Required |
@@ -82,7 +82,7 @@ NVM assigns reference handles in a deterministic order, starting with materializ
 
 A graph record contains `input_lanes:u32, nodes:vector<Node>, outputs:vector<u32>`. Input wires have indices zero through `input_lanes - 1`. Node outputs follow the input wires in node order. Each node contains `activation:u8, bias:i64, edges:vector<Edge>`. Activation 0 is identity and 1 is ReLU. Each edge is `source:u32, weight:i64`. Edges are sorted by source index and have unique sources. A node can refer only to earlier wires. The output vector lists wire indices in logical output-lane order and can repeat a wire.
 
-A function record contains `parameter_count:u32, result_type:u32, frame_types:vector<u32>, blocks:vector<Block>`. The first parameter-count frame slots hold parameters in declaration order. Block zero is the function entry. The image's entry function takes one UTF-8 text array and returns a signed 32-bit integer.
+A function record contains `parameter_count:u32, result_type:u32, more_results:vector<u32>, frame_types:vector<u32>, blocks:vector<Block>`; `more_results` (1.7) is absent from the record of an image that declares an earlier version, and a 1.7 image carries it in every record, empty for a function that returns at most one word. The first parameter-count frame slots hold parameters in declaration order. Block zero is the function entry. The image's entry function takes one UTF-8 text array and returns a signed 32-bit integer.
 
 A value descriptor contains `kind:u8, type:u32, index:u32`. Kind 0 reads frame slot `index`. Kind 1 reads constant `index`. Kind 2 decodes a value starting at logical output lane `index`, using the declared type's width. The descriptor type must match the source slot or constant type for kinds 0 and 1. Consumers validate the decoded form and check reference handles as needed. A reference decoded from lanes must name a live handle whose runtime type is compatible with the descriptor type, or the run traps; a dispatch block uses this check to pass a receiver at the parameter type of the selected function.
 
@@ -94,7 +94,7 @@ An exit begins with `kind:u8, assignments:vector<Assignment>`. An assignment is 
 | --- | --- | --- |
 | Continue | 0 | `resume_block:u32` |
 | Call | 1 | `function:u32, arguments:vector<Value>, result_slot:u32 optional, resume_block:u32` |
-| Return | 2 | One `Value` for a nonvoid function |
+| Return | 2 | One `Value` for each result word: none for a void function, one for a function with an empty `more_results`, and `1 + more_results` for one that has result words ([Multi-word results](#multi-word-results-17)) |
 | State operation | 3 | `operation:u8, immediate:u32, arguments:vector<Value>, result_slot:u32 optional, resume_block:u32` |
 | Host call | 4 | `import:u32, arguments:vector<Value>, success_slot:u32 optional, success_block:u32, error_slot:u32 optional, error_block:u32` |
 | Trap | 5 | `reason:u32` |
@@ -264,6 +264,16 @@ The state-operation exit provides checked storage primitives. Its immediate is z
 | 24 (1.6) | Kernel | `KERN` index | One value per parameter of the kernel record, each assignable to it | The record's result type ([Kernels](#kernels-16)) |
 
 Text operations address UTF-8 bytes at the VM boundary. Constructing text checks UTF-8 validity before publishing the result. Operation 13 accepts a byte list, which can grow as text is assembled. Language text indexing can have its own rules implemented above these byte operations. Arrays have fixed length after allocation. List removal shifts later elements left. Every list carries a structural version that starts at zero when the list is allocated and grows by one, modulo 2^64, with each successful append or removal; writing an element does not change it. A for-each loop compares versions to detect modification. Reads and writes check indices and types before accessing storage. Allocation and growth check size arithmetic and run limits before committing. Operation 23 checks the requested length against storage and heap limits before allocating. Freeing an object invalidates its handle after language cleanup has completed.
+
+### Multi-word results (1.7)
+
+A function returns one word of type `result_type` and, in a 1.7 image, further words of the types in `more_results`, in order. The words are what a later flattening of tuples and payload enums into several typed one-word slots needs; the compiler does not emit them yet, and the format and the runtime carry them first. A function with result words has a nonvoid `result_type`, and no type in the list is void. The writer emits 1.7 exactly when some function has result words, so an image without them keeps its earlier version and its bytes; a loader checks the usual rule that an image uses no feature newer than the version it declares.
+
+- A Return exit of such a function carries one value per word, `1 + more_results` in all, each assignable to its word's type. The encoding is the values in order, with no count: the loader knows the count from the function.
+- A Call exit to such a function writes the words to consecutive slots of the caller's frame, word `i` to slot `result_slot + i`. The slots exist, and each accepts its word's type. An absent result slot discards every word; for a function with at most one word the slot rules are the ones above, and a nonvoid result still requires a slot. Each written slot is initialized.
+- The loader rejects with an *invalid image* a function with result words that is the entry function, the target of a spawn, a parallel item, or a callback, because a task or a callback result crosses a boundary that carries one word (a task's `join` and a parallel item's result are transferable single values).
+- The NVM copies the words in the reference path, and tiers 2 and 3 decline a block whose exit is a return of several words or a call to such a function, as they decline a block that uses any operation they do not yet know ([NVM](NVM#execution-tiers)); the block runs on tier 1 or the interpreter, with the same results, step count, and peak heap cells.
+- The assembly text lists the words after the result type, `function F parameters N result T more [ T... ] frame [ ... ]`, and only for a function that has them. A `more` list in text that declares a version before 1.7 is an assembler error. `neura decompile` writes the signature as `-> (T0, T1, ...)`, a return as `return v0, v1, ...`, and a call that has result words as `s2, s3, s4 := call ...`.
 
 ### Kernels (1.6)
 

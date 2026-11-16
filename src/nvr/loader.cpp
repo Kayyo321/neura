@@ -270,7 +270,7 @@ std::vector<Graph> read_graphs(Reader& in) {
     });
 }
 
-std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types) {
+std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types, std::uint16_t minor) {
     return in.vector(function_size, "function table", [&](Reader& r) {
         Function function;
         function.parameter_count = r.u32();
@@ -279,7 +279,24 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
             fail(Kind::Invalid, "FUNC: function result type " + std::to_string(function.result_type) +
                                     " is out of range");
         }
-        const bool returns_value = types[function.result_type].kind != TypeKind::Void;
+        // The extra result words exist only in a 1.7 record; earlier records
+        // go straight to the frame list.
+        if (minor >= 7) {
+            function.more_results = r.indices("result word list");
+            if (!function.more_results.empty() && types[function.result_type].kind == TypeKind::Void) {
+                fail(Kind::Invalid, "FUNC: a function with several result words has a void first word");
+            }
+            for (const auto word : function.more_results) {
+                if (word >= types.size()) {
+                    fail(Kind::Invalid, "FUNC: result word type " + std::to_string(word) + " is out of range");
+                }
+                if (types[word].kind == TypeKind::Void) {
+                    fail(Kind::Invalid, "FUNC: a result word cannot be void");
+                }
+            }
+        }
+        const std::size_t result_words =
+            (types[function.result_type].kind != TypeKind::Void ? 1 : 0) + function.more_results.size();
         function.frame_types = r.indices("frame slot list");
         function.blocks = r.vector(block_size, "block list", [&](Reader& b) {
             Block block;
@@ -315,7 +332,7 @@ std::vector<Function> read_functions(Reader& in, const std::vector<Type>& types)
                     exit.resume = e.u32();
                     break;
                 case ExitKind::Return:
-                    if (returns_value) {
+                    for (std::size_t word = 0; word < result_words; ++word) {
                         exit.arguments.push_back(read_value(e));
                     }
                     break;
@@ -442,6 +459,8 @@ private:
     void value(const Function& function, const Block& block, const Value& item, const std::string& where) const;
     void assign(std::uint32_t actual, std::uint32_t expected, const std::string& where) const;
     void result(const Function& function, std::uint32_t slot, std::uint32_t produced, const std::string& where) const;
+    void call_result(const Function& function, std::uint32_t slot, const Function& callee,
+                     const std::string& where) const;
     void state(const Function& function, const Exit& exit, const std::string& where) const;
     void scheduler(const Function& function, const Exit& exit, const std::string& where) const;
     void continuation(const Function& function, std::uint32_t target, const std::string& where) const;
@@ -486,6 +505,9 @@ void Validator::callbacks() {
         }
         if (callback.function == image_.entry) {
             invalid(where + ": the entry function cannot be a callback");
+        }
+        if (!image_.functions[callback.function].more_results.empty()) {
+            invalid(where + ": a callback cannot return several words");
         }
     }
 }
@@ -848,6 +870,27 @@ void Validator::result(const Function& function, std::uint32_t slot, std::uint32
     assign(produced, function.frame_types[slot], where + " result");
 }
 
+void Validator::call_result(const Function& function, std::uint32_t slot, const Function& callee,
+                            const std::string& where) const {
+    if (callee.more_results.empty()) {
+        result(function, slot, callee.result_type, where);
+        return;
+    }
+    // Several words land in consecutive slots from the result slot; an absent
+    // slot discards all of them, which a single word cannot do.
+    if (slot == absent) {
+        return;
+    }
+    if (slot >= function.frame_types.size() || callee.more_results.size() >= function.frame_types.size() - slot) {
+        invalid(where + ": the result words do not fit the frame from slot " + std::to_string(slot));
+    }
+    assign(callee.result_type, function.frame_types[slot], where + " result word 0");
+    for (std::size_t i = 0; i < callee.more_results.size(); ++i) {
+        assign(callee.more_results[i], function.frame_types[slot + 1 + i],
+               where + " result word " + std::to_string(i + 1));
+    }
+}
+
 void Validator::continuation(const Function& function, std::uint32_t target, const std::string& where) const {
     if (target >= function.blocks.size()) {
         invalid(where + ": block " + std::to_string(target) + " is out of range");
@@ -1001,6 +1044,9 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
             invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
         }
         const auto& callee = image_.functions[exit.target];
+        if (!callee.more_results.empty()) {
+            invalid(where + ": a parallel item cannot return several words");
+        }
         arity(3);
         if (callee.parameter_count != 1) invalid(where + ": a parallel item's function takes one argument");
         assign(exit.arguments[0].type, callee.frame_types[0], where + " argument 0");
@@ -1068,6 +1114,10 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
             invalid(where + ": function " + std::to_string(exit.target) + " is out of range");
         }
         const auto& callee = image_.functions[exit.target];
+        // A task's result crosses the task boundary as one transferable word.
+        if (!callee.more_results.empty()) {
+            invalid(where + ": a spawned task cannot return several words");
+        }
         arity(callee.parameter_count);
         for (std::size_t i = 0; i < exit.arguments.size(); ++i) {
             const auto actual = exit.arguments[i].type;
@@ -1434,13 +1484,18 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
             for (std::size_t a = 0; a < exit.arguments.size(); ++a) {
                 assign(exit.arguments[a].type, callee.frame_types[a], exit_where + " argument " + std::to_string(a));
             }
-            result(function, exit.result_slot, callee.result_type, exit_where);
+            call_result(function, exit.result_slot, callee, exit_where);
             continuation(function, exit.resume, exit_where);
             break;
         }
         case ExitKind::Return:
+            // The reader took one value per result word.
             if (!exit.arguments.empty()) {
                 assign(exit.arguments.front().type, function.result_type, exit_where + " value");
+            }
+            for (std::size_t i = 0; i < function.more_results.size(); ++i) {
+                assign(exit.arguments[i + 1].type, function.more_results[i],
+                       exit_where + " value " + std::to_string(i + 1));
             }
             break;
         case ExitKind::State:
@@ -1510,6 +1565,9 @@ void Validator::entry() {
     }
     const auto& function = image_.functions[image_.entry];
     const auto& result_type = image_.types[function.result_type];
+    if (!function.more_results.empty()) {
+        invalid("the entry function cannot return several words");
+    }
     bool takes_arguments = function.parameter_count == 1;
     if (takes_arguments) {
         const auto& argument = image_.types[function.frame_types[0]];
@@ -1784,7 +1842,7 @@ Image load(std::span<const std::uint8_t> bytes, const LoadLimits& limits) {
             return import;
         });
     });
-    section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types); });
+    section("FUNC", [&](Reader& in) { image.functions = read_functions(in, image.types, minor); });
     section("META", [&](Reader& in) { image.entry = in.u32(); });
     if (sections.contains("CALB")) {
         section("CALB", [&](Reader& in) {

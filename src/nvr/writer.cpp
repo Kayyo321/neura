@@ -97,7 +97,7 @@ void values(Output& out, const std::vector<Value>& items) {
     vector(out, items, value);
 }
 
-void exit(Output& out, const Exit& item, bool returns_value) {
+void exit(Output& out, const Exit& item, std::size_t result_words) {
     if (item.poll && item.kind != ExitKind::Continue && item.kind != ExitKind::Call) {
         throw std::invalid_argument("a poll is valid only on a continue or call exit");
     }
@@ -117,11 +117,11 @@ void exit(Output& out, const Exit& item, bool returns_value) {
         out.u32(item.resume);
         break;
     case ExitKind::Return:
-        if (returns_value != (item.arguments.size() == 1) || item.arguments.size() > 1) {
+        if (item.arguments.size() != result_words) {
             throw std::invalid_argument("return exit value does not match the function result");
         }
-        if (returns_value) {
-            value(out, item.arguments.front());
+        for (const auto& word : item.arguments) {
+            value(out, word);
         }
         break;
     case ExitKind::State:
@@ -181,15 +181,31 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             if (function.result_type >= image.types.size()) {
                 throw std::invalid_argument("function result type is out of range");
             }
-            const bool returns_value = image.types[function.result_type].kind != TypeKind::Void;
+            const std::size_t result_words =
+                (image.types[function.result_type].kind != TypeKind::Void ? 1 : 0) + function.more_results.size();
+            if (!function.more_results.empty()) {
+                if (image.types[function.result_type].kind == TypeKind::Void) {
+                    throw std::invalid_argument("a multi-word function needs a nonvoid first result");
+                }
+                for (const auto word : function.more_results) {
+                    if (word >= image.types.size() || image.types[word].kind == TypeKind::Void) {
+                        throw std::invalid_argument("a result word is out of range or void");
+                    }
+                }
+            }
             o.u32(function.parameter_count);
             o.u32(function.result_type);
+            // Only a 1.7 record carries the list; an earlier image has none
+            // (required_minor_version declares 1.7 for any that does).
+            if (minor >= 7) {
+                indices(o, function.more_results);
+            }
             indices(o, function.frame_types);
             vector(o, function.blocks, [&](Output& b, const Block& block) {
                 b.u32(block.graph);
                 values(b, block.inputs);
                 b.u32(block.selector_start);
-                vector(b, block.exits, [&](Output& e, const Exit& item) { exit(e, item, returns_value); });
+                vector(b, block.exits, [&](Output& e, const Exit& item) { exit(e, item, result_words); });
             });
         });
     });
@@ -319,6 +335,7 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    if (std::ranges::any_of(image.functions, [](const Function& f) { return !f.more_results.empty(); })) return 7;
     if (!image.kernels.empty()) return 6;
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {

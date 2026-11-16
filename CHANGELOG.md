@@ -19,6 +19,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- NVR 1.7 multi-word function results: a function record can list result words after the first, a return carries one value per word, and a call writes them to consecutive slots ([format](docs/runtime/NVR.md#multi-word-results-17)). This is a format and runtime capability; the compiler does not emit it yet, so every image it builds is unchanged.
 - Research-candidate editor tooling for the separate Neura VS Code extension: `neura lsp --stdio`, compiler-backed unsaved analysis and semantic editing, `neura fmt`, `neura debug --stdio`, and `neura capabilities --json`.
 - Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.
 - Read-only image/graph JSON inspection through `neura inspect-image --json`.

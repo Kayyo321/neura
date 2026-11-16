@@ -617,6 +617,70 @@ NEURA_TEST(tier, operand_counts_above_255_run_on_the_interpreter_like_tier_0) {
     }
 }
 
+NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
+    // Functions that return two and three words (NVR 1.7, mixed int, float and
+    // text), called in a loop, recursively, and with the words discarded. Tier
+    // 2 and tier 3 decline the returns and the calls (docs/design/Storage030.md,
+    // "Tier 2 and tier 3 first decline a block that uses a new operation"), so
+    // every mode must end with the reference run's output, steps and peak heap.
+    const auto image = multi_result_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs at tier 0");
+    check_equal(reference.output, std::string{"2.5\nw\n44850\n1225\n50\n"}, "tier 0 output");
+    check_same(run_captured(image, limits_at(0)), reference, "a second tier 0 run");
+    using Tier3 = nvm::TierOptions::Tier3;
+    for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+        for (const bool programs : {false, true}) {
+            auto options = eager_programs();
+            options.tier3 = tier3;
+            options.native_after = 1;
+            if (!programs) options.programs = nvm::TierOptions::Programs::Off;
+            const std::string label =
+                std::string("tier3 ") + (tier3 == Tier3::Off ? "off" : tier3 == Tier3::Interp ? "interp" : "native") +
+                (programs ? " with programs" : " with regions");
+            nvm::TierCache cache(image, options);
+            // Twice on one cache, so the second run starts with formed code.
+            compare_with_tier_0(image, cache, label, {});
+            compare_with_tier_0(image, cache, label + " again", {});
+            if (programs && programs_run()) {
+                const auto counts = cache.statistics();
+                check(counts.lifted_by_hint > 0 && counts.programs > 0,
+                      label + ": the hinted blocks were lifted into programs");
+                // rec's single-word calls to add still run in programs; the
+                // multi-word calls and returns are declined.
+                check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
+                      label + ": single-word calls and returns still run in programs");
+                check(counts.region_counts.exits > 0, label + ": the multi-word exits were declined");
+                // Tier 3 inherits the decline: it builds from these programs and
+                // still runs, so its result is the reference's.
+                if (tier3 != Tier3::Off && nvm::tier_ceiling() >= 3) {
+                    check(counts.native_programs > 0 && counts.native.steps > 0,
+                          label + ": tier 3 built and ran programs around the declined exits");
+                }
+            }
+        }
+    }
+    nvm::TierCache tier_one(image, eager_programs());
+    check_same(run_captured(image, limits_at(1, &tier_one)), reference, "tier 1");
+    // The default thresholds, and limits that land inside the multi-word calls
+    // and returns.
+    nvm::TierCache defaults(image, nvm::TierOptions{});
+    check_same(run_captured(image, limits_at(2, &defaults)), reference, "default thresholds");
+    for (const std::uint64_t steps : {1ULL, 7ULL, 40ULL, 333ULL, 1500ULL}) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "step limit " + std::to_string(steps), {},
+                            [&](nvm::RunLimits& limits) { limits.max_steps = steps; });
+    }
+    for (std::uint64_t cells = 1; cells <= reference.result.peak_heap_cells + 1; ++cells) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "heap limit " + std::to_string(cells), {},
+                            [&](nvm::RunLimits& limits) { limits.max_heap_cells = cells; });
+    }
+    // The shadow oracle compares frames, including the words a multi-word
+    // call wrote into consecutive slots.
+    check_clean(image, "multi-word results", {});
+}
+
 NEURA_TEST(tier, the_shadow_oracle_syncs_inside_a_long_loop_of_a_program_and_finds_a_planted_difference) {
     // A loop of about half a million blocks that runs in one program: the
     // oracle looks every shadow_sync_blocks blocks, not once at the end.
