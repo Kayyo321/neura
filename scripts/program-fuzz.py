@@ -1011,16 +1011,22 @@ NO_PROFILE = "no-profile"
 
 # (name, run options, environment)
 MODES = [
-    ("jit-off", ["--jit=off"], {}),
-    ("jit-on", ["--jit=on"], {}),
-    ("eager-jit-off", ["--jit=off"], {"NEURA_TIER_EAGER": "1"}),
-    ("eager-jit-on", ["--jit=on"], {"NEURA_TIER_EAGER": "1"}),
-    ("programs-jit-off", ["--jit=off"], {"NEURA_TIER_PROGRAMS": "1"}),
-    ("programs-jit-on", ["--jit=on"], {"NEURA_TIER_PROGRAMS": "1"}),
-    ("eager-programs-jit-off", ["--jit=off"], {"NEURA_TIER_EAGER": "1", "NEURA_TIER_PROGRAMS": "1"}),
-    ("eager-programs-jit-on", ["--jit=on"], {"NEURA_TIER_EAGER": "1", "NEURA_TIER_PROGRAMS": "1"}),
+    ("jit-off", ["--jit=off"], {"NEURA_TIER3": "off"}),
+    ("jit-on", ["--jit=on"], {"NEURA_TIER3": "off"}),
+    ("eager-jit-off", ["--jit=off"], {"NEURA_TIER3": "off", "NEURA_TIER_EAGER": "1"}),
+    ("eager-jit-on", ["--jit=on"], {"NEURA_TIER3": "off", "NEURA_TIER_EAGER": "1"}),
+    ("programs-jit-off", ["--jit=off"], {"NEURA_TIER3": "off", "NEURA_TIER_PROGRAMS": "1"}),
+    ("programs-jit-on", ["--jit=on"], {"NEURA_TIER3": "off", "NEURA_TIER_PROGRAMS": "1"}),
+    ("eager-programs-jit-off", ["--jit=off"], {"NEURA_TIER3": "off", "NEURA_TIER_EAGER": "1", "NEURA_TIER_PROGRAMS": "1"}),
+    ("eager-programs-jit-on", ["--jit=on"], {"NEURA_TIER3": "off", "NEURA_TIER_EAGER": "1", "NEURA_TIER_PROGRAMS": "1"}),
     ("eager-check2-programs", ["--jit=on"],
-     {"NEURA_TIER_EAGER": "1", "NEURA_TIER_CHECK": "2", "NEURA_TIER_PROGRAMS": "1"}),
+     {"NEURA_TIER3": "off", "NEURA_TIER_EAGER": "1", "NEURA_TIER_CHECK": "2", "NEURA_TIER_PROGRAMS": "1"}),
+    # The default: native tier 3 where native code is on (the modes above pin NEURA_TIER3=off, so that regions
+    # and the interpreter of function programs stay covered).
+    ("default-jit-on", ["--jit=on"], {}),
+    ("default-eager-jit-on", ["--jit=on"], {"NEURA_TIER_EAGER": "1"}),
+    ("default-jit-off", ["--jit=off"], {}),
+    ("default-eager-jit-off", ["--jit=off"], {"NEURA_TIER_EAGER": "1"}),
     ("tier3-interp", ["--jit=on"], {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1"}),
     ("tier3-interp-check2", ["--jit=on"],
      {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER_CHECK": "2"}),

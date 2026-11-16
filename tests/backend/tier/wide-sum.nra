@@ -1,0 +1,119 @@
+// One block that adds 300 parameters: the graph of its sum has about 10^5
+// neurons, each depending on thousands of input lanes. Searching for its form
+// built, for every neuron, the set of lanes it reads, and took 12 GB and
+// 40 s; the search now refuses a block whose sets pass a limit
+// (src/lift/recognize.cpp, BlockModel), and the block runs by reference.
+// tests/backend/cli.cmake runs it with tier statistics.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let WideSum = module:program.Entry (
+    let add_all = func(
+        p0: int64, p1: int64, p2: int64, p3: int64, p4: int64, p5: int64,
+        p6: int64, p7: int64, p8: int64, p9: int64, p10: int64, p11: int64,
+        p12: int64, p13: int64, p14: int64, p15: int64, p16: int64, p17: int64,
+        p18: int64, p19: int64, p20: int64, p21: int64, p22: int64, p23: int64,
+        p24: int64, p25: int64, p26: int64, p27: int64, p28: int64, p29: int64,
+        p30: int64, p31: int64, p32: int64, p33: int64, p34: int64, p35: int64,
+        p36: int64, p37: int64, p38: int64, p39: int64, p40: int64, p41: int64,
+        p42: int64, p43: int64, p44: int64, p45: int64, p46: int64, p47: int64,
+        p48: int64, p49: int64, p50: int64, p51: int64, p52: int64, p53: int64,
+        p54: int64, p55: int64, p56: int64, p57: int64, p58: int64, p59: int64,
+        p60: int64, p61: int64, p62: int64, p63: int64, p64: int64, p65: int64,
+        p66: int64, p67: int64, p68: int64, p69: int64, p70: int64, p71: int64,
+        p72: int64, p73: int64, p74: int64, p75: int64, p76: int64, p77: int64,
+        p78: int64, p79: int64, p80: int64, p81: int64, p82: int64, p83: int64,
+        p84: int64, p85: int64, p86: int64, p87: int64, p88: int64, p89: int64,
+        p90: int64, p91: int64, p92: int64, p93: int64, p94: int64, p95: int64,
+        p96: int64, p97: int64, p98: int64, p99: int64, p100: int64, p101: int64,
+        p102: int64, p103: int64, p104: int64, p105: int64, p106: int64, p107: int64,
+        p108: int64, p109: int64, p110: int64, p111: int64, p112: int64, p113: int64,
+        p114: int64, p115: int64, p116: int64, p117: int64, p118: int64, p119: int64,
+        p120: int64, p121: int64, p122: int64, p123: int64, p124: int64, p125: int64,
+        p126: int64, p127: int64, p128: int64, p129: int64, p130: int64, p131: int64,
+        p132: int64, p133: int64, p134: int64, p135: int64, p136: int64, p137: int64,
+        p138: int64, p139: int64, p140: int64, p141: int64, p142: int64, p143: int64,
+        p144: int64, p145: int64, p146: int64, p147: int64, p148: int64, p149: int64,
+        p150: int64, p151: int64, p152: int64, p153: int64, p154: int64, p155: int64,
+        p156: int64, p157: int64, p158: int64, p159: int64, p160: int64, p161: int64,
+        p162: int64, p163: int64, p164: int64, p165: int64, p166: int64, p167: int64,
+        p168: int64, p169: int64, p170: int64, p171: int64, p172: int64, p173: int64,
+        p174: int64, p175: int64, p176: int64, p177: int64, p178: int64, p179: int64,
+        p180: int64, p181: int64, p182: int64, p183: int64, p184: int64, p185: int64,
+        p186: int64, p187: int64, p188: int64, p189: int64, p190: int64, p191: int64,
+        p192: int64, p193: int64, p194: int64, p195: int64, p196: int64, p197: int64,
+        p198: int64, p199: int64, p200: int64, p201: int64, p202: int64, p203: int64,
+        p204: int64, p205: int64, p206: int64, p207: int64, p208: int64, p209: int64,
+        p210: int64, p211: int64, p212: int64, p213: int64, p214: int64, p215: int64,
+        p216: int64, p217: int64, p218: int64, p219: int64, p220: int64, p221: int64,
+        p222: int64, p223: int64, p224: int64, p225: int64, p226: int64, p227: int64,
+        p228: int64, p229: int64, p230: int64, p231: int64, p232: int64, p233: int64,
+        p234: int64, p235: int64, p236: int64, p237: int64, p238: int64, p239: int64,
+        p240: int64, p241: int64, p242: int64, p243: int64, p244: int64, p245: int64,
+        p246: int64, p247: int64, p248: int64, p249: int64, p250: int64, p251: int64,
+        p252: int64, p253: int64, p254: int64, p255: int64, p256: int64, p257: int64,
+        p258: int64, p259: int64, p260: int64, p261: int64, p262: int64, p263: int64,
+        p264: int64, p265: int64, p266: int64, p267: int64, p268: int64, p269: int64,
+        p270: int64, p271: int64, p272: int64, p273: int64, p274: int64, p275: int64,
+        p276: int64, p277: int64, p278: int64, p279: int64, p280: int64, p281: int64,
+        p282: int64, p283: int64, p284: int64, p285: int64, p286: int64, p287: int64,
+        p288: int64, p289: int64, p290: int64, p291: int64, p292: int64, p293: int64,
+        p294: int64, p295: int64, p296: int64, p297: int64, p298: int64, p299: int64
+    ) -> int64 {
+        return p0 + p1 + p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9 +
+            p10 + p11 + p12 + p13 + p14 + p15 + p16 + p17 + p18 + p19 +
+            p20 + p21 + p22 + p23 + p24 + p25 + p26 + p27 + p28 + p29 +
+            p30 + p31 + p32 + p33 + p34 + p35 + p36 + p37 + p38 + p39 +
+            p40 + p41 + p42 + p43 + p44 + p45 + p46 + p47 + p48 + p49 +
+            p50 + p51 + p52 + p53 + p54 + p55 + p56 + p57 + p58 + p59 +
+            p60 + p61 + p62 + p63 + p64 + p65 + p66 + p67 + p68 + p69 +
+            p70 + p71 + p72 + p73 + p74 + p75 + p76 + p77 + p78 + p79 +
+            p80 + p81 + p82 + p83 + p84 + p85 + p86 + p87 + p88 + p89 +
+            p90 + p91 + p92 + p93 + p94 + p95 + p96 + p97 + p98 + p99 +
+            p100 + p101 + p102 + p103 + p104 + p105 + p106 + p107 + p108 + p109 +
+            p110 + p111 + p112 + p113 + p114 + p115 + p116 + p117 + p118 + p119 +
+            p120 + p121 + p122 + p123 + p124 + p125 + p126 + p127 + p128 + p129 +
+            p130 + p131 + p132 + p133 + p134 + p135 + p136 + p137 + p138 + p139 +
+            p140 + p141 + p142 + p143 + p144 + p145 + p146 + p147 + p148 + p149 +
+            p150 + p151 + p152 + p153 + p154 + p155 + p156 + p157 + p158 + p159 +
+            p160 + p161 + p162 + p163 + p164 + p165 + p166 + p167 + p168 + p169 +
+            p170 + p171 + p172 + p173 + p174 + p175 + p176 + p177 + p178 + p179 +
+            p180 + p181 + p182 + p183 + p184 + p185 + p186 + p187 + p188 + p189 +
+            p190 + p191 + p192 + p193 + p194 + p195 + p196 + p197 + p198 + p199 +
+            p200 + p201 + p202 + p203 + p204 + p205 + p206 + p207 + p208 + p209 +
+            p210 + p211 + p212 + p213 + p214 + p215 + p216 + p217 + p218 + p219 +
+            p220 + p221 + p222 + p223 + p224 + p225 + p226 + p227 + p228 + p229 +
+            p230 + p231 + p232 + p233 + p234 + p235 + p236 + p237 + p238 + p239 +
+            p240 + p241 + p242 + p243 + p244 + p245 + p246 + p247 + p248 + p249 +
+            p250 + p251 + p252 + p253 + p254 + p255 + p256 + p257 + p258 + p259 +
+            p260 + p261 + p262 + p263 + p264 + p265 + p266 + p267 + p268 + p269 +
+            p270 + p271 + p272 + p273 + p274 + p275 + p276 + p277 + p278 + p279 +
+            p280 + p281 + p282 + p283 + p284 + p285 + p286 + p287 + p288 + p289 +
+            p290 + p291 + p292 + p293 + p294 + p295 + p296 + p297 + p298 + p299;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let total: int64 = 0;
+        for (let round = 0; round < 3; round = round + 1) {
+            total = total + add_all(
+            1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6,
+            7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5,
+            6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4,
+            5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3,
+            4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2,
+            3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1,
+            2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7,
+            1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6,
+            7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5,
+            6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4,
+            5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3,
+            4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2,
+            3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1,
+            2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7,
+            1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6, 7, 1, 2, 3, 4, 5, 6
+            );
+        }
+        console.print_line("sum " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

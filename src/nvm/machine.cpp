@@ -409,6 +409,7 @@ public:
         // Tier 3 runs function programs: it is on when the cache turns
         // them native (docs/runtime/NVM.md, "Execution tiers").
         tier3_ = tier2_ && tier_->native_enabled();
+        programs_ = tier_->programs();
         // Native code exists only at tier 2 (docs/runtime/NVM.md, "Native
         // compilation"). --jit=on fails here, before the run starts, when
         // the platform cannot run it.
@@ -423,6 +424,12 @@ public:
             jit_context_.check_reference = &State::jit_check_reference;
             jit_context_.state = &State::jit_state;
             jit_context_.poll = &State::jit_poll;
+        }
+        // The default tier 3 (NEURA_TIER3 unset) is native code or nothing:
+        // a run with native code off runs as it did before tier 3.
+        if (tier3_ && tier_->tier3_implicit() && !jit_) {
+            tier3_ = false;
+            programs_ = tier_->programs_without_tier3();
         }
         // Native programs run their machine code where the cache made it
         // and native code is enabled, else the IR interpreter.
@@ -3742,6 +3749,7 @@ private:
             fault(TrapKind::StepLimit, std::to_string(limits_.max_steps) + " steps");
         }
         steps_ += cost;
+        tier_steps_.kernel += cost;
         if (scheduler_ && limits_.profile) current_task().steps += cost;
         if (limits_.profile) {
             if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
@@ -4053,6 +4061,9 @@ private:
     // Tier 3 (tier3_steps.inc): whether function programs run as native
     // programs, the context they run in, and the events for --tier-stats.
     bool tier3_ = false;
+    // Whether blocks form function programs: the cache's setting, less the
+    // programs only a default tier 3 asked for when it is off for this run.
+    bool programs_ = false;
     // Whether they run their machine code (else the IR interpreter), and
     // the values a deoptimization stub stores, by SSA value.
     bool tier3_native_ = false;

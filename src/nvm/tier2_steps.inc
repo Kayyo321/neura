@@ -90,7 +90,7 @@
             if (arrivals < plan.region_threshold) return nullptr;
             // Forming a region is timed as tier 1 (--tier-stats).
             const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
-            if (tier_->programs()) {
+            if (programs_) {
                 // The function's program, when it has one, replaces its
                 // regions: the block enters it when it is one of its entries.
                 const auto program = tier_->program(function, arrivals);

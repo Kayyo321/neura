@@ -115,6 +115,10 @@ struct TierSteps {
     std::uint64_t reference = 0;
     // Steps run inside tier-2 regions (not counted above).
     std::uint64_t region = 0;
+    // Steps a kernel call charged for itself (Machine::charge_kernel_steps),
+    // which the block that called it does not count: they are in the run's
+    // step count, and so here, whatever tier ran the call.
+    std::uint64_t kernel = 0;
 };
 
 // Tier 2 events of one execution, by kind. A region is entered, then ends
@@ -330,6 +334,12 @@ public:
     // where tier 3 has a code generator and executable memory), and why not
     // when Native asked for it.
     bool machine_code() const { return machine_code_; }
+    // Whether native tier 3 is on because NEURA_TIER3 is unset, not because
+    // it was asked for. A run with native code off (--jit=off, NEURA_JIT=off)
+    // then runs as it did before tier 3 (programs_without_tier3()).
+    bool tier3_implicit() const { return tier3_implicit_; }
+    // Whether function programs form without tier 3 (NEURA_TIER_PROGRAMS=1).
+    bool programs_without_tier3() const { return programs_apart_from_tier3_; }
     const std::string& machine_code_off() const { return machine_code_off_; }
     std::uint64_t count_native(std::uint32_t program_id);
     const tier3::Program* native_code(const tier2::Region& program, tier3::Variant variant) const;
@@ -390,6 +400,8 @@ private:
 
     const nvr::Image& image_;
     TierOptions options_;
+    bool tier3_implicit_ = false;
+    bool programs_apart_from_tier3_ = false;
     lift::HintTable hints_;
     std::vector<std::size_t> first_entry_;
     std::vector<Entry> entries_;
@@ -551,8 +563,13 @@ bool tier_eager();
 
 // NEURA_TIER_PROGRAMS=1: caches form function programs (TierOptions::programs).
 bool tier_programs_enabled();
-// NEURA_TIER3: "interp" runs tier 3 on the IR interpreter (TierOptions::tier3).
+// NEURA_TIER3: "interp" runs tier 3 on the IR interpreter, "native" runs it
+// natively, unset is native where native code is available (the default,
+// tier3_environment_implicit), anything else is off (TierOptions::tier3).
 TierOptions::Tier3 tier3_environment();
+// Whether tier3_environment() is the default (NEURA_TIER3 unset) rather than
+// a setting.
+bool tier3_environment_implicit();
 // NEURA_TIER3_AFTER=N (a testing aid, read once): lift and form as
 // NEURA_TIER_EAGER=1 does, but turn a program native at its Nth checkpoint
 // arrival, so that a loop is handed to native code in its middle; 0 when

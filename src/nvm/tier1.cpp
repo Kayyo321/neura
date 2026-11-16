@@ -71,7 +71,7 @@ bool tier_shadow_heap_always() {
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
-    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region;
+    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region + steps.kernel;
     const auto percent = [&](std::uint64_t part) {
         char text[32];
         std::snprintf(text, sizeof text, "%.1f%%", total ? 100.0 * static_cast<double>(part) / total : 0.0);
@@ -92,7 +92,8 @@ std::string describe(const TierStatistics& s) {
            std::to_string(steps.region) + "), tier 1 " + percent(steps.lifted + steps.wired + steps.empty) +
            " (lifted " + std::to_string(steps.lifted) + ", wired " + std::to_string(steps.wired) + ", empty " +
            std::to_string(steps.empty) + "), tier 0 " + percent(steps.reference + steps.declined) + " (reference " +
-           std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")\n";
+           std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")" +
+           (steps.kernel != 0 ? ", kernel calls " + std::to_string(steps.kernel) : std::string()) + "\n";
     const auto& r = s.region_counts;
     if (s.regions != 0 || !s.region_rejections.empty()) {
         out += "tier: regions " + std::to_string(s.regions) + " (" + std::to_string(s.region_blocks) +
@@ -236,11 +237,19 @@ bool tier_programs_enabled() {
 TierOptions::Tier3 tier3_environment() {
     static const TierOptions::Tier3 mode = [] {
         const char* text = std::getenv("NEURA_TIER3");
-        if (text && std::strcmp(text, "interp") == 0) return TierOptions::Tier3::Interp;
-        if (text && std::strcmp(text, "native") == 0) return TierOptions::Tier3::Native;
+        // Unset is the default, native tier 3 where native code is available
+        // (tier3_environment_implicit); anything unrecognized is off.
+        if (!text) return TierOptions::Tier3::Native;
+        if (std::strcmp(text, "interp") == 0) return TierOptions::Tier3::Interp;
+        if (std::strcmp(text, "native") == 0) return TierOptions::Tier3::Native;
         return TierOptions::Tier3::Off;
     }();
     return mode;
+}
+
+bool tier3_environment_implicit() {
+    static const bool implicit = std::getenv("NEURA_TIER3") == nullptr;
+    return implicit;
 }
 
 std::uint32_t tier3_after() {
@@ -259,11 +268,9 @@ std::uint32_t tier3_after() {
 
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
-    if (options_.tier3 == TierOptions::Tier3::Environment) options_.tier3 = tier3_environment();
-    if (options_.programs == TierOptions::Programs::Environment) {
-        options_.programs = tier_programs_enabled() || options_.tier3 != TierOptions::Tier3::Off
-                                ? TierOptions::Programs::On
-                                : TierOptions::Programs::Off;
+    if (options_.tier3 == TierOptions::Tier3::Environment) {
+        options_.tier3 = tier3_environment();
+        tier3_implicit_ = tier3_environment_implicit();
     }
     if (options_.tier3 == TierOptions::Tier3::Native) {
         if (!jit::native::supported()) {
@@ -273,6 +280,26 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
         } else {
             machine_code_ = true;
         }
+        // The default is native tier 3 only where there is native code: a
+        // platform without it runs as it did before tier 3, and says
+        // nothing about it. (A run's own --jit=off is handled by the
+        // execution, which knows it: tier3_implicit().)
+        if (tier3_implicit_ && !machine_code_) {
+            tier3_implicit_ = false;
+            machine_code_off_.clear();
+            options_.tier3 = TierOptions::Tier3::Off;
+        }
+    }
+    // Whether programs form without tier 3's help (NEURA_TIER_PROGRAMS=1 or
+    // a caller's option): they still do when a default tier 3 is turned off
+    // for a run.
+    programs_apart_from_tier3_ = options_.programs == TierOptions::Programs::Environment
+                                     ? tier_programs_enabled()
+                                     : options_.programs == TierOptions::Programs::On;
+    if (options_.programs == TierOptions::Programs::Environment) {
+        options_.programs = tier_programs_enabled() || options_.tier3 != TierOptions::Tier3::Off
+                                ? TierOptions::Programs::On
+                                : TierOptions::Programs::Off;
     }
     if (tier_check_enabled()) options_.checkable = true;
     if (tier_eager() || tier3_after() != 0) {
@@ -495,6 +522,7 @@ void TierCache::add_steps(const TierSteps& steps) {
     statistics_.steps.declined += steps.declined;
     statistics_.steps.reference += steps.reference;
     statistics_.steps.region += steps.region;
+    statistics_.steps.kernel += steps.kernel;
 }
 
 TierStatistics TierCache::statistics() const {

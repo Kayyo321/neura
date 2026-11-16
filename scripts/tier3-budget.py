@@ -48,7 +48,8 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parent.parent
 BENCHMARKS = ROOT / "tests" / "bench-wall" / "neura"
 LIMITS = ["--max-steps", "1000000000000", "--max-heap-cells", "4294967296"]
-MODES = {"default": {}, "native": {"NEURA_TIER3": "native"}}
+# "default" is the behavior before tier 3 became the default (NEURA_TIER3=off).
+MODES = {"default": {"NEURA_TIER3": "off"}, "native": {"NEURA_TIER3": "native"}}
 
 
 def sizes_of(source):

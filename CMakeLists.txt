@@ -727,6 +727,13 @@ if(BUILD_TESTING)
     # every region on the region interpreter.
     add_test(NAME backend-tier-interpreter COMMAND neura_backend_tests tier "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier-interpreter PROPERTIES ENVIRONMENT NEURA_JIT=off)
+    # Native tier 3 is the default (docs/runtime/NVM.md, "Execution tiers"), so
+    # the suites above exercise function programs; these run the tier 2
+    # region suites with tier 3 off, so that a plain ctest covers regions too.
+    foreach(suite IN ITEMS tier jit)
+        add_test(NAME backend-${suite}-off COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(backend-${suite}-off PROPERTIES ENVIRONMENT NEURA_TIER3=off)
+    endforeach()
     # Tier 3's checkable variant under the region check of NEURA_TIER_CHECK=1.
     add_test(NAME backend-tier3-check COMMAND neura_backend_tests tier3_check "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier3-check PROPERTIES ENVIRONMENT "NEURA_TIER_CHECK=1;NEURA_TIER3=interp")
