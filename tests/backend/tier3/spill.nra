@@ -1,0 +1,91 @@
+// A value whose spill home is a frame slot that an append's slow path writes
+// (tests/backend/tier3_heap_tests.cpp). In each iteration `copy` takes
+// `fresh`'s value, `fresh` is reassigned, and the list is appended to;
+// `copy` is read only after the append. The call to `bump` before the
+// append destroys every register, so `copy` lives in memory across the
+// append, and twenty running sums keep it there. The append's slow path
+// (a growth of the list, a collection, a heap limit) writes the frame from
+// its state, which gives `fresh`'s slot the new value: `copy` can have that
+// slot as its home only if the slow path's write-back is taken into
+// account.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Tier3Spill = module:program.Entry (
+    const Mask: int64 = 1048575;
+
+    let bump = func(x: int64) -> int64 {
+        return x + 1;
+    };
+
+    let spill = func(n: int32) -> int64 {
+        let values: int64[list] = [];
+        let s0: int64 = 1;
+        let s1: int64 = 2;
+        let s2: int64 = 3;
+        let s3: int64 = 4;
+        let s4: int64 = 5;
+        let s5: int64 = 6;
+        let s6: int64 = 7;
+        let s7: int64 = 8;
+        let s8: int64 = 9;
+        let s9: int64 = 10;
+        let s10: int64 = 11;
+        let s11: int64 = 12;
+        let s12: int64 = 13;
+        let s13: int64 = 14;
+        let s14: int64 = 15;
+        let s15: int64 = 16;
+        let s16: int64 = 17;
+        let s17: int64 = 18;
+        let s18: int64 = 19;
+        let s19: int64 = 20;
+        for (let i = 0; i < n; i = i + 1) {
+            let fresh: int64 = ((i as int64) * 5 + s0) & Mask;
+            let copy = fresh;
+            let c = bump(i as int64);
+            fresh = (fresh * 3 + c) & Mask;
+            values.append(fresh);
+            s0 = (s0 + s1 + 0) & Mask;
+            s1 = (s1 + s2 + 1) & Mask;
+            s2 = (s2 + s3 + 2) & Mask;
+            s3 = (s3 + s4 + 3) & Mask;
+            s4 = (s4 + s5 + 4) & Mask;
+            s5 = (s5 + s6 + 5) & Mask;
+            s6 = (s6 + s7 + 6) & Mask;
+            s7 = (s7 + s8 + 7) & Mask;
+            s8 = (s8 + s9 + 8) & Mask;
+            s9 = (s9 + s10 + 9) & Mask;
+            s10 = (s10 + s11 + 10) & Mask;
+            s11 = (s11 + s12 + 11) & Mask;
+            s12 = (s12 + s13 + 12) & Mask;
+            s13 = (s13 + s14 + 13) & Mask;
+            s14 = (s14 + s15 + 14) & Mask;
+            s15 = (s15 + s16 + 15) & Mask;
+            s16 = (s16 + s17 + 16) & Mask;
+            s17 = (s17 + s18 + 17) & Mask;
+            s18 = (s18 + s19 + 18) & Mask;
+            s19 = (s19 + s0 + 19) & Mask;
+            s0 = (s0 + copy) & Mask;
+        }
+        let sum = s0 + s1 + s2 + s3 + s4 + s5 + s6 + s7 + s8 + s9;
+        sum = sum + s10 + s11 + s12 + s13 + s14 + s15 + s16 + s17 + s18 + s19;
+        return (sum + (values.length as int64)) & Mask;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let size = 40;
+        if (args.length > 0) {
+            size = result.value_or<int32>(int32s.parse(args[0]), 40);
+        }
+        // Several calls: later ones enter the native program at its start.
+        let total: int64 = 0;
+        for (let round = 0; round < 4; round = round + 1) {
+            total = (total + spill(size)) & Mask;
+        }
+        console.print_line("spill " + total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

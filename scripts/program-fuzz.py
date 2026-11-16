@@ -45,6 +45,8 @@ every mode against the reference:
     NEURA_TIER3=interp and native, NEURA_TIER3_AFTER=7 NEURA_TIER3_VERIFY=1, without --profile (and so against a
                                                reference without it): the variant of native programs that inlines
                                                calls, which --profile turns off
+    NEURA_TIER3=interp NEURA_TIER_EAGER=1 NEURA_TIER_CHECK=1      the region check runs tier 3's checkable variant,
+                                               and the same with NEURA_TIER3=native
 
 and then repeats the comparison under sweeps of limits that land a trap on every
 block, so that a deoptimization or a trap in place is exercised at each of them:
@@ -954,6 +956,11 @@ MODES = [
      {"NEURA_TIER3": "interp", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
     ("tier3-native-inline", [NO_PROFILE, "--jit=on"],
      {"NEURA_TIER3": "native", "NEURA_TIER3_AFTER": "7", "NEURA_TIER3_VERIFY": "1"}),
+    # The region check runs the checkable variant, whose heap writes go through the logging helpers.
+    ("tier3-interp-check1", ["--jit=on"],
+     {"NEURA_TIER3": "interp", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER_CHECK": "1"}),
+    ("tier3-native-check1", ["--jit=on"],
+     {"NEURA_TIER3": "native", "NEURA_TIER_EAGER": "1", "NEURA_TIER3_VERIFY": "1", "NEURA_TIER_CHECK": "1"}),
 ]
 
 QUICK_SEEDS = [1, 2, 5]

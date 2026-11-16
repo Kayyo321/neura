@@ -113,18 +113,62 @@ enum class Op : std::uint8_t {
     Dispatch,      // dispatch_tables[imm] on operands[0]: succs[exit]
     Leave,         // the activation ends at image block imm; operands[0] = C
     Deopt,         // tier 1 runs the state's block; operands[0] = C
+
+    // Heap access through the published layout (heap.hpp), the inline form
+    // of the state operations (docs/runtime/NVM.md, "Execution tiers"). An
+    // entry is a Ptr: the address of its header. The checks deoptimize to
+    // their state (reason References with flag ReferenceCheck, else
+    // StateTraps); tier 1 re-runs the block and traps there as the
+    // reference does.
+    CheckNotNil,      // deoptimizes when the handle operands[0] is 0
+    Lookup,           // Ptr: the entry of handle operands[0]; deoptimizes when there is none. imm bit 0: nil gives a
+                      // null Ptr instead
+    CheckKind,        // deoptimizes unless entry operands[0] passes type_tests[imm]; a null entry passes
+    CheckInit,        // deoptimizes unless field imm of object entry operands[0] is initialized
+    CheckIndex,       // deoptimizes unless operands[0] < operands[1] (unsigned)
+    CheckGlobalInit,  // deoptimizes unless global imm is initialized
+    // Heap reads: no effect; each reads words a heap write, a Widen, a
+    // helper or a call may change (the passes keep them after those).
+    TestKind,         // 1 when entry operands[0] is not null and passes type_tests[imm], else 0
+    LoadTag,          // the type word (u32 at 4) of entry operands[0]
+    LoadField,        // field imm of object entry operands[0]; aux: the entry's initialized-word count when every
+                      // layout it can have shares it, else none (the count word decides)
+    LoadLength,       // the count word (u64 at 8)
+    LoadData,         // Ptr: the element data pointer (at 16)
+    LoadStorage,      // the storage width byte (at 3)
+    LoadElement,      // element operands[1] of data operands[0], stored at width operands[2]; imm: the declared width
+    LoadVersion,      // a list's version (u64 at 32)
+    LoadGlobal,       // global imm
+    Select,           // extras[operands[0]] (operands[0] is below count)
+    // Heap writes: effects.
+    StoreField,       // field imm of object entry operands[0] = operands[1], and its initialized bit; aux as LoadField
+    StoreElement,     // element operands[1] of data operands[0] at width operands[2] = operands[3]; imm: declared
+                      // width. The value fits the declared width.
+    StoreGlobal,      // global imm = operands[0], initialized
+    Widen,            // element operands[1] of the array or list with handle operands[0] = operands[2] through
+                      // Heap::set_element, which widens the storage first when the value does not fit it
+    // Allocation and append with a fast path (design 6.7, 6.8): what the
+    // helper exits[aux] would do, done inline when the heap's state shows
+    // the reference would neither collect, nor trap, nor move the collection
+    // threshold, nor take a new page or chunk; otherwise the helper itself
+    // under R3 (Helper), after writing back the frame of `state` (the state
+    // after the block's commit). operands[0] = C with the block's step.
+    AllocObject,      // a new object of exits[aux] (layout: the exit's immediate; imm: its field count)
+    Append,           // the list entry operands[1] (checked) gets operands[2]; extras: the helper's arguments; imm:
+                      // the list's declared element width in bytes
 };
 
 enum Flag : std::uint16_t {
     Checked = 1,         // may deoptimize
     Effect = 2,          // changes state outside the SSA values
     CheckReference = 4,  // StateCall: the reference check
+    ReferenceCheck = 8,  // a heap check made for a CheckRef (deoptimization reason References)
 };
 
 struct Inst {
     Op op = Op::Const;
     ValueType type;
-    std::uint32_t operands[3] = {none, none, none};
+    std::uint32_t operands[4] = {none, none, none, none};
     // The variable-length operands of Phi, Gather, StateCall, Helper and Call:
     // Function::extras[extra, extra + count).
     std::uint32_t extra = 0;
@@ -212,6 +256,23 @@ struct FrameState {
     std::uint32_t kernel_steps = none;
 };
 
+// The kind and type an entry must have: the static type of a reference
+// (typed_entry's check, machine.cpp), or for a class test the layouts that
+// derive from a class.
+struct TypeTest {
+    // The EntryKind byte (heap.hpp) the entry has.
+    std::uint8_t kind = 0;
+    // Text and bytes: the kind alone.
+    bool any_type = false;
+    // Objects: the layouts accepted; arrays and lists: the type indices
+    // (every index the same canonical type as the static type). Ascending.
+    std::vector<std::uint32_t> types;
+    // Objects: the initialized-word count (ceil(fields / 64)) every accepted
+    // layout has, or none when they differ.
+    std::uint32_t words = 0xffffffffU;
+    bool operator==(const TypeTest&) const = default;
+};
+
 struct Entry {
     // The image block and the index of the program entry (Region::entries).
     std::uint32_t block = 0;
@@ -234,6 +295,8 @@ struct Function {
     std::vector<Entry> entries;
     std::vector<const nvr::Exit*> exits;
     std::vector<tier2::Region::DispatchTable> dispatch_tables;
+    // The tests of CheckKind and TestKind.
+    std::vector<TypeTest> type_tests;
     // For each dispatch table: the index in `programs` of the program it
     // came from, and its index in that program's dispatch_tables (the
     // speculation record of its Dispatch op).
@@ -247,6 +310,9 @@ struct Function {
     std::uint32_t parameter_count = 0;
     std::vector<ValueType> slot_types;
     bool uses_float = false;
+    // NEURA_TIER3_VERIFY=1: after every inline allocation and append the
+    // code asks the executor to check the heap's consistency.
+    bool check_heap = false;
     // The deepest inlining: a native activation is entered only with room
     // for the frames it may materialize.
     std::uint32_t max_inline_depth = 0;
@@ -337,9 +403,14 @@ struct BuildResult {
     std::string reason;
 };
 
+// `variant`: the profile and checkable variants write the heap and the
+// globals through the reference state operations (which log the writes of
+// NEURA_TIER_CHECK=1) instead of inline, and allocate and append through the
+// helpers.
 // Builds the IR of `program` (a function program of `image`) and verifies it
 // when `verify` is set (NEURA_TIER3_VERIFY=1, and debug builds).
-BuildResult build(const nvr::Image& image, const tier2::Region& program, bool verify);
+BuildResult build(const nvr::Image& image, const tier2::Region& program, bool verify,
+                  Variant variant = Variant::Standard);
 
 // The violations of the verifier's rules (V1-V8, V10) in `function`; empty
 // when it is well formed. V9 (floats) passes: nothing yet makes a float
@@ -421,9 +492,25 @@ struct Helpers {
     // popped, the caller's result slot written, `next_block` is the caller's
     // return block.
     Status (*ret)(Context*, std::uint64_t value, bool has_value, std::uint64_t blocks);
+    // Heap::set_element on the live array or list with handle `handle`
+    // (Widen); Exception when it throws.
+    Status (*set_element)(Context*, std::uint64_t handle, std::uint64_t index, std::uint64_t bits);
+    // Checks the heap's own consistency and the executor's cell accounting
+    // after an inline allocation or append, and stops the process with a
+    // report when they do not hold (NEURA_TIER3_VERIFY=1).
+    void (*check_heap)(Context*);
     // Records `tag` in the speculation record of dispatch table `table` of
     // `program` (DispatchRecord).
     void (*record)(Context*, const tier2::Region* program, std::uint32_t table, std::uint64_t tag);
+    // The slow path of an allocation or append inside inlined code (design
+    // 3.6): every frame of `state` materialized from `values` (the physical
+    // frame written, each inlined frame pushed), the helper of `exit` run
+    // under R3 with C in the context, its result stored into the innermost
+    // frame's result slot, and the activation ended at the exit's resume
+    // block (`next_block`). Trapped for the helper's fault.
+    Status (*inlined_helper)(Context*, const Function*, std::uint32_t state, const std::uint64_t* values,
+                             const nvr::Exit* exit, const std::uint64_t* arguments, std::uint32_t count,
+                             std::uint64_t* result);
 };
 
 // The frame stack of a run as native code sees it (machine.cpp, FrameStack):
@@ -572,6 +659,35 @@ struct Context {
     Reason reason = Reason::Budget;
     // One value array per native depth, reused.
     std::vector<std::vector<std::uint64_t>> pool;
+
+    // The heap and the globals, as the executor publishes them (heap.hpp,
+    // "Published layout"): the handle table and allocator records, the
+    // global words and flags, and the executor's own cell accounting. Native
+    // code allocates inline only when `fast_allocation` is set (the pool is
+    // in use, no fleet shares the cells, no heap log records writes).
+    const void* handle_table = nullptr;
+    void* allocator = nullptr;
+    std::uint64_t* globals = nullptr;
+    std::uint8_t* global_initialized = nullptr;
+    std::uint64_t* live_cells = nullptr;
+    std::uint64_t* next_collection = nullptr;
+    std::uint64_t* peak_cells = nullptr;
+    std::uint64_t max_handles = 0;
+    std::uint64_t fast_allocation = 0;
+    // Inline allocations and appends made, for the statistics.
+    std::uint64_t fast_allocations = 0;
+    std::uint64_t fast_appends = 0;
+    // The heap's helpers for native code (System V AMD64, the context
+    // first); each sets `status`.
+    struct HeapFunctions {
+        // Widen: Exception when the store throws.
+        std::uint64_t (*set_element)(Context*, std::uint64_t handle, std::uint64_t index, std::uint64_t bits);
+        void (*check_heap)(Context*);
+        // Helpers::inlined_helper for the running program, from the values
+        // its stub stored; C is in the context.
+        std::uint64_t (*inlined_helper)(Context*, std::uint32_t exit, const std::uint64_t* arguments, std::uint32_t count,
+                                        std::uint32_t state);
+    } heap_functions{};
 };
 
 // The offsets native code uses.
@@ -626,6 +742,27 @@ static_assert(offsetof(Context, frames) == offsets::frames && offsetof(Context, 
               offsetof(Context, inline_calls) == offsets::inline_calls &&
               offsetof(Context, inline_returns) == offsets::inline_returns);
 
+// The offsets of the heap's fields (Context, "The heap and the globals").
+namespace offsets {
+inline constexpr std::int32_t handle_table = static_cast<std::int32_t>(offsetof(Context, handle_table));
+inline constexpr std::int32_t allocator = static_cast<std::int32_t>(offsetof(Context, allocator));
+inline constexpr std::int32_t globals = static_cast<std::int32_t>(offsetof(Context, globals));
+inline constexpr std::int32_t global_initialized = static_cast<std::int32_t>(offsetof(Context, global_initialized));
+inline constexpr std::int32_t live_cells = static_cast<std::int32_t>(offsetof(Context, live_cells));
+inline constexpr std::int32_t next_collection = static_cast<std::int32_t>(offsetof(Context, next_collection));
+inline constexpr std::int32_t peak_cells = static_cast<std::int32_t>(offsetof(Context, peak_cells));
+inline constexpr std::int32_t max_handles = static_cast<std::int32_t>(offsetof(Context, max_handles));
+inline constexpr std::int32_t fast_allocation = static_cast<std::int32_t>(offsetof(Context, fast_allocation));
+inline constexpr std::int32_t fast_allocations = static_cast<std::int32_t>(offsetof(Context, fast_allocations));
+inline constexpr std::int32_t fast_appends = static_cast<std::int32_t>(offsetof(Context, fast_appends));
+inline constexpr std::int32_t set_element =
+    static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, set_element));
+inline constexpr std::int32_t check_heap =
+    static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, check_heap));
+inline constexpr std::int32_t inlined_helper =
+    static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, inlined_helper));
+} // namespace offsets
+
 inline constexpr std::uint32_t max_native_depth = 256;
 
 struct Result {
@@ -643,5 +780,13 @@ struct Result {
 // callee has no native code, the call ends the activation with Leave at the
 // callee's block 0.
 Result interpret(Context& context, const Program& program, std::uint32_t entry_index, bool from_native);
+
+// The fast paths of AllocObject and Append on the heap the context
+// publishes, which native code repeats instruction for instruction: true when
+// they ran (the handle in `handle`); false, having changed nothing, when the
+// reference would collect, trap, move the collection threshold, take a page
+// or a chunk, widen or grow.
+bool allocate_inline(Context& context, std::uint32_t layout, std::uint64_t fields, std::uint64_t& handle);
+bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value);
 
 } // namespace neura::nvm::tier3

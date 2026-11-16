@@ -25,15 +25,16 @@
 //   limit and of the block allowance for this activation chain.
 //
 // Tier 3 never runs with a scheduler (a task image's programs stay on the
-// program interpreter) and never under NEURA_TIER_CHECK=1, whose region
-// check runs programs on it.
+// program interpreter). Under NEURA_TIER_CHECK=1 the region check runs the
+// checkable variant (tier3::Variant), whose writes go through state(), which
+// logs them for the check.
 
-    bool tier3_ready() const { return tier3_ && !scheduler_ && !tier_check_; }
+    bool tier3_ready() const { return tier3_ && !scheduler_; }
 
     // The variant of native programs this run uses (tier3::Variant): under
     // --profile one that inlines nothing, so that every call and return
     // attributes its steps as the reference does; under NEURA_TIER_CHECK=1
-    // the checkable one (which tier3_ready keeps from running).
+    // the checkable one, which the region check runs.
     tier3::Variant tier3_variant() const {
         if (limits_.profile) return tier3::Variant::Profile;
         if (tier_check_) return tier3::Variant::Checkable;
@@ -173,6 +174,8 @@
                                       std::uint32_t count, std::uint64_t* result) {
         auto& self = tier3_self(context);
         self.tier3_flush(*context);
+        if (exit->operation == nvr::StateOp::AllocateObject) ++self.native_counts_.slow_allocations;
+        if (exit->operation == nvr::StateOp::AppendElement) ++self.native_counts_.slow_appends;
         try {
             self.tier3_copy_arguments(arguments, count);
             *result = self.state(*exit, self.region_arguments_);
@@ -309,6 +312,106 @@
         const auto* code = self.tier3_code(*program, false);
         if (code == nullptr || self.frames_.size() + code->ir.max_inline_depth > self.limits_.max_frames) return nullptr;
         return code;
+    }
+
+    // Widen: the reference store of an element, which widens the storage
+    // first when the value does not fit it.
+    static tier3::Status tier3_set_element(tier3::Context* context, std::uint64_t handle, std::uint64_t index,
+                                           std::uint64_t bits) {
+        auto& self = tier3_self(context);
+        try {
+            self.heap_.set_element(self.heap_.find(handle), static_cast<std::size_t>(index), bits);
+            return tier3::Status::Ok;
+        } catch (...) {
+            self.region_exception_ = std::current_exception();
+            return tier3::Status::Exception;
+        }
+    }
+
+    // NEURA_TIER3_VERIFY=1, after an inline allocation or append: the heap's
+    // own consistency (Heap::check) and the executor's accounting.
+    static void tier3_check_heap(tier3::Context* context) {
+        auto& self = tier3_self(context);
+        auto problem = self.heap_.check();
+        if (problem.empty() && self.peak_cells_ < self.live_cells_) problem = "peak heap cells below the live cells";
+        if (problem.empty() && self.next_collection_ > self.limits_.max_heap_cells) problem = "the collection threshold above the limit";
+        if (problem.empty() && self.heap_.last_handle() > self.limits_.max_handles) problem = "a handle above the handle limit";
+        if (problem.empty()) return;
+        std::fprintf(stderr, "neura: NEURA_TIER3_VERIFY: the heap is not consistent after an inline allocation or append: %s\n",
+                     problem.c_str());
+        std::abort();
+    }
+
+    static std::uint64_t tier3_native_set_element(tier3::Context* context, std::uint64_t handle, std::uint64_t index,
+                                                  std::uint64_t bits) {
+        tier3_native_status(context, tier3_native_of(tier3_set_element(context, handle, index, bits)));
+        return 0;
+    }
+
+    // An allocation's or append's slow path inside inlined code (design 3.6):
+    // the state's frames as tier 1 has them at the block's commit, the
+    // helper under R3, its result in the innermost frame, which goes on at
+    // the exit's resume block outside native code.
+    static tier3::Status tier3_inlined_helper(tier3::Context* context, const tier3::Function* fn, std::uint32_t state,
+                                              const std::uint64_t* values, const nvr::Exit* exit,
+                                              const std::uint64_t* arguments, std::uint32_t count, std::uint64_t* result) {
+        auto& self = tier3_self(context);
+        tier3_materialize(context, fn, state, values);
+        const auto status = tier3_helper(context, exit, arguments, count, result);
+        if (status != tier3::Status::Ok) return status;
+        auto frame = self.frames_.back();
+        if (exit->result_slot != nvr::absent) {
+            frame.slots[exit->result_slot] = *result;
+            frame.initialized[exit->result_slot] = 1;
+        }
+        frame.block = exit->resume;
+        context->next_block = exit->resume;
+        return tier3::Status::Ok;
+    }
+
+    static std::uint64_t tier3_native_inlined_helper(tier3::Context* context, std::uint32_t exit, const std::uint64_t* arguments,
+                                                     std::uint32_t count, std::uint32_t state) {
+        std::uint64_t result = 0;
+        try {
+            const auto& ir = context->program->ir;
+            context->region = ir.region;
+            tier3_native_status(context, tier3_native_of(tier3_inlined_helper(context, &ir, state, context->values,
+                                                                                ir.exits[exit], arguments, count, &result)));
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return result;
+    }
+
+    static void tier3_native_check_heap(tier3::Context* context) {
+        tier3_check_heap(context);
+        tier3_native_status(context, tier3::NativeStatus::Ok);
+    }
+
+    // What native code reads and writes of the heap, the globals and the
+    // cell accounting (tier3::Context). Inline allocation is off when the
+    // pool is not in use, a fleet shares the cell count, or a heap log
+    // records writes.
+    void tier3_publish(tier3::Context& context) {
+        context.handle_table = heap_.handle_table();
+        context.allocator = heap_.native_allocator();
+        context.globals = globals_.data();
+        context.global_initialized = global_initialized_.data();
+        context.live_cells = &live_cells_;
+        context.next_collection = &next_collection_;
+        context.peak_cells = &peak_cells_;
+        context.max_handles = limits_.max_handles;
+        context.fast_allocation = Heap::native_allocation() && fleet_heap_ == nullptr && heap_log_ == nullptr;
+        context.fast_allocations = 0;
+        context.fast_appends = 0;
+        context.heap_functions = {&State::tier3_native_set_element, &State::tier3_native_check_heap,
+                                  &State::tier3_native_inlined_helper};
+    }
+
+    // The statistics of the inline allocations and appends of an activation.
+    void tier3_count_fast(const tier3::Context& context) {
+        native_counts_.fast_allocations += context.fast_allocations;
+        native_counts_.fast_appends += context.fast_appends;
     }
 
     // commit_exit's Return for a frame that is neither the last nor a
@@ -508,7 +611,8 @@
     static constexpr tier3::Helpers tier3_helpers_{
         &State::tier3_frame,   &State::tier3_run_constant, &State::tier3_state,       &State::tier3_check_reference,
         &State::tier3_helper,  &State::tier3_write_back,   &State::tier3_deoptimize,  &State::tier3_leave,
-        &State::tier3_call,    &State::tier3_callee_code,  &State::tier3_return,       &State::tier3_record_dispatch,
+        &State::tier3_call,    &State::tier3_callee_code,  &State::tier3_return,      &State::tier3_set_element,
+        &State::tier3_check_heap, &State::tier3_record_dispatch, &State::tier3_inlined_helper,
     };
 
     // A native program entered at entries[entry_index] by the dispatcher: the
@@ -561,6 +665,7 @@
         context.float_default = lift::float_environment_is_default();
         context.region = &entered;
         context.next_block = 0;
+        tier3_publish(context);
         tier3_room(context);
         tier3::Result result;
         if (tier3_native_ && code.machine) {
@@ -585,6 +690,7 @@
         } else {
             result = tier3::interpret(context, code, entry_index, false);
         }
+        tier3_count_fast(context);
         std::uint64_t blocks = context.C;
         bool deoptimized = false;
         switch (result.outcome) {
@@ -637,6 +743,14 @@
         return list;
     }
 
+    std::vector<std::uint64_t> heap_snapshot() const {
+        auto words = heap_.snapshot();
+        words.push_back(live_cells_);
+        words.push_back(peak_cells_);
+        words.push_back(next_collection_);
+        return words;
+    }
+
     Execution::Tier3Ending tier3_run(const tier3::Program& program, std::uint32_t entry) {
         if (!started_) start();
         auto& context = tier3_context_;
@@ -650,6 +764,7 @@
         context.float_default = lift::float_environment_is_default();
         context.region = program.ir.region;
         context.next_block = 0;
+        tier3_publish(context);
         tier3_room(context);
         // Tests only: the step limit of a stopped run does not apply.
         context.room = std::numeric_limits<std::uint64_t>::max();

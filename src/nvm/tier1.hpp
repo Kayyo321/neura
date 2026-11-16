@@ -165,6 +165,12 @@ struct NativeCounts {
     std::uint64_t exits = 0;
     std::uint64_t traps = 0;
     std::uint64_t steps = 0;
+    // Allocations and appends native code made inline, and those it left to
+    // the reference state operation (a helper).
+    std::uint64_t fast_allocations = 0;
+    std::uint64_t fast_appends = 0;
+    std::uint64_t slow_allocations = 0;
+    std::uint64_t slow_appends = 0;
 };
 
 struct TierStatistics {
@@ -235,6 +241,11 @@ struct TierStatistics {
     std::map<std::string, std::uint64_t> native_rejections;
     NativeCounts native;
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> native_deopts;
+    // The heap checks tier 3's passes removed from the native programs made,
+    // by kind (nil, lookup, kind, init, bounds, global), and those they moved
+    // out of loops.
+    std::map<std::string, std::uint64_t> native_heap_checks;
+    std::uint64_t native_heap_hoisted = 0;
 };
 
 // The lifted blocks of one validated image, shared by every execution of it:

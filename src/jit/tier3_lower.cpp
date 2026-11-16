@@ -211,7 +211,8 @@ private:
         for (const auto operand : in.operands) {
             if (operand != t3::none) f(operand);
         }
-        if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call) {
+        if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call || in.op == Op::Select ||
+            in.op == Op::AllocObject || in.op == Op::Append) {
             for (std::uint32_t i = 0; i < in.count; ++i) f(f_.extras[in.extra + i]);
         } else if (in.op == Op::Gather) {
             for (std::uint32_t i = 0; i < in.count; i += 2) f(f_.extras[in.extra + i]);
@@ -372,8 +373,10 @@ private:
                 case Op::Return:
                 case Op::Leave:
                 case Op::Deopt:
+                case Op::AllocObject:
+                case Op::Append:
                     expect(in.operands[0]);
-                    for (int k = 1; k < 3; ++k) {
+                    for (int k = 1; k < 4; ++k) {
                         if (in.operands[k] != t3::none && counter_[in.operands[k]]) refuse("the block counter as a value");
                     }
                     for_each_extra(in, [&](std::uint32_t v) {
@@ -409,7 +412,8 @@ private:
 
     template <typename F>
     void for_each_extra(const t3::Inst& in, F&& f) const {
-        if (in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call) {
+        if (in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call || in.op == Op::Select ||
+            in.op == Op::AllocObject || in.op == Op::Append) {
             for (std::uint32_t i = 0; i < in.count; ++i) f(f_.extras[in.extra + i]);
         }
     }
@@ -594,7 +598,8 @@ private:
         case t3::Type::Int:
         case t3::Type::F32:
         case t3::Type::F64: return type.width;
-        case t3::Type::Ref: return 64;
+        case t3::Type::Ref:
+        case t3::Type::Ptr: return 64;
         default: refuse("a value of a type the code generator does not handle");
         }
     }
@@ -1143,6 +1148,208 @@ private:
             emit(std::move(step)).uses.push_back(reg(vreg(in.operands[0])));
             return;
         }
+        default: lower_heap(id, in); return;
+        }
+        refuse("an operation the code generator does not handle");
+    }
+
+    // ---- heap access ------------------------------------------------------
+
+    // The deoptimization reason of a heap check (as the IR interpreter's).
+    static std::uint8_t heap_reason(const t3::Inst& in) {
+        return static_cast<std::uint8_t>((in.flags & t3::ReferenceCheck) != 0 ? t3::Reason::References : t3::Reason::StateTraps);
+    }
+
+    // A heap check, read or write: registers for entries, data, indices and
+    // values, a memory operand allowed for a length and a storage width.
+    void lower_heap(std::uint32_t id, const t3::Inst& in) {
+        Step step;
+        step.inst = id;
+        step.imm = in.imm;
+        const auto use = [&](mir::Inst& inst, unsigned k) { inst.uses.push_back(reg(vreg(in.operands[k]))); };
+        const auto def = [&](mir::Inst& inst) { inst.defs.push_back(reg(vreg(id))); };
+        switch (in.op) {
+        case Op::Lookup: {
+            step.kind = Kind::Lookup;
+            step.reason = heap_reason(in);
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            def(inst);
+            inst.temps_gpr = 1;
+            add_state(inst, in.state);
+            return;
+        }
+        case Op::CheckNotNil:
+        case Op::CheckKind:
+        case Op::CheckInit: {
+            step.kind = in.op == Op::CheckNotNil ? Kind::CheckNotNil : in.op == Op::CheckKind ? Kind::CheckKind : Kind::CheckInit;
+            step.reason = heap_reason(in);
+            step.index = static_cast<std::uint32_t>(in.imm);
+            if (in.op == Op::CheckKind) {
+                if (in.imm >= f_.type_tests.size()) refuse("a type test out of range");
+                // An entry from a lookup that does not let nil through is
+                // never 0.
+                const auto& source = f_.insts[canon(in.operands[0])];
+                step.checked = !(source.op == Op::Lookup && (source.imm & 1U) == 0);
+            }
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            add_state(inst, in.state);
+            return;
+        }
+        case Op::CheckIndex: {
+            step.kind = Kind::CheckIndex;
+            step.reason = heap_reason(in);
+            step.a_width = width_of(in.operands[0]);
+            step.b_width = width_of(in.operands[1]);
+            const bool constant = known(in.operands[1]) && simm32(known_value(in.operands[1])) &&
+                                  static_cast<std::int64_t>(known_value(in.operands[1])) >= 0;
+            if (constant) {
+                step.b_constant = true;
+                step.b_value = known_value(in.operands[1]);
+            }
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            if (!constant) inst.uses.push_back(any(vreg(in.operands[1])));
+            add_state(inst, in.state);
+            return;
+        }
+        case Op::CheckGlobalInit: {
+            step.kind = Kind::CheckGlobalInit;
+            step.reason = heap_reason(in);
+            add_state(emit(std::move(step)), in.state);
+            return;
+        }
+        case Op::TestKind: {
+            if (in.imm >= f_.type_tests.size()) refuse("a type test out of range");
+            step.kind = Kind::TestKind;
+            step.index = static_cast<std::uint32_t>(in.imm);
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            def(inst);
+            inst.temps_gpr = 1;
+            return;
+        }
+        case Op::LoadTag:
+        case Op::LoadField:
+        case Op::LoadLength:
+        case Op::LoadData:
+        case Op::LoadStorage:
+        case Op::LoadVersion: {
+            step.kind = in.op == Op::LoadTag      ? Kind::LoadTag
+                        : in.op == Op::LoadField  ? Kind::LoadField
+                        : in.op == Op::LoadLength ? Kind::LoadLength
+                        : in.op == Op::LoadData   ? Kind::LoadData
+                        : in.op == Op::LoadStorage ? Kind::LoadStorage
+                                                   : Kind::LoadVersion;
+            step.index = in.aux;
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            def(inst);
+            return;
+        }
+        case Op::LoadElement:
+        case Op::StoreElement: {
+            if (in.imm != 1 && in.imm != 2 && in.imm != 4 && in.imm != 8) refuse("an element width out of range");
+            step.kind = in.op == Op::LoadElement ? Kind::LoadElement : Kind::StoreElement;
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            use(inst, 1);
+            inst.uses.push_back(any(vreg(in.operands[2])));
+            if (in.op == Op::StoreElement) use(inst, 3);
+            else def(inst);
+            return;
+        }
+        case Op::LoadGlobal: {
+            step.kind = Kind::LoadGlobal;
+            def(emit(std::move(step)));
+            return;
+        }
+        case Op::StoreGlobal: {
+            step.kind = Kind::StoreGlobal;
+            use(emit(std::move(step)), 0);
+            return;
+        }
+        case Op::StoreField: {
+            step.kind = Kind::StoreField;
+            step.index = in.aux;
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            use(inst, 1);
+            return;
+        }
+        case Op::Select: {
+            step.kind = Kind::Select;
+            step.imm = in.count;
+            auto& inst = emit(std::move(step));
+            use(inst, 0);
+            for (std::uint32_t i = 0; i < in.count; ++i) inst.uses.push_back(any(vreg(f_.extras[in.extra + i])));
+            def(inst);
+            return;
+        }
+        case Op::Widen: {
+            step.kind = Kind::Widen;
+            auto& inst = emit(std::move(step));
+            inst.uses.push_back(fixed(vreg(in.operands[0]), rsi));
+            inst.uses.push_back(fixed(vreg(in.operands[1]), rdx));
+            inst.uses.push_back(fixed(vreg(in.operands[2]), rcx));
+            inst.clobbers_gpr = caller_saved_gpr;
+            inst.clobbers_xmm = allocatable_xmm;
+            inst.is_call = true;
+            return;
+        }
+        case Op::AllocObject:
+        case Op::Append: {
+            if (in.aux >= f_.exits.size()) refuse("an exit out of range");
+            step.kind = in.op == Op::AllocObject ? Kind::AllocObject : Kind::Append;
+            step.index = in.aux;
+            step.state = in.state;
+            if (in.op == Op::Append) {
+                // The value may not fit the storage unless its type fits the
+                // declared width (imm bytes), which the storage never is below.
+                const auto& type = f_.insts[in.operands[2]].type;
+                const unsigned bits = type.type == t3::Type::Int ? type.width : 64U;
+                step.checked = !(in.imm >= 8 || bits <= 8 * in.imm);
+            }
+            auto& inst = emit(std::move(step));
+            auto& made = out_.steps[inst.opcode];
+            if (in.op == Op::Append) {
+                use(inst, 1);
+                use(inst, 2);
+            }
+            for (std::uint32_t i = 0; i < in.count; ++i) inst.uses.push_back(any(vreg(f_.extras[in.extra + i])));
+            made.arguments = in.count;
+            out_.argument_words = std::max(out_.argument_words, in.count);
+            if (f_.states[in.state].caller != t3::none) {
+                // Inside inlined code the slow path materializes every frame
+                // of the state from its values, as a deoptimization stub does.
+                made.inlined = true;
+                if (in.op == Op::AllocObject) def(inst);
+                inst.temps_gpr = in.op == Op::AllocObject ? 4 : 3;
+                inst.clobbers_xmm = allocatable_xmm;
+                add_state(inst, in.state);
+                return;
+            }
+            const auto& state = f_.states[in.state];
+            if (state.slots.size() != f_.slot_count || state.flags.size() != f_.slot_count) {
+                refuse("a frame state without one entry per slot");
+            }
+            const auto value = [&](std::uint32_t v) {
+                if (known(v)) made.state_constants.emplace_back(v, known_value(v));
+                else inst.uses.push_back(any(vreg(v)));
+            };
+            for (const auto& slot : state.slots) {
+                if (slot.kind == t3::StateSlot::Kind::Value) value(static_cast<std::uint32_t>(slot.value));
+            }
+            for (const auto& flag : state.flags) {
+                if (flag.kind == t3::StateFlag::Kind::Value) value(flag.value);
+            }
+            if (in.op == Op::AllocObject) def(inst);
+            inst.temps_gpr = in.op == Op::AllocObject ? 4 : 3;
+            inst.clobbers_xmm = allocatable_xmm;
+            return;
+        }
+        default: break;
         }
         refuse("an operation the code generator does not handle");
     }
@@ -1289,7 +1496,8 @@ private:
                 for (const auto& u : inst.uses) set(live, u.vreg.id);
                 for (const auto& u : inst.state_uses) set(live, u.vreg.id);
                 const auto& step = out_.steps[inst.opcode];
-                const bool observer = step.kind == Kind::WriteBack || step.kind == Kind::Helper || step.kind == Kind::Call;
+                const bool observer = step.kind == Kind::WriteBack || step.kind == Kind::Helper || step.kind == Kind::Call ||
+                                      step.kind == Kind::AllocObject || step.kind == Kind::Append;
                 const auto state_id = step.kind == Kind::Helper || step.kind == Kind::Call ? f_.insts[step.inst].state
                                                                                           : step.state;
                 Bits around = live;

@@ -171,7 +171,7 @@
             const auto* native = jit_ && !region->program ? native_code(plan) : nullptr;
             const auto* code = region->program ? tier3_code(*region, false) : nullptr;
             time_as(TierTimes::Category::Regions);
-            const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native, plan.program_entry)
+            const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native, plan.program_entry, code)
                                  : code      ? run_native_program(*code, plan.program_entry, allowance - total)
                                  : region->program ? run_program(*region, plan.program_entry, allowance - total)
                                                    : run_region(*region, allowance - total, native);
@@ -799,7 +799,7 @@
     // in order with their values. Reads are covered by the slots they feed.
     // It checks a region's native code (src/jit) the same way.
     RegionOutcome checked_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native,
-                                 std::uint32_t program_entry) {
+                                 std::uint32_t program_entry, const tier3::Program* code = nullptr) {
         auto before = frames_.back();
         const auto function = before.function;
         const auto depth = frames_.size();
@@ -814,8 +814,9 @@
 
         std::vector<HeapWrite> region_writes;
         heap_log_ = &region_writes;
-        const auto outcome = region.program ? run_program(region, program_entry, allowance)
-                                            : run_region(region, allowance, native);
+        const auto outcome = code             ? run_native_program(*code, program_entry, allowance)
+                             : region.program ? run_program(region, program_entry, allowance)
+                                              : run_region(region, allowance, native);
         heap_log_ = nullptr;
 
         auto frame = frames_.back();

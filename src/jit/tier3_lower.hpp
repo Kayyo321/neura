@@ -47,6 +47,33 @@ enum class Kind : std::uint8_t {
     CompareBranch,   // the compare Lift `inst`: succs[0] when it holds, else succs[1]
     Switch,          // succs[uses[0]], of imm successors
     Dispatch,        // dispatch_tables[imm] on uses[0]
+    // Heap access (the IR's heap operations, src/nvm/tier3.hpp); a check
+    // deoptimizes to `state` for `reason`.
+    Lookup,          // defs[0] = the entry of handle uses[0]; imm 1: nil gives 0
+    CheckNotNil,     // deoptimizes when uses[0] is 0
+    CheckKind,       // deoptimizes unless entry uses[0] (0 passes) passes type test `index`
+    CheckInit,       // deoptimizes unless field imm of entry uses[0] is initialized
+    CheckIndex,      // deoptimizes unless uses[0] < uses[1] (or the constant b_value)
+    CheckGlobalInit, // deoptimizes unless global imm is initialized
+    TestKind,        // defs[0] = whether entry uses[0] is not 0 and passes type test `index`
+    LoadTag,         // defs[0] = the type word of entry uses[0]
+    LoadField,       // defs[0] = field imm of entry uses[0]; index: its initialized words, or none
+    LoadLength,      // defs[0] = the count word of entry uses[0]
+    LoadData,        // defs[0] = the data pointer of entry uses[0]
+    LoadStorage,     // defs[0] = the storage width of entry uses[0]
+    LoadElement,     // defs[0] = element uses[1] of data uses[0] at storage uses[2]; imm: the declared width
+    LoadVersion,     // defs[0] = the version of list entry uses[0]
+    LoadGlobal,      // defs[0] = global imm
+    Select,          // defs[0] = uses[1 + uses[0]]
+    StoreField,      // field imm of entry uses[0] = uses[1]; index as LoadField
+    StoreElement,    // element uses[1] of data uses[0] at storage uses[2] = uses[3]; imm: the declared width
+    StoreGlobal,     // global imm = uses[0]
+    Widen,           // the set_element helper on uses[0..2] (in rsi, rdx, rcx)
+    // Inline allocation and append (design 6.7, 6.8): exits[index] inline,
+    // else its helper, after writing the frame back from `state`. uses: the
+    // `arguments` helper arguments, then the write-back's values.
+    AllocObject,     // defs[0] = a new object of imm fields (layout: the exit's immediate)
+    Append,          // the list entry uses[0] gets uses[1]; `checked`: the value may not fit the storage
 };
 
 struct Step {
@@ -73,6 +100,13 @@ struct Step {
     bool checked = true;
     // Gather: the bit of each use.
     std::vector<std::uint32_t> bits;
+    // AllocObject, Append: the uses that are the helper's arguments (the
+    // write-back's values follow them).
+    std::uint32_t arguments = 0;
+    // AllocObject, Append inside inlined code: the slow path stores the
+    // values of every level of `state` (its state uses) and materializes the
+    // frames instead of writing the physical frame back.
+    bool inlined = false;
     // The SSA values the frame state names, each with the index of the state
     // use (mir::Inst::state_uses) that holds it: several values can be one
     // virtual register.

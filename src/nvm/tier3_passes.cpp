@@ -102,8 +102,41 @@ Places::Places(const Function& f) : block(f.insts.size(), none), position(f.inst
     }
 }
 
+bool is_heap_check(Op op) {
+    switch (op) {
+    case Op::CheckNotNil:
+    case Op::Lookup:
+    case Op::CheckKind:
+    case Op::CheckInit:
+    case Op::CheckIndex:
+    case Op::CheckGlobalInit: return true;
+    default: return false;
+    }
+}
+
+bool is_heap_read(Op op) {
+    switch (op) {
+    case Op::TestKind:
+    case Op::LoadTag:
+    case Op::LoadField:
+    case Op::LoadLength:
+    case Op::LoadData:
+    case Op::LoadStorage:
+    case Op::LoadElement:
+    case Op::LoadVersion:
+    case Op::LoadGlobal: return true;
+    default: return false;
+    }
+}
+
 bool is_effect(const Inst& in) {
     switch (in.op) {
+    case Op::StoreField:
+    case Op::StoreElement:
+    case Op::StoreGlobal:
+    case Op::Widen:
+    case Op::AllocObject:
+    case Op::Append: return true;
     case Op::StateCall: return (in.flags & CheckReference) == 0;
     case Op::WriteBack:
     case Op::Helper:
@@ -145,7 +178,7 @@ void Replacements::apply(Function& f) {
         for (std::uint32_t i = 0; i < in.count; ++i) {
             if (in.op == Op::Gather && (i % 2) != 0) continue;
             if (in.op != Op::Gather && in.op != Op::Phi && in.op != Op::StateCall && in.op != Op::Helper &&
-                in.op != Op::Call) {
+                in.op != Op::Call && in.op != Op::Select && in.op != Op::AllocObject && in.op != Op::Append) {
                 continue;
             }
             auto& extra = f.extras[in.extra + i];
@@ -679,7 +712,129 @@ bool value_key(const Function& f, const Inst& in, Replacements& repl, bool check
     return true;
 }
 
-// The values of the dominating blocks, scoped by the dominator tree.
+// What a heap read or check depends on, as versions that change where a
+// write may change it (docs/runtime/NVM.md, "Execution tiers"): the alias
+// classes of the heap (a field index of any object, the elements of a
+// declared width, the element storage of arrays and lists, a global) and,
+// under every class, the entries that are live and the words that only a
+// helper or a call changes. A block with one predecessor starts with the
+// versions its predecessor ends with; any other block, with versions no
+// block had, so that a read or check is merged only with one on the path of
+// single-predecessor blocks above it with no write of its class between.
+class Memory {
+public:
+    // Alias classes.
+    static std::uint64_t field(std::uint64_t index) { return (std::uint64_t{1} << 56) | index; }
+    static std::uint64_t elements(std::uint64_t width) { return (std::uint64_t{2} << 56) | width; }
+    static constexpr std::uint64_t storage = std::uint64_t{3} << 56;
+    static std::uint64_t global(std::uint64_t index) { return (std::uint64_t{4} << 56) | index; }
+    // Entries live, and words only helpers and calls write.
+    static constexpr std::uint64_t entries = std::uint64_t{5} << 56;
+
+    explicit Memory(std::uint64_t& counter) : counter_(&counter), base_(++counter) {}
+
+    std::uint64_t version(std::uint64_t cls) const {
+        const auto found = classes_.find(cls);
+        return found == classes_.end() ? base_ : found->second;
+    }
+    void kill_all() {
+        base_ = ++*counter_;
+        classes_.clear();
+    }
+    void kill(std::uint64_t cls) { classes_[cls] = ++*counter_; }
+
+    // What `in` writes.
+    void apply(const Inst& in) {
+        switch (in.op) {
+        case Op::StoreField: kill(field(in.imm)); break;
+        case Op::StoreElement: kill(elements(in.imm)); break;
+        case Op::StoreGlobal: kill(global(in.imm)); break;
+        case Op::Widen:
+            kill(storage);
+            for (const std::uint64_t w : {1, 2, 4, 8}) kill(elements(w));
+            break;
+        case Op::Helper:
+        case Op::Call:
+        case Op::AllocObject:
+        case Op::Append: kill_all(); break;
+        case Op::StateCall:
+            if ((in.flags & CheckReference) == 0) kill_all();
+            break;
+        default: break;
+        }
+    }
+
+private:
+    std::uint64_t* counter_;
+    std::uint64_t base_;
+    std::map<std::uint64_t, std::uint64_t> classes_;
+};
+
+// The class a heap read or check depends on; none for one that depends on
+// its operands alone.
+std::uint64_t depends_on(const Inst& in) {
+    switch (in.op) {
+    case Op::LoadField: return Memory::field(in.imm);
+    case Op::LoadElement: return Memory::elements(in.imm);
+    case Op::LoadData:
+    case Op::LoadStorage: return Memory::storage;
+    case Op::LoadGlobal: return Memory::global(in.imm);
+    case Op::Lookup:
+    case Op::CheckKind:
+    case Op::CheckInit:
+    case Op::CheckGlobalInit:
+    case Op::TestKind:
+    case Op::LoadTag:
+    case Op::LoadLength:
+    case Op::LoadVersion: return Memory::entries;
+    default: return none;
+    }
+}
+
+// The key of a heap read or check under `memory`.
+bool heap_key(const Inst& in, Replacements& repl, const Memory& memory, Key& key) {
+    if (!is_heap_check(in.op) && !is_heap_read(in.op)) return false;
+    key.clear();
+    key.push_back(0x100 + static_cast<std::uint64_t>(in.op));
+    key.push_back((static_cast<std::uint64_t>(in.type.type) << 8) | in.type.width);
+    key.push_back(in.imm);
+    key.push_back(in.aux);
+    for (const auto operand : in.operands) key.push_back(operand == none ? ~std::uint64_t{0} : repl.find(operand));
+    const auto cls = depends_on(in);
+    key.push_back(cls == none ? 0 : memory.version(cls));
+    return true;
+}
+
+// The key of the check a write makes true: StoreField sets its field's
+// initialized bit, StoreGlobal its global's.
+bool implied_check(const Inst& in, Replacements& repl, const Memory& memory, Key& key) {
+    Inst check;
+    if (in.op == Op::StoreField) {
+        check.op = Op::CheckInit;
+        check.operands[0] = in.operands[0];
+    } else if (in.op == Op::StoreGlobal) {
+        check.op = Op::CheckGlobalInit;
+    } else {
+        return false;
+    }
+    check.imm = in.imm;
+    return heap_key(check, repl, memory, key);
+}
+
+const char* heap_check_kind(Op op) {
+    switch (op) {
+    case Op::CheckNotNil: return "nil";
+    case Op::Lookup: return "lookup";
+    case Op::CheckKind: return "kind";
+    case Op::CheckInit: return "init";
+    case Op::CheckIndex: return "bounds";
+    case Op::CheckGlobalInit: return "global";
+    default: return "read";
+    }
+}
+
+// The values of the dominating blocks, scoped by the dominator tree; heap
+// reads and checks under the versions of what they read (Memory).
 bool number_pure(Function& f, Counts& counts) {
     const Cfg cfg(f);
     Replacements repl(f.insts.size());
@@ -691,12 +846,41 @@ bool number_pure(Function& f, Counts& counts) {
         std::vector<Key> added;
     };
     std::vector<Frame> stack;
+    std::uint64_t counter = 0;
+    std::vector<Memory> ends(f.blocks.size(), Memory(counter));
     const auto enter = [&](std::uint32_t b) {
         Frame frame{b, 0, {}};
+        const auto& preds = f.blocks[b].preds;
+        Memory memory(counter);
+        if (preds.size() == 1 && cfg.idom[b] == preds[0] && f.blocks[b].entry == none) memory = ends[preds[0]];
         for (const auto id : f.blocks[b].insts) {
             const auto& in = f.insts[id];
-            const bool checked = in.op == Op::Lift && (in.flags & Checked) != 0;
             Key own;
+            if (heap_key(in, repl, memory, own)) {
+                const auto found = table.find(own);
+                if (found != table.end()) {
+                    repl.set(id, found->second);
+                    removed.push_back(id);
+                    ++counts[std::string("gvn.") + heap_check_kind(in.op)];
+                    continue;
+                }
+                table[own] = id;
+                frame.added.push_back(std::move(own));
+                continue;
+            }
+            if (implied_check(in, repl, memory, own)) {
+                memory.apply(in);
+                // The write's own key: the check after it, under the
+                // versions after the write.
+                implied_check(in, repl, memory, own);
+                if (!table.contains(own)) {
+                    table[own] = id;
+                    frame.added.push_back(std::move(own));
+                }
+                continue;
+            }
+            memory.apply(in);
+            const bool checked = in.op == Op::Lift && (in.flags & Checked) != 0;
             if (!value_key(f, in, repl, checked, own)) continue;
             // An unchecked op may merge into a checked one: after the check
             // passed the same operation cannot fail.
@@ -715,6 +899,7 @@ bool number_pure(Function& f, Counts& counts) {
             table[own] = id;
             frame.added.push_back(std::move(own));
         }
+        ends[b] = memory;
         stack.push_back(std::move(frame));
     };
     for (const auto top : cfg.children[cfg.root]) {
@@ -781,7 +966,7 @@ bool remove_repeated_reference_checks(Function& f, Counts& counts) {
             auto& bit = set[index.at(std::make_pair(in.operands[0], in.imm))];
             redundant = bit != 0;
             bit = 1;
-        } else if (in.op == Op::Helper || in.op == Op::Call) {
+        } else if (in.op == Op::Helper || in.op == Op::Call || in.op == Op::AllocObject || in.op == Op::Append) {
             std::fill(set.begin(), set.end(), 0);
         }
     };
@@ -847,9 +1032,10 @@ bool remove_dead(Function& f, Counts& counts) {
         case Op::EntryCounter:
         case Op::Phi:
         case Op::Mask:
-        case Op::Gather: return true;
+        case Op::Gather:
+        case Op::Select: return true;
         case Op::Lift: return (in.flags & Checked) == 0;
-        default: return false;
+        default: return is_heap_read(in.op);
         }
     };
     for (const auto& block : f.blocks) {

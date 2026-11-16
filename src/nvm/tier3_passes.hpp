@@ -45,6 +45,10 @@ struct Places {
 
 // An op that changes state outside the SSA values (the verifier's notion).
 bool is_effect(const Inst& in);
+// A heap check: deoptimizes, changes nothing (Lookup also gives the entry).
+bool is_heap_check(Op op);
+// A heap read: no effect and no check; it reads words a write may change.
+bool is_heap_read(Op op);
 
 // The values an instruction reads, including its frame state's.
 template <typename Visit>
@@ -60,6 +64,9 @@ void for_each_operand(const Function& f, const Inst& in, Visit&& visit) {
     case Op::StateCall:
     case Op::Helper:
     case Op::Call:
+    case Op::Select:
+    case Op::AllocObject:
+    case Op::Append:
         for (std::uint32_t i = 0; i < in.count; ++i) visit(f.extras[in.extra + i]);
         break;
     default: break;

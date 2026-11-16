@@ -848,7 +848,9 @@ NEURA_TEST(tier3, frame_states_are_the_block_entry_for_checks_and_the_commit_for
                     check_equal(state.flags.size(), ir.slot_count, "a state has a flag per frame slot");
                     check_equal(state.block, in.origin_block, "a state names the block of its op");
                     const auto& count = ir.insts[state.blocks];
-                    const bool commit_state = in.op == t3::Op::Helper || in.op == t3::Op::Call || in.op == t3::Op::WriteBack;
+                    // An allocation or append with a fast path is a helper on its slow path.
+                    const bool commit_state = in.op == t3::Op::Helper || in.op == t3::Op::Call || in.op == t3::Op::WriteBack ||
+                                              in.op == t3::Op::AllocObject || in.op == t3::Op::Append;
                     if (commit_state) {
                         // After the block's commit: the block's step is in the count.
                         check(count.op == t3::Op::CounterAdd && count.origin_block == in.origin_block,

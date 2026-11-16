@@ -4477,6 +4477,7 @@ std::vector<Execution::Tier3Frame> Execution::tier3_frames() const { return stat
 Execution::Tier3Ending Execution::tier3_run(const tier3::Program& program, std::uint32_t entry) {
     return state_->tier3_run(program, entry);
 }
+std::vector<std::uint64_t> Execution::heap_snapshot() const { return state_->heap_snapshot(); }
 std::uint64_t Execution::tick() const { return state_->tick(); }
 std::uint64_t Execution::peak_queued_messages() const { return state_->peak_queued_messages(); }
 std::uint64_t Execution::peak_pending_requests() const { return state_->peak_pending_requests(); }

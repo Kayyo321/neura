@@ -24,7 +24,9 @@
 // most 4 levels deep, has at most 64 blocks and 400 ops after its own
 // inlining, and keeps the native program within 8 times the root's ops and
 // 20000. After its own inlining it has no Helper, no Call, no Leave and no
-// write-back: inlined code never writes a frame. Its arguments and return
+// write-back: inlined code writes a frame only on the slow path of an
+// allocation or append (AllocObject, Append), which materializes every frame
+// of its state, runs the helper, and leaves at the helper's resume block. Its arguments and return
 // values fit the types of the slots they go to. Host, scheduler and message
 // exits are deoptimizations in function programs already.
 //
@@ -411,6 +413,7 @@ private:
         const auto oe = static_cast<std::uint32_t>(f.exits.size());
         const auto od = static_cast<std::uint32_t>(f.dispatch_tables.size());
         const auto op = static_cast<std::uint32_t>(f.programs.size());
+        const auto ot = static_cast<std::uint32_t>(f.type_tests.size());
         const auto entry = g.entries.front().ir_block;
 
         // What the callee's entry values are here: the arguments for its
@@ -467,14 +470,18 @@ private:
             }
             if (in.state != none) in.state += os;
             in.guard = map(in.guard);
-            if ((in.op == Op::StateCall && (in.flags & CheckReference) == 0) || in.op == Op::Helper || in.op == Op::Call) {
+            if ((in.op == Op::StateCall && (in.flags & CheckReference) == 0) || in.op == Op::Helper || in.op == Op::Call ||
+                in.op == Op::AllocObject || in.op == Op::Append) {
                 in.aux += oe;
             }
             if (in.op == Op::Dispatch) in.imm += od;
+            // The callee's type tests follow the caller's.
+            if (in.op == Op::CheckKind || in.op == Op::TestKind) in.imm += ot;
             f.insts.push_back(std::move(in));
         }
         f.exits.insert(f.exits.end(), g.exits.begin(), g.exits.end());
         f.dispatch_tables.insert(f.dispatch_tables.end(), g.dispatch_tables.begin(), g.dispatch_tables.end());
+        f.type_tests.insert(f.type_tests.end(), g.type_tests.begin(), g.type_tests.end());
         for (const auto& [program, table] : g.dispatch_origins) f.dispatch_origins.emplace_back(program + op, table);
         f.programs.insert(f.programs.end(), g.programs.begin(), g.programs.end());
         f.call_frames.insert(g.call_frames.begin(), g.call_frames.end());

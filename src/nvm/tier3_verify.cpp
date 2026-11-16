@@ -20,9 +20,42 @@ bool has_value(Op op) {
     case Op::Gather:
     case Op::CounterAdd:
     case Op::Helper:
-    case Op::Call: return true;
+    case Op::Call:
+    case Op::Lookup:
+    case Op::TestKind:
+    case Op::LoadTag:
+    case Op::LoadField:
+    case Op::LoadLength:
+    case Op::LoadData:
+    case Op::LoadStorage:
+    case Op::LoadElement:
+    case Op::LoadVersion:
+    case Op::LoadGlobal:
+    case Op::Select:
+    case Op::AllocObject: return true;
     default: return false;
     }
+}
+
+// An allocation or append with a fast path: a helper on its slow path.
+bool fast_path(Op op) { return op == Op::AllocObject || op == Op::Append; }
+
+// A check of the heap (each names a state and may deoptimize).
+bool heap_check(Op op) {
+    switch (op) {
+    case Op::CheckNotNil:
+    case Op::Lookup:
+    case Op::CheckKind:
+    case Op::CheckInit:
+    case Op::CheckIndex:
+    case Op::CheckGlobalInit: return true;
+    default: return false;
+    }
+}
+
+// A write of the heap or the globals.
+bool heap_write(Op op) {
+    return op == Op::StoreField || op == Op::StoreElement || op == Op::StoreGlobal || op == Op::Widen || fast_path(op);
 }
 
 bool terminator(Op op) {
@@ -50,12 +83,13 @@ bool needs_state(const Inst& in) {
     case Op::Return:
     case Op::Deopt: return true;
     case Op::Lift: return (in.flags & Checked) != 0;
-    default: return false;
+    default: return heap_check(in.op) || fast_path(in.op);
     }
 }
 
 // An op that changes state outside the SSA values.
 bool effect(const Inst& in) {
+    if (heap_write(in.op)) return true;
     switch (in.op) {
     case Op::StateCall: return (in.flags & CheckReference) == 0;
     case Op::WriteBack:
@@ -71,6 +105,7 @@ bool effect(const Inst& in) {
 // An op after which no check of the same image block may run (V5): the ones
 // that change what tier 1 would re-run.
 bool commits(const Inst& in) {
+    if (heap_write(in.op)) return true;
     switch (in.op) {
     case Op::StateCall: return (in.flags & CheckReference) == 0;
     case Op::WriteBack:
@@ -81,14 +116,19 @@ bool commits(const Inst& in) {
 }
 
 bool safepoint(const Inst& in) {
-    return in.op == Op::Helper || in.op == Op::Call || in.op == Op::StateCall;
+    return in.op == Op::Helper || in.op == Op::Call || in.op == Op::StateCall || fast_path(in.op);
 }
 
 const char* name_of(Op op) {
     static const char* names[] = {"const",     "runconst", "entryload", "entryflag", "entrycounter", "phi",
                                   "lift",      "mask",     "gather",    "counteradd", "budget",     "switchcheck",
                                   "guard",     "statecall", "writeback", "helper",    "call",         "return",
-                                  "jump",      "branch",   "switch",    "dispatch",  "leave",        "deopt"};
+                                  "jump",      "branch",   "switch",    "dispatch",  "leave",        "deopt",
+                                  "checknotnil", "lookup", "checkkind", "checkinit", "checkindex", "checkglobalinit",
+                                  "testkind",  "loadtag",  "loadfield", "loadlength", "loaddata",   "loadstorage",
+                                  "loadelement", "loadversion", "loadglobal", "select", "storefield", "storeelement",
+                                  "storeglobal", "widen", "allocobject", "append"};
+    static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Op::Append) + 1);
     return names[static_cast<int>(op)];
 }
 
@@ -141,7 +181,8 @@ private:
         }
         if (in.op == Op::Gather) {
             for (std::uint32_t i = 0; i < in.count; i += 2) list.push_back(f_.extras[in.extra + i]);
-        } else if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call) {
+        } else if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call || fast_path(in.op) ||
+                   in.op == Op::Select) {
             for (std::uint32_t i = 0; i < in.count; ++i) list.push_back(f_.extras[in.extra + i]);
         }
         return list;
@@ -397,6 +438,17 @@ private:
                     fail("V2", at(id) + " takes " + type_name(f_.insts[v].type) + " as " + role);
                 }
             };
+            const auto pointer = [&](std::uint32_t v, const char* role) {
+                if (v == none || v >= f_.insts.size() || f_.insts[v].type.type != Type::Ptr) {
+                    fail("V2", at(id) + " takes " + (v == none || v >= f_.insts.size() ? std::string("nothing") : type_name(f_.insts[v].type)) +
+                                   " as " + role + ", not a pointer");
+                }
+            };
+            const auto integer_operand = [&](std::uint32_t v, const char* role) {
+                if (v == none || v >= f_.insts.size() || f_.insts[v].type.type != Type::Int) {
+                    fail("V2", at(id) + " takes " + role + " that is not an integer");
+                }
+            };
             switch (in.op) {
             case Op::Lift: {
                 operand_bits(in.operands[0], "its first operand");
@@ -440,6 +492,60 @@ private:
                     }
                 }
                 break;
+            case Op::CheckNotNil:
+            case Op::Lookup:
+            case Op::StoreGlobal:
+                operand_bits(in.operands[0], "a handle or value");
+                break;
+            case Op::Widen:
+                for (unsigned j = 0; j < 3; ++j) operand_bits(in.operands[j], "an operand");
+                break;
+            case Op::CheckKind:
+            case Op::TestKind:
+                pointer(in.operands[0], "its entry");
+                if (in.imm >= f_.type_tests.size()) fail("V2", at(id) + " names a type test that does not exist");
+                break;
+            case Op::CheckInit:
+            case Op::LoadTag:
+            case Op::LoadField:
+            case Op::LoadLength:
+            case Op::LoadData:
+            case Op::LoadStorage:
+            case Op::LoadVersion:
+                pointer(in.operands[0], "its entry");
+                break;
+            case Op::StoreField:
+                pointer(in.operands[0], "its entry");
+                operand_bits(in.operands[1], "the value");
+                break;
+            case Op::CheckIndex:
+                integer_operand(in.operands[0], "the index");
+                integer_operand(in.operands[1], "the length");
+                break;
+            case Op::LoadElement:
+            case Op::StoreElement:
+                pointer(in.operands[0], "its data");
+                integer_operand(in.operands[1], "the index");
+                integer_operand(in.operands[2], "the storage width");
+                if (in.op == Op::StoreElement) operand_bits(in.operands[3], "the value");
+                if (in.imm != 1 && in.imm != 2 && in.imm != 4 && in.imm != 8) fail("V2", at(id) + " has a declared width of " + std::to_string(in.imm));
+                break;
+            case Op::AllocObject:
+            case Op::Append:
+                if (in.operands[0] == none || f_.insts[in.operands[0]].type != ValueType{Type::Int, 64}) {
+                    fail("V2", at(id) + " takes a counter that is not a 64-bit integer");
+                }
+                if (in.op == Op::Append) {
+                    pointer(in.operands[1], "its list");
+                    operand_bits(in.operands[2], "the value");
+                }
+                for (std::uint32_t j = 0; j < in.count; ++j) operand_bits(f_.extras[in.extra + j], "an argument");
+                if (in.aux >= f_.exits.size()) fail("V2", at(id) + " names an exit that does not exist");
+                break;
+            case Op::Select:
+                integer_operand(in.operands[0], "its index");
+                for (std::uint32_t j = 0; j < in.count; ++j) operand_bits(f_.extras[in.extra + j], "a choice");
+                break;
             case Op::StateCall:
             case Op::Helper:
             case Op::Call:
@@ -460,8 +566,14 @@ private:
     // a call's result slot, which the callee's return writes.
     void writes_of(const Inst& in, std::vector<std::uint8_t>& written) const {
         const auto count = written.size() / 2;
-        if (in.op == Op::WriteBack && in.state < f_.states.size()) {
-            const auto& state = f_.states[in.state];
+        if ((in.op == Op::WriteBack || fast_path(in.op)) && in.state < f_.states.size()) {
+            // A write-back and the slow path of a fast path write the
+            // physical frame, the last level of the chain.
+            auto s = in.state;
+            for (std::uint32_t depth = 0; f_.states[s].caller != none && f_.states[s].caller < f_.states.size() && depth < 64; ++depth) {
+                s = f_.states[s].caller;
+            }
+            const auto& state = f_.states[s];
             for (std::size_t r = 0; r < count && r < state.slots.size(); ++r) {
                 if (state.slots[r].kind != StateSlot::Kind::Unchanged) written[r] = 1;
                 if (state.flags[r].kind != StateFlag::Kind::Unchanged) written[count + r] = 1;
@@ -845,7 +957,8 @@ private:
         for (std::uint32_t id = 0; id < f_.insts.size(); ++id) {
             const auto& in = f_.insts[id];
             if (block_of_[id] == none || !reachable(block_of_[id])) continue;
-            if (in.op == Op::Helper || in.op == Op::Call || (in.op == Op::StateCall && (in.flags & CheckReference) == 0)) {
+            if (in.op == Op::Helper || in.op == Op::Call || fast_path(in.op) ||
+                (in.op == Op::StateCall && (in.flags & CheckReference) == 0)) {
                 for (std::uint32_t j = 0; j < in.count; ++j) {
                     const auto v = f_.extras[in.extra + j];
                     if (v < f_.insts.size() && is_ptr(f_.insts[v])) fail("V6", at(id) + " takes a pointer as an argument");
@@ -866,6 +979,15 @@ private:
             if (!reachable(b)) continue;
             const auto& insts = f_.blocks[b].insts;
             for (std::size_t k = 0; k < insts.size(); ++k) {
+                // A Widen moves the elements of an array or list: no data
+                // pointer read before it is used after it.
+                if (f_.insts[insts[k]].op == Op::Widen) {
+                    for (const auto v : live_after(live, b, k)) {
+                        if (f_.insts[v].op == Op::LoadData) {
+                            fail("V6", "data pointer %" + std::to_string(v) + " is live across " + at(insts[k]));
+                        }
+                    }
+                }
                 if (!safepoint(f_.insts[insts[k]])) continue;
                 for (const auto v : live_after(live, b, k)) {
                     fail("V6", "pointer %" + std::to_string(v) + " is live across " + at(insts[k]));
@@ -972,7 +1094,7 @@ private:
             const auto& insts = f_.blocks[b].insts;
             for (std::size_t k = 0; k < insts.size(); ++k) {
                 const auto& in = f_.insts[insts[k]];
-                if (in.op != Op::Helper && in.op != Op::Call) continue;
+                if (in.op != Op::Helper && in.op != Op::Call && !fast_path(in.op)) continue;
                 if (in.state == none || in.state >= f_.states.size()) continue;
                 // The values the state writes into the frames.
                 std::vector<std::uint32_t> named;
@@ -984,9 +1106,35 @@ private:
                         }
                     }
                 }
-                const auto& physical = f_.states[in.state];
+                // The physical frame's level (the last of the chain: a slow
+                // path inside inlined code materializes it as a write-back
+                // writes it).
+                auto root = in.state;
+                for (std::uint32_t depth = 0; f_.states[root].caller != none && f_.states[root].caller < f_.states.size() && depth < 64;
+                     ++depth) {
+                    root = f_.states[root].caller;
+                }
+                const auto& physical = f_.states[root];
+                // A phi whose operands are one value (or itself) is that value
+                // (inlining leaves such phis for the passes to remove).
+                const auto same_value = [&](std::uint32_t v) {
+                    for (std::uint32_t depth = 0; depth < 64 && f_.insts[v].op == Op::Phi; ++depth) {
+                        const auto& phi = f_.insts[v];
+                        std::uint32_t only = none;
+                        for (std::uint32_t j = 0; j < phi.count; ++j) {
+                            const auto operand = f_.extras[phi.extra + j];
+                            if (operand == v || operand == only) continue;
+                            if (only != none) return v;
+                            only = operand;
+                        }
+                        if (only == none) return v;
+                        v = only;
+                    }
+                    return v;
+                };
                 for (const auto v : live_after(live, b, k)) {
                     if (std::find(named.begin(), named.end(), v) != named.end()) continue;
+                    if (std::find(named.begin(), named.end(), same_value(v)) != named.end()) continue;
                     // The frame already holds an unchanged slot's value.
                     const auto written = written_before_.find(insts[k]);
                     if (frame_slot[v] != none && physical.caller == none && frame_slot[v] < physical.slots.size() &&
@@ -1121,9 +1269,10 @@ std::string describe(const Function& f) {
             }
             if (in.op == Op::Const || in.op == Op::Mask || in.op == Op::CounterAdd || in.op == Op::Budget ||
                 in.op == Op::EntryLoad || in.op == Op::EntryFlag || in.op == Op::Leave || in.op == Op::Call ||
-                in.op == Op::SwitchCheck) {
+                in.op == Op::SwitchCheck || static_cast<int>(in.op) >= static_cast<int>(Op::CheckNotNil)) {
                 out << " #" << in.imm;
             }
+            if ((in.op == Op::LoadField || in.op == Op::StoreField) && in.aux != none) out << " words " << in.aux;
             if (in.op == Op::Lift) out << " op" << static_cast<int>(in.lifted.op);
             if (in.state != none) out << " state " << in.state;
             if (in.guard != none) out << " guard %" << in.guard;

@@ -458,6 +458,10 @@ public:
     };
     std::vector<Tier3Frame> tier3_frames() const;
     Tier3Ending tier3_run(const tier3::Program& program, std::uint32_t entry);
+    // Tests only (tests/backend/tier3_heap_tests.cpp): the heap's words
+    // (Heap::snapshot) and the executor's live and peak cells and collection
+    // threshold, comparable between runs word for word.
+    std::vector<std::uint64_t> heap_snapshot() const;
 
     struct GraphStep {
         std::uint32_t graph = 0;

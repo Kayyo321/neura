@@ -1,5 +1,7 @@
 #include "tier3.hpp"
 
+#include "heap.hpp"
+#include "nvr/format.hpp"
 #include "tier1.hpp"
 
 #include "jit/tier3_native.hpp"
@@ -157,7 +159,8 @@ constexpr std::size_t max_instructions = std::size_t{1} << 21;
 
 class Builder {
 public:
-    Builder(const nvr::Image& image, const tier2::Region& region) : image_(image), region_(region) {}
+    Builder(const nvr::Image& image, const tier2::Region& region, Variant variant)
+        : image_(image), region_(region), variant_(variant) {}
 
     BuildResult run(bool check) {
         BuildResult result;
@@ -673,6 +676,272 @@ private:
         filled(b);
     }
 
+    // --- Heap access (the inline state operations) ------------------------------
+
+    // The test of an entry of static type `type_index`: what typed_entry's
+    // `compatible` accepts (machine.cpp), as a set of layouts or type indices.
+    std::uint32_t type_test(std::uint32_t type_index) {
+        const auto key = std::make_pair(std::uint32_t{0}, type_index);
+        if (const auto found = tests_.find(key); found != tests_.end()) return found->second;
+        TypeTest test;
+        const auto& t = image_.types[type_index];
+        switch (t.kind) {
+        case nvr::TypeKind::Object: return class_test(t.reference, key);
+        case nvr::TypeKind::Array:
+        case nvr::TypeKind::List:
+            test.kind = static_cast<std::uint8_t>(t.kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List);
+            for (std::uint32_t other = 0; other < image_.types.size(); ++other) {
+                if (types_.same(other, type_index)) test.types.push_back(other);
+            }
+            break;
+        case nvr::TypeKind::Text:
+        case nvr::TypeKind::Bytes:
+            test.kind = static_cast<std::uint8_t>(t.kind == nvr::TypeKind::Text ? EntryKind::Text : EntryKind::Bytes);
+            test.any_type = true;
+            break;
+        default:
+            // No entry is compatible with a type that is not a reference.
+            test.kind = 0xff;
+            break;
+        }
+        return add_test(std::move(test), key);
+    }
+
+    // The objects whose layout derives from `layout` (TypeSystem::derives),
+    // and the initialized-word count they share, if they all have one.
+    std::uint32_t class_test(std::uint32_t layout, std::pair<std::uint32_t, std::uint32_t> key) {
+        TypeTest test;
+        test.kind = static_cast<std::uint8_t>(EntryKind::Object);
+        std::uint32_t words = none;
+        bool same = true;
+        for (std::uint32_t l = 0; l < image_.layouts.size(); ++l) {
+            if (!types_.derives(l, layout)) continue;
+            test.types.push_back(l);
+            const auto w = static_cast<std::uint32_t>((image_.layouts[l].fields.size() + 63) / 64);
+            if (words == none) words = w;
+            else if (w != words) same = false;
+        }
+        test.words = same ? words : none;
+        return add_test(std::move(test), key);
+    }
+
+    std::uint32_t layout_test(std::uint32_t layout) {
+        const auto key = std::make_pair(std::uint32_t{1}, layout);
+        if (const auto found = tests_.find(key); found != tests_.end()) return found->second;
+        return class_test(layout, key);
+    }
+
+    std::uint32_t add_test(TypeTest test, std::pair<std::uint32_t, std::uint32_t> key) {
+        const auto id = static_cast<std::uint32_t>(f_->type_tests.size());
+        f_->type_tests.push_back(std::move(test));
+        tests_[key] = id;
+        return id;
+    }
+
+    // A heap check (or, for Lookup, the entry it finds) on `a` and `b`.
+    std::uint32_t heap_check(Op op, std::uint32_t a, std::uint32_t b, std::uint64_t imm, std::uint32_t state,
+                             bool reference = false) {
+        Inst in;
+        in.op = op;
+        in.operands[0] = a;
+        in.operands[1] = b;
+        in.imm = imm;
+        in.flags = static_cast<std::uint16_t>(Checked | (reference ? ReferenceCheck : 0));
+        in.state = state;
+        if (op == Op::Lookup) in.type = {Type::Ptr, 0};
+        return emit(std::move(in));
+    }
+
+    std::uint32_t heap_op(Op op, ValueType type, std::uint32_t a, std::uint32_t b = none, std::uint32_t c = none,
+                          std::uint32_t d = none, std::uint64_t imm = 0, std::uint32_t aux = none) {
+        Inst in;
+        in.op = op;
+        in.type = type;
+        in.operands[0] = a;
+        in.operands[1] = b;
+        in.operands[2] = c;
+        in.operands[3] = d;
+        in.imm = imm;
+        in.aux = aux;
+        if (op == Op::StoreField || op == Op::StoreElement || op == Op::StoreGlobal || op == Op::Widen) in.flags = Effect;
+        return emit(std::move(in));
+    }
+
+    // typed_entry (machine.cpp): nil is a trap of its own for an object
+    // type, then the handle must name a live entry of the type.
+    std::uint32_t typed_entry(std::uint32_t handle, std::uint32_t type_index, std::uint32_t state) {
+        if (image_.types[type_index].kind == nvr::TypeKind::Object && image_.minor_version >= 2) {
+            heap_check(Op::CheckNotNil, handle, none, 0, state);
+        }
+        const auto entry = heap_check(Op::Lookup, handle, none, 0, state);
+        heap_check(Op::CheckKind, entry, none, type_test(type_index), state);
+        return entry;
+    }
+
+    // The declared element width, in bytes, of a collection of type
+    // `type_index` (one for text and bytes).
+    unsigned declared_bytes(std::uint32_t type_index) const {
+        const auto& t = image_.types[type_index];
+        if (t.kind != nvr::TypeKind::Array && t.kind != nvr::TypeKind::List) return 1;
+        return static_cast<unsigned>(element_width(image_.types[t.reference]));
+    }
+
+    // Whether every value of `v`'s type fits `bytes` bytes.
+    bool fits(std::uint32_t v, unsigned bytes) const {
+        const auto& type = f_->insts[v].type;
+        const unsigned bits = type.type == Type::Int ? type.width : 64U;
+        return bytes >= 8 || bits <= 8 * bytes;
+    }
+
+    // The inline form of a state operation (docs/runtime/NVM.md,
+    // "Execution tiers"): state()'s reads and writes on the published layout,
+    // its traps as checks that deoptimize to the block's entry. False for an
+    // operation that stays a StateCall.
+    bool inline_heap_operation(const tier2::Op& op, const nvr::Exit& exit) {
+        using nvr::StateOp;
+        // The profile and checkable variants write through the reference.
+        const bool checkable = variant_ != Variant::Standard;
+        switch (exit.operation) {
+        case StateOp::ReadTag:
+        case StateOp::ReadField:
+        case StateOp::ReadGlobal:
+        case StateOp::ReadLength:
+        case StateOp::ReadElement:
+        case StateOp::ReadVersion:
+        case StateOp::ClassIs:
+        case StateOp::ClassCast: break;
+        case StateOp::WriteField:
+        case StateOp::WriteGlobal:
+        case StateOp::WriteElement:
+            if (checkable) return false;
+            break;
+        case StateOp::ScalarText:
+            if (exit.arguments.size() < 2) return false;
+            break;
+        default: return false;
+        }
+        const auto args = values(op.other, op.width);
+        const auto& types = exit.arguments;
+        const auto state = entry_state(op.block);
+        const auto result_type = slot_type_or(exit.result_slot, integer(64));
+        std::uint32_t result = none;
+        switch (exit.operation) {
+        case StateOp::ReadTag: result = heap_op(Op::LoadTag, result_type, typed_entry(args[0], types[0].type, state)); break;
+        case StateOp::ReadField: {
+            const auto entry = typed_entry(args[0], types[0].type, state);
+            heap_check(Op::CheckInit, entry, none, exit.immediate, state);
+            result = heap_op(Op::LoadField, result_type, entry, none, none, none, exit.immediate,
+                             f_->type_tests[type_test(types[0].type)].words);
+            break;
+        }
+        case StateOp::WriteField: {
+            const auto entry = typed_entry(args[0], types[0].type, state);
+            heap_op(Op::StoreField, {}, entry, args[1], none, none, exit.immediate, f_->type_tests[type_test(types[0].type)].words);
+            break;
+        }
+        case StateOp::ReadGlobal:
+            heap_check(Op::CheckGlobalInit, none, none, exit.immediate, state);
+            result = heap_op(Op::LoadGlobal, result_type, none, none, none, none, exit.immediate);
+            break;
+        case StateOp::WriteGlobal: heap_op(Op::StoreGlobal, {}, args[0], none, none, none, exit.immediate); break;
+        case StateOp::ReadLength:
+            result = heap_op(Op::LoadLength, result_type, typed_entry(args[0], types[0].type, state));
+            break;
+        case StateOp::ReadElement:
+        case StateOp::WriteElement: {
+            const auto entry = typed_entry(args[0], types[0].type, state);
+            const auto length = heap_op(Op::LoadLength, integer(64), entry);
+            heap_check(Op::CheckIndex, args[1], length, 0, state);
+            const auto declared = declared_bytes(types[0].type);
+            if (exit.operation == StateOp::WriteElement && !fits(args[2], declared)) {
+                // A value that may not fit the declared width: the reference
+                // store, which widens the storage when it does not.
+                heap_op(Op::Widen, {}, args[0], args[1], args[2]);
+                break;
+            }
+            const auto data = heap_op(Op::LoadData, {Type::Ptr, 0}, entry);
+            const auto storage = heap_op(Op::LoadStorage, integer(8), entry);
+            if (exit.operation == StateOp::ReadElement) {
+                result = heap_op(Op::LoadElement, result_type, data, args[1], storage, none, declared);
+            } else {
+                heap_op(Op::StoreElement, {}, data, args[1], storage, args[2], declared);
+            }
+            break;
+        }
+        case StateOp::ReadVersion: {
+            const auto entry = typed_entry(args[0], types[0].type, state);
+            result = image_.types[types[0].type].kind == nvr::TypeKind::List ? heap_op(Op::LoadVersion, result_type, entry)
+                                                                             : constant(0, result_type);
+            break;
+        }
+        case StateOp::ClassIs:
+        case StateOp::ClassCast: {
+            // Nil gives false, or itself, before any check.
+            const auto entry = heap_check(Op::Lookup, args[0], none, 1, state);
+            heap_check(Op::CheckKind, entry, none, type_test(types[0].type), state);
+            const auto test = layout_test(static_cast<std::uint32_t>(exit.immediate));
+            if (exit.operation == StateOp::ClassIs) {
+                result = heap_op(Op::TestKind, result_type, entry, none, none, none, test);
+            } else {
+                heap_check(Op::CheckKind, entry, none, test, state);
+                result = args[0];
+            }
+            break;
+        }
+        case StateOp::ScalarText: {
+            const auto names = static_cast<std::uint32_t>(args.size() - 1);
+            heap_check(Op::CheckIndex, args[0], constant(names, integer(bits_of(names))), 0, state);
+            Inst in;
+            in.op = Op::Select;
+            in.type = result_type;
+            in.operands[0] = args[0];
+            set_extras(in, std::vector<std::uint32_t>(args.begin() + 1, args.end()));
+            result = emit(std::move(in));
+            break;
+        }
+        default: return false;
+        }
+        // An operation without a result gives 0, as state() returns it.
+        if (op.dst != none) write(op.dst, result != none ? result : constant(0, result_type), false);
+        return true;
+    }
+
+    // An allocation of an object, or an append, as an operation with an
+    // inline fast path whose slow path is the helper (design 6.7, 6.8): the
+    // block's step, then the op, which writes the frame back only on its slow
+    // path. An append checks its list first, as the reference's typed_entry
+    // does: a failure deoptimizes to the block's entry, and tier 1 traps
+    // there. False for any other helper.
+    bool fast_path(const tier2::Op& op, const nvr::Exit& exit, const std::vector<std::uint32_t>& arguments) {
+        if (variant_ != Variant::Standard) return false;
+        const bool allocates = exit.operation == nvr::StateOp::AllocateObject && arguments.empty() &&
+                               exit.immediate < image_.layouts.size();
+        const bool appends = exit.operation == nvr::StateOp::AppendElement && arguments.size() == 2 &&
+                             exit.arguments.size() == 2 && image_.types[exit.arguments[0].type].kind == nvr::TypeKind::List;
+        if (!allocates && !appends) return false;
+        std::uint32_t entry = none;
+        if (appends) entry = typed_entry(arguments[0], exit.arguments[0].type, entry_state(op.block));
+        const auto charged = counter_add(read(c_var(), cur_), 1);
+        def_[cur_][c_var()] = charged;
+        Inst in;
+        in.op = allocates ? Op::AllocObject : Op::Append;
+        in.operands[0] = charged;
+        if (appends) {
+            in.operands[1] = entry;
+            in.operands[2] = arguments[1];
+        }
+        in.aux = op.index;
+        in.imm = allocates ? image_.layouts[exit.immediate].fields.size() : declared_bytes(exit.arguments[0].type);
+        in.flags = Effect;
+        in.state = commit_state(op.block, charged);
+        in.type = allocates ? slot_type_or(exit.result_slot, ValueType{Type::Ref, 64}) : ValueType{};
+        set_extras(in, arguments);
+        const auto id = emit(std::move(in));
+        if (op.dst != none) write(op.dst, allocates ? id : constant(0, slot_type_or(exit.result_slot, integer(64))), true);
+        terminate(Op::Jump);
+        return true;
+    }
+
     // Translates the op at `pc`; true when it ended the block.
     bool translate(std::uint32_t pc) {
         const auto& op = region_.code[pc];
@@ -760,17 +1029,18 @@ private:
             terminate(Op::Jump);
             return true;
         case Code::CheckRef: {
-            Inst in;
-            in.op = Op::StateCall;
-            in.operands[0] = value(op.a);
-            in.imm = op.index;
-            in.flags = Checked | Effect | CheckReference;
-            in.state = entry_state(op.block);
-            emit(std::move(in));
+            // check_reference: nil passes for an object type (images 0.2 and
+            // later), anything else must be a live entry of the type.
+            const auto& type = image_.types[op.index];
+            const bool nil = type.kind == nvr::TypeKind::Object && image_.minor_version >= 2;
+            const auto state = entry_state(op.block);
+            const auto entry = heap_check(Op::Lookup, value(op.a), none, nil ? 1 : 0, state, true);
+            heap_check(Op::CheckKind, entry, none, type_test(op.index), state, true);
             return false;
         }
         case Code::State: {
             const auto& exit = *region_.exits[op.index];
+            if (inline_heap_operation(op, exit)) return false;
             Inst in;
             in.op = Op::StateCall;
             in.aux = op.index;
@@ -813,6 +1083,7 @@ private:
             const bool call = op.code == Code::Call;
             const auto& exit = *region_.exits[op.index];
             const auto arguments = values(op.other, op.width);
+            if (!call && fast_path(op, exit, arguments)) return true;
             // The block's step, the commit, and the frame the reference sees.
             const auto charged = counter_add(read(c_var(), cur_), 1);
             def_[cur_][c_var()] = charged;
@@ -1063,7 +1334,7 @@ private:
     // of `written`) a write-back stores, and a call's result slot.
     void apply_writes(const Inst& in, std::vector<std::uint8_t>& written) const {
         const auto count = static_cast<std::size_t>(slots_);
-        if (in.op == Op::WriteBack) {
+        if (in.op == Op::WriteBack || in.op == Op::AllocObject || in.op == Op::Append) {
             const auto& state = f_->states[in.state];
             for (std::size_t r = 0; r < count; ++r) {
                 if (state.slots[r].kind != StateSlot::Kind::Unchanged) written[r] = 1;
@@ -1154,7 +1425,8 @@ private:
             work.pop_back();
             const auto& in = f_->insts[v];
             for (const auto operand : in.operands) mark(operand);
-            if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call) {
+            if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call ||
+                in.op == Op::Select || in.op == Op::AllocObject || in.op == Op::Append) {
                 for (std::uint32_t i = 0; i < in.count; ++i) mark(f_->extras[in.extra + i]);
             } else if (in.op == Op::Gather) {
                 for (std::uint32_t i = 0; i < in.count; i += 2) mark(f_->extras[in.extra + i]);
@@ -1280,6 +1552,8 @@ private:
 
     const nvr::Image& image_;
     const tier2::Region& region_;
+    const Variant variant_;
+    nvr::TypeSystem types_{image_};
     Function* f_ = nullptr;
     std::string error_;
     std::uint32_t slots_ = 0;
@@ -1295,6 +1569,7 @@ private:
     std::map<std::uint32_t, std::uint32_t> label_of_;
     std::map<std::uint32_t, std::uint32_t> entry_states_;
     std::map<std::uint32_t, std::uint32_t> ones_;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint32_t> tests_;
     std::vector<std::map<std::uint32_t, std::uint32_t>> def_;
     std::vector<std::map<std::uint32_t, std::uint32_t>> start_;
     std::vector<std::vector<std::pair<std::uint32_t, std::uint32_t>>> incomplete_;
@@ -1310,8 +1585,8 @@ private:
 
 } // namespace
 
-BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check) {
-    return Builder(image, program).run(check);
+BuildResult build(const nvr::Image& image, const tier2::Region& program, bool check, Variant variant) {
+    return Builder(image, program, variant).run(check);
 }
 
 namespace {
@@ -1401,7 +1676,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
     }
     tier3::BuildResult built;
     try {
-        built = tier3::build(image_, program, tier3::verify_enabled());
+        built = tier3::build(image_, program, tier3::verify_enabled(), variant);
         if (built.program) built.program->ir.variant = variant;
         // Only the standard variant inlines: the profile and checkable
         // variants keep every call and return the reference's.
@@ -1418,6 +1693,7 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
             tier3::inline_calls(image_, built.program->ir, source, tier3::verify_enabled());
         }
         if (built.program && options_.native_passes && tier3::passes_enabled()) tier3::optimize(image_, built.program->ir, tier3::verify_enabled());
+        if (built.program) built.program->ir.check_heap = tier3::verify_enabled();
     } catch (const std::exception& error) {
         built.reason = std::string("internal error: ") + error.what();
     }
@@ -1458,6 +1734,15 @@ const tier3::Program* TierCache::compile_native(const tier2::Region& program, ti
         const std::lock_guard lock(mutex_);
         if (built.program) {
             published = built.program.get();
+            for (const auto& [name, count] : built.program->ir.pass_counts) {
+                for (const char* kind : {"nil", "lookup", "kind", "init", "bounds", "global"}) {
+                    if (name == std::string("gvn.") + kind || name == std::string("elim.") + kind) {
+                        statistics_.native_heap_checks[kind] += count;
+                    } else if (name == std::string("licm.") + kind) {
+                        statistics_.native_heap_hoisted += count;
+                    }
+                }
+            }
             statistics_.native_inlined += built.program->ir.inlined_calls;
             statistics_.native_class_tests += built.program->ir.class_tested_dispatches;
             native_owned_.push_back(std::move(built.program));
@@ -1514,6 +1799,10 @@ void TierCache::add_native_events(const NativeCounts& counts,
     total.exits += counts.exits;
     total.traps += counts.traps;
     total.steps += counts.steps;
+    total.fast_allocations += counts.fast_allocations;
+    total.fast_appends += counts.fast_appends;
+    total.slow_allocations += counts.slow_allocations;
+    total.slow_appends += counts.slow_appends;
     for (const auto& [key, value] : deopts) statistics_.native_deopts[key] += value;
 }
 

@@ -665,6 +665,7 @@ if(BUILD_TESTING)
         tests/backend/tier2_tests.cpp
         tests/backend/tier_programs_tests.cpp
         tests/backend/tier_shadow_tests.cpp
+        tests/backend/tier3_heap_tests.cpp
         tests/backend/tier3_inline_tests.cpp
         tests/backend/tier3_ir_tests.cpp
         tests/backend/tier3_native_tests.cpp
@@ -724,6 +725,9 @@ if(BUILD_TESTING)
     # every region on the region interpreter.
     add_test(NAME backend-tier-interpreter COMMAND neura_backend_tests tier "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier-interpreter PROPERTIES ENVIRONMENT NEURA_JIT=off)
+    # Tier 3's checkable variant under the region check of NEURA_TIER_CHECK=1.
+    add_test(NAME backend-tier3-check COMMAND neura_backend_tests tier3_check "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(backend-tier3-check PROPERTIES ENVIRONMENT "NEURA_TIER_CHECK=1;NEURA_TIER3=interp")
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"

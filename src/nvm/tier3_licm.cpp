@@ -204,6 +204,17 @@ std::uint32_t preheader_state(Function& f, const Loop& loop, std::uint32_t) {
 
 namespace {
 
+const char* heap_kind_name(Op op) {
+    switch (op) {
+    case Op::CheckNotNil: return "nil";
+    case Op::Lookup: return "lookup";
+    case Op::CheckKind: return "kind";
+    case Op::CheckInit: return "init";
+    case Op::CheckIndex: return "bounds";
+    default: return "global";
+    }
+}
+
 // A pure op that is safe to run where it did not run before. An op a guard
 // covers stays where the guard dominates it; a division whose check went
 // stays where the check's proof held (a hardware division by zero traps).
@@ -270,6 +281,38 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
             }
         }
     }
+    // What the loop writes of the heap: the heap reads and checks that may
+    // leave it are those nothing in it changes (6.4, 6.6 of the design: a
+    // helper, call or state call may free, collect, grow or write anything).
+    bool safepoint = false;
+    bool widens = false;
+    std::vector<std::uint64_t> fields;
+    std::vector<std::uint64_t> globals;
+    for (const auto b : loop.body) {
+        for (const auto id : f.blocks[b].insts) {
+            const auto& in = f.insts[id];
+            if (in.op == Op::Helper || in.op == Op::Call || in.op == Op::StateCall || in.op == Op::AllocObject ||
+                in.op == Op::Append) {
+                safepoint = true;
+            }
+            else if (in.op == Op::Widen) widens = true;
+            else if (in.op == Op::StoreField) fields.push_back(in.imm);
+            else if (in.op == Op::StoreGlobal) globals.push_back(in.imm);
+        }
+    }
+    const auto written = [](const std::vector<std::uint64_t>& list, std::uint64_t index) {
+        return std::find(list.begin(), list.end(), index) != list.end();
+    };
+    // Entries whose kind and type a check before the loop, or one that
+    // leaves it, has fixed: a field or version may be read from them.
+    std::vector<std::uint8_t> kind_checked(f.insts.size(), 0);
+    for (std::uint32_t id = 0; id < f.insts.size(); ++id) {
+        const auto& in = f.insts[id];
+        const auto b = places.block[id];
+        if (in.op == Op::CheckKind && b != none && !loop.in_body[b] && cfg.dominates(b, loop.header)) {
+            kind_checked[in.operands[0]] = 1;
+        }
+    }
     struct Move {
         std::uint32_t id;
         bool check;
@@ -301,10 +344,39 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
                     }
                 }
             };
+            if (!is_outside(in.operands[3])) continue;
             if (hoistable_pure(in)) {
                 take_constants();
                 outside[id] = 1;
                 plan.push_back({id, false});
+            } else if (is_heap_check(in.op)) {
+                // A check of values (nil, bounds) holds wherever they are the
+                // same; one of an entry's liveness, kind or flags, or of a
+                // global's flag, while nothing in the loop frees or
+                // collects.
+                const bool of_values = in.op == Op::CheckNotNil || in.op == Op::CheckIndex;
+                if (has_state && on_every_path && !effect_seen && in.guard == none && (of_values || !safepoint)) {
+                    take_constants();
+                    if (in.op == Op::Lookup) outside[id] = 1;
+                    if (in.op == Op::CheckKind) kind_checked[in.operands[0]] = 1;
+                    plan.push_back({id, true});
+                }
+            } else if (is_heap_read(in.op) && in.op != Op::LoadElement && !safepoint) {
+                bool moves = true;
+                switch (in.op) {
+                case Op::LoadField:
+                case Op::LoadVersion: moves = kind_checked[in.operands[0]] != 0 && !(in.op == Op::LoadField && written(fields, in.imm)); break;
+                case Op::LoadData:
+                case Op::LoadStorage: moves = !widens; break;
+                case Op::LoadGlobal: moves = !written(globals, in.imm); break;
+                default: break;
+                }
+                if (moves) {
+                    take_constants();
+                    outside[id] = 1;
+                    plan.push_back({id, false});
+                    ++counts["licm.read"];
+                }
             } else if (in.op == Op::Lift && (in.flags & Checked) != 0 && in.guard == none && has_state && on_every_path &&
                        !effect_seen &&
                        !lift::float_opcode(in.lifted.op)) {
@@ -348,7 +420,8 @@ bool hoist_one(Function& f, const Cfg& cfg, const Loop& loop, Counts& counts) {
         if (m.check) {
             if (state == none) state = preheader_state(f, loop, preheader);
             f.insts[m.id].state = state;
-            ++counts["licm.check"];
+            ++counts[is_heap_check(f.insts[m.id].op) ? std::string("licm.") + heap_kind_name(f.insts[m.id].op) : std::string("licm.check")];
+        } else if (is_heap_read(f.insts[m.id].op)) {
         } else if (f.insts[m.id].op != Op::Const) {
             ++counts["licm.pure"];
         }

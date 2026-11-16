@@ -1,8 +1,10 @@
 #include "tier3.hpp"
 
+#include "heap.hpp"
 #include "lift/evaluate.hpp"
 
 #include <algorithm>
+#include <cstring>
 #include <stdexcept>
 
 namespace neura::nvm::tier3 {
@@ -25,7 +27,120 @@ struct Activation {
     Activation& operator=(const Activation&) = delete;
 };
 
+// Words of the heap at an address, as native code reads and writes them
+// (heap.hpp, "Published layout"; host byte order).
+std::uint64_t load(std::uint64_t address, unsigned bytes) {
+    std::uint64_t value = 0;
+    switch (bytes) {
+    case 1: { std::uint8_t v = 0; std::memcpy(&v, reinterpret_cast<const void*>(address), 1); value = v; break; }
+    case 2: { std::uint16_t v = 0; std::memcpy(&v, reinterpret_cast<const void*>(address), 2); value = v; break; }
+    case 4: { std::uint32_t v = 0; std::memcpy(&v, reinterpret_cast<const void*>(address), 4); value = v; break; }
+    default: std::memcpy(&value, reinterpret_cast<const void*>(address), 8); break;
+    }
+    return value;
+}
+
+void store(std::uint64_t address, unsigned bytes, std::uint64_t value) {
+    switch (bytes) {
+    case 1: { const auto v = static_cast<std::uint8_t>(value); std::memcpy(reinterpret_cast<void*>(address), &v, 1); break; }
+    case 2: { const auto v = static_cast<std::uint16_t>(value); std::memcpy(reinterpret_cast<void*>(address), &v, 2); break; }
+    case 4: { const auto v = static_cast<std::uint32_t>(value); std::memcpy(reinterpret_cast<void*>(address), &v, 4); break; }
+    default: std::memcpy(reinterpret_cast<void*>(address), &value, 8); break;
+    }
+}
+
+// The entry of `handle` through the published handle table, or 0.
+std::uint64_t lookup(const Context& context, std::uint64_t handle) {
+    const auto* table = static_cast<const Heap::HandleTable*>(context.handle_table);
+    const auto page = handle >> Heap::handle_page_bits();
+    if (table == nullptr || page >= table->count) return 0;
+    const auto address = reinterpret_cast<std::uintptr_t>(table->pages[page]);
+    if (address == 0) return 0;
+    return load(address + Heap::page_entries_offset() + 8 * (handle & Heap::handle_page_mask()), 8);
+}
+
+bool passes(const TypeTest& test, std::uint64_t entry) {
+    if (load(entry + Heap::kind_offset(), 1) != test.kind) return false;
+    if (test.any_type) return true;
+    const auto type = static_cast<std::uint32_t>(load(entry + Heap::type_offset(), 4));
+    return std::binary_search(test.types.begin(), test.types.end(), type);
+}
+
+// The address of field `field` of an object entry: after its initialized
+// words, `words` of them when known, else as many as its count needs.
+std::uint64_t field_address(std::uint64_t entry, std::uint64_t field, std::uint32_t words) {
+    const auto count = words != none ? words : (load(entry + Heap::count_offset(), 8) + 63) / 64;
+    return entry + Heap::initialized_offset() + 8 * (count + field);
+}
+
+// The width an element is stored at: the declared width while the storage
+// is that, else eight bytes.
+unsigned element_bytes(std::uint64_t storage, std::uint64_t declared) {
+    return storage == declared ? static_cast<unsigned>(declared) : 8U;
+}
+
 } // namespace
+
+bool allocate_inline(Context& context, std::uint32_t layout, std::uint64_t fields, std::uint64_t& handle) {
+    if (context.fast_allocation == 0) return false;
+    const auto bytes = Heap::object_block_bytes(static_cast<std::size_t>(fields));
+    if (bytes > Heap::allocator_largest()) return false;
+    auto& words = *static_cast<Heap::NativeAllocator*>(context.allocator);
+    if (words.last >= context.max_handles) return false;
+    const auto cells = 1 + fields;
+    const auto live = *context.live_cells;
+    const auto next = *context.next_collection;
+    if (live > next || cells > next - live) return false;
+    const auto h = words.last + 1;
+    const auto* table = static_cast<const Heap::HandleTable*>(context.handle_table);
+    const auto page_index = h >> Heap::handle_page_bits();
+    if (page_index >= table->count) return false;
+    const auto page = reinterpret_cast<std::uintptr_t>(table->pages[page_index]);
+    if (page == 0) return false;
+    const auto c = Heap::allocator_class_of(bytes);
+    const auto size = Heap::allocator_class_size(c);
+    auto* block = static_cast<unsigned char*>(words.free[c]);
+    if (block == nullptr && static_cast<std::size_t>(words.end[c] - words.next[c]) < size) return false;
+    // Every condition holds: what Blocks::allocate, the new object's
+    // initialization, store_new() and the executor's count do.
+    if (block != nullptr) {
+        std::memcpy(&words.free[c], block, sizeof(void*));
+    } else {
+        block = words.next[c];
+        words.next[c] += size;
+    }
+    const auto address = reinterpret_cast<std::uintptr_t>(block);
+    store(address, 8, std::uint64_t{0x08080000} | (std::uint64_t{layout} << 32));
+    store(address + Heap::count_offset(), 8, fields);
+    store(address + Heap::identity_offset(), 8, 0);
+    const auto zeroed = (fields + 63) / 64 + fields;
+    if (zeroed != 0) std::memset(block + Heap::initialized_offset(), 0, static_cast<std::size_t>(8 * zeroed));
+    store(page + Heap::page_entries_offset() + 8 * (h & Heap::handle_page_mask()), 8, address);
+    store(page + Heap::page_live_offset(), 8, load(page + Heap::page_live_offset(), 8) + 1);
+    words.last = h;
+    *context.live_cells = live + cells;
+    if (*context.peak_cells < live + cells) *context.peak_cells = live + cells;
+    handle = h;
+    return true;
+}
+
+bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value) {
+    if (context.fast_allocation == 0) return false;
+    const auto live = *context.live_cells;
+    const auto next = *context.next_collection;
+    if (live >= next) return false;
+    const auto storage = static_cast<unsigned>(load(entry + Heap::storage_width_offset(), 1));
+    if (storage < 8 && (value >> (8 * storage)) != 0) return false;
+    const auto count = load(entry + Heap::count_offset(), 8);
+    if (count >= load(entry + Heap::list_capacity_offset(), 8)) return false;
+    // What append() does without widening or growing, and the count.
+    store(load(entry + Heap::data_offset(), 8) + count * storage, storage, value);
+    store(entry + Heap::count_offset(), 8, count + 1);
+    store(entry + Heap::list_version_offset(), 8, load(entry + Heap::list_version_offset(), 8) + 1);
+    *context.live_cells = live + 1;
+    if (*context.peak_cells < live + 1) *context.peak_cells = live + 1;
+    return true;
+}
 
 // The IR interpreter (docs/runtime/NVM.md, "Execution tiers"). It does for
 // each op what native code does, through the same helpers: values are in an
@@ -43,6 +158,9 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
     std::uint8_t* initialized = nullptr;
     helpers.frame(&context, &slots, &initialized);
 
+    const auto heap_reason = [](const Inst& in) {
+        return (in.flags & ReferenceCheck) != 0 ? Reason::References : Reason::StateTraps;
+    };
     const auto deoptimize = [&](const Inst& in, Reason reason) {
         helpers.deoptimize(&context, &fn, in.state, reason, values.data());
         return Result{Outcome::Deopt, 0};
@@ -197,6 +315,117 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
                 helpers.leave(&context, static_cast<std::uint32_t>(in.imm));
                 return {Outcome::Leave, 0};
             case Op::Deopt: return deoptimize(in, Reason::Exits);
+            case Op::CheckNotNil:
+                if (operand(0) == 0) return deoptimize(in, heap_reason(in));
+                break;
+            case Op::Lookup: {
+                const auto handle = operand(0);
+                if (handle == 0 && (in.imm & 1U) != 0) {
+                    values[id] = 0;
+                    break;
+                }
+                const auto entry = lookup(context, handle);
+                if (entry == 0) return deoptimize(in, heap_reason(in));
+                values[id] = entry;
+                break;
+            }
+            case Op::CheckKind: {
+                const auto entry = operand(0);
+                if (entry != 0 && !passes(fn.type_tests[in.imm], entry)) return deoptimize(in, heap_reason(in));
+                break;
+            }
+            case Op::CheckInit: {
+                const auto word = load(operand(0) + Heap::initialized_offset() + 8 * (in.imm / 64), 8);
+                if (((word >> (in.imm % 64)) & 1U) == 0) return deoptimize(in, heap_reason(in));
+                break;
+            }
+            case Op::CheckIndex:
+                if (operand(0) >= operand(1)) return deoptimize(in, heap_reason(in));
+                break;
+            case Op::CheckGlobalInit:
+                if (context.global_initialized[in.imm] == 0) return deoptimize(in, heap_reason(in));
+                break;
+            case Op::TestKind: {
+                const auto entry = operand(0);
+                values[id] = entry != 0 && passes(fn.type_tests[in.imm], entry) ? 1 : 0;
+                break;
+            }
+            case Op::LoadTag: values[id] = load(operand(0) + Heap::type_offset(), 4); break;
+            case Op::LoadField: values[id] = load(field_address(operand(0), in.imm, in.aux), 8); break;
+            case Op::LoadLength: values[id] = load(operand(0) + Heap::length_offset(), 8); break;
+            case Op::LoadData: values[id] = load(operand(0) + Heap::data_offset(), 8); break;
+            case Op::LoadStorage: values[id] = load(operand(0) + Heap::storage_width_offset(), 1); break;
+            case Op::LoadElement: {
+                const auto bytes = element_bytes(operand(2), in.imm);
+                values[id] = load(operand(0) + operand(1) * bytes, bytes);
+                break;
+            }
+            case Op::LoadVersion: values[id] = load(operand(0) + Heap::list_version_offset(), 8); break;
+            case Op::LoadGlobal: values[id] = context.globals[in.imm]; break;
+            case Op::Select: {
+                const auto index = operand(0);
+                if (index >= in.count) throw std::logic_error("tier 3: a select past its values");
+                values[id] = values[fn.extras[in.extra + index]];
+                break;
+            }
+            case Op::StoreField: {
+                const auto entry = operand(0);
+                store(field_address(entry, in.imm, in.aux), 8, operand(1));
+                const auto flags = entry + Heap::initialized_offset() + 8 * (in.imm / 64);
+                store(flags, 8, load(flags, 8) | (std::uint64_t{1} << (in.imm % 64)));
+                break;
+            }
+            case Op::StoreElement: {
+                const auto bytes = element_bytes(operand(2), in.imm);
+                store(operand(0) + operand(1) * bytes, bytes, operand(3));
+                break;
+            }
+            case Op::StoreGlobal:
+                context.globals[in.imm] = operand(0);
+                context.global_initialized[in.imm] = 1;
+                break;
+            case Op::AllocObject:
+            case Op::Append: {
+                bool fast = false;
+                std::uint64_t result = 0;
+                if (in.op == Op::AllocObject) {
+                    fast = allocate_inline(context, static_cast<std::uint32_t>(fn.exits[in.aux]->immediate), in.imm, result);
+                    context.fast_allocations += fast ? 1 : 0;
+                } else {
+                    fast = append_inline(context, operand(1), operand(2));
+                    context.fast_appends += fast ? 1 : 0;
+                }
+                if (fast) {
+                    if (fn.check_heap) helpers.check_heap(&context);
+                    values[id] = result;
+                    break;
+                }
+                gather_arguments();
+                context.C = operand(0);
+                if (fn.states[in.state].caller != none) {
+                    // Inside inlined code: every frame materialized, the
+                    // helper, and the activation ends at its resume block.
+                    const auto status = helpers.inlined_helper(&context, &fn, in.state, values.data(), fn.exits[in.aux],
+                                                               arguments.data(), static_cast<std::uint32_t>(arguments.size()),
+                                                               &result);
+                    if (status == Status::Trapped) return {Outcome::Trapped, 0};
+                    if (status == Status::Exception) return {Outcome::Exception, 0};
+                    return {Outcome::Leave, 0};
+                }
+                // The helper (R3), after the frame is written back.
+                helpers.write_back(&context, &fn, in.state, values.data());
+                const auto status = helpers.helper(&context, fn.exits[in.aux], arguments.data(),
+                                                   static_cast<std::uint32_t>(arguments.size()), &result);
+                if (status == Status::Trapped) return {Outcome::Trapped, 0};
+                if (status == Status::Exception) return {Outcome::Exception, 0};
+                values[id] = result;
+                break;
+            }
+            case Op::Widen:
+                if (helpers.set_element(&context, operand(0), operand(1), operand(2)) != Status::Ok) {
+                    return {Outcome::Exception, 0};
+                }
+                break;
             }
         }
         if (next == none) throw std::logic_error("tier 3: a block ended without a terminator");

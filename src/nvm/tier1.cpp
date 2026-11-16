@@ -141,6 +141,16 @@ std::string describe(const TierStatistics& s) {
                std::to_string(n.references) + ", state traps " + std::to_string(n.state_traps) + ", exits " +
                std::to_string(n.exits) + "; traps in place " + std::to_string(n.traps) + "; steps in native code " +
                std::to_string(n.steps) + "\n";
+        out += "tier: native heap: allocations fast " + std::to_string(n.fast_allocations) + ", slow " +
+               std::to_string(n.slow_allocations) + "; appends fast " + std::to_string(n.fast_appends) + ", slow " +
+               std::to_string(n.slow_appends) + "; checks removed:";
+        if (s.native_heap_checks.empty()) out += " none";
+        const char* separator = " ";
+        for (const auto& [kind, count] : s.native_heap_checks) {
+            out += separator + kind + " " + std::to_string(count);
+            separator = ", ";
+        }
+        out += "; hoisted " + std::to_string(s.native_heap_hoisted) + "\n";
         if (!s.native_off.empty()) out += "tier: native programs on the IR interpreter: " + s.native_off + "\n";
         for (const auto& [reason, count] : s.native_rejections) {
             out += "tier: no native program " + std::to_string(count) + ": " + reason + "\n";

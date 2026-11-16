@@ -26,6 +26,7 @@
 #include "jit/tier3_lower.hpp"
 #include "jit/x64.hpp"
 #include "lift/evaluate.hpp"
+#include "nvm/heap.hpp"
 #include "nvm/tier3.hpp"
 
 #include <algorithm>
@@ -190,6 +191,8 @@ public:
         a_.bind(ret_outcome_);
         a_.alu(Alu::add, S64, x64::rsp, Imm32{static_cast<std::int32_t>(frame_bytes_)});
         a_.ret();
+        // Constant data the code reads (the tables of type tests).
+        for (std::size_t i = 0; i < data_.size(); ++i) data_[i]();
 
         std::vector<x64::Label> entries;
         for (const auto b : l_.entry_blocks) entries.push_back(block_labels_[b]);
@@ -726,6 +729,7 @@ private:
             a_.jmp(block_labels_[succs[table.fallback]]);
             return;
         }
+        default: return heap(inst, ia, step);
         }
         throw EmitError("an unknown machine instruction");
     }
@@ -737,9 +741,12 @@ private:
     // The physical frame from the state: each slot whose entry is not
     // Unchanged (a value already in its own frame slot needs no store), each
     // initialized flag, and the block.
-    void write_back(const mir::InstAllocation& ia, const Step& step) {
+    void write_back(const mir::InstAllocation& ia, const Step& step) { write_back_from(ia, step, 0, Gpr{ia.temps_gpr.at(0)}); }
+
+    // The write-back of `step`'s state from the uses at `first` on, with the
+    // temporary register `t`.
+    void write_back_from(const mir::InstAllocation& ia, const Step& step, std::size_t first, Gpr t) {
         const auto& state = f_.states[step.state];
-        const auto t = Gpr{ia.temps_gpr.at(0)};
         const auto constant = [&](std::uint64_t v, std::uint64_t& bits) {
             for (const auto& [value, known] : step.state_constants) {
                 if (value == v) {
@@ -757,7 +764,7 @@ private:
                 a_.mov(S64, slot(r), t);
             }
         };
-        std::size_t u = 0;
+        std::size_t u = first;
         for (std::uint32_t r = 0; r < state.slots.size(); ++r) {
             const auto& entry = state.slots[r];
             std::uint64_t bits = 0;
@@ -956,6 +963,573 @@ private:
         a_.mov(S64, frame, Mem::at(context, off::slots));
         a_.test(S32, x64::rcx, x64::rcx);
         a_.jcc(Cond::ne, ret_outcome_);
+    }
+
+    // ---- heap access ------------------------------------------------------------
+    //
+    // What the IR interpreter does for each heap operation
+    // (src/nvm/tier3_interp.cpp) on the published layout (src/nvm/heap.hpp),
+    // instruction for instruction; a failing check jumps to its stub.
+
+    using H = nvm::Heap;
+
+    // Constant data emitted after the code.
+    std::vector<std::function<void()>> data_;
+
+    // Jumps to `fail` unless entry `e` passes type test `index`: its kind
+    // byte, then (unless the kind is enough) its type word against each type
+    // of the set or, for a larger set, a bit of a table after the code. `t`
+    // is destroyed.
+    void type_test(Gpr e, std::uint32_t index, Label fail, Gpr t) {
+        const auto& test = f_.type_tests.at(index);
+        a_.movzx(S32, t, S8, Mem::at(e, static_cast<std::int32_t>(H::kind_offset())));
+        a_.alu(Alu::cmp, S32, t, imm32(test.kind));
+        a_.jcc(Cond::ne, fail);
+        if (test.any_type) return;
+        if (test.types.empty()) {
+            a_.jmp(fail);
+            return;
+        }
+        a_.mov(S32, t, Mem::at(e, static_cast<std::int32_t>(H::type_offset())));
+        if (test.types.size() <= 4) {
+            const auto passed = a_.label();
+            for (std::size_t i = 0; i + 1 < test.types.size(); ++i) {
+                a_.alu(Alu::cmp, S32, t, imm32(test.types[i]));
+                a_.jcc(Cond::e, passed);
+            }
+            a_.alu(Alu::cmp, S32, t, imm32(test.types.back()));
+            a_.jcc(Cond::ne, fail);
+            a_.bind(passed);
+            return;
+        }
+        const auto table = a_.label();
+        const auto largest = test.types.back();
+        std::vector<std::uint64_t> words(largest / 64 + 1, 0);
+        for (const auto type : test.types) words[type / 64] |= std::uint64_t{1} << (type % 64);
+        data_.push_back([this, table, words] {
+            a_.align(8);
+            a_.bind(table);
+            for (const auto w : words) a_.data64(w);
+        });
+        a_.alu(Alu::cmp, S32, t, imm32(largest));
+        a_.jcc(Cond::a, fail);
+        a_.bit(Bit::bt, S64, Rm(Mem::rip_relative(table)), t);
+        a_.jcc(Cond::ae, fail);
+    }
+
+    // The address of a field: after the entry's initialized words, `words`
+    // of them when known, else as many as its count needs (in `scratch`).
+    Mem field(Gpr e, std::uint64_t index, std::uint32_t words) {
+        const auto base = H::initialized_offset() + 8 * index;
+        if (words != t3::none) return Mem::at(e, displacement(base + 8ULL * words));
+        a_.mov(S64, scratch, Mem::at(e, static_cast<std::int32_t>(H::count_offset())));
+        a_.alu(Alu::add, S64, scratch, Imm32{63});
+        a_.shift(Shift::shr, S64, scratch, Imm8{6});
+        return Mem::at(e, scratch, 8, displacement(base));
+    }
+
+    // Sets bit `bit` of the word at `word`.
+    void set_bit(const Mem& word, unsigned bit) {
+        if (bit < 31) a_.alu(Alu::or_, S64, word, imm32(std::uint64_t{1} << bit));
+        else a_.bit(Bit::bts, S64, Rm(word), Imm8{static_cast<std::uint8_t>(bit)});
+    }
+
+    static Size width_size(std::uint64_t bytes) {
+        switch (bytes) {
+        case 1: return S8;
+        case 2: return S16;
+        case 4: return S32;
+        default: return S64;
+        }
+    }
+
+    // Loads the element at `p` + `i` * `bytes`, zero-extended.
+    void load_element(Gpr d, Gpr p, Gpr i, std::uint64_t bytes) {
+        const auto at = Mem::at(p, i, static_cast<unsigned>(bytes), 0);
+        if (bytes == 1 || bytes == 2) a_.movzx(S32, d, width_size(bytes), at);
+        else a_.mov(width_size(bytes), d, at);
+    }
+
+    // Calls `offset`'s helper (context first) keeping every allocatable
+    // caller-saved register; the helper's result is in `scratch` after it.
+    void call_saving(std::int32_t offset, const std::function<void()>& arguments) {
+        static constexpr Gpr saved[] = {x64::rax, x64::rcx, x64::rdx, x64::rsi, x64::rdi, x64::r8, x64::r9, x64::r10};
+        for (const auto r : saved) a_.push(r);
+        arguments();
+        a_.mov(S64, x64::rdi, context);
+        call_helper(offset);
+        a_.mov(S64, scratch, x64::rax);
+        for (auto i = std::size(saved); i > 0; --i) a_.pop(saved[i - 1]);
+    }
+
+    // NEURA_TIER3_VERIFY=1: the heap's consistency after an inline
+    // allocation or append.
+    void check_heap() {
+        if (!f_.check_heap) return;
+        call_saving(off::check_heap, [] {});
+    }
+
+    // The slow path of an allocation or append: the frame written back, the
+    // block's step in the context, then the helper of exits[index] on the
+    // argument uses, every allocatable register kept; its result into `d`
+    // (when it has one), and on to `done`. A trap or an exception ends the
+    // activation.
+    void slow_path(const mir::InstAllocation& ia, const Step& step, std::size_t arguments, Label slow, Label done,
+                   const Gpr* d, Gpr t) {
+        const auto pending = pending_;
+        cold_.push_back([this, ia, step, arguments, slow, done, d_reg = d ? *d : Gpr{0}, has_d = d != nullptr, t, pending] {
+            a_.bind(slow);
+            if (step.inlined) return inlined_slow_path(ia, step, arguments, t, pending);
+            write_back_from(ia, step, arguments + step.arguments, t);
+            if (pending == 0) {
+                a_.mov(S64, Mem::at(context, off::C), counter);
+            } else {
+                a_.lea(S64, scratch, Mem::at(counter, displacement(pending)));
+                a_.mov(S64, Mem::at(context, off::C), scratch);
+            }
+            store_arguments(ia, arguments, step.arguments);
+            call_saving(off::helper, [&] {
+                a_.mov(S32, x64::rsi, imm32(step.index));
+                a_.lea(S64, x64::rdx, Mem::at(x64::rsp, 64));
+                a_.mov(S32, x64::rcx, imm32(step.arguments));
+            });
+            const auto failed = a_.label();
+            a_.alu(Alu::cmp, S32, Mem::at(context, off::status), Imm32{0});
+            a_.jcc(Cond::ne, failed);
+            if (has_d) a_.mov(S64, d_reg, scratch);
+            a_.jmp(done);
+            a_.bind(failed);
+            a_.alu(Alu::cmp, S32, Mem::at(context, off::status), imm32(static_cast<std::uint32_t>(t3::NativeStatus::Trapped)));
+            a_.jcc(Cond::e, trapped_exit_);
+            a_.jmp(exception_exit_);
+        });
+    }
+
+    // The slow path inside inlined code: the values of every level of the
+    // state into the context's value array (as a stub stores them), C in the
+    // context, then the helper that materializes the frames, runs the
+    // reference operation and leaves at its resume block; the activation
+    // ends.
+    void inlined_slow_path(const mir::InstAllocation& ia, const Step& step, std::size_t arguments, Gpr t,
+                           std::uint64_t pending) {
+        a_.mov(S64, t, Mem::at(context, off::values));
+        const auto at = [&](std::uint32_t value) { return Mem::at(t, displacement(8ULL * value)); };
+        for (const auto& [use, value] : step.state_values) {
+            const auto& location = ia.state_uses.at(use);
+            if (in_register(location)) {
+                a_.mov(S64, at(value), gpr(location));
+            } else {
+                a_.mov(S64, scratch, memory(location));
+                a_.mov(S64, at(value), scratch);
+            }
+        }
+        for (const auto& [value, bits] : step.state_constants) {
+            if (simm32(bits)) {
+                a_.mov(S64, at(value), imm32(bits));
+            } else {
+                a_.mov_constant(scratch, bits);
+                a_.mov(S64, at(value), scratch);
+            }
+        }
+        if (pending == 0) {
+            a_.mov(S64, Mem::at(context, off::C), counter);
+        } else {
+            a_.lea(S64, scratch, Mem::at(counter, displacement(pending)));
+            a_.mov(S64, Mem::at(context, off::C), scratch);
+        }
+        store_arguments(ia, arguments, step.arguments);
+        a_.mov(S64, x64::rdi, context);
+        a_.mov(S32, x64::rsi, imm32(step.index));
+        a_.mov(S64, x64::rdx, x64::rsp);
+        a_.mov(S32, x64::rcx, imm32(step.arguments));
+        a_.mov(S32, x64::r8, imm32(step.state));
+        call_helper(nvm::tier3::offsets::inlined_helper);
+        a_.alu(Alu::cmp, S32, Mem::at(context, off::status), Imm32{0});
+        a_.jcc(Cond::e, left_exit_);
+        a_.alu(Alu::cmp, S32, Mem::at(context, off::status), imm32(static_cast<std::uint32_t>(t3::NativeStatus::Trapped)));
+        a_.jcc(Cond::e, trapped_exit_);
+        a_.jmp(exception_exit_);
+    }
+
+    // Jumps to `slow` unless `cells` cells fit below the collection
+    // threshold: live <= next and cells <= next - live. Leaves live in `t`.
+    void cells_fit(std::uint64_t cells, Gpr t, Label slow) {
+        a_.mov(S64, scratch, Mem::at(context, nvm::tier3::offsets::live_cells));
+        a_.mov(S64, t, Mem::at(scratch));
+        a_.mov(S64, scratch, Mem::at(context, nvm::tier3::offsets::next_collection));
+        a_.mov(S64, scratch, Mem::at(scratch));
+        a_.alu(Alu::sub, S64, scratch, t);
+        a_.jcc(Cond::b, slow);
+        if (simm32(cells)) {
+            a_.alu(Alu::cmp, S64, scratch, imm32(cells));
+        } else {
+            a_.push(t);
+            a_.mov_constant(t, cells);
+            a_.alu(Alu::cmp, S64, scratch, t);
+            a_.pop(t);
+        }
+        a_.jcc(Cond::b, slow);
+    }
+
+    // live += cells (live is in `t`), and the peak.
+    void count_cells(std::uint64_t cells, Gpr t) {
+        if (simm32(cells)) {
+            a_.alu(Alu::add, S64, t, imm32(cells));
+        } else {
+            a_.mov_constant(scratch, cells);
+            a_.alu(Alu::add, S64, t, scratch);
+        }
+        a_.mov(S64, scratch, Mem::at(context, nvm::tier3::offsets::live_cells));
+        a_.mov(S64, Mem::at(scratch), t);
+        a_.mov(S64, scratch, Mem::at(context, nvm::tier3::offsets::peak_cells));
+        const auto kept = a_.label();
+        a_.alu(Alu::cmp, S64, Mem::at(scratch), t);
+        a_.jcc(Cond::ae, kept);
+        a_.mov(S64, Mem::at(scratch), t);
+        a_.bind(kept);
+    }
+
+    void heap(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
+        namespace o3 = nvm::tier3::offsets;
+        switch (step.kind) {
+        case Kind::Lookup: {
+            const auto h = gpr(ia.uses[0]);
+            const auto d = gpr(ia.defs[0]);
+            const auto t = Gpr{ia.temps_gpr.at(0)};
+            const auto fail = stub(inst, ia);
+            const auto done = a_.label();
+            if ((step.imm & 1U) != 0) {
+                const auto handle = a_.label();
+                a_.test(S64, h, h);
+                a_.jcc(Cond::ne, handle);
+                a_.alu(Alu::xor_, S32, d, d);
+                a_.jmp(done);
+                a_.bind(handle);
+            }
+            a_.mov(S32, t, h);
+            a_.alu(Alu::and_, S32, t, imm32(H::handle_page_mask()));
+            a_.mov(S64, scratch, h);
+            a_.shift(Shift::shr, S64, scratch, Imm8{static_cast<std::uint8_t>(H::handle_page_bits())});
+            a_.mov(S64, d, Mem::at(context, o3::handle_table));
+            a_.alu(Alu::cmp, S64, scratch, Mem::at(d, static_cast<std::int32_t>(offsetof(H::HandleTable, count))));
+            a_.jcc(Cond::ae, fail);
+            a_.mov(S64, d, Mem::at(d, static_cast<std::int32_t>(offsetof(H::HandleTable, pages))));
+            a_.mov(S64, d, Mem::at(d, scratch, 8, 0));
+            a_.test(S64, d, d);
+            a_.jcc(Cond::e, fail);
+            a_.mov(S64, d, Mem::at(d, t, 8, static_cast<std::int32_t>(H::page_entries_offset())));
+            a_.test(S64, d, d);
+            a_.jcc(Cond::e, fail);
+            a_.bind(done);
+            return;
+        }
+        case Kind::CheckNotNil: {
+            const auto h = gpr(ia.uses[0]);
+            a_.test(S64, h, h);
+            a_.jcc(Cond::e, stub(inst, ia));
+            return;
+        }
+        case Kind::CheckKind: {
+            const auto e = gpr(ia.uses[0]);
+            const auto fail = stub(inst, ia);
+            const auto passed = a_.label();
+            if (step.checked) {
+                a_.test(S64, e, e);
+                a_.jcc(Cond::e, passed);
+            }
+            type_test(e, step.index, fail, scratch);
+            a_.bind(passed);
+            return;
+        }
+        case Kind::CheckInit: {
+            const auto e = gpr(ia.uses[0]);
+            const auto word = Mem::at(e, displacement(H::initialized_offset() + 8 * (step.imm / 64)));
+            const auto bit = static_cast<unsigned>(step.imm % 64);
+            if (bit < 31) {
+                a_.test(S64, word, imm32(std::uint64_t{1} << bit));
+                a_.jcc(Cond::e, stub(inst, ia));
+            } else {
+                a_.bit(Bit::bt, S64, Rm(word), Imm8{static_cast<std::uint8_t>(bit)});
+                a_.jcc(Cond::ae, stub(inst, ia));
+            }
+            return;
+        }
+        case Kind::CheckIndex: {
+            const auto i = gpr(ia.uses[0]);
+            if (step.b_constant) {
+                a_.alu(Alu::cmp, S64, i, imm32(step.b_value));
+            } else if (in_register(ia.uses[1])) {
+                a_.alu(Alu::cmp, S64, i, gpr(ia.uses[1]));
+            } else {
+                a_.alu(Alu::cmp, S64, i, memory(ia.uses[1]));
+            }
+            a_.jcc(Cond::ae, stub(inst, ia));
+            return;
+        }
+        case Kind::CheckGlobalInit: {
+            a_.mov(S64, scratch, Mem::at(context, o3::global_initialized));
+            a_.movzx(S32, scratch, S8, Mem::at(scratch, displacement(step.imm)));
+            a_.test(S32, scratch, scratch);
+            a_.jcc(Cond::e, stub(inst, ia));
+            return;
+        }
+        case Kind::TestKind: {
+            const auto e = gpr(ia.uses[0]);
+            const auto d = gpr(ia.defs[0]);
+            const auto t = Gpr{ia.temps_gpr.at(0)};
+            const auto done = a_.label();
+            a_.alu(Alu::xor_, S32, t, t);
+            a_.test(S64, e, e);
+            a_.jcc(Cond::e, done);
+            type_test(e, step.index, done, scratch);
+            a_.mov(S32, t, Imm32{1});
+            a_.bind(done);
+            a_.mov(S64, d, t);
+            return;
+        }
+        case Kind::LoadTag:
+            a_.mov(S32, gpr(ia.defs[0]), Mem::at(gpr(ia.uses[0]), static_cast<std::int32_t>(H::type_offset())));
+            return;
+        case Kind::LoadField: {
+            const auto at = field(gpr(ia.uses[0]), step.imm, step.index);
+            a_.mov(S64, gpr(ia.defs[0]), at);
+            return;
+        }
+        case Kind::LoadLength:
+            a_.mov(S64, gpr(ia.defs[0]), Mem::at(gpr(ia.uses[0]), static_cast<std::int32_t>(H::length_offset())));
+            return;
+        case Kind::LoadData:
+            a_.mov(S64, gpr(ia.defs[0]), Mem::at(gpr(ia.uses[0]), static_cast<std::int32_t>(H::data_offset())));
+            return;
+        case Kind::LoadStorage:
+            a_.movzx(S32, gpr(ia.defs[0]), S8, Mem::at(gpr(ia.uses[0]), static_cast<std::int32_t>(H::storage_width_offset())));
+            return;
+        case Kind::LoadVersion:
+            a_.mov(S64, gpr(ia.defs[0]), Mem::at(gpr(ia.uses[0]), static_cast<std::int32_t>(H::list_version_offset())));
+            return;
+        case Kind::LoadElement:
+        case Kind::StoreElement: {
+            const auto p = gpr(ia.uses[0]);
+            const auto i = gpr(ia.uses[1]);
+            const bool load = step.kind == Kind::LoadElement;
+            const auto access = [&](std::uint64_t bytes) {
+                if (load) load_element(gpr(ia.defs[0]), p, i, bytes);
+                else a_.mov(width_size(bytes), Mem::at(p, i, static_cast<unsigned>(bytes), 0), gpr(ia.uses[3]));
+            };
+            if (step.imm == 8) {
+                access(8);
+                return;
+            }
+            // The storage is the declared width, or eight bytes once widened.
+            const auto wide = a_.label();
+            const auto done = a_.label();
+            if (in_register(ia.uses[2])) a_.alu(Alu::cmp, S64, gpr(ia.uses[2]), imm32(step.imm));
+            else a_.alu(Alu::cmp, S64, memory(ia.uses[2]), imm32(step.imm));
+            a_.jcc(Cond::ne, wide);
+            access(step.imm);
+            a_.jmp(done);
+            a_.bind(wide);
+            access(8);
+            a_.bind(done);
+            return;
+        }
+        case Kind::LoadGlobal:
+            a_.mov(S64, scratch, Mem::at(context, o3::globals));
+            a_.mov(S64, gpr(ia.defs[0]), Mem::at(scratch, displacement(8 * step.imm)));
+            return;
+        case Kind::StoreGlobal:
+            a_.mov(S64, scratch, Mem::at(context, o3::globals));
+            a_.mov(S64, Mem::at(scratch, displacement(8 * step.imm)), gpr(ia.uses[0]));
+            a_.mov(S64, scratch, Mem::at(context, o3::global_initialized));
+            a_.mov(S8, Mem::at(scratch, displacement(step.imm)), Imm32{1});
+            return;
+        case Kind::StoreField: {
+            const auto e = gpr(ia.uses[0]);
+            a_.mov(S64, field(e, step.imm, step.index), gpr(ia.uses[1]));
+            set_bit(Mem::at(e, displacement(H::initialized_offset() + 8 * (step.imm / 64))), static_cast<unsigned>(step.imm % 64));
+            return;
+        }
+        case Kind::Select: {
+            const auto index = gpr(ia.uses[0]);
+            const auto d = gpr(ia.defs[0]);
+            const auto done = a_.label();
+            for (std::uint64_t k = 0; k + 1 < step.imm; ++k) {
+                const auto next = a_.label();
+                a_.alu(Alu::cmp, S64, index, imm32(k));
+                a_.jcc(Cond::ne, next);
+                load(d, ia.uses[1 + k]);
+                a_.jmp(done);
+                a_.bind(next);
+            }
+            load(d, ia.uses[step.imm]);
+            a_.bind(done);
+            return;
+        }
+        case Kind::Widen:
+            a_.mov(S64, x64::rdi, context);
+            call_helper(o3::set_element);
+            check_status(Label{}, false);
+            return;
+        case Kind::AllocObject: return allocate(ia, step);
+        case Kind::Append: return append(ia, step);
+        default: break;
+        }
+        throw EmitError("an unknown machine instruction");
+    }
+
+    // AllocObject (design 6.7): inline when the pool is in use and the
+    // reference would allocate without a collection, a limit, a new window,
+    // a new page or a new chunk; every condition is decided before the first
+    // write. What it writes is what Blocks::allocate, the object's
+    // initialization, store_new() and the executor's count write.
+    void allocate(const mir::InstAllocation& ia, const Step& step) {
+        namespace o3 = nvm::tier3::offsets;
+        const auto d = gpr(ia.defs[0]);
+        const Gpr words{ia.temps_gpr.at(0)}, h{ia.temps_gpr.at(1)}, t{ia.temps_gpr.at(2)}, page{ia.temps_gpr.at(3)};
+        const auto fields = step.imm;
+        const auto layout = std::uint64_t{f_.exits.at(step.index)->immediate};
+        const auto slow = a_.label();
+        const auto done = a_.label();
+        const auto bytes = H::object_block_bytes(static_cast<std::size_t>(fields));
+        slow_path(ia, step, 0, slow, done, &d, words);
+        if (bytes > H::allocator_largest()) {
+            a_.jmp(slow);
+            a_.bind(done);
+            return;
+        }
+        const auto c = H::allocator_class_of(bytes);
+        const auto size = H::allocator_class_size(c);
+        const auto free_at = Mem::at(words, static_cast<std::int32_t>(offsetof(H::NativeAllocator, free) + 8 * c));
+        const auto next_at = Mem::at(words, static_cast<std::int32_t>(offsetof(H::NativeAllocator, next) + 8 * c));
+        const auto end_at = Mem::at(words, static_cast<std::int32_t>(offsetof(H::NativeAllocator, end) + 8 * c));
+        const auto last_at = Mem::at(words, static_cast<std::int32_t>(offsetof(H::NativeAllocator, last)));
+        a_.alu(Alu::cmp, S64, Mem::at(context, o3::fast_allocation), Imm32{0});
+        a_.jcc(Cond::e, slow);
+        a_.mov(S64, words, Mem::at(context, o3::allocator));
+        a_.mov(S64, h, last_at);
+        a_.alu(Alu::cmp, S64, h, Mem::at(context, o3::max_handles));
+        a_.jcc(Cond::ae, slow);
+        cells_fit(1 + fields, t, slow);
+        // The page of the handle exists.
+        a_.alu(Alu::add, S64, h, Imm32{1});
+        a_.mov(S64, page, h);
+        a_.shift(Shift::shr, S64, page, Imm8{static_cast<std::uint8_t>(H::handle_page_bits())});
+        a_.mov(S64, scratch, Mem::at(context, o3::handle_table));
+        a_.alu(Alu::cmp, S64, page, Mem::at(scratch, static_cast<std::int32_t>(offsetof(H::HandleTable, count))));
+        a_.jcc(Cond::ae, slow);
+        a_.mov(S64, scratch, Mem::at(scratch, static_cast<std::int32_t>(offsetof(H::HandleTable, pages))));
+        a_.mov(S64, page, Mem::at(scratch, page, 8, 0));
+        a_.test(S64, page, page);
+        a_.jcc(Cond::e, slow);
+        // A free block of the class, or room in its chunk.
+        const auto pop = a_.label();
+        const auto have = a_.label();
+        a_.mov(S64, scratch, free_at);
+        a_.test(S64, scratch, scratch);
+        a_.jcc(Cond::ne, pop);
+        a_.mov(S64, scratch, end_at);
+        a_.alu(Alu::sub, S64, scratch, next_at);
+        a_.alu(Alu::cmp, S64, scratch, imm32(size));
+        a_.jcc(Cond::b, slow);
+        a_.mov(S64, scratch, next_at);
+        a_.alu(Alu::add, S64, next_at, imm32(size));
+        a_.jmp(have);
+        a_.bind(pop);
+        a_.mov(S64, t, Mem::at(scratch));
+        a_.mov(S64, free_at, t);
+        a_.bind(have);
+        // The object: header, identity 0, no field initialized, every field 0.
+        a_.mov_constant(t, std::uint64_t{0x08080000} | (layout << 32));
+        a_.mov(S64, Mem::at(scratch, 0), t);
+        if (simm32(fields)) {
+            a_.mov(S64, Mem::at(scratch, static_cast<std::int32_t>(H::count_offset())), imm32(fields));
+        } else {
+            a_.mov_constant(t, fields);
+            a_.mov(S64, Mem::at(scratch, static_cast<std::int32_t>(H::count_offset())), t);
+        }
+        a_.mov(S64, Mem::at(scratch, static_cast<std::int32_t>(H::identity_offset())), Imm32{0});
+        const auto zeroed = (fields + 63) / 64 + fields;
+        for (std::uint64_t k = 0; k < zeroed; ++k) {
+            a_.mov(S64, Mem::at(scratch, displacement(H::initialized_offset() + 8 * k)), Imm32{0});
+        }
+        // Its handle: the page's entry, its live count, the last handle.
+        a_.mov(S32, t, h);
+        a_.alu(Alu::and_, S32, t, imm32(H::handle_page_mask()));
+        a_.mov(S64, Mem::at(page, t, 8, static_cast<std::int32_t>(H::page_entries_offset())), scratch);
+        a_.alu(Alu::add, S64, Mem::at(page, static_cast<std::int32_t>(H::page_live_offset())), Imm32{1});
+        a_.mov(S64, last_at, h);
+        // The cells.
+        a_.mov(S64, scratch, Mem::at(context, o3::live_cells));
+        a_.mov(S64, t, Mem::at(scratch));
+        count_cells(1 + fields, t);
+        a_.alu(Alu::add, S64, Mem::at(context, o3::fast_allocations), Imm32{1});
+        check_heap();
+        a_.mov(S64, d, h);
+        a_.bind(done);
+    }
+
+    // Append (design 6.8): inline when the pool is in use, the cell fits
+    // below the collection threshold, the value fits the storage and the
+    // list has room; then what append() and the count write.
+    void append(const mir::InstAllocation& ia, const Step& step) {
+        namespace o3 = nvm::tier3::offsets;
+        const auto e = gpr(ia.uses[0]);
+        const auto v = gpr(ia.uses[1]);
+        const Gpr live{ia.temps_gpr.at(0)}, storage{ia.temps_gpr.at(1)}, count{ia.temps_gpr.at(2)};
+        const auto declared = f_.insts[step.inst].imm;
+        const auto slow = a_.label();
+        const auto done = a_.label();
+        slow_path(ia, step, 2, slow, done, nullptr, live);
+        a_.alu(Alu::cmp, S64, Mem::at(context, o3::fast_allocation), Imm32{0});
+        a_.jcc(Cond::e, slow);
+        cells_fit(1, live, slow);
+        a_.movzx(S32, storage, S8, Mem::at(e, static_cast<std::int32_t>(H::storage_width_offset())));
+        if (step.checked) {
+            // The value fits the storage: no bit above it.
+            const auto fits = a_.label();
+            a_.alu(Alu::cmp, S32, storage, Imm32{8});
+            a_.jcc(Cond::e, fits);
+            for (const std::uint64_t w : {1, 2}) {
+                const auto other = a_.label();
+                a_.alu(Alu::cmp, S32, storage, imm32(w));
+                a_.jcc(Cond::ne, other);
+                a_.alu(Alu::cmp, S64, v, imm32((std::uint64_t{1} << (8 * w)) - 1));
+                a_.jcc(Cond::a, slow);
+                a_.jmp(fits);
+                a_.bind(other);
+            }
+            a_.mov(S64, scratch, v);
+            a_.shift(Shift::shr, S64, scratch, Imm8{32});
+            a_.jcc(Cond::ne, slow);
+            a_.bind(fits);
+        }
+        a_.mov(S64, count, Mem::at(e, static_cast<std::int32_t>(H::count_offset())));
+        a_.alu(Alu::cmp, S64, count, Mem::at(e, static_cast<std::int32_t>(H::list_capacity_offset())));
+        a_.jcc(Cond::ae, slow);
+        a_.mov(S64, scratch, Mem::at(e, static_cast<std::int32_t>(H::data_offset())));
+        const auto store = [&](std::uint64_t bytes) {
+            a_.mov(width_size(bytes), Mem::at(scratch, count, static_cast<unsigned>(bytes), 0), v);
+        };
+        if (declared == 8) {
+            store(8);
+        } else {
+            const auto wide = a_.label();
+            const auto stored = a_.label();
+            a_.alu(Alu::cmp, S32, storage, imm32(declared));
+            a_.jcc(Cond::ne, wide);
+            store(declared);
+            a_.jmp(stored);
+            a_.bind(wide);
+            store(8);
+            a_.bind(stored);
+        }
+        a_.alu(Alu::add, S64, count, Imm32{1});
+        a_.mov(S64, Mem::at(e, static_cast<std::int32_t>(H::count_offset())), count);
+        a_.alu(Alu::add, S64, Mem::at(e, static_cast<std::int32_t>(H::list_version_offset())), Imm32{1});
+        count_cells(1, live);
+        a_.alu(Alu::add, S64, Mem::at(context, o3::fast_appends), Imm32{1});
+        check_heap();
+        a_.bind(done);
     }
 
     // ---- lifted operations ------------------------------------------------------

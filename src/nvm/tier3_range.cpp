@@ -533,6 +533,56 @@ public:
         return found == guard_node_.end() ? node : found->second;
     }
 
+    // Whether the facts of `node` say index < length, for a bounds check of
+    // `index` against `length`, a count word: a comparison that holds there
+    // of the index (or the value an Index operation checked and passed on)
+    // with that count (the same value, or a conversion of it, which passed
+    // only if it kept the count), in an
+    // order that means the unsigned order of the whole values. Unsigned:
+    // both operands fit the compared width. Signed: besides, the index is
+    // not negative, so the bound is above it and not negative either.
+    bool index_below(std::uint32_t index, std::uint32_t length, std::uint32_t node) const {
+        const auto count_of = [&](std::uint32_t v) {
+            while (f_.insts[v].op == Op::Lift && f_.insts[v].lifted.op == lift::Opcode::ConvertInteger &&
+                   f_.insts[v].operands[0] != none) {
+                v = f_.insts[v].operands[0];
+            }
+            return v;
+        };
+        // The same count word read once: two reads of it are one value only
+        // where value numbering made them one (an append between them, inline
+        // or not, keeps them apart).
+        const auto same_length = [&](std::uint32_t v) { return count_of(v) == count_of(length); };
+        const auto& checked = f_.insts[index];
+        const bool via_index = checked.op == Op::Lift && checked.lifted.op == lift::Opcode::Index;
+        const auto same_index = [&](std::uint32_t v) { return v == index || (via_index && v == checked.operands[0]); };
+        for (auto n = node; n != none; n = nodes_[n].parent) {
+            Rel rel{};
+            bool is_signed = false;
+            unsigned w = 0;
+            if (!relation_of(f_, nodes_[n].cmp, nodes_[n].sense, rel, is_signed, w)) continue;
+            const auto& c = f_.insts[nodes_[n].cmp];
+            std::uint32_t i = none;
+            std::uint32_t bound = none;
+            if (rel == Rel::Lt && c.operands[0] != none && same_index(c.operands[0])) {
+                i = c.operands[0];
+                bound = c.operands[1];
+            } else if (rel == Rel::Gt && c.operands[1] != none && same_index(c.operands[1])) {
+                i = c.operands[1];
+                bound = c.operands[0];
+            }
+            if (i == none || bound == none || !same_length(bound)) continue;
+            if (!tracked(f_.insts[i]) || !tracked(f_.insts[bound])) continue;
+            if (declared_width(f_, i) > w || declared_width(f_, bound) > w) continue;
+            if (is_signed && declared_width(f_, i) == w) {
+                const auto r = refined(i, node);
+                if (r.bottom || r.s.lo < 0) continue;
+            }
+            return true;
+        }
+        return false;
+    }
+
 private:
     std::uint32_t push(std::uint32_t parent, std::uint32_t cmp, bool sense) {
         nodes_.push_back({parent, cmp, sense});
@@ -685,10 +735,12 @@ private:
 
 // --- Which checks cannot fail -------------------------------------------------------------------------------
 
-// The checks of the heap operations (bounds, nil, kind, type, initialized) are
-// not here: they have no IR yet. When they do, they join this decision as
-// further cases that read the lengths and the facts the heap ops publish, and
-// the guards of a loop's preheader (make_guards) gain a kind for each.
+// The checks of the heap operations: a bounds check (CheckIndex) goes in
+// `eliminate` when the index's range is below the length's or a comparison
+// on every path to it says index < length (Analysis::index_below); the nil,
+// lookup, kind and initialized checks go in value numbering when one with
+// the same operands dominates them (tier3_passes.cpp, Memory), and leave
+// loops in loop-invariant code motion (tier3_licm.cpp).
 //
 // The kind of the check of `l` (operands in the ranges x and y, declared dx
 // and dy bits wide) when lift::evaluate reports no failure for any pair of
@@ -823,6 +875,17 @@ Round eliminate(Function& f, const Cfg& cfg, const Analysis& analysis, Counts& c
                     drop_check(in);
                     in.guard = guard_for(b);
                     ++counts[kind];
+                    round.changed = true;
+                    round.removed.push_back(id);
+                }
+                continue;
+            }
+            if (in.op == Op::CheckIndex) {
+                const auto x = analysis.refined(in.operands[0], node);
+                const auto len = analysis.refined(in.operands[1], node);
+                if ((!x.bottom && !len.bottom && x.u.hi < len.u.lo) || analysis.index_below(in.operands[0], in.operands[1], node)) {
+                    gone[id] = 1;
+                    ++counts["elim.bounds"];
                     round.changed = true;
                     round.removed.push_back(id);
                 }

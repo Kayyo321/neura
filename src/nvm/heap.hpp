@@ -7,6 +7,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
 #include <memory>
 #include <new>
 #include <span>
@@ -84,6 +85,7 @@ inline ElementWidth element_width(const nvr::Type& element) {
 
 class Heap {
     struct Entry;
+    struct Page;
 
 public:
     // A live entry. Null means "not live": nil, a handle never assigned, or
@@ -139,14 +141,14 @@ public:
 
     // The highest handle ever assigned; zero before the first allocation.
     // The executor's handle limit counts it.
-    std::uint64_t last_handle() const { return last_; }
+    std::uint64_t last_handle() const { return blocks_.native.last; }
 
     // The lowest live handle above `handle`, or zero when there is none:
     // the live entries in handle order, for comparing two heaps entry by
     // entry.
     std::uint64_t next_live(std::uint64_t handle) const {
         const auto from = handle + 1;
-        if (from == 0 || from > last_) return 0;
+        if (from == 0 || from > blocks_.native.last) return 0;
         const auto first = static_cast<std::size_t>(from >> page_bits);
         for (auto at = std::lower_bound(live_pages_.begin(), live_pages_.end(), first); at != live_pages_.end(); ++at) {
             const auto page = *at;
@@ -429,8 +431,8 @@ public:
         auto& stored = pages_[page];
         auto& item = stored->entries[handle & page_mask];
         release(std::exchange(item, nullptr));
-        if (--stored->live == 0 && page < ((last_ + 1) >> page_bits)) {
-            stored.reset();
+        if (--stored->live == 0 && page < ((blocks_.native.last + 1) >> page_bits)) {
+            delete std::exchange(stored, nullptr);
             // The page's index stays in live_pages_ until it is compacted,
             // once at least half of the list is released pages.
             if (++released_pages_ * 2 > live_pages_.size()) compact_pages();
@@ -520,8 +522,8 @@ public:
                 release(std::exchange(item, nullptr));
                 --stored->live;
             }
-            if (stored->live == 0 && page < ((last_ + 1) >> page_bits)) {
-                stored.reset();
+            if (stored->live == 0 && page < ((blocks_.native.last + 1) >> page_bits)) {
+                delete std::exchange(stored, nullptr);
                 continue;
             }
             live_pages_[kept++] = page;
@@ -587,6 +589,158 @@ public:
         return false;
     }
 
+    // --- Checks ---------------------------------------------------------
+
+    // Empty when the heap's own words agree with each other; else the first
+    // disagreement. The handle table record names the page list; every page
+    // counts its entries; the existing pages are in live_pages_; no handle
+    // above last_handle() has an entry; every entry's header is well formed;
+    // and each size class's free blocks and bump range lie in chunks of that
+    // class, apart from every live entry's block. For NEURA_TIER3_VERIFY=1
+    // (after native code allocates) and tests; it decides nothing.
+    std::string check() const {
+        const auto last = blocks_.native.last;
+        if (handle_table_.pages != pages_.data() || handle_table_.count != pages_.size()) return "the handle table record";
+        std::vector<const void*> live_blocks;
+        for (std::size_t page = 0; page < pages_.size(); ++page) {
+            const auto* stored = pages_[page];
+            if (!stored) continue;
+            if (!std::binary_search(live_pages_.begin(), live_pages_.end(), page)) {
+                return "page " + std::to_string(page) + " is not in the page list";
+            }
+            std::uint64_t entries = 0;
+            for (std::size_t index = 0; index < page_size; ++index) {
+                const auto* item = stored->entries[index];
+                if (!item) continue;
+                ++entries;
+                const auto handle = (std::uint64_t{page} << page_bits) | index;
+                if (handle == 0 || handle > last) return "handle " + std::to_string(handle) + " above the last";
+                const bool widths = (item->declared == ElementWidth::W1 || item->declared == ElementWidth::W2 ||
+                                     item->declared == ElementWidth::W4 || item->declared == ElementWidth::W8) &&
+                                    (item->storage == item->declared || item->storage == ElementWidth::W8);
+                if (static_cast<unsigned>(item->kind) > static_cast<unsigned>(EntryKind::Bytes) || !widths ||
+                    (item->flags & ~(marked_flag | inline_flag)) != 0 || (item->flags & marked_flag) != 0) {
+                    return "the header of handle " + std::to_string(handle);
+                }
+                live_blocks.push_back(item);
+            }
+            if (entries != stored->live) return "the live count of page " + std::to_string(page);
+        }
+        if (Blocks::pooled) {
+            std::sort(live_blocks.begin(), live_blocks.end(), std::less<>());
+            const auto chunk_of = [&](const void* address) -> std::ptrdiff_t {
+                const auto* byte = static_cast<const unsigned char*>(address);
+                for (std::size_t i = 0; i < blocks_.chunks_.size(); ++i) {
+                    if (byte >= blocks_.chunks_[i] && byte <= blocks_.chunks_[i] + Blocks::chunk_bytes) {
+                        return static_cast<std::ptrdiff_t>(i);
+                    }
+                }
+                return -1;
+            };
+            for (std::size_t c = 0; c < allocator_class_count; ++c) {
+                const auto size = Blocks::sizes[c];
+                const auto* next = blocks_.native.next[c];
+                const auto* end = blocks_.native.end[c];
+                if ((next == nullptr) != (end == nullptr)) return "the bump range of class " + std::to_string(c);
+                if (next) {
+                    const auto chunk = chunk_of(end);
+                    if (chunk < 0 || end != blocks_.chunks_[static_cast<std::size_t>(chunk)] + Blocks::chunk_bytes ||
+                        next > end || (next - blocks_.chunks_[static_cast<std::size_t>(chunk)]) % size != 0) {
+                        return "the bump range of class " + std::to_string(c);
+                    }
+                }
+                std::size_t steps = 0;
+                for (const void* block = blocks_.native.free[c]; block; ++steps) {
+                    const auto chunk = chunk_of(block);
+                    if (chunk < 0 || steps > blocks_.chunks_.size() * (Blocks::chunk_bytes / 8) ||
+                        (static_cast<const unsigned char*>(block) - blocks_.chunks_[static_cast<std::size_t>(chunk)]) % size != 0) {
+                        return "the free list of class " + std::to_string(c);
+                    }
+                    if (std::binary_search(live_blocks.begin(), live_blocks.end(), block, std::less<>())) {
+                        return "a free block of class " + std::to_string(c) + " is a live entry";
+                    }
+                    void* following = nullptr;
+                    std::memcpy(&following, block, sizeof(void*));
+                    block = following;
+                }
+            }
+        }
+        return {};
+    }
+
+    // The heap's words with every block address given as its place among the
+    // allocator's chunks (chunk number and offset; a block from operator new
+    // as one marker), so that two heaps that made the same allocations and
+    // frees compare equal word for word: the last handle and identity, every
+    // page and its live count, every live entry's handle, place and words
+    // (header, identity and flags and fields, or elements, capacity and
+    // version, and the place of a separate buffer), the page list, and each
+    // size class's free list and bump range. For tests.
+    std::vector<std::uint64_t> snapshot() const {
+        std::vector<std::uint64_t> out;
+        const auto place = [&](const void* address) -> std::uint64_t {
+            if (address == nullptr) return 0;
+            if (address == static_cast<const void*>(Blocks::empty_)) return 1;
+            const auto* byte = static_cast<const unsigned char*>(address);
+            for (std::size_t i = 0; i < blocks_.chunks_.size(); ++i) {
+                if (byte >= blocks_.chunks_[i] && byte <= blocks_.chunks_[i] + Blocks::chunk_bytes) {
+                    return (std::uint64_t{i + 1} << 32) | static_cast<std::uint64_t>(byte - blocks_.chunks_[i]);
+                }
+            }
+            return 2;
+        };
+        out.push_back(blocks_.native.last);
+        out.push_back(last_identity_);
+        out.push_back(pages_.size());
+        for (std::size_t page = 0; page < pages_.size(); ++page) {
+            const auto* stored = pages_[page];
+            out.push_back(stored ? 1 + stored->live : 0);
+            if (!stored) continue;
+            for (std::size_t index = 0; index < page_size; ++index) {
+                const auto* item = stored->entries[index];
+                if (!item) continue;
+                out.push_back((std::uint64_t{page} << page_bits) | index);
+                out.push_back(place(item));
+                std::uint64_t head[2];
+                std::memcpy(head, item, sizeof head);
+                out.insert(out.end(), head, head + 2);
+                const auto count = static_cast<std::size_t>(item->count);
+                if (item->kind == EntryKind::Object) {
+                    const auto* words = reinterpret_cast<const std::uint64_t*>(reinterpret_cast<const ObjectEntry*>(item) + 1);
+                    out.push_back(reinterpret_cast<const ObjectEntry*>(item)->identity);
+                    out.insert(out.end(), words, words + word_count(count) + count);
+                    continue;
+                }
+                const auto& sequence = *reinterpret_cast<const ArrayEntry*>(item);
+                out.push_back((item->flags & inline_flag) != 0 ? 0 : place(sequence.data));
+                const auto stored_bytes = count * static_cast<std::size_t>(item->storage);
+                for (std::size_t i = 0; i < stored_bytes; ++i) out.push_back(sequence.data[i]);
+                if (item->kind == EntryKind::List) {
+                    const auto& l = *reinterpret_cast<const ListEntry*>(item);
+                    out.push_back(l.capacity);
+                    out.push_back(l.version);
+                }
+            }
+        }
+        out.push_back(live_pages_.size());
+        out.insert(out.end(), live_pages_.begin(), live_pages_.end());
+        out.push_back(released_pages_);
+        for (std::size_t c = 0; c < allocator_class_count; ++c) {
+            out.push_back(place(blocks_.native.next[c]));
+            out.push_back(place(blocks_.native.end[c]));
+            std::size_t steps = 0;
+            for (const void* block = blocks_.native.free[c]; block && steps < (std::size_t{1} << 24); ++steps) {
+                out.push_back(place(block));
+                void* following = nullptr;
+                std::memcpy(&following, block, sizeof(void*));
+                block = following;
+            }
+            out.push_back(0);
+        }
+        out.push_back(blocks_.chunks_.size());
+        return out;
+    }
+
     // --- Published layout -----------------------------------------------
     //
     // How an entry is stored, for native code that reads and writes fields
@@ -644,6 +798,52 @@ public:
     static constexpr std::size_t inline_data_offset() { return sizeof(ArrayEntry); }
     static constexpr std::size_t list_capacity_offset() { return offsetof(ListEntry, capacity); }
     static constexpr std::size_t list_version_offset() { return offsetof(ListEntry, version); }
+
+    // The handle table. A live handle h names the entry whose header address
+    // is word (h & handle_page_mask()) of the page at page_entries_offset();
+    // the page is word (h >> handle_page_bits()) of `pages` when that is
+    // below `count` and not null. A page's live count (uint64) is at
+    // page_live_offset(). An entry slot holds null for a handle not assigned
+    // yet or freed. The record lives as long as the heap; the heap rewrites
+    // it whenever its page list is resized, and the page words themselves
+    // are the heap's own.
+    struct HandleTable {
+        Page* const* pages;
+        std::uint64_t count;
+    };
+    const HandleTable* handle_table() const { return &handle_table_; }
+    static constexpr unsigned handle_page_bits() { return page_bits; }
+    static constexpr std::uint64_t handle_page_mask() { return page_mask; }
+    static constexpr std::size_t page_entries_offset() { return offsetof(Page, entries); }
+    static constexpr std::size_t page_live_offset() { return offsetof(Page, live); }
+
+    // The block allocator's words (Blocks): for size class c, `free[c]` is
+    // the head of its free list (a free block's first word is the next
+    // one) and [next[c], end[c]) the unused part of its current chunk;
+    // `last` is the highest handle assigned (last_handle()). These are the
+    // words the heap itself allocates with, not copies: a writer that takes
+    // a block or assigns a handle exactly as Blocks::allocate and
+    // store_new() do leaves the heap as they would. A request of `bytes`
+    // (at most allocator_largest()) takes a block of class
+    // allocator_class_of(bytes), allocator_class_size() bytes long.
+    static constexpr std::size_t allocator_class_count = 36;
+    struct NativeAllocator {
+        std::array<void*, allocator_class_count> free;
+        std::array<unsigned char*, allocator_class_count> next;
+        std::array<unsigned char*, allocator_class_count> end;
+        std::uint64_t last;
+    };
+    NativeAllocator* native_allocator() { return &blocks_.native; }
+    // Whether entries come from the size classes (false under
+    // AddressSanitizer, where every block comes from operator new or the
+    // pool poisons its free blocks): only then may native code allocate
+    // with native_allocator().
+    static constexpr bool native_allocation() { return Blocks::native_pool; }
+    static constexpr std::size_t allocator_largest() { return Blocks::largest; }
+    static constexpr std::size_t allocator_class_of(std::size_t bytes) { return Blocks::class_of(bytes); }
+    static constexpr std::size_t allocator_class_size(std::size_t c) { return Blocks::sizes[c]; }
+    // The block of an object of `fields` fields.
+    static constexpr std::size_t object_block_bytes(std::size_t fields) { return object_bytes(fields); }
 
 private:
     static constexpr std::uint8_t marked_flag = 1;
@@ -761,20 +961,20 @@ private:
             if (!pooled || bytes > largest) return ::operator new(bytes);
             const auto c = class_of(bytes);
             const std::size_t size = sizes[c];
-            if (void* block = free_[c]) {
+            if (void* block = native.free[c]) {
                 unpoison(block, size);
-                std::memcpy(&free_[c], block, sizeof(void*));
+                std::memcpy(&native.free[c], block, sizeof(void*));
                 return block;
             }
-            if (static_cast<std::size_t>(end_[c] - next_[c]) < size) {
+            if (static_cast<std::size_t>(native.end[c] - native.next[c]) < size) {
                 auto* chunk = static_cast<unsigned char*>(::operator new(chunk_bytes));
                 chunks_.push_back(chunk);
                 poison(chunk, chunk_bytes);
-                next_[c] = chunk;
-                end_[c] = chunk + chunk_bytes;
+                native.next[c] = chunk;
+                native.end[c] = chunk + chunk_bytes;
             }
-            void* block = next_[c];
-            next_[c] += size;
+            void* block = native.next[c];
+            native.next[c] += size;
             unpoison(block, size);
             return block;
         }
@@ -787,8 +987,8 @@ private:
                 return;
             }
             const auto c = class_of(bytes);
-            std::memcpy(block, &free_[c], sizeof(void*));
-            free_[c] = block;
+            std::memcpy(block, &native.free[c], sizeof(void*));
+            native.free[c] = block;
             poison(block, sizes[c]);
         }
 
@@ -798,13 +998,18 @@ private:
 #else
         static constexpr bool pooled = true;
 #endif
+#if defined(NEURA_HEAP_ADDRESS_SANITIZER)
+        static constexpr bool native_pool = false;
+#else
+        static constexpr bool native_pool = pooled;
+#endif
         // Size classes: every 8 bytes up to 128, every 16 up to 256, then
         // four per doubling up to 2 KiB. A class wastes at most 1/8 of a
         // block above 128 bytes; an object's header and fields are a
         // multiple of 8, so small objects waste nothing.
         static constexpr std::size_t largest = 2048;
         static constexpr std::size_t chunk_bytes = std::size_t{64} * 1024;
-        static constexpr std::array<std::uint16_t, 36> sizes{
+        static constexpr std::array<std::uint16_t, allocator_class_count> sizes{
             8,   16,  24,  32,  40,  48,  56,  64,  72,   80,   88,   96,   104,  112,  120,  128,  144,  160,
             176, 192, 208, 224, 240, 256, 320, 384, 448, 512, 640, 768, 896, 1024, 1280, 1536, 1792, 2048};
         static constexpr std::array<std::uint8_t, largest / 8 + 1> classes = [] {
@@ -816,7 +1021,7 @@ private:
             }
             return table;
         }();
-        static std::size_t class_of(std::size_t bytes) { return classes[(bytes + 7) / 8]; }
+        static constexpr std::size_t class_of(std::size_t bytes) { return classes[(bytes + 7) / 8]; }
 
         static void poison(const void* block, std::size_t bytes) {
 #if defined(NEURA_HEAP_ADDRESS_SANITIZER)
@@ -837,15 +1042,21 @@ private:
 
         alignas(8) static inline unsigned char empty_[8]{};
 
-        std::array<void*, sizes.size()> free_{};
-        std::array<unsigned char*, sizes.size()> next_{};
-        std::array<unsigned char*, sizes.size()> end_{};
         std::vector<unsigned char*> chunks_;
+
+    public:
+        // The free lists and bump ranges of the size classes, and the heap's
+        // last handle: the words native code allocates with
+        // (native_allocator()).
+        NativeAllocator native{};
+
+    private:
+        friend class Heap;
     };
 
     // The block of an object, or of an array, text, or bytes entry whose
     // `length` elements are inline at `width`.
-    static std::size_t object_bytes(std::size_t fields) {
+    static constexpr std::size_t object_bytes(std::size_t fields) {
         return sizeof(ObjectEntry) + 8 * (word_count(fields) + fields);
     }
     static std::size_t inline_bytes(std::size_t length, ElementWidth width) {
@@ -923,13 +1134,16 @@ private:
     // Makes sure the page of handle last_handle() + 1 exists, before the
     // entry's blocks are allocated, so that store_new() cannot fail.
     void reserve_handle() {
-        const auto page = (last_ + 1) >> page_bits;
-        if (page >= pages_.size()) pages_.resize(page + 1);
+        const auto page = (blocks_.native.last + 1) >> page_bits;
+        if (page >= pages_.size()) {
+            pages_.resize(page + 1);
+            handle_table_ = {pages_.data(), pages_.size()};
+        }
         auto& stored = pages_[page];
         if (!stored) {
             live_pages_.push_back(static_cast<std::size_t>(page));
             try {
-                stored = std::make_unique<Page>();
+                stored = new Page();
             } catch (...) {
                 live_pages_.pop_back();
                 throw;
@@ -946,11 +1160,11 @@ private:
     // Stores an entry under handle last_handle() + 1, whose page
     // reserve_handle() made.
     std::uint64_t store_new(Entry* item) {
-        const auto handle = last_ + 1;
+        const auto handle = blocks_.native.last + 1;
         auto& stored = *pages_[handle >> page_bits];
         stored.entries[handle & page_mask] = item;
         ++stored.live;
-        last_ = handle;
+        blocks_.native.last = handle;
         return handle;
     }
 
@@ -983,11 +1197,12 @@ private:
     }
 
     void release_all() {
-        for (auto& stored : pages_) {
+        for (auto* stored : pages_) {
             if (!stored) continue;
             for (auto* item : stored->entries) {
                 if (item) release(item);
             }
+            delete stored;
         }
     }
 
@@ -1001,11 +1216,16 @@ private:
 
     struct Page {
         std::array<Entry*, page_size> entries{};
-        std::size_t live = 0;
+        std::uint64_t live = 0;
     };
+    static_assert(std::is_standard_layout_v<Page>);
 
     Blocks blocks_;
-    std::vector<std::unique_ptr<Page>> pages_;
+    // Owns the pages it points to (null: a page that does not exist).
+    std::vector<Page*> pages_;
+    // The published record of pages_ (handle_table()), rewritten whenever
+    // pages_ is resized.
+    HandleTable handle_table_{nullptr, 0};
     // The indices of the pages that exist, ascending, so that the walks in
     // handle order (sweep, for_each, next_live) skip released pages. A page
     // is appended when its first handle is reserved, which is above every
@@ -1014,7 +1234,6 @@ private:
     std::vector<std::size_t> live_pages_;
     std::size_t released_pages_ = 0;
     std::size_t swept_pages_ = 0;
-    std::uint64_t last_ = 0;
     std::uint64_t last_identity_ = 0;
 };
 
@@ -1024,6 +1243,11 @@ static_assert(Heap::marked_flag_mask() == 1 && Heap::inline_flag_mask() == 2);
 static_assert(Heap::identity_offset() == 16 && Heap::initialized_offset() == 24 && Heap::first_field_offset(0) == 24 &&
               Heap::first_field_offset(1) == 32 && Heap::first_field_offset(64) == 32 &&
               Heap::first_field_offset(65) == 40);
+static_assert(Heap::handle_page_bits() == 8 && Heap::handle_page_mask() == 255 && Heap::page_entries_offset() == 0 &&
+              Heap::page_live_offset() == 2048);
+static_assert(offsetof(Heap::HandleTable, pages) == 0 && offsetof(Heap::HandleTable, count) == 8);
+static_assert(offsetof(Heap::NativeAllocator, free) == 0 && offsetof(Heap::NativeAllocator, next) == 8 * 36 &&
+              offsetof(Heap::NativeAllocator, end) == 16 * 36 && offsetof(Heap::NativeAllocator, last) == 24 * 36);
 static_assert(Heap::length_offset() == 8 && Heap::data_offset() == 16 && Heap::inline_data_offset() == 24 &&
               Heap::list_capacity_offset() == 24 && Heap::list_version_offset() == 32);
 
