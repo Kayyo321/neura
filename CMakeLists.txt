@@ -316,6 +316,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/float.cpp
     src/neura-ir/control_flow.cpp
     src/neura-ir/specialize.cpp
+    src/neura-ir/containment.cpp
     src/neura-ir/static_initialization.cpp
     src/neura-ir/task_analysis.cpp
     src/neura-ir/purity.cpp
@@ -602,6 +603,7 @@ if(BUILD_TESTING)
         tests/ir-optimization/behavior_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/concurrency_tests.cpp
+        tests/ir-optimization/containment_tests.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
         tests/ir-optimization/main.cpp

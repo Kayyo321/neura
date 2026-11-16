@@ -1,0 +1,3 @@
+let ThroughTuple = module (
+    let Pair = enum (One(int), Two(int, [string, Pair]));
+);

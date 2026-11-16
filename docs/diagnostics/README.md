@@ -107,6 +107,7 @@ Errors about types, values, calls, and statements.
 | [E0445](E0445.md) | a 'last' field assigned outside 'init' |
 | [E0446](E0446.md) | a constructor that does not assign a 'last' field |
 | [E0447](E0447.md) | a deferred 'last' binding that is not a local or an instance field |
+| [E0448](E0448.md) | a value type that contains itself |
 
 ## E05xx: Classes and lifecycle
 

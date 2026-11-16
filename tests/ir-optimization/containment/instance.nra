@@ -1,0 +1,6 @@
+// A recursive generic enum closes a cycle in each instance, not in the
+// generic declaration.
+let Instance = module (
+    let Chain = enum<T> (End, Link(T, Chain<T>));
+    export let Numbers = Chain<int>;
+);

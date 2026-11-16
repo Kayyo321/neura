@@ -1,0 +1,8 @@
+// The standard library's own value types, with Result instantiated: an
+// instance that reaches a cycle without closing one reports nothing.
+let regex = import:Std.Text.Regex;
+let result = import:Std.Core.Result;
+
+let StandardLibrary = module (
+    export let Outcome = result.Result<int>;
+);

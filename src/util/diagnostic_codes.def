@@ -100,6 +100,7 @@ NEURA_DIAGNOSTIC(E0444, "a deferred 'last' binding without a type")
 NEURA_DIAGNOSTIC(E0445, "a 'last' field assigned outside 'init'")
 NEURA_DIAGNOSTIC(E0446, "a constructor that does not assign a 'last' field")
 NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an instance field")
+NEURA_DIAGNOSTIC(E0448, "a value type that contains itself")
 
 // Classes, lifecycle, and accessors
 NEURA_DIAGNOSTIC(E0501, "invalid static member")
