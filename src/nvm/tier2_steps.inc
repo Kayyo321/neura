@@ -129,6 +129,9 @@
     // loaded once, and its temporaries).
     void use_program(std::uint32_t function, const tier2::Region& program) {
         if (function_programs_.size() != image_.functions.size()) function_programs_.resize(image_.functions.size());
+        // A native call of the function enters the program the cell holds
+        // only while it is the run's program.
+        if (function_programs_[function] != &program && function < tier3_cells_.size()) tier3_cells_[function] = {};
         function_programs_[function] = &program;
         program_image(program);
     }

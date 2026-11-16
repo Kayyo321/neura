@@ -525,6 +525,46 @@ NEURA_TEST(tier3, the_fast_paths_change_a_heap_word_for_word_as_its_own_operatio
     check(!t3::append_inline(fast.context, fast.entry(fast_list), 300), "a wide value takes the slow path");
 }
 
+// A list that is full grows inside native code, in inlined code too: the
+// capacity check runs again after Heap::grow, no frame is materialized and
+// the activation is not left, so no append is a slow one while the cells
+// fit. The run, its steps and its peak heap cells are tier 0's (the heap
+// words, capacities included, are compared by the allocation test above); a collection still takes the generic
+// slow path.
+NEURA_TEST(tier3, a_full_list_grows_in_native_code_without_leaving_it_and_the_heap_is_tier_0s) {
+    const auto image = heap_image(environment);
+    for (const auto& arguments : {std::vector<std::string>{"append", "100"}, std::vector<std::string>{"inlined", "40"}}) {
+        in_each_mode([&] {
+            const auto label = std::string(heap_mode == nvm::TierOptions::Tier3::Native ? "machine code " : "IR interpreter ") +
+                               arguments[0];
+            auto options = heap_options();
+            options.native_after = 7;
+            nvm::TierCache cache(image, options);
+            const auto unprofiled = [](nvm::RunLimits& limits) { limits.profile = false; };
+            const auto reference = same_as_tier_0(image, cache, label, arguments, unprofiled);
+            const auto stats = cache.statistics();
+            // NEURA_TIER_EAGER makes programs native before their callees', so nothing is inlined then.
+            if (arguments[0] == "inlined" && !nvm::tier_eager()) check(stats.native_inlined > 0, label + ": calls were inlined");
+            if (nvm::Heap::native_allocation()) {
+                check(stats.native.fast_appends > 0, label + ": appends ran inline");
+                // The first value wider than a list's storage widens it, which is
+                // the generic append's (at most one per list here); growths, a dozen
+                // each before, no longer are.
+                check(stats.native.slow_appends <= 2, label + ": no append left native code to grow a list (slow appends " +
+                                                          std::to_string(stats.native.slow_appends) + ")");
+            }
+            // With cells so few that collections come, the generic path still runs and agrees.
+            for (const std::uint64_t cells : {reference.result.peak_heap_cells / 2 + 1, reference.result.peak_heap_cells + 1}) {
+                same_as_tier_0(image, cache, label + " at heap-cell limit " + std::to_string(cells), arguments,
+                               [&](nvm::RunLimits& limits) {
+                                   limits.profile = false;
+                                   limits.max_heap_cells = cells;
+                               });
+            }
+        });
+    }
+}
+
 // --- Allocations and appends inside inlined code (design 3.6) ----------------------------
 
 // `inlined` calls push (an append) and fresh (an allocation) in a loop; both

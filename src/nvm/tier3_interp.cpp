@@ -167,7 +167,7 @@ bool allocate_inline(Context& context, std::uint32_t layout, std::uint64_t field
     return true;
 }
 
-bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value) {
+bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value, bool* failed) {
     if (context.fast_allocation == 0) return false;
     const auto live = *context.live_cells;
     const auto next = *context.next_collection;
@@ -175,7 +175,17 @@ bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value) {
     const auto storage = static_cast<unsigned>(load(entry + Heap::storage_width_offset(), 1));
     if (storage < 8 && (value >> (8 * storage)) != 0) return false;
     const auto count = load(entry + Heap::count_offset(), 8);
-    if (count >= load(entry + Heap::list_capacity_offset(), 8)) return false;
+    if (count >= load(entry + Heap::list_capacity_offset(), 8)) {
+        // A full list grows where it is, as machine code does, and the
+        // append goes on; without the helper (a context that is not the
+        // run's) the generic append grows it.
+        if (context.heap_functions.grow_list == nullptr) return false;
+        context.heap_functions.grow_list(&context, reinterpret_cast<void*>(entry));
+        if (context.status != static_cast<std::uint32_t>(NativeStatus::Ok)) {
+            if (failed != nullptr) *failed = true;
+            return false;
+        }
+    }
     // What append() does without widening or growing, and the count.
     store(load(entry + Heap::data_offset(), 8) + count * storage, storage, value);
     store(entry + Heap::count_offset(), 8, count + 1);
@@ -448,7 +458,9 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
                     fast = allocate_inline(context, static_cast<std::uint32_t>(fn.exits[in.aux]->immediate), in.imm, result);
                     context.fast_allocations += fast ? 1 : 0;
                 } else {
-                    fast = append_inline(context, operand(1), operand(2));
+                    bool failed = false;
+                    fast = append_inline(context, operand(1), operand(2), &failed);
+                    if (failed) return {Outcome::Exception, 0};
                     context.fast_appends += fast ? 1 : 0;
                 }
                 if (fast) {

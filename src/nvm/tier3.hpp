@@ -359,6 +359,11 @@ struct Function {
     // The slot count of each function the program calls (not inlined): the
     // size of the frame a call pushes.
     std::map<std::uint32_t, std::uint32_t> call_frames;
+    // The widths (lanes, at most 64) of the parameters of each function the
+    // program calls (not inlined): the widths an argument must fit for the
+    // callee's entry (a call's enter helper checks them, and so does native
+    // code that enters from the callee's cell).
+    std::map<std::uint32_t, std::vector<std::uint8_t>> call_widths;
     // What the passes did, by kind (tier3_passes.cpp lists the names), for
     // the tests and for NEURA_TIER_DUMP.
     std::map<std::string, std::uint64_t> pass_counts;
@@ -659,6 +664,21 @@ struct NativeHelpers {
     std::uint64_t (*enter)(Context*, std::uint32_t callee);
 };
 
+// What native code needs to enter the native code of a callee without the
+// enter helper (Context::callee_cells, one per function of the image, kept by
+// the run): the callee's entry, its program and region, and the frames its
+// code needs below its own. Zero (`entry` null) until the helper has entered
+// the callee once, and again whenever the run's program of the function
+// changes. Only for the standard variant and callees without floating-point
+// code or entry-0 clean slots, whose entry conditions all depend on the
+// function's program alone (see State::tier3_cache_callee).
+struct CalleeCell {
+    const std::uint8_t* entry = nullptr;
+    const Program* program = nullptr;
+    const tier2::Region* region = nullptr;
+    std::uint64_t frames = 0;
+};
+
 // What a native activation chain reads and writes. The fields up to
 // `functions` are native code's, at the offsets of `offsets` below (asserted
 // after the struct); the rest are the executor's.
@@ -698,6 +718,9 @@ struct Context {
     std::uint64_t max_frames = 0;
     std::uint64_t inline_calls = 0;
     std::uint64_t inline_returns = 0;
+    CalleeCell* callee_cells = nullptr;
+    // Calls native code entered from a callee's cell, for the statistics.
+    std::uint64_t cell_entries = 0;
 
     void* owner = nullptr;
     const Helpers* helpers = nullptr;
@@ -739,6 +762,9 @@ struct Context {
         // its stub stored; C is in the context.
         std::uint64_t (*inlined_helper)(Context*, std::uint32_t exit, const std::uint64_t* arguments, std::uint32_t count,
                                         std::uint32_t state);
+        // Grows the full list whose entry is the second argument (Heap::grow);
+        // status Ok, or Exception when the allocation fails.
+        std::uint64_t (*grow_list)(Context*, void* entry);
     } heap_functions{};
 };
 
@@ -770,6 +796,8 @@ inline constexpr std::int32_t frames = 160;
 inline constexpr std::int32_t max_frames = 168;
 inline constexpr std::int32_t inline_calls = 176;
 inline constexpr std::int32_t inline_returns = 184;
+inline constexpr std::int32_t callee_cells = 192;
+inline constexpr std::int32_t cell_entries = 200;
 } // namespace offsets
 
 static_assert(std::is_standard_layout_v<Context>);
@@ -790,12 +818,24 @@ static_assert(offsetof(Context, functions) + offsetof(NativeHelpers, state) == o
               offsetof(Context, functions) + offsetof(NativeHelpers, deoptimize) == offsets::deoptimize &&
               offsetof(Context, functions) + offsetof(NativeHelpers, evaluate) == offsets::evaluate &&
               offsetof(Context, functions) + offsetof(NativeHelpers, enter) == offsets::enter);
+static_assert(offsetof(Context, callee_cells) == offsets::callee_cells &&
+              offsetof(Context, cell_entries) == offsets::cell_entries);
 static_assert(offsetof(Context, frames) == offsets::frames && offsetof(Context, max_frames) == offsets::max_frames &&
               offsetof(Context, inline_calls) == offsets::inline_calls &&
               offsetof(Context, inline_returns) == offsets::inline_returns);
 
+// The fields of a CalleeCell.
+namespace cell_offsets {
+inline constexpr std::int32_t entry = static_cast<std::int32_t>(offsetof(CalleeCell, entry));
+inline constexpr std::int32_t program = static_cast<std::int32_t>(offsetof(CalleeCell, program));
+inline constexpr std::int32_t region = static_cast<std::int32_t>(offsetof(CalleeCell, region));
+inline constexpr std::int32_t frames = static_cast<std::int32_t>(offsetof(CalleeCell, frames));
+inline constexpr std::int32_t size = static_cast<std::int32_t>(sizeof(CalleeCell));
+} // namespace cell_offsets
+
 // The offsets of the heap's fields (Context, "The heap and the globals").
 namespace offsets {
+inline constexpr std::int32_t region = static_cast<std::int32_t>(offsetof(Context, region));
 inline constexpr std::int32_t handle_table = static_cast<std::int32_t>(offsetof(Context, handle_table));
 inline constexpr std::int32_t allocator = static_cast<std::int32_t>(offsetof(Context, allocator));
 inline constexpr std::int32_t globals = static_cast<std::int32_t>(offsetof(Context, globals));
@@ -811,6 +851,8 @@ inline constexpr std::int32_t set_element =
     static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, set_element));
 inline constexpr std::int32_t check_heap =
     static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, check_heap));
+inline constexpr std::int32_t grow_list =
+    static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, grow_list));
 inline constexpr std::int32_t inlined_helper =
     static_cast<std::int32_t>(offsetof(Context, heap_functions) + offsetof(Context::HeapFunctions, inlined_helper));
 } // namespace offsets
@@ -837,8 +879,11 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
 // publishes, which native code repeats instruction for instruction: true when
 // they ran (the handle in `handle`); false, having changed nothing, when the
 // reference would collect, trap, move the collection threshold, take a page
-// or a chunk, widen or grow.
+// or a chunk, or widen (a full list grows inside native code instead).
 bool allocate_inline(Context& context, std::uint32_t layout, std::uint64_t fields, std::uint64_t& handle);
-bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value);
+// A full list grows here when the context has the grow helper
+// (Context::heap_functions); `failed` is set when that fails (the status of
+// the context says how).
+bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value, bool* failed = nullptr);
 
 } // namespace neura::nvm::tier3

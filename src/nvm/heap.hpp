@@ -797,6 +797,9 @@ public:
     static constexpr std::size_t data_offset() { return offsetof(ArrayEntry, data); }
     static constexpr std::size_t inline_data_offset() { return sizeof(ArrayEntry); }
     static constexpr std::size_t list_capacity_offset() { return offsetof(ListEntry, capacity); }
+    // Gives the full list `entry` (a ListEntry) room for another element, as
+    // append does; for native code, which grows a list without leaving.
+    void grow_list_entry(void* entry) { grow(*static_cast<ListEntry*>(entry)); }
     static constexpr std::size_t list_version_offset() { return offsetof(ListEntry, version); }
 
     // The handle table. A live handle h names the entry whose header address

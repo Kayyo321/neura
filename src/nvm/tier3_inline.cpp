@@ -512,6 +512,7 @@ private:
         for (const auto& [program, table] : g.dispatch_origins) f.dispatch_origins.emplace_back(program + op, table);
         f.programs.insert(f.programs.end(), g.programs.begin(), g.programs.end());
         f.call_frames.insert(g.call_frames.begin(), g.call_frames.end());
+        f.call_widths.insert(g.call_widths.begin(), g.call_widths.end());
 
         // Frame states: the callee's own level becomes an inlined frame
         // below the call's state.

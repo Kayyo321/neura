@@ -1164,7 +1164,15 @@ private:
             in.state = state;
             in.type = slot_type_or(exit.result_slot, integer(64));
             set_extras(in, arguments);
-            if (call) f_->call_frames[op.a] = static_cast<std::uint32_t>(image_.functions.at(op.a).frame_types.size());
+            if (call) {
+                const auto& callee = image_.functions.at(op.a);
+                f_->call_frames[op.a] = static_cast<std::uint32_t>(callee.frame_types.size());
+                std::vector<std::uint8_t> widths;
+                for (std::uint32_t slot = 0; slot < callee.parameter_count && slot < callee.frame_types.size(); ++slot) {
+                    widths.push_back(static_cast<std::uint8_t>(std::min(nvr::lane_count(image_.types[callee.frame_types[slot]]), 64U)));
+                }
+                f_->call_widths[op.a] = std::move(widths);
+            }
             const auto id = emit(std::move(in));
             if (op.dst != none) write(op.dst, id, true);
             if (call) {
@@ -1730,6 +1738,35 @@ std::uint64_t TierCache::count_native(std::uint32_t program_id) {
     return native_arrivals_[program_id].fetch_add(1, std::memory_order_relaxed) + 1;
 }
 
+bool TierCache::native_ready(const tier2::Region& program, std::uint64_t arrivals) {
+    const std::uint64_t after = options_.native_after;
+    const std::uint64_t period = std::max<std::uint64_t>(1, after / 8);
+    if (arrivals < after || (arrivals - after) % period != 0) return false;
+    if (program.program_id >= native_capacity_) return true;
+    const std::lock_guard lock(mutex_);
+    std::uint64_t activity = 0;
+    std::uint32_t last = std::numeric_limits<std::uint32_t>::max();
+    bool pending = false;
+    for (const auto& op : program.code) {
+        if (op.code != tier2::Code::Call || op.a >= programs_.size() || op.a == last) continue;
+        last = op.a;
+        if (programs_[op.a].state == RegionEntry::State::Settled) continue;
+        pending = true;
+        const auto first = first_entry_[op.a];
+        const auto blocks = image_.functions[op.a].blocks.size();
+        for (std::size_t b = 0; b < blocks; ++b) {
+            activity += counts_[first + b].load(std::memory_order_relaxed) +
+                        region_counts_[first + b].load(std::memory_order_relaxed);
+        }
+    }
+    if (!pending) return true;
+    if (native_waiting_.size() != native_capacity_) native_waiting_.assign(native_capacity_, {});
+    auto& waiting = native_waiting_[program.program_id];
+    if (activity != waiting.activity) waiting = {activity, 0};
+    else ++waiting.idle;
+    return arrivals >= after * 16 || waiting.idle >= 2;
+}
+
 const tier3::Program* TierCache::native_code(const tier2::Region& program, tier3::Variant variant) const {
     if (program.program_id >= native_capacity_) return nullptr;
     const auto* found =
@@ -1877,6 +1914,8 @@ void TierCache::add_native_events(const NativeCounts& counts,
     total.fast_appends += counts.fast_appends;
     total.slow_allocations += counts.slow_allocations;
     total.slow_appends += counts.slow_appends;
+    total.helper_entries += counts.helper_entries;
+    total.cell_entries += counts.cell_entries;
     for (const auto& [key, value] : deopts) statistics_.native_deopts[key] += value;
 }
 

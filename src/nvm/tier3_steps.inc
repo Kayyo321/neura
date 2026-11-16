@@ -48,7 +48,9 @@
         if (!tier3_ready()) return nullptr;
         const auto variant = tier3_variant();
         if (const auto* code = tier_->native_code(program, variant)) return code;
-        if (!count || tier_->count_native(program.program_id) < tier_->options().native_after) return nullptr;
+        if (!count) return nullptr;
+        const auto arrivals = tier_->count_native(program.program_id);
+        if (arrivals < tier_->options().native_after || !tier_->native_ready(program, arrivals)) return nullptr;
         // Building the program is timed as tier 1 (--tier-stats).
         const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
         return tier_->compile_native(program, variant);
@@ -399,6 +401,16 @@
         return result;
     }
 
+    static std::uint64_t tier3_native_grow_list(tier3::Context* context, void* entry) {
+        try {
+            tier3_self(context).heap_.grow_list_entry(entry);
+            tier3_native_status(context, tier3::NativeStatus::Ok);
+        } catch (...) {
+            tier3_native_exception(context);
+        }
+        return 0;
+    }
+
     static void tier3_native_check_heap(tier3::Context* context) {
         tier3_check_heap(context);
         tier3_native_status(context, tier3::NativeStatus::Ok);
@@ -409,6 +421,8 @@
     // pool is not in use, a fleet shares the cell count, or a heap log
     // records writes.
     void tier3_publish(tier3::Context& context) {
+        if (tier3_cells_.size() != image_.functions.size()) tier3_cells_.assign(image_.functions.size(), {});
+        context.callee_cells = tier3_cells_.data();
         context.handle_table = heap_.handle_table();
         context.allocator = heap_.native_allocator();
         context.globals = globals_.data();
@@ -420,14 +434,16 @@
         context.fast_allocation = Heap::native_allocation() && fleet_heap_ == nullptr && heap_log_ == nullptr;
         context.fast_allocations = 0;
         context.fast_appends = 0;
+        context.cell_entries = 0;
         context.heap_functions = {&State::tier3_native_set_element, &State::tier3_native_check_heap,
-                                  &State::tier3_native_inlined_helper};
+                                  &State::tier3_native_inlined_helper, &State::tier3_native_grow_list};
     }
 
     // The statistics of the inline allocations and appends of an activation.
     void tier3_count_fast(const tier3::Context& context) {
         native_counts_.fast_allocations += context.fast_allocations;
         native_counts_.fast_appends += context.fast_appends;
+        native_counts_.cell_entries += context.cell_entries;
     }
 
     // commit_exit's Return for a frame that is neither the last nor a
@@ -573,9 +589,35 @@
         ++context->native_depth;
         context->program = code;
         context->region = code->ir.region;
-        tier3_self(context).tier3_values(*context, *code);
+        auto& self = tier3_self(context);
+        self.tier3_values(*context, *code);
+        self.tier3_cache_callee(callee, *code);
+        ++self.native_counts_.helper_entries;
         tier3_native_status(context, tier3::NativeStatus::Ok);
         return reinterpret_cast<std::uint64_t>(code->machine->address() + code->entry_code.at(0));
+    }
+
+    // Fills the callee's cell (tier3::CalleeCell) after the enter helper
+    // entered `code` as the native code of the run's program of `callee`, so
+    // that native code enters it again without the helper while what the
+    // helper settled from the program and the variant alone still holds:
+    // the standard variant (the profile and checkable ones keep the helper),
+    // no floating-point code (whose entry depends on the floating-point
+    // environment), no clean slots at entry 0 (whose NaNs the helper checks),
+    // and machine code with its entry 0 made. What depends on the call (the
+    // argument widths, the native depth, the frame limit) is checked by the
+    // native code that uses the cell; the cell is cleared by use_program.
+    void tier3_cache_callee(std::uint32_t callee, const tier3::Program& code) {
+        if (tier3_variant() != tier3::Variant::Standard || callee >= tier3_cells_.size()) return;
+        const auto* program = callee < function_programs_.size() ? function_programs_[callee] : nullptr;
+        if (program == nullptr || program->uses_float || code.ir.uses_float || !code.machine) return;
+        if (!code.ir.clean_slots.empty() && !code.ir.clean_slots.front().empty()) return;
+        if (code.entry_code.at(0) == jit::native::lazy) return;
+        auto& cell = tier3_cells_[callee];
+        cell.program = &code;
+        cell.region = code.ir.region;
+        cell.frames = code.ir.max_inline_depth;
+        cell.entry = code.machine->address() + code.entry_code.at(0);
     }
 
     static std::uint64_t tier3_native_return(tier3::Context* context, std::uint64_t value, std::uint64_t blocks) {

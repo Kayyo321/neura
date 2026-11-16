@@ -1116,6 +1116,54 @@ private:
         a_.bind(slow);
     }
 
+    // The entry of the callee's native code from its cell, once its frame is
+    // pushed: what the enter helper (State::tier3_native_entry) decides from
+    // the call, done here, with the helper as the way for everything the cell
+    // does not settle. The cell (t3::CalleeCell, the run's, by callee) is
+    // filled by the helper when it enters the callee, for the standard
+    // variant and a callee that has no floating-point code and no entry
+    // conditions beyond the arguments' widths, and cleared when the run's
+    // program of the callee changes. Goes to `helper_path` (the frame stays
+    // pushed) when the cell is empty, an argument does not fit its
+    // parameter, the native depth is spent, or the callee's frames would pass
+    // the frame limit; else the callee's program and region are the
+    // context's, the native depth is one deeper, the frame register is the
+    // callee's, rax is its entry, and the code continues at `entered`.
+    void enter_from_cell(const Step& step, std::uint32_t count, Label helper_path, Label entered) {
+        const auto widths = f_.call_widths.find(static_cast<std::uint32_t>(step.imm));
+        if (widths == f_.call_widths.end() || widths->second.size() != count) return;
+        const auto cell = [&](std::int32_t field) {
+            return Mem::at(x64::rdx, displacement(std::uint64_t{static_cast<std::uint32_t>(step.imm)} *
+                                                      static_cast<std::uint32_t>(t3::cell_offsets::size) +
+                                                  static_cast<std::uint32_t>(field)));
+        };
+        for (std::uint32_t i = 0; i < count; ++i) {
+            if (widths->second[i] >= 64) continue;
+            a_.mov(S64, x64::rcx, Mem::at(x64::rsp, static_cast<std::int32_t>(8 * i)));
+            a_.shift(Shift::shr, S64, x64::rcx, Imm8{widths->second[i]});
+            a_.jcc(Cond::ne, helper_path);
+        }
+        a_.mov(S64, x64::rdx, Mem::at(context, off::callee_cells));
+        a_.mov(S64, x64::rax, cell(t3::cell_offsets::entry));
+        a_.test(S64, x64::rax, x64::rax);
+        a_.jcc(Cond::e, helper_path);
+        a_.alu(Alu::cmp, S32, Mem::at(context, off::native_depth), imm32(t3::max_native_depth));
+        a_.jcc(Cond::ae, helper_path);
+        a_.mov(S64, x64::rcx, Mem::at(context, off::frames));
+        a_.mov(S64, x64::rcx, Mem::at(x64::rcx, frame_off::size));
+        a_.alu(Alu::add, S64, x64::rcx, cell(t3::cell_offsets::frames));
+        a_.alu(Alu::cmp, S64, x64::rcx, Mem::at(context, off::max_frames));
+        a_.jcc(Cond::a, helper_path);
+        a_.mov(S64, x64::rcx, cell(t3::cell_offsets::program));
+        a_.mov(S64, Mem::at(context, off::program), x64::rcx);
+        a_.mov(S64, x64::rcx, cell(t3::cell_offsets::region));
+        a_.mov(S64, Mem::at(context, off::region), x64::rcx);
+        a_.alu(Alu::add, S32, Mem::at(context, off::native_depth), Imm32{1});
+        a_.alu(Alu::add, S64, Mem::at(context, off::cell_entries), Imm32{1});
+        a_.mov(S64, frame, Mem::at(context, off::slots));
+        a_.jmp(entered);
+    }
+
     void call(const mir::Inst& inst, const mir::InstAllocation& ia, const Step& step) {
         const auto count = f_.insts[step.inst].count;
         a_.mov(S64, Mem::at(context, off::C), counter);
@@ -1125,9 +1173,13 @@ private:
         const bool in_place = f_.variant == t3::Variant::Standard && frame_size != f_.call_frames.end() &&
                               frame_size->second <= max_inline_frame && count <= frame_size->second;
         const auto pushed = a_.label();
+        const auto entered = a_.label();
         if (in_place) {
             const auto slow = a_.label();
             inline_push(step, count, frame_size->second, slow);
+            const auto helper_path = a_.label();
+            enter_from_cell(step, count, helper_path, entered);
+            a_.bind(helper_path);
             a_.mov(S64, x64::rdi, context);
             a_.mov(S32, x64::rsi, imm32(step.imm));
             call_helper(off::enter);
@@ -1142,6 +1194,7 @@ private:
         call_helper(off::call);
         if (in_place) a_.bind(pushed);
         check_status(Label{}, false);
+        a_.bind(entered);
         a_.call(Rm(x64::rax));
         // The callee's activation is over: the context's program is ours
         // again, and the frame arenas may have moved.
@@ -1694,9 +1747,23 @@ private:
             a_.jcc(Cond::ne, slow);
             a_.bind(fits);
         }
+        // A full list grows in a cold path (Heap::grow, as the generic append
+        // does) and the capacity check is made again: no frame is
+        // materialized and native code is not left. The cells check above
+        // already ran, so a collection still takes the generic slow path.
+        const auto retry = a_.label();
+        const auto grow = a_.label();
+        a_.bind(retry);
         a_.mov(S64, count, Mem::at(e, static_cast<std::int32_t>(H::count_offset())));
         a_.alu(Alu::cmp, S64, count, Mem::at(e, static_cast<std::int32_t>(H::list_capacity_offset())));
-        a_.jcc(Cond::ae, slow);
+        a_.jcc(Cond::ae, grow);
+        cold_.push_back([this, grow, retry, e] {
+            a_.bind(grow);
+            call_saving(nvm::tier3::offsets::grow_list, [&] { a_.mov(S64, x64::rsi, e); });
+            a_.alu(Alu::cmp, S32, Mem::at(context, off::status), Imm32{0});
+            a_.jcc(Cond::e, retry);
+            a_.jmp(exception_exit_);
+        });
         a_.mov(S64, scratch, Mem::at(e, static_cast<std::int32_t>(H::data_offset())));
         const auto store = [&](std::uint64_t bytes) {
             a_.mov(width_size(bytes), Mem::at(scratch, count, static_cast<unsigned>(bytes), 0), v);

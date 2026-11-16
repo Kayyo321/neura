@@ -178,6 +178,10 @@ struct NativeCounts {
     std::uint64_t fast_appends = 0;
     std::uint64_t slow_allocations = 0;
     std::uint64_t slow_appends = 0;
+    // Calls native code made into native callees: entered by the enter
+    // helper, and from the callee's cell (tier3::CalleeCell).
+    std::uint64_t helper_entries = 0;
+    std::uint64_t cell_entries = 0;
 };
 
 struct TierStatistics {
@@ -342,6 +346,15 @@ public:
     bool programs_without_tier3() const { return programs_apart_from_tier3_; }
     const std::string& machine_code_off() const { return machine_code_off_; }
     std::uint64_t count_native(std::uint32_t program_id);
+    // Whether `program`, at its `arrivals`-th checkpoint arrival (not below
+    // native_after), is built now. A program is built once the functions it
+    // calls have settled programs of their own, so that the inliner and the
+    // class tests of its dispatch sites can use them. It waits for callees
+    // that are still warming up, checked every native_after / 8 arrivals, up
+    // to the 16 * native_after-th arrival, and stops waiting once none of the
+    // unsettled callees has run for two checks in a row (a callee that does
+    // not run delays the build by a quarter of native_after arrivals).
+    bool native_ready(const tier2::Region& program, std::uint64_t arrivals);
     const tier3::Program* native_code(const tier2::Region& program, tier3::Variant variant) const;
     const tier3::Program* compile_native(const tier2::Region& program, tier3::Variant variant);
     // The speculation record of dispatch table `table` of `program`
@@ -438,6 +451,13 @@ private:
     // variant).
     std::unique_ptr<std::atomic<const tier3::Program*>[]> native_programs_;
     std::size_t native_capacity_ = 0;
+    // The activity of the unsettled callees of each program at its last
+    // native_ready check, by program number (under mutex_).
+    struct NativeWaiting {
+        std::uint64_t activity = 0;
+        std::uint32_t idle = 0;
+    };
+    std::vector<NativeWaiting> native_waiting_;
     std::vector<std::unique_ptr<tier3::Program>> native_owned_;
     // The speculation records of each program's dispatch tables, by program
     // number, made when the program is published (with tier 3 on).

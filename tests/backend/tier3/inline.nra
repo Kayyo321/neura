@@ -82,6 +82,32 @@ let Tier3Inline = module:program.Entry (
         return total;
     };
 
+    // A loop that calls `twist` on every fourth iteration: the caller's
+    // checkpoints are reached four times as often as the callee's blocks.
+    let sparse = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = (total + (i as int64)) & Mask;
+            if (i % 4 == 0) {
+                total = twist(total);
+            }
+        }
+        return total;
+    };
+
+    // A loop that calls `twist` once, on its first iteration: the callee
+    // runs, but never gets a program.
+    let cold = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = (total + (i as int64)) & Mask;
+            if (i == 0) {
+                total = twist(total);
+            }
+        }
+        return total;
+    };
+
     // A callee with a loop of its own: its loop head keeps its checkpoint
     // inside the caller, where native code can deoptimize and tier 1 goes on
     // in the inlined frame.
@@ -186,6 +212,27 @@ let Tier3Inline = module:program.Entry (
         return add(descend(depth - 1), twist(depth as int64));
     };
 
+    // A recursion (never inlined) whose depth-0 branch runs only for some
+    // values: its blocks are not all run when its program forms, and the
+    // program is formed again later.
+    let fall = func(value: int64, depth: int32) -> int64 {
+        if (depth == 0) {
+            if (value % 61 == 0) {
+                return (value * 5 + 1) & Mask;
+            }
+            return value & Mask;
+        }
+        return add(fall(value + 1, depth - 1), depth as int64);
+    };
+
+    let refresh = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = add(total, fall(i as int64, 4));
+        }
+        return total;
+    };
+
     export let.override main = func(args: string[]) -> program.ExitCode {
         let kind = "calls";
         let size = 20;
@@ -197,6 +244,12 @@ let Tier3Inline = module:program.Entry (
         }
         if (kind == "calls") {
             report("calls", calls(size));
+        } else if (kind == "refresh") {
+            report("refresh", refresh(size));
+        } else if (kind == "sparse") {
+            report("sparse", sparse(size));
+        } else if (kind == "cold") {
+            report("cold", cold(size));
         } else if (kind == "spins") {
             report("spins", spins(size));
         } else if (kind == "dispatch") {

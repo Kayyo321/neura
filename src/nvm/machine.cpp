@@ -4068,6 +4068,9 @@ private:
     // the values a deoptimization stub stores, by SSA value.
     bool tier3_native_ = false;
     std::vector<std::uint64_t> tier3_values_;
+    // The native callee cells (tier3::CalleeCell), by function, sized when a
+    // native activation starts (tier3_publish).
+    std::vector<tier3::CalleeCell> tier3_cells_;
     const tier2::Region* tier3_plan_region_ = nullptr;
     BlockPlan* tier3_plan_ = nullptr;
     tier3::Context tier3_context_;

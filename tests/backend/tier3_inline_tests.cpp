@@ -243,6 +243,90 @@ NEURA_TEST(tier3, a_closure_call_and_a_single_implementation_are_inlined) {
     }
 }
 
+NEURA_TEST(tier3, a_program_waits_for_callees_that_are_warming_up_and_not_for_callees_that_stopped_running) {
+    if (!programs_run() || !thresholds_kept()) return;
+    const auto image = inline_image(environment);
+    {
+        // `twist` has no program of its own when `sparse` reaches its
+        // threshold (its blocks arrive once per four iterations, and 40
+        // times before a program forms), but it runs steadily: the build waits
+        // for it and inlines it.
+        auto options = inline_options(100);
+        options.region_after = 40;
+        nvm::TierCache cache(image, options);
+        compare_with_tier_0(image, cache, "sparse calls", {"sparse", "3000"});
+        const auto* ir = native_ir(cache, function_named(image, "sparse"));
+        check(ir != nullptr, "sparse is a native program");
+        check(ir != nullptr && inlines(*ir, function_named(image, "twist")), "twist, still warming up at the threshold, is inlined");
+    }
+    {
+        // `twist` ran once and never again: `cold` waits two checks (an
+        // eighth of the threshold each, 200 arrivals) for it, not the longest
+        // wait (16 times the threshold, 12800 arrivals; the run makes 1200).
+        auto options = inline_options(800);
+        options.region_after = 40;
+        nvm::TierCache cache(image, options);
+        compare_with_tier_0(image, cache, "cold callee", {"cold", "1200"});
+        check(native_ir(cache, function_named(image, "cold")) != nullptr,
+              "a callee that stopped running delays the native program by two checks");
+    }
+    {
+        // `twist` runs every fourth iteration and has no program of its own
+        // for the whole run (its blocks reach the region threshold, 500, only
+        // after 2000 iterations; `sparse`'s program forms after 500): each
+        // check sees it running, and the build goes ahead at the longest wait
+        // (16 times the threshold of 50, 800 arrivals), about iteration 1300.
+        // The run makes 1700.
+        auto options = inline_options(50);
+        options.region_after = 500;
+        nvm::TierCache cache(image, options);
+        compare_with_tier_0(image, cache, "callee that is still warming up", {"sparse", "1700"});
+        check(native_ir(cache, function_named(image, "sparse")) != nullptr,
+              "the wait for a callee that keeps running but has no program is bounded");
+    }
+}
+
+NEURA_TEST(tier3, native_calls_enter_their_callee_from_its_cell_and_a_program_formed_again_clears_the_cell) {
+    if (!programs_run() || !thresholds_kept()) return;
+    const auto image = inline_image(environment);
+    {
+        // `descend` calls itself: a call that is no inlined. Machine code
+        // enters the callee from its cell, up to the native depth, and past
+        // it and at every frame limit through the helper.
+        auto options = inline_options();
+        options.tier3 = nvm::TierOptions::Tier3::Native;
+        nvm::TierCache cache(image, options);
+        compare_with_tier_0(image, cache, "descend", {"descend", "2000"});
+        for (const std::uint32_t frames : {200U, 255U, 256U, 257U, 258U, 300U, 1000U}) {
+            compare_with_tier_0(image, cache, "descend with " + std::to_string(frames) + " frames", {"descend", "2000"},
+                                [&](nvm::RunLimits& limits) { limits.max_frames = frames; });
+        }
+        const auto counts = cache.statistics().native;
+        if (cache.machine_code()) {
+            check(counts.cell_entries > 0, "descend: native calls entered from the callee's cell");
+            check(counts.helper_entries > 0, "descend: the helper entered the callee at first and at the native depth");
+        } else {
+            check_equal(counts.cell_entries, std::uint64_t{0}, "no cell entries on the IR interpreter");
+        }
+    }
+    {
+        // `fall` recurses, and its program is formed again once the branch
+        // its first program stubs has run: the cell of the first program is
+        // cleared, and the helper enters the new program's native code.
+        auto options = inline_options(4);
+        options.program_proofs = 0;
+        options.tier3 = nvm::TierOptions::Tier3::Native;
+        nvm::TierCache cache(image, options);
+        compare_with_tier_0(image, cache, "refresh", {"refresh", "3000"});
+        const auto statistics = cache.statistics();
+        check(statistics.refreshed > 0, "refresh: a program was formed again");
+        if (cache.machine_code()) {
+            check(statistics.native.cell_entries > 0, "refresh: native calls entered from cells");
+            check(statistics.native.helper_entries >= 2, "refresh: the helper entered the callee again after its program changed");
+        }
+    }
+}
+
 NEURA_TEST(tier3, profile_runs_use_a_variant_that_inlines_nothing_and_keep_function_steps) {
     if (!programs_run()) return;
     const auto image = inline_image(environment);
