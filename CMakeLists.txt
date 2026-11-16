@@ -334,6 +334,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/reference_storage.cpp
     src/ir-optimization/analysis.cpp
     src/ir-optimization/effects.cpp
+    src/ir-optimization/analysis_cache.cpp
     src/ir-optimization/inlining.cpp
     src/ir-optimization/integer_folding.cpp
     src/ir-optimization/locals.cpp
