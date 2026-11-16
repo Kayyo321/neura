@@ -39,6 +39,7 @@ NEURA_DIAGNOSTIC(E0210, "malformed comparison chain")
 NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
 NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
 NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
+NEURA_DIAGNOSTIC(E0214, "parameter without a type")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
@@ -133,6 +134,7 @@ NEURA_DIAGNOSTIC(E0532, "unexported field in a fields-only anonymous class")
 NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous class")
 NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
 NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
+NEURA_DIAGNOSTIC(E0537, "constructor shorthand names no instance field")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

@@ -1,0 +1,7 @@
+error[E0304]: unknown name 'set'
+ --> $DIR/shorthand-ordinary-name.nra:2:28
+  |
+2 | let make = func(x: int) => set;
+  |                            ^^^ not found in this scope
+
+For more information about this error, try `neura explain E0304`.

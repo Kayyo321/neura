@@ -1,0 +1,4 @@
+// Enum payloads are not grouped.
+let Shape = enum (
+    Point(x, y: int),
+);

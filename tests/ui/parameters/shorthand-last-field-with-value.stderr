@@ -1,0 +1,12 @@
+error[E0401]: cannot assign twice to 'x'
+ --> $DIR/shorthand-last-field-with-value.nra:5:28
+  |
+2 |     export last x: int = 1;
+  |                 - first assigned here
+...
+5 |     export let init = func(x, y: int) => set;
+  |                            ^ second assignment
+  |
+  = help: consider declaring it with 'let' if it should change
+
+For more information about this error, try `neura explain E0401`.

@@ -2,17 +2,17 @@
 
 This note fixes the grammar and rules of two 0.3.0 features before they are implemented, as [the 0.3.0 baseline](Release030.md) requires: grouped parameter types, and the constructor shorthand `=> set`. The rows move to [Core language](../lang/CoreLanguage.md) and [Object lifecycle](../lang/ObjectLifecycle.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-16. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. A row the owner changes is changed here and on the language page in one later change.
+Status: *proposed* on 2026-11-16, and *implemented* as written in the change that moved the rows to the language pages. The owner was away and had asked for autonomous work toward 0.3.0, so the rows await the owner's confirmation; "proposed" stays until then. A row the owner changes is changed here and on the language page in one later change.
 
 Neither feature adds a NeuraIR operation or changes an image. A program written with them lowers to the IR of the same program written out in full.
 
 ## Grouped parameter types
 
-<!-- example: fragment: proposed syntax that the compiler does not accept yet -->
+<!-- example: check -->
 ```neura
-let distance = func(x, y: float64, label: string) -> string { ... };
+let distance = func(x, y: float64, label: string) -> string { return label; };
 // is the function
-let distance = func(x: float64, y: float64, label: string) -> string { ... };
+let spread = func(x: float64, y: float64, label: string) -> string { return label; };
 ```
 
 | Rule | Status |
@@ -31,7 +31,7 @@ Tooling follows the expansion. Signature help, hovers and the documentation inde
 
 ## Constructor shorthand
 
-<!-- example: fragment: proposed syntax that the compiler does not accept yet -->
+<!-- example: check -->
 ```neura
 let Point = class(
     export last x: int;

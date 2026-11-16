@@ -319,6 +319,7 @@ private:
     void check_override(SymbolId id, const Declaration& decl);
     void check_interfaces(SymbolId id);
     void check_constructor(SymbolId id, const Declaration& decl);
+    void check_constructor_shorthand(SymbolId id, const Declaration& decl);
     void require_implicit_constructor(SymbolId cls, const Span& span);
 
     SymbolId own_member(SymbolId owner, std::string_view name) const;
@@ -3042,6 +3043,10 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {
+        // `$instance` is the receiver as the constructor shorthand writes it:
+        // no source declares that name, so nothing can shadow it.
+        if (expr.text == "$instance" && context.receiver != no_symbol && class_or_interface(symbol(context.receiver).kind))
+            return receiver(context.receiver, expr.span, context);
         SymbolId promoted_receiver = no_symbol;
         auto id = find(expr.text, context, expr.span, &promoted_receiver);
         if (id == no_symbol && expr.text == "instance" && context.receiver != no_symbol &&
@@ -4497,6 +4502,40 @@ std::vector<IrNode> Lowering::body(const std::vector<Statement>& stmts, Context&
     return instructions;
 }
 
+// `init = func(...) => set` has been expanded to one store per parameter
+// (ObjectLifecycle.md, Constructor shorthand). Each parameter must name an
+// instance field the class declares itself, and a derived class needs a
+// base constructor that takes no arguments, which the shorthand calls first.
+void Lowering::check_constructor_shorthand(SymbolId id, const Declaration& decl) {
+    const auto owner = symbol(id).owner;
+    for (const auto& parameter : decl.parameters) {
+        const auto field = own_member(owner, parameter.name);
+        if (field != no_symbol && symbol(field).kind == SymbolKind::Field) continue;
+        auto error = Diagnostic(parameter.span, "'" + parameter.name + "' is not an instance field of class '" +
+                                                    symbol(owner).name + "'")
+            .with_code("E0537");
+        if (field != no_symbol)
+            error.label(name_span(field), std::string("'") + parameter.name + "' is declared here as " +
+                        (symbol(field).kind == SymbolKind::Function ? "a method" : "a static member"));
+        else if (member(owner, parameter.name, false) != no_symbol)
+            error.label("'" + parameter.name + "' is inherited, and the shorthand sets only the class's own fields");
+        else
+            error.label("the class declares no field '" + parameter.name + "'");
+        error.label(*decl.set_shorthand, "'=> set' stores each parameter in the field of the same name");
+        error.help("name the parameter after an instance field of this class, or write the constructor with a block");
+        throw error;
+    }
+    if (symbol(owner).base != no_symbol && symbol(owner).base != root_class_) {
+        try {
+            require_implicit_constructor(owner, *decl.set_shorthand);
+        } catch (Diagnostic& error) {
+            error.help("'=> set' calls super.init() first; write the constructor as a block that calls "
+                       "super.init(...) itself");
+            throw;
+        }
+    }
+}
+
 void Lowering::check_constructor(SymbolId id, const Declaration& decl) {
     auto owner = symbol(id).owner;
     if (symbol(owner).kind != SymbolKind::Class || (decl.name != "init" && decl.name != "deinit"))
@@ -4512,6 +4551,7 @@ void Lowering::check_constructor(SymbolId id, const Declaration& decl) {
             .with_code("E0509");
     if (decl.name == "deinit" && !decl.parameters.empty())
         throw Diagnostic(decl.span, "deinit takes no parameters").with_code("E0509");
+    if (decl.set_shorthand) check_constructor_shorthand(id, decl);
     if (decl.name != "init" || symbol(owner).base == no_symbol || symbol(owner).base == root_class_) return;
     if (!decl.body.empty()) {
         const auto& first = decl.body.front();

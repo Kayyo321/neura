@@ -1,0 +1,6 @@
+let Box = class (
+    export let size: int = 0;
+    export let grow = func() {};
+
+    export let init = func(size: int, grow: int) => set;
+);

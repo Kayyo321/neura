@@ -1,0 +1,7 @@
+error[E0433]: duplicate overload parameter signature for 'add'
+ --> $DIR/equal-overload-signatures.nra:4:6
+  |
+4 | } or func(a: int32, b: int32) -> int {
+  |      ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^...
+
+For more information about this error, try `neura explain E0433`.

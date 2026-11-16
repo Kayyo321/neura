@@ -153,9 +153,14 @@ private:
             const auto found = lookup(expr.text);
             return found ? *found : std::nullopt;
         }
-        if (expr.kind != ExprKind::Member || !options_.instance_is_receiver) return std::nullopt;
+        if (expr.kind != ExprKind::Member) return std::nullopt;
         const auto& receiver = expr.operands.front();
-        if (receiver.kind != ExprKind::Name || receiver.text != "instance" || lookup("instance")) return std::nullopt;
+        // `$instance` is the receiver written by the constructor shorthand;
+        // no name shadows it.
+        const bool shorthand = receiver.kind == ExprKind::Name && receiver.text == "$instance";
+        if (!shorthand && (!options_.instance_is_receiver || receiver.kind != ExprKind::Name ||
+                           receiver.text != "instance" || lookup("instance")))
+            return std::nullopt;
         for (std::size_t i = 0; i < bindings_.size() && bindings_[i].field; ++i) {
             if (bindings_[i].name == expr.text) return i;
         }

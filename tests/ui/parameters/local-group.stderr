@@ -1,0 +1,9 @@
+error[E0205]: expected a type annotation or an initializer
+ --> $DIR/local-group.nra:2:6
+  |
+2 | let a, b: int;
+  |      ^ 'a' needs a type, a value, or both
+  |
+  = help: write ': T' after the name for its type, and '= value' for its value
+
+For more information about this error, try `neura explain E0205`.

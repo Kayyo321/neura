@@ -1,0 +1,10 @@
+error[E0403]: expected string, got int32
+ --> $DIR/shorthand-incompatible-type.nra:5:28
+  |
+2 |     export let owner: string;
+  |                ----- 'owner' is declared here with type string
+...
+5 |     export let init = func(owner, balance: int) => set;
+  |                            ^^^^^ expected string, found int32
+
+For more information about this error, try `neura explain E0403`.

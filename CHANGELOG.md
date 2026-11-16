@@ -19,6 +19,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- Grouped parameter types: `func(x, y: float64, label: string)` gives `x` and `y` one type. A group works in every parameter list, and a variadic parameter is a group of one name. New diagnostic `E0214` for a parameter without a type; a variadic parameter in a larger group is `E0207`.
+- The constructor shorthand `init = func(x, y: int) => set;`, which stores each parameter in the instance field of the same name. New diagnostic `E0537` for a parameter that names no instance field of the class.
 - Research-candidate editor tooling for the separate Neura VS Code extension: `neura lsp --stdio`, compiler-backed unsaved analysis and semantic editing, `neura fmt`, `neura debug --stdio`, and `neura capabilities --json`.
 - Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.
 - Read-only image/graph JSON inspection through `neura inspect-image --json`.

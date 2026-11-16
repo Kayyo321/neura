@@ -545,7 +545,7 @@ if(BUILD_TESTING)
     )
     # Editor protocol contracts execute real compiler and runtime paths.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
+    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
             add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py" "$<TARGET_FILE:neura>")
@@ -581,6 +581,13 @@ if(BUILD_TESTING)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/nir-link.cmake"
     )
+
+    # Grouped parameters and the constructor shorthand build the image of
+    # their written-out form (docs/design/Parameters030.md).
+    add_test(NAME parameters-equivalence COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence")
+    set_tests_properties(parameters-equivalence PROPERTIES TIMEOUT 180)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

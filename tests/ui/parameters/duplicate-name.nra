@@ -1,0 +1,4 @@
+// Duplicate names are diagnosed after expansion, with the existing code.
+let add = func(a, b, a: int) -> int {
+    return b;
+};

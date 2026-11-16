@@ -1,0 +1,10 @@
+error[E0537]: 'y' is not an instance field of class 'Point'
+ --> $DIR/shorthand-missing-field.nra:4:31
+  |
+4 |     export let init = func(x, y: int) => set;
+  |                               ^ the class declares no field 'y'
+  |                                          --- '=> set' stores each parameter in the field of the same name
+  |
+  = help: name the parameter after an instance field of this class, or write the constructor with a block
+
+For more information about this error, try `neura explain E0537`.

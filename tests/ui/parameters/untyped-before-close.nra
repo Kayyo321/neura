@@ -1,0 +1,4 @@
+// A comma after the last name does not give it a type.
+let add = func(a: int, b, ) -> int {
+    return a;
+};

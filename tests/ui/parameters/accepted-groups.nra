@@ -1,0 +1,22 @@
+// A group of names takes one type; a later group does not reach back.
+let distance = func(x, y: float64, label: string) -> string {
+    return label;
+};
+let mixed = func(a: int, b, c: string) -> string {
+    return c;
+};
+let nested = func(
+    // a comment before the first group
+    first, second: [int, string][],
+    #Note("callbacks") f, g: func(int, int) -> int, // after a group
+    rest: ...string
+) -> int {
+    return f(1, 2);
+};
+let tupled = func(p, q: [int, [string, float64]]) {};
+let generic = func<T>(a, b: T) -> T {
+    return a;
+};
+let lambda = func(a, b: int) -> int => a + b;
+let apply = func(f: func(int, int) -> int) -> int => f(1, 2);
+let total = apply(func(a, b: int) -> int { return a + b; });

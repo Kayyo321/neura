@@ -1,0 +1,6 @@
+let Counter = class (
+    export static let total: int = 0;
+    export let step: int = 1;
+
+    export let init = func(step: int, total: int) => set;
+);
