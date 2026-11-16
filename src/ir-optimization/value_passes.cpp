@@ -237,8 +237,8 @@ std::size_t propagate_copies(IrProgram& program) {
 }
 
 std::size_t eliminate_common_subexpressions(IrProgram& program) {
-    const EffectAnalysis analysis(program);
     const PurityAnalysis purity(program);
+    const EffectAnalysis analysis(program, purity);
     std::size_t count = 0;
     for (auto& body : program.bodies) {
         if (!function_body(program, body)) continue;

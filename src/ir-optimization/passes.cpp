@@ -189,8 +189,8 @@ std::size_t remove_unreachable(IrProgram& program) {
 }
 
 std::size_t remove_pure_discards(IrProgram& program) {
-    const EffectAnalysis effects(program);
     const PurityAnalysis purity(program);
+    const EffectAnalysis effects(program, purity);
     // A call whose result is unused, of a function that is pure and total
     // (neura-ir/purity.hpp), with arguments that are pure and total: it
     // has no effect, cannot fail, and returns. A call that polls is a

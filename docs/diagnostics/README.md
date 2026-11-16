@@ -4,7 +4,7 @@ Each error that the compiler reports has a code: `E` and four digits, whose hund
 
 A page states the rule, shows a program that breaks it with the error it gets, and shows the program fixed. The examples are compiled by the `doc-examples` test: a failing example must fail with its code, and a fixed one must compile. A few errors cannot be caused by a single source file; their pages say why, and show only the fix.
 
-E0923 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
+E0924 to E0929 are free for later tags, and W0006 to W0009 for later warnings.
 
 ## E01xx: Lexer
 
@@ -229,6 +229,7 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0920](E0920.md) | #Immutable class with a base or subclass that is not #Immutable |
 | [E0921](E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
+| [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
 
 ## Warnings
 

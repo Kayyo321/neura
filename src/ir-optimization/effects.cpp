@@ -34,66 +34,6 @@ void each_node(const std::vector<IrNode>& nodes, const std::function<void(const 
 
 } // namespace
 
-ModuleDispatch::ModuleDispatch(const IrProgram& program) : program_(program) {
-    for (SymbolId id = 0; id < program.symbols.size(); ++id) {
-        const auto& item = program.symbols[id];
-        if (item.kind == SymbolKind::Module) {
-            // Every module up the chain has a derived module.
-            std::set<SymbolId> seen;
-            for (auto base = item.base; base < program.symbols.size() && seen.insert(base).second;
-                 base = program.symbols[base].base) {
-                derived_.insert(base);
-            }
-        }
-        if (item.kind == SymbolKind::Function && item.owner != no_symbol) {
-            members_[{item.owner, item.name}].push_back(id);
-        }
-    }
-}
-
-SymbolId ModuleDispatch::module(const IrNode& call) const {
-    if (call.op != IrOp::VirtualCall || call.operands.empty()) return no_symbol;
-    const auto& receiver = call.operands.front();
-    if (receiver.type.kind != TypeKind::Module || receiver.symbol >= program_.symbols.size()) return no_symbol;
-    const auto& item = program_.symbols[receiver.symbol];
-    if (receiver.op == IrOp::Reference && item.kind == SymbolKind::Module) return receiver.symbol;
-    if (receiver.op == IrOp::Reference && item.kind == SymbolKind::Import &&
-        item.type.symbol < program_.symbols.size() && program_.symbols[item.type.symbol].kind == SymbolKind::Module) {
-        return item.type.symbol;
-    }
-    if (receiver.op == IrOp::Receiver && item.kind == SymbolKind::Module && !derived(receiver.symbol)) {
-        return receiver.symbol;
-    }
-    return no_symbol;
-}
-
-SymbolId ModuleDispatch::target(const IrNode& call) const {
-    const auto module = this->module(call);
-    if (module == no_symbol || call.symbol >= program_.symbols.size() || !call.type_arguments.empty()) {
-        return no_symbol;
-    }
-    // The first module up the chain that declares a function of that name
-    // supplies it; it must be the declared function or override it.
-    std::set<SymbolId> seen;
-    for (auto scope = module; scope < program_.symbols.size() && seen.insert(scope).second;
-         scope = program_.symbols[scope].base) {
-        const auto found = members_.find({scope, program_.symbols[call.symbol].name});
-        if (found == members_.end()) continue;
-        if (found->second.size() != 1) return no_symbol;
-        const auto candidate = found->second.front();
-        std::set<SymbolId> chain;
-        for (auto current = candidate; current < program_.symbols.size() && chain.insert(current).second;
-             current = program_.symbols[current].overrides) {
-            if (current == call.symbol) {
-                const auto& function = program_.symbols[candidate];
-                return function.has_body && function.generics.empty() ? candidate : no_symbol;
-            }
-        }
-        return no_symbol;
-    }
-    return no_symbol;
-}
-
 void Effects::merge(const Effects& other) {
     insert_all(local_reads, other.local_reads);
     insert_all(local_writes, other.local_writes);
@@ -154,7 +94,18 @@ SymbolId EffectAnalysis::callee(const IrNode& node) const {
 }
 
 EffectAnalysis::EffectAnalysis(const IrProgram& program)
-    : program_(program), dispatch_(program), unknown_(unknown_effects()) {
+    : program_(program), owned_(std::make_unique<PurityAnalysis>(program)), purity_(*owned_), dispatch_(program),
+      unknown_(unknown_effects()) {
+    build();
+}
+
+EffectAnalysis::EffectAnalysis(const IrProgram& program, const PurityAnalysis& purity)
+    : program_(program), purity_(purity), dispatch_(program), unknown_(unknown_effects()) {
+    build();
+}
+
+void EffectAnalysis::build() {
+    const auto& program = program_;
     std::map<SymbolId, const IrBody*> bodies;
     for (const auto& body : program.bodies) {
         if (body.owner < program.symbols.size() && program.symbols[body.owner].kind == SymbolKind::Function &&
@@ -234,6 +185,14 @@ EffectAnalysis::EffectAnalysis(const IrProgram& program)
                 auto summary = of(bodies.at(function)->instructions);
                 summary.local_reads.clear();
                 summary.local_writes.clear();
+                // Allocation, traps, host requests and the scheduler are the
+                // purity analysis's facts, not a second computation.
+                if (const auto* facts = purity_.summary(function)) {
+                    summary.allocates = facts->optimizer.allocates;
+                    summary.may_trap = facts->optimizer.traps;
+                    summary.host = facts->optimizer.host;
+                    summary.scheduler = facts->optimizer.scheduler;
+                }
                 if (summary != functions_[function]) {
                     functions_[function] = std::move(summary);
                     changed = true;

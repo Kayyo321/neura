@@ -374,6 +374,18 @@ IrAttributeValue kernel_binding_payload(std::string kernel, std::uint32_t abi_ve
     return attribute_list({attribute_text(std::move(kernel)), attribute_unsigned(abi_version)});
 }
 
+IrAttributeValue host_effects_payload(const HostEffects& effects) {
+    return attribute_list({attribute_bool(effects.allocates), attribute_bool(effects.traps),
+                           attribute_bool(effects.scheduler), attribute_bool(effects.retains)});
+}
+
+std::optional<HostEffects> host_effects(const IrSymbol& symbol) {
+    const auto* found = find_attribute(symbol, AttributeId::HostEffects);
+    if (!found || found->value.items.size() != 4) return std::nullopt;
+    const auto& items = found->value.items;
+    return HostEffects{items[0].integer != 0, items[1].integer != 0, items[2].integer != 0, items[3].integer != 0};
+}
+
 std::optional<bool> last_binding(const IrSymbol& symbol) {
     const auto* found = find_attribute(symbol, AttributeId::BindingLast);
     if (!found || found->value.kind != AttributeValueKind::Bool) return std::nullopt;

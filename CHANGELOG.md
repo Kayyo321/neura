@@ -19,6 +19,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- `#HostEffects(allocates:, traps:, scheduler:, retains:)` declares what a call of a standard library host binding may do (`E0923` on any other function). It becomes the registered NeuraIR attribute `host.effects` (id 11, no format version change), and the effect and retention summaries of the purity analysis read it; a binding without it is unknown in every fact. Optimized images are unchanged.
 - Research-candidate editor tooling for the separate Neura VS Code extension: `neura lsp --stdio`, compiler-backed unsaved analysis and semantic editing, `neura fmt`, `neura debug --stdio`, and `neura capabilities --json`.
 - Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.
 - Read-only image/graph JSON inspection through `neura inspect-image --json`.

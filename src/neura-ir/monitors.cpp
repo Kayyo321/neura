@@ -158,6 +158,22 @@ void declare_checked_tags(IrProgram& program, SymbolId first, const std::functio
         if (!item.has_body) reject("has no body to synchronize", "remove #Synchronized");
         set_attribute(program.symbols[id], AttributeId::Synchronized, attribute_bool(true));
     }
+    // #HostEffects on a host binding: the contract that its summary takes.
+    for (SymbolId id = first; id < count; ++id) {
+        const auto& item = program.symbols[id];
+        if (item.kind != SymbolKind::Function || !has_tag(item, TagId::HostEffects)) continue;
+        if (!item.host_binding || item.has_body || !item.external) {
+            throw Diagnostic(tag_or(id, TagId::HostEffects),
+                             "#HostEffects on " + quoted(item.name) + ", which is not a host binding without a body")
+                .with_code("E0923").label("#HostEffects given here").label(name_span(id), "declared here")
+                .help("a function with a body is summarized from its body; remove #HostEffects");
+        }
+        const auto flag = [&](std::string_view argument) {
+            return tag_text(item, TagId::HostEffects, argument).value_or("true") != "false";
+        };
+        set_attribute(program.symbols[id], AttributeId::HostEffects,
+                      host_effects_payload({flag("allocates"), flag("traps"), flag("scheduler"), flag("retains")}));
+    }
     // #Synchronized on a class: every exported method with a body.
     for (SymbolId id = first; id < count; ++id) {
         const auto& cls = program.symbols[id];

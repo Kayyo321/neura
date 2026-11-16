@@ -86,6 +86,7 @@ Tags persist in `.nir` files, so a program that imports a prebuilt module sees a
 | `#ThreadSafe` | classes, functions, methods | Checked: the function is task-safe (`E0608`, with the call chain), or the class is `#Immutable` or a monitor (`E0609`) with task-safe exported methods. |
 | `#NotThreadSafe` | classes, functions, methods | No spawned task or parallel worker may call it (`E0601`) or receive the class's instances (`E0602`). |
 | `#Synchronized` | classes, methods | The method runs with exclusive access to its receiver, first come, first served, re-entrant for calls on its own receiver; on a class, every exported method with a body. Not on constructors, destructors, statics, bodyless methods, or kernel or host bindings (`E0921`); an override of a synchronized method must be synchronized (`E0922`). See [concurrency.md](concurrency.md#monitors). |
+| `#HostEffects` | host bindings | Library only: declares what a call of a function bound to a host service may do (`allocates`, `traps`, `scheduler`, `retains`; an omitted argument says it may). On any other function it is `E0923`. |
 
 <!-- example: warning: W0003 -->
 ```neura

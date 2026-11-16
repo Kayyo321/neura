@@ -51,3 +51,9 @@ NEURA_ATTRIBUTE(InlineDirective, 8, "inline.directive", on_function, false, "u2"
 NEURA_ATTRIBUTE(Synchronized, 9, "synchronized", on_function, false, "b")
 // A class whose instances may be shared between tasks.
 NEURA_ATTRIBUTE(ClassShareable, 10, "class.shareable", on_class, false, "b")
+// On a function bound to a host service and declared without a body: what a
+// call may do, as the standard library declares with #HostEffects:
+// [may allocate, may trap, uses the scheduler, retains its arguments]. A host
+// call is a host request by definition. Without it every fact is unknown
+// (docs/design/Representation030.md, "Effect and retention summaries").
+NEURA_ATTRIBUTE(HostEffects, 11, "host.effects", on_function, false, "[b b b b]")

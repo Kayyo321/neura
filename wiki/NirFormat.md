@@ -133,6 +133,7 @@ Each registered attribute has a stable identifier, the symbol kinds that may car
 | 8 | `inline.directive` | function | no | `u2` | The optimizer's inlining directive: 0 automatic, 1 always, 2 never |
 | 9 | `synchronized` | function | no | `b` | A method that runs under its instance's guard: one marked `#Synchronized`, an exported method of a class marked `#Synchronized`, or an accessor of a class with synchronized methods ([Concurrency](Concurrency#81-monitors)) |
 | 10 | `class.shareable` | class | no | `b` | A monitor by its declaration: a class with synchronized methods whose exported methods are all synchronized, whose exported fields are `last` or `const` of an immutable type or have accessors, and whose base is such a class. The linked program shares its instances between tasks when the rules that depend on the whole program also hold ([Concurrency](Concurrency#81-monitors)) |
+| 11 | `host.effects` | function | no | `[b b b b]` | The contract of a host binding, which has no body to summarize: whether a call may allocate, may trap, may use the scheduler, and may retain its arguments, as the standard library declares with `#HostEffects` ([Tags](Tags#hosteffects)). A host call is always a host request, so the record has no field for it. A binding without it is unknown in every fact of an [effect summary](IrOptimization#effect-summaries). It is a function's own declaration, not a recorded summary: a function with a body is always summarized from its body |
 
 Identifier 0 is reserved, and identifiers are never reused. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
 
@@ -142,6 +143,7 @@ The reader rejects an unknown identifier, an unknown value kind, a bool other th
 - A field's `accessor.get` or `accessor.set` names a function of the same owner, and that function's `accessor.of` names the field with the matching kind. The reverse also holds.
 - `synchronized` marks a function owned by a class.
 - A kernel binding names a kernel.
+- `host.effects` marks a function bound to a host service that has no body. The reader rejects the same: a contract on a function with a body, on a kernel, or on a function that is no host binding.
 
 Linking a prebuilt module renumbers the symbol references, types, and span files in attributes, as it does for the symbol's own fields. Two definitions coalesce only when their attributes are equal. As with the 1.6 linkage fields, an embedded standard library definition without attributes still links against an installed one that has them. Specialization copies the attributes of every symbol it copies. A reference to a member of the generic class then names the instance's copy, which specialization creates if needed. A reference to a parameter or local of the copied function names its copy.
 

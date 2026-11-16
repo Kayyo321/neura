@@ -250,4 +250,9 @@ NEURA_TAG(Range, 85, Numerics, Values | Local | Parameter | Callables, reserved,
           "the value always lies within [min, max]",
           "check the bounds where the value is produced and trap_with_message")
 
+// Effect contracts (Representation030.md, "Effect and retention summaries")
+NEURA_TAG(HostEffects, 86, Resources, Function, implemented, false,
+          "allocates:b=true,traps:b=true,scheduler:b=true,retains:b=true", "0.3.0",
+          "what a call of this host binding may do; an omitted argument says it may (E0923)", "")
+
 #undef NEURA_TAG
