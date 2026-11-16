@@ -8,6 +8,7 @@
 // (backend-tier3).
 #include "graph_test_support.hpp"
 
+#include "jit/tier3_native.hpp"
 #include "nvm/tier1.hpp"
 #include "nvm/tier2.hpp"
 #include "nvm/tier3.hpp"
@@ -33,10 +34,12 @@ nvm::TierOptions inline_options(std::uint32_t native_after = 3) {
     options.minimum_proof_work = std::uint64_t{1} << 30;
     options.region_after = 1;
     options.programs = nvm::TierOptions::Programs::On;
-    // NEURA_TIER3 picks the back end (native: machine code); without it, the
-    // IR interpreter.
-    options.tier3 = nvm::tier3_environment() == nvm::TierOptions::Tier3::Off ? nvm::TierOptions::Tier3::Interp
-                                                                              : nvm::TierOptions::Tier3::Environment;
+    // NEURA_TIER3 picks the back end (native: machine code); with it off, or
+    // unset where there is no machine code (the default is then no tier 3),
+    // the IR interpreter.
+    const bool interpreted = nvm::tier3_environment() == nvm::TierOptions::Tier3::Off ||
+                             (nvm::tier3_environment_implicit() && !jit::native::supported());
+    options.tier3 = interpreted ? nvm::TierOptions::Tier3::Interp : nvm::TierOptions::Tier3::Environment;
     options.native_after = native_after;
     return options;
 }
