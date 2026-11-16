@@ -1,6 +1,6 @@
 # Neura 0.3.0: baseline and frozen contracts
 
-This page records the starting point of the 0.3.0 work and the contracts that are fixed before any of it changes behavior. Contributors need them in order to tell a regression from an intended change. It is a design note: the language pages, [Project](../Project.md), and the format pages stay authoritative for behavior. A decision recorded here becomes a rule only when the page that owns it says so. A row marked *proposed* is not yet signed off; the owner signs it off by approving the change that marks it *frozen*.
+This page records the starting point of the 0.3.0 work and the contracts that are fixed before any of it changes behavior. Contributors need them in order to tell a regression from an intended change. It is a design note: the language pages, [Project](../Project.md), and the format pages stay authoritative for behavior. A decision recorded here becomes a rule only when the page that owns it says so. The owner signed off every row marked *frozen* on 2026-11-16. A frozen row changes only through a later change to this page that the owner approves, and that change says why.
 
 ## Baseline
 
@@ -36,11 +36,11 @@ The gate for 0.3.0 is that it is no slower than rc.3. Speed equal to Java's is r
 
 | Rule | Status |
 | --- | --- |
-| `scripts/bench-wall.py --long --runs 5` on the machine of the rc.3 table, with the same command and sizes. Every output matches Java, and every program's steps and peak heap cells match the table, or the change explains why they differ. | proposed |
-| Each program's median time and the geometric mean are within 5% of the rc.3 figures | proposed |
-| The same run with `NEURA_TIER3=off` is within 5% of rc.3 with `NEURA_TIER3=off` | proposed |
+| `scripts/bench-wall.py --long --runs 5` on the machine of the rc.3 table, with the same command and sizes. Every output matches Java, and every program's steps and peak heap cells match the table, or the change explains why they differ. | frozen |
+| Each program's median time and the geometric mean are within 5% of the rc.3 figures | frozen |
+| The same run with `NEURA_TIER3=off` is within 5% of rc.3 with `NEURA_TIER3=off` | frozen |
 | `tests/benchmarks/baseline.txt` keeps its existing rule ([CONTRIBUTING](../../CONTRIBUTING.md)) | in force |
-| The gate runs after each change to storage, hooks or inline values, and before every 0.3.0 candidate | proposed |
+| The gate runs after each change to storage, hooks or inline values, and before every 0.3.0 candidate | frozen |
 
 ## Size and dependency baseline
 
@@ -69,11 +69,11 @@ Launch time of a whole process, measured on the machine of the benchmark table w
 
 | Budget for the split products | Status |
 | --- | --- |
-| Every shipped executable depends on no library beyond the five above, and on libclang only where `neura` uses it today | proposed |
-| The `neura` dispatcher, stripped, is at most 1 MiB | proposed |
-| The execution core, the executables a runtime-only installation contains, contains no compiler, parser, lowering or decompiler code | proposed |
-| Each archive is at most 25% larger than the rc.3 archive for its target, excluding application target components (browser, desktop and database providers), which are measured separately | proposed |
-| `neura --version` and a direct run of a hello-world image take no longer than with rc.3, within 5% | proposed |
+| Every shipped executable depends on no library beyond the five above, and on libclang only where `neura` uses it today | frozen |
+| The `neura` dispatcher, stripped, is at most 1 MiB | frozen |
+| The execution core, the executables a runtime-only installation contains, contains no compiler, parser, lowering or decompiler code | frozen |
+| Each archive is at most 25% larger than the rc.3 archive for its target, excluding application target components (browser, desktop and database providers), which are measured separately | frozen |
+| `neura --version` and a direct run of a hello-world image take no longer than with rc.3, within 5% | frozen |
 
 ## Format revisions
 
@@ -81,10 +81,10 @@ Each change to an artifact format takes the next minor version. The writer keeps
 
 | Revision | First user | Status |
 | --- | --- | --- |
-| NeuraIR 1.11 | Owner, borrow, effect and policy facts; multiword typed values | proposed |
-| NeuraIR 1.12 and later | Later language features, in the order they land | proposed |
-| NVR 1.7 | Frame and static regions, inline aggregates, direct construction | proposed |
-| NVR 1.8 and later | Later runtime features, in the order they land | proposed |
+| NeuraIR 1.11 | Owner, borrow, effect and policy facts; multiword typed values | frozen |
+| NeuraIR 1.12 and later | Later language features, in the order they land | frozen |
+| NVR 1.7 | Frame and static regions, inline aggregates, direct construction | frozen |
+| NVR 1.8 and later | Later runtime features, in the order they land | frozen |
 
 An image of NVR 1.6 or earlier keeps its current storage accounting under every tier.
 
@@ -94,40 +94,40 @@ An image of NVR 1.6 or earlier keeps its current storage accounting under every 
 
 | `neura` form | Direct executable | Product | Status |
 | --- | --- | --- | --- |
-| `build`, `check`, `emit-ir` | `neurac` (default action `build`) | SDK | proposed |
-| `run` | `neura-run` | both | proposed |
-| `runtime ...` | `neura-run runtime ...` | both; needs `neurad` for service control | proposed |
-| (service) | `neurad` | runtime, optional | proposed |
-| `test` | `neura-test` | SDK | proposed |
-| `debug` | `neura-debug` | SDK | proposed |
-| `lsp` | `neura-lsp` | SDK | proposed |
-| `fmt` | `neura-fmt` | SDK | proposed |
-| `decompile` | `neura-decompile` | SDK | proposed |
-| `assemble`, `disassemble` | `neura-asm`, `neura-disasm` | SDK | proposed |
-| `inspect`, `inspect-image` | `neura-inspect` | both | proposed |
-| `docs` | `neura-doc` | SDK | proposed |
-| `c-bindings` | `neura-cbind` | SDK | proposed |
-| `explain`, `tags` | `neura-explain`, `neura-tags` | SDK | proposed |
-| `doctor` | `neura-doctor` | both | proposed |
-| `update`, `uninstall` | `neura-update`, `neura-uninstall` | both | proposed |
-| `new`, `dev`, `contracts`, `package` | `neura-new`, `neura-dev`, `neura-contracts`, `neura-package` | SDK | proposed |
-| `--version`, `help`, `capabilities` | built into `neura` | both | proposed |
+| `build`, `check`, `emit-ir` | `neurac` (default action `build`) | SDK | frozen |
+| `run` | `neura-run` | both | frozen |
+| `runtime ...` | `neura-run runtime ...` | both; needs `neurad` for service control | frozen |
+| (service) | `neurad` | runtime, optional | frozen |
+| `test` | `neura-test` | SDK | frozen |
+| `debug` | `neura-debug` | SDK | frozen |
+| `lsp` | `neura-lsp` | SDK | frozen |
+| `fmt` | `neura-fmt` | SDK | frozen |
+| `decompile` | `neura-decompile` | SDK | frozen |
+| `assemble`, `disassemble` | `neura-asm`, `neura-disasm` | SDK | frozen |
+| `inspect`, `inspect-image` | `neura-inspect` | both | frozen |
+| `docs` | `neura-doc` | SDK | frozen |
+| `c-bindings` | `neura-cbind` | SDK | frozen |
+| `explain`, `tags` | `neura-explain`, `neura-tags` | SDK | frozen |
+| `doctor` | `neura-doctor` | both | frozen |
+| `update`, `uninstall` | `neura-update`, `neura-uninstall` | both | frozen |
+| `new`, `dev`, `contracts`, `package` | `neura-new`, `neura-dev`, `neura-contracts`, `neura-package` | SDK | frozen |
+| `--version`, `help`, `capabilities` | built into `neura` | both | frozen |
 
 ## Run and service defaults
 
 | Rule | Status |
 | --- | --- |
-| `neura run`, `neura-run`, `neura test` and editor Run and Debug execute directly (`--runtime=off`). They do not contact, start or probe a service, even when one is running. | proposed |
-| `--runtime=auto` uses or starts a compatible service and may fall back to direct execution only before the launch is committed. `--runtime=required` never falls back. | proposed |
-| `--detach` requires `--runtime=auto` or `--runtime=required` | proposed |
-| Ready workers that have never run an application: 1 | proposed |
-| Active applications per service: 64 | proposed |
-| Pending launches, prepared and not yet committed: 16; a launch beyond this fails with an admission error before commit | proposed |
-| Launch reservation lifetime: 30 seconds | proposed |
-| Image cache: 256 MiB | proposed |
-| Terminal status records: 1,024, each kept for 24 hours | proposed |
-| Control message size: 1 MiB, excluding the image bytes, which are sent by handle or content identity | proposed |
-| Grace period between `stop` and forced termination: 10 seconds | proposed |
+| `neura run`, `neura-run`, `neura test` and editor Run and Debug execute directly (`--runtime=off`). They do not contact, start or probe a service, even when one is running. | frozen |
+| `--runtime=auto` uses or starts a compatible service and may fall back to direct execution only before the launch is committed. `--runtime=required` never falls back. | frozen |
+| `--detach` requires `--runtime=auto` or `--runtime=required` | frozen |
+| Ready workers that have never run an application: 1 | frozen |
+| Active applications per service: 64 | frozen |
+| Pending launches, prepared and not yet committed: 16; a launch beyond this fails with an admission error before commit | frozen |
+| Launch reservation lifetime: 30 seconds | frozen |
+| Image cache: 256 MiB | frozen |
+| Terminal status records: 1,024, each kept for 24 hours | frozen |
+| Control message size: 1 MiB, excluding the image bytes, which are sent by handle or content identity | frozen |
+| Grace period between `stop` and forced termination: 10 seconds | frozen |
 
 ## Migration inventory
 
