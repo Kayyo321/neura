@@ -258,6 +258,12 @@ private:
         case Code::Deopt:
             m_.jump(stub(op.block, Outcome::Exits));
             return;
+        case Code::Call:
+        case Code::Return:
+        case Code::Dispatch:
+        case Code::Helper:
+            // Ops of function programs, which run on the region interpreter.
+            throw GenerationError("a function program");
         }
         throw GenerationError("an unknown op");
     }

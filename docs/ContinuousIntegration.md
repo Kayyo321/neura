@@ -32,7 +32,7 @@ Tier 1 builds and tests one configuration: Linux on x86-64 with GCC 14. It does 
 | --- | --- |
 | Build and test (Linux arm64) | Release, GCC 14, Ubuntu 24.04 on arm64, every CTest entry. |
 | Build and test (macOS arm64) and (macOS x86-64) | Release, Apple Clang, macOS 15, libffi and pkgconf from Homebrew, every CTest entry CMake registers on macOS. |
-| Address and undefined-behavior sanitizers (Linux x86-64) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, with a 1 GiB stack and a three-hour limit for each of `backend-reference` and `decompiler-behavior`, every CTest entry except `native-install` and `native-container`. |
+| Address and undefined-behavior sanitizers (Linux x86-64, shards 1 and 2) | GCC 14 with `-fsanitize=address,undefined`, without the static launcher, with a 1 GiB stack, a three-hour limit for each test and a two-hour limit for `program-fuzz`, every CTest entry except `native-install` and `native-container`. Each shard builds the same configuration and runs every second test by CTest number. |
 
 The sanitizer job leaves out two tests that cannot hold in its configuration: `native-install` requires a launcher that needs only the C library, and `native-container` rewrites an executable it has just run, which the leak checker's helper process can still hold open. It raises the stack because sanitized frames are several times larger, and `backend-reference` runs test programs 400 calls deep in an evaluator that recurses on the native stack.
 
@@ -74,7 +74,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
 cmake --build build --parallel
 scripts/check-kernels.sh build
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 172
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 177
 ```
 
 To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.

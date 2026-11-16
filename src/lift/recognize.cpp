@@ -49,6 +49,10 @@ bool evaluate_wires(const nvr::Graph& graph, std::vector<std::int64_t>& wires) {
 // the graph, and samples of the graph's behavior.
 class BlockModel {
 public:
+    // The most dependencies of wires on input lanes a block's model keeps, in
+    // all (about 200 MB of sets at the limit; src/lift/recognize.hpp).
+    static constexpr std::uint64_t max_support_entries = std::uint64_t{1} << 22;
+
     BlockModel(const nvr::Image& image, const nvr::Block& block)
         : image_(image), block_(block), graph_(image.graphs.at(block.graph)) {
         std::uint32_t lane = 0;
@@ -72,13 +76,28 @@ public:
         for (std::uint32_t i = 0; i < graph_.input_lanes; ++i) {
             support_[i] = {i};
         }
+        // The sets grow with the graph's depth and width together: a block
+        // that adds 300 words has about 10^5 nodes that each depend on
+        // thousands of lanes. Past `max_support_entries` in all, the block
+        // is too large to search, and the sets are dropped (oversized()).
+        std::uint64_t entries = 0;
         for (std::size_t n = 0; n < graph_.nodes.size(); ++n) {
             auto& set = support_[graph_.input_lanes + n];
             for (const auto& edge : graph_.nodes[n].edges) {
                 set.insert(support_[edge.source].begin(), support_[edge.source].end());
             }
+            entries += set.size();
+            if (entries > max_support_entries) {
+                oversized_ = true;
+                std::vector<std::set<std::uint32_t>>().swap(support_);
+                return;
+            }
         }
     }
+
+    // Whether the block's graph is too large to model: the other members that
+    // read the dependencies of its wires must not be used.
+    bool oversized() const { return oversized_; }
 
     const nvr::Image& image() const { return image_; }
     const nvr::Block& block() const { return block_; }
@@ -183,6 +202,7 @@ private:
     std::uint32_t lanes_ = 0;
     std::map<std::uint32_t, std::uint32_t> targets_;
     std::vector<std::set<std::uint32_t>> support_;
+    bool oversized_ = false;
 };
 
 // Pseudo-random sample values for each input word, including boundaries.
@@ -875,6 +895,7 @@ bool lift_dispatch(const nvr::Image& image, const nvr::Block& block, LiftedForm&
         }
     }
     const BlockModel model(image, block);
+    if (model.oversized()) return false;
     std::map<std::size_t, std::vector<std::uint32_t>> exits;
     for (std::uint32_t layout = 0; layout < image.layouts.size(); ++layout) {
         const auto outputs = model.outputs({layout, 0});
@@ -922,6 +943,7 @@ Recognition recognize(const nvr::Image& image, std::uint32_t function_index, std
         return result;
     };
     const BlockModel model(image, block);
+    if (model.oversized()) return unrecognized("graph too large to search");
     std::size_t normal_exits = 0;
     for (const auto& exit : block.exits) {
         normal_exits += exit.kind == nvr::ExitKind::Trap ? 0 : 1;

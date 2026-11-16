@@ -58,6 +58,18 @@
                 // The cache may have formed the region again with more
                 // blocks.
                 const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
+                if (plan.region && plan.region->program) {
+                    // A program formed while blocks were pending: the cache
+                    // forms it again, and the block enters the new version.
+                    const auto program = tier_->program(function, plan.region_threshold);
+                    const auto* entry = program.region ? program.region->entry_at(block) : nullptr;
+                    if (program.region) use_program(function, *program.region);
+                    plan.region = entry ? program.region : nullptr;
+                    plan.program_entry =
+                        entry ? static_cast<std::uint32_t>(entry - program.region->entries.data()) : 0;
+                    plan.region_threshold = entry ? program.retry_after : 0;
+                    return plan.region;
+                }
                 const auto resolved = tier_->region(function, block, plan.region_threshold);
                 plan.region = resolved.region;
                 plan.region_threshold = resolved.retry_after;
@@ -78,6 +90,25 @@
             if (arrivals < plan.region_threshold) return nullptr;
             // Forming a region is timed as tier 1 (--tier-stats).
             const TierTimes::Scope timing(times_, TierTimes::Category::Tier1);
+            if (programs_) {
+                // The function's program, when it has one, replaces its
+                // regions: the block enters it when it is one of its entries.
+                const auto program = tier_->program(function, arrivals);
+                if (!program.settled) {
+                    plan.region_threshold = program.retry_after;
+                    return nullptr;
+                }
+                if (program.region) {
+                    use_program(function, *program.region);
+                    const auto* entry = program.region->entry_at(block);
+                    plan.region_state = BlockPlan::RegionState::Settled;
+                    plan.region_threshold = entry ? program.retry_after : 0;
+                    plan.region = entry ? program.region : nullptr;
+                    plan.program_entry =
+                        entry ? static_cast<std::uint32_t>(entry - program.region->entries.data()) : 0;
+                    return plan.region;
+                }
+            }
             const auto resolved = tier_->region(function, block, arrivals);
             if (!resolved.settled) {
                 plan.region_threshold = resolved.retry_after;
@@ -91,6 +122,31 @@
         }
         }
         return nullptr;
+    }
+
+    // The run's record of a function's program: the program a call enters,
+    // and the register image of the program (its constants and immediates,
+    // loaded once, and its temporaries).
+    void use_program(std::uint32_t function, const tier2::Region& program) {
+        if (function_programs_.size() != image_.functions.size()) function_programs_.resize(image_.functions.size());
+        // A native call of the function enters the program the cell holds
+        // only while it is the run's program.
+        if (function_programs_[function] != &program && function < tier3_cells_.size()) tier3_cells_[function] = {};
+        function_programs_[function] = &program;
+        program_image(program);
+    }
+
+    // The register image of `program`, made when the run first uses it.
+    void program_image(const tier2::Region& program) {
+        if (program_images_.size() <= program.program_id) program_images_.resize(program.program_id + 1);
+        auto& image = program_images_[program.program_id];
+        if (!image.empty() || program.register_count == program.slot_widths.size()) return;
+        image.assign(program.register_count - program.slot_widths.size(), 0);
+        const auto base = program.slot_widths.size();
+        for (const auto& constant : program.constants) {
+            image[constant.reg - base] = const_values_[constant.index] & lift::mask_of(constant.width);
+        }
+        for (const auto& [r, value] : program.immediates) image[r - base] = value;
     }
 
     void reserve_region(const tier2::Region* region) {
@@ -113,10 +169,15 @@
             auto& plan = block_plan(frame.function, frame.block);
             const auto* region = region_for(frame.function, frame.block, plan);
             if (!region) break;
-            const auto* native = jit_ ? native_code(plan) : nullptr;
+            // Function programs run as native programs (tier 3) when they
+            // have one, else on the interpreter.
+            const auto* native = jit_ && !region->program ? native_code(plan) : nullptr;
+            const auto* code = region->program ? tier3_code(*region, false) : nullptr;
             time_as(TierTimes::Category::Regions);
-            const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native)
-                                             : run_region(*region, allowance - total, native);
+            const auto outcome = tier_check_ ? checked_region(*region, allowance - total, native, plan.program_entry, code)
+                                 : code      ? run_native_program(*code, plan.program_entry, allowance - total)
+                                 : region->program ? run_program(*region, plan.program_entry, allowance - total)
+                                                   : run_region(*region, allowance - total, native);
             total += outcome.blocks;
             if (outcome.deoptimized) break;
         }
@@ -347,6 +408,12 @@
                 running = false;
                 break;
             case tier2::Code::Deopt:
+            case tier2::Code::Call:
+            case tier2::Code::Return:
+            case tier2::Code::Dispatch:
+            case tier2::Code::Helper:
+                // Calls, returns, dispatches and helpers are ops of function
+                // programs only (run_program).
                 deopt(op.block, region_counts_.exits);
                 running = false;
                 break;
@@ -411,7 +478,304 @@
         return {done, deoptimized};
     }
 
+    // A function program (tier2.hpp, Region::program) on the interpreter,
+    // entered at entries[entry_index]. Slot registers are the running
+    // frame's slots; every other register is in the program's register
+    // image. Calls and returns switch the program and the frame inside this
+    // one loop, so nothing is left to unwind when it ends: at every point
+    // where it can end, every frame is as tier 1 would have it, the
+    // innermost frame's block is where the run goes on, and the completed
+    // blocks have been added to the step counts. `done` holds the completed
+    // blocks not yet added (all of one function); `blocks` counts every block
+    // completed since the entry, for the allowance and the caller.
+    RegionOutcome run_program(const tier2::Region& entered, std::uint32_t entry_index, std::uint64_t allowance) {
+        {
+            auto frame = frames_.back();
+            const auto& entry = entered.entries[entry_index];
+            bool refuse = entered.uses_float && !lift::float_environment_is_default();
+            for (const auto slot : entry.reads) refuse = refuse || !frame.initialized[slot];
+            for (std::size_t slot = 0; slot < entered.slot_widths.size() && !refuse; ++slot) {
+                const auto width = entered.slot_widths[slot];
+                refuse = width < 64 && frame.initialized[slot] && (frame.slots[slot] >> width) != 0;
+            }
+            if (refuse) {
+                ++region_counts_.refused;
+                return {0, true};
+            }
+        }
+        ++region_counts_.entries;
+        const bool float_default = lift::float_environment_is_default();
+        const tier2::Region* program = &entered;
+        std::uint32_t pc = entered.entries[entry_index].label;
+        std::uint64_t done = 0;
+        std::uint64_t blocks = 0;
+        std::uint64_t* slots = nullptr;
+        std::uint8_t* init = nullptr;
+        std::uint64_t* temps = nullptr;
+        std::size_t slot_count = 0;
+        const auto load_frame = [&] {
+            auto frame = frames_.back();
+            slots = frame.slots;
+            init = frame.initialized;
+        };
+        const auto enter = [&](const tier2::Region& next) {
+            program = &next;
+            program_image(next);
+            temps = program_images_[next.program_id].data();
+            slot_count = next.slot_widths.size();
+        };
+        enter(entered);
+        load_frame();
+        const auto reg = [&](std::uint32_t r) -> std::uint64_t& { return r < slot_count ? slots[r] : temps[r - slot_count]; };
+        // Adds the completed blocks to the run's count, under --profile to
+        // the running frame's function and task (R4).
+        const auto flush = [&] {
+            if (done == 0) return;
+            steps_ += done;
+            if (limits_.profile) {
+                if (scheduler_) current_task().steps += done;
+                if (function_steps_.size() != image_.functions.size()) function_steps_.resize(image_.functions.size());
+                function_steps_[frames_.back().function] += done;
+            }
+            tier_steps_.region += done;
+            region_counts_.program_steps += done;
+            block_plan(program->function, program->entry).region_steps += done;
+            done = 0;
+        };
+        const auto end = [&](std::uint32_t block, bool deoptimized, std::uint64_t& counter) -> RegionOutcome {
+            auto frame = frames_.back();
+            frame.block = block;
+            flush();
+            ++counter;
+            auto& ended = block_plan(frame.function, block);
+            ++(deoptimized ? ended.region_deopts : ended.region_leaves);
+            return {blocks, deoptimized};
+        };
+        const auto* code = program->code.data();
+        for (;;) {
+            const auto& op = code[pc++];
+            switch (op.code) {
+            case tier2::Code::Budget: {
+                // A checkpoint of a program that has native code (or has
+                // just reached the threshold for it): the frame is canonical
+                // here, so the activation ends as a Leave at this block, and
+                // the dispatcher enters the native program there.
+                if (tier3_ && tier3_code(*program, true)) return end(op.block, false, region_counts_.leaves);
+                const auto& checkpoint = program->checkpoints[op.a];
+                const auto used = steps_ + done;
+                const bool steps_fit = used <= limits_.max_steps && limits_.max_steps - used >= checkpoint.steps;
+                const bool allowed = allowance - blocks >= checkpoint.steps;
+                const bool polls_fit = !scheduler_ || checkpoint.polls == 0 ||
+                                       scheduler_->polls + checkpoint.polls < limits_.task_quantum;
+                if (!steps_fit || !allowed || !polls_fit) return end(op.block, true, region_counts_.budget);
+                break;
+            }
+            case tier2::Code::Lift: {
+                bool failed = false;
+                const auto value = lift::evaluate(program->instructions[op.index], reg(op.a), reg(op.b), failed);
+                if (failed) return end(op.block, true, region_counts_.checks);
+                reg(op.dst) = value;
+                if (op.flags & tier2::defines) init[op.dst] = 1;
+                break;
+            }
+            case tier2::Code::Mask:
+                reg(op.dst) = reg(op.a) & lift::mask_of(op.width);
+                break;
+            case tier2::Code::Move:
+                reg(op.dst) = reg(op.a);
+                break;
+            case tier2::Code::Gather: {
+                std::uint64_t value = 0;
+                const auto* bits = program->gathers.data() + op.index;
+                for (unsigned i = 0; i < op.width; ++i) value |= ((reg(bits[i].reg) >> bits[i].bit) & 1U) << i;
+                reg(op.dst) = value;
+                break;
+            }
+            case tier2::Code::Store:
+                reg(op.dst) = reg(op.a);
+                init[op.dst] = 1;
+                break;
+            case tier2::Code::Branch:
+                pc = (reg(op.a) & 1U) != 0 ? op.target : op.other;
+                break;
+            case tier2::Code::Switch: {
+                const auto index = reg(op.a);
+                if (index >= op.width) return end(op.block, true, region_counts_.selectors);
+                pc = program->operands[op.index + index];
+                break;
+            }
+            case tier2::Code::Dispatch: {
+                const auto& table = program->dispatch_tables[op.index];
+                const auto tag = reg(op.a);
+                const auto found = std::lower_bound(table.exits.begin(), table.exits.end(), tag,
+                                                    [](const auto& entry, std::uint64_t key) { return entry.first < key; });
+                const auto exit = found != table.exits.end() && found->first == tag ? found->second : table.fallback;
+                if (tier3_) tier3_record(*program, op.index, tag);
+                pc = program->operands[op.other + exit];
+                break;
+            }
+            case tier2::Code::Jump:
+                done += op.flags & tier2::completes;
+                blocks += op.flags & tier2::completes;
+                pc = op.target;
+                break;
+            case tier2::Code::CheckRef: {
+                const auto bits = reg(op.a);
+                if (type(op.index).kind == nvr::TypeKind::Object && bits == 0 && image_.minor_version >= 2) break;
+                try {
+                    typed_entry(bits, op.index);
+                } catch (const Fault&) {
+                    return end(op.block, true, region_counts_.references);
+                }
+                break;
+            }
+            case tier2::Code::State: {
+                auto& arguments = region_arguments_;
+                arguments.clear();
+                for (unsigned i = 0; i < op.width; ++i) arguments.push_back(reg(program->operands[op.other + i]));
+                try {
+                    const auto result = state(*program->exits[op.index], arguments);
+                    if (op.dst != nvr::absent) reg(op.dst) = result;
+                } catch (const Fault&) {
+                    return end(op.block, true, region_counts_.state_traps);
+                }
+                break;
+            }
+            case tier2::Code::Poll:
+                if (scheduler_) {
+                    // As poll(), with the quantum out of reach (Budget).
+                    serve_dump_request();
+                    ++scheduler_->polls;
+                }
+                break;
+            case tier2::Code::Complete:
+                ++done;
+                ++blocks;
+                break;
+            case tier2::Code::Leave:
+                done += op.flags & tier2::completes;
+                blocks += op.flags & tier2::completes;
+                return end(op.target, false, region_counts_.leaves);
+            case tier2::Code::Deopt:
+                return end(op.block, true, region_counts_.exits);
+            case tier2::Code::Call: {
+                // commit_exit's Call (machine.cpp): the arguments, read
+                // before the assignments the Stores before this op
+                // committed; the caller stays at the call block; the step;
+                // push_frame, whose fault is the run's trap here; the poll.
+                const auto& exit = *program->exits[op.index];
+                auto& arguments = region_arguments_;
+                arguments.clear();
+                for (unsigned i = 0; i < op.width; ++i) arguments.push_back(reg(program->operands[op.other + i]));
+                frames_.back().block = op.block;
+                ++done;
+                ++blocks;
+                flush();
+                try {
+                    push_frame(op.a, arguments, exit.result_slot, exit.resume);
+                } catch (const Fault& failure) {
+                    trap(failure);
+                    ++region_counts_.traps;
+                    return {blocks - 1, true};
+                }
+                frames_.set_called_from(program);
+                ++region_counts_.calls;
+                if (exit.poll && scheduler_) {
+                    serve_dump_request();
+                    ++scheduler_->polls;
+                }
+                load_frame();
+                const auto* callee = op.a < function_programs_.size() ? function_programs_[op.a] : nullptr;
+                // A callee with native code runs there: the dispatcher enters
+                // it at its first block.
+                bool enters = callee != nullptr && (!callee->uses_float || float_default) &&
+                              !callee->entries.empty() && callee->entries.front().block == 0 &&
+                              !(tier3_ && tier3_code(*callee, false));
+                if (enters) {
+                    // Entry 0's checks: its early reads are parameters, which
+                    // the push initialized, and the parameters fit their
+                    // types; every other slot is zero and uninitialized.
+                    for (const auto slot : callee->entries.front().reads) enters = enters && slot < callee->parameter_count;
+                    for (std::uint32_t slot = 0; slot < callee->parameter_count && enters; ++slot) {
+                        const auto width = callee->slot_widths[slot];
+                        enters = width >= 64 || (slots[slot] >> width) == 0;
+                    }
+                }
+                if (!enters) return end(0, false, region_counts_.leaves);
+                enter(*callee);
+                code = program->code.data();
+                pc = callee->entries.front().label;
+                break;
+            }
+            case tier2::Code::Helper: {
+                // commit_exit's State case (machine.cpp): the arguments,
+                // read before the assignments the Stores before this op
+                // committed; the block, the step; the reference state
+                // operation, whose fault is the run's trap here, the block
+                // having been charged; the result slot; the resume block.
+                const auto& exit = *program->exits[op.index];
+                auto& arguments = region_arguments_;
+                arguments.clear();
+                for (unsigned i = 0; i < op.width; ++i) arguments.push_back(reg(program->operands[op.other + i]));
+                frames_.back().block = op.block;
+                ++done;
+                ++blocks;
+                flush();
+                try {
+                    const auto result = state(exit, arguments);
+                    if (op.dst != nvr::absent) {
+                        slots[op.dst] = result;
+                        init[op.dst] = 1;
+                    }
+                } catch (const Fault& failure) {
+                    trap(failure);
+                    ++region_counts_.traps;
+                    return {blocks - 1, true};
+                }
+                ++region_counts_.helpers;
+                pc = op.target;
+                break;
+            }
+            case tier2::Code::Return: {
+                // commit_exit's Return for a frame that is neither the last of
+                // its task nor a callback's: anything else is tier 1's.
+                const auto value = op.a == nvr::absent ? 0 : reg(op.a);
+                const auto depth = frames_.size();
+                bool simple = depth >= 2 && !frames_.header(depth - 1).boundary;
+                if (simple && scheduler_) {
+                    const auto& scopes = current_task().scopes;
+                    simple = scopes.empty() || scopes.back().frame_depth != depth;
+                }
+                if (!simple) return end(op.block, true, region_counts_.exits);
+                ++done;
+                ++blocks;
+                flush();
+                const auto header = frames_.header(depth - 1);
+                if (scheduler_) remove_live_cells(frame_cells(header.function));
+                frames_.pop_back();
+                auto caller = frames_.back();
+                if (header.return_slot != nvr::absent) {
+                    caller.slots[header.return_slot] = value;
+                    caller.initialized[header.return_slot] = 1;
+                }
+                caller.block = header.return_block;
+                ++region_counts_.returns;
+                load_frame();
+                const auto* resumed = static_cast<const tier2::Region*>(header.called_from);
+                if (!resumed || (resumed->uses_float && !float_default) || (tier3_ && tier3_code(*resumed, false))) {
+                    return end(header.return_block, false, region_counts_.leaves);
+                }
+                enter(*resumed);
+                code = program->code.data();
+                pc = program->block_labels[header.return_block];
+                break;
+            }
+            }
+        }
+    }
+
     void flush_region_events() {
+        flush_native_events();
         if (region_counts_.entries == 0 && region_counts_.refused == 0 && region_counts_.budget == 0) return;
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> steps;
         std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> deopts;
@@ -437,7 +801,8 @@
     // frame, the steps and polls, and the writes to heap and global storage
     // in order with their values. Reads are covered by the slots they feed.
     // It checks a region's native code (src/jit) the same way.
-    RegionOutcome checked_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native) {
+    RegionOutcome checked_region(const tier2::Region& region, std::uint64_t allowance, const jit::Program* native,
+                                 std::uint32_t program_entry, const tier3::Program* code = nullptr) {
         auto before = frames_.back();
         const auto function = before.function;
         const auto depth = frames_.size();
@@ -452,7 +817,9 @@
 
         std::vector<HeapWrite> region_writes;
         heap_log_ = &region_writes;
-        const auto outcome = run_region(region, allowance, native);
+        const auto outcome = code             ? run_native_program(*code, program_entry, allowance)
+                             : region.program ? run_program(region, program_entry, allowance)
+                                              : run_region(region, allowance, native);
         heap_log_ = nullptr;
 
         auto frame = frames_.back();
@@ -525,7 +892,7 @@
             global_initialized_[write.index] = write.old_initialized;
             return;
         }
-        auto& item = entry(write.handle);
-        item.cells[write.index] = write.old_value;
-        if (write.field) item.initialized[write.index] = write.old_initialized;
+        const auto item = entry(write.handle);
+        if (write.field) heap_.restore_field(item, write.index, write.old_value, write.old_initialized != 0);
+        else heap_.set_element(item, write.index, write.old_value);
     }

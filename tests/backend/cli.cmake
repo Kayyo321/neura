@@ -191,6 +191,17 @@ string(CONCAT hello_tier_lines
     "tier: jit off\n"
     "tier: tier 0 steps 1 in function 2 block 9: below the threshold\n"
     "tier: tier 0 steps 1 in function 0 block 11: below the threshold\n")
+# The lines are those of a run without tier 3: --jit=off leaves the default
+# tier 3 off, and the exact text holds whatever the environment of the suite
+# asks (NEURA_TIER3, NEURA_TIER_EAGER, NEURA_TIER_PROGRAMS change the lines).
+foreach(setting IN ITEMS NEURA_TIER3 NEURA_TIER_EAGER NEURA_TIER_PROGRAMS NEURA_TIER3_AFTER)
+    set("saved_${setting}" "$ENV{${setting}}")
+    set("saved_${setting}_defined" FALSE)
+    if(DEFINED ENV{${setting}})
+        set("saved_${setting}_defined" TRUE)
+    endif()
+    unset(ENV{${setting}})
+endforeach()
 foreach(tier IN ITEMS 2 0)
     if(tier STREQUAL "0")
         set(expected_lines "tier: tier 0\n")
@@ -208,6 +219,11 @@ foreach(tier IN ITEMS 2 0)
     endif()
     expect_tier_time("--tier-stats at tier ${tier}" "${tier_stats_stderr}")
 endforeach()
+foreach(setting IN ITEMS NEURA_TIER3 NEURA_TIER_EAGER NEURA_TIER_PROGRAMS NEURA_TIER3_AFTER)
+    if(saved_${setting}_defined)
+        set(ENV{${setting}} "${saved_${setting}}")
+    endif()
+endforeach()
 neura(no_tier_stats "${TEST_DIR}" run --tier=2 --jit=off "${TEST_DIR}/hello.nvr")
 if(no_tier_stats_stderr MATCHES "tier:")
     message(FATAL_ERROR "a run without --tier-stats printed tier statistics\n${no_tier_stats_stderr}")
@@ -220,6 +236,106 @@ if(NOT trees_status STREQUAL "0")
     message(FATAL_ERROR "binary-trees with --tier-stats failed\n${trees_stderr}")
 endif()
 expect_tier_time("binary-trees with --tier-stats" "${trees_stderr}")
+# The default tier 3 (docs/runtime/NVM.md, "Function programs"): with
+# NEURA_TIER3 unset a run forms native function programs where native code is
+# available (x86-64 Linux, --jit not off); NEURA_TIER3=off, --jit=off and
+# NEURA_JIT=off give the run of a build without tier 3, which forms none. The
+# runs print the same and take the same steps either way. NEURA_TIER_EAGER=1
+# makes the short run form programs.
+function(tier3_run prefix tier3 jit)
+    set(settings NEURA_TIER3 NEURA_TIER_EAGER NEURA_TIER_PROGRAMS NEURA_TIER3_AFTER NEURA_JIT)
+    foreach(setting IN LISTS settings)
+        set(was_defined_${setting} FALSE)
+        if(DEFINED ENV{${setting}})
+            set(was_defined_${setting} TRUE)
+            set(was_${setting} "$ENV{${setting}}")
+        endif()
+        unset(ENV{${setting}})
+    endforeach()
+    if(NOT tier3 STREQUAL "unset")
+        set(ENV{NEURA_TIER3} "${tier3}")
+    endif()
+    set(ENV{NEURA_TIER_EAGER} 1)
+    neura(run "${TEST_DIR}" run --stats --tier-stats --jit=${jit} "${TEST_DIR}/binary-trees.nvr" -- 8)
+    foreach(setting IN LISTS settings)
+        unset(ENV{${setting}})
+        if(was_defined_${setting})
+            set(ENV{${setting}} "${was_${setting}}")
+        endif()
+    endforeach()
+    string(REGEX MATCH "stats: steps [0-9]+, peak heap cells [0-9]+" counts "${run_stderr}")
+    if(NOT run_status STREQUAL "0" OR counts STREQUAL "")
+        message(FATAL_ERROR "binary-trees with NEURA_TIER3=${tier3}, --jit=${jit}: status ${run_status}\n${run_stderr}")
+    endif()
+    set("${prefix}_stdout" "${run_stdout}" PARENT_SCOPE)
+    # The steps the tier line adds up are the run's steps.
+    string(REGEX MATCH "stats: steps ([0-9]+)," run_steps "${run_stderr}")
+    set(run_steps "${CMAKE_MATCH_1}")
+    string(REGEX MATCH "\ntier: steps ([0-9]+):" tier_steps "${run_stderr}")
+    if(NOT run_steps STREQUAL CMAKE_MATCH_1)
+        message(FATAL_ERROR "tier: steps ${CMAKE_MATCH_1} is not stats: steps ${run_steps} "
+                            "(NEURA_TIER3=${tier3}, --jit=${jit})\n${run_stderr}")
+    endif()
+    set("${prefix}_counts" "${counts}" PARENT_SCOPE)
+    set("${prefix}_stderr" "${run_stderr}" PARENT_SCOPE)
+    set("${prefix}_native" FALSE PARENT_SCOPE)
+    set("${prefix}_programs" FALSE PARENT_SCOPE)
+    if(run_stderr MATCHES "\ntier: native programs [1-9]")
+        set("${prefix}_native" TRUE PARENT_SCOPE)
+    endif()
+    if(run_stderr MATCHES "\ntier: programs [1-9]" OR run_stderr MATCHES "\ntier: native")
+        set("${prefix}_programs" TRUE PARENT_SCOPE)
+    endif()
+endfunction()
+tier3_run(tier3_default unset auto)
+tier3_run(tier3_off off auto)
+tier3_run(tier3_nojit unset off)
+tier3_run(tier3_bogus bogus auto)
+if(NOT tier3_off_stdout STREQUAL trees_stdout OR NOT tier3_default_stdout STREQUAL trees_stdout)
+    message(FATAL_ERROR "NEURA_TIER3 changed the output of binary-trees")
+endif()
+foreach(other IN ITEMS off nojit bogus)
+    if(NOT tier3_${other}_counts STREQUAL tier3_default_counts)
+        message(FATAL_ERROR "NEURA_TIER3 changed the counts of binary-trees: ${tier3_default_counts} and "
+                            "${tier3_${other}_counts} (${other})")
+    endif()
+    if(tier3_${other}_programs)
+        message(FATAL_ERROR "binary-trees formed function programs with tier 3 off (${other})")
+    endif()
+endforeach()
+# With tier 3 off the statistics hold the lines of a run without tier 3 only.
+foreach(other IN ITEMS off nojit bogus)
+    if(NOT tier3_${other}_stderr MATCHES "\ntier: blocks [0-9]+, hinted [0-9]+" OR
+       NOT tier3_${other}_stderr MATCHES "\ntier: steps [0-9]+: tier 2 " OR
+       tier3_${other}_stderr MATCHES "\ntier: (no )?(native|program)")
+        message(FATAL_ERROR "tier statistics with tier 3 off (${other}):\n${tier3_${other}_stderr}")
+    endif()
+endforeach()
+# (CMAKE_HOST_SYSTEM_PROCESSOR is empty in script mode.)
+execute_process(COMMAND uname -m OUTPUT_VARIABLE machine OUTPUT_STRIP_TRAILING_WHITESPACE ERROR_QUIET)
+if(CMAKE_HOST_SYSTEM_NAME STREQUAL "Linux" AND machine MATCHES "^(x86_64|amd64)$")
+    if(NOT tier3_default_native)
+        message(FATAL_ERROR "the default run of binary-trees formed no native program")
+    endif()
+else()
+    # Hosts without tier 3 native code run as they did before tier 3.
+    if(tier3_default_programs)
+        message(FATAL_ERROR "the default run of binary-trees formed function programs on a host without tier 3 code")
+    endif()
+endif()
+
+# A block that adds 300 parameters is too large for the form search, which
+# would otherwise need gigabytes (tests/backend/tier/wide-sum.nra): the run
+# finishes in seconds, the block stays on tier 0, and the statistics say why.
+build_image("${TEST_DIR}/wide-sum.nvr" "${tests}/tier/wide-sum.nra")
+set(ENV{NEURA_TIER_EAGER} 1)
+execute_process(COMMAND "${NEURA}" run --tier-stats "${TEST_DIR}/wide-sum.nvr" TIMEOUT 120
+                RESULT_VARIABLE wide_status OUTPUT_VARIABLE wide_stdout ERROR_VARIABLE wide_stderr)
+unset(ENV{NEURA_TIER_EAGER})
+if(NOT wide_status STREQUAL "0" OR NOT wide_stdout STREQUAL "sum 3591\n" OR
+   NOT wide_stderr MATCHES "tier: not lifted [1-9][0-9]*: not recognized: graph too large to search")
+    message(FATAL_ERROR "wide-sum: status ${wide_status}\n${wide_stdout}${wide_stderr}")
+endif()
 file(WRITE "${TEST_DIR}/tree-sizes.txt" "4\n6\n8\n")
 neura(trees_each "${TEST_DIR}" run --tier-stats --each "${TEST_DIR}/tree-sizes.txt" "${TEST_DIR}/binary-trees.nvr")
 expect_tier_time("run --each with --tier-stats" "${trees_each_stderr}")
@@ -230,6 +346,85 @@ neura(tier_workers "${TEST_DIR}" run --tier-stats --parallel-workers 2 "${TEST_D
 if(NOT tier_workers_stderr MATCHES "tier: steps" OR tier_workers_stderr MATCHES "tier: time:")
     message(FATAL_ERROR "--tier-stats with parallel workers\n${tier_workers_stderr}")
 endif()
+
+# NEURA_TIER_CHECK=2 (docs/runtime/NVM.md, "Controls"): a run checked against
+# its shadow, recorded or not, prints and records what it does unchecked, and
+# a replayed run, which the oracle does not check, says so in one line on
+# stderr.
+build_image("${TEST_DIR}/regions.nvr" "${tests}/tier/regions.nra")
+set(shadow_runs "regions.nvr" "binary-trees.nvr --max-heap-cells 3000 -- 8")
+foreach(shadow_run IN LISTS shadow_runs)
+    separate_arguments(shadow_arguments UNIX_COMMAND "${shadow_run}")
+    neura(unchecked "${TEST_DIR}" run --stats ${shadow_arguments})
+    set(ENV{NEURA_TIER_EAGER} 1)
+    set(ENV{NEURA_TIER_CHECK} 2)
+    neura(checked "${TEST_DIR}" run --stats ${shadow_arguments})
+    unset(ENV{NEURA_TIER_CHECK})
+    unset(ENV{NEURA_TIER_EAGER})
+    if(NOT checked_status STREQUAL unchecked_status OR NOT checked_stdout STREQUAL unchecked_stdout OR
+       NOT checked_stderr STREQUAL unchecked_stderr)
+        message(FATAL_ERROR "NEURA_TIER_CHECK=2 changed the run of ${shadow_run}: status ${checked_status}, "
+                            "unchecked ${unchecked_status}\n${checked_stdout}${checked_stderr}")
+    endif()
+endforeach()
+neura(unchecked "${TEST_DIR}" run --record "${TEST_DIR}/regions-unchecked.trace" "${TEST_DIR}/regions.nvr")
+set(ENV{NEURA_TIER_EAGER} 1)
+set(ENV{NEURA_TIER_CHECK} 2)
+neura(checked_record "${TEST_DIR}" run --record "${TEST_DIR}/regions.trace" "${TEST_DIR}/regions.nvr")
+neura(checked_replay "${TEST_DIR}" run --replay "${TEST_DIR}/regions.trace" "${TEST_DIR}/regions.nvr")
+unset(ENV{NEURA_TIER_CHECK})
+unset(ENV{NEURA_TIER_EAGER})
+if(NOT checked_record_status STREQUAL "0" OR NOT checked_record_stdout STREQUAL unchecked_stdout OR
+   NOT checked_record_stderr STREQUAL "")
+    message(FATAL_ERROR "NEURA_TIER_CHECK=2 with --record: status ${checked_record_status}\n"
+                        "${checked_record_stdout}${checked_record_stderr}")
+endif()
+same_bytes("a trace recorded under NEURA_TIER_CHECK=2" "${TEST_DIR}/regions-unchecked.trace" "${TEST_DIR}/regions.trace")
+if(NOT checked_replay_status STREQUAL "0" OR NOT checked_replay_stdout STREQUAL unchecked_stdout OR
+   NOT checked_replay_stderr STREQUAL "neura: NEURA_TIER_CHECK=2 is not applied: the run replays a trace\n")
+    message(FATAL_ERROR "NEURA_TIER_CHECK=2 with --replay: status ${checked_replay_status}\n"
+                        "${checked_replay_stdout}${checked_replay_stderr}")
+endif()
+
+# Function programs (NEURA_TIER_PROGRAMS=1): a run whose console writes happen
+# in called functions records the trace tier 0 records, and replays it.
+build_image("${TEST_DIR}/program-calls.nvr" "${tests}/tier/program-calls.nra")
+neura(calls_t0 "${TEST_DIR}" run --tier=0 --record "${TEST_DIR}/calls-t0.trace" "${TEST_DIR}/program-calls.nvr" -- calls 6)
+set(ENV{NEURA_TIER_PROGRAMS} 1)
+set(ENV{NEURA_TIER_EAGER} 1)
+neura(calls_programs "${TEST_DIR}" run --tier-stats --record "${TEST_DIR}/calls-programs.trace"
+      "${TEST_DIR}/program-calls.nvr" -- calls 6)
+neura(calls_replay "${TEST_DIR}" run --replay "${TEST_DIR}/calls-t0.trace" "${TEST_DIR}/program-calls.nvr" -- calls 6)
+unset(ENV{NEURA_TIER_EAGER})
+unset(ENV{NEURA_TIER_PROGRAMS})
+if(NOT calls_t0_status STREQUAL "0" OR NOT calls_programs_status STREQUAL "0" OR
+   NOT calls_programs_stdout STREQUAL calls_t0_stdout OR NOT calls_programs_stderr MATCHES "tier: programs [1-9]")
+    message(FATAL_ERROR "program-calls with function programs: status ${calls_programs_status}\n"
+                        "${calls_programs_stdout}${calls_programs_stderr}")
+endif()
+same_bytes("a trace recorded with function programs" "${TEST_DIR}/calls-t0.trace" "${TEST_DIR}/calls-programs.trace")
+if(NOT calls_replay_status STREQUAL "0" OR NOT calls_replay_stdout STREQUAL calls_t0_stdout)
+    message(FATAL_ERROR "program-calls replayed with function programs: status ${calls_replay_status}\n"
+                        "${calls_replay_stdout}${calls_replay_stderr}")
+endif()
+
+# Allocation, text and kernel calls run as helpers inside programs, and the run
+# prints what tier 0 prints.
+build_image("${TEST_DIR}/program-helpers.nvr" "${tests}/tier/program-helpers.nra")
+foreach(helper_case IN ITEMS alloc kernel text)
+    neura(helpers_t0 "${TEST_DIR}" run --tier=0 "${TEST_DIR}/program-helpers.nvr" -- ${helper_case} 9)
+    set(ENV{NEURA_TIER_PROGRAMS} 1)
+    set(ENV{NEURA_TIER_EAGER} 1)
+    neura(helpers_programs "${TEST_DIR}" run --tier-stats "${TEST_DIR}/program-helpers.nvr" -- ${helper_case} 9)
+    unset(ENV{NEURA_TIER_EAGER})
+    unset(ENV{NEURA_TIER_PROGRAMS})
+    if(NOT helpers_t0_status STREQUAL "0" OR NOT helpers_programs_status STREQUAL "0" OR
+       NOT helpers_programs_stdout STREQUAL helpers_t0_stdout OR
+       NOT helpers_programs_stderr MATCHES "tier: programs [1-9][^\n]*helpers [1-9]")
+        message(FATAL_ERROR "program-helpers ${helper_case} with function programs: status ${helpers_programs_status}\n"
+                            "${helpers_programs_stdout}${helpers_programs_stderr}")
+    endif()
+endforeach()
 
 # The .nir listing route matches the source listing in both modes.
 foreach(mode IN ITEMS "" --no-optimize)

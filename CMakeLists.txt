@@ -59,6 +59,16 @@ else()
 endif()
 configure_file(src/cli/version.hpp.in "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/version.hpp" @ONLY)
 
+# Under AddressSanitizer the NVM heap (src/nvm/heap.hpp) takes every entry
+# from operator new, so that the sanitizer checks each one. This option
+# keeps its size-class pool instead, to check the pool's own code; it has no
+# effect in a build without the sanitizer. Every target that includes the
+# heap must see the same setting, so it applies to the whole build.
+option(NEURA_HEAP_POOL_UNDER_SANITIZERS "Keep the NVM heap's size-class pool under AddressSanitizer" OFF)
+if(NEURA_HEAP_POOL_UNDER_SANITIZERS)
+    add_compile_definitions(NEURA_HEAP_POOL_UNDER_SANITIZERS=1)
+endif()
+
 function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -96,6 +106,14 @@ set(neura_nvm_sources
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
+    src/nvm/tier3_build.cpp
+    src/nvm/tier3_float.cpp
+    src/nvm/tier3_inline.cpp
+    src/nvm/tier3_interp.cpp
+    src/nvm/tier3_licm.cpp
+    src/nvm/tier3_passes.cpp
+    src/nvm/tier3_range.cpp
+    src/nvm/tier3_verify.cpp
     src/nvm/trace.cpp
     src/nvm/trace_file.cpp
     # The native code generator of tier 2 (docs/runtime/NVM.md, "Native
@@ -103,6 +121,11 @@ set(neura_nvm_sources
     src/jit/aarch64.cpp
     src/jit/compiler.cpp
     src/jit/jit.cpp
+    src/jit/mir_check.cpp
+    src/jit/regalloc.cpp
+    src/jit/tier3_emit.cpp
+    src/jit/tier3_lower.cpp
+    src/jit/x64.cpp
     src/jit/x86_64.cpp
 )
 add_library(neura_nvm STATIC ${neura_nvm_sources})
@@ -541,6 +564,17 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/scripts/check-doc-examples.py"
         --neura "$<TARGET_FILE:neura>" --root "${CMAKE_CURRENT_SOURCE_DIR}"
     )
+    # A few generated programs, each compared across every execution mode and under limit sweeps (scripts/program-fuzz.py).
+    add_test(NAME program-fuzz COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/scripts/program-fuzz.py" run
+        --neura "$<TARGET_FILE:neura>" --quick --jobs 3
+    )
+    # The quick fuzz run takes a few minutes in a Release build. Under the
+    # address and undefined-behavior sanitizers every run is several times
+    # slower, so that configuration sets a longer limit.
+    set(NEURA_PROGRAM_FUZZ_TEST_TIMEOUT 600 CACHE STRING
+        "CTest limit, in seconds, for the program-fuzz test")
+    set_tests_properties(program-fuzz PROPERTIES TIMEOUT "${NEURA_PROGRAM_FUZZ_TEST_TIMEOUT}")
     add_test(NAME nir-link COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/nir-link-tests"
@@ -587,6 +621,25 @@ if(BUILD_TESTING)
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
 
+    # The x86-64 encoder of tier 3 (src/jit/x64.cpp): every instruction form
+    # against an assembler's bytes, labels and relaxation, and small functions
+    # run on x86-64 Linux. It links the runtime for jit::Program only.
+    add_executable(neura_x64_tests tests/jit/x64_tests.cpp)
+    target_link_libraries(neura_x64_tests PRIVATE neura_nvm)
+    target_include_directories(neura_x64_tests PRIVATE tests)
+    neura_target_defaults(neura_x64_tests)
+    add_test(NAME backend-x64 COMMAND neura_x64_tests)
+
+    # The register allocator of tier 3 (src/jit/regalloc.cpp) and its
+    # independent checker (src/jit/mir_check.cpp): hand-built functions,
+    # random functions checked by the checker and allocated twice for
+    # determinism, the move sequencer, and allocations the checker must reject.
+    add_executable(neura_regalloc_tests tests/jit/regalloc_tests.cpp)
+    target_link_libraries(neura_regalloc_tests PRIVATE neura_nvm)
+    target_include_directories(neura_regalloc_tests PRIVATE tests)
+    neura_target_defaults(neura_regalloc_tests)
+    add_test(NAME backend-regalloc COMMAND neura_regalloc_tests)
+
     add_executable(neura_backend_tests
         tests/backend/allocation_fault.cpp
         tests/backend/assembler.cpp
@@ -602,6 +655,8 @@ if(BUILD_TESTING)
     tests/backend/float_tests.cpp
         tests/backend/format_tests.cpp
     tests/backend/generics_tests.cpp
+        tests/backend/heap_executor_tests.cpp
+        tests/backend/heap_tests.cpp
         tests/backend/host_tests.cpp
         tests/backend/layered_tests.cpp
         tests/backend/nir_tests.cpp
@@ -609,8 +664,17 @@ if(BUILD_TESTING)
         tests/backend/reference_tests.cpp
         tests/backend/tier_tests.cpp
         tests/backend/tier2_tests.cpp
+        tests/backend/tier_programs_tests.cpp
+        tests/backend/tier_shadow_tests.cpp
+        tests/backend/tier3_float_tests.cpp
+        tests/backend/tier3_heap_tests.cpp
+        tests/backend/tier3_inline_tests.cpp
+        tests/backend/tier3_ir_tests.cpp
+        tests/backend/tier3_native_tests.cpp
+        tests/backend/tier3_pass_tests.cpp
         tests/backend/vm_tests.cpp
         tests/jit/jit_tests.cpp
+        tests/jit/tier3_native_tests.cpp
         tests/ir-optimization/concurrency_support.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
@@ -654,7 +718,7 @@ if(BUILD_TESTING)
         set_tests_properties(gpu-device gpu-cli PROPERTIES SKIP_RETURN_CODE 77 LABELS gpu TIMEOUT 1800)
     endif()
 
-    foreach(suite IN ITEMS circuits floats format vm host nir conversion generics layered fleet placement concurrency tier jit)
+    foreach(suite IN ITEMS circuits floats format vm heap host nir conversion generics layered fleet placement concurrency tier tier3 jit)
         add_test(NAME backend-${suite}
             COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
@@ -663,6 +727,16 @@ if(BUILD_TESTING)
     # every region on the region interpreter.
     add_test(NAME backend-tier-interpreter COMMAND neura_backend_tests tier "${CMAKE_CURRENT_SOURCE_DIR}")
     set_tests_properties(backend-tier-interpreter PROPERTIES ENVIRONMENT NEURA_JIT=off)
+    # Native tier 3 is the default (docs/runtime/NVM.md, "Execution tiers"), so
+    # the suites above exercise function programs; these run the tier 2
+    # region suites with tier 3 off, so that a plain ctest covers regions too.
+    foreach(suite IN ITEMS tier jit)
+        add_test(NAME backend-${suite}-off COMMAND neura_backend_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
+        set_tests_properties(backend-${suite}-off PROPERTIES ENVIRONMENT NEURA_TIER3=off)
+    endforeach()
+    # Tier 3's checkable variant under the region check of NEURA_TIER_CHECK=1.
+    add_test(NAME backend-tier3-check COMMAND neura_backend_tests tier3_check "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(backend-tier3-check PROPERTIES ENVIRONMENT "NEURA_TIER_CHECK=1;NEURA_TIER3=interp")
 
     add_test(NAME backend-each COMMAND "${CMAKE_COMMAND}"
         "-DNEURA=$<TARGET_FILE:neura>"

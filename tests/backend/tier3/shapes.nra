@@ -1,0 +1,89 @@
+// Functions of the shapes tier 3 builds IR from (docs/runtime/NVM.md,
+// "Execution tiers"): a loop with a branch and checked arithmetic, inline
+// field reads and writes, an allocation and a call in a loop, recursion, and
+// a trap in the middle of a loop. The first argument picks the case, the
+// second the size. tests/backend/tier3_ir_tests.cpp runs it at every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Tier3Shapes = module:program.Entry (
+    let Cell = class (
+        export let value: int64 = 0;
+    );
+
+    let report = func(label: string, value: int64) {
+        console.print_line(label + " " + value.to_string());
+    };
+
+    // A counter and a total that change in a loop with a branch: phis at the
+    // loop head, a checked addition and subtraction, a loop long enough for
+    // the interpreter to hand it to native code in the middle.
+    let sum_to = func(n: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < n; i = i + 1) {
+            if (i % 3 == 0) {
+                total = total + (i as int64);
+            } else {
+                total = total - 1;
+            }
+        }
+        return total;
+    };
+
+    // Inline field reads and a write.
+    let bump = func(cell: Cell, by: int64) -> int64 {
+        cell.value = cell.value + by;
+        return cell.value;
+    };
+
+    // An allocation (a helper) and a call in a loop.
+    let make = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            let cell = new Cell();
+            total = total + bump(cell, i as int64);
+        }
+        return total;
+    };
+
+    // A call chain as deep as `depth`: native code nests its calls to a fixed
+    // depth and leaves past it.
+    let descend = func(depth: int32) -> int64 {
+        if (depth == 0) {
+            return 0;
+        }
+        return 1 + descend(depth - 1);
+    };
+
+    // An overflow after several iterations.
+    let grow = func(n: int32) -> int32 {
+        let x: int32 = 1;
+        for (let i = 0; i < n; i = i + 1) {
+            x = x * 3;
+        }
+        return x;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kind = "sum";
+        let size = 100;
+        if (args.length > 0) {
+            kind = args[0];
+        }
+        if (args.length > 1) {
+            size = result.value_or<int32>(int32s.parse(args[1]), 100);
+        }
+        if (kind == "sum") {
+            report("sum", sum_to(size));
+        } else if (kind == "make") {
+            report("make", make(size));
+        } else if (kind == "descend") {
+            report("descend", descend(size));
+        } else {
+            report("grow", grow(size) as int64);
+        }
+        return program.ExitCode.Ok;
+    };
+);

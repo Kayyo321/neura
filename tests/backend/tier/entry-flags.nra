@@ -1,0 +1,31 @@
+// A function whose temporaries are assigned in a loop, for the tier 3 tests
+// of the initialized flags at entry 0 (tests/backend/tier3_native_tests.cpp).
+// The test turns the loop's back edge into an edge to block 0, so that the
+// dispatcher can arrive at block 0 with the temporaries initialized. The
+// first argument is the size.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let EntryFlags = module:program.Entry (
+    let spin = func(count: int, total: int) -> int {
+        while (count > 0) {
+            let t = count * 3;
+            let u = t + total;
+            total = u % 1000003;
+            count = count - 1;
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let total = 0;
+        for (let i = 0; i < n; i = i + 1) {
+            total = spin(i % 50 + 10, total);
+        }
+        console.println("entry-flags {}", total);
+        return program.ExitCode.Ok;
+    };
+);

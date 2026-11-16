@@ -1,0 +1,74 @@
+// Allocations and appends for the two-heap comparison of tier 3's fast paths
+// (tests/backend/tier3_heap_tests.cpp): objects of several sizes made in
+// loops, kept, dropped and destroyed (so collections free blocks that later
+// allocations take again), lists of two widths appended to until they grow,
+// and a constructor called in a loop. It writes nothing: the test compares
+// the heaps the runs leave, word for word.
+let program = import:Std.Program;
+
+let Tier3Alloc = module:program.Entry (
+    const Mask: int64 = 1048575;
+
+    let Pair = class (
+        export let left: int64 = 0;
+        export let right: int64 = 0;
+    );
+
+    let Node = class (
+        export last value: int64;
+        export let init = func(start: int64) {
+            value = start;
+        };
+    );
+
+    let Big = class (
+        export let a0: int64 = 0;
+        export let a1: int64 = 1;
+        export let a2: int64 = 2;
+        export let a3: int64 = 3;
+        export let a4: int64 = 4;
+        export let a5: int64 = 5;
+        export let a6: int64 = 6;
+        export let a7: int64 = 7;
+        export let a8: int64 = 8;
+        export let a9: int64 = 9;
+    );
+
+    let churn = func(rounds: int32) -> int64 {
+        let kept: Pair[list] = [];
+        let bytes: uint8[list] = [];
+        let words: int64[list] = [];
+        let sum: int64 = 0;
+        let nodes: Node[list] = [];
+        for (let i = 0; i < rounds; i = i + 1) {
+            let pair = new Pair();
+            pair.left = i as int64;
+            pair.right = (i * 3) as int64;
+            if (i % 4 == 0) {
+                kept.append(pair);
+            }
+            let big = new Big();
+            sum = (sum + big.a9 + pair.right) & Mask;
+            if (i % 7 == 0) {
+                destroy big;
+            }
+            let node = new Node(i as int64);
+            if (i % 5 == 0) {
+                nodes.append(node);
+            }
+            bytes.append((i % 200) as uint8);
+            words.append((i * 11) as int64);
+        }
+        for (let i = 0; i < kept.length; i = i + 1) {
+            sum = (sum + kept[i].left + kept[i].right) & Mask;
+        }
+        return sum + (bytes.length as int64) + (words.length as int64) + (nodes.length as int64);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        if (churn(600) < 0) {
+            return program.ExitCode.Ok;
+        }
+        return program.ExitCode.Ok;
+    };
+);

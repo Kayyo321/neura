@@ -1,0 +1,64 @@
+// The collector marks every entry reachable from the roots, whatever order it
+// walks them in. A deep tree and a wide list of trees stay alive while
+// short-lived trees force many collections; sums over the survivors show that
+// no first child, last child, or first or last element was lost.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let CollectorMarkOrder = module:program.Entry (
+    let Node = class (
+        export let left: Node = nil;
+        export let right: Node = nil;
+        export let weight: int = 0;
+    );
+
+    let build = func(depth: int, weight: int) -> Node {
+        let node = new Node();
+        node.weight = weight;
+        if (depth > 0) {
+            node.left = build(depth - 1, weight + 1);
+            node.right = build(depth - 1, weight + 2);
+        }
+        return node;
+    };
+
+    let sum = func(node: Node) -> int {
+        if (node.left == nil) {
+            return node.weight;
+        }
+        return node.weight + sum(node.left) + sum(node.right);
+    };
+
+    let plant = func() -> Node[list] {
+        let trees: Node[list] = [build(3, 1)];
+        for (let i = 2; i <= 200; i = i + 1) {
+            trees.append(build(3, i));
+        }
+        return trees;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let deep = build(12, 0);
+        let forest = plant();
+        let expected = 0;
+        for (let i = 0; i < 200; i = i + 1) {
+            expected = expected + sum(forest[i]);
+        }
+        let churn = 0;
+        for (let round = 0; round < 40; round = round + 1) {
+            churn = churn + sum(build(8, round));
+            let kept = 0;
+            for (let i = 0; i < 200; i = i + 1) {
+                kept = kept + sum(forest[i]);
+            }
+            if (kept != expected) {
+                console.print_line("forest damaged");
+                return program.ExitCode.Failure;
+            }
+        }
+        console.println("deep tree sum: {}", sum(deep));
+        console.println("forest first and last: {} {}", sum(forest[0]), sum(forest[199]));
+        console.println("churn: {}", churn);
+        return program.ExitCode.Ok;
+    };
+);

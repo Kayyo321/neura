@@ -399,6 +399,42 @@ neura(bare run --task-dump child-trap.bare.nvr)
 if(NOT bare_stderr MATCHES "\n    task 2  spawned at function [0-9]+ block [0-9]+  running\n        function [0-9]+ block [0-9]+\n")
     message(FATAL_ERROR "child-trap: the dump of a bare image names no function and block\n${bare_stderr}")
 endif()
+# A trap inside a tier 2 region (an inline state operation that faults, after
+# which tier 1 runs the block again) writes one dump, at the trap's block,
+# exactly as tier 0 does: the dump is written when the fault becomes the
+# run's trap, not when a region raises and catches it.
+must("region-trap" build "${SOURCE_DIR}/tests/concurrency/region-trap.nra" -o region-trap.nvr)
+neura(trap0 run --tier=0 --task-dump region-trap.nvr)
+if(NOT trap0_status STREQUAL "139" OR NOT trap0_stderr MATCHES "trap: index out of bounds: index 3000 for length 3000")
+    message(FATAL_ERROR "region-trap at tier 0: status ${trap0_status}\n${trap0_stderr}")
+endif()
+string(REGEX MATCHALL "task 0  root  running\n" trap0_dumps "${trap0_stderr}")
+list(LENGTH trap0_dumps trap0_count)
+if(NOT trap0_count EQUAL 1)
+    message(FATAL_ERROR "region-trap at tier 0: ${trap0_count} dumps\n${trap0_stderr}")
+endif()
+foreach(variant IN ITEMS "default" "eager" "eager-interpreter" "programs")
+    set(environment "")
+    if(variant STREQUAL "eager")
+        set(environment NEURA_TIER_EAGER=1)
+    elseif(variant STREQUAL "eager-interpreter")
+        set(environment NEURA_TIER_EAGER=1 NEURA_JIT=off)
+    elseif(variant STREQUAL "programs")
+        set(environment NEURA_TIER_EAGER=1 NEURA_TIER_PROGRAMS=1)
+    endif()
+    execute_process(
+        COMMAND "${CMAKE_COMMAND}" -E env ${environment} "${NEURA}" run --task-dump --tier-stats region-trap.nvr
+        WORKING_DIRECTORY "${TEST_DIR}"
+        RESULT_VARIABLE tiered_status
+        OUTPUT_VARIABLE tiered_stdout
+        ERROR_VARIABLE tiered_stderr)
+    string(REGEX REPLACE "(^|\n)tier: [^\n]*" "" tiered_dump "${tiered_stderr}")
+    if(NOT tiered_status STREQUAL trap0_status OR NOT tiered_stdout STREQUAL trap0_stdout OR
+       NOT tiered_dump STREQUAL trap0_stderr OR NOT tiered_stderr MATCHES "\\(in regions [1-9]")
+        message(FATAL_ERROR "region-trap (${variant}): the trap or its task dump differs from tier 0's, or no "
+                            "region ran\n--- tier 0:\n${trap0_stderr}\n--- ${variant}:\n${tiered_stderr}")
+    endif()
+endforeach()
 
 # SIGQUIT asks a running image for a dump and the run continues to its end.
 # The run must outlast two seconds of wall time, so it stays on the reference

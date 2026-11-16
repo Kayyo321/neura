@@ -1,0 +1,104 @@
+// Loops for tier 3's passes (docs/runtime/NVM.md, "Execution tiers"): an index
+// that starts at an argument, a loop that stops on `!=`, divisions and shifts
+// by constants, a checked product that does not change in a loop, and a loop
+// whose product overflows or is never reached. The first argument picks the
+// case, the rest are its sizes. tests/backend/tier3_pass_tests.cpp runs it at
+// every tier, at every step limit, and with the passes off.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Tier3Passes = module:program.Entry (
+    let report = func(label: string, value: int64) {
+        console.print_line(label + " " + value.to_string());
+    };
+
+    let table = func(size: int32) -> int64[list] {
+        let values: int64[list] = [];
+        for (let i = 0; i < size; i = i + 1) {
+            values.append((i * 3) as int64);
+        }
+        return values;
+    };
+
+    // The loop variable starts at `start`, which may be negative; the index
+    // is 100 more, so a start of -100 or more reads the table.
+    let window = func(data: int64[list], start: int32) -> int64 {
+        let total: int64 = 0;
+        let n = data.length - 100;
+        for (let i = start; i < n; i = i + 1) {
+            total = total + data[i + 100];
+        }
+        return total;
+    };
+
+    // A loop that ends when the variable reaches the bound exactly.
+    let count_to = func(start: int32, stop: int32) -> int64 {
+        let total: int64 = 0;
+        let i = start;
+        while (i != stop) {
+            total = total + (i as int64);
+            i = i + 1;
+        }
+        return total;
+    };
+
+    // Division, remainder, shifts and conversions by constants.
+    let digits = func(n: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 1; i < n; i = i + 1) {
+            let wide = (i as int64) * 1000;
+            total = total + wide / 7 + wide % 7 + ((i << 3) >> 2) as int64 + (i as int16) as int64;
+        }
+        return total;
+    };
+
+    // A product of two arguments that does not change in the loop.
+    let scaled = func(n: int32, factor: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < n * factor; i = i + 1) {
+            total = total + (i as int64);
+        }
+        return total;
+    };
+
+    // The same product, behind a condition that is false.
+    let skipped = func(n: int32, factor: int32, run: bool) -> int64 {
+        let total: int64 = 0;
+        let i = 0;
+        while (run && i < n) {
+            total = total + ((n * factor) as int64);
+            i = i + 1;
+        }
+        return total;
+    };
+
+    let parse = func(args: string[], index: int32, fallback: int32) -> int32 {
+        if (args.length > index) {
+            return result.value_or<int32>(int32s.parse(args[index]), fallback);
+        }
+        return fallback;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kind = "window";
+        if (args.length > 0) {
+            kind = args[0];
+        }
+        let first = parse(args, 1, 40);
+        let second = parse(args, 2, 0);
+        if (kind == "window") {
+            report("window", window(table(first), second));
+        } else if (kind == "count") {
+            report("count", count_to(first, second));
+        } else if (kind == "digits") {
+            report("digits", digits(first));
+        } else if (kind == "scaled") {
+            report("scaled", scaled(first, second));
+        } else {
+            report("skipped", skipped(first, second, false));
+        }
+        return program.ExitCode.Ok;
+    };
+);

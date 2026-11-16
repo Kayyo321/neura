@@ -1340,6 +1340,9 @@ namespace {
 
 nvm::TierOptions eager() {
     nvm::TierOptions options;
+    // Native code is generated for regions, not function programs: these
+    // tests keep regions when NEURA_TIER_PROGRAMS=1 is set.
+    options.programs = nvm::TierOptions::Programs::Off;
     options.hint_after = 1;
     options.search_after = 1;
     options.minimum_proof_work = std::uint64_t{1} << 30;

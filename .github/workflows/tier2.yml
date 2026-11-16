@@ -120,12 +120,12 @@ jobs:
           ctest --test-dir build --parallel "$(sysctl -n hw.ncpu)" --no-tests=error
           --output-on-failure --output-junit ctest-junit.xml
 
-      # 164 = the 170 tests Tier 1 requires on Linux without a GPU, less the 6
+      # 171 = the 177 tests Tier 1 requires on Linux without a GPU, less the 6
       # that need the Linux native launcher (native-build, native-run,
       # native-container, native-policy, native-install, native-c-import).
       - name: Require every test to have run
         if: ${{ !cancelled() }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 166
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 171
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
@@ -139,10 +139,16 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+  # The tests are split into two shards by CTest number, each built and run
+  # by its own job: run as one job they no longer fit its time limit.
   sanitizers:
-    name: Address and undefined-behavior sanitizers (Linux x86-64)
+    name: Address and undefined-behavior sanitizers (Linux x86-64, shard ${{ matrix.shard }} of 2)
     runs-on: ubuntu-24.04
     timeout-minutes: 330
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
     env:
       CC: gcc-14
       CXX: g++-14
@@ -165,13 +171,15 @@ jobs:
       # A static executable cannot carry the sanitizer runtime, so the static
       # launcher is left out of this configuration. backend-reference and
       # decompiler-behavior each ran for more than their usual limit of an hour
-      # here without a sanitizer report, so each gets three hours.
+      # here without a sanitizer report, so each gets three hours. program-fuzz
+      # gets two hours instead of ten minutes, for the same reason.
       - name: Configure
         run: >
           cmake -S . -B build -DCMAKE_BUILD_TYPE=RelWithDebInfo
           -DNEURA_STATIC_LAUNCHER=OFF
           -DNEURA_REFERENCE_TEST_TIMEOUT=10800
           -DNEURA_DECOMPILER_BEHAVIOR_TEST_TIMEOUT=10800
+          -DNEURA_PROGRAM_FUZZ_TEST_TIMEOUT=7200
           "-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-sanitize-recover=undefined -fno-omit-frame-pointer"
           "-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined"
@@ -191,18 +199,26 @@ jobs:
       # times larger: backend-reference runs test programs 400 calls deep in
       # an evaluator that recurses on the native stack, and overflows the
       # default 8 MiB before the evaluator's own depth limit stops it.
+      #
+      # Under AddressSanitizer the NVM heap takes every entry from operator
+      # new, which makes the tests that run many programs several times slower
+      # than in a Release build: backend-placement and decompiler-lift each ran
+      # for more than an hour. A test without a limit of its own gets three
+      # hours.
+      #
+      # -I takes every second test, starting at the shard's number.
       - name: Test
         run: |
           ulimit -s 1048576
           ctest --test-dir build --parallel "$(nproc)" --no-tests=error \
-            --output-on-failure --output-junit ctest-junit.xml --timeout 3600 \
-            -E "^(native-install|native-container)$"
+            --output-on-failure --output-junit ctest-junit.xml --timeout 10800 \
+            -I "${{ matrix.shard }},,2" -E "^(native-install|native-container)$"
 
       - name: Upload the build log and the test report
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
-          name: tier2-sanitizers
+          name: tier2-sanitizers-${{ matrix.shard }}
           path: |
             build/build.log
             build/ctest-junit.xml

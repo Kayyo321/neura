@@ -22,6 +22,11 @@ namespace neura::nvm {
 namespace tier2 {
 struct Region;
 }
+namespace tier3 {
+struct Program;
+struct DispatchRecord;
+enum class Variant : std::uint8_t;
+}
 
 // Tier 1 of the executor (docs/runtime/NVM.md, "Execution tiers"): blocks
 // whose graphs are proven to compute typed operations run as native 64-bit
@@ -64,6 +69,37 @@ struct TierOptions {
     // a region formed without them is formed again later.
     std::uint32_t region_after = 1000;
     std::uint32_t region_patience = 8;
+    // Function programs (tier2.hpp, Region::program): formed in place of
+    // regions when this is On, or when it is Environment (the default) and
+    // NEURA_TIER_PROGRAMS=1 is set. Off keeps regions whatever the
+    // environment says. When a function's program is formed, at most
+    // `program_proofs` of its hinted blocks that were never tried are
+    // proven then, so that blocks which have not run yet are not left out.
+    enum class Programs : std::uint8_t { Environment, Off, On };
+    Programs programs = Programs::Environment;
+    std::uint32_t program_proofs = 32;
+    // Programs are compiled for the region check of NEURA_TIER_CHECK=1:
+    // calls and returns as deoptimizations (set from the environment).
+    bool checkable = false;
+    // Tier 3 (tier3.hpp): function programs are turned into native programs
+    // once their checkpoints have been reached `native_after` times,
+    // counted over every run sharing the cache. Interp runs the IR on the IR
+    // interpreter; Native gives native programs machine code where tier 3
+    // has a code generator (src/jit/tier3_native.hpp), which runs with native
+    // code enabled (--jit not off), the IR interpreter elsewhere. Both form
+    // function programs whatever NEURA_TIER_PROGRAMS says. Environment (the
+    // default) reads NEURA_TIER3 ("interp", "native", else off).
+    enum class Tier3 : std::uint8_t { Environment, Off, Interp, Native };
+    Tier3 tier3 = Tier3::Environment;
+    std::uint32_t native_after = 1000;
+    // Whether tier 3's passes (tier3_passes.cpp) run on a built program;
+    // NEURA_TIER3_PASSES=0 turns them off whatever this says. A test turns
+    // them off to compare a run with and without.
+    bool native_passes = true;
+    // Whether the standard variant of a native program inlines calls
+    // (tier3_inline.cpp). A test turns it off to compare a run with and
+    // without.
+    bool native_inlining = true;
 };
 
 // Steps of one execution by how the block was evaluated. `lifted` ran a
@@ -79,6 +115,10 @@ struct TierSteps {
     std::uint64_t reference = 0;
     // Steps run inside tier-2 regions (not counted above).
     std::uint64_t region = 0;
+    // Steps a kernel call charged for itself (Machine::charge_kernel_steps),
+    // which the block that called it does not count: they are in the run's
+    // step count, and so here, whatever tier ran the call.
+    std::uint64_t kernel = 0;
 };
 
 // Tier 2 events of one execution, by kind. A region is entered, then ends
@@ -105,6 +145,43 @@ struct RegionCounts {
     // Entries that ran the region's native code (the rest ran the region
     // interpreter).
     std::uint64_t native = 0;
+    // Function programs: calls and returns run inside a program, and faults
+    // of a call that became the run's trap there.
+    std::uint64_t calls = 0;
+    std::uint64_t returns = 0;
+    std::uint64_t helpers = 0;
+    std::uint64_t traps = 0;
+    // Steps run in programs (a part of the steps run in regions).
+    std::uint64_t program_steps = 0;
+};
+
+// Tier 3 events of one execution (statistics only).
+struct NativeCounts {
+    std::uint64_t entered = 0;
+    std::uint64_t left = 0;
+    std::uint64_t refused = 0;
+    std::uint64_t budget = 0;
+    std::uint64_t checks = 0;
+    std::uint64_t guards = 0;
+    std::uint64_t selectors = 0;
+    std::uint64_t references = 0;
+    std::uint64_t state_traps = 0;
+    std::uint64_t exits = 0;
+    std::uint64_t traps = 0;
+    std::uint64_t steps = 0;
+    // Kernel exits that native programs ran through the helper (an inline
+    // sqrt is no helper).
+    std::uint64_t kernel_helpers = 0;
+    // Allocations and appends native code made inline, and those it left to
+    // the reference state operation (a helper).
+    std::uint64_t fast_allocations = 0;
+    std::uint64_t fast_appends = 0;
+    std::uint64_t slow_allocations = 0;
+    std::uint64_t slow_appends = 0;
+    // Calls native code made into native callees: entered by the enter
+    // helper, and from the callee's cell (tier3::CalleeCell).
+    std::uint64_t helper_entries = 0;
+    std::uint64_t cell_entries = 0;
 };
 
 struct TierStatistics {
@@ -152,6 +229,34 @@ struct TierStatistics {
     std::uint64_t jit_compiled = 0;
     std::uint64_t jit_bytes = 0;
     std::map<std::string, std::uint64_t> jit_failures;
+    // Function programs formed, their blocks, stubs and entries, and why
+    // functions got none.
+    std::uint64_t programs = 0;
+    std::uint64_t program_blocks = 0;
+    std::uint64_t program_stubs = 0;
+    std::uint64_t program_entries = 0;
+    std::map<std::string, std::uint64_t> program_rejections;
+    // Tier 3: empty when no run used it; else its back end ("interp", or
+    // "native" once a run ran machine code), why a run asking for machine
+    // code ran the IR interpreter, the native programs made, their bytes of
+    // code, the calls inlined into them and the dispatch sites given class
+    // tests, the function programs that got none, and what the runs did in
+    // them.
+    std::string native_mode;
+    std::string native_off;
+    std::uint64_t native_programs = 0;
+    std::uint64_t native_bytes = 0;
+    std::uint64_t native_inlined = 0;
+    std::uint64_t native_class_tests = 0;
+    std::uint64_t native_failed = 0;
+    std::map<std::string, std::uint64_t> native_rejections;
+    NativeCounts native;
+    std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t> native_deopts;
+    // The heap checks tier 3's passes removed from the native programs made,
+    // by kind (nil, lookup, kind, init, bounds, global), and those they moved
+    // out of loops.
+    std::map<std::string, std::uint64_t> native_heap_checks;
+    std::uint64_t native_heap_hoisted = 0;
 };
 
 // The lifted blocks of one validated image, shared by every execution of it:
@@ -213,6 +318,57 @@ public:
         std::uint64_t retry_after = 0;
     };
     RegionResolution region(std::uint32_t function, std::uint32_t block, std::uint64_t arrivals);
+    // The function program of `function` (Region::program), formed now that
+    // one of its blocks has had `arrivals` dispatcher arrivals, or null: the
+    // function's blocks get regions. Settled and pending as for region().
+    // Only when TierOptions::programs is set.
+    RegionResolution program(std::uint32_t function, std::uint64_t arrivals);
+    bool programs() const { return options_.programs == TierOptions::Programs::On; }
+
+    // Tier 3 (tier3.hpp). The mode the cache was made with, and the
+    // checkpoint arrivals of a program (Region::program_id) counted so far:
+    // each Budget a run interprets counts one. The native program of a
+    // function program is built, verified, and published the first time the
+    // count has reached native_after and some run asks (compile_native); a
+    // failure is remembered and never retried. Published programs are
+    // immutable and live as long as the cache. There is one native program
+    // per program version and variant (tier3::Variant).
+    bool native_enabled() const { return options_.tier3 != TierOptions::Tier3::Off && programs(); }
+    // Whether native programs get machine code (TierOptions::Tier3::Native
+    // where tier 3 has a code generator and executable memory), and why not
+    // when Native asked for it.
+    bool machine_code() const { return machine_code_; }
+    // Whether native tier 3 is on because NEURA_TIER3 is unset, not because
+    // it was asked for. A run with native code off (--jit=off, NEURA_JIT=off)
+    // then runs as it did before tier 3 (programs_without_tier3()).
+    bool tier3_implicit() const { return tier3_implicit_; }
+    // Whether function programs form without tier 3 (NEURA_TIER_PROGRAMS=1).
+    bool programs_without_tier3() const { return programs_apart_from_tier3_; }
+    const std::string& machine_code_off() const { return machine_code_off_; }
+    std::uint64_t count_native(std::uint32_t program_id);
+    // Whether `program`, at its `arrivals`-th checkpoint arrival (not below
+    // native_after), is built now. A program is built once the functions it
+    // calls have settled programs of their own, so that the inliner and the
+    // class tests of its dispatch sites can use them. It waits for callees
+    // that are still warming up, checked every native_after / 8 arrivals, up
+    // to the 16 * native_after-th arrival, and stops waiting once none of the
+    // unsettled callees has run for two checks in a row (a callee that does
+    // not run delays the build by a quarter of native_after arrivals).
+    bool native_ready(const tier2::Region& program, std::uint64_t arrivals);
+    const tier3::Program* native_code(const tier2::Region& program, tier3::Variant variant) const;
+    const tier3::Program* compile_native(const tier2::Region& program, tier3::Variant variant);
+    // The speculation record of dispatch table `table` of `program`
+    // (tier3::DispatchRecord), or null: programs have them only while tier 3
+    // is on.
+    tier3::DispatchRecord* dispatch_record(const tier2::Region& program, std::uint32_t table) const;
+    // A run uses tier 3: with machine code (`machine`), or on the IR
+    // interpreter, for `off` when machine code was asked for.
+    void note_native(bool machine, const std::string& off);
+    // A run made the code of an entry made on first use (tier3::Program::
+    // entry): its bytes, or why it could not.
+    void note_native_entry(std::uint64_t bytes, const std::string& failure);
+    void add_native_events(const NativeCounts& counts,
+                           const std::map<std::pair<std::uint32_t, std::uint32_t>, std::uint64_t>& deopts);
     std::uint64_t count_region(std::uint32_t function, std::uint32_t block) {
         return region_counts_[first_entry_[function] + block].fetch_add(1, std::memory_order_relaxed) + 1;
     }
@@ -257,6 +413,8 @@ private:
 
     const nvr::Image& image_;
     TierOptions options_;
+    bool tier3_implicit_ = false;
+    bool programs_apart_from_tier3_ = false;
     lift::HintTable hints_;
     std::vector<std::size_t> first_entry_;
     std::vector<Entry> entries_;
@@ -279,10 +437,35 @@ private:
         bool refreshing = false;
     };
     std::vector<RegionEntry> regions_;
+    // Function programs, by function, and the next program number.
+    std::vector<RegionEntry> programs_;
+    std::uint32_t next_program_id_ = 0;
     // Regions replaced by a refresh, which runs may still hold.
     std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;
     // Native code by region; null where compilation failed.
     std::map<const tier2::Region*, std::unique_ptr<jit::Program>> native_;
+    // Tier 3, by program number: arrivals at its checkpoints, and its state:
+    // null (not tried), `forming`, `failed`, or the published program.
+    std::unique_ptr<std::atomic<std::uint64_t>[]> native_arrivals_;
+    // By program number and variant (number * tier3::variant_count +
+    // variant).
+    std::unique_ptr<std::atomic<const tier3::Program*>[]> native_programs_;
+    std::size_t native_capacity_ = 0;
+    // The activity of the unsettled callees of each program at its last
+    // native_ready check, by program number (under mutex_).
+    struct NativeWaiting {
+        std::uint64_t activity = 0;
+        std::uint32_t idle = 0;
+    };
+    std::vector<NativeWaiting> native_waiting_;
+    std::vector<std::unique_ptr<tier3::Program>> native_owned_;
+    // The speculation records of each program's dispatch tables, by program
+    // number, made when the program is published (with tier 3 on).
+    std::unique_ptr<std::atomic<tier3::DispatchRecord*>[]> dispatch_records_;
+    std::vector<std::unique_ptr<tier3::DispatchRecord[]>> dispatch_owned_;
+    void make_dispatch_records(const tier2::Region& program);
+    bool machine_code_ = false;
+    std::string machine_code_off_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;
     std::chrono::steady_clock::duration search_spent_{};
     std::chrono::steady_clock::duration hint_spent_{};
@@ -383,10 +566,34 @@ std::uint8_t tier_ceiling();
 // reference evaluator too, and every region execution again block by block
 // at tier 1 (tier2_steps.inc), and abort with a report on any difference.
 bool tier_check_enabled();
+// NEURA_TIER_CHECK=2: run every execution that would run above tier 1 with
+// a shadow execution at tier 1, and compare the two at every point where
+// compiled code returns to the dispatcher and at every event
+// (src/nvm/tier_shadow.inc).
+bool tier_shadow_enabled();
+// NEURA_TIER_CHECK_HEAP=1: under NEURA_TIER_CHECK=2, compare the heaps at
+// every such point, rather than at the end of the run and at points spaced
+// by the steps run in proportion to the heap's size.
+bool tier_shadow_heap_always();
 // NEURA_TIER_EAGER=1: lift every block when it first runs, with ample proof
 // work and search time, and form regions at the first arrival, so that
 // short test runs exercise tiers 1 and 2. It changes only which blocks run
 // lifted or in regions, and when.
 bool tier_eager();
+
+// NEURA_TIER_PROGRAMS=1: caches form function programs (TierOptions::programs).
+bool tier_programs_enabled();
+// NEURA_TIER3: "interp" runs tier 3 on the IR interpreter, "native" runs it
+// natively, unset is native where native code is available (the default,
+// tier3_environment_implicit), anything else is off (TierOptions::tier3).
+TierOptions::Tier3 tier3_environment();
+// Whether tier3_environment() is the default (NEURA_TIER3 unset) rather than
+// a setting.
+bool tier3_environment_implicit();
+// NEURA_TIER3_AFTER=N (a testing aid, read once): lift and form as
+// NEURA_TIER_EAGER=1 does, but turn a program native at its Nth checkpoint
+// arrival, so that a loop is handed to native code in its middle; 0 when
+// unset.
+std::uint32_t tier3_after();
 
 } // namespace neura::nvm

@@ -16,7 +16,10 @@ Each program runs at --tier=0, at --tier=1 and --tier=2, and at each of
 those with NEURA_TIER_CHECK=1, all but the first with NEURA_TIER_EAGER=1 so
 that every block is lifted, and every region formed, when it first runs
 (under the check, every tier-1 step is also evaluated by reference and every
-region run again block by block, aborting on a difference). Status,
+region run again block by block, aborting on a difference). Tier 2 also runs
+with NEURA_TIER_CHECK=2, which runs each case beside a shadow at tier 1 and
+compares the two wherever compiled code returns and at every event, aborting
+on a difference (at tier 1 it would check nothing). Status,
 standard output, and standard error must be identical, and --tier-stats
 must show that tier 1 ran lifted blocks and tier 2 ran regions.
 
@@ -226,6 +229,10 @@ def main():
     parser.add_argument("--jit", default="off,on",
                         help="comma-separated native-code modes to run tier 2 in (off, on, auto)")
     args = parser.parse_args()
+    # A fleet (`run --each`) on a graph device runs without tier 2, so on a
+    # machine with a GPU the sweep would compare nothing. Keep the device
+    # out unless the caller asks for it.
+    os.environ.setdefault("NEURA_GPU", "off")
     modes = [mode for mode in args.jit.split(",") if mode]
     if not modes or any(mode not in ("off", "on", "auto") for mode in modes):
         sys.exit("--jit takes off, on, and auto, separated by commas")
@@ -257,6 +264,9 @@ def main():
             runs[label] = run([neura, "run", *options, "--each", str(lists), str(image)], eager)
             runs[f"{label} checked"] = run([neura, "run", *options, "--each", str(lists), str(image)],
                                            dict(eager, NEURA_TIER_CHECK="1"))
+            if label.startswith("tier 2"):
+                runs[f"{label} shadowed"] = run([neura, "run", *options, "--each", str(lists), str(image)],
+                                                dict(eager, NEURA_TIER_CHECK="2"))
         stats = run([neura, "run", "--tier=2", f"--jit={modes[-1]}", "--tier-stats", "--each", str(lists),
                      str(image)], eager)
         stats_lines = stats[2].decode(errors="replace").splitlines()

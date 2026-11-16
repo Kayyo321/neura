@@ -1,5 +1,9 @@
 #include "tier1.hpp"
 
+#include "tier3.hpp"
+
+#include "jit/tier3_native.hpp"
+
 #include "lift/lift.hpp"
 
 #include <cmath>
@@ -38,9 +42,28 @@ std::uint8_t tier_ceiling() {
     return ceiling;
 }
 
-bool tier_check_enabled() {
-    static const bool enabled = [] {
+namespace {
+
+// NEURA_TIER_CHECK: 1 or 2, or 0 for any other value.
+int tier_check_mode() {
+    static const int mode = [] {
         const char* text = std::getenv("NEURA_TIER_CHECK");
+        if (text && std::strcmp(text, "1") == 0) return 1;
+        if (text && std::strcmp(text, "2") == 0) return 2;
+        return 0;
+    }();
+    return mode;
+}
+
+} // namespace
+
+bool tier_check_enabled() { return tier_check_mode() == 1; }
+
+bool tier_shadow_enabled() { return tier_check_mode() == 2; }
+
+bool tier_shadow_heap_always() {
+    static const bool enabled = [] {
+        const char* text = std::getenv("NEURA_TIER_CHECK_HEAP");
         return text && std::strcmp(text, "1") == 0;
     }();
     return enabled;
@@ -48,7 +71,7 @@ bool tier_check_enabled() {
 
 std::string describe(const TierStatistics& s) {
     const auto& steps = s.steps;
-    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region;
+    const auto total = steps.lifted + steps.wired + steps.empty + steps.declined + steps.reference + steps.region + steps.kernel;
     const auto percent = [&](std::uint64_t part) {
         char text[32];
         std::snprintf(text, sizeof text, "%.1f%%", total ? 100.0 * static_cast<double>(part) / total : 0.0);
@@ -69,7 +92,8 @@ std::string describe(const TierStatistics& s) {
            std::to_string(steps.region) + "), tier 1 " + percent(steps.lifted + steps.wired + steps.empty) +
            " (lifted " + std::to_string(steps.lifted) + ", wired " + std::to_string(steps.wired) + ", empty " +
            std::to_string(steps.empty) + "), tier 0 " + percent(steps.reference + steps.declined) + " (reference " +
-           std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")\n";
+           std::to_string(steps.reference) + ", declined " + std::to_string(steps.declined) + ")" +
+           (steps.kernel != 0 ? ", kernel calls " + std::to_string(steps.kernel) : std::string()) + "\n";
     const auto& r = s.region_counts;
     if (s.regions != 0 || !s.region_rejections.empty()) {
         out += "tier: regions " + std::to_string(s.regions) + " (" + std::to_string(s.region_blocks) +
@@ -95,6 +119,53 @@ std::string describe(const TierStatistics& s) {
         };
         top(s.region_deopts, "deoptimized");
         top(s.region_leaves, "left");
+    }
+    if (s.programs != 0 || !s.program_rejections.empty()) {
+        out += "tier: programs " + std::to_string(s.programs) + " (" + std::to_string(s.program_blocks) +
+               " blocks, " + std::to_string(s.program_stubs) + " stubs, " + std::to_string(s.program_entries) +
+               " entries); calls " + std::to_string(r.calls) + ", returns " + std::to_string(r.returns) +
+               ", helpers " + std::to_string(r.helpers) + ", traps in place " + std::to_string(r.traps) +
+               "; steps in programs " + std::to_string(r.program_steps) + "\n";
+        for (const auto& [reason, count] : s.program_rejections) {
+            out += "tier: no program " + std::to_string(count) + ": " + reason + "\n";
+        }
+    }
+    if (!s.native_mode.empty()) {
+        const auto& n = s.native;
+        out += "tier: native programs " + std::to_string(s.native_programs) + " (" + std::to_string(s.native_bytes) +
+               " bytes of code, " + std::to_string(s.native_inlined) + " calls inlined, " +
+               std::to_string(s.native_class_tests) + " dispatch sites with class tests, " +
+               std::to_string(s.native_failed) + " not compiled); entered " + std::to_string(n.entered) + ", left " +
+               std::to_string(n.left) + ", refused " + std::to_string(n.refused) + "; deoptimized: budget " +
+               std::to_string(n.budget) + ", checks " + std::to_string(n.checks) + ", guards " +
+               std::to_string(n.guards) + ", selectors " + std::to_string(n.selectors) + ", references " +
+               std::to_string(n.references) + ", state traps " + std::to_string(n.state_traps) + ", exits " +
+               std::to_string(n.exits) + "; traps in place " + std::to_string(n.traps) + "; steps in native code " +
+               std::to_string(n.steps) + "\n";
+        out += "tier: native heap: allocations fast " + std::to_string(n.fast_allocations) + ", slow " +
+               std::to_string(n.slow_allocations) + "; appends fast " + std::to_string(n.fast_appends) + ", slow " +
+               std::to_string(n.slow_appends) + "; checks removed:";
+        if (s.native_heap_checks.empty()) out += " none";
+        const char* separator = " ";
+        for (const auto& [kind, count] : s.native_heap_checks) {
+            out += separator + kind + " " + std::to_string(count);
+            separator = ", ";
+        }
+        out += "; hoisted " + std::to_string(s.native_heap_hoisted) + "\n";
+        if (!s.native_off.empty()) out += "tier: native programs on the IR interpreter: " + s.native_off + "\n";
+        out += "tier: native kernel helpers " + std::to_string(n.kernel_helpers) + "\n";
+        out += "tier: native calls entered by the helper " + std::to_string(n.helper_entries) + ", from callee cells " +
+               std::to_string(n.cell_entries) + "\n";
+        for (const auto& [reason, count] : s.native_rejections) {
+            out += "tier: no native program " + std::to_string(count) + ": " + reason + "\n";
+        }
+        std::vector<std::pair<std::uint64_t, std::pair<std::uint32_t, std::uint32_t>>> ends;
+        for (const auto& [block, count] : s.native_deopts) ends.emplace_back(count, block);
+        std::sort(ends.begin(), ends.end(), std::greater<>());
+        for (std::size_t i = 0; i < ends.size() && i < 5; ++i) {
+            out += "tier: native deoptimized " + std::to_string(ends[i].first) + " times at function " +
+                   std::to_string(ends[i].second.first) + " block " + std::to_string(ends[i].second.second) + "\n";
+        }
     }
     if (!s.jit_mode.empty()) {
         if (!s.jit_off.empty() && s.jit_compiled == 0 && s.jit_failures.empty()) {
@@ -157,14 +228,89 @@ bool tier_eager() {
     return enabled;
 }
 
+bool tier_programs_enabled() {
+    static const bool enabled = [] {
+        const char* text = std::getenv("NEURA_TIER_PROGRAMS");
+        return text && std::strcmp(text, "1") == 0;
+    }();
+    return enabled;
+}
+
+TierOptions::Tier3 tier3_environment() {
+    static const TierOptions::Tier3 mode = [] {
+        const char* text = std::getenv("NEURA_TIER3");
+        // Unset is the default, native tier 3 where native code is available
+        // (tier3_environment_implicit); anything unrecognized is off.
+        if (!text) return TierOptions::Tier3::Native;
+        if (std::strcmp(text, "interp") == 0) return TierOptions::Tier3::Interp;
+        if (std::strcmp(text, "native") == 0) return TierOptions::Tier3::Native;
+        return TierOptions::Tier3::Off;
+    }();
+    return mode;
+}
+
+bool tier3_environment_implicit() {
+    static const bool implicit = std::getenv("NEURA_TIER3") == nullptr;
+    return implicit;
+}
+
+std::uint32_t tier3_after() {
+    static const std::uint32_t value = [] {
+        const char* text = std::getenv("NEURA_TIER3_AFTER");
+        if (!text || *text == '\0') return std::uint32_t{0};
+        std::uint64_t number = 0;
+        for (const char* c = text; *c != '\0'; ++c) {
+            if (*c < '0' || *c > '9' || number > 1'000'000) return std::uint32_t{0};
+            number = number * 10 + static_cast<std::uint64_t>(*c - '0');
+        }
+        return static_cast<std::uint32_t>(number);
+    }();
+    return value;
+}
+
 TierCache::TierCache(const nvr::Image& image, TierOptions options)
     : image_(image), options_(options), hints_(lift::decode_hints(image)) {
-    if (tier_eager()) {
+    if (options_.tier3 == TierOptions::Tier3::Environment) {
+        options_.tier3 = tier3_environment();
+        tier3_implicit_ = tier3_environment_implicit();
+    }
+    if (options_.tier3 == TierOptions::Tier3::Native) {
+        if (!jit::native::supported()) {
+            machine_code_off_ = "no tier 3 code generator for this platform";
+        } else if (const auto available = jit::availability(jit::Mode::On); !available.enabled) {
+            machine_code_off_ = available.error;
+        } else {
+            machine_code_ = true;
+        }
+        // The default is native tier 3 only where there is native code: a
+        // platform without it runs as it did before tier 3, and says
+        // nothing about it. (A run's own --jit=off is handled by the
+        // execution, which knows it: tier3_implicit().)
+        if (tier3_implicit_ && !machine_code_) {
+            tier3_implicit_ = false;
+            machine_code_off_.clear();
+            options_.tier3 = TierOptions::Tier3::Off;
+        }
+    }
+    // Whether programs form without tier 3's help (NEURA_TIER_PROGRAMS=1 or
+    // a caller's option): they still do when a default tier 3 is turned off
+    // for a run.
+    programs_apart_from_tier3_ = options_.programs == TierOptions::Programs::Environment
+                                     ? tier_programs_enabled()
+                                     : options_.programs == TierOptions::Programs::On;
+    if (options_.programs == TierOptions::Programs::Environment) {
+        options_.programs = tier_programs_enabled() || options_.tier3 != TierOptions::Tier3::Off
+                                ? TierOptions::Programs::On
+                                : TierOptions::Programs::Off;
+    }
+    if (tier_check_enabled()) options_.checkable = true;
+    if (tier_eager() || tier3_after() != 0) {
         options_.hint_after = 1;
         options_.search_after = 1;
         options_.minimum_proof_work = std::uint64_t{1} << 32;
         options_.search_budget = std::chrono::milliseconds(60'000);
         options_.region_after = 1;
+        options_.native_after = tier3_after() != 0 ? tier3_after() : 1;
     }
     first_entry_.reserve(image.functions.size());
     std::size_t total = 0;
@@ -175,6 +321,13 @@ TierCache::TierCache(const nvr::Image& image, TierOptions options)
     entries_ = std::vector<Entry>(total);
     counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     regions_ = std::vector<RegionEntry>(total);
+    programs_ = std::vector<RegionEntry>(image.functions.size());
+    // A function has at most five programs over its life: the first and four
+    // refreshes (TierCache::program).
+    native_capacity_ = 5 * image.functions.size() + 8;
+    native_arrivals_ = std::make_unique<std::atomic<std::uint64_t>[]>(native_capacity_);
+    native_programs_ = std::make_unique<std::atomic<const tier3::Program*>[]>(native_capacity_ * tier3::variant_count);
+    dispatch_records_ = std::make_unique<std::atomic<tier3::DispatchRecord*>[]>(native_capacity_);
     region_counts_ = std::make_unique<std::atomic<std::uint64_t>[]>(total);
     statistics_.blocks = total;
     statistics_.hinted = hints_.size();
@@ -371,6 +524,7 @@ void TierCache::add_steps(const TierSteps& steps) {
     statistics_.steps.declined += steps.declined;
     statistics_.steps.reference += steps.reference;
     statistics_.steps.region += steps.region;
+    statistics_.steps.kernel += steps.kernel;
 }
 
 TierStatistics TierCache::statistics() const {

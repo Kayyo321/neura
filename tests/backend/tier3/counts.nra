@@ -1,0 +1,34 @@
+// A count kept on one path of a loop body, after an inner loop, for tier 3
+// (docs/runtime/NVM.md, "Execution tiers"): at the loop heads the count is a
+// phi of its first value and of a phi that joins it with its increment, so
+// a phi that is not a constant flows into one that would be if it were. The
+// argument is the size. tests/backend/tier3_native_tests.cpp runs it at
+// every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Counts = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let inside = 0;
+        let checksum: int64 = 0;
+        for (let y = 0; y < n; y = y + 1) {
+            for (let x = 0; x < n; x = x + 1) {
+                let i = 0;
+                while (i < x + y) {
+                    i = i + 1;
+                }
+                let bit: int64 = 0;
+                if (i % 3 == 0) {
+                    bit = 1;
+                    inside = inside + 1;
+                }
+                checksum = (checksum * 31 + bit) & 65535;
+            }
+        }
+        console.println("counts {} {}", inside, checksum);
+        return program.ExitCode.Ok;
+    };
+);

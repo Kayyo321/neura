@@ -25,6 +25,61 @@ struct TaskDumpRequest;
 class ScheduleChooser;
 class TaskObserver;
 
+// Test hooks of the shadow-run oracle of NEURA_TIER_CHECK=2
+// (docs/runtime/NVM.md, "Controls"; src/nvm/tier_shadow.inc). A run given
+// hooks runs the oracle whatever the environment says, wherever
+// NEURA_TIER_CHECK=2 would. Tests only.
+struct TierShadowHooks {
+    // What the oracle changes in the run itself (not in its shadow) at the
+    // first sync point at or after step `at_step` where there is such a
+    // thing to change, so that a test can see the difference reported. It
+    // changes one thing once, in the run or a parallel item of it.
+    enum class Perturb : std::uint8_t {
+        None,
+        // The first initialized slot of the innermost frame whose type is
+        // not a reference: its lowest bit flips.
+        SlotValue,
+        // The first initialized slot of the innermost frame: uninitialized.
+        SlotInitialized,
+        // The innermost frame's block: the next block of its function.
+        FrameBlock,
+        // The first initialized global whose type is not a reference: its
+        // lowest bit flips.
+        Global,
+        // The first object, by handle, with an initialized field whose type
+        // is not a reference: the field's lowest bit flips.
+        HeapField,
+        // The first object, by handle, with an initialized field: uninitialized.
+        HeapInitialized,
+        // The first list, by handle: its version is one more.
+        ListVersion,
+        // The live heap cells: one more.
+        LiveCells,
+        // The step count: one more.
+        Steps,
+        // The first channel, by handle, holding a value: the lowest bit of
+        // the oldest value flips.
+        ChannelBuffer,
+        // The lowest-numbered task: one more committed select.
+        TaskSelects,
+    };
+    Perturb perturb = Perturb::None;
+    std::uint64_t at_step = 0;
+    // Set once the perturbation is made.
+    bool perturbed = false;
+    // Receives the report of the first difference instead of standard
+    // error, and the run goes on without its shadow; without it, the
+    // report is printed and the process aborts.
+    std::function<void(const std::string&)> report;
+    // Receives the line saying the oracle is not applied to a run instead
+    // of standard error.
+    std::function<void(const std::string&)> notice;
+    // Compares the heaps at every sync point, as NEURA_TIER_CHECK_HEAP=1.
+    bool every_heap = false;
+    // Sync points reached, counted over the run and its parallel items.
+    std::uint64_t syncs = 0;
+};
+
 // Bounds a run enforces. Exhaustion traps at the operation that would exceed
 // the bound, before the allocation, frame, or block it would start.
 struct RunLimits {
@@ -102,6 +157,15 @@ struct RunLimits {
     // order: entry N is the task that ran from tick N. It must outlive the
     // run. Tests and tools compare schedules with it.
     std::vector<std::uint64_t>* schedule = nullptr;
+    // The shadow-run oracle of NEURA_TIER_CHECK=2 with test hooks, or null.
+    // It must outlive the run. It never changes what a run does unless it
+    // is told to perturb it.
+    TierShadowHooks* tier_shadow = nullptr;
+    // Why NEURA_TIER_CHECK=2 cannot check this run, or null: a caller that
+    // gives the run inputs the oracle does not pass to its shadow in order
+    // (`neura run --record` and `--replay`) says so here, and the run says
+    // the oracle is not applied.
+    const char* tier_check_off = nullptr;
 };
 
 // Chooses among the runnable tasks at a scheduling decision
@@ -327,6 +391,10 @@ struct DebugSnapshot {
     std::vector<DebugValue> globals;
 };
 
+namespace tier3 {
+struct Program;
+}
+
 class Execution {
 public:
     // Throws std::invalid_argument when an argument is not valid UTF-8.
@@ -363,6 +431,37 @@ public:
     // The most tasks that were live at once, counting the root. Zero for a
     // serial image.
     std::uint64_t peak_tasks() const;
+
+    // Tests only (tests/backend/tier3_ir_tests.cpp). The frames of the run,
+    // outermost first, as the tier machinery keeps them (return slot and
+    // block, and the program a frame returns into); and a native program
+    // (src/nvm/tier3.hpp) run from the entry `entry` on the current frames
+    // as the dispatcher would run it, with no allowance and no checks of the
+    // entry. The ending: the outcome and reason as the numbers of
+    // tier3::Outcome and tier3::Reason, the block the run goes on at, and
+    // the blocks the activation completed.
+    struct Tier3Frame {
+        std::uint32_t function = 0;
+        std::uint32_t block = 0;
+        std::uint32_t return_slot = 0;
+        std::uint32_t return_block = 0;
+        bool boundary = false;
+        const void* called_from = nullptr;
+        std::vector<std::uint64_t> slots;
+        std::vector<std::uint8_t> initialized;
+    };
+    struct Tier3Ending {
+        unsigned outcome = 0;
+        unsigned reason = 0;
+        std::uint32_t next_block = 0;
+        std::uint64_t blocks = 0;
+    };
+    std::vector<Tier3Frame> tier3_frames() const;
+    Tier3Ending tier3_run(const tier3::Program& program, std::uint32_t entry);
+    // Tests only (tests/backend/tier3_heap_tests.cpp): the heap's words
+    // (Heap::snapshot) and the executor's live and peak cells and collection
+    // threshold, comparable between runs word for word.
+    std::vector<std::uint64_t> heap_snapshot() const;
 
     struct GraphStep {
         std::uint32_t graph = 0;
@@ -417,6 +516,17 @@ public:
     // The largest live heap size reached so far, in the cells of
     // RunLimits::max_heap_cells.
     std::uint64_t peak_heap_cells() const;
+    // A live heap entry as the allocator recorded it: its kind (0 object, 1
+    // array, 2 list, 3 text, 4 bytes), its layout or type index, and its
+    // declared element width in bytes. For tests of the allocator.
+    struct HeapEntryWidth {
+        std::uint64_t handle = 0;
+        std::uint8_t kind = 0;
+        std::uint32_t type = 0;
+        std::uint8_t width = 0;
+    };
+    // Every live heap entry, in handle order.
+    std::vector<HeapEntryWidth> heap_entry_widths() const;
     // Steps per image function, in function table order, when
     // RunLimits::profile is set; otherwise empty.
     const std::vector<std::uint64_t>& function_steps() const;

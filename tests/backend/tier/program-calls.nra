@@ -1,0 +1,179 @@
+// Calls and returns for tier 2 function programs (docs/runtime/NVM.md,
+// "Execution tiers"): a loop calling small functions, a recursive function,
+// a mutually recursive pair, interface calls through a dispatch block in a
+// loop, a console write inside a called function, and traps two and three
+// frames deep. The first argument picks the case, the second the size.
+// tests/backend/tier_programs_tests.cpp runs it at every tier.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let ProgramCalls = module:program.Entry (
+    const Mask: int64 = 1048575;
+
+    let Shape = interface (
+        let weight = func(scale: int64) -> int64;
+    );
+
+    let Square = class implements Shape (
+        export last side: int64;
+        export let init = func(length: int64) {
+            side = length;
+        };
+        export let weight = func(scale: int64) -> int64 => side * side + scale;
+    );
+
+    let Stick = class implements Shape (
+        export last length: int64;
+        export let init = func(size: int64) {
+            length = size;
+        };
+        export let weight = func(scale: int64) -> int64 => length - scale;
+    );
+
+    let Cell = class (
+        export let value: int64;
+        export let label: string;
+    );
+
+    let add = func(a: int64, b: int64) -> int64 => (a + b) & Mask;
+
+    let twist = func(value: int64) -> int64 {
+        let shifted = (value << 3) & Mask;
+        return shifted ^ (value >> 2);
+    };
+
+    let fib = func(n: int64) -> int64 {
+        if (n < 2) {
+            return n;
+        }
+        return add(fib(n - 1), fib(n - 2));
+    };
+
+    let is_even = func(n: int64) -> bool {
+        if (n == 0) {
+            return true;
+        }
+        return is_odd(n - 1);
+    };
+
+    let is_odd = func(n: int64) -> bool {
+        if (n == 0) {
+            return false;
+        }
+        return is_even(n - 1);
+    };
+
+    let report = func(label: string, value: int64) {
+        console.print_line(label + " " + value.to_string());
+    };
+
+    let shapes = func(count: int32, rounds: int32) -> int64 {
+        let all: Shape[list] = [];
+        for (let i = 0; i < count; i = i + 1) {
+            if (i % 3 == 0) {
+                all.append(new Stick((i % 11) as int64));
+            } else {
+                all.append(new Square((i % 7) as int64));
+            }
+        }
+        let total: int64 = 0;
+        for (let round = 0; round < rounds; round = round + 1) {
+            for (let shape in all) {
+                total = add(total, shape.weight(round as int64));
+            }
+        }
+        return total;
+    };
+
+    // A closure called in a loop: a call through the closure's dispatch.
+    let apply = func(step: func(int64) -> int64, count: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < count; i = i + 1) {
+            total = step(total);
+        }
+        return total;
+    };
+
+    let loop = func(size: int32) -> int64 {
+        let total: int64 = 0;
+        for (let i = 0; i < size; i = i + 1) {
+            total = add(total, twist(i as int64));
+            if (i % 50 == 0) {
+                report("at", total);
+            }
+        }
+        return total;
+    };
+
+    // Traps two and three frames below main.
+    let overflow_inner = func(value: int32) -> int32 => value * 65536 * 65536;
+    let overflow_middle = func(value: int32) -> int32 => overflow_inner(value) + 1;
+    let index_inner = func(values: int64[list], at: int32) -> int64 => values[at];
+    let index_middle = func(values: int64[list], at: int32) -> int64 => index_inner(values, at) + 1;
+    let nil_inner = func(shape: Shape, scale: int64) -> int64 => shape.weight(scale);
+    let nil_middle = func(shape: Shape, scale: int64) -> int64 => nil_inner(shape, scale) + 1;
+    let field_inner = func(cell: Cell) -> int64 => cell.value;
+    let field_middle = func(cell: Cell) -> int64 => field_inner(cell) + 1;
+
+    let trap = func(kind: string, size: int32) -> int64 {
+        let total: int64 = 0;
+        let values: int64[list] = [1, 2, 3];
+        let cell = new Cell();
+        cell.label = "cell";
+        for (let i = 0; i <= size; i = i + 1) {
+            let at = 1;
+            let factor = 0;
+            if (i == size) {
+                at = 3;
+                factor = 3;
+            }
+            if (kind == "overflow") {
+                total = total + (overflow_middle(factor) as int64);
+            } else if (kind == "index") {
+                total = total + index_middle(values, at);
+            } else if (kind == "nil") {
+                let shape: Shape = new Square(2);
+                if (i == size) {
+                    shape = nil;
+                }
+                total = total + nil_middle(shape, 1);
+            } else {
+                if (i == size) {
+                    cell = new Cell();
+                } else {
+                    cell.value = i as int64;
+                }
+                total = total + field_middle(cell);
+            }
+        }
+        return total;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kind = "calls";
+        let size = 20;
+        if (args.length > 0) {
+            kind = args[0];
+        }
+        if (args.length > 1) {
+            size = result.value_or<int32>(int32s.parse(args[1]), 20);
+        }
+        if (kind == "calls") {
+            report("loop", loop(size * 10));
+            report("fib", fib((size % 18) as int64));
+            let even: int64 = 0;
+            if (is_even((size * 7) as int64)) {
+                even = 1;
+            }
+            report("even", even);
+            report("shapes", shapes(size, 4));
+            let offset: int64 = (size as int64) + 3;
+            report("closure", apply(func(x: int64) -> int64 => add(x, offset), size * 5));
+        } else {
+            report("trap", trap(kind, size));
+        }
+        return program.ExitCode.Ok;
+    };
+);
