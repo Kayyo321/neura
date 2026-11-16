@@ -1,0 +1,28 @@
+// An enum that contains itself through a link class is transferable only if
+// every part is: a variant holding a mutable class keeps it from crossing a
+// spawn, however the recursion is broken.
+let Recursive = module (
+    let Notes = class (
+        export let text: string = "";
+    );
+
+    let Link = class (
+        export last cause: Chain;
+
+        export let init = func(value: Chain) {
+            cause = value;
+        };
+    );
+
+    let Chain = enum (End, Note(Notes), More(Link));
+
+    let consume = func(chain: Chain) -> int => 0;
+
+    export let run = func() -> int {
+        last chain = Chain.More(new Link(Chain.End));
+        scope {
+            spawn consume(chain);
+        }
+        return 0;
+    };
+);
