@@ -628,24 +628,17 @@ public:
         }
         if (Blocks::pooled) {
             std::sort(live_blocks.begin(), live_blocks.end(), std::less<>());
-            const auto chunk_of = [&](const void* address) -> std::ptrdiff_t {
-                const auto* byte = static_cast<const unsigned char*>(address);
-                for (std::size_t i = 0; i < blocks_.chunks_.size(); ++i) {
-                    if (byte >= blocks_.chunks_[i] && byte <= blocks_.chunks_[i] + Blocks::chunk_bytes) {
-                        return static_cast<std::ptrdiff_t>(i);
-                    }
-                }
-                return -1;
-            };
+            // A block lies in the chunk that holds it; a bump range ends where
+            // its chunk does (chunk_holding(), chunk_ending_at()).
+            const auto chunk_of = [&](const void* address) { return chunk_holding(blocks_.chunks_, address); };
             for (std::size_t c = 0; c < allocator_class_count; ++c) {
                 const auto size = Blocks::sizes[c];
                 const auto* next = blocks_.native.next[c];
                 const auto* end = blocks_.native.end[c];
                 if ((next == nullptr) != (end == nullptr)) return "the bump range of class " + std::to_string(c);
                 if (next) {
-                    const auto chunk = chunk_of(end);
-                    if (chunk < 0 || end != blocks_.chunks_[static_cast<std::size_t>(chunk)] + Blocks::chunk_bytes ||
-                        next > end || (next - blocks_.chunks_[static_cast<std::size_t>(chunk)]) % size != 0) {
+                    const auto chunk = chunk_ending_at(blocks_.chunks_, end);
+                    if (chunk < 0 || next > end || (next - blocks_.chunks_[static_cast<std::size_t>(chunk)]) % size != 0) {
                         return "the bump range of class " + std::to_string(c);
                     }
                 }
@@ -681,13 +674,24 @@ public:
         const auto place = [&](const void* address) -> std::uint64_t {
             if (address == nullptr) return 0;
             if (address == static_cast<const void*>(Blocks::empty_)) return 1;
-            const auto* byte = static_cast<const unsigned char*>(address);
-            for (std::size_t i = 0; i < blocks_.chunks_.size(); ++i) {
-                if (byte >= blocks_.chunks_[i] && byte <= blocks_.chunks_[i] + Blocks::chunk_bytes) {
-                    return (std::uint64_t{i + 1} << 32) | static_cast<std::uint64_t>(byte - blocks_.chunks_[i]);
-                }
+            const auto chunk = chunk_holding(blocks_.chunks_, address);
+            if (chunk < 0) return 2;
+            return (std::uint64_t{static_cast<std::size_t>(chunk) + 1} << 32) |
+                   static_cast<std::uint64_t>(static_cast<const unsigned char*>(address) - blocks_.chunks_[static_cast<std::size_t>(chunk)]);
+        };
+        // A bump range's two ends, as places in the chunk it ends at.
+        const auto place_range = [&](const unsigned char* next, const unsigned char* end, std::uint64_t& at_next,
+                                     std::uint64_t& at_end) {
+            at_next = at_end = 0;
+            if (end == nullptr) return;
+            const auto chunk = chunk_ending_at(blocks_.chunks_, end);
+            if (chunk < 0) {
+                at_next = at_end = 2;
+                return;
             }
-            return 2;
+            const auto base = std::uint64_t{static_cast<std::size_t>(chunk) + 1} << 32;
+            at_next = base | static_cast<std::uint64_t>(next - blocks_.chunks_[static_cast<std::size_t>(chunk)]);
+            at_end = base | Blocks::chunk_bytes;
         };
         out.push_back(blocks_.native.last);
         out.push_back(last_identity_);
@@ -726,8 +730,10 @@ public:
         out.insert(out.end(), live_pages_.begin(), live_pages_.end());
         out.push_back(released_pages_);
         for (std::size_t c = 0; c < allocator_class_count; ++c) {
-            out.push_back(place(blocks_.native.next[c]));
-            out.push_back(place(blocks_.native.end[c]));
+            std::uint64_t at_next = 0, at_end = 0;
+            place_range(blocks_.native.next[c], blocks_.native.end[c], at_next, at_end);
+            out.push_back(at_next);
+            out.push_back(at_end);
             std::size_t steps = 0;
             for (const void* block = blocks_.native.free[c]; block && steps < (std::size_t{1} << 24); ++steps) {
                 out.push_back(place(block));
@@ -819,6 +825,32 @@ public:
     static constexpr std::uint64_t handle_page_mask() { return page_mask; }
     static constexpr std::size_t page_entries_offset() { return offsetof(Page, entries); }
     static constexpr std::size_t page_live_offset() { return offsetof(Page, live); }
+
+    // Where an address lies among chunks of the allocator's chunk size
+    // (`chunks` holds their start addresses in the order they were taken),
+    // as an index into `chunks`, or -1. The system may place one chunk right
+    // after another, so the address one past the end of a chunk is the start
+    // of the next and belongs to that one: chunk_holding() takes the
+    // half-open range [start, start + size), and a bump range's end, which
+    // is one past the end of its chunk, is found by chunk_ending_at(). Which
+    // chunks are adjacent depends on the system's allocator, so nothing that
+    // compares two heaps may depend on it.
+    static std::ptrdiff_t chunk_holding(const std::vector<unsigned char*>& chunks, const void* address) {
+        const auto* byte = static_cast<const unsigned char*>(address);
+        for (std::size_t i = 0; i < chunks.size(); ++i) {
+            if (std::less_equal<>()(chunks[i], byte) && std::less<>()(byte, chunks[i] + Blocks::chunk_bytes)) {
+                return static_cast<std::ptrdiff_t>(i);
+            }
+        }
+        return -1;
+    }
+    static std::ptrdiff_t chunk_ending_at(const std::vector<unsigned char*>& chunks, const void* address) {
+        for (std::size_t i = 0; i < chunks.size(); ++i) {
+            if (address == chunks[i] + Blocks::chunk_bytes) return static_cast<std::ptrdiff_t>(i);
+        }
+        return -1;
+    }
+    static constexpr std::size_t chunk_size() { return Blocks::chunk_bytes; }
 
     // The block allocator's words (Blocks): for size class c, `free[c]` is
     // the head of its free list (a free block's first word is the next

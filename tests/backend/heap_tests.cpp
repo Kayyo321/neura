@@ -960,4 +960,47 @@ NEURA_TEST(heap, walks_skip_released_pages_between_live_ones) {
     check(walks.each == (std::vector<std::uint64_t>{2560, 2561}) && walks.next == walks.each, "walks after the sweep");
 }
 
+// The allocator takes its chunks from the system, which may put one right
+// after another (macOS does), so the address one past the end of a chunk
+// is the start of the next. Heap::check() and Heap::snapshot() place every
+// block and bump range by these lookups; which chunks are adjacent must
+// change neither.
+NEURA_TEST(heap, a_chunk_that_follows_another_owns_the_address_between_them) {
+    const auto size = Heap::chunk_size();
+    // Addresses only: nothing here is read or written.
+    auto* const base = reinterpret_cast<unsigned char*>(std::uintptr_t{1} << 30);
+    for (const bool later_first : {false, true}) {
+        const std::vector<unsigned char*> chunks = later_first ? std::vector{base + size, base} : std::vector{base, base + size};
+        const std::size_t first = later_first ? 1 : 0, second = later_first ? 0 : 1;
+        const auto label = std::string(later_first ? "the later chunk first" : "the earlier chunk first") + ": ";
+        check_equal(Heap::chunk_holding(chunks, base), static_cast<std::ptrdiff_t>(first), label + "the start of the first");
+        check_equal(Heap::chunk_holding(chunks, base + size - 8), static_cast<std::ptrdiff_t>(first), label + "its last block");
+        check_equal(Heap::chunk_holding(chunks, base + size), static_cast<std::ptrdiff_t>(second),
+                    label + "one past the end of the first is the start of the second");
+        check_equal(Heap::chunk_holding(chunks, base + 2 * size - 8), static_cast<std::ptrdiff_t>(second), label + "the second's last block");
+        check_equal(Heap::chunk_holding(chunks, base + 2 * size), std::ptrdiff_t{-1}, label + "one past the end of both");
+        check_equal(Heap::chunk_holding(chunks, base - 8), std::ptrdiff_t{-1}, label + "before both");
+        check_equal(Heap::chunk_ending_at(chunks, base + size), static_cast<std::ptrdiff_t>(first),
+                    label + "a bump range ending there ends the first chunk");
+        check_equal(Heap::chunk_ending_at(chunks, base + 2 * size), static_cast<std::ptrdiff_t>(second), label + "and there the second");
+        check_equal(Heap::chunk_ending_at(chunks, base), std::ptrdiff_t{-1}, label + "no chunk ends at a start");
+    }
+}
+
+// A heap that fills several chunks of several classes, frees, and takes
+// the blocks again is consistent at every step and its bump ranges and
+// free lists are places in its chunks.
+NEURA_TEST(heap, a_heap_over_several_chunks_checks_consistent) {
+    if (!Heap::native_allocation()) return;
+    Heap heap;
+    std::vector<std::uint64_t> made;
+    for (std::size_t i = 0; i < 4000; ++i) {
+        const auto fields = i % 7 == 0 ? 11 : (i % 3);
+        made.push_back(heap.create_object(static_cast<std::uint32_t>(i % 5), fields));
+        if (i % 11 == 5) heap.free(made[i / 2]);
+        if (i % 500 == 499) check(heap.check().empty(), "consistent after " + std::to_string(i) + ": " + heap.check());
+    }
+    check(heap.check().empty(), "consistent at the end: " + heap.check());
+}
+
 } // namespace neura::testing
