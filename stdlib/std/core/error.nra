@@ -73,14 +73,41 @@ export let Error = module (
         export let.override to_string = func -> string => code_text + ": " + message_text;
     );
 
-    /// @brief Represents an expected failure and its category-specific context.
+    /// @brief The link from a Context error to the error that caused it. An enum value is stored inline, so
+    /// an Error cannot hold another Error directly; the class holds it by reference instead.
+    #[Final, Since("0.3.0")]
+    export let ErrorLink = class (
+        /// @brief The error that the context describes.
+        export last cause: Error;
+
+        /// @brief Links to the given cause.
+        export let init = func(value: Error) {
+            cause = value;
+        };
+    );
+
+    /// @brief The link from a PortableError context to its cause. It is #Immutable, like PortableError, so
+    /// that a portable error stays transferable.
+    #[Final, Immutable, ThreadSafe, Since("0.3.0")]
+    export let PortableErrorLink = class (
+        /// @brief The portable error that the context describes.
+        export last cause: PortableError;
+
+        /// @brief Links to the given cause.
+        export let init = func(value: PortableError) {
+            cause = value;
+        };
+    );
+
+    /// @brief Represents an expected failure and its category-specific context. A Context error reaches its
+    /// cause through an ErrorLink: match Context { message, cause } and read cause.cause.
     #Since("0.1.0")
     export let Error = enum (
         Io { kind: IoErrorKind, message: string, path: string },
         Parse { kind: ParseErrorKind, offset: int, message: string },
         Encoding { offset: int, message: string },
         Custom(ErrorDetail),
-        Context { message: string, cause: Error }
+        Context { message: string, cause: ErrorLink }
     );
 
     /// @brief A transferable copy of an Error, so that a failure can cross a channel or a spawn
@@ -93,7 +120,7 @@ export let Error = module (
         Parse { kind: ParseErrorKind, offset: int, message: string },
         Encoding { offset: int, message: string },
         Custom { code: string, message: string },
-        Context { message: string, cause: PortableError }
+        Context { message: string, cause: PortableErrorLink }
     );
 
     /// @brief A Custom error holding a SimpleDetail.
@@ -104,7 +131,7 @@ export let Error = module (
     /// @brief Wraps an error with a message that describes the operation that failed.
     #[Pure, ThreadSafe]
     export let context = func(cause: Error, text: string) -> Error =>
-        Error.Context { message: text, cause: cause };
+        Error.Context { message: text, cause: new ErrorLink(cause) };
 
     /// @brief The transferable copy of an error. A Custom error keeps its code and message but loses its
     /// ErrorDetail object, so a subclass's other members are gone; every other variant is copied as it is.
@@ -115,7 +142,7 @@ export let Error = module (
         Error.Encoding { offset, message: text } => PortableError.Encoding { offset: offset, message: text },
         Error.Custom(detail) => PortableError.Custom { code: detail.code(), message: detail.message() },
         Error.Context { message: text, cause } =>
-            PortableError.Context { message: text, cause: to_portable(cause) },
+            PortableError.Context { message: text, cause: new PortableErrorLink(to_portable(cause.cause)) },
     };
 
     /// @brief The error a portable copy stands for. A Custom copy comes back holding a SimpleDetail with the
@@ -128,7 +155,7 @@ export let Error = module (
         PortableError.Encoding { offset, message: text } => Error.Encoding { offset: offset, message: text },
         PortableError.Custom { code, message: text } => custom(code, text),
         PortableError.Context { message: text, cause } =>
-            Error.Context { message: text, cause: from_portable(cause) },
+            Error.Context { message: text, cause: new ErrorLink(from_portable(cause.cause)) },
     };
 
     /// @brief Returns the spelling of an I/O error category.
@@ -145,7 +172,7 @@ export let Error = module (
         Error.Parse { kind: _, offset, message: text } => "parse error at " + offset.to_string() + ": " + text,
         Error.Encoding { offset, message: text } => "invalid encoding at " + offset.to_string() + ": " + text,
         Error.Custom(detail) => detail.message(),
-        Error.Context { message: text, cause } => text + ": " + message(cause),
+        Error.Context { message: text, cause } => text + ": " + message(cause.cause),
     };
 
     /// @brief Formats an I/O failure with its kind and optional path.
@@ -163,7 +190,7 @@ export let Error = module (
         do {
             match (current) {
                 Error.Context { message: _, cause } => {
-                    current = cause;
+                    current = cause.cause;
                 },
                 _ => {
                     return current;
@@ -182,7 +209,7 @@ export let Error = module (
             result.append(current);
             match (current) {
                 Error.Context { message: _, cause } => {
-                    current = cause;
+                    current = cause.cause;
                 },
                 _ => {
                     more = false;
@@ -228,7 +255,7 @@ export let Error = module (
             Error.Context { message: text, cause } => {
                 match (b) {
                     Error.Context { message: other_text, cause: other_cause } => {
-                        return text == other_text && equals(cause, other_cause);
+                        return text == other_text && equals(cause.cause, other_cause.cause);
                     },
                     _ => { return false; },
                 }
@@ -246,7 +273,7 @@ export let Error = module (
             hashing.combine(hashing.combine(2, offset.hash_code()), text.hash_code()),
         Error.Custom(detail) => hashing.combine(3, detail.hash_code()),
         Error.Context { message: text, cause } =>
-            hashing.combine(hashing.combine(4, text.hash_code()), hash(cause)),
+            hashing.combine(hashing.combine(4, text.hash_code()), hash(cause.cause)),
     };
 
     /// @brief The same text as message.

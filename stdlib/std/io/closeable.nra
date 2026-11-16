@@ -28,7 +28,8 @@ export let Closeable = module (
             Result.Err(closing) => match (outcome) {
                 Result.Ok(_) => Result<T>.Err(closing),
                 Result.Err(failure) => Result<T>.Err(error.Error.Context {
-                    message: "closing the resource also failed: " + error.message(closing), cause: failure }),
+                    message: "closing the resource also failed: " + error.message(closing),
+                    cause: new error.ErrorLink(failure) }),
             },
         };
     };

@@ -1115,8 +1115,14 @@ export let then = func<T>(first: func(T, T) -> Ordering, second: func(T, T) -> O
   #Pure export let.override equals = func(other: class) -> bool
   #Pure export let.override hash_code = func -> uint32
   #Pure export let.override to_string = func -> string
-#Since("0.1.0") export let Error = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom(ErrorDetail), Context { message: string, cause: Error })
-#Since("0.1.0") export let PortableError = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom { code: string, message: string }, Context { message: string, cause: PortableError })
+#[Final, Since("0.3.0")] export let ErrorLink = class (
+  export last cause: Error
+  export let init = func(value: Error)
+#[Final, Immutable, ThreadSafe, Since("0.3.0")] export let PortableErrorLink = class (
+  export last cause: PortableError
+  export let init = func(value: PortableError)
+#Since("0.1.0") export let Error = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom(ErrorDetail), Context { message: string, cause: ErrorLink })
+#Since("0.1.0") export let PortableError = enum (Io { kind: IoErrorKind, message: string, path: string }, Parse { kind: ParseErrorKind, offset: int, message: string }, Encoding { offset: int, message: string }, Custom { code: string, message: string }, Context { message: string, cause: PortableErrorLink })
 #[Pure, ThreadSafe] export let custom = func(code: string, text: string) -> Error
 #[Pure, ThreadSafe] export let context = func(cause: Error, text: string) -> Error
 export let to_portable = func(e: Error) -> PortableError
@@ -1802,7 +1808,7 @@ export const Bits: int = 8
 #Since("0.1.0") export let Version = module (
 export const Major: int = 0
 export const Minor: int = 2
-export const Patch: int = 0
+export const Patch: int = 1
 ```
 
 ## `Std.Digest.Crc32`

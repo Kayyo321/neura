@@ -52,7 +52,7 @@ let CloseableTests = module (
         match (failure) {
             error.Error.Context { message, cause } => {
                 test.assert_equal_string("closing the resource also failed: the close failed", message);
-                test.assert_equal_string("test.body", code_of(cause));
+                test.assert_equal_string("test.body", code_of(cause.cause));
             },
             _ => { test.fail("expected a Context error"); },
         }

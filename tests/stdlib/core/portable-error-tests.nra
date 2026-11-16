@@ -77,10 +77,10 @@ let PortableErrorTests = module (
         match (portable) {
             error.PortableError.Context { message, cause } => {
                 test.assert_equal_string("outer", message);
-                match (cause) {
+                match (cause.cause) {
                     error.PortableError.Context { message: inner, cause: root } => {
                         test.assert_equal_string("middle", inner);
-                        match (root) {
+                        match (root.cause) {
                             error.PortableError.Custom { code, message: text } => {
                                 test.assert_equal_string("billing.card_declined", code);
                                 test.assert_equal_string("card declined for 9", text);

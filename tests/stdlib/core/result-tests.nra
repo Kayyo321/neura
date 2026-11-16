@@ -38,7 +38,7 @@ let ResultTests = module (
         match (e) {
             error.Error.Context { message: text, cause } => {
                 test.assert_equal_string("saving", text);
-                test.assert_equal_string("disk full", error.message(cause));
+                test.assert_equal_string("disk full", error.message(cause.cause));
             },
             _ => { test.fail("expected a Context error"); },
         }

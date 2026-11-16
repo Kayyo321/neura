@@ -89,10 +89,9 @@ NEURA_TEST(structure, containment_follows_a_generic_instance) {
 }
 
 NEURA_TEST(structure, containment_of_the_standard_library) {
-    // Error and PortableError hold their cause inline (Representation030.md
-    // step 3 replaces it with a link class), and the regular expression
-    // parser's Node contains itself. Result<int> reaches Error without
-    // closing a cycle of its own.
+    // Error and PortableError hold their cause through a link class, so only
+    // the regular expression parser's Node contains itself. Result<int>
+    // contains Error and closes no cycle.
     const auto program = specialized(environment, "standard-library.nra");
     std::set<std::string> starts;
     for (const auto& cycle : find_containment_cycles(program)) {
@@ -100,7 +99,7 @@ NEURA_TEST(structure, containment_of_the_standard_library) {
     }
     std::string found;
     for (const auto& name : starts) found += (found.empty() ? "" : ", ") + name;
-    check_equal(found, std::string("Error, Node, PortableError"), "standard library cycles");
+    check_equal(found, std::string("Node"), "standard library cycles");
 }
 
 NEURA_TEST(structure, containment_of_the_backend_programs) {
