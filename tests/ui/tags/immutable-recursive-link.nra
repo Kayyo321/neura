@@ -1,0 +1,19 @@
+// A link class that makes an enum recursive is still checked: an #Immutable
+// link to an enum with a mutable variant is rejected, and recursion through
+// the link does not make the enum immutable.
+let Recursive = module (
+    let Notes = class (
+        export let text: string = "";
+    );
+
+    #[Final, Immutable]
+    let Link = class (
+        export last cause: Chain;
+
+        export let init = func(value: Chain) {
+            cause = value;
+        };
+    );
+
+    let Chain = enum (End, Note(Notes), More(Link));
+);

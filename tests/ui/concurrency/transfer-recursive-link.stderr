@@ -1,0 +1,7 @@
+error[E0602]: a value of type Chain is not transferable, so it cannot be given to a spawned task
+  --> $DIR/transfer-recursive-link.nra:24:27
+   |
+24 |             spawn consume(chain);
+   |                           ^^^^^ not transferable
+
+For more information about this error, try `neura explain E0602`.
