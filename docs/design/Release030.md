@@ -81,7 +81,7 @@ Each change to an artifact format takes the next minor version. The writer keeps
 
 | Revision | First user | Status |
 | --- | --- | --- |
-| NeuraIR 1.11 | Owner, borrow, effect and policy facts; multiword typed values | frozen |
+| NeuraIR 1.11 | The first change that adds an operation or a node field, expected to be explicit construction (`new` for lists and function values). Effect and retention facts are derived, or are symbol attributes, which need no format version, and multiword values are already NeuraIR types ([semantic facts](Representation030.md#amendments-to-the-baseline)). Amended 2026-11-16. | frozen |
 | NeuraIR 1.12 and later | Later language features, in the order they land | frozen |
 | NVR 1.7 | Frame and static regions, inline aggregates, direct construction | frozen |
 | NVR 1.8 and later | Later runtime features, in the order they land | frozen |
@@ -148,4 +148,4 @@ Counts of the sites in today's syntax that each planned breaking rule would touc
 
 ## Fixed when each feature starts
 
-The exact grammar of each new form, and the table of class hook events, are fixed on their language pages when work on that feature starts and before its first implementation change. They are not fixed here. A form is fixed with accepted and rejected examples and with its diagnostics. No feature may leave a source-level rule to the runtime or the converter.
+The exact grammar of each new form, and the table of class hook events, are fixed in a design note when work on that feature starts, before its first implementation change, and move to the language page in the change that implements them, because a language page is published as fact when it is merged ([semantic facts](Representation030.md#amendments-to-the-baseline); amended 2026-11-16). They are not fixed here. A form is fixed with accepted and rejected examples and with its diagnostics. No feature may leave a source-level rule to the runtime or the converter.
