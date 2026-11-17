@@ -177,12 +177,15 @@ jobs:
           MINIMUM: ${{ matrix.minimum }}
         run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
 
-      # stage holds every component, the SDK archive; stage-runtime holds the
-      # execution core only (docs/design/Products030.md).
+      # stage holds the core and the SDK, the SDK archive; stage-runtime holds
+      # the execution core and the service (docs/design/Products030.md,
+      # Service030.md). `cmake --install` without a component leaves the
+      # service out.
       - name: Install into a new prefix
         run: |
           cmake --install build --prefix stage
           cmake --install build --component core --prefix stage-runtime
+          cmake --install build --component service --prefix stage-runtime
 
       # The archive must run on a machine without a C++ runtime or libffi,
       # with a C library no newer than the one documented in docs/Install.md.

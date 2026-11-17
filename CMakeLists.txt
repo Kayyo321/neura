@@ -445,6 +445,17 @@ add_library(neura_cli_core STATIC
     src/launcher/descriptor.cpp
     src/tooling/inspect.cpp
 )
+if(NOT WIN32)
+    # The runtime service (docs/design/Service030.md): the client of
+    # `run --runtime`, the `runtime` commands, and neurad's supervisor and
+    # worker, which link the execution core only.
+    target_sources(neura_cli_core PRIVATE
+        src/service/launch.cpp
+        src/service/system.cpp
+        src/service/worker.cpp
+    )
+    target_link_libraries(neura_cli_core PUBLIC neura_service_protocol ${CMAKE_DL_LIBS})
+endif()
 target_include_directories(neura_cli_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(neura_cli_core PUBLIC neura_cli_tool neura_runner neura_lifecycle)
 if(NEURA_HAS_GPU)
@@ -589,7 +600,9 @@ function(neura_add_tool name component source)
         target_link_options(${name} PRIVATE -static-libstdc++ -static-libgcc)
     endif()
     neura_target_defaults(${name})
-    install(TARGETS ${name} RUNTIME DESTINATION bin COMPONENT ${component})
+    if(NOT component STREQUAL "service")
+        install(TARGETS ${name} RUNTIME DESTINATION bin COMPONENT ${component})
+    endif()
     set(NEURA_TOOL_TARGETS ${NEURA_TOOL_TARGETS} ${name} PARENT_SCOPE)
 endfunction()
 
@@ -598,6 +611,12 @@ neura_add_tool(neura-inspect core src/cli/tools/neura-inspect.cpp neura_core_lib
 neura_add_tool(neura-doctor core src/cli/tools/neura-doctor.cpp neura_core_library)
 neura_add_tool(neura-update core src/cli/tools/neura-update.cpp neura_core_library)
 neura_add_tool(neura-uninstall core src/cli/tools/neura-uninstall.cpp neura_core_library)
+if(NOT WIN32)
+    # The service component. `cmake --install` of every component leaves it
+    # out, so the SDK's prefix is unchanged; `--component service` adds it.
+    neura_add_tool(neurad service src/cli/tools/neurad.cpp neura_core_library)
+    install(TARGETS neurad RUNTIME DESTINATION bin COMPONENT service EXCLUDE_FROM_ALL)
+endif()
 if(NEURA_SDK)
     foreach(tool IN ITEMS neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain
             neura-tags neura-debug neura-lsp neura-fmt)
@@ -1213,6 +1232,17 @@ if(BUILD_TESTING AND NEURA_SDK)
         target_link_libraries(neura_service_environment_tests PRIVATE neura_nvm)
         neura_target_defaults(neura_service_environment_tests)
         add_test(NAME service-unit-environment COMMAND neura_service_environment_tests)
+    endif()
+    if(NOT WIN32)
+        # A test driver that plays the supervisor of one worker.
+        add_executable(neura_service_worker_driver tests/service/worker_driver.cpp)
+        target_link_libraries(neura_service_worker_driver PRIVATE neura_cli_core)
+        target_include_directories(neura_service_worker_driver PRIVATE src)
+        neura_target_defaults(neura_service_worker_driver)
+        add_test(NAME service-worker COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" worker "$<TARGET_FILE_DIR:neura>"
+            "$<TARGET_FILE:neura_service_worker_driver>")
+        set_tests_properties(service-worker PROPERTIES TIMEOUT 600)
     endif()
     # The service end to end, one suite per test (tests/service/service.py).
     foreach(suite IN ITEMS cli-options off-default)

@@ -251,14 +251,272 @@ def off_default(work: Work) -> None:
     check(work.files_under(work.run_dir) == [], "case 2: still nothing in the run directory")
 
 
+# --------------------------------------------------------------------------
+# Step 5: the worker, driven by a stand-in supervisor.
+
+PROGRAMS = REPOSITORY / "tests/service/programs"
+REGIONS = REPOSITORY / "tests/backend/tier/region-storage.nvra"
+
+
+def program(work: Work, name: str) -> str:
+    return str(work.image(name, path=PROGRAMS / f"{name}.nra"))
+
+
+def region_image(work: Work) -> str:
+    image = work.root / "region-storage.nvr"
+    if not image.exists():
+        status, _, err = work.run(["assemble", str(REGIONS), "-o", str(image)])
+        if status != 0:
+            raise SystemExit(f"assembling the region image failed\n{err.decode()}")
+    return str(image)
+
+
+def tier_lines(stderr: bytes) -> list[bytes]:
+    """The --tier-stats report without its wall times."""
+    return [line for line in stderr.splitlines() if line.startswith(b"tier: ") and not line.startswith(b"tier: time:")]
+
+
+def without_times(stderr: bytes) -> bytes:
+    return b"\n".join(line for line in stderr.splitlines() if not line.startswith(b"tier: time:"))
+
+
+def worker_suite(work: Work) -> None:
+    driver = Path(sys.argv[3]).resolve()
+    neurad = work.bin / "neurad"
+    report = work.root / "report.json"
+
+    def direct(arguments, env=None, cwd=None, stdin=b"", **kwargs):
+        result = subprocess.run([str(work.neura), "run", *arguments], input=stdin, capture_output=True,
+                                env=env or work.env, cwd=cwd or work.root, timeout=120, **kwargs)
+        return result.returncode, result.stdout, result.stderr
+
+    def driven(arguments, driver_options=(), env=None, cwd=None, stdin=b"", **kwargs):
+        if report.exists():
+            report.unlink()
+        result = subprocess.run([str(driver), str(neurad), "--report", str(report), *driver_options, "--", *arguments],
+                                input=stdin, capture_output=True, env=env or work.env, cwd=cwd or work.root,
+                                timeout=120, **kwargs)
+        return result.returncode, result.stdout, result.stderr
+
+    def ending() -> dict:
+        return json.loads(report.read_text()) if report.exists() else {}
+
+    # Case 45: the worker entry run by hand.
+    result = subprocess.run([str(neurad), "--worker"], capture_output=True, env=work.env)
+    check(result.returncode == 1 and b"cannot be run by hand" in result.stderr and result.stdout == b"",
+          "case 45: neurad --worker run by hand exits 1 with a message")
+    result = subprocess.run([str(neurad), "--worker", "--channel", "0", "--build", "x", "--supervisor", "1"],
+                            capture_output=True, env=work.env, stdin=subprocess.DEVNULL)
+    check(result.returncode == 1 and result.stdout == b"", "case 45: a worker with no supervisor's channel exits 1")
+
+    hello = str(work.image("hello", path=HELLO))
+    exit_status = program(work, "exit-status")
+    startup = program(work, "startup-trap")
+    environment = program(work, "environment")
+    read_file = program(work, "read-file")
+    echo = program(work, "echo")
+    binary = program(work, "binary")
+    regions = region_image(work)
+
+    # The same output, status and trap as a direct run.
+    cases = [
+        ("hello", [hello]),
+        ("arguments and exit status", [exit_status, "--", "7", "", "a b", "\u00e9"]),
+        ("stats and profile", ["--stats", "--profile", exit_status, "--", "0"]),
+        ("case 42: a trap in startup code", [startup]),
+        ("case 28: --max-stack-cells on an image with regions", ["--max-stack-cells", "159", regions]),
+        ("regions under the limit", ["--stats", "--max-stack-cells", "160", regions]),
+        ("--max-steps", ["--max-steps", "50", exit_status, "--", "0"]),
+        ("--deny-env", ["--deny-env", environment, "--", "HOME"]),
+        ("--tier=0 --jit=off", ["--tier=0", "--jit=off", "--stats", exit_status, "--", "0"]),
+    ]
+    for label, arguments in cases:
+        expected = direct(arguments)
+        got = driven(arguments)
+        check(got == expected, f"{label}: the worker's run is the direct run's {expected[0]}")
+    status, _, err = driven([startup])
+    first = ending()
+    status_again, _, err_again = driven([startup])
+    check(first.get("terminal") == "trapped" and ending().get("terminal") == "trapped" and err == err_again
+          and status == status_again and first.get("pid") != ending().get("pid"),
+          "case 42: the next launch of the image runs startup again in another worker")
+
+    # Cases 26 and 27: each launch has its own mode, from its own environment.
+    image = str(work.image("bench", path=REPOSITORY / "tests/service/programs/exit-status.nra"))
+    for mode in ("off", "native", "interp"):
+        env = dict(work.env, NEURA_TIER3=mode)
+        _, _, expected = direct(["--tier-stats", image, "--", "0"], env=env)
+        _, _, got = driven(["--tier-stats", image, "--", "0"], env=env)
+        check(tier_lines(got) == tier_lines(expected) and tier_lines(got),
+              f"case 26: NEURA_TIER3={mode} shows its own mode")
+    _, _, got = driven(["--tier-stats", image, "--", "0"], driver_options=["--supervisor-env", "NEURA_JIT=off"])
+    check(b"tier: jit auto: " in got and b"tier: jit off" not in got,
+          "case 27: NEURA_JIT=off in the supervisor's environment does not reach the application")
+    _, _, got = driven(["--tier-stats", image, "--", "0"], env=dict(work.env, NEURA_JIT="off"),
+                       driver_options=["--supervisor-env", "NEURA_JIT=on"])
+    check(b"tier: jit off" in got, "case 27: the caller's NEURA_JIT=off is the application's")
+    for mode in ("0", "1"):
+        env = dict(work.env, NEURA_TIER=mode)
+        expected = direct(["--tier-stats", image, "--", "0"], env=env)
+        got = driven(["--tier-stats", image, "--", "0"], env=env, driver_options=["--supervisor-env", "NEURA_TIER=2"])
+        check(tier_lines(got[2]) == tier_lines(expected[2]), f"NEURA_TIER={mode} is the caller's")
+
+    # The whole environment is the caller's, and only the caller's.
+    env = dict(work.env, LD_LIBRARY_PATH="/nonexistent/caller", NEURA_SERVICE_PROBE="caller")
+    expected = direct(["--allow-env", environment, "--", "LD_LIBRARY_PATH", "NEURA_SERVICE_PROBE", "ONLY_SUPERVISOR"],
+                      env=env)
+    got = driven(["--allow-env", environment, "--", "LD_LIBRARY_PATH", "NEURA_SERVICE_PROBE", "ONLY_SUPERVISOR"],
+                 env=env, driver_options=["--supervisor-env", "ONLY_SUPERVISOR=1",
+                                          "--supervisor-env", "NEURA_SERVICE_PROBE=supervisor"])
+    check(got == expected and b"ONLY_SUPERVISOR unset" in got[1] and b"LD_LIBRARY_PATH=/nonexistent/caller" in got[1],
+          "case 29: the caller's environment, LD_LIBRARY_PATH included, replaces the worker's")
+
+    # Case 32: relative paths and --allow-fs=. against the caller's directory.
+    caller = work.root / "caller dir"
+    caller.mkdir()
+    (caller / "data.txt").write_text("from the caller\n")
+    expected = direct(["--allow-fs=.", read_file, "--", "data.txt"], cwd=caller)
+    got = driven(["--allow-fs=.", read_file, "--", "data.txt"], cwd=caller)
+    check(got == expected and got[1] == b"from the caller\n", "case 32: relative paths and --allow-fs=.")
+    expected = direct(["--allow-fs=.", read_file, "--", "../h"], cwd=caller)
+    got = driven(["--allow-fs=.", read_file, "--", "../h"], cwd=caller)
+    check(got == expected and got[0] != 0, "case 32: a path outside the grant is refused as directly")
+
+    # Case 33: the caller's directory deleted before the commit.
+    gone = work.root / "gone"
+    gone.mkdir()
+    script = f'cd "{gone}" && rmdir "{gone}" && exec "{work.neura}" run "{read_file}" -- data.txt'
+    result = subprocess.run(["sh", "-c", script], capture_output=True, env=work.env)
+    expected = (result.returncode, result.stdout, result.stderr)
+    gone.mkdir()
+    got = driven([read_file, "--", "data.txt"], driver_options=["--remove-cwd"], cwd=gone)
+    check(got == expected and not gone.exists(), "case 33: a deleted working directory, as directly")
+
+    # Case 34: standard output is a closed pipe.
+    for ignored in (False, True):
+        def closed_pipe(command):
+            read_end, write_end = os.pipe()
+            os.close(read_end)
+            preexec = (lambda: signal.signal(signal.SIGPIPE, signal.SIG_IGN)) if ignored else None
+            try:
+                result = subprocess.run(command, stdout=write_end, stderr=subprocess.PIPE, env=work.env,
+                                        cwd=work.root, preexec_fn=preexec, restore_signals=not ignored)
+            finally:
+                os.close(write_end)
+            return result.returncode, result.stderr
+        expected = closed_pipe([str(work.neura), "run", binary, "--", "4"])
+        got = closed_pipe([str(driver), str(neurad), "--report", str(report), "--", binary, "--", "4"])
+        if ignored:
+            check(got == expected, "case 34: with SIGPIPE ignored, the same write error and status")
+        else:
+            check(expected[0] == -signal.SIGPIPE and ending().get("terminal") == "signaled"
+                  and ending().get("signal") == signal.SIGPIPE,
+                  "case 34: the program is ended by SIGPIPE, as directly")
+
+    # Case 35: standard input is a terminal.
+    import pty
+    def through_terminal(command):
+        main, secondary = pty.openpty()
+        process = subprocess.Popen(command, stdin=secondary, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=work.env, cwd=work.root)
+        os.close(secondary)
+        os.write(main, b"typed line\n")
+        time.sleep(0.3)
+        os.write(main, b"\x04")
+        out, err = process.communicate(timeout=30)
+        os.close(main)
+        return process.returncode, out, err
+    expected = through_terminal([str(work.neura), "run", echo])
+    got = through_terminal([str(driver), str(neurad), "--", echo])
+    check(got == expected and got[1] == b"[typed line]\nend\n", "case 35: reads from a terminal; Ctrl-D ends the input")
+
+    # Case 36: binary output of 64 MiB with NUL bytes, to a pipe and to a file.
+    expected = direct([binary, "--", "1024"])
+    got = driven([binary, "--", "1024"])
+    check(got == expected and len(got[1]) == 64 << 20 and b"\0" in got[1][:256],
+          "case 36: 64 MiB of binary output to a pipe, identical bytes")
+    for name, command in (("direct", [str(work.neura), "run", binary, "--", "1024"]),
+                          ("worker", [str(driver), str(neurad), "--", binary, "--", "1024"])):
+        with open(work.root / f"{name}.bin", "wb") as output:
+            subprocess.run(command, stdout=output, env=work.env, cwd=work.root, check=True)
+    check((work.root / "direct.bin").read_bytes() == (work.root / "worker.bin").read_bytes(),
+          "case 36: 64 MiB of binary output to a file, identical bytes")
+
+    # The order of assignment: environment, umask, limits, nice, directory,
+    # process group, streams, signals, and nothing else of the driver's.
+    pid_file = work.root / "worker.pid"
+    def settings():
+        os.umask(0o027)
+        import resource
+        resource.setrlimit(resource.RLIMIT_NOFILE, (200, resource.getrlimit(resource.RLIMIT_NOFILE)[1]))
+        os.nice(3)
+        signal.signal(signal.SIGUSR1, signal.SIG_IGN)
+        signal.pthread_sigmask(signal.SIG_BLOCK, {signal.SIGUSR2})
+    extra = os.open(work.root / "extra-descriptor", os.O_CREAT | os.O_WRONLY)
+    process = subprocess.Popen([str(driver), str(neurad), "--pid-file", str(pid_file), "--report", str(report), "--",
+                                echo], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=dict(work.env, PROBE_VARIABLE="caller"), cwd=caller, preexec_fn=settings,
+                               pass_fds=(extra,))
+    deadline = time.monotonic() + 20
+    while not pid_file.exists() and time.monotonic() < deadline:
+        time.sleep(0.05)
+    time.sleep(0.3)
+    pid = int(pid_file.read_text())
+    proc = Path(f"/proc/{pid}")
+    status_lines = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines() if ":" in line)
+    environ = dict(entry.split("=", 1) for entry in (proc / "environ").read_bytes().decode().split("\0") if "=" in entry)
+    caller_env = dict(work.env, PROBE_VARIABLE="caller")
+    check(environ == caller_env, "the worker's environment is the caller's, whole")
+    check(os.readlink(proc / "cwd") == str(caller), "the worker's directory is the caller's")
+    check(status_lines["Umask"].strip() == "0027", "the worker has the caller's umask")
+    limits = (proc / "limits").read_text()
+    check(any(line.startswith("Max open files") and line.split()[3] == "200" for line in limits.splitlines()),
+          "the worker has the caller's soft limit of open files")
+    check(os.getpriority(os.PRIO_PROCESS, pid) == os.getpriority(os.PRIO_PROCESS, os.getpid()) + 3,
+          "the worker has the caller's nice value")
+    check(os.getpgid(pid) == pid, "the worker leads a process group of its own")
+    check(int(status_lines["SigIgn"], 16) & (1 << (signal.SIGUSR1 - 1)) != 0, "the caller's ignored signals are ignored")
+    check(int(status_lines["SigBlk"], 16) & (1 << (signal.SIGUSR2 - 1)) != 0, "the caller's signal mask is the worker's")
+    fds = sorted(int(fd) for fd in os.listdir(proc / "fd"))
+    check(fds == [0, 1, 2, 3], f"the worker holds its streams and its channel only ({fds})")
+    out, err = process.communicate(b"one\n", timeout=30)
+    os.close(extra)
+    check(process.returncode == 0 and out == b"[one]\nend\n", "the held run ends with its input")
+
+    # A worker runs one application and exits.
+    driven([hello], driver_options=["--second-assignment"])
+    check(ending().get("second") == "refused", "a worker is never given a second application")
+
+    # The supervisor's end ends the worker.
+    if pid_file.exists():
+        pid_file.unlink()
+    process = subprocess.Popen([str(driver), str(neurad), "--pid-file", str(pid_file), "--exit-after-started", "--",
+                                echo], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                               env=work.env, cwd=work.root)
+    process.wait(timeout=30)
+    pid = int(pid_file.read_text()) if pid_file.exists() else 0
+    deadline = time.monotonic() + 5
+    while pid and Path(f"/proc/{pid}").exists() and time.monotonic() < deadline:
+        state = (Path(f"/proc/{pid}") / "stat").read_text().split()[2] if Path(f"/proc/{pid}").exists() else "X"
+        if state == "Z":
+            break
+        time.sleep(0.05)
+    alive = pid and Path(f"/proc/{pid}").exists() and (Path(f"/proc/{pid}") / "stat").read_text().split()[2] != "Z"
+    check(process.returncode == 99 and pid and not alive, "the worker ends when its supervisor does")
+    process.stdin.close()
+    process.stdout.close()
+    process.stderr.close()
+
+
 SUITES = {
     "cli-options": cli_options,
     "off-default": off_default,
+    "worker": worker_suite,
 }
 
 
 def main() -> int:
-    if len(sys.argv) != 3 or sys.argv[1] not in SUITES:
+    if len(sys.argv) < 3 or sys.argv[1] not in SUITES:
         print(__doc__)
         return 2
     work = Work(Path(sys.argv[2]))

@@ -353,10 +353,11 @@ def components(bin_dir: Path, mixed: Path) -> None:
         check(status == 1 and f"FAIL  components: the Neura-sdk component is incomplete: neura-fmt missing from "
               f"{neura.parent}. Reinstall Neura\n".encode() in out, f"doctor reports the incomplete SDK\n{out.decode()}")
 
-        # The service component of `neura runtime`.
+        # The service component of `neura runtime`, in a copy without neurad.
+        core_dir = work / "core"
         expected = (f"neura: error: 'neura runtime' needs the Neura-runtime service component (neurad), which is not "
-                    f"in {bin_dir.resolve()}. 'neura run' runs images directly without it\n")
-        check(run([str(bin_dir / "neura"), "runtime", "status"], work, None) == (1, b"", expected.encode()),
+                    f"in {core_dir}. 'neura run' runs images directly without it\n")
+        check(run([str(core_dir / "neura"), "runtime", "status"], work, None) == (1, b"", expected.encode()),
               "neura runtime without neurad")
 
         # A dispatcher from another build: every tool refuses it.

@@ -45,6 +45,9 @@ printf '%s\n' "$triple" | grep -Eq '^[0-9A-Za-z_.-]+$' || die "not a target trip
 # The tools of each component, as src/cli/tool_registry.cpp lists them.
 core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall"
 sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
+# The service component (docs/design/Service030.md): optional in a runtime
+# prefix ("cmake --install --component service"), never in the SDK's.
+service_tools="neurad"
 for tool in $core_tools; do
     [ -x "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is missing; install the core component into the prefix"
 done
@@ -60,6 +63,9 @@ if [ "$runtime" -eq 1 ]; then
 else
     for tool in $sdk_tools; do
         [ -x "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is missing; install the SDK component into the prefix"
+    done
+    for tool in $service_tools; do
+        [ ! -e "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is the service component, which the SDK archive does not hold"
     done
     ls "$prefix"/lib/neura/libneura-sdk-* > /dev/null 2>&1 ||
         die "the SDK library lib/neura/libneura-sdk-<version> is missing; install the SDK component into the prefix"
