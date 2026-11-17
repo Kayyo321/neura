@@ -245,6 +245,11 @@ Errors about projects and their artifacts.
 | Code | Error |
 | --- | --- |
 | [E1020](E1020.md) | malformed project manifest |
+| [E1021](E1021.md) | unsupported manifest schema or language version |
+| [E1023](E1023.md) | invalid target |
+| [E1025](E1025.md) | path outside the project |
+| [E1028](E1028.md) | limit out of range |
+| [E1032](E1032.md) | dependency not pinned or not found |
 
 ## Warnings
 

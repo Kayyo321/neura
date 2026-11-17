@@ -8,6 +8,7 @@
 //   E03xx  names               E08xx  backend
 //   E04xx  types and bindings  E09xx  tags
 //   E05xx  classes             W####  warnings
+//                              E10xx  applications
 //
 // E0899 is the one code for errors that only a compiler defect or a
 // hand-edited artifact can cause.
@@ -207,6 +208,11 @@ NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchroni
 NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding without a body")
 
 NEURA_DIAGNOSTIC(E1020, "malformed project manifest")
+NEURA_DIAGNOSTIC(E1021, "unsupported manifest schema or language version")
+NEURA_DIAGNOSTIC(E1023, "invalid target")
+NEURA_DIAGNOSTIC(E1025, "path outside the project")
+NEURA_DIAGNOSTIC(E1028, "limit out of range")
+NEURA_DIAGNOSTIC(E1032, "dependency not pinned or not found")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

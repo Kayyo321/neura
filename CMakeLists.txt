@@ -473,7 +473,7 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
-add_library(neura_project STATIC EXCLUDE_FROM_ALL src/project/toml.cpp)
+add_library(neura_project STATIC EXCLUDE_FROM_ALL src/project/toml.cpp src/project/manifest.cpp)
 target_include_directories(neura_project PUBLIC src)
 neura_target_defaults(neura_project)
 
@@ -482,6 +482,12 @@ if(BUILD_TESTING)
     target_link_libraries(neura_project_toml_tests PRIVATE neura_project)
     neura_target_defaults(neura_project_toml_tests)
     add_test(NAME project-toml COMMAND neura_project_toml_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/project")
+
+    add_executable(neura_project_manifest_tests tests/project/manifest_tests.cpp)
+    target_link_libraries(neura_project_manifest_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_manifest_tests)
+    add_test(NAME project-manifest
+        COMMAND neura_project_manifest_tests "${CMAKE_CURRENT_SOURCE_DIR}/docs/design/Projects030.md")
 
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)

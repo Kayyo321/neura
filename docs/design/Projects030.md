@@ -86,7 +86,7 @@ capabilities = ["desktop", "http_client"]
 [targets.desktop.bridge]
 operations = ["parts.export"]
 
-[targets.desktop.package]
+[targets.desktop.packaging]
 icon = "desktop/icon.png"
 formats = ["deb", "tar.gz"]
 ```
@@ -94,25 +94,25 @@ formats = ["deb", "tar.gz"]
 | Rule | Status |
 | --- | --- |
 | The manifest uses the grammar of [TOML 1.0](https://toml.io/en/v1.0.0) for bare, basic double-quoted and dotted keys, tables, arrays of tables, basic double-quoted strings, signed 64-bit decimal integers, booleans, homogeneous arrays of strings or integers, and comments. Files use UTF-8 with LF or CRLF line endings. Floats, dates, inline tables, literal and multi-line strings, and other array element types are `E1020`. The reader lives in `src/project/toml.cpp`. | syntax reader implemented |
-| An unknown key, a key of the wrong type, and a missing required key are `E1020`, each with the key's position. Nothing is ignored. | proposed |
-| `schema` is 1; another value is `E1021`. `project.language` is the language version the sources are written for, `"0.3"`; a compiler that does not implement it is `E1021`. | proposed |
-| `project.name` is lowercase letters, digits and hyphens. `project.id` is a reverse-domain identifier and names the desktop application, its origin and its data directory. `project.version` is three decimal numbers. | proposed |
-| A package is a source root: `root`, optional `assets` roots, and `depends`, the packages whose modules it may import. Every path is relative to the manifest, uses `/`, and stays inside the project directory (`E1025`). Dependencies form no cycle. | proposed |
+| An unknown key or a key of the wrong type is `E1020` at the key. A missing required key is `E1020` at its containing table unless a more specific rule below applies. | manifest model implemented |
+| `schema` is 1. Another value is `E1021`. `project.language` is the language version the sources are written for, `"0.3"`. A compiler that does not implement it reports `E1021`. | manifest model implemented |
+| `project.name` is lowercase letters, digits and hyphens. `project.id` is a lowercase reverse-domain identifier and names the desktop application, its origin and its data directory. `project.version` has three decimal components with no redundant leading zeroes. | manifest model implemented |
+| A package is a source root with `root`, optional `assets` roots and optional `depends`. The dependency names refer to project packages or declared external dependencies. Local project paths are relative to the manifest, use `/` and stay inside the project directory (`E1025`). Internal package dependencies form no cycle. | manifest model implemented, real filesystem validation proposed |
 | A module belongs to the package whose root contains its file. An import of a module in a package that is not the importer's own, not `Std`, and not in its `depends` closure is `E1030`. This is how a server module is kept out of a browser bundle: the `ui` package does not depend on `server`. | proposed |
-| An external package is `[dependencies.name]` with `path` (a directory outside the project) or `archive` (a file inside it), and `digest`. There is no registry and no network fetch in 0.3.0; an unpinned or unresolved dependency is `E1032`. | proposed |
-| A target has `kind` (`web`, `server` or `desktop`), `package`, `entry`, `capabilities`, and by kind the tables below. A `desktop` target has `ui`, the name of a `web` target of the same project, whose built bundle it embeds unchanged (`E1023` otherwise). | proposed |
+| An external package is `[dependencies.name]` with `path` (a relative path to a directory outside the project) or `archive` (a relative path to a file inside it), and `digest`. Its name is distinct from project package names. There is no registry and no network fetch in 0.3.0. An unpinned or unresolved dependency reports `E1032`. | manifest declaration implemented, resolution proposed |
+| A target has `kind` (`web`, `server` or `desktop`), `package`, `entry`, `capabilities`, and by kind the tables below. A `desktop` target has `ui`, the name of a `web` target of the same project, whose built bundle it embeds unchanged (`E1023` otherwise). A shared-package project may omit `[targets]` or leave it empty. | manifest model implemented |
 | The entry module exports the function its kind requires: `start: func(web.Context) -> Result<Unit>`, `serve: func(app.Context) -> Result<Unit>`, or `start: func(desktop.Context) -> Result<Unit>` (`E1024`). | proposed |
-| `capabilities` lists the capability groups the target's image may use, from those its kind allows ([overview](Apps030.md#capability-groups)); the console, clock and entropy groups are always available and are not listed. A host service of a group that is not listed, or that the kind does not allow, reachable from the entry, is `E1027` at build; at run time the host grants only the listed groups. | proposed |
+| `capabilities` lists the capability groups the target's image may use, from those its kind allows ([overview](Apps030.md#capability-groups)). The console, clock and entropy groups are always available. A manifest cannot list them. An unknown or disallowed entry in the list reports `E1020`. A host service of a group that is not listed, or that the kind does not allow, reachable from the entry, is `E1027` at build. At run time the host grants only the listed groups in addition to the groups that are always available. | declaration check implemented, reachability and enforcement proposed |
 | `providers` lists the provider components a server or desktop target links; a name the installed target component does not have, or a version outside what it supports, is `E1031`. | proposed |
-| `[targets.name.limits]` sets limits by their identifier ([overview](Apps030.md#finite-limits)). A value above the maximum, below 1, or for a limit of another target kind is `E1028`. | proposed |
-| `[targets.name.origins]` lists absolute origins by use: `connect` (fetch), `load` (images and media), `style` (remote stylesheets), `external` (links a desktop application opens in the system browser). Each is a scheme, host and optional port; a path or a wildcard is `E1020`. Anything not listed is not reachable. | proposed |
+| `[targets.name.limits]` sets limits by their identifier ([overview](Apps030.md#finite-limits)). A single bound takes an integer. S-10, S-12 and S-13 take an array of exactly two integers in the order listed in the overview. U and W limits belong to web targets, S to server, D to desktop, and C to all three. A desktop bundle inherits the embedded web bundle's U and W limits. A value above its maximum, below 1, or for a limit of another target kind reports `E1028`. | manifest model implemented, enforcement proposed |
+| `[targets.name.origins]` lists absolute origins by use. `connect` governs fetch, `load` images and media, `style` remote stylesheets, and `external` links a desktop application opens in the system browser. Each has a scheme, a DNS host or IP literal, and an optional decimal port. An IPv6 literal uses brackets. A path or a wildcard reports `E1020`. Anything outside the lists is unreachable. | shape check implemented, host enforcement proposed |
 | A manifest contains no command, script or hook. No tool runs anything a manifest names, except the signing tools of `neura package --sign`. | proposed |
 
 | Kind | Further keys |
 | --- | --- |
 | `web` | `styles` (global stylesheets, in order), `routing` (`"hash"` or `"history"`), `origins`, `limits` |
 | `server` | `http` (`listen`, `tls_listen`, `admin_listen`, `trusted_proxies`), `sql.<pool>` (`provider`, `migrations`, `migrate`), `config` (`prefix`, `expose`), `providers`, `limits` |
-| `desktop` | `ui`, `bridge.operations`, `origins`, `package` (`icon`, `formats`, `sign_identity`), `sql.<pool>`, `providers`, `limits` |
+| `desktop` | `ui`, `bridge.operations`, `origins`, `packaging` (`icon`, `formats`, `sign_identity`), `sql.<pool>`, `providers`, `limits` |
 
 ## The lock file
 
@@ -311,3 +311,4 @@ No 0.2 workflow changes: a directory without `neura.toml` behaves as before. A m
 8. Limits are set by their identifiers under `[targets.name.limits]`.
 9. A manifest can name no command.
 10. The reference application is a stock list in `examples/apps/stock/`, with CSV export as its native operation.
+11. A desktop target's `package` key selects its source package. Desktop deployment settings use `[targets.name.packaging]`. TOML gives each key a single definition, so using the same key for the source string and the settings table is invalid.
