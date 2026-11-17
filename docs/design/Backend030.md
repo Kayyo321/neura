@@ -143,6 +143,8 @@ A service that waits is overlapping and cancellable.
 | An outgoing `https` fetch verifies the peer against the system trust store, or a bundle the configuration names. Verification cannot be turned off from Neura code. | proposed |
 | Plain HTTP and HTTPS can listen together, each on its own address. | proposed |
 
+The [server component lock](../../packaging/server-components.lock.toml) pins OpenSSL 3.5.9. It records the source archive digest, the upstream release-signing key and the bundled license. The server component links the static libraries. The standalone TLS tests also run with a system installation of OpenSSL 3.5.
+
 ## SQL
 
 | Rule | Status |
