@@ -620,6 +620,31 @@ NEURA_TEST(tier, operand_counts_above_255_run_on_the_interpreter_like_tier_0) {
     }
 }
 
+NEURA_TEST(tier, wide_named_calls_defaults_and_holes_run_like_tier_0) {
+    // 300 named arguments, in parameter order and reversed through hidden
+    // locals, 299 inserted defaults, and an interpolated string with 300
+    // holes (docs/design/Calls030.md, Lowering and artifacts): exits with
+    // more than 255 operands are declined by formation and run on the
+    // interpreter, so every tier must print the tier 0 output.
+    const auto image = build_program({tier_program(environment, "wide-calls")});
+    const auto reference = run_captured(image, limits_at(0), std::nullopt, {"all"});
+    check(reference.result.completed, "the wide calls run at tier 0");
+    check_equal(reference.output, std::string{"order 180901\nreverse 180901\ndefaults 45850\nholes 599\n"},
+                "tier 0 output");
+    for (const bool interpreted : {false, true}) {
+        for (const char* kind : {"all", "order", "reverse", "defaults", "holes"}) {
+            auto options = eager_programs();
+            if (interpreted) {
+                options.tier3 = nvm::TierOptions::Tier3::Interp;
+                options.native_after = 1;
+            }
+            nvm::TierCache cache(image, options);
+            const std::string label = std::string(kind) + (interpreted ? " on the tier 3 interpreter" : " in programs");
+            compare_with_tier_0(image, cache, label, {kind});
+        }
+    }
+}
+
 NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
     // Functions that return two and three words (NVR 1.7, mixed int, float and
     // text), called in a loop, recursively, and with the words discarded. Tier
