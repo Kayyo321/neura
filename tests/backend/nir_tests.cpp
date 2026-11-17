@@ -709,6 +709,14 @@ Attributed attributed_fixture(const Environment& environment, bool attributes = 
         set_attribute(s[a.checksum], AttributeId::InlineDirective,
                       attribute_unsigned(static_cast<std::uint64_t>(InlineDirective::Never)));
         add_attribute(s[a.parameter], AttributeId::Tag, tag_payload(3, "Hidden", {}, s[a.parameter].span));
+        // A host binding of the linked standard library carries a contract.
+        const auto binding = std::ranges::find_if(s, [](const IrSymbol& item) {
+            return item.kind == SymbolKind::Function && item.host_binding && !item.has_body &&
+                   !has_attribute(item, AttributeId::KernelBinding);
+        });
+        check(binding != s.end(), "the linked program has a host binding");
+        set_attribute(*binding, AttributeId::HostEffects,
+                      host_effects_payload({.allocates = true, .traps = true, .scheduler = false, .retains = false}));
     }
     if (deferred) {
         for (const auto local : {a.step, a.point_local}) {
@@ -775,6 +783,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::InlineDirective, 8, "inline.directive", on_function, false, "u2"},
         {AttributeId::Synchronized, 9, "synchronized", on_function, false, "b"},
         {AttributeId::ClassShareable, 10, "class.shareable", on_class, false, "b"},
+        {AttributeId::HostEffects, 11, "host.effects", on_function, false, "[b b b b]"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -783,7 +792,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
                   info->repeats == row.repeats && info->schema == row.schema,
               std::string(row.name) + " differs from the documented registry");
     }
-    check(find_attribute_info(0) == nullptr && find_attribute_info(11) == nullptr, "ids 0 and 11 are unregistered");
+    check(find_attribute_info(0) == nullptr && find_attribute_info(12) == nullptr, "ids 0 and 12 are unregistered");
     check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
 
     // Schemas accept the payloads of the helpers and reject other shapes.
