@@ -1,0 +1,2 @@
+// A literal is not a name (edge case 88).
+let text = nameof(1);

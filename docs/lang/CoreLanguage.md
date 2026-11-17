@@ -564,6 +564,28 @@ order:    3 items, 12.50 paid, {braces}
 
 `$` begins an interpolated string only directly before `"`; anywhere else it is `E0101`. An interpolated string lowers to a call of `Std.Io.Console.vformat` with a constant pattern that numbers the holes and an array of the packed values, so it adds no NeuraIR operation; a program that uses none builds as before.
 
+### nameof
+
+`nameof(path)` is a string constant: the declared name of the declaration `path` resolves to, without qualification.
+
+<!-- example: check -->
+```neura
+let Invoice = class (
+    export let total: int64 = 0;
+);
+
+let field = nameof(Invoice.total);   // "total"
+let kind = nameof(Invoice);          // "Invoice"
+```
+
+| Rule | Detail |
+| --- | --- |
+| `path` is a name or a dotted path, with type arguments where a generic type is applied. | It may name a local, a parameter, a function or overload group, a field, a method, a class, an interface, an enum, a variant, a module, a type parameter, or an import alias, which gives the alias. A member is found on the static type of what precedes it. |
+| Nothing is evaluated. | No receiver, getter, hook, initializer or allocation. A use in `nameof` is not a read for definite assignment or for the unused-binding warning. |
+| The operand resolves to one accessible declaration. | An unknown name is `E0304`, an unknown or inaccessible member `E0305`, and a built-in type, a literal, a call, an index or any other expression `E0487`. |
+| The string is program data. | It is in the image and stays when names and source maps are stripped. It changes when the declaration is renamed, so it is not a stable name for stored data. |
+| `nameof` is an operator where an expression starts and `(` follows. | No declaration may be named `nameof` (`E0311`). |
+
 ### Comparison chains
 
 A comparison can use one subject and several alternatives. For example, `x == 0 or 1 or 2` tests whether `x` equals any of those values, and `x != 0 and 1` tests whether it differs from both. The subject is evaluated once. Each alternative is evaluated left to right and compared with the captured subject using the original operator. An `or` chain stops at the first true comparison. An `and` chain stops at the first false comparison.

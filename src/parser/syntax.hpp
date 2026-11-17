@@ -94,6 +94,9 @@ struct Expr {
         // the hole expressions in written order, nested width and precision
         // holes included, and `interpolation` describes them.
         Interpolation,
+        // `nameof(path)`: operand 0, when written, is the path, which is
+        // not evaluated.
+        NameOf,
     };
 
     Kind kind;

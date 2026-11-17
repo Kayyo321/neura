@@ -127,6 +127,7 @@ Errors about types, values, calls, and statements.
 | [E0484](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0484.md) | labels are not available for this call |
 | [E0485](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0485.md) | default value is not a constant |
 | [E0486](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0486.md) | invalid format specification in an interpolated string |
+| [E0487](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0487.md) | invalid nameof operand |
 | [E0488](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0488.md) | invalid extension function |
 
 ## E05xx: Classes and lifecycle

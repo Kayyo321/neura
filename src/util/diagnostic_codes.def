@@ -117,6 +117,7 @@ NEURA_DIAGNOSTIC(E0483, "argument supplied twice")
 NEURA_DIAGNOSTIC(E0484, "labels are not available for this call")
 NEURA_DIAGNOSTIC(E0485, "default value is not a constant")
 NEURA_DIAGNOSTIC(E0486, "invalid format specification in an interpolated string")
+NEURA_DIAGNOSTIC(E0487, "invalid nameof operand")
 NEURA_DIAGNOSTIC(E0488, "invalid extension function")
 
 // Classes, lifecycle, and accessors

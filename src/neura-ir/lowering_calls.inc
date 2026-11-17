@@ -1446,3 +1446,78 @@ IrNode Lowering::interpolation(const Expr& expr, Context& context) {
     result.operands.push_back(std::move(values));
     return result;
 }
+
+// nameof (Calls030.md, nameof): the declared name of the declaration a path
+// resolves to, as a string constant. Nothing is evaluated: the path is
+// resolved by name, and a member is found on the static type of what
+// precedes it.
+
+SymbolId Lowering::name_of_target(const Expr& path, Context& context) {
+    const auto invalid = [&](const Span& at) {
+        return Diagnostic(at, "nameof takes the name of a declaration").with_code("E0487")
+            .label("not the name of a declaration")
+            .help("write a name or a dotted path, such as 'nameof(Invoice.total)'");
+    };
+    switch (path.kind) {
+    case ExprKind::Name: {
+        if (primitive(path.text) && find(path.text, context, path.span) == no_symbol)
+            throw Diagnostic(path.span, "nameof takes the name of a declaration").with_code("E0487")
+                .label("'" + path.text + "' is a built-in type, which no declaration names");
+        const auto id = find(path.text, context, path.span);
+        if (id == no_symbol) {
+            auto error = Diagnostic(path.span, "unknown name '" + path.text + "'").with_code("E0304")
+                .label("not found in this scope");
+            suggest_name(error, path.span, path.text, visible_names(context), "a binding");
+            throw error;
+        }
+        return id;
+    }
+    case ExprKind::TypeApplication:
+        return name_of_target(path.operands.front(), context);
+    case ExprKind::Member: {
+        const auto owner = name_of_target(path.operands.front(), context);
+        resolve(owner);
+        // A type, a module or an import names its members; a value names
+        // the members of its static type.
+        auto scope = owner;
+        const auto kind = symbol(owner).kind;
+        if (kind == SymbolKind::Import || kind == SymbolKind::Alias) {
+            scope = symbol(owner).type.symbol;
+        } else if (!class_or_interface(kind) && kind != SymbolKind::Module && kind != SymbolKind::Enum) {
+            const auto nominal = receiver_type(symbol(owner).type);
+            if (nominal.symbol == no_symbol || (nominal.kind != TypeKind::Object && nominal.kind != TypeKind::Enum))
+                throw Diagnostic(path.span, "type " + describe(symbol(owner).type) + " has no members")
+                    .with_code("E0305");
+            scope = nominal.symbol;
+        }
+        if (scope == no_symbol) throw invalid(path.span);
+        const bool exported = !inside(lexical_owner(context), scope);
+        auto target = member(scope, path.text, exported);
+        if (target == no_symbol && symbol(scope).kind != SymbolKind::Module)
+            target = value_member(symbol(scope).type, path.text, exported);
+        if (target == no_symbol) {
+            auto error = Diagnostic(path.span, "unknown or inaccessible member '" + path.text + "' of " +
+                                                   symbol(scope).name).with_code("E0305");
+            if (const auto hidden = member(scope, path.text, false); hidden != no_symbol && exported)
+                not_exported(error, hidden);
+            else
+                error.label(symbol(scope).name + " has no member '" + path.text + "'");
+            throw error;
+        }
+        return target;
+    }
+    default:
+        throw invalid(path.span);
+    }
+}
+
+IrNode Lowering::name_of(const Expr& expr, Context& context) {
+    if (expr.operands.empty())
+        throw Diagnostic(expr.span, "nameof takes the name of a declaration").with_code("E0487")
+            .label("nameof needs a name")
+            .help("write a name or a dotted path, such as 'nameof(Invoice.total)'");
+    const auto target = name_of_target(expr.operands.front(), context);
+    auto result = node(IrOp::String, expr.span, string_type);
+    result.text = symbol(target).name;
+    return result;
+}

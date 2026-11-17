@@ -1,0 +1,9 @@
+error[E0311]: 'nameof' is a reserved name
+ --> $DIR/nameof-reserved.nra:2:5
+  |
+2 | let nameof = 1;
+  |     ^^^^^^ 'nameof' is an operator, so no declaration takes its name
+  |
+  = help: choose another name
+
+For more information about this error, try `neura explain E0311`.

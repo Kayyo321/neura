@@ -10,8 +10,9 @@ spellings are written differently; everything that executes, and the
 optional lift section, must be byte for byte the same.
 `<name>.nra` with `<name>.expected` is a program with no written-out form,
 which is built and run for its standard output: from source, unoptimized,
-and from a `.nir` module, each at the default tier and at tier 0. A program
-that traps keeps the output printed before the trap.
+from a `.nir` module, and without names and a source map, each at the
+default tier and at tier 0. A program that traps keeps the output printed
+before the trap.
 
 Usage: equivalence.py <neura> <directory>
 """
@@ -61,11 +62,15 @@ class EquivalenceTests(unittest.TestCase):
                 result = run('emit-ir', str(source), '-o', str(module))
                 self.assertEqual(result.returncode, 0, result.stderr)
                 builds = {'source': [str(source)], 'unoptimized': ['--no-optimize', str(source)],
-                          'nir': [str(module)]}
+                          'nir': [str(module)], 'stripped': ['--no-source-map', str(source)]}
                 for build, arguments in builds.items():
                     image = pathlib.Path(scratch) / (source.name + '.' + build + '.nvr')
                     result = run('build', *arguments, '-o', str(image))
                     self.assertEqual(result.returncode, 0, result.stderr)
+                    if build == 'stripped':
+                        listing = run('disassemble', str(image), '-o', str(image) + '.nvra')
+                        self.assertEqual(listing.returncode, 0, listing.stderr)
+                        self.assertNotIn('section "NAME"', pathlib.Path(str(image) + '.nvra').read_text())
                     for tier in ([], ['--tier=0']):
                         with self.subTest(program=source.name, build=build, tier=tier):
                             self.assertEqual(run('run', *tier, str(image)).stdout, expected.read_text())

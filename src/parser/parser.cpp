@@ -229,6 +229,16 @@ private:
         return advance();
     }
 
+    // The name a declaration introduces. `nameof` is an operator from
+    // 0.3.0, recognized without name lookup, so nothing is named so.
+    const Token& declared_name() {
+        if (at_contextual("nameof"))
+            throw Diagnostic(current().span, "'nameof' is a reserved name").with_code("E0311")
+                .label("'nameof' is an operator, so no declaration takes its name")
+                .help("choose another name");
+        return identifier();
+    }
+
     Span span_from(std::size_t start) const {
         Span span = tokens_[start].span;
         const Span& end = tokens_[cursor_ - 1].span;
@@ -396,7 +406,7 @@ private:
             do {
                 const auto start = cursor_;
                 GenericParameter parameter{};
-                parameter.name = identifier().text;
+                parameter.name = declared_name().text;
                 if (match(":")) {
                     if (match("[")) {
                         do {
@@ -434,7 +444,7 @@ private:
             };
             while (true) {
                 auto parameter_tags = tag_list();
-                const auto& name = identifier();
+                const auto& name = declared_name();
                 group.push_back({name.span, name.text, {}, false, std::move(parameter_tags)});
                 if (match(",")) {
                     if (at(")")) throw untyped(group.front());
@@ -854,7 +864,7 @@ private:
             }
         }
         if (!result.cast_target) {
-            const auto& name = identifier();
+            const auto& name = declared_name();
             result.name = name.text;
             result.name_span = name.span;
             if (match(":")) {
@@ -1208,7 +1218,7 @@ private:
             if (!result.constant_bindings) expect("let");
             expect("[");
             do {
-                result.bindings.push_back(identifier());
+                result.bindings.push_back(declared_name());
             } while (match(",") && !at("]"));
             expect("]");
             destructure_tail(result);
@@ -1250,7 +1260,7 @@ private:
             result.kind = Statement::Kind::Scope;
             result.keyword = advance().span;
             if (match("(")) {
-                result.bindings.push_back(identifier());
+                result.bindings.push_back(declared_name());
                 expect(")");
             }
             result.body = block();
@@ -1340,7 +1350,7 @@ private:
         } else {
             if (at("let") || at("const")) {
                 arm.constant_binding = advance().text == "const";
-                arm.binding = identifier();
+                arm.binding = declared_name();
                 expect("=");
             }
             arm.operation = expression();
@@ -1374,7 +1384,7 @@ private:
         if (positional || result.named) {
             const auto close = positional ? ")" : "}";
             while (!at(close)) {
-                auto binding = identifier();
+                auto binding = declared_name();
                 if (result.named) {
                     result.fields.push_back(binding.text);
                     if (match(":")) binding = identifier();
@@ -1408,7 +1418,7 @@ private:
                 declaration->kind = Declaration::Kind::Binding;
                 declaration->constant = constant;
                 declaration->documentation = tokens_[start].documentation;
-                const auto& name = identifier();
+                const auto& name = declared_name();
                 declaration->name = name.text;
                 declaration->name_span = name.span;
                 if (match(":")) {
@@ -1833,6 +1843,17 @@ private:
         }
 
         const auto& token = current();
+        // `nameof(path)` (docs/design/Calls030.md): recognized where an
+        // expression starts and '(' follows; lowering checks the operand.
+        if (at_contextual("nameof") && next_is(1, "(")) {
+            advance();
+            advance();
+            auto result = make_expression(Expr::Kind::NameOf, token.span, "nameof");
+            if (!at(")")) result.operands.push_back(expression());
+            expect(")");
+            result.span = span_from(start);
+            return result;
+        }
         // `spawn name...`: two adjacent identifiers begin no other expression,
         // and `spawn(x)` stays a call of a function named spawn.
         if (at_contextual("spawn") && tokens_[cursor_ + 1].kind == TokenKind::Identifier) {

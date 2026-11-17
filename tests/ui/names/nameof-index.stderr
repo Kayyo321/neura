@@ -1,0 +1,9 @@
+error[E0487]: nameof takes the name of a declaration
+ --> $DIR/nameof-index.nra:3:19
+  |
+3 | let text = nameof(a[0]);
+  |                   ^^^^ not the name of a declaration
+  |
+  = help: write a name or a dotted path, such as 'nameof(Invoice.total)'
+
+For more information about this error, try `neura explain E0487`.

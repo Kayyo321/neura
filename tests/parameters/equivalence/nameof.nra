@@ -1,0 +1,26 @@
+// nameof strings are program data (docs/design/Calls030.md, nameof): the
+// program prints the same names when it is built without names and source
+// maps, and nothing in an operand is evaluated: a nil receiver is not read.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Invoice = class (
+    export let total: int64 = 0;
+    export let add = func(amount: int64) {
+        total += amount;
+    };
+);
+
+let make = func -> Invoice {
+    console.print_line("evaluated");
+    return new Invoice();
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let invoice: Invoice = nil;
+        console.print_line(nameof(Invoice) + " " + nameof(Invoice.total) + " " + nameof(invoice.add));
+        console.print_line(nameof(invoice) + " " + nameof(console) + " " + nameof(make) + " " + nameof(args));
+        return program.ExitCode.Ok;
+    };
+);

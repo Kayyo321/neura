@@ -1,0 +1,2 @@
+// A built-in type has no declaration to name (edge case 88).
+let text = nameof(int32);
