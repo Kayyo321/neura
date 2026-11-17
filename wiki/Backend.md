@@ -219,7 +219,7 @@ A tuple is not an object. IRtoNeuronConversion stores a tuple-typed NeuraIR valu
 
 No source construct creates an object constant of a tuple type (a constant initializer is a literal), so a tuple has no constant boundary. A collection of tuples cannot be an argument or a result of a host call; the compiler does not convert it, and no standard library binding has one.
 
-Images that use a tuple change. A function that returns a tuple, or a program with an array of tuples, makes the image NVR 1.7; an image that uses none keeps its version and its bytes. Tier 2 and tier 3 decline a block that returns or calls with several words, or that reads or writes a component, and run it on tier 1 until native lowering follows ([execution tiers](NVM#execution-tiers)). Steps and `peak_heap_cells` of a program that uses tuples drop where a tuple used to be allocated and was only passed or read, and rise where a whole tuple is read from a field, global or element, which now costs one state exit for each word; boxing at a boundary costs an allocation and a read for each field.
+Images that use a tuple change. A function that returns a tuple, or a program with an array of tuples, makes the image NVR 1.7; an image that uses none keeps its version and its bytes. Tiers 2 and 3 run several-word returns and calls and component reads and writes themselves ([execution tiers](NVM#execution-tiers)). Steps and `peak_heap_cells` of a program that uses tuples drop where a tuple used to be allocated and was only passed or read, and rise where a whole tuple is read from a field, global or element, which now costs one state exit for each word; boxing at a boundary costs an allocation and a read for each field.
 
 ## Format decisions
 

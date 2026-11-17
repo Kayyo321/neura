@@ -72,6 +72,7 @@ void for_each_operand_position(const Inst& in, Visit&& visit) {
     case Op::Select:
     case Op::AllocObject:
     case Op::Append:
+    case Op::Return:
         for (std::uint32_t i = 0; i < in.count; ++i) visit(operand_slots + i);
         break;
     default: break;
