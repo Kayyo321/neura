@@ -87,6 +87,7 @@ std::string constant_text(const nvr::Image& image, std::uint32_t index) {
         return quoted(std::string(constant.payload.begin(), constant.payload.end()));
     }
     if (t.kind == nvr::TypeKind::Object && constant.payload.empty()) return "nil";
+    if (nvr::is_static_object_constant(t, constant)) return "static L" + std::to_string(t.reference);
     Expression e;
     e.kind = Expression::Kind::Immediate;
     e.type = constant.type;

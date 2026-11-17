@@ -10,7 +10,13 @@ let sum = func(first: int, rest: ...int) -> int {
     return total;
 };
 
-let inspect = func(items: ...) -> variadic.Argument[] => items;
+let inspect = func(items: ...) -> variadic.Argument[list] {
+    last result: variadic.Argument[list] = new;
+    for (let item in items) {
+        result.append(item);
+    }
+    return result;
+};
 let touch = func(history: int[], digit: int) -> int => history[0]++ + digit;
 
 let Main = module:program.Entry (
@@ -22,7 +28,7 @@ let Main = module:program.Entry (
         test.assert(match (packed[1]) { variadic.Argument.Signed(number) => number == 2, _ => false });
         test.assert(match (packed[2]) { variadic.Argument.Boolean(flag) => flag, _ => false });
         test.assert_equal_int32(0, inspect().length);
-        let packed_inspect: func(variadic.Argument[]) -> variadic.Argument[] = inspect;
+        let packed_inspect: func(variadic.Argument[]) -> variadic.Argument[list] = inspect;
         test.assert_equal_int32(1, packed_inspect([variadic.Argument.Unsigned(1)]).length);
 
         let history = [0];

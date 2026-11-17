@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace neura {
@@ -163,6 +164,16 @@ enum class IrOp {
     TaskScope, Spawn, SchedulerCall
 };
 
+// A MakeClosure (or its specialized Allocate) carries the written
+// construction form in its text. The empty form is a bare lambda or named
+// function; a bare bound value records the receiver form for diagnostics.
+inline constexpr std::string_view bound_closure = "$bound";
+inline constexpr std::string_view owned_lambda = "$new_func";
+inline constexpr std::string_view owned_bound = "$new_bound";
+inline constexpr std::string_view task_closure = "$task_closure";
+inline constexpr std::string_view region_reference = "$region_reference";
+inline constexpr std::string_view static_reference = "$static_reference";
+
 struct IrNode {
     IrOp op;
     IrType type;
@@ -189,6 +200,10 @@ struct IrNode {
     // optimizer inlined this node from, or 0 for a node that was not inlined.
     std::uint32_t inline_site = 0;
 };
+
+inline bool explicitly_owned_closure(const IrNode& node) {
+    return node.text == owned_lambda || node.text == owned_bound || node.text == task_closure;
+}
 
 // A call the optimizer replaced with a copy of the callee's body. `parent`
 // is the site of the call itself (one plus its index), or 0 when the call was

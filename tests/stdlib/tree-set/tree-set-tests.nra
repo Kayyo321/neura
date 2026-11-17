@@ -87,7 +87,7 @@ let TreeSetTests = module (
         test.assert_equal_int32(1, items.next());
         test.assert_equal_int32(2, items.next());
         let seen = cell.of<int>(0);
-        set.for_each(func(v: int) -> void {
+        set.for_each(new func(v: int) -> void {
             seen.value = seen.value * 10 + v;
         });
         test.assert_equal_int32(123456, seen.value);

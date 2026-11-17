@@ -129,6 +129,9 @@ Errors about types, values, calls, and statements.
 | [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) | a value type that contains itself |
 | [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md) | a value type larger than its inline limit |
 | [E0450](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0450.md) | a list literal without new |
+| [E0451](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0451.md) | an array escapes its owner |
+| [E0452](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0452.md) | a primitive borrow escapes its owner |
+| [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md) | an escaping closure requires explicit construction |
 
 ## E05xx: Classes and lifecycle
 

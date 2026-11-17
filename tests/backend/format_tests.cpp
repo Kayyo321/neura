@@ -387,6 +387,20 @@ NEURA_TEST(format, assembled_fixtures_decode_to_their_models) {
     check(nvr::load(logic) == logic_model(), "the logic fixture decodes to its model");
 }
 
+NEURA_TEST(format, static_object_constants_require_version_1_7_and_a_fieldless_layout) {
+    auto image = logic_model();
+    const auto layout = static_cast<std::uint32_t>(image.layouts.size());
+    const auto type = static_cast<std::uint32_t>(image.types.size());
+    image.layouts.push_back({nvr::absent, {}});
+    image.types.push_back({nvr::TypeKind::Object, 0, layout});
+    image.constants.push_back({type, {1}});
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{7}, "a static object constant requires NVR 1.7");
+    check(nvr::load(bytes).constants.back() == image.constants.back(), "the descriptor round trips");
+    image.layouts[layout].fields = {1};
+    expect_invalid(image, "a static object constant requires a fieldless layout");
+}
+
 NEURA_TEST(format, nil_and_interface_layouts_require_version_1_2) {
     auto image = logic_model();
     image.constants.push_back({5, {}});
@@ -858,7 +872,7 @@ NEURA_TEST(format, storage_region_operations_are_validated) {
             "argument 1 must be a uint64 region token");
     mutated([&](nvr::Image& m) { exit_of(m, 8, 3).arguments.pop_back(); }, "expects 2 argument(s)");
     mutated([&](nvr::Image& m) { exit_of(m, 8, 3).result_slot = 0; }, "a void result requires an absent slot");
-    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "immediate must be zero");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "unknown move-to-region mode");
 }
 
 NEURA_TEST(format, a_region_token_is_not_a_task_or_channel_operand) {

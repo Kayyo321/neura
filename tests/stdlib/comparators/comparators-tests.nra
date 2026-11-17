@@ -43,7 +43,7 @@ let ComparatorsTests = module (
         test.assert(by_length("", "c") == ordering.Ordering.Less);
         // Absolute value as the key; the key runs once per operand.
         let calls = cell.of<int>(0);
-        let magnitude = func(v: int) -> int {
+        let magnitude = new func(v: int) -> int {
             calls.value = calls.value + 1;
             if (v < 0) {
                 return -v;
@@ -62,7 +62,7 @@ let ComparatorsTests = module (
         let combined = comparators.then<int>(parity, int32s.compare);
         test.assert_equal_string("[-4, 0, 2, 6, -3, 1, 5]", text(sorted(new([5, 2, -3, 0, 6, 1, -4]), combined)));
         let second_calls = cell.of<int>(0);
-        let counted = func(a: int, b: int) -> ordering.Ordering {
+        let counted = new func(a: int, b: int) -> ordering.Ordering {
             second_calls.value = second_calls.value + 1;
             return int32s.compare(a, b);
         };

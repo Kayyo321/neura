@@ -119,6 +119,9 @@ NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an ins
 NEURA_DIAGNOSTIC(E0448, "a value type that contains itself")
 NEURA_DIAGNOSTIC(E0449, "a value type larger than its inline limit")
 NEURA_DIAGNOSTIC(E0450, "a list literal without new")
+NEURA_DIAGNOSTIC(E0451, "an array escapes its owner")
+NEURA_DIAGNOSTIC(E0452, "a primitive borrow escapes its owner")
+NEURA_DIAGNOSTIC(E0453, "an escaping closure requires explicit construction")
 
 // Classes, lifecycle, and accessors
 NEURA_DIAGNOSTIC(E0501, "invalid static member")

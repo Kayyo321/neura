@@ -346,7 +346,7 @@ private:
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
     IrNode lambda(const Declaration& declaration, Context& context);
-    IrNode bind_function(IrNode callee, Context& context);
+    IrNode bind_function(IrNode callee, Context& context, bool owned = false);
     std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
     IrNode capture(ClosureEnvironment& environment, SymbolId key, IrNode input, const Span& span);
@@ -1387,7 +1387,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     return closure_value(callable, environment, span);
 }
 
-IrNode Lowering::bind_function(IrNode callee, Context& context) {
+IrNode Lowering::bind_function(IrNode callee, Context& context, bool owned) {
     const auto target = callee.symbol;
     if (!entries_[target].overloads.empty())
         throw Diagnostic(callee.span, "an overloaded function must be called directly").with_code("E0433");
@@ -1439,6 +1439,7 @@ IrNode Lowering::bind_function(IrNode callee, Context& context) {
     result.operands.push_back(std::move(invocation));
     program_.bodies.push_back({method, {std::move(result)}});
     auto closure = closure_value(callable, environment, span);
+    if (!closure.operands.empty()) closure.text = owned ? owned_bound : bound_closure;
     return qualifier ? discard_before(std::move(*qualifier), std::move(closure)) : std::move(closure);
 }
 
@@ -3079,8 +3080,11 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         target.span = expr.span;
         return target;
     }
-    case ExprKind::Lambda:
-        return lambda(*expr.lambda, context);
+    case ExprKind::Lambda: {
+        auto result = lambda(*expr.lambda, context);
+        if (expr.text == "new") result.text = owned_lambda;
+        return result;
+    }
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {
@@ -3209,6 +3213,18 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Range:
         return range(expr, context, expected);
     case ExprKind::New:
+        if (expr.text == "bound") {
+            auto target = expression(expr.operands.front(), context);
+            if (target.op != IrOp::Reference || target.symbol == no_symbol ||
+                symbol(target.symbol).kind != SymbolKind::Function || target.operands.empty() ||
+                target.operands.front().type.kind == TypeKind::Module || static_member(target.symbol)) {
+                throw Diagnostic(expr.operands.front().span, "new bound requires an instance method and its receiver")
+                    .with_code("E0423");
+            }
+            auto result = bind_function(std::move(target), context, true);
+            result.span = expr.span;
+            return result;
+        }
         return construct(expr, context, expected);
     case ExprKind::NamedVariant: {
         const auto target = expression(expr.operands.front(), context);
@@ -3816,6 +3832,7 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     program_.bodies.push_back({method, std::move(instructions)});
     auto started = node(IrOp::Spawn, expr.span, uint64_type);
     started.operands.push_back(closure_value(callable, environment, expr.span));
+    started.operands.back().text = task_closure;
 
     if (!handle) {
         // Nothing can join this task, so the runtime need not keep its

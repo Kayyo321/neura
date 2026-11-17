@@ -58,7 +58,7 @@ export let ByteBuffer = module (
         export let reader = func -> func(int) -> Result<uint8[list]> {
             last snapshot = to_list();
             last position = cell.of<int>(0);
-            return func(max: int) -> Result<uint8[list]> {
+            return new func(max: int) -> Result<uint8[list]> {
                 bytes.check_maximum(max);
                 last start = position.value;
                 let end = snapshot.length;

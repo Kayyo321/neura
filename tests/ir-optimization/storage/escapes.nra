@@ -47,11 +47,11 @@ let Escapes = module (
         return rows.length;
     };
 
-    export let captured = func(source: int[]) -> int {
+    export let captured = func(source: int[]) -> func() -> int {
         let read = func -> int {
             return source[0];
         };
-        return read();
+        return read;
     };
 
     export let outer_binding = func() -> int {
@@ -88,13 +88,13 @@ let Escapes = module (
         return cell;
     };
 
-    export let captures_reference = func() -> int {
+    export let captures_reference = func() -> func() -> int {
         let cell: int = 1;
         let alias: &int = cell;
         let read = func -> int {
             return alias;
         };
-        return read();
+        return read;
     };
 
     export let retained_reference = func() -> int {

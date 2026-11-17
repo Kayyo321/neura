@@ -76,7 +76,7 @@ Local and global reference declarations require initializers. Static reference f
 
 A constructor can bind a field in separate branches. Binding for the first time inside a loop body or step is rejected, as is an assignment reached with the field bound on only some paths. Direct reads of a field before binding are errors.
 
-A reference keeps its storage alive after the original binding leaves scope. A function declared to return `&T` can return a reference to a mutable local. A caller can keep that alias in a reference binding. The storage of a referenced field also survives destruction of its containing object. Reading a referent before a primitive value has been stored still traps. Primitive references are unavailable as generic type arguments. See [primitive-references.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/primitive-references.nra).
+A borrow of a local or value parameter is valid within the binding's activation region. A call can use that borrow if its parameter does not retain it. Returning the borrow, storing it in a heap field, or capturing it in an escaping closure is [E0452](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0452.md). A function returning `&T` can return a borrow of a global, static field, or field of an explicitly constructed owner. A field borrow keeps its owner reachable for collection. After explicit destruction of that owner, accessing the borrow traps with `invalid reference handle`. Reading an uninitialized referent also traps. Primitive references are unavailable as generic type arguments. See [primitive-references.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/primitive-references.nra).
 
 ## Tuples
 
