@@ -209,9 +209,8 @@ struct StorageEscape {
 // Every escape in the bodies of `program`, in body order. `stage` says whether
 // generic declarations are the program (Lowered) or are skipped in favor of
 // their instances (Specialized). Primitive references are recognized by the
-// ReferencePlace operation, which exists until materialize_reference_storage
-// replaces it with heap boxes; run the analysis before it, as the storage
-// milestone will, because a box is indistinguishable from a fresh object.
+// ReferencePlace operation. Run the analysis before materialization replaces
+// those operations with boxes and loses the provenance of the borrowed places.
 std::vector<StorageEscape> find_storage_escapes(const IrProgram& program,
                                                 StorageStage stage = StorageStage::Lowered);
 std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, const PurityAnalysis& purity,
