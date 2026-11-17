@@ -95,9 +95,10 @@ skip() { echo "NOT RUN $1 $2: $3"; not_run=$((not_run + 1)); }
 
 # Runs a command with an empty environment: a new HOME and the system PATH.
 clean() {
-    home=$1
+    # Not "home": the checks keep their own HOME in that variable.
+    clean_home=$1
     shift
-    env -i HOME="$home" PATH="$home/.local/bin:/usr/bin:/bin" LC_ALL=C "$@"
+    env -i HOME="$clean_home" PATH="$clean_home/.local/bin:/usr/bin:/bin" LC_ALL=C "$@"
 }
 
 # install_archive HOME ARCHIVE [ADD-ARCHIVE]: unpacks the archives and runs
