@@ -118,7 +118,8 @@ An *event* is one run of an effective clause. The table gives every source opera
 | The two words are stored wherever a tuple's words are: frame slots, parameters, results, fields, globals, and aggregate elements. A shape's size counts both, and `E0449` names the policy words when they take a shape over 64. | proposed |
 | A receiver is one word, since it is never nil. Converting between a policy-carrying type and one that is not adds a zero policy word or drops the word. | proposed |
 | Over a boundary that carries one word (a channel message, a task's result, a parallel item, a callback, an object constant), the two words are boxed and unboxed as an aggregate is. The box is not an event. | proposed |
-| A function without a body (a host binding, a kernel, a foreign function) cannot take or return a policy-carrying reference (`E0546`). Its other side has no policy word and could not keep one. | proposed |
+| A scheduler binding of the standard library (a guard's state, a parallel item, a transfer check) carries a policy-carrying value as it carries a tuple: boxed where the storage milestone boxes a tuple, and rejected with the same diagnostic where it rejects one. | proposed |
+| A host binding, a kernel or a foreign function cannot take or return a policy-carrying reference (`E0546`): its other side has no policy word and could not keep one. The check runs on specialized signatures in the linked program. No bodyless function of the standard library has a parameter or result of a class, interface or `class` type other than a `#Final` handle class or a type parameter, so a program is rejected only where it instantiates such a parameter with a hooked class. | proposed |
 | The collector treats the policy word as the `uint32` it is. Equality and identity hashing read the handle only. | proposed |
 
 ## Lowering and artifacts
@@ -126,16 +127,51 @@ An *event* is one run of an effective clause. The table gives every source opera
 | Stage | Change | Status |
 | --- | --- | --- |
 | Parser | `class_hook_clauses` beside `accessor_clauses`, called after the `(` of a declared class; the result is `Declaration::hooks`, a list of `HookClause` (kind, override, spans, expression or block). `skip_accessor_clauses` recovers past a bad clause. | proposed |
-| Lowering | A new `lowering_hooks.inc`. Each clause becomes a hidden static function `$class_get(instance, policy)` or `$class_set(value, instance, policy)` of its class, with the attributes `hook.get` and `hook.set` on the class and `hook.of` on the function (identifiers 12 to 14 in `attributes.def`). The checks `E0538` to `E0543` and `E0545` run here. | proposed |
+| Lowering | A new `lowering_hooks.inc`. Each clause becomes a hidden static function `$class_get(instance, policy)` or `$class_set(value, instance, policy)` of its class, with the attributes `hook.get` and `hook.set` on the class and `hook.of` on the function (the next three free identifiers in `attributes.def` when the change lands). The checks `E0538` to `E0543` and `E0545` run here. | proposed |
 | NeuraIR | A module that declares a clause is written with the next free NeuraIR minor version when the change lands, so that an older reader refuses it. The encoding gains nothing else. Events are not stored: they are derived from the tree. | proposed |
 | Elaboration | A new pass, `elaborate_class_hooks` (`src/neura-ir/class_hooks.cpp`), runs on the linked program after `specialize` and before `optimize`, at every place those two are called together (`build_image_bytes`, `emit_ir`, the test runner and `tooling/debug.cpp`). It computes the policy-carrying types and wraps each event's operand in `IrOp::HookRead` or `IrOp::HookAdmit`. It does nothing when the program has no clause. | proposed |
-| Derivation | The pass applies the event table to the tree. A `Load`, `Field`, `Index`, `Project` or `EnumProject` of class type is a read; an `Initialize`, `Store`, `Append`, element of `Collection`, call operand or `Return` operand is an admission. A symbol whose name begins with `$` is a compiler temporary and has no event, except a capture field `$capture<N>`. The parameters and result of a function that carries `accessor.of` or `hook.of`, and `IrOp::Receiver`, have none. Anything the rules do not exempt is an event, so a temporary that lowering forgets to name with `$` shows as an extra event in the trace tests and never as a missing one. | proposed |
+| Derivation | The pass applies [the derivation table](#derivation) to the tree, and reports `E0544` and `E0546`, which need the linked program's summaries and specialized signatures. | proposed |
 | Stored form | `HookRead` and `HookAdmit` exist only after elaboration. The `.nir` writer refuses them, the verifier accepts them only in an elaborated program, and there it derives the events again and requires each to be wrapped exactly once. `emit-ir` prints them. | proposed |
 | Summaries | Elaboration sets `Summary::hooks`, with the clause as its cause, on every function that contains an event with a clause that is not identity, and the clause's own effects join that function's summary. `#Pure` and the other checked tags are checked again after elaboration; a violation is reported with today's code and a label at the clause. | proposed |
 | Literal nil | An initializer the pass wraps in `HookAdmit` is not a literal, so `constant_initializer` no longer makes it an image constant: it becomes a startup action at its place in source order. The converter decides nothing about hooks. | proposed |
 | Converter | `HookRead` and `HookAdmit` become: select the policy, compare it against the classes of the operand's static type that have a clause, in ascending layout identifier, and call the clause's function, or do nothing for identity. A setter's result goes to fresh slots, and one exit's `assignments` then writes handle, policy word and flags to the destination. | proposed |
 | NVR | The next free NVR minor version: the state operations `HookEnter(kind, policy, handle)` and `HookLeave`, which the hidden functions run first and last, and the trap reasons `HookRecursion` and `HookLimit`. The result check is a `ReadTag` and a compare. The writer emits the version only for an image with a clause. | proposed |
 | Decompiler | Reads and writes the two operations, shows a policy word by its class name when the image carries names, and reports a hidden hook function as inferred structure only from its `HookEnter`. | proposed |
+
+### Derivation
+
+Every NeuraIR operation is in exactly one row. An event exists only where the value's type is a policy-carrying type. The pass and the verifier each switch over every operation, so an operation added later does not compile until it has a row.
+
+| Operation | Event | Status |
+| --- | --- | --- |
+| `Load` of a local, parameter or global; `Field`, including the `$accessor` form, whose event is on the adapter's result; `Index`; `Project`; `EnumProject`; `RemoveAt` when it yields the element | Read | proposed |
+| The value operand of `Initialize` and `Store`; the appended operand of `Append`; each element operand of `Collection`; the fill operand of `RepeatCollection`, admitted once per element; each capture operand of `MakeClosure` | Admission to the destination | proposed |
+| Each written argument operand of `Call`, `VirtualCall`, `CallClosure` and `BaseInitialize`, but not the receiver operand | Admission to the parameter | proposed |
+| The operand of `Return` | Admission to the function's declared result | proposed |
+| `Tuple`, `EnumConstruct`, `ScopedValue`, `SelectValue`, `ShortCircuit`, `Convert`, `ClassCast`, `Nil`, `Allocate`, `Receiver`, `Discard`, `Destroy` | None of their own; their operands keep theirs | proposed |
+| `ClassIs`, `ClassHash`, `ClassText`, `ValueEquals`, `ValueHash`, `ValueText`, `EnumTag`, `ComparisonChain`, `Binary`, `Unary`, `Length`, `CollectionVersion` | None; they consume values that were already read | proposed |
+| `Spawn`, `SchedulerCall`, `ExternalCall`, `TaskScope` | None; a value they carry is boxed or rejected by the representation rules, and the binding that receives a result has its own admission | proposed |
+| `Block`, `Branch`, `Loop`, `Break`, `Continue`, `Fail`, `TrapMessage`, `Integer`, `Float`, `String`, `Boolean`, `Reference`, `ReferencePlace`, and the text operations | None | proposed |
+
+| Exemption | Status |
+| --- | --- |
+| A symbol whose name begins with `$` is a compiler temporary: reading it and storing to it are not events. A capture field `$capture<N>` is the exception, since it is a binding of its lambda. | proposed |
+| The parameters and the result of a function that carries `accessor.of` or `hook.of` have no events. | proposed |
+| Anything the rules do not exempt is an event. A temporary that lowering creates without a `$` name therefore shows as an extra event in the trace tests and never as a missing one. | proposed |
+
+### Rows other milestones add
+
+Each feature below is specified by its own milestone's note, which adds its rows to the tables above under these constraints.
+
+| Feature | Owner | Constraint | Status |
+| --- | --- | --- | --- |
+| Named arguments and constant defaults | calls | Each supplied argument is admitted in written order, before the next is evaluated; a default that is used is admitted like a written argument. | proposed |
+| Extension sets | calls | The receiver is a written parameter and is admitted. | proposed |
+| `?.` and `??` | absence | The receiver is read once through its getter and the test uses the value read; a skipped access, argument or fallback has no event. | proposed |
+| `match.is`, guards and nested patterns | matching | The subject is evaluated once and tested as a snapshot with no event; a selected binding is admitted; a type match proves nothing about later reads. | proposed |
+| Inline `any` | matching | Reading or admitting an `any` that holds a class reference is that class's one event; packing and unpacking add none; the `any` carries the policy word. | proposed |
+| Records and `new with` | data | Generated field stores are admissions; generated equality, hashing and codecs read fields with events. | proposed |
+| `defer`, `using`, `yield` | lifetime | Stated in that milestone's note: reads at registration, admissions at the deferred call, no event for the resource token or the generator's state. | proposed |
 
 ### Optimization and tiers
 
@@ -263,7 +299,7 @@ Accepted unless marked *rejected*.
 29. The same getter when the static field holds nil: trap, `class hook recursion: get of Session`.
 30. A setter that stores `value` into a field of the class's own type: trap, recursion, since the store is a set of the same object.
 31. A hook that reads a reference of an unrelated hooked class: accepted, that class's event runs.
-32. A hook that sends on a channel, or calls a function that may: rejected, `E0544`.
+32. A hook that sends on a channel, or calls a function that may: rejected, `E0544`, on the linked program.
 33. A hook on a class with a `#Synchronized` method: rejected, `E0541`.
 34. `value = other;` in a setter: rejected with the existing immutable-binding code.
 35. `session.user` on a nil that a getter passes through: the existing nil failure, after the getter.
@@ -280,7 +316,7 @@ Accepted unless marked *rejected*.
 46. `init(user: Session) => set` with a `Session` field: per parameter, a getter on the parameter and a setter on the field, in parameter order.
 47. `f(a, b: Session)`: grouped parameters are two parameters, admitted in order.
 48. A hooked reference sent on a channel or returned from a task: boxed, no event for the box, and the receive binding has its setter.
-49. A hooked class as a parameter of a host binding: rejected, `E0546`.
+49. A hooked class as a parameter of a host binding or a foreign function: rejected, `E0546`. `Guarded<Session>` with a hooked `Session`: accepted, the state is boxed.
 50. A tuple of 33 hooked references: 66 words, rejected, `E0449`, naming the policy words.
 51. A hooked class imported from a `.nir` built before the importer adds a hooked subclass: accepted; events are derived on the linked program, so the library needs no rebuild.
 52. A `#Pure` function that reads a reference whose getter writes a counter: rejected after elaboration with `#Pure`'s existing code, labelled at the clause.
@@ -318,8 +354,8 @@ Each step is one commit on `m4-integration` with the targeted tests named. The f
 | --- | --- | --- | --- |
 | 1 | This note | doc checks | no |
 | 2 | `static scope`: parser, lowering into the file body, `E0217`, `E0218`, `E0470`, formatter, outline, pages and examples | parser and UI fixtures for cases 56 to 74; a multi-file order program; `neura test` reset; a debug-adapter test with a breakpoint in a block | only programs that use it |
-| 3 | Hook clause syntax and declarations: parser, `lowering_hooks.inc`, attributes, the NeuraIR minor, `E0215`, `E0216`, `E0538` to `E0545`, formatter and language server. A program with a clause is rejected at the end of lowering with "class hooks are not executable yet", so nothing unimplemented can run. | parser and UI fixtures for cases 1 to 34; `.nir` round trip; an older-minor reader refusal | no |
-| 4 | The audit of lowering's temporaries (every hidden symbol named with `$`), `elaborate_class_hooks`, the derivation, the verifier rule, `Summary::hooks`, the IR optimizer rows, `E0546` | IR tests of the event count for each row of the event table; one must-decline test per IR pass | no |
+| 3 | Hook clause syntax and declarations: parser, `lowering_hooks.inc`, attributes, the NeuraIR minor, `E0215`, `E0216`, `E0538` to `E0543`, `E0545`, formatter and language server. A program with a clause is rejected at the end of lowering with "class hooks are not executable yet", so nothing unimplemented can run. | parser and UI fixtures for cases 1 to 31, 33 and 34; `.nir` round trip; an older-minor reader refusal | no |
+| 4 | The audit of lowering's temporaries, `elaborate_class_hooks`, the derivation, the verifier rule, `Summary::hooks`, the IR optimizer rows, `E0544`, `E0546`. A hidden symbol the audit finds without a `$` name is not renamed, because a name can reach an image's optional metadata: it is added to a list of exempt symbol kinds in `class_hooks.cpp`, and new temporaries are created with `$` names. | IR tests of the event count for each row of the derivation table; one must-decline test per IR pass; the identity set's images compared | no |
 | 5 | The NVR minor, `HookEnter` and `HookLeave` in the machine, loader, writer, assembler and decompiler, the trap reasons, tier 2 and tier 3 declines | assembler-level tests; a malformed-image test for each operation | no |
 | 6 | The converter: two-word references, selection and dispatch, the commit exit, boxing at one-word boundaries, hook-bearing initializers; the step 3 rejection is removed; debugger display | the trace programs below in every execution mode, with `NEURA_TIER3_VERIFY=1` and `NEURA_TIER_CHECK=2`; the debugger zero-event test | programs with a clause |
 | 7 | Language pages, the diagnostics pages, examples, changelog, status | doc checks, doc examples | no |
@@ -352,7 +388,7 @@ No existing source changes meaning: no class has a hook, and `static scope` did 
 | --- | --- |
 | Policy provenance is a second value word, present only for policy-carrying types | It reuses the value words of the storage milestone, uses no handle bits, and leaves programs without hooks unchanged. |
 | Events are derived on the linked program and not stored in `.nir` | Whether a type has a hook depends on every class in the program, and a library must not need a rebuild when an importer adds a hooked subclass. |
-| A compiler temporary is recognized by its `$` name | It changes no `.nir` bytes of existing programs, and a missed temporary shows as an extra event. |
+| A compiler temporary is recognized by its `$` name, and no existing symbol is renamed | It changes no `.nir` or image bytes of existing programs, and a missed temporary shows as an extra event. |
 | Reading `instance` in a method is not an event | The receiver was read where the call was written; an event per member access would make a class whose getter can yield nil unusable. |
 | A captured binding is initialized and read with events | A capture is a binding of the lambda, and bindings have events. |
 | Building or binding a whole tuple or enum has no event; projecting a component has one | Copying an aggregate must never validate again what it holds; only a source projection or binding does. |
