@@ -2,9 +2,9 @@
 // docs/design/Representation030.md "Storage, owner and transfer facts",
 // docs/design/Storage030.md "Regions"). Each case lowers a program from
 // tests/ir-optimization/storage and checks what the analyses derive from the
-// declarations, the body trees and the summaries. No stage enforces an escape
-// yet, so these cases are the evidence for the rules, and the survey at the end
-// lists what the repository's own programs would have to migrate.
+// declarations, the body trees and the summaries. The raw IR fixtures can
+// contain escapes that a normal source build rejects.
+#include "cli/source_loader.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/storage.hpp"
@@ -29,7 +29,8 @@ fs::path storage_dir(const Environment& environment) {
 }
 
 IrProgram lowered(const Environment& environment, std::string_view file) {
-    return lower_files({storage_dir(environment) / file});
+    const auto dir = storage_dir(environment);
+    return lower(read_sources({dir / file}, {dir}, library_root()));
 }
 
 // Lowered, then specialized without materializing references: the form in
@@ -544,32 +545,17 @@ std::string where(const fs::path& root, const Span& span) {
 NEURA_TEST(structure, storage_escapes_of_the_backend_programs) {
     // Every program in tests/backend/programs, each lowered on its own with
     // the library it uses, checked on lowering and on the specialized program.
-    // This is what the change that enforces the region rules has to migrate,
-    // in the programs and in the standard library. Each finding was checked
-    // against the rules; the reasons are in the list below.
-    //
-    // primitive-references.nra:17  `retained` returns a reference to its by-value
-    //     parameter `value`, which dies with the frame.
-    // primitive-references.nra:70, 71, 98  `new Counter(local, ...)` passes a
-    //     reference to the local `local` to a constructor that keeps it in the
-    //     field `alias`; the reference outlives the argument's block.
-    // ranges-and-variadics.nra:13  `inspect` returns its variadic pack, an
-    //     array that the caller created, so it returns an array it did not create.
-    // stdlib/std/io/internal/formatting.nra:56  the formatter keeps the array
-    //     of arguments it was given in a field.
+    // The only remaining findings here belong to primitive references.
+    // The reference migration updates this expectation in the following step.
     const std::vector<std::string> expected{
-        "lowered formatting.nra:56 array stored in a field (stdlib/std/io/internal/formatting.nra:56)",
         "lowered primitive-references.nra:17 reference to a local returned",
         "lowered primitive-references.nra:70 reference to a local retained by a call",
         "lowered primitive-references.nra:71 reference to a local retained by a call",
         "lowered primitive-references.nra:98 reference to a local retained by a call",
-        "lowered ranges-and-variadics.nra:13 array returned but not created",
-        "specialized formatting.nra:56 array stored in a field (stdlib/std/io/internal/formatting.nra:56)",
         "specialized primitive-references.nra:17 reference to a local returned",
         "specialized primitive-references.nra:70 reference to a local retained by a call",
         "specialized primitive-references.nra:71 reference to a local retained by a call",
         "specialized primitive-references.nra:98 reference to a local retained by a call",
-        "specialized ranges-and-variadics.nra:13 array returned but not created",
     };
     std::set<std::string> found;
     const auto collect = [&](const IrProgram& program, StorageStage stage, std::string_view label, const fs::path& file) {
@@ -601,7 +587,9 @@ NEURA_TEST(structure, result_transfers_agree_with_summaries_in_the_backend_progr
         files.push_back(storage_dir(environment) / (std::string(fixture) + ".nra"));
     }
     for (const auto& file : files) {
-        auto program = lower_files({file});
+        auto program = file.parent_path() == storage_dir(environment)
+            ? lowered(environment, file.filename().string())
+            : lower_files({file});
         for (const auto stage : {0, 1, 2}) {
             auto copy = program;
             if (stage >= 1) materialize_reference_storage(copy);

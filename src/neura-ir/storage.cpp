@@ -1,6 +1,7 @@
 #include "storage.hpp"
 
 #include "reference_storage.hpp"
+#include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
 
 #include <algorithm>
@@ -41,7 +42,7 @@ bool synthetic_class(const IrProgram& program, SymbolId id) {
 bool synthetic_body(const IrProgram& program, SymbolId owner) {
     if (!valid(program, owner)) return true;
     const auto& item = program.symbols[owner];
-    return item.kind == SymbolKind::Function && synthetic_class(program, item.owner);
+    return item.kind == SymbolKind::Function && item.name != "$invoke" && synthetic_class(program, item.owner);
 }
 
 bool closure_allocation(const IrProgram& program, const IrNode& node) {
@@ -154,8 +155,8 @@ bool opens_scope(IrOp op, Region region) {
     switch (op) {
     case IrOp::Block: return region == Region::Body;
     case IrOp::Branch:
-    case IrOp::Loop:
     case IrOp::TaskScope: return region == Region::Body || region == Region::Alternative;
+    case IrOp::Loop: return true;
     default: return false;
     }
 }
@@ -170,11 +171,10 @@ public:
 
     BodyFacts run() {
         traverse_all(Phase::Declare);
-        for (int round = 0; round < 12; ++round) {
-            const auto before = table_;
+        do {
+            changed_ = false;
             traverse_all(Phase::Flow);
-            if (before == table_) break;
-        }
+        } while (changed_);
         traverse_all(Phase::Emit);
         return std::move(out_);
     }
@@ -246,6 +246,20 @@ private:
 
     static OriginSet unknown() { return {make(Origin::Kind::Unknown)}; }
 
+    Origin owned(const IrNode& node, const StorageOwner& scope) const {
+        auto origin = make(Origin::Kind::Owned);
+        origin.scope = scope;
+        origin.span = node.span;
+        return origin;
+    }
+
+    template <class T>
+    void add_to(std::set<T>& destination, const std::set<T>& source) {
+        const auto before = destination.size();
+        destination.insert(source.begin(), source.end());
+        changed_ = changed_ || before != destination.size();
+    }
+
     // The slot of the object that a field operand reads, when it is a slot.
     std::size_t owner_slot(const IrNode& field) const {
         if (field.operands.empty()) return no_slot;
@@ -268,10 +282,7 @@ private:
         case IrOp::Collection:
         case IrOp::RepeatCollection:
             if (node.type.kind == TypeKind::Array) {
-                auto origin = make(Origin::Kind::Owned);
-                origin.scope = scope;
-                origin.span = node.span;
-                out.insert(std::move(origin));
+                out.insert(owned(node, scope));
             }
             break;
         case IrOp::Load:
@@ -291,9 +302,12 @@ private:
             if (facts_.tracked(node.type)) out.insert(field_origin(node));
             break;
         case IrOp::Index:
-            // An element of an array lives and dies with the array.
             if (!node.operands.empty() && node.operands.front().type.kind == TypeKind::Array) {
-                out = origins(node.operands.front(), scope);
+                for (const auto& array : origins(node.operands.front(), scope)) {
+                    const auto children = elements_.find(array);
+                    if (children == elements_.end()) out.insert(array);
+                    else out.insert(children->second.begin(), children->second.end());
+                }
             }
             break;
         case IrOp::Project:
@@ -341,7 +355,10 @@ private:
         case IrOp::ExternalCall:
             out = call_origins(node, scope);
             break;
-        case IrOp::CallClosure: out = unknown(); break;
+        case IrOp::CallClosure:
+        case IrOp::SchedulerCall:
+            if (facts_.holds_array(node.type)) out.insert(owned(node, scope));
+            break;
         default: break;
         }
         if (!facts_.tracked(node.type)) return {};
@@ -356,17 +373,23 @@ private:
         } else {
             targets.push_back(call.symbol);
         }
-        if (targets.empty()) return unknown();
+        if (targets.empty()) {
+            // All legal implementations of an array-returning Neura
+            // signature return an owned result, including function values.
+            return facts_.holds_array(call.type) ? OriginSet{owned(call, scope)} : unknown();
+        }
         OriginSet out;
         for (const auto target : targets) {
             const auto* summary = known(target) ? purity_.summary(target) : nullptr;
-            if (!summary) return unknown();
+            if (!summary) {
+                if (facts_.holds_array(call.type) && call.op != IrOp::ExternalCall && known(target) &&
+                    symbol(target).has_body) out.insert(owned(call, scope));
+                else out.insert(make(Origin::Kind::Unknown));
+                continue;
+            }
             switch (summary->ownership) {
             case PurityAnalysis::Ownership::Fresh: {
-                auto origin = make(Origin::Kind::Owned);
-                origin.scope = scope;
-                origin.span = call.span;
-                out.insert(std::move(origin));
+                out.insert(owned(call, scope));
                 break;
             }
             case PurityAnalysis::Ownership::Borrowed: {
@@ -377,30 +400,161 @@ private:
                 break;
             }
             case PurityAnalysis::Ownership::Static: out.insert(make(Origin::Kind::Static)); break;
-            case PurityAnalysis::Ownership::Unknown: out.insert(make(Origin::Kind::Unknown)); break;
+            case PurityAnalysis::Ownership::Unknown:
+                if (facts_.holds_array(call.type) && call.op != IrOp::ExternalCall && symbol(target).has_body)
+                    out.insert(owned(call, scope));
+                else out.insert(make(Origin::Kind::Unknown));
+                break;
             }
         }
         return out;
     }
 
-    // A binding keeps what it is given. An array created in a scope inside the
-    // binding's own is treated as moved out to the binding's scope, so one
-    // escape is reported once, where it is assigned.
-    OriginSet moved(SymbolId binding, OriginSet from) const {
-        const auto declared = declared_.find(binding);
-        const StorageOwner& home = declared == declared_.end() ? root_ : declared->second;
-        OriginSet out;
-        for (auto origin : from) {
-            if (origin.kind == Origin::Kind::Owned && home.encloses(origin.scope)) origin.scope = home;
-            out.insert(std::move(origin));
+    OriginSet owned_graph(OriginSet roots) const {
+        OriginSet result;
+        std::vector<Origin> pending(roots.begin(), roots.end());
+        while (!pending.empty()) {
+            const auto origin = std::move(pending.back());
+            pending.pop_back();
+            if (!result.insert(origin).second) continue;
+            if (const auto found = elements_.find(origin); found != elements_.end())
+                pending.insert(pending.end(), found->second.begin(), found->second.end());
         }
-        return out;
+        return result;
+    }
+
+    const StorageOwner& binding_scope(SymbolId binding) const {
+        const auto declared = declared_.find(binding);
+        return declared == declared_.end() ? root_ : declared->second;
+    }
+
+    using Closures = std::set<const IrNode*>;
+
+    Closures closures(const IrNode& value) const {
+        if (value.op == IrOp::MakeClosure || closure_allocation(program_, value)) return {&value};
+        if (value.op == IrOp::Load) {
+            const auto found = closures_.find(value.symbol);
+            return found == closures_.end() ? Closures{} : found->second;
+        }
+        Closures result;
+        const auto add = [&](const IrNode& part) {
+            const auto found = closures(part);
+            result.insert(found.begin(), found.end());
+        };
+        switch (value.op) {
+        case IrOp::Collection:
+        case IrOp::Tuple:
+        case IrOp::EnumConstruct:
+        case IrOp::Convert:
+        case IrOp::ClassCast:
+        case IrOp::Project:
+        case IrOp::Index:
+        case IrOp::EnumProject:
+            for (const auto& part : value.operands) add(part);
+            break;
+        case IrOp::ScopedValue:
+        case IrOp::SelectValue:
+            if (!value.body.empty()) add(value.body.back());
+            if (!value.alternative.empty()) add(value.alternative.back());
+            break;
+        default: break;
+        }
+        return result;
+    }
+
+    void escape_closures(const IrNode& value) {
+        add_to(escaping_, closures(value));
     }
 
     void bind(SymbolId binding, const IrNode& value, const StorageOwner& scope) {
-        const auto part = moved(binding, origins(value, scope));
-        auto& entry = table_[binding];
-        entry.insert(part.begin(), part.end());
+        if (facts_.tracked(value.type)) add_to(table_[binding], origins(value, scope));
+        for (const auto* closure : closures(value)) {
+            if (binding_scope(binding).encloses(closure_scopes_.at(closure))) {
+                add_to(escaping_, Closures{closure});
+            }
+        }
+        add_to(closures_[binding], closures(value));
+    }
+
+    bool scoped_virtual(const IrNode& call) const {
+        return call.op == IrOp::VirtualCall && known(call.symbol) && symbol(call.symbol).name == "$invoke";
+    }
+
+    // A Neura function-value call borrows its receiver while dispatching.
+    // All body-bearing implementations are checked at the storage boundary.
+    bool may_retain(const IrNode& call, std::size_t index, bool closure) const {
+        if (call.op == IrOp::CallClosure || scoped_virtual(call)) return closure && index != 0;
+        if (call.op == IrOp::ExternalCall && known(call.symbol) && kernel_bound(symbol(call.symbol))) return false;
+        const auto targets = call.op == IrOp::VirtualCall ? purity_.targets(call) : std::vector{call.symbol};
+        const std::size_t slot = index + (call.op == IrOp::VirtualCall ? 0 : 1);
+        if (targets.empty()) return closure && index != 0;
+        return std::ranges::any_of(targets, [&](SymbolId id) {
+            const auto* summary = known(id) ? purity_.summary(id) : nullptr;
+            if (!known(id)) return false; // allocation using the implicit constructor
+            if (!summary || slot >= summary->retention.size()) return !symbol(id).has_body;
+            switch (summary->retention[slot]) {
+            case PurityAnalysis::Retention::Elsewhere: return true;
+            case PurityAnalysis::Retention::Unknown: return closure || !symbol(id).has_body;
+            case PurityAnalysis::Retention::ByResult: return closure;
+            case PurityAnalysis::Retention::NotRetained: return false;
+            }
+            return true;
+        });
+    }
+
+    void flow(const IrNode& node, const StorageOwner& scope) {
+        const bool closure = node.op == IrOp::MakeClosure || closure_allocation(program_, node);
+        if (closure) {
+            if (escaping_.contains(&node)) {
+                for (const auto& value : node.operands) escape_closures(value);
+            }
+            return;
+        }
+        switch (node.op) {
+        case IrOp::Initialize:
+            if (node.operands.empty()) break;
+            if (local_or_parameter(node.symbol)) bind(node.symbol, node.operands.front(), scope);
+            else escape_closures(node.operands.front());
+            break;
+        case IrOp::Store: {
+            const auto& to = node.operands.front();
+            const auto& from = node.operands.back();
+            if (to.op == IrOp::Load && local_or_parameter(to.symbol)) {
+                if (!is_primitive_reference(to.type)) bind(to.symbol, from, scope);
+            } else {
+                escape_closures(from);
+                if (to.op == IrOp::Index && to.operands.front().type.kind == TypeKind::Array &&
+                    facts_.holds_array(from.type)) {
+                    for (const auto& array : origins(to.operands.front(), scope))
+                        add_to(elements_[array], origins(from, scope));
+                }
+            }
+            break;
+        }
+        case IrOp::Collection:
+        case IrOp::RepeatCollection:
+            for (const auto& value : node.operands) {
+                escape_closures(value);
+                if (node.type.kind == TypeKind::Array && facts_.holds_array(value.type))
+                    add_to(elements_[owned(node, scope)], origins(value, scope));
+            }
+            break;
+        case IrOp::Return:
+        case IrOp::Append:
+        case IrOp::SchedulerCall:
+            for (const auto& value : node.operands) escape_closures(value);
+            break;
+        case IrOp::Allocate:
+        case IrOp::Call:
+        case IrOp::VirtualCall:
+        case IrOp::CallClosure:
+        case IrOp::ExternalCall:
+            for (std::size_t i = 0; i < node.operands.size(); ++i) {
+                if (may_retain(node, i, true)) escape_closures(node.operands[i]);
+            }
+            break;
+        default: break;
+        }
     }
 
     // -- Visiting a node ----------------------------------------------------------
@@ -413,15 +567,9 @@ private:
         switch (phase) {
         case Phase::Declare:
             if (node.op == IrOp::Initialize && local_or_parameter(node.symbol)) declared_.emplace(node.symbol, scope);
+            if (node.op == IrOp::MakeClosure || closure_allocation(program_, node)) closure_scopes_.emplace(&node, scope);
             break;
-        case Phase::Flow:
-            if (node.op == IrOp::Initialize && local_or_parameter(node.symbol) && !node.operands.empty()) {
-                bind(node.symbol, node.operands.front(), scope);
-            } else if (node.op == IrOp::Store && node.operands.size() == 2 && node.operands[0].op == IrOp::Load &&
-                       local_or_parameter(node.operands[0].symbol) && !is_primitive_reference(node.operands[0].type)) {
-                bind(node.operands[0].symbol, node.operands[1], scope);
-            }
-            break;
+        case Phase::Flow: flow(node, scope); break;
         case Phase::Emit: emit(node, scope); break;
         }
     }
@@ -463,11 +611,10 @@ private:
     // to frame storage where it would outlive the frame.
     void arrays_into(EscapeKind kind, const IrNode& at, const IrNode& value, const StorageOwner& scope,
                      SymbolId target = no_symbol) {
-        for (const auto& origin : origins(value, scope)) {
-            if (origin.kind == Origin::Kind::Unknown) continue;
-            if (is_primitive_reference(value.type)) continue;
-            report(kind, at, value, origin, target);
-        }
+        if (!facts_.holds_array(value.type)) return;
+        const auto set = origins(value, scope);
+        if (set.empty() && value.type.kind == TypeKind::Array) report(kind, at, value, owned(value, scope), target);
+        for (const auto& origin : set) report(kind, at, value, origin, target);
     }
 
     void references_into(EscapeKind kind, const IrNode& at, const IrNode& value, const StorageOwner& scope,
@@ -499,20 +646,32 @@ private:
             references_into(EscapeKind::ReferenceInField, at, value, scope, destination.symbol);
         } else if (destination.op == IrOp::Load && local_or_parameter(destination.symbol)) {
             if (is_primitive_reference(destination.type)) return;
-            const auto declared = declared_.find(destination.symbol);
-            const StorageOwner& home = declared == declared_.end() ? root_ : declared->second;
+            const auto& home = binding_scope(destination.symbol);
             for (const auto& origin : origins(value, scope)) {
                 if (origin.kind == Origin::Kind::Owned && home.encloses(origin.scope)) {
                     report(EscapeKind::ArrayAssignedToOuterBinding, at, value, origin, destination.symbol);
                 }
             }
-        } else if (destination.op == IrOp::Index && !destination.operands.empty() &&
-                   destination.operands.front().type.kind == TypeKind::List) {
-            arrays_into(EscapeKind::ArrayInListElement, at, value, scope);
+        } else if (destination.op == IrOp::Index && !destination.operands.empty()) {
+            if (destination.operands.front().type.kind == TypeKind::List) {
+                arrays_into(EscapeKind::ArrayInListElement, at, value, scope);
+            } else if (facts_.holds_array(value.type)) {
+                const auto destinations = origins(destination.operands.front(), scope);
+                for (const auto& from : origins(value, scope)) {
+                    const bool safe = !destinations.empty() && std::ranges::all_of(destinations, [&](const auto& to) {
+                        if (from == to) return true;
+                        if (to.kind != Origin::Kind::Owned) return false;
+                        if (from.kind != Origin::Kind::Owned) return from.kind != Origin::Kind::Unknown;
+                        return from.scope == to.scope || from.scope.encloses(to.scope);
+                    });
+                    if (!safe) report(EscapeKind::ArrayInLongerLivedElement, at, value, from);
+                }
+            }
         }
     }
 
     void captured(const IrNode& closure, bool task, const StorageOwner& scope) {
+        if (!task && !escaping_.contains(&closure)) return;
         for (const auto& value : closure.operands) {
             arrays_into(task ? EscapeKind::ArrayInTaskArgument : EscapeKind::ArrayCapturedByClosure, closure, value, scope);
             references_into(EscapeKind::ReferenceCapturedByClosure, closure, value, scope);
@@ -520,6 +679,10 @@ private:
     }
 
     void retained(const IrNode& call, const StorageOwner& scope) {
+        for (std::size_t i = 0; i < call.operands.size(); ++i) {
+            if (facts_.holds_array(call.operands[i].type) && may_retain(call, i, false))
+                arrays_into(EscapeKind::ArrayRetainedByCall, call, call.operands[i], scope, call.symbol);
+        }
         std::vector<SymbolId> targets;
         if (call.op == IrOp::VirtualCall) {
             targets = purity_.targets(call);
@@ -638,14 +801,14 @@ private:
     void returned(const IrNode& node, const StorageOwner& scope) {
         if (node.operands.empty() || !facts_.tracked(node.operands.front().type)) return;
         const auto& value = node.operands.front();
-        const auto set = origins(value, scope);
+        const auto set = owned_graph(origins(value, scope));
         out_.returns.push_back({node.span, set});
         for (const auto& origin : set) {
             const bool borrowed = origin.kind == Origin::Kind::Parameter || origin.kind == Origin::Kind::Global ||
                                   origin.kind == Origin::Kind::Field || origin.kind == Origin::Kind::Static;
             if (origin.kind == Origin::Kind::Local) {
                 if (is_primitive_reference(value.type)) report(EscapeKind::ReferenceReturned, node, value, origin);
-            } else if (borrowed && !is_primitive_reference(value.type)) {
+            } else if ((borrowed || origin.kind == Origin::Kind::Unknown) && !is_primitive_reference(value.type)) {
                 report(EscapeKind::ArrayReturnedBorrowed, node, value, origin);
             }
         }
@@ -658,6 +821,11 @@ private:
     StorageOwner root_;
     std::map<SymbolId, StorageOwner> declared_;
     std::map<SymbolId, OriginSet> table_;
+    std::map<Origin, OriginSet> elements_;
+    std::map<const IrNode*, StorageOwner> closure_scopes_;
+    std::map<SymbolId, Closures> closures_;
+    Closures escaping_;
+    bool changed_ = false;
     std::set<const IrNode*> tasks_;
     BodyFacts out_;
 };
@@ -932,13 +1100,15 @@ std::string_view describe_escape_kind(EscapeKind kind) {
     case EscapeKind::ArrayInListElement: return "array stored in a list element";
     case EscapeKind::ArrayInChannelMessage: return "array sent on a channel";
     case EscapeKind::ArrayInTaskArgument: return "array passed to a task";
-    case EscapeKind::ArrayCapturedByClosure: return "array captured by a closure";
+    case EscapeKind::ArrayCapturedByClosure: return "array captured by an escaping closure";
     case EscapeKind::ArrayAssignedToOuterBinding: return "array assigned to a binding of an outer block";
     case EscapeKind::ArrayReturnedBorrowed: return "array returned but not created";
     case EscapeKind::ReferenceReturned: return "reference to a local returned";
     case EscapeKind::ReferenceInField: return "reference to a local stored in a field or global";
     case EscapeKind::ReferenceCapturedByClosure: return "reference to a local captured by a closure";
     case EscapeKind::ReferenceRetainedByCall: return "reference to a local retained by a call";
+    case EscapeKind::ArrayInLongerLivedElement: return "array stored in an element that can outlive it";
+    case EscapeKind::ArrayRetainedByCall: return "array passed to a call that may retain it";
     }
     return "";
 }
@@ -958,6 +1128,23 @@ std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, const 
 
 std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, StorageStage stage) {
     return find_storage_escapes(program, PurityAnalysis(program), stage);
+}
+
+void check_array_storage(const IrProgram& program, StorageStage stage) {
+    for (const auto& escape : find_storage_escapes(program, stage)) {
+        switch (escape.kind) {
+        case EscapeKind::ReferenceReturned:
+        case EscapeKind::ReferenceInField:
+        case EscapeKind::ReferenceCapturedByClosure:
+        case EscapeKind::ReferenceRetainedByCall:
+            continue;
+        default: break;
+        }
+        auto diagnostic = Diagnostic(escape.operation, std::string(describe_escape_kind(escape.kind))).with_code("E0451");
+        if (!escape.storage.file.empty()) diagnostic.label(escape.storage, "array storage originates here");
+        diagnostic.help("keep the array within its owner's lifetime, or use an explicitly constructed list");
+        throw diagnostic;
+    }
 }
 
 } // namespace neura

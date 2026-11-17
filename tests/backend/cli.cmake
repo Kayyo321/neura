@@ -579,11 +579,17 @@ foreach(program IN LISTS programs)
     endforeach()
 endforeach()
 
+# An iteration releases its allocations on continue and on break. The
+# successful bound stays below what a hundred retained iterations would use.
+expect_run("array-region stack reclamation" "${TEST_DIR}/array-regions.nvr" "" 0 "" --max-stack-cells 64)
+expect_failure("array-region stack limit" "stack limit exceeded" run --max-stack-cells 4
+               "${TEST_DIR}/array-regions.nvr")
+
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
                       stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
                       last-bindings target-typed-new anonymous-classes inline-tuples inline-tuples-tasks inline-enums
-                      inline-enums-tasks)
+                      inline-enums-tasks array-regions)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")

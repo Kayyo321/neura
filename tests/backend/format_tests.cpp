@@ -858,7 +858,7 @@ NEURA_TEST(format, storage_region_operations_are_validated) {
             "argument 1 must be a uint64 region token");
     mutated([&](nvr::Image& m) { exit_of(m, 8, 3).arguments.pop_back(); }, "expects 2 argument(s)");
     mutated([&](nvr::Image& m) { exit_of(m, 8, 3).result_slot = 0; }, "a void result requires an absent slot");
-    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "immediate must be zero");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "unknown move-to-region mode");
 }
 
 NEURA_TEST(format, a_region_token_is_not_a_task_or_channel_operand) {

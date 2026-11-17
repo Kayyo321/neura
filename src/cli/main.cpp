@@ -19,6 +19,7 @@
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/fleet.hpp"
@@ -1001,6 +1002,7 @@ int emit_ir(const Options& options) {
         neura::require_valid_ir(program, "before specialization");
         neura::materialize_reference_storage(program);
         neura::specialize(program);
+        neura::check_array_storage(program, neura::StorageStage::Specialized);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
@@ -1478,6 +1480,7 @@ int run_tests(const Options& options) {
     }
     neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_array_storage(program, neura::StorageStage::Specialized);
     neura::check_containment(program);
     neura::check_inline_limit(program);
     if (options.optimize) {
@@ -1826,17 +1829,10 @@ int task_safety_report(neura::IrProgram program) {
 namespace {
 
 int check_program(neura::IrProgram program) {
-    const bool thread_safe_tags = std::any_of(program.symbols.begin(), program.symbols.end(), [](const auto& item) {
-        return neura::has_tag(item, neura::TagId::ThreadSafe);
-    });
-    if (neura::uses_tasks(program) || thread_safe_tags) {
-        // The isolation rules of a spawn, and the #ThreadSafe check, need
-        // concrete types, which exist after specialization (Concurrency.md
-        // section 5).
-        neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
-        neura::specialize(program);
-    }
+    neura::require_valid_ir(program, "before specialization");
+    neura::materialize_reference_storage(program);
+    neura::specialize(program);
+    neura::check_array_storage(program, neura::StorageStage::Specialized);
     return 0;
 }
 

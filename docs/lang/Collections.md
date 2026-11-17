@@ -8,7 +8,6 @@ Arrays and lists are built-in, homogeneous collections. Their type is formed by 
 | `string[list]` | List of strings. |
 | `string[][]` | Array of arrays of strings. |
 | `string[list][list]` | List of lists of strings. |
-| `string[][list]` | List of arrays of strings. |
 | `string[list][]` | Array of lists of strings. |
 
 Read suffixes from left to right: each suffix wraps the type to its left. Nested collections are collections of collections, not necessarily rectangular matrices. Each inner collection has its own length; rows can have different lengths.
@@ -38,7 +37,7 @@ let evens: int[list] = new(0 .. 8 : 2); // [0, 2, 4, 6]
 let descending = 5 .. 0 : -2;          // [5, 3, 1]
 ```
 
-An expected array or list type determines the result and the integer type of the bounds and step; a list is constructed with `new(start .. stop)`. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` and heap limits and does not advance past the last element. A constructed list starts with version zero.
+An expected array or list type determines the result and the integer type of the bounds and step; a list is constructed with `new(start .. stop)`. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` limit and the applicable stack or heap limit and does not advance past the last element. A constructed list starts with version zero.
 
 Binary operators bind more tightly than `..` and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
 
@@ -46,13 +45,31 @@ A list can grow or shrink through its built-in operations. Both collections expo
 
 A list's read-only `version` is a `uint64`. It starts at zero and advances modulo 2^64 on every successful append or removal. Element assignment leaves it alone. Wrappers can save it when they create an iterator and compare it before advancing, including after a structural change made through another reference to the same list.
 
+## Array lifetime
+
+A fresh array belongs to the lexical block that creates it, including each iteration of a loop. Leaving that block releases its storage. An inner block can borrow an outer array. Assignment aliases an array, with the same cells and identity. An assignment that would keep an array or any of its backing rows past their owner is an [E0451](../diagnostics/E0451.md) error.
+
+A function can return a fresh array and its backing arrays by transferring their storage to the caller. Returning a parameter, global array, or a row borrowed from either is an error. The rule also applies to arrays inside tuple and enum results.
+
+<!-- example: check -->
+```neura
+let grid = func(limit: int) -> int[][] {
+    last shared = 0 .. limit;
+    return [shared, [9], shared];
+};
+```
+
+A class field, list element, message, task argument, or escaping closure cannot retain an activation array. A non-retaining call can borrow it for the call. Use a list, including a list of lists for ragged data, when the collection needs to live in heap storage. An array initialized as a global or static field lives for the execution.
+
+The runner counts region allocations against `--max-stack-cells` and reports their peak with `--stats`. List allocation counts against the heap limit.
+
 ## Indexing and safety
 
 Indexing is zero-based. Reading or writing `collection[index]` is valid only when the index is an integer in the range `0 <= index < collection.length`. Every access is bounds checked; an invalid index, including a negative index, causes a bounds error and terminates the current operation before any out-of-bounds memory is accessed. `remove_at` has the same index requirement. An implementation may eliminate a check only when it can prove that doing so preserves this behavior. Nested indexing checks each level independently.
 
 Collection operations must also check length and allocation arithmetic for overflow and fail safely if a requested size cannot be represented or allocated. Safe Neura code cannot use collection indexing or list operations to read or write outside the collection's storage. This guarantee does not by itself specify the safety of external native code.
 
-The spelling of bounds and allocation errors, error handling, ownership and aliasing, collection equality, and general allocation APIs remain to be specified. In particular, a fixed array length does not imply immutable elements or exclusive ownership.
+The spelling of bounds and allocation errors, error handling, list ownership, collection equality, and general allocation APIs remain to be specified. In particular, a fixed array length does not imply immutable elements or exclusive ownership.
 
 A negative index fails with trap reason 2 (bounds failure); an index at or past the length is a bounds fault detected by NVM. Both end the run with status 139, `ExitCode.SegmentationFault` ([Errors](Errors.md)).
 

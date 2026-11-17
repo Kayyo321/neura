@@ -359,6 +359,10 @@ std::uint16_t required_minor_version(const Image& image) {
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::Scheduler && exit.scheduler == SchedulerOp::ParallelFinish &&
+                    exit.arguments.size() == 2) {
+                    return 7;
+                }
                 if (exit.kind == ExitKind::State &&
                     (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent ||
                      is_region_operation(exit.operation))) {

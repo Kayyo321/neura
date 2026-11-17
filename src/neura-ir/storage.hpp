@@ -173,13 +173,15 @@ enum class EscapeKind : std::uint8_t {
     ArrayInListElement,          // appended to a list, stored in one, or written in a list literal
     ArrayInChannelMessage,       // sent on a channel
     ArrayInTaskArgument,         // captured by the function value a task starts
-    ArrayCapturedByClosure,      // captured by any other closure
+    ArrayCapturedByClosure,      // captured by an escaping closure
     ArrayAssignedToOuterBinding, // created in an inner scope, assigned to a binding of an outer one
     ArrayReturnedBorrowed,       // returned, but borrowed from a parameter, global or field
     ReferenceReturned,           // a reference to a local or parameter, returned
     ReferenceInField,            // a reference to a local or parameter, stored in a field or global
     ReferenceCapturedByClosure,  // a reference to a local or parameter, captured by a closure
     ReferenceRetainedByCall,     // such a reference, passed to a call that retains it
+    ArrayInLongerLivedElement,   // stored in an array element with a longer or unknown lifetime
+    ArrayRetainedByCall,         // passed to a callee that may retain the value elsewhere
 };
 
 std::string_view describe_escape_kind(EscapeKind kind);
@@ -212,5 +214,8 @@ std::vector<StorageEscape> find_storage_escapes(const IrProgram& program,
                                                 StorageStage stage = StorageStage::Lowered);
 std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, const PurityAnalysis& purity,
                                                 StorageStage stage = StorageStage::Lowered);
+
+// Enforce the array lifetime part of the storage contract.
+void check_array_storage(const IrProgram& program, StorageStage stage);
 
 } // namespace neura

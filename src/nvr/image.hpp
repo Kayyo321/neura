@@ -193,6 +193,9 @@ enum class StateOp : std::uint8_t {
 
 inline constexpr std::uint8_t state_op_count = 33;
 
+// Reserved token of execution-lifetime static storage (NVR 1.7).
+inline constexpr std::uint64_t static_region_token = UINT64_MAX;
+
 // Whether `operation` is one of the NVR 1.7 region operations.
 inline constexpr bool is_region_operation(StateOp operation) {
     return operation >= StateOp::EnterRegion && operation <= StateOp::MoveToRegion;

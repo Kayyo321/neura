@@ -9,6 +9,7 @@
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/driver.hpp"
 #include "nvm/machine.hpp"
@@ -403,6 +404,7 @@ void Adapter::launch(const Json& arguments) {
             require_valid_ir(program, "before debug specialization");
             materialize_reference_storage(program);
             specialize(program);
+            check_array_storage(program, StorageStage::Specialized);
             check_containment(program);
             check_inline_limit(program);
             require_valid_ir(program, "before debug conversion");

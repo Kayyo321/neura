@@ -18,6 +18,7 @@
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/value_layout.hpp"
 #include "neura-ir/verifier.hpp"
@@ -185,9 +186,18 @@ private:
     // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
     Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
                       std::uint32_t result_type, const Span& span);
-    // Scope exits for every task scope opened inside `depth` enclosing ones,
-    // innermost first, for a return, break, or continue that leaves them.
-    void leave_task_scopes(std::size_t depth, const Span& span);
+    struct ScopeExit {
+        std::optional<Operand> token;
+        bool joins_tasks;
+    };
+    void leave_scopes(std::size_t depth, const Span& span);
+    bool needs_region(const IrNode& node);
+    void enter_scope(bool allocate_region, bool joins_tasks, const Span& span);
+    void end_scope(const Span& span);
+    void lexical_region(const std::vector<IrNode>& statements, const Span& span);
+    Operand region_token();
+    bool has_array_word(const std::vector<std::uint32_t>& types) const;
+    bool owns_result(const FunctionOrigin& origin, const std::vector<std::uint32_t>& types) const;
 
     // Statements and expressions.
     void region(const std::vector<IrNode>& statements);
@@ -283,12 +293,13 @@ private:
         std::uint32_t exit;
         // `continue` takes the back edge itself and the loop polls there.
         bool poll_on_continue;
-        // Task scopes open where the loop began.
-        std::size_t task_scopes;
+        // Lexical and task scopes open where the loop began.
+        std::size_t scopes;
     };
     std::vector<LoopTargets> loops_;
-    // Task scopes open at the statement being converted.
-    std::size_t task_scopes_ = 0;
+    std::vector<ScopeExit> scopes_;
+    std::uint32_t result_region_slot_ = absent;
+    bool static_initializer_ = false;
     std::vector<std::uint32_t> placeholders_;
 
     friend class Converter;
@@ -2103,6 +2114,7 @@ Values FunctionCompiler::invoke_values(const FunctionOrigin& callee, std::vector
                                        const std::vector<std::uint32_t>& result_types, const Span& span,
                                        bool poll) {
     const auto target = c_.function(callee);
+    if (owns_result(callee, result_types)) arguments.push_back(region_token());
     const bool nothing = c_.type_at(result_types.front()).kind == nvr::TypeKind::Void;
     // The words of a tuple result land in consecutive slots.
     const auto result_slot = nothing ? absent : new_slots(result_types);
@@ -2216,10 +2228,60 @@ Operand FunctionCompiler::scheduler(nvr::SchedulerOp operation, std::uint32_t ta
     return result_slot == absent ? Operand{} : slot_operand(result_slot);
 }
 
-void FunctionCompiler::leave_task_scopes(std::size_t depth, const Span& span) {
-    for (auto open_scopes = task_scopes_; open_scopes > depth; --open_scopes) {
-        scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, c_.scalar(nvr::TypeKind::Void), span);
+void FunctionCompiler::leave_scopes(std::size_t depth, const Span& span) {
+    const auto nothing = c_.scalar(nvr::TypeKind::Void);
+    for (auto i = scopes_.size(); i > depth; --i) {
+        const auto& scope = scopes_[i - 1];
+        if (scope.joins_tasks) scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, span);
+        if (scope.token) state(nvr::StateOp::ReleaseRegion, 0, {*scope.token}, nothing, span);
     }
+}
+
+void FunctionCompiler::enter_scope(bool allocate_region, bool joins_tasks, const Span& span) {
+    ScopeExit scope{std::nullopt, joins_tasks};
+    if (allocate_region && !static_initializer_) {
+        scope.token = state(nvr::StateOp::EnterRegion, 0, {}, c_.scalar(nvr::TypeKind::Unsigned, 64), span);
+    }
+    scopes_.push_back(scope);
+}
+
+void FunctionCompiler::end_scope(const Span& span) {
+    if (open()) leave_scopes(scopes_.size() - 1, span);
+    scopes_.pop_back();
+}
+
+Operand FunctionCompiler::region_token() {
+    if (static_initializer_) return immediate(c_.scalar(nvr::TypeKind::Unsigned, 64), nvr::static_region_token);
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+        if (scope->token) return *scope->token;
+    }
+    throw std::logic_error("an activation allocation has no region");
+}
+
+bool FunctionCompiler::has_array_word(const std::vector<std::uint32_t>& types) const {
+    return std::ranges::any_of(types, [&](std::uint32_t type) { return c_.type_at(type).kind == nvr::TypeKind::Array; });
+}
+
+bool FunctionCompiler::owns_result(const FunctionOrigin& origin, const std::vector<std::uint32_t>& types) const {
+    return (origin.role == Role::Function || origin.role == Role::UnboxCollection) && has_array_word(types);
+}
+
+bool FunctionCompiler::needs_region(const IrNode& node) {
+    if (node.op == IrOp::Block || node.op == IrOp::TaskScope || node.op == IrOp::Loop) return false;
+    if ((node.type.kind == TypeKind::Array || node.type.kind == TypeKind::Tuple || node.type.kind == TypeKind::Enum) &&
+        (node.op == IrOp::Collection || node.op == IrOp::RepeatCollection || node.op == IrOp::Call ||
+         node.op == IrOp::VirtualCall || node.op == IrOp::SchedulerCall) &&
+        has_array_word(result_types(node.type, node.span))) return true;
+    if (std::ranges::any_of(node.operands, [&](const auto& operand) { return needs_region(operand); })) return true;
+    if (node.op == IrOp::Branch) return false;
+    const auto needs = [&](const auto& child) { return needs_region(child); };
+    return std::ranges::any_of(node.body, needs) || std::ranges::any_of(node.alternative, needs);
+}
+
+void FunctionCompiler::lexical_region(const std::vector<IrNode>& statements, const Span& span) {
+    enter_scope(std::ranges::any_of(statements, [&](const auto& item) { return needs_region(item); }), false, span);
+    region(statements);
+    end_scope(span);
 }
 
 // ---------------------------------------------------------------------------
@@ -2283,7 +2345,7 @@ void FunctionCompiler::statement(const IrNode& node) {
         values(node.operands.front());
         return;
     case IrOp::Block:
-        region(node.body);
+        lexical_region(node.body, node.span);
         return;
     case IrOp::Branch:
         branch_statement(node);
@@ -2292,6 +2354,8 @@ void FunctionCompiler::statement(const IrNode& node) {
         loop(node);
         return;
     case IrOp::TaskScope: {
+        enter_scope(std::ranges::any_of(node.body, [&](const auto& item) { return needs_region(item); }), true,
+                    node.span);
         const auto nothing = c_.scalar(nvr::TypeKind::Void);
         if (node.symbol != no_symbol) {
             // The scope's identity, for its handle.
@@ -2305,14 +2369,8 @@ void FunctionCompiler::statement(const IrNode& node) {
         } else {
             scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
         }
-        ++task_scopes_;
         region(node.body);
-        // Falling off the end waits for the scope's tasks. A return, break,
-        // or continue inside the body has already left it.
-        if (open()) {
-            scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, node.span);
-        }
-        --task_scopes_;
+        end_scope(node.span);
         return;
     }
     case IrOp::Return: {
@@ -2320,28 +2378,37 @@ void FunctionCompiler::statement(const IrNode& node) {
         exit.kind = nvr::ExitKind::Return;
         if (!node.operands.empty()) {
             auto value = values(node.operands.front());
-            if (task_scopes_ != 0) {
-                // The value is computed first, then each scope waits for its
-                // tasks, then the function returns it (Concurrency.md 4.1).
-                const auto slot = new_slots(c_.word_types(node.operands.front().type, node.span));
-                for (std::size_t i = 0; i < value.size(); ++i) assign(slot + static_cast<std::uint32_t>(i), value[i]);
-                leave_task_scopes(0, node.span);
-                value = slot_values(slot, value.size());
+            if (result_region_slot_ != absent) {
+                for (auto& word : value) spill(word);
+                const auto nothing = c_.scalar(nvr::TypeKind::Void);
+                for (const auto& word : value) {
+                    if (c_.type_at(word.type).kind == nvr::TypeKind::Array) {
+                        state(nvr::StateOp::MoveToRegion, 1, {resolve(word), slot_operand(result_region_slot_)},
+                              nothing, node.span);
+                    }
+                }
+            }
+            if (std::ranges::any_of(scopes_, [](const auto& scope) { return scope.token || scope.joins_tasks; })) {
+                // Commit the return value before leaving the scopes. Any
+                // array result has already moved to the caller's region.
+                for (auto& word : value) spill(word);
+                leave_scopes(0, node.span);
+                for (auto& word : value) word = resolve(word);
             }
             exit.arguments = std::move(value);
         } else {
-            leave_task_scopes(0, node.span);
+            leave_scopes(0, node.span);
         }
         operation_at(node.span);
         close({exit});
         return;
     }
     case IrOp::Break:
-        leave_task_scopes(loops_.back().task_scopes, node.span);
+        leave_scopes(loops_.back().scopes, node.span);
         jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        leave_task_scopes(loops_.back().task_scopes, node.span);
+        leave_scopes(loops_.back().scopes, node.span);
         jump(loops_.back().next, loops_.back().poll_on_continue);
         return;
     case IrOp::Fail: {
@@ -2416,13 +2483,13 @@ void FunctionCompiler::branch_statement(const IrNode& node) {
     const auto else_block = node.alternative.empty() ? join : new_block();
     branch(condition, then_block, else_block);
     begin(then_block, node.body.empty() ? node.span : node.body.front().span);
-    region(node.body);
+    lexical_region(node.body, node.span);
     if (open()) {
         jump(join);
     }
     if (else_block != join) {
         begin(else_block, node.alternative.front().span);
-        region(node.alternative);
+        lexical_region(node.alternative, node.span);
         if (open()) {
             jump(join);
         }
@@ -2434,7 +2501,11 @@ void FunctionCompiler::loop(const IrNode& node) {
     const auto head = new_block();
     jump(head);
     begin(head, node.span);
-    const auto condition = expression(node.operands.front());
+    enter_scope(needs_region(node.operands.front()), false, node.span);
+    auto condition = expression(node.operands.front());
+    if (scopes_.back().token) spill(condition);
+    end_scope(node.span);
+    condition = resolve(condition);
     const auto body = new_block();
     const auto exit = new_block();
     branch(condition, body, exit);
@@ -2444,16 +2515,16 @@ void FunctionCompiler::loop(const IrNode& node) {
     // The poll of a loop rides on the exit that takes the back edge: the
     // jump from the latch, or without a latch every jump back to the head.
     const bool poll_at_head = node.poll && latch == head;
-    loops_.push_back({latch, exit, poll_at_head, task_scopes_});
+    loops_.push_back({latch, exit, poll_at_head, scopes_.size()});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
-    region(node.body);
+    lexical_region(node.body, node.span);
     if (open()) {
         jump(latch, poll_at_head);
     }
     loops_.pop_back();
     if (latch != head) {
         begin(latch, node.alternative.front().span);
-        region(node.alternative);
+        lexical_region(node.alternative, node.span);
         if (open()) {
             jump(head, node.poll);
         }
@@ -2796,11 +2867,19 @@ Operand FunctionCompiler::expression(const IrNode& node) {
     case IrOp::Collection: {
         auto elements = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
+        if (node.type.kind == TypeKind::Array) {
+            elements.insert(elements.begin(), region_token());
+            return state(nvr::StateOp::RegionCollection, type, std::move(elements), type, node.span);
+        }
         return state(nvr::StateOp::AllocateCollection, type, std::move(elements), type, node.span);
     }
     case IrOp::RepeatCollection: {
         auto arguments = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
+        if (node.type.kind == TypeKind::Array) {
+            arguments.insert(arguments.begin(), region_token());
+            return state(nvr::StateOp::RegionRepeat, type, std::move(arguments), type, node.span);
+        }
         return state(nvr::StateOp::RepeatCollection, type, std::move(arguments), type, node.span);
     }
     case IrOp::Index: {
@@ -3363,21 +3442,24 @@ Values FunctionCompiler::scheduler_call(const IrNode& node) {
         }
         target = c_.function(c_.boundary_origin({Role::Function, method, no_symbol}));
     }
-    const auto code = is_select ? select_code : operation->code;
+    const auto code = static_cast<nvr::SchedulerOp>(is_select ? select_code : operation->code);
+    if (code == nvr::SchedulerOp::ParallelFinish && node.type.kind == TypeKind::Array) {
+        arguments.push_back(region_token());
+    }
     if ((node.type.kind == TypeKind::Array || node.type.kind == TypeKind::List) &&
         c_.inline_value(node.type.arguments.front())) {
         // The runtime builds the array of results from boxed values; the
         // program's array holds the words inline.
-        const auto built = scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
+        const auto built = scheduler(code, target, std::move(arguments),
                                      c_.wire_type(node.type, node.span), node.span);
         return {invoke(c_.collection_function(node.type, node.span), {built}, c_.type_of(node.type, node.span),
                        node.span)};
     }
     if (!c_.inline_value(node.type))
-        return {scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
+        return {scheduler(code, target, std::move(arguments),
                           c_.type_of(node.type, node.span), node.span)};
     // The scheduler yields the boxed value.
-    const auto handle = scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
+    const auto handle = scheduler(code, target, std::move(arguments),
                                   c_.boxed_type(node.type, node.span), node.span);
     return unbox(node.type, handle, node.span);
 }
@@ -3408,6 +3490,7 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
 
 Values FunctionCompiler::dispatch_call(SymbolId cls, SymbolId method, std::vector<Operand> operands,
                                        const std::vector<std::uint32_t>& results, const Span& span, bool poll) {
+    if (has_array_word(results)) operands.push_back(region_token());
     for (auto& operand : operands) {
         spill(operand);
     }
@@ -3744,13 +3827,15 @@ void FunctionCompiler::compile_function() {
         receiver_module_ = origin_.receiver;
     }
     parameters(origin_.symbol);
-    function_.parameter_count = static_cast<std::uint32_t>(function_.frame_types.size());
     // A tuple result is several words (NVR 1.7): the first is the result type.
     const auto results = c_.word_types(function.type, function.span);
+    if (owns_result(origin_, results)) result_region_slot_ = new_slot(c_.scalar(nvr::TypeKind::Unsigned, 64));
+    function_.parameter_count = static_cast<std::uint32_t>(function_.frame_types.size());
     function_.result_type = results.front();
     function_.more_results.assign(results.begin() + 1, results.end());
     begin(new_block(), function.span);
-    region(c_.body(origin_.symbol));
+    static_initializer_ = is_static_initializer(function);
+    lexical_region(c_.body(origin_.symbol), function.span);
     finish();
 }
 
@@ -3768,6 +3853,11 @@ void FunctionCompiler::compile_constructor() {
     function_.parameter_count = static_cast<std::uint32_t>(function_.frame_types.size());
     function_.result_type = c_.scalar(nvr::TypeKind::Void);
     begin(new_block(), item.span);
+    const bool has_field_region = std::ranges::any_of(c_.field_initializers(cls),
+        [&](const auto* node) { return needs_region(*node); });
+    const bool has_body_region = init != no_symbol && std::ranges::any_of(c_.body(init),
+        [&](const auto& node) { return needs_region(node); });
+    enter_scope(has_field_region || has_body_region, false, item.span);
     if (init != no_symbol) {
         const auto& body = c_.body(init);
         std::size_t start = 0;
@@ -3793,6 +3883,7 @@ void FunctionCompiler::compile_constructor() {
         }
         field_initializers(cls);
     }
+    end_scope(item.span);
     finish();
 }
 
@@ -4062,7 +4153,9 @@ void FunctionCompiler::compile_unbox_collection() {
     const auto none = c_.scalar(nvr::TypeKind::Void);
     const auto boxed = c_.boxed_type(element, span);
     const auto input = new_slot(source_type);
-    function_.parameter_count = 1;
+    const bool array = c_.type_at(target_type).kind == nvr::TypeKind::Array;
+    const auto destination = array ? new_slot(u64) : absent;
+    function_.parameter_count = array ? 2 : 1;
     function_.result_type = target_type;
     begin(new_block(), span);
     const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(input)}, u64, span);
@@ -4075,7 +4168,9 @@ void FunctionCompiler::compile_unbox_collection() {
     {
         ExitSpec exit;
         exit.kind = nvr::ExitKind::Return;
-        exit.arguments = {state(nvr::StateOp::AllocateCollection, target_type, {}, target_type, span)};
+        exit.arguments = {array ? state(nvr::StateOp::RegionCollection, target_type, {slot_operand(destination)},
+                                        target_type, span)
+                                : state(nvr::StateOp::AllocateCollection, target_type, {}, target_type, span)};
         close({exit});
     }
     begin(filled, span);
@@ -4083,7 +4178,9 @@ void FunctionCompiler::compile_unbox_collection() {
     auto seed = unbox(element, first, span);
     std::vector<Operand> repeated{length};
     repeated.insert(repeated.end(), seed.begin(), seed.end());
-    const auto out = state(nvr::StateOp::RepeatCollection, target_type, std::move(repeated), target_type, span);
+    if (array) repeated.insert(repeated.begin(), slot_operand(destination));
+    const auto out = state(array ? nvr::StateOp::RegionRepeat : nvr::StateOp::RepeatCollection,
+                           target_type, std::move(repeated), target_type, span);
     const auto position = new_slot(u64);
     assign(position, immediate(u64, 1));
     const auto head = new_block();
@@ -4171,7 +4268,9 @@ void FunctionCompiler::compile_start() {
     function_.parameter_count = 1;
     function_.result_type = test || standard ? c_.scalar(nvr::TypeKind::Signed, 32) : c_.type_of(main.type, main.span);
     const auto& items = c_.startup();
-    begin(new_block(), items.empty() ? main.span : items.front().node->span);
+    const auto& start = items.empty() ? main.span : items.front().node->span;
+    begin(new_block(), start);
+    enter_scope(std::ranges::any_of(items, [&](const auto& item) { return needs_region(*item.node); }), false, start);
     for (const auto& item : items) {
         if (!open()) {
             break;
@@ -4273,6 +4372,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     require_valid_ir(program, "before specialization");
     materialize_reference_storage(program);
     specialize(program);
+    check_array_storage(program, StorageStage::Specialized);
     // Tuples and payload enums are stored inline: a value type may not
     // contain itself (E0448), and its shape has a limit (E0449).
     check_containment(program);

@@ -123,7 +123,7 @@ The execution contract defines initial state, how and when state commits, how co
 | Loops and recursion | A transition circuit can update control state and revisit a region. Recursive calls require storage for active frames and return continuations, with a defined limit for finite targets. |
 | Classes and objects | Classes define layouts and method circuits. Each object has its own state, and method calls pass a receiver reference to shared circuits. The umbrella `class` type preserves identity and dynamic type. Nil uses the reserved zero reference. |
 | Dynamic dispatch | The runtime reads the receiver's layout tag. A generated circuit selects the implementation using class and interface subtype links. A checked cast preserves the handle and checks the target layout relationship. |
-| Collections and lifecycle | Indexing, allocation, initialization, and destruction require explicit bounds, lifetime rules, and failure behavior before their lowering is defined. |
+| Collections and lifecycle | An array belongs to a lexical region. The converter emits region allocation, owned result transfer, and releases at lexical exits. The runtime owns stack-cell accounting and storage teardown. Lists grow in heap storage. |
 
 ### Runtime boundary
 

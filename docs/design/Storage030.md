@@ -59,9 +59,9 @@ Arrays, primitive-reference storage and non-escaping closure environments that b
 | Rule | Status |
 | --- | --- |
 | A region belongs to a block, a loop iteration, or a function. It is released on every exit from its owner: the end of the block, `break`, `continue`, `return`, a trap, cancellation, and task teardown. A loop releases each iteration's region before the next. | proposed |
-| A fresh array belongs to the region of the block that creates it. Returning a fresh array moves it, and every entry it owns, to the caller's region. A function that returns an array it did not create, borrowed from a parameter, global or field, is an error. | proposed |
-| Assigning an array created in an inner block to a binding of an outer block is an error. An inner binding may borrow an outer array. | proposed |
-| An array may not be stored in a class field, a list element, a channel message, an escaping closure, or a task argument. A tuple or enum that contains an array has the array's lifetime. | proposed |
+| A fresh array belongs to the region of the block that creates it. Returning a fresh array moves it, and every entry it owns, to the caller's region. A function that returns an array it did not create, borrowed from a parameter, global or field, is an error. | implemented (step 9), proposed |
+| Assigning an array created in an inner block to a binding of an outer block is an error. An inner binding may borrow an outer array. | implemented (step 9), proposed |
+| An array may not be stored in a class field, a list element, a channel message, an escaping closure, or a task argument. A tuple or enum that contains an array has the array's lifetime. | implemented (step 9), proposed |
 | A primitive reference to a local or parameter is a borrow of a region box that lives as long as the binding's block. It may not be returned, stored in a field, or captured by an escaping closure. Returning `&T` is allowed only for global storage or a field of an owner the result summary names. `reference_storage.cpp` no longer promotes storage to the heap. | proposed |
 | A closure environment that does not escape is a region entry of the block that creates it; `new func` and `new bound` allocate on the heap. | proposed |
 | Escapes are checked on lowering and again on the linked, specialized program, with the storage and transfer facts of M2. | proposed |
@@ -95,6 +95,8 @@ Amended on 2026-11-16: declining every new operation in tiers 2 and 3 would hold
 | 9 | Arrays in regions, with the escape checks | yes |
 | 10 | Primitive references as checked borrows, and closures in regions | yes |
 | 11 | The performance gate | no |
+
+Step 9 implements array placement, transfer, lexical release and E0451 ([Arrays and lists](../lang/Collections.md#array-lifetime)). The converter combines region release and task-scope joins in its existing exit path. At the lifetime milestone, the region token and release move to that milestone's existing exit-stack entry. A task-scope block joins its children before releasing its region. Startup and static arrays live for the execution, and pooled inactive enum words carry no ownership.
 
 ## Gate
 
