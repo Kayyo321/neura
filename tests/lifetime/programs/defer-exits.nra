@@ -59,6 +59,7 @@ let ExitOrder = module:program.Entry (
 
     // A deferred close of the channel lets the child finish, so the scope's
     // join, which runs after the scope's deferred calls, can complete.
+
     let drain = func() -> int {
         const [sender, receiver, closer] = channels.open<int>(4);
         defer say("after the join");

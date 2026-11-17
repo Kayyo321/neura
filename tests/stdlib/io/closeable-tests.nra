@@ -60,4 +60,32 @@ let CloseableTests = module (
             error.message(failure));
         test.assert_equal_int32(1, resource.closes);
     };
+
+    // A `using` block applies the same rule to the value it returns (docs/design/Lifetime030.md, through
+    // std/io/internal/close-outcome.nra): its result equals release's for each outcome and close.
+    let used = func(resource: Resource, body_ok: bool) -> result.Result<int> {
+        using (held = resource) {
+            if (body_ok) {
+                return result.Result<int>.Ok(5);
+            }
+            return result.Result<int>.Err(body_failure());
+        }
+    };
+
+    let described = func(outcome: result.Result<int>) -> string => match (outcome) {
+        result.Result.Ok(value) => "ok " + value.to_string(),
+        result.Result.Err(failure) => "error " + error.message(failure),
+    };
+
+    export let test_using_agrees_with_release = func() -> void {
+        for (let i = 0; i < 4; i++) {
+            let body_ok = i % 2 == 0;
+            let failing = i >= 2;
+            let outcome = body_ok ? result.Result<int>.Ok(5) : result.Result<int>.Err(body_failure());
+            let resource = new Resource(failing);
+            test.assert_equal_string(described(closeable.release<int>(new Resource(failing), outcome)),
+                described(used(resource, body_ok)));
+            test.assert_equal_int32(1, resource.closes);
+        }
+    };
 );

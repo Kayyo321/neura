@@ -1,0 +1,24 @@
+// Edge case 45: a task that captures the resource must be joined inside the
+// block, so its scope is inside the `using`.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+#Synchronized
+let Log = class implements closeable.Closeable (
+    export let write = func() -> void {};
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+
+let use = func(log: Log) -> void {
+    log.write();
+};
+
+let work = func() -> Result<int> {
+    scope {
+        using (log = new Log()) {
+            spawn use(log);
+        }
+    }
+    return Result<int>.Ok(0);
+};

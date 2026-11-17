@@ -1,0 +1,18 @@
+// Edge case 42: the resource is not stored in a field.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let flush = func() -> void {};
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let open = func() -> Resource => new Resource();
+let Owner = class (
+    export let kept: Resource = nil;
+    export let work = func() -> Result<int> {
+        using (source = open()) {
+            instance.kept = source;
+        }
+        return Result<int>.Ok(0);
+    };
+);

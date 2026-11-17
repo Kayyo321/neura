@@ -1,0 +1,58 @@
+// Tier 3 deoptimization inside a `close` and between a `using` and its
+// exit (docs/design/Lifetime030.md, "Optimization and tiers"). The token
+// and the carried result are frame slots, so the frame states list them.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let closeable = import:Std.Io.Closeable;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Counter = class implements closeable.Closeable (
+    export let closes: int = 0;
+    export let weight: int = 0;
+    export let close = func -> Result<Unit> {
+        closes = closes + 1;
+        weight = weight + closes % 13;
+        if (closes % 9973 == 0) {
+            return Result<Unit>.Err(error.custom("close", "a rare failure"));
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+);
+
+let UsingDeopt = module:program.Entry (
+    let counter = new Counter();
+
+    let step = func(index: int) -> Result<int> {
+        using (source = counter) {
+            if (index % 5 == 0) {
+                return Result<int>.Ok(index % 7);
+            }
+            if (index % 11 == 0) {
+                return Result<int>.Err(error.custom("body", "skipped"));
+            }
+        }
+        return Result<int>.Ok(1);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let sum = 0;
+        let failures = 0;
+        for (let index = 0; index < 40000; index++) {
+            match (step(index)) {
+                Result.Ok(value) => {
+                    sum = sum + value;
+                },
+                Result.Err(_) => {
+                    failures = failures + 1;
+                },
+            }
+        }
+        console.print_line("sum " + sum.to_string());
+        console.print_line("failures " + failures.to_string());
+        console.print_line("closes " + counter.closes.to_string());
+        console.print_line("weight " + counter.weight.to_string());
+        return program.ExitCode.Ok;
+    };
+);

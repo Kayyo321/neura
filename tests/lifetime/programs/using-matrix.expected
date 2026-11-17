@@ -1,0 +1,55 @@
+read returns
+close returns
+ok, close ok: ok 7
+read returns
+close returns
+ok, close fails: error returns failed to close
+close returns
+err, close ok: error the body failed
+close returns
+err, close fails: error closing the resource also failed: returns failed to close: the body failed
+read outer
+read inner
+close inner
+close outer
+nested ok: ok 10
+read outer
+read inner
+close inner
+close outer
+nested both fail after ok: error closing the resource also failed: outer failed to close: inner failed to close
+close inner
+close outer
+nested both fail after err: error closing the resource also failed: outer failed to close: closing the resource also failed: inner failed to close: the nested body failed
+read outer
+read inner
+close inner
+close outer
+nested inner fails: error inner failed to close
+read falls
+close falls
+after the block
+falls, close ok: ok 5
+read falls
+close falls
+falls, close fails: error falls failed to close
+close loop0
+end of iteration 0
+close loop1
+close loop2
+end of iteration 2
+close loop3
+loops, closes ok: ok 4
+close loop0
+end of iteration 0
+close loop1
+close loop2
+loops, close fails: error loop2 failed to close
+missing: error no such resource
+close propagates
+propagates, close ok: error no such resource
+close propagates
+propagates, close fails: error closing the resource also failed: propagates failed to close: no such resource
+read other
+close admitted
+redirected: ok 5

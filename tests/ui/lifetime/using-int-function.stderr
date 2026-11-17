@@ -1,0 +1,12 @@
+error[E0473]: 'using' needs a function that returns 'Result<T>'
+  --> $DIR/using-int-function.nra:11:5
+   |
+10 | let work = func() -> int {
+   |                      --- the function returns 'int32'
+11 |     using (source = open()) {
+   |     ^^^^^
+   |
+   = note: a failed close returns its error from the function
+   = help: return a Result, or move the block into a function or lambda that returns one
+
+For more information about this error, try `neura explain E0473`.

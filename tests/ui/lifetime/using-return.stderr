@@ -1,0 +1,11 @@
+error[E0475]: 'source' is closed at the end of its 'using' block and cannot be returned
+  --> $DIR/using-return.nra:12:16
+   |
+11 |     using (source = open()) {
+   |     ----- 'source' is bound here, and closed when this block is left
+12 |         return Result<Resource>.Ok(source);
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

@@ -1,0 +1,11 @@
+error[E0475]: 'log' is closed at the end of its 'using' block and cannot be captured by a task that is not joined inside the block: put the 'scope' inside the 'using' block
+  --> $DIR/using-spawn-outside.nra:20:13
+   |
+19 |         using (log = new Log()) {
+   |         ----- 'log' is bound here, and closed when this block is left
+20 |             spawn use(log);
+   |             ^^^^^^^^^^^^^^
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

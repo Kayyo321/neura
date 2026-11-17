@@ -1,0 +1,4 @@
+deferred in the scope, before the join
+joined with 500 lines
+closing the log after 500 lines
+ok 500

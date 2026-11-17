@@ -8,13 +8,15 @@ let Counter = class (
     export let init = func(label: string) -> void {
         name = label;
     };
+
     export let report = func(value: int) -> void {
         console.print_line(name + " reports " + value.to_string());
     };
+
     export let next = func(step: int) -> func(int) -> void {
         console.print_line(name + " next " + step.to_string());
         return func(value: int) -> void {
-            console.print_line("step " + (step + value).to_string());
+            console.print_line("step " +(step + value).to_string());
         };
     };
 );
@@ -55,6 +57,7 @@ let DeferCalls = module:program.Entry (
 
     // `a.b(c)(d)`: the inner call runs at the statement, the outer one at
     // the exit.
+
     let chained = func() -> void {
         let counter = new Counter("chain");
         defer counter.next(trace("inner", 10))(trace("outer", 5));
@@ -63,6 +66,7 @@ let DeferCalls = module:program.Entry (
 
     // A function value, a static function, a generic function with type
     // arguments, and an array of the block.
+
     let kinds = func(callback: func() -> void) -> void {
         defer callback();
         defer Registry.clear();

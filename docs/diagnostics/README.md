@@ -39,6 +39,7 @@ Errors about the grammar.
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
 | [E0219](E0219.md) | malformed defer statement |
+| [E0220](E0220.md) | malformed using statement |
 | [E0225](E0225.md) | positional argument after a named argument |
 | [E0226](E0226.md) | default value on a parameter that takes none |
 | [E0227](E0227.md) | malformed interpolated string |
@@ -124,6 +125,9 @@ Errors about types, values, calls, and statements.
 | [E0450](E0450.md) | a list literal without new |
 | [E0471](E0471.md) | deferred call with a result |
 | [E0472](E0472.md) | defer or using outside a function |
+| [E0473](E0473.md) | using in a function that cannot return a close error |
+| [E0474](E0474.md) | using resource that cannot be closed |
+| [E0475](E0475.md) | scoped resource leaves its using block |
 | [E0480](E0480.md) | conflicting inferred type arguments |
 | [E0481](E0481.md) | lambda does not fit its callable context |
 | [E0482](E0482.md) | unknown argument label |

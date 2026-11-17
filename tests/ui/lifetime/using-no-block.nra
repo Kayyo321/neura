@@ -1,0 +1,13 @@
+// Edge case 31: a 'using' needs its block.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let flush = func() -> void {};
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let open = func() -> Resource => new Resource();
+let work = func() -> Result<int> {
+    using (source = open())
+    return Result<int>.Ok(0);
+};

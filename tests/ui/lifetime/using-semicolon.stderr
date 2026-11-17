@@ -1,0 +1,12 @@
+error[E0220]: a 'using' block has no ';' after its '}'
+  --> $DIR/using-semicolon.nra:13:6
+   |
+13 |     };
+   |      ^ remove this ';'
+   |
+help: remove the ';'
+   |
+13 |     };
+   |      -
+
+For more information about this error, try `neura explain E0220`.

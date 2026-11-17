@@ -1,0 +1,25 @@
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The rule that combines the outcome of the work that used a resource with the result of closing it,
+/// as a `using` block applies it to the value a `return` carries (docs/design/Lifetime030.md). It is the rule of
+/// Std.Io.Closeable.release for a close that has already run; it lives here so that only a program that writes
+/// `using` loads it.
+export let CloseOutcome = module (
+    /// @brief The outcome when the close succeeded; the close error when it failed after an Ok; and when it
+    /// failed after an Err, a Context error whose cause is the outcome's error and whose message is "closing the
+    /// resource also failed: " and the close error's message.
+    #NoDiscard
+    export let close_outcome = func<T>(outcome: Result<T>, closing: Result<Unit>) -> Result<T> {
+        return match (closing) {
+            Result.Ok(_) => outcome,
+            Result.Err(failure) => match (outcome) {
+                Result.Ok(_) => Result<T>.Err(failure),
+                Result.Err(original) => Result<T>.Err(error.Error.Context {
+                    message: "closing the resource also failed: " + error.message(failure),
+                    cause: new error.ErrorLink(original) }),
+            },
+        };
+    };
+);

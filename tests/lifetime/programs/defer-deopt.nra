@@ -19,6 +19,7 @@ let Square = class:Shape (
         super.init();
         side = length;
     };
+
     export let.override area = func() -> int {
         return side * side;
     };
@@ -30,6 +31,7 @@ let Strip = class:Shape (
         super.init();
         length = size;
     };
+
     export let.override area = func() -> int {
         return length + 1;
     };

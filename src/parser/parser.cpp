@@ -1269,6 +1269,8 @@ private:
             result.body = block();
         } else if (at_defer_statement()) {
             result = defer_statement();
+        } else if (at_using_statement()) {
+            result = using_statement();
         } else if (at_contextual("select") && next_is(1, "{")) {
             result.kind = Statement::Kind::Select;
             result.keyword = advance().span;

@@ -15,6 +15,7 @@
 #include "purity.hpp"
 #include "reference_initialization.hpp"
 #include "reference_storage.hpp"
+#include "scoped_resources.hpp"
 #include "static_initialization.hpp"
 #include "tags.hpp"
 #include "parser/syntax.hpp"
@@ -477,7 +478,10 @@ private:
     void lower_defer(std::vector<IrNode>& instructions, const Statement& stmt, Context& context);
     void require_function_block(const Span& keyword, std::string_view word, const Context& context);
     void hoist_operands(IrNode& call, std::vector<IrNode>& saved, std::size_t number, const Context& context);
+    IrNode lower_using(const Statement& stmt, Context& context);
     std::size_t lifetime_statements_ = 0;
+    // The `$resume` methods of generators, whose bodies hold no `using`.
+    std::set<SymbolId> generator_bodies_;
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
@@ -4245,7 +4249,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         require_function_block(stmt.keyword, "defer", context);
         throw Diagnostic(stmt.span, "'defer' requires a statement list").with_code("E0899");
     case StmtKind::Using:
-        throw Diagnostic(stmt.span, "'using' is not lowered yet").with_code("E0899");
+        return lower_using(stmt, context);
     case StmtKind::While: {
         auto result = node(IrOp::Loop, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
@@ -5209,6 +5213,9 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
         }
     }
     check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    // A `using` resource does not escape its block (Lifetime030.md), judged
+    // with the retention summaries of the linked program.
+    check_scoped_resources(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
     return std::move(program_);
 }
 

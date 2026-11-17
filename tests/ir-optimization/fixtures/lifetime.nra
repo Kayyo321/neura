@@ -6,10 +6,11 @@ let Lifetime = module (
     export let trace: int64 = 0;
 
     export let mark = func(tag: int8) -> void {
-        trace = (trace % 1000000000000) * 1000 + (tag as int64) + 500;
+        trace =(trace % 1000000000000) * 1000 +(tag as int64) + 500;
     };
 
     // The argument is saved at the statement; the later store must stay.
+
     export let saved_argument = func(value: int8) -> int64 {
         trace = 0;
         let copy: int8 = value;
@@ -21,6 +22,7 @@ let Lifetime = module (
 
     // The returned value is computed before the deferred calls run, last
     // first, and a copy of it is not propagated past them.
+
     export let held_return = func(value: int8) -> int64 {
         trace = 0;
         {
@@ -36,6 +38,7 @@ let Lifetime = module (
 
     // A loop runs its body's deferred call at the end of every iteration,
     // and on break and continue.
+
     export let loop_exits = func(limit: int8) -> int64 {
         trace = 0;
         let index: int8 = 0;

@@ -7,10 +7,12 @@ let Log = class (
     export let init = func() -> void {
         lines = new string[list]();
     };
+
     export let write = func(line: string) -> void {
         console.print_line(line);
         lines.append(line);
     };
+
     export let count = func() -> int {
         return lines.length;
     };
@@ -29,6 +31,7 @@ let DeferOrder = module:program.Entry (
     };
 
     // Two defers in one block run last in, first out.
+
     let two = func() -> void {
         defer show("first", 1);
         defer show("second", 2);
@@ -36,6 +39,7 @@ let DeferOrder = module:program.Entry (
     };
 
     // The arguments are read at the statement.
+
     let saved = func() -> void {
         let n = 1;
         defer show("saved", n);
@@ -44,6 +48,7 @@ let DeferOrder = module:program.Entry (
     };
 
     // The returned value is computed first, then the deferred call runs.
+
     let held = func() -> int {
         defer show("after compute", 0);
         return compute(21);
@@ -51,6 +56,7 @@ let DeferOrder = module:program.Entry (
 
     // A loop body runs its deferred call at the end of each iteration, and
     // on break and continue.
+
     let loop = func() -> void {
         for (let index = 0; index < 4; index++) {
             defer show("iteration end", index);
@@ -65,6 +71,7 @@ let DeferOrder = module:program.Entry (
     };
 
     // A defer in one branch runs at the end of that branch.
+
     let branch = func(flag: bool) -> void {
         if (flag) {
             defer show("then end", 1);
@@ -76,6 +83,7 @@ let DeferOrder = module:program.Entry (
     };
 
     // A defer after a return that is taken is never registered.
+
     let early = func(flag: bool) -> int {
         defer show("early outer", 0);
         if (flag) {
@@ -86,6 +94,7 @@ let DeferOrder = module:program.Entry (
     };
 
     // A defer in a lambda belongs to the lambda's block.
+
     let lambda = func() -> void {
         let run = func(value: int) -> void {
             defer show("lambda end", value);
