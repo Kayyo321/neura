@@ -116,6 +116,7 @@ A refusal changes nothing. Installing a different version beside an existing one
     share/neura/stdlib/...
     share/doc/neura/LICENSE
     lib/neura/launchers/<target>/...      where the platform has launchers
+    bin/neurad                  the runtime service, only with the service component
 <root>/current                  symbolic link: versions/<version>
 <bin dir>/neura                 symbolic link: <root>/current/bin/neura
 ```
@@ -141,6 +142,8 @@ The running `neura` resolves the real path of its executable. If that path is `<
 | a package manager's name, such as `homebrew` or `deb` | The package manager owns the files | Exit with status 3 and name the package manager. |
 | `unmanaged` | No marker | Exit with status 3 and explain that the tool was probably built from source or copied. |
 | a marker that is not valid | Damaged | Exit with status 1 and name the problem. |
+
+The optional runtime service keeps nothing under the root. Its socket is in `$XDG_RUNTIME_DIR/neura/` (or `${TMPDIR:-/tmp}/neura-<uid>/neura/`), its application records and log in `${XDG_STATE_HOME:-~/.local/state}/neura/<id>/<generation>/`, and `neura runtime enable` writes `~/.config/systemd/user/neurad-<id>.service` (`~/Library/LaunchAgents/net.neura.neurad-<id>.plist` on macOS), where `<id>` names the install root ([runtime service files](runtime/Service.md#files)). An SDK install has no `neurad`; `cmake --install build --component service` adds it to a prefix.
 
 ## Check an install
 

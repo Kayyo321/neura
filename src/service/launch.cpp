@@ -12,8 +12,6 @@
 #include <sys/resource.h>
 #include <unistd.h>
 
-extern char** environ;
-
 namespace neura::service {
 
 namespace {
@@ -75,7 +73,7 @@ Envelope make_envelope(const cli::Options& options, std::span<const std::uint8_t
     envelope.image_size = bytes.size();
     envelope.image_path = options.files.front().string();
     envelope.arguments = options.arguments;
-    for (char** entry = environ; entry && *entry; ++entry) envelope.environment.emplace_back(*entry);
+    for (char** entry = process_environment(); entry && *entry; ++entry) envelope.environment.emplace_back(*entry);
     for (const auto name : mode_variables) {
         for (const auto& entry : envelope.environment) {
             if (entry.size() > name.size() && entry.compare(0, name.size(), name) == 0 && entry[name.size()] == '=') {

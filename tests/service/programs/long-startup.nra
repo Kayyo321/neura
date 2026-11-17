@@ -1,0 +1,23 @@
+// Spends its startup filling a table in a module initializer, then prints
+// one entry: a program whose time before main is long.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let fill = func -> int[list] {
+    let table: int[list] = new;
+    let i = 0;
+    while (i < 2000000) {
+        table.append((i * 7) % 1000);
+        i = i + 1;
+    }
+    return table;
+};
+
+let table = fill();
+
+export let LongStartup = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(table[12345].to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -33,8 +33,6 @@
 #include <sys/event.h>
 #endif
 
-extern char** environ;
-
 namespace neura::service {
 
 namespace {
@@ -141,11 +139,7 @@ int worker_main(const std::vector<std::string>& arguments) {
         auto& fds = assignment->descriptors;
 
         // 1. The caller's environment, whole, before anything reads it.
-#if defined(__linux__)
-        ::clearenv();
-#else
-        environ = nullptr;
-#endif
+        clear_environment();
         for (const auto& entry : envelope.environment) ::putenv(::strdup(entry.c_str()));
         nvm::bind_environment();
 
@@ -317,7 +311,7 @@ WorkerProcess spawn_worker(const fs::path& neurad, const std::string& build, con
     }
     pid_t pid = -1;
     const int error = ::posix_spawn(&pid, neurad.c_str(), &actions, &attributes, argv.data(),
-                                    environment ? envp.data() : environ);
+                                    environment ? envp.data() : process_environment());
     for (const auto& [resource, previous] : saved) ::setrlimit(resource, &previous);
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attributes);

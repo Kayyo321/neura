@@ -160,6 +160,12 @@ std::vector<std::string> live_generations(const Installation& installation);
 // Every generation that has a state directory.
 std::vector<std::string> recorded_generations(const Installation& installation);
 
+// This process's environment, as `environ` holds it; macOS reaches it
+// through _NSGetEnviron from a shared library.
+char** process_environment();
+// Removes every variable of this process's environment.
+void clear_environment();
+
 // --- Process settings --------------------------------------------------------
 
 // The settings of this process that a launch carries: umask, soft and hard

@@ -27,6 +27,11 @@
 #include <link.h>
 #include <sys/random.h>
 #endif
+#if defined(__APPLE__)
+#include <crt_externs.h>
+#else
+extern char** environ;
+#endif
 
 namespace neura::service {
 
@@ -434,6 +439,27 @@ std::vector<std::string> recorded_generations(const Installation& installation) 
     }
     std::ranges::sort(generations);
     return generations;
+}
+
+char** process_environment() {
+#if defined(__APPLE__)
+    return *_NSGetEnviron();
+#else
+    return environ;
+#endif
+}
+
+void clear_environment() {
+#if defined(__linux__)
+    ::clearenv();
+#else
+    std::vector<std::string> names;
+    for (char** entry = process_environment(); entry && *entry; ++entry) {
+        const std::string_view text(*entry);
+        names.emplace_back(text.substr(0, text.find('=')));
+    }
+    for (const auto& name : names) ::unsetenv(name.c_str());
+#endif
 }
 
 // --- Process settings -----------------------------------------------------------

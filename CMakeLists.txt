@@ -1238,8 +1238,10 @@ if(BUILD_TESTING AND NEURA_SDK)
         neura_target_defaults(neura_service_environment_tests)
         add_test(NAME service-unit-environment COMMAND neura_service_environment_tests)
     endif()
-    if(NOT WIN32)
-        # A test driver that plays the supervisor of one worker.
+    if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        # A test driver that plays the supervisor of one worker. The suites
+        # read /proc and use memfd_create: Linux is the qualified platform.
+        # On macOS the service builds but these suites do not run.
         add_executable(neura_service_worker_driver tests/service/worker_driver.cpp)
         target_link_libraries(neura_service_worker_driver PRIVATE neura_cli_core)
         target_include_directories(neura_service_worker_driver PRIVATE src)
@@ -1248,13 +1250,13 @@ if(BUILD_TESTING AND NEURA_SDK)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" worker "$<TARGET_FILE_DIR:neura>"
             "$<TARGET_FILE:neura_service_worker_driver>")
         set_tests_properties(service-worker PROPERTIES TIMEOUT 600)
+        # The service end to end, one suite per test (tests/service/service.py).
+        foreach(suite IN ITEMS cli-options off-default protocol run parity control login isolation)
+            add_test(NAME service-${suite} COMMAND "${Python3_EXECUTABLE}"
+                "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" ${suite} "$<TARGET_FILE_DIR:neura>")
+            set_tests_properties(service-${suite} PROPERTIES TIMEOUT 600)
+        endforeach()
     endif()
-    # The service end to end, one suite per test (tests/service/service.py).
-    foreach(suite IN ITEMS cli-options off-default protocol run parity control login)
-        add_test(NAME service-${suite} COMMAND "${Python3_EXECUTABLE}"
-            "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" ${suite} "$<TARGET_FILE_DIR:neura>")
-        set_tests_properties(service-${suite} PROPERTIES TIMEOUT 600)
-    endforeach()
 
     # The install lifecycle (docs/Install.md): version source, the data
     # formats, and the commands against an install made from a release

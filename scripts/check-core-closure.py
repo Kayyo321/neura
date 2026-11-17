@@ -5,7 +5,8 @@
 
 The core component (docs/design/Products030.md) holds `neura`, `neura-run`,
 `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall` and the
-shared library `lib/neura/libneura-core-<version>`. A static library
+shared library `lib/neura/libneura-core-<version>`; `neurad`, of the
+service component, is held to the same rule when it is built. A static library
 contributes an object file to a binary only to define a global symbol the
 binary needs, so an object of a compiler library is in a binary exactly when
 one of its global definitions is. This script lists the global definitions
@@ -29,6 +30,9 @@ import sys
 from pathlib import Path
 
 CORE_TOOLS = ["neura", "neura-run", "neura-inspect", "neura-doctor", "neura-update", "neura-uninstall"]
+# The service component (docs/design/Service030.md) links the execution core
+# only, like the core tools; it is checked when it is built.
+SERVICE_TOOLS = ["neurad"]
 SDK_LIBRARIES = [
     "libneura_compiler.a",
     "libneura_decompiler.a",
@@ -114,7 +118,8 @@ def main() -> int:
     if not core_shared:
         print(f"FAIL {build}/lib/neura holds no libneura-core")
         failed = True
-    for path in [build / tool for tool in CORE_TOOLS] + core_shared:
+    service = [build / tool for tool in SERVICE_TOOLS if (build / tool).exists()]
+    for path in [build / tool for tool in CORE_TOOLS] + service + core_shared:
         name = path.name
         if not path.exists():
             print(f"FAIL {name}: not built in {build}")

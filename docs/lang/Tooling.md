@@ -61,7 +61,7 @@ A tool's first argument may name one of its commands; otherwise it runs its firs
 neura: error: 'neura build' needs neurac, which is not in /opt/neura/bin; it is part of the Neura-sdk component. Install the SDK, or reinstall Neura
 ```
 
-A tool started by a `neura` of another build refuses to run, so a directory of tools from different builds cannot mix them silently. `neura runtime` belongs to the runtime service component, which is not part of this release; it reports that component missing. `capabilities --json` reports a feature whose tool is missing as `false`.
+A tool started by a `neura` of another build refuses to run, so a directory of tools from different builds cannot mix them silently. `neura runtime` is `neura-run runtime` and belongs to the runtime service component, `neurad` ([Run through the runtime service](#run-through-the-runtime-service)); without `neurad` next to `neura` it reports that component missing. `capabilities --json` reports a feature whose tool is missing as `false`, and has a `service` member that says whether `neurad` is installed.
 
 The tools share their code through two libraries in `lib/neura`, named with the full version: `libneura-core-<version>` (the image format, the runner and every execution tier) and `libneura-sdk-<version>` (the compiler, the decompiler, and the editor tools), which needs the core library. Each tool finds them relative to its own executable, so an installation can be moved as a whole, and the build directory holds them in its own `lib/neura`. The tools form two install components. The **core** (`neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, and `libneura-core`) runs images and loads no compiler code. The **SDK** adds the compiler and the other tools, `libneura-sdk`, the standard library, and the native launchers. `cmake --install build --component core --prefix <dir>` installs only the core; without `--component`, both are installed. Configuring with `-DNEURA_SDK=OFF` builds only the core, without the libclang submodule.
 
@@ -101,6 +101,21 @@ Capability options apply in command-line order, and a later option for a group o
 `neura run --record trace.txt` writes every host request and response, and how the run ended, to a text trace. `neura run --replay trace.txt` runs the image answering each request from the trace instead of calling any service, so it needs no capability, and reproduces the console output of the recorded run. A replay whose requests differ from the trace stops with status 1 and names the first difference. The trace of a program with tasks also records which task issued each request, when each overlapping request was answered, and the clock readings that expired a timer or a deadline, so its replay reproduces the schedule; such a trace carries the quantum and the task limits of the recorded run, and a replay uses them in place of its own options. [NVM](../runtime/NVM.md#determinism-limits-and-observability) describes the trace format.
 
 [Neuron conversion and execution](../Backend.md) lists the supported operations and the build diagnostics for unsupported ones. The status of each example is in [Feature status](Status.md).
+
+### Run through the runtime service
+
+`neura run` runs an image in a new process of its own, and nothing changes that default: no environment variable or configuration file makes it use a service. `--runtime=auto` or `--runtime=required` on the command runs the image through `neurad`, the optional per-user [runtime service](../runtime/Service.md), which keeps a worker process ready and the image bytes cached, and starts on demand. The output, status, traps, `--stats`, `--profile` and `--tier-stats` counts are those of a direct run.
+
+```sh
+neura run --runtime=auto app.nvr -- one two        # through the service, or directly
+neura run --runtime=required app.nvr               # through the service, or status 5
+neura run --runtime=required --detach --stdout=out.log --stderr=err.log app.nvr
+neura runtime ps
+neura runtime stop <id>
+neura runtime shutdown
+```
+
+`auto` runs directly, after one line `neura: runtime: running directly: <reason>` on standard error, when the service is not installed, cannot start within 2 seconds, refuses the launch for capacity or a setting it cannot reproduce, or does not support an option: `--each`, `--record`, `--replay` and a graph device are direct only. `required` exits with status 5 instead, and so does every launch when another user's or another build's supervisor answers or the image changes while it is launched. Once the launch is committed it is never run directly: when the connection ends before the outcome, the command asks the service for its record and, if no answer comes, exits with status 6. `--detach --stdout=FILE --stderr=FILE [--stdin=FILE]` prints the application's ID and exits once the launch is committed; the files are opened for appending, and the input is empty without `--stdin`. `--runtime-report=FILE` writes the path taken and the launch's times as JSON, also for a direct run. `neura test --runtime=...` is a usage error; tests and debugging are direct. The [runtime service page](../runtime/Service.md) lists the `neura runtime` commands, the files, and what a service launch does not inherit from the caller (its session, controlling terminal, descriptors above 2, and control group).
 
 ### Run programs with tasks
 
@@ -289,6 +304,8 @@ Each status below is the tool's own. The exit status of a program that `neura ru
 | 1 | A usage error, an unknown command or option, a diagnostic in the source, an image that fails to load or bind, a failed test, or a failed `update` or `uninstall` | [Errors](Errors.md) |
 | 3 | `update` or `uninstall` on an install that `neura update` does not manage | [Install](../Install.md) |
 | 4 | `update --check` found a newer version | [Install](../Install.md) |
+| 5 | `run --runtime=...` or `neura runtime`: the service ran nothing and nothing was started | [Runtime service](../runtime/Service.md#statuses-and-messages) |
+| 6 | `run --runtime=...`: the launch was committed and its outcome is unknown; it was not run again | [Runtime service](../runtime/Service.md#statuses-and-messages) |
 | 128 and above from `run` | The program's trap class, such as 136 for an arithmetic trap or 134 for a message trap, or the program's own `ExitCode` | [Errors](Errors.md), [Program entry](Modules.md#program-entry) |
 
 ## Execution contract

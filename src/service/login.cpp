@@ -14,8 +14,6 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
-extern char** environ;
-
 namespace neura::service {
 
 namespace {
@@ -53,7 +51,7 @@ int run_program(const fs::path& program, const std::vector<std::string>& argumen
     for (auto& argument : owned) argv.push_back(argument.data());
     argv.push_back(nullptr);
     pid_t pid = -1;
-    const int error = ::posix_spawn(&pid, program.c_str(), &actions, nullptr, argv.data(), environ);
+    const int error = ::posix_spawn(&pid, program.c_str(), &actions, nullptr, argv.data(), process_environment());
     posix_spawn_file_actions_destroy(&actions);
     if (error != 0) return 127;
     int status = 0;

@@ -71,6 +71,7 @@ GENERATED: dict[str, str] = {
     "docs/lang/Tutorial.md": "Tutorial",
     "docs/lang/Types.md": "Types",
     "docs/runtime/NVM.md": "NVM",
+    "docs/runtime/Service.md": "Service",
     "docs/runtime/Kernels.md": "Kernels",
     "docs/runtime/NVR.md": "NVR",
     "docs/style/CodingStyle.md": "CodingStyle",

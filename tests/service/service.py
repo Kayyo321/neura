@@ -275,7 +275,9 @@ def region_image(work: Work) -> str:
 
 def tier_lines(stderr: bytes) -> list[bytes]:
     """The --tier-stats report without its wall times."""
-    return [line for line in stderr.splitlines() if line.startswith(b"tier: ") and not line.startswith(b"tier: time:")]
+    # The proof and search times of the first line are wall times too.
+    return [re.sub(rb"[0-9.]+ ms", b"<t> ms", line) for line in stderr.splitlines()
+            if line.startswith(b"tier: ") and not line.startswith(b"tier: time:")]
 
 
 def without_times(stderr: bytes) -> bytes:
@@ -609,9 +611,9 @@ def protocol_suite(work: Work) -> None:
     os.close(fd)
     os.close(cwd)
     reply = connection.receive()
-    check(reply.kind == "Rejected" and reply.text("Reason") in ("token-expired", "token-unknown")
+    check(reply.kind == "Rejected" and reply.text("Reason") == "token-expired"
           and reply.number("NotStarted") == 1 and output.read_bytes() == b"Hello, World!\n",
-          f"case 15: a late Commit is refused and nothing runs ({reply.text('Reason')})")
+          f"case 15: a late Commit is token-expired and nothing runs ({reply.text('Reason')})")
 
     # Case 14: seventeen Prepares without Commit; released after the reservation time.
     replies = []
@@ -774,7 +776,7 @@ def protocol_suite(work: Work) -> None:
     service.process.wait()
 
     # Case 44: a worker that never reports ready.
-    service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "ready=400,never-ready=1"})
+    service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "ready=1500,never-ready=1"})
     connection = service.hello()
     fd = os.open(os.devnull, os.O_WRONLY)
     committed, _ = launch(service, connection, hello_image, hello_path, fd)
@@ -818,6 +820,10 @@ def assigned_workers(work: Work) -> list[int]:
         if b"--worker" in command and state != "Z" and os.getpgid(pid) == pid:
             found.append(pid)
     return found
+
+
+def neura_path_of(work: Work) -> Path:
+    return work.neura
 
 
 def kill_supervisors(work: Work, foreground_only: bool = False) -> None:
@@ -910,6 +916,18 @@ def run_suite(work: Work) -> None:
               and path_taken() == "direct-fallback", f"case 58: {label} with auto runs directly with the line")
     status, out, err = neura_run(["--runtime=required", "--replay", str(trace), hello])
     check(status == 5 and b"--replay is not supported" in err, "case 58: --replay with required is status 5")
+
+    # An image inside a native executable: the client extracts it.
+    native = work.root / "native-exit"
+    built = subprocess.run([str(neura_path_of(work)), "build", "--native", str(PROGRAMS / "exit-status.nra"), "-o",
+                            str(native)], capture_output=True, env=work.env, cwd=work.root)
+    if built.returncode == 0:
+        expected = neura_run([str(native), "--", "3", "x"])
+        got = neura_run(["--runtime=required", f"--runtime-report={report}", str(native), "--", "3", "x"])
+        check(got == expected and expected[0] == 3 and path_taken().startswith("service"),
+              "an image inside a native executable runs through the service as directly")
+    else:
+        print("skip: no native launcher in this build:", built.stderr.decode()[:200])
 
     # Case 23: an image that fails validation.
     bad = work.root / "bad.nvr"
@@ -1362,6 +1380,32 @@ def login_suite(work: Work) -> None:
         check(status == 0 and not unit.exists(), f"case 54: disable {attempt} succeeds")
     check(f"--user disable neurad-{service.installation}.service" in calls.read_text(), "disable asks systemctl to disable")
 
+    # Cases 1 and 2 with a supervisor running and login start registered:
+    # the defaults stay direct and make no connection.
+    runtime(work, neura, "enable", env=env)
+    service.start()
+    control = service.hello(purpose=2)
+    before = accepted_connections(control)
+    result = subprocess.run([str(neura), "run", hello], capture_output=True, env=work.env, cwd=work.root)
+    check((result.returncode, result.stdout, result.stderr) == (0, b"Hello, World!\n", b""),
+          "case 1: plain neura run with a supervisor running and login start registered")
+    tests = work.root / "suite.nra"
+    tests.write_text("let test = import:Std.Test;\n\nlet Suite = module (\n"
+                     "    export let test_adds = func() -> void {\n        test.assert(1 + 1 == 2);\n    };\n);\n")
+    result = subprocess.run([str(neura), "test", str(tests)], capture_output=True, env=work.env, cwd=work.root)
+    check(result.returncode == 0, "case 2: plain neura test with a supervisor running")
+    ended, _ = debug_session(work, HELLO)
+    check(ended, "case 2: a debug launch with a supervisor running")
+    after = accepted_connections(control)
+    control.send("List", [])
+    listing = control.receive()
+    check(after == before and listing.number("ApplicationCount") == 0 and not listing.all("Record"),
+          f"case 1: the supervisor saw no connection and no application ({before} then {after})")
+    control.close()
+    service.process.kill()
+    service.process.wait()
+    runtime(work, neura, "disable", env=env)
+
     # Case 61: neura capabilities reads files only.
     def capabilities(neura_path: Path) -> dict:
         result = subprocess.run([str(neura_path), "capabilities", "--json"], capture_output=True, env=work.env)
@@ -1371,6 +1415,7 @@ def login_suite(work: Work) -> None:
     os.chmod(service.directory.parent, 0o700)
     os.chmod(service.directory, 0o700)
     listener = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM)
+    service.socket.unlink(missing_ok=True)
     listener.bind(str(service.socket))
     listener.listen(4)
     listener.setblocking(False)
@@ -1449,6 +1494,88 @@ def parity_suite(work: Work) -> None:
           "the identity cases through the service equal the direct run's: output, status, traps, steps, profile")
 
 
+def isolation_suite(work: Work) -> None:
+    """Cases 26 and 27 through one supervisor, and the isolation gate."""
+    report = work.root / "report.json"
+    image = program(work, "exit-status")
+
+    def through(arguments, env):
+        result = subprocess.run([str(work.neura), "run", "--runtime=required", f"--runtime-report={report}",
+                                 *arguments], capture_output=True, env=env, cwd=work.root, timeout=60)
+        return result.returncode, result.stdout, result.stderr, json.loads(report.read_text())
+
+    # The supervisor's own environment says NEURA_JIT=off and NEURA_TIER3=off.
+    service = pc.Service(work.bin, work.env)
+    service.start(extra_env={"NEURA_JIT": "off", "NEURA_TIER3": "off"})
+    control = service.hello(purpose=2)
+    for variables in ({"NEURA_TIER3": "off"}, {"NEURA_TIER3": "native"}, {"NEURA_TIER3": "interp"},
+                      {"NEURA_JIT": "on"}, {}):
+        env = dict(work.env, **variables)
+        wait_until(lambda: listing_value(control, "ReadyWorkers") == 1)
+        status, out, err, data = through(["--tier-stats", image, "--", "0"], env)
+        direct = subprocess.run([str(work.neura), "run", "--tier-stats", image, "--", "0"], capture_output=True,
+                                env=env, cwd=work.root)
+        check(status == 0 and data["path"] == "service-warm" and tier_lines(err) == tier_lines(direct.stderr)
+              and tier_lines(err), f"cases 26, 27: {variables or 'nothing set'} through one warm supervisor shows "
+                                   f"the caller's mode ({data['path']})")
+
+    # Simultaneous launches that write globals, statics and files.
+    state = program(work, "state")
+    processes = []
+    for index in range(8):
+        processes.append(subprocess.Popen([str(work.neura), "run", "--runtime=required", state, "--",
+                                           f"launch{index}", f"file{index}.txt"], stdin=subprocess.PIPE,
+                                          stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env,
+                                          cwd=work.root))
+    check(wait_until(lambda: len(assigned_workers(work)) == 8 and all(
+        (work.root / f"file{i}.txt").exists() for i in range(8))), "isolation: eight launches run at once")
+    pids = set(assigned_workers(work))
+    results = [process.communicate(b"\n", timeout=60) for process in processes]
+    check(all(out == f"launch{i}: launches 1, count 1000\n".encode() for i, (out, _) in enumerate(results)),
+          "isolation: each launch has its own globals and statics")
+    check(all((work.root / f"file{i}.txt").read_text() == f"launch{i}" for i in range(8)),
+          "isolation: each launch wrote its own file")
+    seen = set(pids)
+    for _ in range(4):
+        process = subprocess.Popen([str(work.neura), "run", "--runtime=required", state, "--", "again", "again.txt"],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=work.env, cwd=work.root)
+        wait_until(lambda: assigned_workers(work))
+        current = set(assigned_workers(work))
+        out, _ = process.communicate(b"\n", timeout=60)
+        check(not current & seen and out == b"again: launches 1, count 1000\n",
+              "isolation: a worker's process ID is never seen again, and a new launch starts from zero")
+        seen |= current
+    startup = program(work, "startup-trap")
+    first = subprocess.run([str(work.neura), "run", "--runtime=required", startup], capture_output=True, env=work.env)
+    second = subprocess.run([str(work.neura), "run", "--runtime=required", f"--runtime-report={report}", startup],
+                            capture_output=True, env=work.env)
+    direct = subprocess.run([str(work.neura), "run", startup], capture_output=True, env=work.env)
+    check((first.returncode, first.stderr) == (second.returncode, second.stderr) == (direct.returncode, direct.stderr)
+          and json.loads(report.read_text())["state"] == "trapped",
+          "case 42: a trap in startup; the next launch of the image runs startup again and traps the same way")
+    after = subprocess.run([str(work.neura), "run", "--runtime=required", state, "--", "clean", "clean.txt"],
+                           input=b"\n", capture_output=True, env=work.env, cwd=work.root)
+    check(after.stdout == b"clean: launches 1, count 1000\n", "isolation: a launch after a trapped one starts clean")
+    service.process.kill()
+    service.process.wait()
+
+
+def listing_value(connection, tag: str) -> int | None:
+    connection.send("List", [])
+    reply = connection.receive()
+    return reply.number(tag) if reply is not None else None
+
+
+def accepted_connections(connection) -> int:
+    connection.send("List", [])
+    reply = connection.receive()
+    for value in reply.all("Limit"):
+        if value[8:] == b"connections-accepted":
+            return int.from_bytes(value[:8], "little")
+    return -1
+
+
 def socket_file(path: Path) -> bool:
     """Leaves a socket file with nothing listening, as a killed supervisor does."""
     import socket as sockets
@@ -1467,6 +1594,7 @@ SUITES = {
     "parity": parity_suite,
     "control": control_suite,
     "login": login_suite,
+    "isolation": isolation_suite,
 }
 
 

@@ -17,8 +17,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-extern char** environ;
-
 namespace neura::service {
 
 using Millis = std::chrono::milliseconds;
@@ -121,7 +119,7 @@ bool start_supervisor(const Installation& installation, const fs::path& log, boo
     for (auto& argument : arguments) argv.push_back(argument.data());
     argv.push_back(nullptr);
     pid_t pid = -1;
-    const int error = ::posix_spawn(&pid, neurad.c_str(), &actions, &attributes, argv.data(), environ);
+    const int error = ::posix_spawn(&pid, neurad.c_str(), &actions, &attributes, argv.data(), process_environment());
     posix_spawn_file_actions_destroy(&actions);
     posix_spawnattr_destroy(&attributes);
     return error == 0;

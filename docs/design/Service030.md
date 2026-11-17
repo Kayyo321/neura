@@ -2,7 +2,7 @@
 
 This note fixes the design of the 0.3.0 runtime service milestone: the per-user service `neurad`, its local protocol, one worker process per application, foreground and detached launches, a pool of ready workers that are each used once, a bounded cache of image bytes, and the `--runtime=off|auto|required` modes of `neura run`. It builds on the products, executables and service defaults that [the 0.3.0 baseline](Release030.md#run-and-service-defaults) froze, and assumes the split into sibling executables of [that page's table](Release030.md#products-and-executables): `neura` dispatches, `neura-run` runs images, and `neurad` is an optional component. Installing, updating and removing the service component belong to the lifecycle note of the same release (`docs/design/Lifecycle030.md`). Rows move to [Tooling](../lang/Tooling.md), [NVM](../runtime/NVM.md), [Install](../Install.md) and a new page `docs/runtime/Service.md` in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+Status: *proposed* on 2026-11-17, and *implemented* as written in the changes that followed this note, except where a row or a decision below says otherwise. The owner was away and had asked for autonomous work toward 0.3.0, so the rows await the owner's confirmation; "proposed" stays until then. Later changes to a row are made here, with the reason. The user-facing page is [the runtime service](../runtime/Service.md).
 
 The service is a way to launch an image. It adds no language rule, no NeuraIR or NVR revision, and no operation. An image runs the same under it as under a direct run, and every program that does not ask for it never meets it.
 
@@ -11,13 +11,13 @@ The service is a way to launch an image. It adds no language rule, no NeuraIR or
 | Rule | Status |
 | --- | --- |
 | The defaults are those of the baseline and stay direct: `neura run`, `neura-run`, `neura test`, `neura debug` and the editor run in a new process of their own and neither look for, contact nor start a service, whether or not one is running or registered to start at login. No environment variable and no configuration file changes this; only `--runtime=auto` or `--runtime=required` on the command does. | frozen by the baseline |
-| An application is one execution of one image. Each application runs in its own worker process, never in the supervisor and never in a process that has run or will run another application. | proposed |
-| Nothing that an application made is reused: no heap, global, static, startup result, class or module guard, handle, host response, open resource, loaded native library, lifted block, region, function program or machine code. Startup runs in full for every application. | proposed |
-| What may be shared is the bytes of an image, read-only, and work the worker did before it knew which application it would run and that depends on nothing the caller supplies. | proposed |
-| Whatever the caller's process would have given a direct run, the launch carries explicitly. The worker takes nothing from the supervisor's environment, working directory, streams or limits. | proposed |
-| A failure of the service, of the transport or of the host is reported as that, with its own exit status. It is never reported as a trap, a step limit or the program's own status. | proposed |
-| No application is started twice, restarted, replayed or adopted by another supervisor. When the service cannot say whether an application ran, it says so. | proposed |
-| The service is local to one user and one installation. It has no network listener, needs no elevation, and is no sandbox: a worker has the authority of the user, bounded by the capability policy of the launch exactly as a direct run is. | proposed |
+| An application is one execution of one image. Each application runs in its own worker process, never in the supervisor and never in a process that has run or will run another application. | proposed; implemented |
+| Nothing that an application made is reused: no heap, global, static, startup result, class or module guard, handle, host response, open resource, loaded native library, lifted block, region, function program or machine code. Startup runs in full for every application. | proposed; implemented |
+| What may be shared is the bytes of an image, read-only, and work the worker did before it knew which application it would run and that depends on nothing the caller supplies. | proposed; implemented |
+| Whatever the caller's process would have given a direct run, the launch carries explicitly. The worker takes nothing from the supervisor's environment, working directory, streams or limits. | proposed; implemented |
+| A failure of the service, of the transport or of the host is reported as that, with its own exit status. It is never reported as a trap, a step limit or the program's own status. | proposed; implemented |
+| No application is started twice, restarted, replayed or adopted by another supervisor. When the service cannot say whether an application ran, it says so. | proposed; implemented |
+| The service is local to one user and one installation. It has no network listener, needs no elevation, and is no sandbox: a worker has the authority of the user, bounded by the capability policy of the launch exactly as a direct run is. | proposed; implemented |
 
 ## Commands, protocol and files
 
@@ -28,20 +28,20 @@ The service is a way to launch an image. It adds no language rule, no NeuraIR or
 | Command | Does | Status |
 | --- | --- | --- |
 | `neura run --runtime=off IMAGE [-- ARGS]` | The default, written out. A direct run. | frozen by the baseline |
-| `neura run --runtime=required IMAGE [-- ARGS]` | Runs through the service of this installation, starting it when it is not running. Never runs directly. | proposed |
-| `neura run --runtime=auto IMAGE [-- ARGS]` | As `required`, but runs directly when the service is not installed, cannot start, has no capacity or does not support an option of the command, and only while nothing has been committed. | proposed |
-| `--detach --stdout=FILE --stderr=FILE [--stdin=FILE]` | With `auto` or `required` only. The command prints the application ID and a newline on standard output and exits with status 0 once the launch is committed. The files are opened by the client for appending, created with the caller's umask. Without `--stdin` the application reads an empty input. `--detach` never falls back to a direct run. | proposed |
-| `--runtime-report=FILE` | Writes one JSON object when the command ends: `schema` 1, the `path` taken (`direct`, `service-warm`, `service-fresh`, `direct-fallback`), the fallback or failure `reason`, the application ID, the terminal state, and the times of the launch phases. Accepted in every mode. | proposed |
-| `neura runtime start` | Starts the supervisor of the active generation if it is not running, and waits until it answers. | proposed |
-| `neura runtime status [--json]` | Says whether the service component is installed, whether a supervisor answers for each live generation, its state, epoch, ready workers, applications, cache bytes and whether login start is registered. Starts nothing. Exits 0 also when nothing is installed or running. | proposed |
-| `neura runtime ps [--json] [--all]` | Lists the applications of every live generation of this installation that are not terminal; `--all` adds the terminal records still kept. Starts nothing. | proposed |
-| `neura runtime inspect ID [--json]` | One application: its state, image path and digest, argument count, mode settings, limits, times and terminal outcome. Routed to the generation named in the ID; if that supervisor is gone, read from its records. Starts nothing. | proposed |
-| `neura runtime stop ID [--grace=SECONDS]` | Asks for the application's process group to be terminated: `SIGTERM`, then `SIGKILL` after the grace period (10 seconds by default, the baseline's row). Waits for the terminal state and prints it. | proposed |
-| `neura runtime shutdown [--generation=G] [--timeout=SECONDS] [--terminate]` | Each supervisor refuses new launches and exits when its applications have ended. After the timeout (60 seconds by default) the command reports the applications still running and exits with status 1; they keep running and the supervisor stays draining. `--terminate` stops them first, as `stop` does. | proposed |
-| `neura runtime enable`, `disable` | Register or remove the start of the supervisor at login. See [login start](#starting-retiring-and-login-start). `disable` stops nothing. | proposed |
-| `neura runtime cache clear` | Drops every cached image no running application uses. Stops nothing. | proposed |
-| `neurad --foreground --root ROOT` | The supervisor, in the foreground, for a service manager or a terminal. `neura runtime start` and an on-demand start run the same command, detached. | proposed |
-| `neurad --worker` | The worker entry. Private: it works only when started by a supervisor of the same build, and exits with status 1 and a message otherwise. | proposed |
+| `neura run --runtime=required IMAGE [-- ARGS]` | Runs through the service of this installation, starting it when it is not running. Never runs directly. | proposed; implemented |
+| `neura run --runtime=auto IMAGE [-- ARGS]` | As `required`, but runs directly when the service is not installed, cannot start, has no capacity or does not support an option of the command, and only while nothing has been committed. | proposed; implemented |
+| `--detach --stdout=FILE --stderr=FILE [--stdin=FILE]` | With `auto` or `required` only. The command prints the application ID and a newline on standard output and exits with status 0 once the launch is committed. The files are opened by the client for appending, created with the caller's umask. Without `--stdin` the application reads an empty input. `--detach` never falls back to a direct run. | proposed; implemented |
+| `--runtime-report=FILE` | Writes one JSON object when the command ends: `schema` 1, the `path` taken (`direct`, `service-warm`, `service-fresh`, `direct-fallback`), the fallback or failure `reason`, the application ID, the terminal state, and the times of the launch phases. Accepted in every mode. | proposed; implemented |
+| `neura runtime start` | Starts the supervisor of the active generation if it is not running, and waits until it answers. | proposed; implemented |
+| `neura runtime status [--json]` | Says whether the service component is installed, whether a supervisor answers for each live generation, its state, epoch, ready workers, applications, cache bytes and whether login start is registered. Starts nothing. Exits 0 also when nothing is installed or running. | proposed; implemented |
+| `neura runtime ps [--json] [--all]` | Lists the applications of every live generation of this installation that are not terminal; `--all` adds the terminal records still kept. Starts nothing. | proposed; implemented |
+| `neura runtime inspect ID [--json]` | One application: its state, image path and digest, argument count, mode settings, limits, times and terminal outcome. Routed to the generation named in the ID; if that supervisor is gone, read from its records. Starts nothing. | proposed; implemented |
+| `neura runtime stop ID [--grace=SECONDS]` | Asks for the application's process group to be terminated: `SIGTERM`, then `SIGKILL` after the grace period (10 seconds by default, the baseline's row). Waits for the terminal state and prints it. | proposed; implemented |
+| `neura runtime shutdown [--generation=G] [--timeout=SECONDS] [--terminate]` | Each supervisor refuses new launches and exits when its applications have ended. After the timeout (60 seconds by default) the command reports the applications still running and exits with status 1; they keep running and the supervisor stays draining. `--terminate` stops them first, as `stop` does. | proposed; implemented |
+| `neura runtime enable`, `disable` | Register or remove the start of the supervisor at login. See [login start](#starting-retiring-and-login-start). `disable` stops nothing. | proposed; implemented |
+| `neura runtime cache clear` | Drops every cached image no running application uses. Stops nothing. | proposed; implemented |
+| `neurad --foreground --root ROOT` | The supervisor, in the foreground, for a service manager or a terminal. `neura runtime start` and an on-demand start run the same command, detached. | proposed; implemented |
+| `neurad --worker` | The worker entry. Private: it works only when started by a supervisor of the same build, and exits with status 1 and a message otherwise. | proposed; implemented |
 
 `--json` output is one object with `"schema": 1`. A reader ignores members it does not know; a member is never removed or given another meaning without a new schema number.
 
@@ -51,10 +51,10 @@ The client parses the command with the code of a direct run (`read_options` and 
 
 | Option or mode | Through the service | Status |
 | --- | --- | --- |
-| Arguments after `--`, capability options, `--max-steps`, `--max-frames`, `--max-heap-cells`, `--max-stack-cells`, the task limits, `--task-quantum`, `--parallel-workers`, `--tier`, `--jit`, `--stats`, `--profile`, `--tier-stats`, `--task-dump`, `--trace-events`, `--trace-wall-time`, `--virtual-time` | Supported, with the meaning and output of a direct run | proposed |
-| An image inside a native executable | Supported as today: the client extracts the image, and the image is what runs | proposed |
-| `--each` (a fleet), `--record`, `--replay`, a graph device (`NEURA_GPU`, a GPU build's device options) | Not supported in 0.3.0. With `auto` the command runs directly; with `required` it fails before anything starts. | proposed |
-| `neura test --runtime=...`, `neura debug` with a service mode, and a debug launch from the editor with one | Rejected as a usage error. Tests and debugging are direct in 0.3.0. | proposed |
+| Arguments after `--`, capability options, `--max-steps`, `--max-frames`, `--max-heap-cells`, `--max-stack-cells`, the task limits, `--task-quantum`, `--parallel-workers`, `--tier`, `--jit`, `--stats`, `--profile`, `--tier-stats`, `--task-dump`, `--trace-events`, `--trace-wall-time`, `--virtual-time` | Supported, with the meaning and output of a direct run | proposed; implemented |
+| An image inside a native executable | Supported as today: the client extracts the image, and the image is what runs | proposed; implemented |
+| `--each` (a fleet), `--record`, `--replay`, a graph device (`NEURA_GPU`, a GPU build's device options) | Not supported in 0.3.0. With `auto` the command runs directly; with `required` it fails before anything starts. | proposed; implemented |
+| `neura test --runtime=...`, `neura debug` with a service mode, and a debug launch from the editor with one | Rejected as a usage error. Tests and debugging are direct in 0.3.0. | proposed; implemented for `neura test` and the debug adapter's launch request; the editor's launch setting is not (the extension is versioned apart and is not in this repository) |
 
 ### Files
 
@@ -62,10 +62,10 @@ The client parses the command with the code of a direct run (`read_options` and 
 
 | Path | Holds | Status |
 | --- | --- | --- |
-| `<run>/neura/<endpoint>/` | Mode 0700, owned by the user. `s`, the control socket (a Unix stream socket, mode 0600); `lock`, on which the supervisor holds an exclusive `flock` for its whole life; `start`, locked by a client while it starts a supervisor. | proposed |
-| `<run>` | `$XDG_RUNTIME_DIR` when it is set, absolute, owned by the user and mode 0700; otherwise `${TMPDIR:-/tmp}/neura-<uid>`, created mode 0700, and refused when it exists with another owner or mode or is a symbolic link. | proposed |
-| `${XDG_STATE_HOME:-$HOME/.local/state}/neura/<id>/<generation>/` | `records/<application ID>`, one small file per application, written whole and renamed into place at each change of state; `epoch-<epoch>`, the highest application number the epoch has issued; `log`, the supervisor's own log, at most 1 MiB and one rotated copy. | proposed |
-| Login start | `~/.config/systemd/user/neurad-<id>.service` on Linux; `~/Library/LaunchAgents/net.neura.neurad-<id>.plist` on macOS. | proposed |
+| `<run>/neura/<endpoint>/` | Mode 0700, owned by the user. `s`, the control socket (a Unix stream socket, mode 0600); `lock`, on which the supervisor holds an exclusive `flock` for its whole life; `start`, locked by a client while it starts a supervisor. | proposed; implemented |
+| `<run>` | `$XDG_RUNTIME_DIR` when it is set, absolute, owned by the user and mode 0700; otherwise `${TMPDIR:-/tmp}/neura-<uid>`, created mode 0700, and refused when it exists with another owner or mode or is a symbolic link. | proposed; implemented |
+| `${XDG_STATE_HOME:-$HOME/.local/state}/neura/<id>/<generation>/` | `records/<application ID>`, one small file per application, written whole and renamed into place at each change of state; `epoch-<epoch>`, the highest application number the epoch has issued; `log`, the supervisor's own log, at most 1 MiB and one rotated copy. | proposed; implemented |
+| Login start | `~/.config/systemd/user/neurad-<id>.service` on Linux; `~/Library/LaunchAgents/net.neura.neurad-<id>.plist` on macOS. | proposed; implemented; the macOS form untested |
 
 A client finds the supervisors of its installation by computing `<endpoint>` for each generation its install marker lists, and the records of generations that are gone by listing the state directory. A socket path longer than the platform allows, which needs a run directory of more than about 75 bytes, makes the service unavailable on that machine, with a message that names the path. Nothing mutable is written under the install root. No file holds an argument, an environment value or anything a program wrote. The image cache is in the supervisor's memory and has no file.
 
@@ -79,48 +79,49 @@ A message is `length:u32` (the bytes that follow, at most 1,048,576, the baselin
 
 | Kind | From | Carries | Status |
 | --- | --- | --- | --- |
-| `Hello` | client | Lowest and highest protocol major it speaks, its build, installation `<id>` and generation, whether it connects to launch or to control, the features it needs | proposed |
-| `Welcome` | supervisor | The protocol chosen, the service epoch (128 random bits made when the supervisor starts), build, generation, features, limits, and its state: `accepting`, `retiring` or `draining` | proposed |
-| `Prepare` | client | A request ID (128 random bits) and the [launch envelope](#launch-envelope) | proposed |
-| `Prepared` | supervisor | A token (256 random bits), the time it stays valid, whether the image bytes are needed, and the path: `warm` or `fresh` | proposed |
-| `Image` | client | The token and one descriptor from which the image bytes can be read | proposed |
-| `Commit` | client | The token and four descriptors: the working directory, standard input, output and error | proposed |
-| `Committed` | supervisor | The application ID | proposed |
-| `Outcome` | supervisor | The application ID, the terminal state, the exit status, and the times of the launch phases | proposed |
-| `Rejected` | supervisor | A reason from the table below, a sentence, and `not-started`: nothing of the application ran and nothing will | proposed |
-| `Cancel` | client | A token: release the reservation | proposed |
-| `Signal` | client | The application ID and one of `INT`, `TERM`, `HUP`, `QUIT`, `WINCH` | proposed |
-| `Query`, `Status` | client, supervisor | A request ID or an application ID; the record, or `expired`, or `unknown` | proposed |
-| `List`, `Listing` | client, supervisor | The supervisor's state and its applications | proposed |
-| `Stop` | client | The application ID and the grace period | proposed |
-| `Shutdown`, `Retire`, `CacheClear` | client | `Shutdown` carries the terminate flag; `Retire` is sent by an update that activated another generation | proposed |
+| `Hello` | client | Lowest and highest protocol major it speaks, its build, installation `<id>` and generation, whether it connects to launch or to control, the features it needs | proposed; implemented; no feature is defined yet, so none is sent |
+| `Welcome` | supervisor | The protocol chosen, the service epoch (128 random bits made when the supervisor starts), build, generation, features, limits, and its state: `accepting`, `retiring` or `draining` | proposed; implemented |
+| `Prepare` | client | A request ID (128 random bits) and the [launch envelope](#launch-envelope) | proposed; implemented |
+| `Prepared` | supervisor | A token (256 random bits), the time it stays valid, whether the image bytes are needed, and the path: `warm` or `fresh` | proposed; implemented, and it also carries the application ID and acknowledges an `Image` (decision 14) |
+| `Image` | client | The token and one descriptor from which the image bytes can be read | proposed; implemented |
+| `Commit` | client | The token and four descriptors: the working directory, standard input, output and error | proposed; implemented |
+| `Committed` | supervisor | The application ID | proposed; implemented |
+| `Outcome` | supervisor | The application ID, the terminal state, the exit status, and the times of the launch phases | proposed; implemented |
+| `Rejected` | supervisor | A reason from the table below, a sentence, and `not-started`: nothing of the application ran and nothing will | proposed; implemented |
+| `Cancel` | client | A token: release the reservation | proposed; implemented |
+| `Signal` | client | The application ID and one of `INT`, `TERM`, `HUP`, `QUIT`, `WINCH` | proposed; implemented |
+| `Query`, `Status` | client, supervisor | A request ID or an application ID; the record, or `expired`, or `unknown` | proposed; implemented |
+| `List`, `Listing` | client, supervisor | The supervisor's state and its applications | proposed; implemented |
+| `Stop` | client | The application ID and the grace period | proposed; implemented |
+| `Shutdown`, `Retire`, `CacheClear` | client | `Shutdown` carries the terminate flag; `Retire` is sent by an update that activated another generation | proposed; implemented in the supervisor; an update that sends `Retire` is the lifecycle milestone's |
 
-Every request carries a deadline, and a client that gets no reply by then closes the connection. The defaults: 250 ms to connect and receive `Welcome` from a running supervisor; 2 seconds for an on-demand start; 1 second each for `Prepare` and `Commit`; 5 seconds plus 1 second for each 64 MiB to send an image.
+Every request carries a deadline, and a client that gets no reply by then closes the connection. The defaults: 250 ms to connect and receive `Welcome` from a running supervisor; 2 seconds for an on-demand start; 1 second each for `Prepare` and for sending `Commit`, and 5 seconds for `Committed`, which waits for a worker (decision 15); 5 seconds plus 1 second for each 64 MiB to send an image.
 
 | `Rejected` reason | Meaning | `auto` | Status |
 | --- | --- | --- | --- |
-| `protocol`, `identity` | A malformed message; a peer that is another user or installation, or a `Prepare` from a client of another generation or build | error | proposed |
-| `unsupported-protocol`, `unsupported-feature`, `unsupported-option` | No common protocol major; a feature or an option of the table above the service does not have | direct | proposed |
-| `not-reproducible` | The worker cannot be given a setting of the caller's process (see [the worker](#the-worker)) | direct | proposed |
-| `admission-applications`, `admission-pending` | 64 applications, or 16 prepared launches, are already held (the baseline's limits). Nothing is queued. | direct | proposed |
-| `image-too-large`, `admission-cache` | The image is larger than the cache limit; or it does not fit beside the images that running applications use | direct | proposed |
-| `image-mismatch` | The bytes read are not of the size and digest the envelope names | error | proposed |
-| `draining`, `retired` | The supervisor is shutting down; or it is retired and the client is not of its generation | direct | proposed |
-| `token-unknown`, `token-expired` | `Commit`, `Image` or `Cancel` with a token this supervisor did not issue in this epoch, or issued more than 30 seconds ago | error | proposed |
+| `protocol`, `identity` | A malformed message; a peer that is another user or installation, or a `Prepare` from a client of another generation or build | error | proposed; implemented |
+| `unsupported-protocol`, `unsupported-feature`, `unsupported-option` | No common protocol major; a feature or an option of the table above the service does not have | direct | proposed; implemented; `unsupported-feature` is never sent while no feature exists |
+| `not-reproducible` | The worker cannot be given a setting of the caller's process (see [the worker](#the-worker)) | direct | proposed; implemented |
+| `admission-applications`, `admission-pending` | 64 applications, or 16 prepared launches, are already held (the baseline's limits). Nothing is queued. | direct | proposed; implemented |
+| `image-too-large`, `admission-cache` | The image is larger than the cache limit; or it does not fit beside the images that running applications use | direct | proposed; implemented |
+| `image-mismatch` | The bytes read are not of the size and digest the envelope names | error | proposed; implemented |
+| `draining`, `retired` | The supervisor is shutting down; or it is retired and the client is not of its generation | direct | proposed; implemented |
+| `token-unknown`, `token-expired` | `Commit`, `Image` or `Cancel` with a token this supervisor did not issue in this epoch, or issued more than 30 seconds ago | error | proposed; implemented |
+| `worker-unavailable` | The worker given the launch ended or did not report ready within 2 seconds before it took the launch; nothing ran (decision 16) | error | proposed; implemented |
 
 ### Launch envelope
 
 | Field | Rule | Status |
 | --- | --- | --- |
-| Image identity | The SHA-256 and size of the exact image bytes the runner would load, after extraction from a native executable. Never a path or a modification time. The path is carried only to be shown by `ps` and in messages. | proposed |
-| Arguments | The argument vector after `--`, as byte strings | proposed |
-| Environment | The caller's whole environment, names and values. The worker replaces its own environment with it before any other step of the launch. | proposed |
-| Mode summary | The values in that environment of `NEURA_TIER`, `NEURA_TIER3`, `NEURA_TIER3_AFTER`, `NEURA_TIER_PROGRAMS`, `NEURA_TIER_EAGER`, `NEURA_TIER_CHECK`, `NEURA_TIER_CHECK_HEAP` and `NEURA_JIT`, and the `--tier` and `--jit` options. Copied into the record so that `inspect` shows the mode an application ran in. No other environment value is recorded. | proposed |
-| Capability policy | The resolved policy, with the prefixes of file grants already resolved against the caller's directory, as a direct run resolves them | proposed |
-| Limits and options | Every member of `nvm::RunLimits` that an option sets, `--max-stack-cells` included, and the runner options of the table above | proposed |
-| Process settings | The umask; the soft limits `RLIMIT_NOFILE`, `RLIMIT_STACK`, `RLIMIT_CORE`, `RLIMIT_FSIZE`, `RLIMIT_AS` and `RLIMIT_CPU`; the nice value | proposed |
-| Lifetime | `foreground` or `detached` | proposed |
-| Client clock | The client's monotonic clock reading when its process started, so the worker's `--tier-stats` total covers the whole command as it does in a direct run | proposed |
+| Image identity | The SHA-256 and size of the exact image bytes the runner would load, after extraction from a native executable. Never a path or a modification time. The path is carried only to be shown by `ps` and in messages. | proposed; implemented |
+| Arguments | The argument vector after `--`, as byte strings | proposed; implemented |
+| Environment | The caller's whole environment, names and values. The worker replaces its own environment with it before any other step of the launch. | proposed; implemented |
+| Mode summary | The values in that environment of `NEURA_TIER`, `NEURA_TIER3`, `NEURA_TIER3_AFTER`, `NEURA_TIER_PROGRAMS`, `NEURA_TIER_EAGER`, `NEURA_TIER_CHECK`, `NEURA_TIER_CHECK_HEAP` and `NEURA_JIT`, and the `--tier` and `--jit` options. Copied into the record so that `inspect` shows the mode an application ran in. No other environment value is recorded. | proposed; implemented |
+| Capability policy | The resolved policy, with the prefixes of file grants already resolved against the caller's directory, as a direct run resolves them | proposed; implemented |
+| Limits and options | Every member of `nvm::RunLimits` that an option sets, `--max-stack-cells` included, and the runner options of the table above | proposed; implemented |
+| Process settings | The umask; the soft limits `RLIMIT_NOFILE`, `RLIMIT_STACK`, `RLIMIT_CORE`, `RLIMIT_FSIZE`, `RLIMIT_AS` and `RLIMIT_CPU`; the nice value | proposed; implemented |
+| Lifetime | `foreground` or `detached` | proposed; implemented |
+| Client clock | The client's monotonic clock reading when its process started, so the worker's `--tier-stats` total covers the whole command as it does in a direct run | proposed; implemented |
 
 The working directory and the three streams are descriptors sent with `Commit`, not paths, so the worker has exactly the caller's objects. An envelope larger than a message is `Rejected` with `unsupported-option`; a command whose environment and arguments do not fit in 1 MiB runs directly under `auto`.
 
@@ -140,15 +141,15 @@ If the client sent `Commit` and the connection ended before `Committed` or `Outc
 
 | Rule | Status |
 | --- | --- |
-| The supervisor starts a worker with `posix_spawn` of `neurad --worker`; it never forks itself. The worker shares one socket pair with the supervisor. | proposed |
-| Before it is given an application, a worker may only load its executable and libraries, run static initializers that read no environment and open no file of the user, and report ready. It does not read `NEURA_*`, create a tier cache, generate code, open a graph device, load a native library, or read an image. | proposed |
-| On assignment the worker, in this order: replaces its environment; applies the umask, the limits and the nice value; changes to the working directory descriptor; makes itself a process group leader; installs the three streams as descriptors 0, 1 and 2 and closes every other descriptor but the supervisor's and its lease on the runtime generation, which it holds until it exits (the lifecycle note); resets signal dispositions and the signal mask; maps the image bytes read-only; then loads, validates and binds the image and runs it with the code of a direct run (`runner::run`). | proposed |
+| The supervisor starts a worker with `posix_spawn` of `neurad --worker`; it never forks itself. The worker shares one socket pair with the supervisor. | proposed; implemented |
+| Before it is given an application, a worker may only load its executable and libraries, run static initializers that read no environment and open no file of the user, and report ready. It does not read `NEURA_*`, create a tier cache, generate code, open a graph device, load a native library, or read an image. | proposed; implemented |
+| On assignment the worker, in this order: replaces its environment; applies the umask, the limits and the nice value; changes to the working directory descriptor; makes itself a process group leader; installs the three streams as descriptors 0, 1 and 2 and closes every other descriptor but the supervisor's and its lease on the runtime generation, which it holds until it exits (the lifecycle note); resets signal dispositions and the signal mask; maps the image bytes read-only; then loads, validates and binds the image and runs it with the code of a direct run (`runner::run`). | proposed; implemented, except the lease, which waits for the lifecycle milestone's `leases/`; the worker also takes the caller's ignored signals and mask (decision 17) |
 | The environment readers that keep their first answer for the life of the process (`tier_ceiling`, `tier_check_mode`, `tier_shadow_heap_always`, `tier_eager`, `tier_programs_enabled`, `tier3_environment`, `tier3_environment_implicit`, `tier3_after` in `src/nvm/tier1.cpp`, `environment_mode` in `src/jit/jit.cpp`, `passes_enabled` in `tier3_passes.cpp` and `verify_enabled` in `tier3_build.cpp`) abort a worker that calls one before its environment is replaced (`src/nvm/environment.cpp`). The readers in `tier2.cpp`, `tier3_emit.cpp`, `ffi_provider.cpp` and `gpu_run.cpp` read at each use and keep nothing, so they need no gate. A test launches twice through one supervisor with different `NEURA_TIER3` and `NEURA_JIT` and requires each run's `--tier-stats` to show its own mode. | proposed; implemented |
-| A ready worker is used when the caller's `LD_*`, `DYLD_*`, `GLIBC_TUNABLES` and `MALLOC_*` variables equal those the worker was started with and its limits can be set from inside. Otherwise the supervisor starts a worker for this launch with the caller's environment and limits at `posix_spawn` (the path `fresh`). A setting neither can give, such as a soft limit above the supervisor's hard limit, is `not-reproducible`. | proposed |
-| A worker runs one application and exits. It is never returned to the pool, whatever the application did. | proposed |
-| The pool holds one ready worker (the baseline's row). After a launch takes it the supervisor starts another, unless it is retired, draining or at the application limit. A launch that finds no ready worker starts one and waits for it; it is not refused for that. | proposed |
-| A worker ends when its supervisor does: `PR_SET_PDEATHSIG` with `SIGKILL` on Linux, a thread watching the supervisor's process on macOS, and in both the end of the socket pair. Nothing adopts it. | proposed |
-| The worker tells the supervisor how the run ended (exit status, or trap class and status) before it exits. A worker that ends without saying so is `worker-lost`. | proposed |
+| A ready worker is used when the caller's `LD_*`, `DYLD_*`, `GLIBC_TUNABLES` and `MALLOC_*` variables equal those the worker was started with and its limits can be set from inside. Otherwise the supervisor starts a worker for this launch with the caller's environment and limits at `posix_spawn` (the path `fresh`). A setting neither can give, such as a soft limit above the supervisor's hard limit, is `not-reproducible`. | proposed; implemented, with the stack limit and the nice value (decision 17) |
+| A worker runs one application and exits. It is never returned to the pool, whatever the application did. | proposed; implemented |
+| The pool holds one ready worker (the baseline's row). After a launch takes it the supervisor starts another, unless it is retired, draining or at the application limit. A launch that finds no ready worker starts one and waits for it; it is not refused for that. | proposed; implemented |
+| A worker ends when its supervisor does: `PR_SET_PDEATHSIG` with `SIGKILL` on Linux, a thread watching the supervisor's process on macOS, and in both the end of the socket pair. Nothing adopts it. | proposed; implemented on Linux; the macOS thread is untested |
+| The worker tells the supervisor how the run ended (exit status, or trap class and status) before it exits. A worker that ends without saying so is `worker-lost`. | proposed; implemented |
 
 What a worker does not have of the caller's process, and a direct run does: the caller's session, process group, controlling terminal and parent, its descriptors above 2, and its control group or service scope. Reading and writing a terminal through the passed descriptors works; the terminal's own signals reach the client, which forwards them.
 
@@ -156,12 +157,12 @@ What a worker does not have of the caller's process, and a direct run does: the 
 
 | Rule | Status |
 | --- | --- |
-| The worker writes to the caller's own descriptors. The service relays no byte of a stream, so binary data, end of input, partial writes, a closed pipe and terminal modes are those of a direct run, and no order between output and error is invented. | proposed |
-| A foreground client forwards `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGQUIT` and `SIGWINCH` to its application's process group only. `SIGQUIT` asks the image for a task dump, as in a direct run. A stopped client (`SIGTSTP`) stops only itself. | proposed |
-| A foreground client that ends or loses its connection before `Outcome` cancels its launch: the supervisor terminates the application's process group as `stop` does, and the terminal state is `client-lost`. End of input on standard input is not that: it reaches the program as end of input. | proposed |
-| A foreground client exits with the application's exit status. When the worker was killed by signal N it exits with 128 + N after printing `neura: runtime: the application was ended by signal N`. | proposed |
-| A detached application has no client. It ends by itself, by `stop`, or by `shutdown --terminate`. It is never restarted. | proposed |
-| `stop` and a cancel end the process group from outside. No trap is raised, and no `defer`, `using` or task cleanup of the program is promised to run. | proposed |
+| The worker writes to the caller's own descriptors. The service relays no byte of a stream, so binary data, end of input, partial writes, a closed pipe and terminal modes are those of a direct run, and no order between output and error is invented. | proposed; implemented |
+| A foreground client forwards `SIGINT`, `SIGTERM`, `SIGHUP`, `SIGQUIT` and `SIGWINCH` to its application's process group only. `SIGQUIT` asks the image for a task dump, as in a direct run. A stopped client (`SIGTSTP`) stops only itself. | proposed; implemented |
+| A foreground client that ends or loses its connection before `Outcome` cancels its launch: the supervisor terminates the application's process group as `stop` does, and the terminal state is `client-lost`. End of input on standard input is not that: it reaches the program as end of input. | proposed; implemented |
+| A foreground client exits with the application's exit status. When the worker was killed by signal N it exits with 128 + N after printing `neura: runtime: the application was ended by signal N`. | proposed; implemented |
+| A detached application has no client. It ends by itself, by `stop`, or by `shutdown --terminate`. It is never restarted. | proposed; implemented |
+| `stop` and a cancel end the process group from outside. No trap is raised, and no `defer`, `using` or task cleanup of the program is promised to run. | proposed; implemented |
 
 ### States and records
 
@@ -184,31 +185,31 @@ An application ID is `<generation>.<first 8 hexadecimal digits of the epoch>.<nu
 
 | Rule | Status |
 | --- | --- |
-| A client of `auto` or `required` that finds no supervisor takes the `start` lock, looks again, starts `neurad --foreground --root ROOT` in a new session with its streams on `/dev/null` and the log, and waits up to 2 seconds for `Welcome`. Clients that arrive meanwhile wait on the lock and find the supervisor started. | proposed |
-| A supervisor started on demand exits when it has had no application and no connection for 15 minutes. One started by `neura runtime start` or at login stays. | proposed |
-| A supervisor is *retired* when `current` under its root no longer names its generation, which it checks at each `Prepare`, or when it receives `Retire`. A retired supervisor keeps no ready worker, serves the clients of its own generation, and exits as soon as it has no application and no connection. | proposed |
-| A supervisor that begins when its generation is not the active one is retired from the start. | proposed |
-| `enable` writes the unit of the table above, whose command is `<root>/current/bin/neurad --foreground --root <root>` and which is never restarted by the service manager, and enables it for the user (`systemctl --user enable`, `launchctl bootstrap`). Where no user service manager answers, as in WSL without systemd or in a container, it changes nothing and exits with status 1 and a message; `start`, `auto` and `required` still work there. `disable` removes the unit and exits 0 when there is none. | proposed |
-| An installation that an 0.2 updater produced and that has not yet been migrated (a schema 1 install marker, and a `core` component manifest, `share/neura/components/core.txt`, in the running generation) refuses `start`, `enable`, `auto` and `required` with the instruction to run `neura update --migrate-install`, status 5. `auto` does not fall back to a direct run there: the refusal is the lifecycle rule that service start and service launches are refused until the migration, not a missing service. `--runtime=off`, `status`, `ps`, `inspect`, `disable` and `neura capabilities` work, since they start nothing. | proposed |
+| A client of `auto` or `required` that finds no supervisor takes the `start` lock, looks again, starts `neurad --foreground --root ROOT` in a new session with its streams on `/dev/null` and the log, and waits up to 2 seconds for `Welcome`. Clients that arrive meanwhile wait on the lock and find the supervisor started. | proposed; implemented |
+| A supervisor started on demand exits when it has had no application and no connection for 15 minutes. One started by `neura runtime start` or at login stays. | proposed; implemented |
+| A supervisor is *retired* when `current` under its root no longer names its generation, which it checks at each `Prepare`, or when it receives `Retire`. A retired supervisor keeps no ready worker, serves the clients of its own generation, and exits as soon as it has no application and no connection. | proposed; implemented |
+| A supervisor that begins when its generation is not the active one is retired from the start. | proposed; implemented |
+| `enable` writes the unit of the table above, whose command is `<root>/current/bin/neurad --foreground --root <root>` and which is never restarted by the service manager, and enables it for the user (`systemctl --user enable`, `launchctl bootstrap`). Where no user service manager answers, as in WSL without systemd or in a container, it changes nothing and exits with status 1 and a message; `start`, `auto` and `required` still work there. `disable` removes the unit and exits 0 when there is none. | proposed; implemented on Linux; the macOS form untested |
+| An installation that an 0.2 updater produced and that has not yet been migrated (a schema 1 install marker, and a `core` component manifest, `share/neura/components/core.txt`, in the running generation) refuses `start`, `enable`, `auto` and `required` with the instruction to run `neura update --migrate-install`, status 5. `auto` does not fall back to a direct run there: the refusal is the lifecycle rule that service start and service launches are refused until the migration, not a missing service. `--runtime=off`, `status`, `ps`, `inspect`, `disable` and `neura capabilities` work, since they start nothing. | proposed; implemented |
 
 ### Editors
 
 | Rule | Status |
 | --- | --- |
-| `neura capabilities` reports whether the service component is installed and its protocol version, from the files of the installation. It connects to nothing and starts nothing, and reports a missing component as missing. On an installation that is not yet migrated it reports the component with the state `unmigrated`, because the service refuses to start or launch there; it reports, and does not refuse. An editor offers a service mode only for the state `ready`. | proposed |
-| The editor's Run uses a service mode only when the launch configuration sets it (`"runtime": "auto"` or `"required"`), and passes it as `--runtime`. It never infers the mode from a service being installed or running. The mode used, and a fallback, are shown in the run's output. | proposed |
-| The editor's Test and Debug are direct. A configuration that sets a service mode for them is rejected before anything is built or started, with a message that names the setting; it is not dropped. | proposed |
-| In an untrusted workspace the editor may read `neura capabilities`. It starts no supervisor, no application and no debug session. | proposed |
-| The editor's tests run with the service component absent from the installation and the run directory unwritable, then with a supervisor running: build, run, test, a breakpoint at startup, step, restart and stop behave the same in both, and the supervisor sees no connection. | proposed |
+| `neura capabilities` reports whether the service component is installed and its protocol version, from the files of the installation. It connects to nothing and starts nothing, and reports a missing component as missing. On an installation that is not yet migrated it reports the component with the state `unmigrated`, because the service refuses to start or launch there; it reports, and does not refuse. An editor offers a service mode only for the state `ready`. | proposed; implemented |
+| The editor's Run uses a service mode only when the launch configuration sets it (`"runtime": "auto"` or `"required"`), and passes it as `--runtime`. It never infers the mode from a service being installed or running. The mode used, and a fallback, are shown in the run's output. | proposed; not implemented: the editor extension is versioned apart and is not in this repository |
+| The editor's Test and Debug are direct. A configuration that sets a service mode for them is rejected before anything is built or started, with a message that names the setting; it is not dropped. | proposed; the debug adapter refuses such a launch (case 59); the editor's own check is not implemented |
+| In an untrusted workspace the editor may read `neura capabilities`. It starts no supervisor, no application and no debug session. | proposed; not implemented (the editor extension) |
+| The editor's tests run with the service component absent from the installation and the run directory unwritable, then with a supervisor running: build, run, test, a breakpoint at startup, step, restart and stop behave the same in both, and the supervisor sees no connection. | proposed; not implemented (the editor extension); `service-off-default` and `service-login` cover the CLI and the debug adapter |
 
 ### The image cache
 
 | Rule | Status |
 | --- | --- |
-| The cache maps a SHA-256 to the bytes of one image, in memory the supervisor owns and never writes again, and gives a worker a read-only descriptor to it. Its key is the digest alone, since it lives and dies with one supervisor of one build. | proposed |
-| It holds at most 256 MiB (the baseline's row), entries in use included: every image a live or prepared application uses is an entry. An entry in use is never evicted; the least recently used free entry goes first. A launch whose image does not fit after every free entry is evicted is refused at `Prepare` with `admission-cache`. | proposed |
-| The cache holds bytes only. A worker decodes and validates the image every time, with the loader of a direct run. No decoded structure, validation result, source map, lifted block or machine code is cached, in memory or on disk, in 0.3.0. | proposed |
-| A cached image authorizes nothing. Grants, native dependencies and limits come from each launch's envelope. | proposed |
+| The cache maps a SHA-256 to the bytes of one image, in memory the supervisor owns and never writes again, and gives a worker a read-only descriptor to it. Its key is the digest alone, since it lives and dies with one supervisor of one build. | proposed; implemented |
+| It holds at most 256 MiB (the baseline's row), entries in use included: every image a live or prepared application uses is an entry. An entry in use is never evicted; the least recently used free entry goes first. A launch whose image does not fit after every free entry is evicted is refused at `Prepare` with `admission-cache`. | proposed; implemented |
+| The cache holds bytes only. A worker decodes and validates the image every time, with the loader of a direct run. No decoded structure, validation result, source map, lifted block or machine code is cached, in memory or on disk, in 0.3.0. | proposed; implemented |
+| A cached image authorizes nothing. Grants, native dependencies and limits come from each launch's envelope. | proposed; implemented |
 
 ## Semantics
 
@@ -216,13 +217,13 @@ The service changes no stage of the compiler and no image. Everything in this no
 
 | Rule | Status |
 | --- | --- |
-| For the same image, arguments, input, environment, working directory, policy and options, a service launch and a direct run give the same output on each stream, exit status, trap and message, `--stats`, `--profile` and `--tier-stats` counts, and trace events. Wall times differ. | proposed |
-| Every application has its own heap, frames, regions, globals, statics, class and module guards, handles, scheduler, monitors, clocks, limits and host bindings. Startup, a `static scope` when that feature lands, and class statics run once per application. Language accounting charges constants, arguments and static state on every launch even when the image bytes are shared. | proposed |
-| Applications run at the same time as separate processes. The service schedules no task and changes no quantum. Separate launches are not a fleet, and `run --each` keeps its meaning and its direct path. | proposed |
-| Each worker makes its own tier cache for its one image. Lifted blocks, regions, function programs and machine code live and die in that worker. A second launch of the same image lifts and compiles again. | proposed |
-| The time a launch takes is measured from the client's start to the application's first step. Proving, searching and tier 3 compilation happen after the first step and belong to the run: they are read from the `--tier-stats` time line and are never counted in, or subtracted from, a launch time. A claim about warm launches is a claim about the first interval only. | proposed |
-| Service limits (ready workers, applications, pending launches, cache bytes, records, message size) are the baseline's and are apart from an application's limits. A launch over a service limit is refused; an application's limits are never lowered to admit it. | proposed |
-| Memory is reported in three parts that are never added to the language counters: the supervisor's resident size without the cache, the cache bytes, and each ready worker's resident size. | proposed |
+| For the same image, arguments, input, environment, working directory, policy and options, a service launch and a direct run give the same output on each stream, exit status, trap and message, `--stats`, `--profile` and `--tier-stats` counts, and trace events. Wall times differ. | proposed; implemented |
+| Every application has its own heap, frames, regions, globals, statics, class and module guards, handles, scheduler, monitors, clocks, limits and host bindings. Startup, a `static scope` when that feature lands, and class statics run once per application. Language accounting charges constants, arguments and static state on every launch even when the image bytes are shared. | proposed; implemented |
+| Applications run at the same time as separate processes. The service schedules no task and changes no quantum. Separate launches are not a fleet, and `run --each` keeps its meaning and its direct path. | proposed; implemented |
+| Each worker makes its own tier cache for its one image. Lifted blocks, regions, function programs and machine code live and die in that worker. A second launch of the same image lifts and compiles again. | proposed; implemented |
+| The time a launch takes is measured from the client's start to the application's first step. Proving, searching and tier 3 compilation happen after the first step and belong to the run: they are read from the `--tier-stats` time line and are never counted in, or subtracted from, a launch time. A claim about warm launches is a claim about the first interval only. | proposed; implemented: the client's start is the start of `cli::run`, after the dispatcher and the library load, and the first step is approximated by `run-started`, after binding (decision 31) |
+| Service limits (ready workers, applications, pending launches, cache bytes, records, message size) are the baseline's and are apart from an application's limits. A launch over a service limit is refused; an application's limits are never lowered to admit it. | proposed; implemented |
+| Memory is reported in three parts that are never added to the language counters: the supervisor's resident size without the cache, the cache bytes, and each ready worker's resident size. | proposed; implemented |
 
 ## Lowering and artifacts
 
@@ -236,24 +237,24 @@ The service reports no source diagnostic, so it takes none of the codes `E0711` 
 
 | Status | Meaning | Status |
 | --- | --- | --- |
-| the application's | A committed foreground launch that reached a terminal state | proposed |
-| 1 | A usage error; `shutdown` that timed out; `enable` without a service manager | proposed |
-| 5 | The service did not run the application and nothing was started: not installed, could not start, refused, or an option it does not support under `required` | proposed |
-| 6 | The outcome is unknown: a commit was sent and no outcome arrived | proposed |
+| the application's | A committed foreground launch that reached a terminal state | proposed; implemented |
+| 1 | A usage error; `shutdown` that timed out; `enable` without a service manager | proposed; implemented |
+| 5 | The service did not run the application and nothing was started: not installed, could not start, refused, or an option it does not support under `required` | proposed; implemented |
+| 6 | The outcome is unknown: a commit was sent and no outcome arrived | proposed; implemented |
 
 | Condition | Message after `neura: runtime: ` | Status |
 | --- | --- | --- |
-| `--detach` with `off` or no `--runtime` | `--detach needs --runtime=auto or --runtime=required` (status 1) | proposed |
-| `--detach` without both output files | `--detach needs --stdout and --stderr` (status 1) | proposed |
-| `required`, no `neurad` in the installation | `the service component is not installed; install Neura-runtime, or run without --runtime` (5) | proposed |
-| The supervisor did not answer in time | `the service did not start within 2 seconds; see <log>` (5) | proposed |
-| `Rejected`, under `required` | `the service refused the launch: <sentence> (<reason>)` (5) | proposed |
-| `identity`, `protocol`, `image-mismatch`, in either mode | The sentence, and `nothing was run` (5) | proposed |
-| An unsupported option under `required` | `--each is not supported by the service; run without --runtime` (5) | proposed |
-| Fallback under `auto` | `running directly: <reason>`, one line before the program starts; the run's status is the program's | proposed |
-| Commit sent, no outcome | `the outcome of application <ID or request ID> is unknown; it was not run again. Try "neura runtime inspect <ID>"` (6) | proposed |
-| `inspect` or `stop` of an ID of another installation or a malformed ID | `<ID> is not an application of this installation` (1) | proposed |
-| Unmigrated installation | `finish the 0.3.0 install first: run "neura update --migrate-install"` (5) | proposed |
+| `--detach` with `off` or no `--runtime` | `--detach needs --runtime=auto or --runtime=required` (status 1) | proposed; implemented |
+| `--detach` without both output files | `--detach needs --stdout and --stderr` (status 1) | proposed; implemented |
+| `required`, no `neurad` in the installation | `the service component is not installed; install Neura-runtime, or run without --runtime` (5) | proposed; implemented |
+| The supervisor did not answer in time | `the service did not start within 2 seconds; see <log>` (5) | proposed; implemented |
+| `Rejected`, under `required` | `the service refused the launch: <sentence> (<reason>)` (5) | proposed; implemented |
+| `identity`, `protocol`, `image-mismatch`, in either mode | The sentence, and `nothing was run` (5) | proposed; implemented |
+| An unsupported option under `required` | `--each is not supported by the service; run without --runtime` (5) | proposed; implemented |
+| Fallback under `auto` | `running directly: <reason>`, one line before the program starts; the run's status is the program's | proposed; implemented |
+| Commit sent, no outcome | `the outcome of application <ID or request ID> is unknown; it was not run again. Try "neura runtime inspect <ID>"` (6) | proposed; implemented |
+| `inspect` or `stop` of an ID of another installation or a malformed ID | `<ID> is not an application of this installation` (1) | proposed; implemented |
+| Unmigrated installation | `finish the 0.3.0 install first: run "neura update --migrate-install"` (5) | proposed; implemented |
 
 ## Edge cases
 
@@ -352,6 +353,65 @@ Each step is one commit on the milestone branch. No step changes an image.
 - **The claim follows the numbers.** The release notes state the measured difference between a warm launch and a direct run for those workloads and that machine, and nothing more. If a warm launch is not faster, the notes say so and present the service as process management. Neither result changes the direct default.
 - **Budgets.** Step 10 records the idle supervisor's resident size, a ready worker's, and the warm and stopped-service launch times, and a later change may not exceed them by more than 10% without saying why.
 
+## Evidence
+
+The tests are `ctest -R service-` on Linux ([the runtime service page](../runtime/Service.md#what-the-tests-establish) lists them). Each is an observed match over its cases, not a proof. By edge case:
+
+| Cases | Test | Covered |
+| --- | --- | --- |
+| 1, 2 | `service-off-default`, `service-login` | Without `neurad` and with unwritable run and state directories; then with a supervisor running and login start registered, which accepts no connection |
+| 3, 4, 7, 8, 13, 18, 19, 21, 23, 29 to 31, 37 to 39, 58 | `service-run` | As written; case 10 with a wrong mode only (another user needs a second account); case 31 at 1.5 MiB (decision 21); case 29 shows the fresh path and the variable reaching the program, not a native library loaded through it |
+| 5, 6, 59 (`neura test`) | `service-cli-options` | As written |
+| 9, 11, 14 to 17, 20, 22, 24, 25, 43, 44, 57 | `service-protocol` | Through an independent Python client of the protocol; case 11 also through the client in `service-run`; case 25 rejects, not its `auto` half; case 17 the `token-unknown` refusal, not the client's 5 or 6 |
+| 26 to 28, 32 to 36, 42, 45 | `service-worker` | A worker driven by a stand-in supervisor, against direct runs; case 35 reads and Ctrl-D, while Ctrl-C through a terminal and the client is not tested (forwarded signals are, in `service-run`) |
+| 26, 27, 42, isolation | `service-isolation` | Through one warm supervisor; eight launches at once with their own globals, statics and files; no worker process ID seen twice |
+| 40, 46 to 52, 55, 56, 63 | `service-control` | Case 50 on an installation made by the test, with the supervisor retiring at the next `Prepare`; case 63 on Linux with a `TMPDIR` of 49 bytes |
+| 53, 54, 59 (debug adapter), 60, 61 | `service-login` | With a stand-in `systemctl` on `PATH` |
+| parity | `service-parity` | `scripts/runtime-identity.py` direct and with `--service` |
+| 12 | none | By construction: IDs, tokens and records decide; no decision reads a process ID |
+| 41 | none | No program can start a child process without native code; `stop` ending a whole process group is tested with the worker's group |
+| 59 (editor), 62 | none | The editor extension is not in this repository |
+
+The gate's other evidence, measured on 2026-11-17 with the build of this milestone (Linux x86-64, 8 cores, a machine shared with other builds):
+
+- **Images unchanged.** 251 images built from the runtime-identity programs, the examples, the benchmarks and the service's test programs are byte-identical when built by the compiler before the milestone and after it (12 sources of the set are not programs and build with neither).
+- **Direct stays direct.** `scripts/runtime-identity.py`: 159 default cases and 4,914 extended tier-0 cases identical before and after the change that binds the environment readers and shares `run_image`.
+- **Parity.** `scripts/runtime-identity.py capture --service` against a direct capture, in each execution mode of the baseline (`--tier=0`, `--jit=off`, `--jit=on`, `NEURA_TIER_EAGER=1`, with `NEURA_TIER_CHECK=1`, `NEURA_TIER_CHECK=2`, and both): 159 cases and 482 files identical in every mode, with 151 or 152 of the runs through the service (the record, replay and `--each` cases stay direct). The extended case set was not run through the service. This is an observed match over these cases, not a proof.
+- **Measurements.** See [Measurements](#measurements). A warm launch is not faster than a direct run here.
+
+## Measurements
+
+`scripts/bench-launch.py --samples 20`, on 2026-11-17: Linux x86-64, 8 cores, nice 0, a machine shared with other builds (load average 3.6 to 4.6 during the run). Each figure is p50 / p95 in milliseconds, timed from outside the command, so it includes the dispatcher, the library load and the client. *before* is `neura run` of the build this milestone started from; *direct* is `neura run` of this build; *cold* starts a supervisor on demand; *uncached* has a running supervisor with a ready worker and the image dropped from the cache; *warm* has both, and every warm sample reported `service-warm`; *burst of 8* is eight warm-started launches at once, each one a sample. The `--runtime-report` file a service sample writes is included in its time.
+
+| Workload (image bytes) | Mode | before | direct | cold | uncached | warm | burst of 8 |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| hello-world (12,784) | default | 0.90 / 1.01 | 0.86 / 0.93 | 6.76 / 6.84 | 1.35 / 1.45 | 1.32 / 1.39 | 3.65 / 4.23 |
+| | `NEURA_TIER3=off` | 0.84 / 0.96 | 0.82 / 0.88 | 6.78 / 6.89 | 1.35 / 1.46 | 1.32 / 1.43 | 3.09 / 3.40 |
+| | `--jit=off` | 0.86 / 0.91 | 0.83 / 0.94 | 6.77 / 6.85 | 1.33 / 1.41 | 1.34 / 1.41 | 3.17 / 3.51 |
+| long startup (119,101) | default | 10.44 / 11.30 | 10.40 / 10.74 | 16.46 / 16.77 | 10.96 / 11.18 | 10.66 / 10.91 | 17.64 / 25.62 |
+| | `NEURA_TIER3=off` | 112.53 / 114.16 | 113.85 / 116.29 | 119.81 / 123.65 | 115.17 / 117.88 | 118.71 / 121.81 | 172.99 / 187.61 |
+| | `--jit=off` | 126.37 / 133.46 | 123.39 / 127.38 | 131.52 / 136.28 | 125.08 / 127.61 | 123.26 / 124.73 | 139.70 / 190.85 |
+| tasks, `fan-out.nra` (92,528) | default | 3.38 / 3.55 | 3.37 / 3.53 | 9.67 / 9.83 | 4.23 / 4.38 | 3.99 / 4.08 | 7.63 / 8.78 |
+| | `NEURA_TIER3=off` | 3.35 / 3.43 | 3.37 / 3.51 | 9.59 / 9.73 | 4.26 / 4.34 | 4.04 / 4.09 | 7.60 / 9.82 |
+| | `--jit=off` | 3.32 / 3.47 | 3.35 / 3.51 | 9.62 / 9.83 | 4.31 / 4.52 | 4.01 / 4.12 | 8.23 / 11.53 |
+| largest benchmark, `time-text.nra` (4,436,792) | default | 117.45 / 119.16 | 118.34 / 119.99 | 145.00 / 149.87 | 141.12 / 141.97 | 130.18 / 167.32 | 210.68 / 286.74 |
+| | `NEURA_TIER3=off` | 115.26 / 135.29 | 117.27 / 142.48 | 188.67 / 223.66 | 157.16 / 186.60 | 127.75 / 160.59 | 150.91 / 173.52 |
+| | `--jit=off` | 112.64 / 113.80 | 113.92 / 115.41 | 144.01 / 151.73 | 138.39 / 139.06 | 126.02 / 126.95 | 188.97 / 198.42 |
+
+The phases of a warm hello-world launch, p50 in milliseconds from the start of `cli::run` in the client: connected 0.14, accepted 0.16, committed 0.20, worker started 0.30, image loaded 0.35, run started (the approximate first step) 0.40, exit 0.44, client end 0.55. For the 4.4 MB image the client needs 15.3 ms before it connects: reading the file and its SHA-256, which a direct run does not compute.
+
+**What the numbers say.** On this machine a warm launch is not faster than a direct run: it is about 0.5 ms slower for hello-world and tasks, the same within noise for a long startup, and about 12 ms slower for a 4.4 MB image because the client hashes it. A direct run already starts in under a millisecond here, so a ready worker has little to save, and the service is process management (detached applications, `ps`, `stop`, shutdown and login start), not a speed-up. The release notes say this and nothing more. Neither result changes the direct default. The workloads with a native dependency and with a terminal were not measured: the first needs a native library built for the benchmark, and the second a terminal the harness does not have.
+
+| Budget (a later change may exceed it by at most 10% without saying why) | Measured |
+| --- | --- |
+| Resident size of an idle supervisor, without the cache | 5,956 KiB |
+| Cache bytes with hello-world cached | 12,784 |
+| Resident size of a ready worker | 4,084 KiB |
+| Wakeups of an idle supervisor in 60 seconds; of a ready worker | 0; 0 |
+| Warm hello-world launch, p50 / p95 | 1.32 / 1.39 ms |
+| Launch with the service stopped (an on-demand start), hello-world, p50 / p95 | 6.76 / 6.84 ms |
+| `neurad`; `libneura-core` (unstripped, debug information as built) | 22,984 bytes; 5,808,160 bytes |
+
 ## Migration
 
 Nothing in a source file, the standard library or an image changes. For the migration guide:
@@ -375,3 +435,21 @@ Nothing in a source file, the standard library or an image changes. For the migr
 11. `neura runtime cache clear` exists, as the one way to release cache memory without a shutdown.
 12. No diagnostic code is used.
 13. The note first said that an unmigrated installation refuses `start` and `enable` (its lifecycle row, case 60) while `neura capabilities` only reports (the editor rows, case 61), without saying what `capabilities` reports there, so an editor could offer a mode the installation refuses. The lifecycle rule of the release, that service start and service launches are refused until `neura update --migrate-install`, decides it: `start`, `enable`, `auto` and `required` all refuse with status 5 and no `auto` fallback, and `capabilities` keeps answering but reports the component as `unmigrated`. Cases 60 and 61 test both halves. Changed on 2026-11-17, before any row was implemented.
+14. `Prepared` also carries the application ID, which the supervisor assigns at `Prepare` so that a record exists from the reservation on, and a second `Prepared` acknowledges an `Image`: without an acknowledgement a client whose `Image` failed would send `Commit` for a released token. No message kind was added for it.
+15. The client waits 5 seconds for `Committed`, not 1: the supervisor answers once a worker has the launch, and a worker started for it has 2 seconds to report ready.
+16. `worker-unavailable` is a reason of its own: the worker given a committed launch ended, or did not report ready within 2 seconds, before it took the launch. Nothing ran, but the launch was committed, so `auto` does not run directly and the status is 5.
+17. The envelope also carries the hard resource limits, the ignored signals and the signal mask, which a direct run inherits: a program that writes to a closed pipe gets `SIGPIPE` or the write error exactly as directly, depending on its caller. A worker lowers its hard limits to the caller's and never raises them. A different stack limit takes the fresh path, because the main thread's stack and the default stack of new threads are fixed when a process starts; a nice value below the supervisor's cannot be given by any worker and is `not-reproducible`. A supervisor started on demand inherits the first caller's nice value and limits, so a later caller with a lower nice value is refused (and `auto` runs directly).
+18. A build is identified by the version line and the GNU build ID of `libneura-core` (on a platform without one, the library file's device, inode, size and time), because local builds all report the commit `unknown` and a rebuilt tree must be another build (case 11). `neurad --build` prints it.
+19. A worker that ends without reporting is `worker-lost` when `SIGKILL` ended it or it exited, and `signaled` when another signal did; both give 128 + N to the foreground client after the `ended by signal` line.
+20. A supervisor started on demand gets `--on-demand`, which is what makes it exit when idle. The supervisor reads `NEURA_TEST_SERVICE_TIMERS` from its own environment, for tests only: shorter reservation, ready, idle and grace times, a worker that never reports ready (case 44), answering as another build (case 11), and closing a connection after `Committed` (case 18). No worker and no application sees it.
+21. Case 31 is tested with a 1.5 MiB environment in 100 KiB variables: `exec` accepts at most `ARG_MAX` (2 MiB here) of arguments and environment together and 128 KiB per string.
+22. `Listing` carries, in its `Limit` list, the number of connections the supervisor accepted, so that a test can show that a plain `neura run`, `neura test` or debug launch made none (cases 1, 2).
+23. The generation lease of the worker, the `Retire` an update sends, and generation names of the form `<version>+<id>` belong to the lifecycle milestone, which is not merged here. The supervisor serves `Retire` and checks `current`; a worker holds no lease; `detect_install` accepts semantic-version names only, so cases 50 and 63 use `0.3.0`, `0.3.1` and `0.3.0-rc.1`.
+24. The unmigrated test is the lifecycle note's: a schema 1 marker (the only schema this branch reads) and `share/neura/components/core.txt` in the running generation. Until the lifecycle milestone ships manifests no real installation has that file, so no installation is refused in this branch; the tests build one.
+25. Records are JSON objects, one file each, holding the image path, digest and size, the argument count, the mode summary, the limits, the path, the times and the outcome. No argument, environment value or output is recorded.
+26. `neurad` is the install component `service` and is excluded from a plain `cmake --install`, so an SDK prefix and archive are unchanged and hold no service; the release workflow adds `--component service` to the runtime prefix, and `make-archive.sh` refuses `neurad` in the SDK archive.
+27. `neura runtime stop` of an application whose supervisor is gone prints the state its record has (`unknown` for a live one) with status 0: its worker ended with the supervisor. `inspect` of an expired ID prints `expired` with status 1, as `stop` does.
+28. On a terminal that sends `SIGINT` while the shell ignores it for background jobs, the client and therefore the application inherit the ignored disposition, as a direct run does; the forwarded signal is then ignored by the application too.
+29. The tests that start supervisors, read `/proc` or use `memfd_create` run on Linux only; macOS builds the service and its unit tests but runs none of the service suites.
+30. A supervisor on Linux keeps cached images in sealed memory files (`memfd_create`, `F_SEAL_WRITE`), so neither it nor a worker's native code can change them; elsewhere they are unlinked temporary files.
+31. The launch phases are measured from the start of `cli::run` in the client, after the dispatcher's `exec` and the library load, which `scripts/bench-launch.py` times from outside. The first step is approximated by `run-started`, after the host bindings, because the NVM has no hook for it and none was added.

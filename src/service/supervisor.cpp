@@ -19,6 +19,7 @@
 #include <list>
 #include <map>
 #include <memory>
+#include <set>
 
 #include <fcntl.h>
 #include <poll.h>
@@ -30,8 +31,6 @@
 #include <sys/un.h>
 #include <sys/wait.h>
 #include <unistd.h>
-
-extern char** environ;
 
 namespace neura::service {
 
@@ -168,6 +167,7 @@ private:
     void save(const Application& application);
     void forget(const Application& application);
     void prune_records();
+    void prune_stored();
     bool active_generation() const;
 
     // The loop.
@@ -236,6 +236,17 @@ private:
     std::uint64_t clock_ = 0;
     std::map<int, Connection> connections_;
     int next_connection_ = 1;
+    // Connections accepted since the start, shown by Listing so that a test
+    // can prove that a command made none.
+    std::uint64_t accepted_ = 0;
+    // Tokens of released reservations, newest last.
+    std::deque<Token> released_tokens_;
+    bool released(std::span<const std::uint8_t> token) const {
+        if (token.size() != 32) return false;
+        return std::ranges::any_of(released_tokens_, [&](const Token& known) {
+            return std::equal(token.begin(), token.end(), known.begin());
+        });
+    }
     std::map<std::uint64_t, Application> applications_;
     // Terminal applications, oldest first, for the record limit.
     std::deque<std::uint64_t> terminal_order_;
@@ -338,6 +349,46 @@ void Supervisor::forget(const Application& application) {
     fs::remove(records_ / application.id, error);
 }
 
+void Supervisor::prune_stored() {
+    // The records and epoch files of earlier supervisors of this generation
+    // keep the same bounds: terminal records 24 hours and 1,024 at most,
+    // live ones (now unknown) always, and an epoch file while a record of
+    // its epoch remains or for 24 hours.
+    const auto now = unix_now();
+    std::vector<std::pair<std::int64_t, fs::path>> terminal;
+    std::set<std::string> epochs_in_use;
+    std::error_code error;
+    for (const auto& entry : fs::directory_iterator(records_, error)) {
+        const auto text = read_text(entry.path());
+        if (!text) continue;
+        try {
+            auto record = Json::parse(*text);
+            const auto state = terminal_named(record["state"].string());
+            epochs_in_use.insert(record["epoch"].string());
+            if (state && !is_live(*state)) terminal.emplace_back(record["ended"].integer(), entry.path());
+        } catch (const std::exception&) {
+            // A record that does not parse was cut short: it is dropped.
+            fs::remove(entry.path(), error);
+        }
+    }
+    std::ranges::sort(terminal);
+    const auto excess = terminal.size() > max_terminal_records ? terminal.size() - max_terminal_records : 0;
+    for (std::size_t i = 0; i < terminal.size(); ++i) {
+        if (i < excess || now - terminal[i].first > static_cast<std::int64_t>(record_lifetime_seconds)) {
+            fs::remove(terminal[i].second, error);
+        }
+    }
+    for (const auto& entry : fs::directory_iterator(state_dir_, error)) {
+        const auto name = entry.path().filename().string();
+        if (!name.starts_with("epoch-") || epochs_in_use.contains(name.substr(6))) continue;
+        struct stat status{};
+        if (::stat(entry.path().c_str(), &status) == 0 &&
+            now - static_cast<std::int64_t>(status.st_mtime) > static_cast<std::int64_t>(record_lifetime_seconds)) {
+            fs::remove(entry.path(), error);
+        }
+    }
+}
+
 void Supervisor::prune_records() {
     // Terminal records live 24 hours and at most 1,024 are kept; live ones
     // are never removed.
@@ -396,6 +447,7 @@ void Supervisor::accept_connections() {
         connection.fd = std::move(owned);
         connection.opened = Clock::now();
         connections_.emplace(next_connection_++, std::move(connection));
+        ++accepted_;
     }
 }
 
@@ -660,6 +712,10 @@ Application* Supervisor::by_id(std::string_view id) {
 }
 
 void Supervisor::release(Application& application) {
+    // The token stays known for the epoch, so that a late Commit is
+    // token-expired rather than token-unknown (bounded: the oldest go).
+    released_tokens_.push_back(application.token);
+    if (released_tokens_.size() > 4096) released_tokens_.pop_front();
     if (application.image_ready) use_entry(application.envelope.digest, -1);
     application.streams.clear();
     forget(application);
@@ -681,6 +737,10 @@ void Supervisor::image(int key, Received& received) {
     const auto& message = received.message;
     auto* application = by_token(token_of(message));
     if (!application) {
+        if (released(token_of(message))) {
+            reject(key, message.sequence, Reason::TokenExpired, "the reservation expired or was released");
+            return;
+        }
         reject(key, message.sequence, Reason::TokenUnknown, "this supervisor did not issue the token");
         return;
     }
@@ -778,6 +838,10 @@ void Supervisor::commit(int key, Received& received) {
     const auto& message = received.message;
     auto* application = by_token(token_of(message));
     if (!application) {
+        if (released(token_of(message))) {
+            reject(key, message.sequence, Reason::TokenExpired, "the reservation expired or was released before the commit");
+            return;
+        }
         reject(key, message.sequence, Reason::TokenUnknown, "this supervisor did not issue the token in this epoch");
         return;
     }
@@ -1110,7 +1174,8 @@ Message Supervisor::listing() const {
         .add(Tag::Epoch, std::string_view(reinterpret_cast<const char*>(epoch_.data()), epoch_.size()))
         .add(Tag::Generation, installation_.generation)
         .add(Tag::Build, build_)
-        .add_u64(Tag::Pid, static_cast<std::uint64_t>(::getpid()));
+        .add_u64(Tag::Pid, static_cast<std::uint64_t>(::getpid()))
+        .add(Tag::Limit, named_value("connections-accepted", accepted_));
     for (const auto& [number, application] : applications_) message.add(Tag::Record, record_text(application));
     return message;
 }
@@ -1261,9 +1326,6 @@ void Supervisor::timers() {
             worker.process.spawned = now + Millis(60'000);
         }
     }
-    if (on_demand_ && live_count() == 0 && connections_.empty() && applications_.empty() == false) {
-        // Terminal records do not keep a supervisor alive.
-    }
     if (on_demand_ && live_count() == 0 && connections_.empty() && now - idle_since_ >= timers_.idle) {
         log("idle: no application and no connection; exiting");
         stop_ = true;
@@ -1276,7 +1338,7 @@ int Supervisor::run() {
     // The workers are of this build; only the supervisor's answers differ.
     worker_build_ = build_;
     if (timers_.other_build) build_ += " (a test of another build)";
-    for (char** entry = environ; entry && *entry; ++entry) own_environment_.emplace_back(*entry);
+    for (char** entry = process_environment(); entry && *entry; ++entry) own_environment_.emplace_back(*entry);
     random_bytes(epoch_);
     const auto run = run_directory(true);
     make_private_directory(run / "neura");
@@ -1328,6 +1390,7 @@ int Supervisor::run() {
     ::sigaction(SIGHUP, &action, nullptr);
     std::signal(SIGPIPE, SIG_IGN);
 
+    prune_stored();
     retired_ = !active_generation();
     log("started: pid " + std::to_string(::getpid()) + ", epoch " + hex(epoch_) + ", generation " +
         installation_.generation + (retired_ ? ", retired" : "") + (on_demand_ ? ", on demand" : ""));
@@ -1375,6 +1438,9 @@ int Supervisor::run() {
             }
         }
         reap();
+        // Idle is measured from the end of the last application or
+        // connection, whichever came later.
+        if (live_count() > 0 || !connections_.empty()) idle_since_ = Clock::now();
         timers();
         if (can_exit()) stop_ = true;
     }

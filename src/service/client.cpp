@@ -29,8 +29,6 @@
 #include <sys/un.h>
 #include <unistd.h>
 
-extern char** environ;
-
 namespace neura::service {
 
 namespace {
