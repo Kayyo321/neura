@@ -69,6 +69,13 @@ if(NEURA_HEAP_POOL_UNDER_SANITIZERS)
     add_compile_definitions(NEURA_HEAP_POOL_UNDER_SANITIZERS=1)
 endif()
 
+# The SDK: the compiler, the decompiler, the editor tools, the standard
+# library and the native launchers (docs/design/Products030.md). Without it
+# the build defines only the execution core, the `core` install component,
+# so nothing in the core can depend on compiler code, and libclang's loader
+# is not built.
+option(NEURA_SDK "Build the SDK tools as well as the execution core" ON)
+
 function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
     set_target_properties(${target} PROPERTIES CXX_EXTENSIONS OFF)
@@ -166,7 +173,9 @@ if(NOT NEURA_STATIC_LAUNCHER MATCHES "^(AUTO|ON|OFF)$")
     message(FATAL_ERROR "NEURA_STATIC_LAUNCHER must be AUTO, ON, or OFF")
 endif()
 set(NEURA_HAS_STATIC_LAUNCHER OFF)
-if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+if(NOT NEURA_SDK)
+    # The launchers belong to the SDK's native packaging.
+elseif(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     set(neura_launcher_triple "${NEURA_HOST_TRIPLE}")
     set(neura_launcher_directory "lib/neura/launchers/${neura_launcher_triple}")
     find_library(NEURA_STATIC_LIBFFI NAMES libffi.a HINTS ${LIBFFI_LIBRARY_DIRS} REQUIRED)
@@ -303,6 +312,7 @@ if(NOT MSVC)
 endif()
 neura_target_defaults(neura_lift)
 
+if(NEURA_SDK)
 add_library(neura_compiler STATIC
     src/c-import/c_import.cpp
     src/cli/diagnostic_render.cpp
@@ -381,6 +391,7 @@ foreach(page IN LISTS neura_diagnostic_pages)
 endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pages.inc"
     CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
+endif()
 
 # --- The Neura tools (docs/design/Products030.md) ------------------------------
 # `neura` is a dispatcher: each command runs a sibling tool from the same
@@ -416,6 +427,7 @@ if(NEURA_HAS_GPU)
 endif()
 neura_target_defaults(neura_cli_core)
 
+if(NEURA_SDK)
 # The commands of the SDK: the compiler's, test, the decompiler's and the
 # reference pages, and the driver that renders source diagnostics.
 add_library(neura_cli_sdk STATIC
@@ -438,6 +450,7 @@ neura_target_defaults(neura_cli_explain)
 add_library(neura_cli_tags STATIC src/cli/commands_tags.cpp)
 target_link_libraries(neura_cli_tags PUBLIC neura_cli_sdk)
 neura_target_defaults(neura_cli_tags)
+endif()
 
 set(NEURA_TOOL_TARGETS)
 # neura_add_tool(<name> <component> <source> <libraries>...): one executable
@@ -459,6 +472,7 @@ neura_add_tool(neura-inspect core src/cli/tools/neura-inspect.cpp neura_cli_core
 neura_add_tool(neura-doctor core src/cli/tools/neura-doctor.cpp neura_cli_core)
 neura_add_tool(neura-update core src/cli/tools/neura-update.cpp neura_cli_core)
 neura_add_tool(neura-uninstall core src/cli/tools/neura-uninstall.cpp neura_cli_core)
+if(NEURA_SDK)
 neura_add_tool(neurac sdk src/cli/tools/neurac.cpp neura_cli_sdk)
 neura_add_tool(neura-test sdk src/cli/tools/neura-test.cpp neura_cli_sdk)
 neura_add_tool(neura-doc sdk src/cli/tools/neura-doc.cpp neura_cli_sdk)
@@ -476,6 +490,7 @@ neura_add_tool(neura-fmt sdk src/cli/tools/neura-fmt.cpp neura_cli_sdk)
 # loads libclang only when it runs.
 target_link_libraries(neura-doctor PRIVATE neura_compiler)
 target_compile_definitions(neura-doctor PRIVATE NEURA_DOCTOR_PROBES_LIBCLANG=1)
+endif()
 
 # The dispatcher links the registry only.
 add_executable(neura src/cli/main.cpp)
@@ -497,11 +512,14 @@ neura_target_defaults(neura)
 
 install(TARGETS neura RUNTIME DESTINATION bin COMPONENT core)
 install(FILES LICENSE DESTINATION share/doc/neura COMPONENT core)
-install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL COMPONENT sdk
-    FILES_MATCHING PATTERN "*.nra")
+if(NEURA_SDK)
+    install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL COMPONENT sdk
+        FILES_MATCHING PATTERN "*.nra")
+endif()
 
 include(CTest)
 
+if(NEURA_SDK)
 # The libclang C API headers and a loader that opens the system libclang at
 # run time, for C header imports. Building Neura never links libclang.
 set(NEURA_LIBCLANG_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/neura-libclang")
@@ -516,6 +534,7 @@ if(NOT EXISTS "${NEURA_LIBCLANG_DIR}/include/clang-c/Index.h")
 endif()
 set(NEURA_LIBCLANG_TESTS ${BUILD_TESTING})
 add_subdirectory(third_party/neura-libclang)
+endif()
 
 # --- Kernels (docs/runtime/Kernels.md) ---------------------------------------
 # Deterministic, pure C functions that the runtime will call in place of
@@ -564,7 +583,7 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
-if(BUILD_TESTING)
+if(BUILD_TESTING AND NEURA_SDK)
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)
         neura_target_defaults(neura_native_container_tests)

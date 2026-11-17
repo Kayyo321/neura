@@ -1,12 +1,19 @@
 #!/bin/sh
 # Packs an install prefix into a release archive.
 #
-# usage: make-archive.sh <install-prefix> <output-dir> <full-version> <triple>
+# usage: make-archive.sh [--runtime] <install-prefix> <output-dir> <full-version> <triple>
 #
 # <install-prefix> is a directory made by "cmake --install --prefix". The
 # output is <output-dir>/neura-<full-version>-<triple>.tar.gz, whose single
 # top-level directory neura-<full-version>-<triple>/ holds the prefix, this
-# repository's install.sh, and a VERSION file with the full version.
+# repository's install.sh, and a VERSION file with the full version. The
+# prefix must hold every tool of the core and SDK components and the
+# standard library (docs/design/Products030.md).
+#
+# With --runtime the prefix is one made by "cmake --install --component
+# core": the execution core without the SDK. The output is
+# neura-runtime-<full-version>-<triple>.tar.gz, with the prefix and VERSION
+# and no install.sh, which installs the SDK archive only.
 #
 # The archive is reproducible: names are sorted, owners are 0, the time of
 # every member is SOURCE_DATE_EPOCH (default 0), and gzip records no name or
@@ -19,7 +26,12 @@ die() {
     exit 1
 }
 
-[ "$#" -eq 4 ] || die "usage: make-archive.sh <install-prefix> <output-dir> <full-version> <triple>"
+runtime=0
+if [ "${1:-}" = "--runtime" ]; then
+    runtime=1
+    shift
+fi
+[ "$#" -eq 4 ] || die "usage: make-archive.sh [--runtime] <install-prefix> <output-dir> <full-version> <triple>"
 prefix=$1
 output_dir=$2
 version=$3
@@ -30,6 +42,23 @@ printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9]
 printf '%s\n' "$triple" | grep -Eq '^[0-9A-Za-z_.-]+$' || die "not a target triple: $triple"
 [ -d "$prefix" ] || die "$prefix is not a directory"
 [ -x "$prefix/bin/neura" ] || die "$prefix/bin/neura is missing; install into the prefix first"
+# The tools of each component, as src/cli/tool.cpp lists them.
+core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall"
+sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
+for tool in $core_tools; do
+    [ -x "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is missing; install the core component into the prefix"
+done
+if [ "$runtime" -eq 1 ]; then
+    for tool in $sdk_tools; do
+        [ ! -e "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is an SDK tool; a runtime prefix holds only the core component"
+    done
+    [ ! -e "$prefix/share/neura/stdlib" ] || die "$prefix holds the standard library; a runtime prefix holds only the core component"
+    [ ! -e "$prefix/lib/neura" ] || die "$prefix holds the native launchers; a runtime prefix holds only the core component"
+else
+    for tool in $sdk_tools; do
+        [ -x "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is missing; install the SDK component into the prefix"
+    done
+fi
 here=$(cd "$(dirname "$0")" && pwd -P)
 [ -f "$here/install.sh" ] || die "$here/install.sh is missing"
 
@@ -46,13 +75,19 @@ printf '%s\n' "$epoch" | grep -Eq '^[0-9]+$' || die "SOURCE_DATE_EPOCH is not a 
 
 mkdir -p "$output_dir"
 output_dir=$(cd "$output_dir" && pwd -P)
-top=neura-$version-$triple
+if [ "$runtime" -eq 1 ]; then
+    top=neura-runtime-$version-$triple
+else
+    top=neura-$version-$triple
+fi
 work=$(mktemp -d "${TMPDIR:-/tmp}/neura-archive.XXXXXX")
 trap 'rm -rf "$work"' EXIT
 
 mkdir "$work/$top"
 cp -R "$prefix/." "$work/$top/"
-cp "$here/install.sh" "$work/$top/install.sh"
+if [ "$runtime" -eq 0 ]; then
+    cp "$here/install.sh" "$work/$top/install.sh"
+fi
 printf '%s\n' "$version" >"$work/$top/VERSION"
 
 if [ -n "$(find "$work/$top" -type l)" ]; then
