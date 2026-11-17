@@ -189,13 +189,13 @@ An application ID is `<generation>.<first 8 hexadecimal digits of the epoch>.<nu
 | A supervisor is *retired* when `current` under its root no longer names its generation, which it checks at each `Prepare`, or when it receives `Retire`. A retired supervisor keeps no ready worker, serves the clients of its own generation, and exits as soon as it has no application and no connection. | proposed |
 | A supervisor that begins when its generation is not the active one is retired from the start. | proposed |
 | `enable` writes the unit of the table above, whose command is `<root>/current/bin/neurad --foreground --root <root>` and which is never restarted by the service manager, and enables it for the user (`systemctl --user enable`, `launchctl bootstrap`). Where no user service manager answers, as in WSL without systemd or in a container, it changes nothing and exits with status 1 and a message; `start`, `auto` and `required` still work there. `disable` removes the unit and exits 0 when there is none. | proposed |
-| An installation that an 0.2 updater produced and that has not yet been migrated refuses `start`, `enable`, `auto` and `required` with the instruction to run `neura update --migrate-install`. `--runtime=off` works. | proposed |
+| An installation that an 0.2 updater produced and that has not yet been migrated (a schema 1 install marker, and a `core` component manifest, `share/neura/components/core.txt`, in the running generation) refuses `start`, `enable`, `auto` and `required` with the instruction to run `neura update --migrate-install`, status 5. `auto` does not fall back to a direct run there: the refusal is the lifecycle rule that service start and service launches are refused until the migration, not a missing service. `--runtime=off`, `status`, `ps`, `inspect`, `disable` and `neura capabilities` work, since they start nothing. | proposed |
 
 ### Editors
 
 | Rule | Status |
 | --- | --- |
-| `neura capabilities` reports whether the service component is installed and its protocol version, from the files of the installation. It connects to nothing and starts nothing, and reports a missing component as missing. | proposed |
+| `neura capabilities` reports whether the service component is installed and its protocol version, from the files of the installation. It connects to nothing and starts nothing, and reports a missing component as missing. On an installation that is not yet migrated it reports the component with the state `unmigrated`, because the service refuses to start or launch there; it reports, and does not refuse. An editor offers a service mode only for the state `ready`. | proposed |
 | The editor's Run uses a service mode only when the launch configuration sets it (`"runtime": "auto"` or `"required"`), and passes it as `--runtime`. It never infers the mode from a service being installed or running. The mode used, and a fallback, are shown in the run's output. | proposed |
 | The editor's Test and Debug are direct. A configuration that sets a service mode for them is rejected before anything is built or started, with a message that names the setting; it is not dropped. | proposed |
 | In an untrusted workspace the editor may read `neura capabilities`. It starts no supervisor, no application and no debug session. | proposed |
@@ -318,8 +318,8 @@ Each case is a test of the order of work. *Accept* means the launch runs; *rejec
 57. A message of 2 MiB, a field length past the end, an unknown kind, a `Commit` with three descriptors: one `Rejected` with `protocol`, then the connection closes; the supervisor keeps serving others (reject).
 58. `--record`, `--replay`, `--each` with `required`: status 5; with `auto`: direct, with the line (reject, accept).
 59. `neura test --runtime=required`; a debug launch that asks for a service mode; an editor Debug configuration with `"runtime": "required"`: rejected before anything starts (reject).
-60. A launch on an installation not yet migrated from a 0.2 update: status 5 with the instruction; `--runtime=off` runs (reject).
-61. `neura capabilities` with a stale socket, with no `neurad`, and with a supervisor running: the same answer about the component each time, no connection, no file written (accept).
+60. On an installation not yet migrated from a 0.2 update: `--runtime=required`, `--runtime=auto`, `neura runtime start` and `neura runtime enable` each exit with status 5 and the instruction, start nothing and write nothing; `--runtime=off` runs, and `status` and `ps` answer (reject, accept).
+61. `neura capabilities` with a stale socket, with no `neurad`, and with a supervisor running: the same answer about the component each time, no connection, no file written. On an installation not yet migrated: the component is reported with the state `unmigrated` (accept).
 62. An editor Run with `"runtime": "auto"` in an untrusted workspace: nothing is started (reject).
 63. A release candidate's generation name under a macOS `TMPDIR` of 49 bytes: the socket path is under 104 bytes and the service starts (accept).
 
@@ -374,3 +374,4 @@ Nothing in a source file, the standard library or an image changes. For the migr
 10. No speed-up is promised. Budgets for memory and launch time are the first measured values plus 10%.
 11. `neura runtime cache clear` exists, as the one way to release cache memory without a shutdown.
 12. No diagnostic code is used.
+13. The note first said that an unmigrated installation refuses `start` and `enable` (its lifecycle row, case 60) while `neura capabilities` only reports (the editor rows, case 61), without saying what `capabilities` reports there, so an editor could offer a mode the installation refuses. The lifecycle rule of the release, that service start and service launches are refused until `neura update --migrate-install`, decides it: `start`, `enable`, `auto` and `required` all refuse with status 5 and no `auto` fallback, and `capabilities` keeps answering but reports the component as `unmigrated`. Cases 60 and 61 test both halves. Changed on 2026-11-17, before any row was implemented.
