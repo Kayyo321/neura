@@ -148,4 +148,45 @@ std::vector<Section> multi_result_sections(unsigned returned_words) {
     };
 }
 
+std::vector<Section> aggregate_sections(unsigned minor) {
+    Out constants;
+    constants.u32(3);
+    constants.u32(2).u32(4).u32(0);                              // int32 0
+    constants.u32(5).u32(8).u64(1);                              // int64 1
+    constants.u32(6).u32(8).u64(0x4004000000000000ULL);          // float64 2.5
+
+    Out functions;
+    functions.u32(1);
+    functions.u32(1).u32(2);                 // parameter count, result type int32
+    if (minor >= 7) functions.u32(0);        // no more result words
+    functions.u32(2).u32(4).u32(8);          // frame: text[], array of aggregates
+    functions.u32(2);                        // blocks
+    // Block 0: allocate the array of one element, its words int64 1 and float64 2.5.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(3).u32(0).u8(7).u32(8);
+    functions.raw(vector_of({value(1, 5, 1), value(1, 6, 2)}));
+    functions.u32(1).u32(1);                 // result slot 1, resume block 1
+    // Block 1: return int32 0.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(2).u32(0).raw(value(1, 2, 0));
+
+    Out graphs;
+    graphs.u32(1).u32(0).u32(0).u32(0);
+    Out empty;
+    empty.u32(0);
+    Out layouts;
+    layouts.u32(1);
+    layouts.u32(0xffffffffU).u32(2).u32(5).u32(6).u32(0);        // no parent, fields int64 float64, no interfaces
+    Out types;
+    types.u32(9);
+    types.u8(0).u8(1).u8(3).u8(32).u8(4).u8(7).u32(3).u8(3).u8(64).u8(9).u8(64);
+    types.u8(11).u32(0);                     // 7 aggregate of layout 0
+    types.u8(7).u32(7);                      // 8 array of type 7
+    return {
+        {"CONS", 1, constants.bytes}, {"FUNC", 1, functions.bytes}, {"GLOB", 1, empty.bytes},
+        {"GRPH", 1, graphs.bytes},    {"IMPT", 1, empty.bytes},     {"LAYO", 1, layouts.bytes},
+        {"META", 1, empty.bytes},     {"TYPE", 1, types.bytes},
+    };
+}
+
 } // namespace neura::testing::nvr_bytes

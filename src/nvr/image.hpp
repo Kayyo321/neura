@@ -5,6 +5,7 @@
 // records in docs/runtime/NVR.md.
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <optional>
 #include <string>
@@ -25,14 +26,22 @@ enum class TypeKind : std::uint8_t {
     Void = 0, Bool = 1, Unsigned = 2, Signed = 3, Text = 4, Bytes = 5, Object = 6, Array = 7, List = 8,
     // NVR 1.1: IEEE 754 binary16, binary32, or binary64 by width, and
     // bfloat16 (width 16).
-    Float = 9, BFloat = 10
+    Float = 9, BFloat = 10,
+    // NVR 1.7. A fixed run of typed words stored inline in an array or list:
+    // `reference` is a layout (no parent, no interfaces, two to
+    // max_aggregate_components fields) that lists the component types. It is
+    // valid only as the element type of an Array or List.
+    Aggregate = 11
 };
+
+inline constexpr std::size_t max_aggregate_components = 64;
 
 struct Type {
     TypeKind kind = TypeKind::Void;
     // Width in bits for Unsigned, Signed, Float, and BFloat; zero otherwise.
     std::uint8_t width = 0;
-    // Layout for Object, element type for Array and List; zero otherwise.
+    // Layout for Object and Aggregate, element type for Array and List; zero
+    // otherwise.
     std::uint32_t reference = 0;
 
     bool operator==(const Type&) const = default;
@@ -167,10 +176,13 @@ enum class StateOp : std::uint8_t {
     // NVR 1.3.
     RepeatCollection = 23,
     // NVR 1.6. A call of a built-in C kernel; the immediate is its KERN index.
-    Kernel = 24
+    Kernel = 24,
+    // NVR 1.7. A component of one element of an array or list of aggregates;
+    // the immediate is the component index.
+    ReadComponent = 25, WriteComponent = 26
 };
 
-inline constexpr std::uint8_t state_op_count = 25;
+inline constexpr std::uint8_t state_op_count = 27;
 
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
@@ -334,5 +346,21 @@ unsigned lane_count(const Type& type);
 unsigned selector_lanes(std::size_t exit_count);
 
 bool is_reference(TypeKind kind);
+
+// The component types of `element_type` when it is an Aggregate (NVR 1.7), or
+// null for any other type. The caller has a validated image.
+inline const std::vector<std::uint32_t>* aggregate_components(const Image& image, std::uint32_t element_type) {
+    if (element_type >= image.types.size() || image.types[element_type].kind != TypeKind::Aggregate) return nullptr;
+    return &image.layouts[image.types[element_type].reference].fields;
+}
+
+// The component types of the elements of array or list type `collection`, or
+// null when its elements are single words.
+inline const std::vector<std::uint32_t>* collection_components(const Image& image, std::uint32_t collection) {
+    if (collection >= image.types.size()) return nullptr;
+    const auto& type = image.types[collection];
+    if (type.kind != TypeKind::Array && type.kind != TypeKind::List) return nullptr;
+    return aggregate_components(image, type.reference);
+}
 
 } // namespace neura::nvr

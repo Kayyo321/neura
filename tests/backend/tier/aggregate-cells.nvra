@@ -1,0 +1,53 @@
+; Accounting of aggregate collections (NVR 1.7): one cell per word. The entry holds the
+; arguments array (1 cell), an array of three (int64, float64) elements (1 + 6 cells), a list of two
+; (int64, float64, int64) elements (1 + 6) that grows by one element (+ 3) and loses one (- 3).
+; The peak is 1 + 7 + 10 = 18 cells and the run ends with 15.
+nvr 1.7 profile 1
+entry 0
+
+type 0 text
+type 1 array 0
+type 2 signed 32
+type 3 unsigned 32
+type 4 void
+type 5 bool
+type 6 signed 64
+type 7 float 64
+type 8 unsigned 64
+type 9 aggregate 0
+type 10 array 9
+type 11 aggregate 1
+type 12 list 11
+layout 0 parent - fields [ 6 7 ] interfaces [ ]
+layout 1 parent - fields [ 6 7 6 ] interfaces [ ]
+constant 0 type 6 bytes 0100000000000000
+constant 1 type 7 bytes 000000000000e03f
+constant 2 type 6 bytes 0200000000000000
+constant 3 type 7 bytes 000000000000f83f
+constant 4 type 6 bytes 0300000000000000
+constant 5 type 7 bytes 0000000000000440
+constant 6 type 8 bytes 0200000000000000
+constant 7 type 6 bytes 0400000000000000
+constant 8 type 7 bytes 000000000000e83f
+constant 9 type 6 bytes 0500000000000000
+constant 10 type 8 bytes 0000000000000000
+constant 11 type 7 bytes 0000000000002340
+constant 12 type 2 bytes 00000000
+
+graph 0 inputs 0 outputs [ ]
+
+function 0 parameters 1 result 2 frame [ 1 10 12 6 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit state allocate-collection immediate 10 arguments [ constant:6:0 constant:7:1 constant:6:2 constant:7:3 constant:6:4 constant:7:5 ] result 1 resume 1 assign [ ]
+  block 1 graph 0 selector 0 inputs [ ]
+    exit state repeat-collection immediate 12 arguments [ constant:8:6 constant:6:0 constant:7:1 constant:6:2 ] result 2 resume 2 assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit state append-element immediate 0 arguments [ slot:12:2 constant:6:7 constant:7:8 constant:6:9 ] result - resume 3 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit state remove-element immediate 0 arguments [ slot:12:2 constant:8:10 ] result - resume 4 assign [ ]
+  block 4 graph 0 selector 0 inputs [ ]
+    exit state read-component immediate 2 arguments [ slot:12:2 constant:8:10 ] result 3 resume 5 assign [ ]
+  block 5 graph 0 selector 0 inputs [ ]
+    exit state write-component immediate 1 arguments [ slot:10:1 constant:8:6 constant:7:11 ] result - resume 6 assign [ ]
+  block 6 graph 0 selector 0 inputs [ ]
+    exit return arguments [ constant:2:12 ] assign [ ]

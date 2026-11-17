@@ -323,6 +323,7 @@ std::string Adapter::type_name(const nvm::DebugValue& value) const {
     case nvr::TypeKind::Array: return "array";
     case nvr::TypeKind::List: return "list";
     case nvr::TypeKind::Object: return "object";
+    case nvr::TypeKind::Aggregate: return "tuple";
     }
     return "value";
 }

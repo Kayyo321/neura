@@ -592,6 +592,266 @@ NEURA_TEST(format, multi_word_results_round_trip_through_the_assembly_text) {
     check(source.find("return ") != std::string::npos, "returns are listed");
 }
 
+NEURA_TEST(format, aggregate_elements_need_version_1_7) {
+    // tests/backend/tier/aggregate-cells.nvra: types 9 and 11 are aggregates of
+    // (int64, float64) and (int64, float64, int64); 10 is an array of 9, 12 a list of 11.
+    auto image = aggregate_cells_image(environment);
+    check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
+    check(image.types[9].kind == nvr::TypeKind::Aggregate && image.types[9].reference == 0, "the aggregate type");
+    check(image.layouts[1].fields == std::vector<std::uint32_t>({6, 7, 6}), "the aggregate layout lists its components");
+    check_equal(static_cast<unsigned>(nvr::TypeKind::Aggregate), 11U, "the type kind number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::ReadComponent), 25U, "the read-component number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::WriteComponent), 26U, "the write-component number");
+    check_equal(nvr::required_minor_version(image), std::uint16_t{7}, "an aggregate type declares 1.7");
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{7}, "the writer emits 1.7");
+    const auto loaded = nvr::load(bytes);
+    check(loaded == image, "an image with aggregates round trips through the loader");
+    check(nvr::encode(loaded) == bytes, "and re-encodes to the same bytes");
+    auto declared_old = image;
+    declared_old.minor_version = 6;
+    check(nvr::encode(declared_old) == bytes, "a declared 1.6 image with aggregates is written as 1.7");
+
+    // A component operation alone also needs 1.7, even when a model declares less.
+    auto only_ops = image;
+    check_equal(nvr::required_minor_version(only_ops), std::uint16_t{7}, "components of an image");
+    only_ops.types.resize(8);
+    only_ops.functions[0].blocks.resize(1);
+    only_ops.functions[0].blocks[0].exits[0].operation = nvr::StateOp::ReadComponent;
+    check_equal(nvr::required_minor_version(only_ops), std::uint16_t{7}, "a component operation declares 1.7");
+
+    // Without aggregates the version and the bytes are what they were.
+    check_equal(nvr::required_minor_version(hello_model()), std::uint16_t{0}, "no aggregate, no 1.7");
+    check_equal(nvr::encode(hello_model())[6], std::uint8_t{0}, "an image without aggregates keeps its version");
+    check(nvr::encode(logic_model()) == logic_bytes(), "and its bytes");
+    check(nvr::encode(multi_result_image(environment))[6] == 7, "the multi-word image still declares 1.7 alone");
+
+    // Wire encoding, byte by byte from docs/runtime/NVR.md: kind 11 and a layout index.
+    Header seven;
+    seven.minor = 7;
+    const auto wire = nvr::load(assemble(aggregate_sections(7), seven));
+    check(wire.types[7].kind == nvr::TypeKind::Aggregate && wire.types[7].reference == 0, "the wire type record");
+    check(wire.types[8].kind == nvr::TypeKind::Array && wire.types[8].reference == 7, "an array of the aggregate");
+    check(nvr::encode(wire) == assemble(aggregate_sections(7), seven), "the writer reproduces the bytes");
+    const auto run = run_captured(wire);
+    check(run.result.completed && run.result.status == 0, "the image runs");
+    check_equal(run.result.peak_heap_cells, std::uint64_t{4}, "arguments array 1, array 1 + 2 words");
+
+    // The same function table under a 1.6 header is a well-formed 1.6 table; the aggregate type
+    // is what needs 1.7.
+    Header six;
+    six.minor = 6;
+    expect_rejected(assemble(aggregate_sections(6), six), Kind::Malformed, "uses NVR 1.7 features but declares 1.6");
+    auto future = assemble(aggregate_sections(7), seven);
+    future[6] = 8;
+    expect_rejected(future, Kind::Unsupported, "format version 1.8 is not supported");
+}
+
+NEURA_TEST(format, aggregate_elements_are_validated) {
+    const auto image = aggregate_cells_image(environment);
+    // Blocks of the entry: 0 allocate the array, 1 repeat the list, 2 append, 3 remove, 4 read
+    // component 2 of l[0] into slot 3, 5 write component 1 of a[2], 6 return. Slots: 0 text[],
+    // 1 array of 9, 2 list of 11, 3 int64. Constants: 0 int64 1, 1 float64 0.5, 6 uint64 2.
+    const auto mutated = [&](const std::function<void(nvr::Image&)>& change, std::string_view fragment,
+                             std::source_location where = std::source_location::current()) {
+        auto copy = image;
+        change(copy);
+        expect_invalid(copy, fragment, where);
+    };
+    const auto exit_of = [](nvr::Image& m, std::size_t block) -> nvr::Exit& {
+        return m.functions[0].blocks[block].exits[0];
+    };
+    nvr::load(nvr::encode(image));
+
+    // An aggregate is the element of an array or list and nothing else.
+    const auto only = "an aggregate is valid only as the element of an array or list";
+    mutated([](nvr::Image& m) { m.functions[0].frame_types.push_back(9); }, only);
+    mutated([](nvr::Image& m) { m.globals.push_back({9, nvr::absent}); }, only);
+    mutated([](nvr::Image& m) { m.layouts.push_back({nvr::absent, {6, 9}, {}}); }, only);
+    mutated([](nvr::Image& m) { m.imports.push_back({"app.service", 1, {9}, 4, 3}); }, only);
+    mutated([](nvr::Image& m) { m.imports.push_back({"app.service", 1, {}, 9, 3}); }, only);
+    mutated([](nvr::Image& m) { m.functions[0].result_type = 9; }, "an aggregate is not a result type");
+    mutated([&](nvr::Image& m) {
+        m.functions[0].more_results = {9};
+        exit_of(m, 6).arguments.push_back(exit_of(m, 6).arguments[0]);
+    }, "an aggregate is not a result type");
+    mutated([](nvr::Image& m) { m.constants[0].type = 9; }, "constants cannot have this type");
+    mutated([](nvr::Image& m) { m.kernels.push_back({"neura.test.kernel", 1, {9}, 4}); }, only);
+    // Arrays of arrays of aggregates are fine, and a list of aggregates is a slot type.
+    {
+        auto copy = image;
+        copy.types.push_back({nvr::TypeKind::Array, 0, 10});
+        copy.functions[0].frame_types.push_back(13);
+        nvr::load(nvr::encode(copy));
+    }
+    // The layout of an aggregate: two to 64 components, no parent, no interface, no object.
+    mutated([](nvr::Image& m) { m.layouts[0].fields = {6}; }, "an aggregate has 2 to 64 components, not 1");
+    mutated([](nvr::Image& m) { m.layouts[0].fields.assign(65, 6); }, "an aggregate has 2 to 64 components, not 65");
+    {
+        // 64 components are allowed: the load gets as far as the operations, which build
+        // elements of two words.
+        auto copy = image;
+        copy.layouts[0].fields.assign(64, 6);
+        expect_invalid(copy, "words are not a whole number of 64-component elements");
+    }
+    mutated([](nvr::Image& m) { m.layouts[0].parent = 1; }, "the layout has a parent or interfaces");
+    mutated([](nvr::Image& m) { m.layouts.push_back({0, {6, 7}, {}}); },
+            "an aggregate layout cannot be a parent or interface");
+    mutated([](nvr::Image& m) { m.types.push_back({nvr::TypeKind::Object, 0, 0}); },
+            "an object cannot use an aggregate's layout");
+    mutated([](nvr::Image& m) { m.types[9].reference = 7; }, "layout 7 is out of range");
+
+    // ReadElement and WriteElement do not address an aggregate element.
+    mutated([&](nvr::Image& m) {
+        auto& exit = exit_of(m, 4);
+        exit.operation = nvr::StateOp::ReadElement;
+        exit.immediate = 0;
+    }, "read-element cannot address an aggregate element");
+    mutated([&](nvr::Image& m) {
+        auto& exit = exit_of(m, 5);
+        exit.operation = nvr::StateOp::WriteElement;
+        exit.immediate = 0;
+    }, "write-element cannot address an aggregate element");
+    // Component operations: the component index, the collection and the types.
+    mutated([&](nvr::Image& m) { exit_of(m, 4).immediate = 3; }, "component 3 is out of range");
+    mutated([&](nvr::Image& m) { exit_of(m, 5).immediate = 2; }, "component 2 is out of range");
+    mutated([&](nvr::Image& m) { exit_of(m, 4).result_slot = 1; }, "result: type 6 is not assignable to type 10");
+    mutated([&](nvr::Image& m) { exit_of(m, 5).arguments[2] = {nvr::ValueKind::Constant, 6, 0}; },
+            "component value: type 6 is not assignable to type 7");
+    mutated([&](nvr::Image& m) { exit_of(m, 5).arguments.pop_back(); }, "expects 3 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 4).arguments[1] = {nvr::ValueKind::Constant, 7, 1}; },
+            "argument 1 must be an unsigned 64-bit index");
+    mutated([&](nvr::Image& m) { exit_of(m, 5).result_slot = 3; }, "a void result requires an absent slot");
+    mutated([](nvr::Image& m) {
+        m.types.push_back({nvr::TypeKind::Array, 0, 6});
+        m.functions[0].frame_types.push_back(13);
+        auto& exit = m.functions[0].blocks[4].exits[0];
+        exit.arguments[0] = {nvr::ValueKind::Slot, 13, 4};
+        exit.immediate = 0;
+    }, "a component operation needs a collection of aggregates");
+    // Building a collection: whole elements, each word of its component's type.
+    mutated([&](nvr::Image& m) { exit_of(m, 0).arguments.pop_back(); },
+            "5 words are not a whole number of 2-component elements");
+    mutated([&](nvr::Image& m) { exit_of(m, 0).arguments.push_back(exit_of(m, 0).arguments[0]); },
+            "7 words are not a whole number of 2-component elements");
+    mutated([&](nvr::Image& m) { std::swap(exit_of(m, 0).arguments[0], exit_of(m, 0).arguments[1]); },
+            "element 0: type 7 is not assignable to type 6");
+    mutated([&](nvr::Image& m) { std::swap(exit_of(m, 0).arguments[4], exit_of(m, 0).arguments[5]); },
+            "element 4: type 7 is not assignable to type 6");
+    mutated([&](nvr::Image& m) { exit_of(m, 1).arguments.pop_back(); }, "expects 4 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 1).arguments[2] = exit_of(m, 1).arguments[1]; },
+            "element 2: type 6 is not assignable to type 7");
+    mutated([&](nvr::Image& m) { exit_of(m, 2).arguments.pop_back(); }, "expects 4 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 2).arguments[3] = exit_of(m, 2).arguments[2]; },
+            "component value 2: type 7 is not assignable to type 6");
+    mutated([&](nvr::Image& m) { exit_of(m, 2).arguments[0] = {nvr::ValueKind::Slot, 10, 1}; },
+            "argument 0 has the wrong type");
+    // Removal and length are unchanged: a list and an index.
+    {
+        auto copy = image;
+        nvr::load(nvr::encode(copy));
+        auto& exit = exit_of(copy, 3);
+        exit.arguments.push_back(exit.arguments[1]);
+        expect_invalid(copy, "expects 2 argument(s)");
+    }
+    // A kernel's collection arguments are scalars: an array of aggregates is not one.
+    // (Kernel signatures are checked against a table, in kernel_tests.cpp.)
+}
+
+NEURA_TEST(format, an_aggregate_is_not_a_channel_element_type) {
+    const auto image = aggregate_cells_image(environment);
+    // channel-open takes its element type as a type index: an aggregate is not one.
+    {
+        auto copy = image;
+        copy.layouts.push_back({nvr::absent, {6}, {}});
+        copy.types.push_back({nvr::TypeKind::Object, 0, 2});
+        copy.functions[0].frame_types.push_back(13);
+        copy.transferable_layouts = std::vector<std::uint32_t>{};
+        auto& exit = copy.functions[0].blocks[4].exits[0];
+        exit = {};
+        exit.kind = nvr::ExitKind::Scheduler;
+        exit.scheduler = nvr::SchedulerOp::ChannelOpen;
+        exit.target = 6;
+        exit.arguments = {{nvr::ValueKind::Slot, 13, 4}, {nvr::ValueKind::Constant, 6, 0}};
+        exit.resume = 5;
+        nvr::load(nvr::encode(copy));
+        exit.target = 9;
+        expect_invalid(copy, "the channel's element type must be a transferable type");
+        exit.target = 10;
+        expect_invalid(copy, "the channel's element type must be a transferable type");
+    }
+}
+
+NEURA_TEST(format, aggregate_collections_show_their_elements_as_groups_in_the_debugger) {
+    // Stopped by the step limit after the six blocks that build, change and read the collections:
+    // slot 1 is the array of three (int64, float64) elements, slot 2 the list of two
+    // (int64, float64, int64) elements.
+    const auto image = aggregate_cells_image(environment);
+    nvm::RunLimits limits;
+    limits.max_steps = 6;
+    nvm::Execution execution(image, std::span<const std::string>{}, limits);
+    const auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::Trapped, "the step limit stops the run");
+    const auto snapshot = execution.debug_snapshot();
+    check(!snapshot.threads.empty() && !snapshot.threads[0].frames.empty(), "the frame is kept");
+    const auto& slots = snapshot.threads[0].frames[0].slots;
+    check_equal(slots[1].text, std::string{"array[3]"}, "the array's length counts elements");
+    check_equal(slots[1].children, std::size_t{3}, "one child per element");
+    check_equal(slots[2].text, std::string{"list[2]"}, "the list's length counts elements");
+    const auto array = execution.debug_children(slots[1].type, slots[1].bits, 0, 100);
+    check_equal(array.size(), std::size_t{3}, "three groups");
+    check_equal(array[0].text, std::string{"(1, 0.5)"}, "an element is a group of its components");
+    check_equal(array[2].text, std::string{"(3, 9.5)"}, "a written component shows");
+    const auto list = execution.debug_children(slots[2].type, slots[2].bits, 0, 100);
+    check_equal(list.size(), std::size_t{2}, "two groups");
+    check_equal(list[1].text, std::string{"(4, 0.75, 5)"}, "three components");
+    check_equal(execution.debug_children(slots[2].type, slots[2].bits, 1, 100).size(), std::size_t{1}, "a window");
+    check_equal(slots[3].text, std::string{"2"}, "the component read by block 4 is int64 2");
+}
+
+NEURA_TEST(format, aggregate_elements_round_trip_through_the_assembly_text) {
+    const auto image = aggregate_cells_image(environment);
+    const auto text = decompiler::disassemble(image);
+    check(text.find("nvr 1.7 profile") != std::string::npos, "the assembly text declares 1.7");
+    check(text.find("type 9 aggregate 0") != std::string::npos, "the aggregate type is listed");
+    check(text.find("read-component immediate 2") != std::string::npos, "the component read is listed");
+    check(text.find("write-component immediate 1") != std::string::npos, "the component write is listed");
+    check(decompiler::assemble(text) == image, "assemble(disassemble(image)) is the image");
+    check(nvr::encode(decompiler::assemble(text)) == nvr::encode(image), "and encodes to the same bytes");
+    const auto large = aggregate_image(environment);
+    check(decompiler::assemble(decompiler::disassemble(large)) == large, "the larger image round trips too");
+    // The text of a 1.6 image names no aggregate and no component operation.
+    auto old_text = text;
+    old_text.replace(old_text.find("nvr 1.7"), 7, "nvr 1.6");
+    bool rejected = false;
+    try {
+        decompiler::assemble(old_text);
+    } catch (const decompiler::AssemblyError& error) {
+        rejected = std::string(error.what()).find("aggregate types require NVR 1.7") != std::string::npos;
+    }
+    check(rejected, "the assembler rejects an aggregate type under a 1.6 header");
+    auto no_type = decompiler::disassemble(aggregate_cells_image(environment));
+    no_type.replace(no_type.find("nvr 1.7"), 7, "nvr 1.6");
+    no_type.replace(no_type.find("type 9 aggregate 0"), 18, "type 9 void");
+    no_type.replace(no_type.find("type 11 aggregate 1"), 19, "type 11 void");
+    rejected = false;
+    try {
+        decompiler::assemble(no_type);
+    } catch (const decompiler::AssemblyError& error) {
+        rejected = std::string(error.what()).find("component operations require NVR 1.7") != std::string::npos;
+    }
+    check(rejected, "and a component operation under a 1.6 header");
+    // The decompiled source shows the element types and the components.
+    const auto source = decompiler::decompile(image).text;
+    check(source.find("(int64, float64)[]") != std::string::npos, "the array's element type is listed: " + source);
+    check(source.find("(int64, float64, int64)[list]") != std::string::npos, "the list's element type is listed");
+    check(source.find("[uint64 0].c2") != std::string::npos || source.find("].c2") != std::string::npos,
+          "the component read is listed: " + source);
+    check(source.find("].c1 = ") != std::string::npos, "the component write is listed");
+    check(source.find("repeat(") != std::string::npos && source.find("append(") != std::string::npos,
+          "repeat and append list every word");
+}
+
 NEURA_TEST(format, writer_reproduces_assembled_fixtures) {
     check(nvr::encode(hello_model()) == assemble(hello_sections()), "writer output matches the hello fixture");
     check(nvr::encode(logic_model()) == logic_bytes(), "writer output matches the logic fixture");
@@ -790,8 +1050,8 @@ NEURA_TEST(format, record_encoding_errors) {
     }
     {
         auto sections = hello_sections();
-        replace(sections, "TYPE", Out().u32(1).u8(11).bytes);
-        expect_rejected(assemble(sections), Kind::Malformed, "invalid type kind 11");
+        replace(sections, "TYPE", Out().u32(1).u8(12).bytes);
+        expect_rejected(assemble(sections), Kind::Malformed, "invalid type kind 12");
     }
     {
         auto sections = hello_sections();

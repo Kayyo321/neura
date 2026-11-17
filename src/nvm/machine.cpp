@@ -1183,6 +1183,18 @@ private:
         return element_width(type(type(collection).reference));
     }
 
+    // The component types of the elements of collection type `collection`
+    // when they are aggregates, or null (NVR 1.7).
+    const std::vector<std::uint32_t>* components_of(std::uint32_t collection) const {
+        return aggregates_ ? nvr::collection_components(image_, collection) : nullptr;
+    }
+
+    // The component positions that hold references, as a trace plan of the
+    // aggregate's layout, for the collection type `collection`.
+    const std::vector<std::size_t>& component_plan(std::uint32_t collection, const std::vector<std::uint32_t>& fields) {
+        return trace_plan(layout_traces_, type(type(collection).reference).reference, image_.layouts.size(), fields);
+    }
+
     void add_live_cells(std::uint64_t cells) {
         live_cells_ += cells;
         if (fleet_heap_) fleet_heap_->add(cells);
@@ -1260,9 +1272,14 @@ private:
             const auto layout = heap_.type(item);
             const auto& fields = image_.layouts[layout].fields;
             heap_.visit_fields_reverse(item, trace_plan(layout_traces_, layout, image_.layouts.size(), fields), mark_one);
-        } else if ((kind == EntryKind::Array || kind == EntryKind::List) &&
-                   nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
-            heap_.visit_elements_reverse(item, mark_one);
+        } else if (kind == EntryKind::Array || kind == EntryKind::List) {
+            if (const auto* fields = components_of(heap_.type(item))) {
+                // An aggregate collection traces the reference components of
+                // every element, by the aggregate layout's plan.
+                heap_.visit_components_reverse(item, fields->size(), component_plan(heap_.type(item), *fields), mark_one);
+            } else if (nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
+                heap_.visit_elements_reverse(item, mark_one);
+            }
         }
     }
 
@@ -1274,9 +1291,12 @@ private:
         if (kind == EntryKind::Object) {
             const auto& fields = image_.layouts[item.type()].fields;
             item.visit_fields_reverse(trace_plan(layout_traces_, item.type(), image_.layouts.size(), fields), mark_one);
-        } else if ((kind == EntryKind::Array || kind == EntryKind::List) &&
-                   nvr::is_reference(type(type(item.type()).reference).kind)) {
-            item.visit_elements_reverse(mark_one);
+        } else if (kind == EntryKind::Array || kind == EntryKind::List) {
+            if (const auto* fields = components_of(item.type())) {
+                item.visit_components_reverse(fields->size(), component_plan(item.type(), *fields), mark_one);
+            } else if (nvr::is_reference(type(type(item.type()).reference).kind)) {
+                item.visit_elements_reverse(mark_one);
+            }
         }
     }
 
@@ -3471,9 +3491,44 @@ private:
         return static_cast<std::size_t>(index);
     }
 
+    // The element index checked against a collection of aggregates, whose
+    // length is its words divided by the components per element.
+    std::size_t checked_aggregate_index(Heap::Ref item, std::uint64_t index, std::size_t width) {
+        const auto elements = length(item) / width;
+        if (index >= elements) {
+            fault(TrapKind::IndexOutOfBounds, "index " + std::to_string(index) + " for length " +
+                                                  std::to_string(elements));
+        }
+        return static_cast<std::size_t>(index);
+    }
+
+    // The references among the components of one element, which a collection
+    // started by the allocation must keep alive.
+    std::vector<std::uint64_t> component_roots(const std::vector<std::uint32_t>& fields,
+                                               std::span<const std::uint64_t> words) const {
+        std::vector<std::uint64_t> roots;
+        for (std::size_t i = 0; i < fields.size() && i < words.size(); ++i) {
+            if (nvr::is_reference(type(fields[i]).kind) && words[i] != 0) roots.push_back(words[i]);
+        }
+        return roots;
+    }
+
     std::uint64_t state(const nvr::Exit& exit, const std::vector<std::uint64_t>& args) {
         const auto& types = exit.arguments;
         switch (exit.operation) {
+        case nvr::StateOp::ReadComponent:
+        case nvr::StateOp::WriteComponent: {
+            const auto item = typed_entry(args[0], types[0].type);
+            const auto width = components_of(types[0].type)->size();
+            const auto word = checked_aggregate_index(item, args[1], width) * width + exit.immediate;
+            if (exit.operation == nvr::StateOp::ReadComponent) return heap_.element(item, word);
+            if (heap_log_) {
+                heap_log_->push_back({false, false, args[0], static_cast<std::uint32_t>(word), heap_.element(item, word), 0,
+                                      args[2]});
+            }
+            heap_.set_element(item, word, args[2]);
+            return 0;
+        }
         case nvr::StateOp::ClassHash:
         case nvr::StateOp::ClassText: {
             const auto identity = heap_.ensure_identity(typed_entry(args[0], types[0].type));
@@ -3547,6 +3602,21 @@ private:
         case nvr::StateOp::AllocateCollection: {
             const auto kind = type(exit.immediate).kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
             const auto width = collection_width(exit.immediate);
+            if (const auto* fields = components_of(exit.immediate);
+                fields && exit.operation == nvr::StateOp::RepeatCollection) {
+                // One element's words follow the length; the entry holds that
+                // run `count` times and costs one cell per word.
+                if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+                const auto count = args[0];
+                if (count > Heap::max_elements() / fields->size())
+                    fault(TrapKind::HeapLimit, "collection length exceeds storage limits");
+                const auto cells = count * fields->size() + 1;
+                const std::span<const std::uint64_t> words(args.data() + 1, fields->size());
+                const auto roots = count != 0 ? component_roots(*fields, words) : std::vector<std::uint64_t>{};
+                ensure_heap_cells(cells, "allocation of ", roots);
+                return insert_allocation(
+                    heap_.create_repeated(kind, exit.immediate, static_cast<std::size_t>(count), words), cells);
+            }
             if (exit.operation == nvr::StateOp::RepeatCollection) {
                 if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
                 const auto count = args[0];
@@ -3566,8 +3636,11 @@ private:
             for (const auto element : args) item.push(element);
             return allocate(std::move(item));
         }
-        case nvr::StateOp::ReadLength:
-            return length(typed_entry(args[0], types[0].type));
+        case nvr::StateOp::ReadLength: {
+            const auto item = typed_entry(args[0], types[0].type);
+            if (const auto* fields = components_of(types[0].type)) return length(item) / fields->size();
+            return length(item);
+        }
         case nvr::StateOp::ReadElement: {
             const auto item = typed_entry(args[0], types[0].type);
             const auto index = checked_index(item, args[1]);
@@ -3587,6 +3660,16 @@ private:
             // The list is a root of any collection the growth starts, so
             // `item` stays valid across it.
             const auto item = typed_entry(args[0], types[0].type);
+            if (const auto* fields = components_of(types[0].type)) {
+                // The element's words are appended together: one structural
+                // change, and one cell per word.
+                auto roots = component_roots(*fields, std::span<const std::uint64_t>(args).subspan(1));
+                roots.push_back(args[0]);
+                ensure_heap_cells(fields->size(), "growth by ", roots);
+                heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
+                add_live_cells(fields->size());
+                return 0;
+            }
             const auto element_type = type(heap_.type(item)).reference;
             const std::array roots{args[0], nvr::is_reference(type(element_type).kind) ? args[1] : std::uint64_t{0}};
             ensure_heap_cells(1, "growth by ", roots);
@@ -3596,6 +3679,12 @@ private:
         }
         case nvr::StateOp::RemoveElement: {
             const auto item = typed_entry(args[0], types[0].type);
+            if (const auto* fields = components_of(types[0].type)) {
+                const auto index = checked_aggregate_index(item, args[1], fields->size());
+                heap_.remove_words(item, index * fields->size(), fields->size());
+                remove_live_cells(fields->size());
+                return 0;
+            }
             const auto index = checked_index(item, args[1]);
             heap_.remove(item, index);
             remove_live_cells(1);
@@ -3985,6 +4074,11 @@ private:
 
     const nvr::Image& image_;
     nvr::TypeSystem types_;
+    // Whether any type is an aggregate (NVR 1.7), so that an image without
+    // one pays nothing for the checks on its collections.
+    bool aggregates_ = std::ranges::any_of(image_.types, [](const nvr::Type& t) {
+        return t.kind == nvr::TypeKind::Aggregate;
+    });
     RunLimits limits_;
     std::optional<std::uint32_t> entry_;
     std::vector<std::string> arguments_;
@@ -4237,9 +4331,13 @@ DebugValue Execution::State::debug_value(std::uint32_t index, std::uint64_t bits
         break;
     case EntryKind::Array:
     case EntryKind::List:
-        value.text = std::string(heap_.kind(entry) == EntryKind::Array ? "array[" : "list[") +
-                     std::to_string(heap_.length(entry)) + "]";
-        value.children = heap_.length(entry);
+        {
+            const auto* fields = aggregates_ ? nvr::collection_components(image_, heap_.type(entry)) : nullptr;
+            const auto elements = fields ? heap_.length(entry) / fields->size() : heap_.length(entry);
+            value.text = std::string(heap_.kind(entry) == EntryKind::Array ? "array[" : "list[") +
+                         std::to_string(elements) + "]";
+            value.children = elements;
+        }
         break;
     case EntryKind::Object:
         value.layout = heap_.type(entry);
@@ -4263,6 +4361,20 @@ std::vector<DebugValue> Execution::State::debug_children(std::uint32_t index, st
         for (auto i = start; i < end; ++i) values.push_back(debug_value(fields[i], heap_.field(entry, static_cast<std::uint32_t>(i)), heap_.initialized(entry, static_cast<std::uint32_t>(i))));
     } else if (heap_.kind(entry) == EntryKind::Array || heap_.kind(entry) == EntryKind::List) {
         const auto element = image_.types[heap_.type(entry)].reference;
+        if (const auto* fields = nvr::aggregate_components(image_, element)) {
+            // Each element is one group of its components, shown as text.
+            const auto elements = heap_.length(entry) / fields->size();
+            const auto last = start + std::min(count, elements - std::min(start, elements));
+            for (auto i = start; i < last; ++i) {
+                std::string text = "(";
+                for (std::size_t c = 0; c < fields->size(); ++c) {
+                    text += (c == 0 ? "" : ", ") +
+                            debug_value((*fields)[c], heap_.element(entry, i * fields->size() + c), true).text;
+                }
+                values.push_back(DebugValue{element, 0, true, text + ")", 0});
+            }
+            return values;
+        }
         const auto end = start + std::min(count, heap_.length(entry) - std::min(start, heap_.length(entry)));
         // Collections are initialized atomically at allocation; only object
         // fields carry per-cell initialized flags.

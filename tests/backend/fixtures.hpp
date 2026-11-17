@@ -29,6 +29,13 @@ std::vector<std::uint8_t> logic_bytes();
 // tests/backend/tier/multi-result.nvra, assembled: an NVR 1.7 image whose
 // functions return two and three words (the compiler does not emit them yet).
 nvr::Image multi_result_image(const Environment& environment);
+// tests/backend/tier/aggregates.nvra, assembled and given the lift hints of its
+// graphs: an NVR 1.7 image with arrays and lists of aggregate elements. The
+// entry's argument count selects a trap case (1 to 4).
+nvr::Image aggregate_image(const Environment& environment);
+// tests/backend/tier/aggregate-cells.nvra, assembled: the cell accounting of
+// aggregate collections (peak 18 cells, 15 at the end).
+nvr::Image aggregate_cells_image(const Environment& environment);
 
 // One image of the corpus that the decompiler tests use.
 struct CorpusImage {

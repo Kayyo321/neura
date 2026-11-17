@@ -27,9 +27,35 @@ std::uint32_t result_slot_count(const nvr::Image& image, const nvr::Exit& exit) 
                : 1U;
 }
 
-bool internal_exit(const nvr::Exit& exit) {
+// Whether a state exit works on a collection of aggregates (NVR 1.7): a
+// component operation, one that builds such a collection, or one that reads
+// or changes its length or elements. A collection whose entry holds several
+// words per element has a different length and cost than the inline
+// operations compute, so tiers 2 and 3 decline it.
+bool aggregate_exit(const nvr::Image& image, const nvr::Exit& exit) {
+    if (exit.kind != nvr::ExitKind::State) return false;
+    switch (exit.operation) {
+    case nvr::StateOp::ReadComponent:
+    case nvr::StateOp::WriteComponent:
+        return true;
+    case nvr::StateOp::AllocateCollection:
+    case nvr::StateOp::RepeatCollection:
+        return nvr::collection_components(image, exit.immediate) != nullptr;
+    case nvr::StateOp::ReadLength:
+    case nvr::StateOp::ReadElement:
+    case nvr::StateOp::WriteElement:
+    case nvr::StateOp::AppendElement:
+    case nvr::StateOp::RemoveElement:
+    case nvr::StateOp::ReadVersion:
+        return !exit.arguments.empty() && nvr::collection_components(image, exit.arguments[0].type) != nullptr;
+    default:
+        return false;
+    }
+}
+
+bool internal_exit(const nvr::Image& image, const nvr::Exit& exit) {
     return exit.kind == nvr::ExitKind::Continue ||
-           (exit.kind == nvr::ExitKind::State && inline_state_operation(exit));
+           (exit.kind == nvr::ExitKind::State && inline_state_operation(exit) && !aggregate_exit(image, exit));
 }
 
 // --- Region optimization (tier2.hpp, "Optimization") ---------------------
@@ -743,7 +769,11 @@ private:
         // ops carry one value and one result slot.
         if (exit.kind == nvr::ExitKind::Return && exit.arguments.size() > 1) return false;
         if (exit.kind == nvr::ExitKind::Call && image_.functions[exit.target].more_results.size() > 0) return false;
-        if (internal_exit(exit)) return true;
+        // Likewise a component operation and any state operation on a
+        // collection of aggregates (NVR 1.7, "Inline tuples and payload enums"
+        // in docs/design/Storage030.md): the reference path runs them.
+        if (aggregate_exit(image_, exit)) return false;
+        if (internal_exit(image_, exit)) return true;
         if (!program_ || checkable_) return false;
         return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return ||
                exit.kind == nvr::ExitKind::State;
@@ -1060,7 +1090,7 @@ private:
             reached[0] = 1;
             for (std::uint32_t local = 0; local < n; ++local) {
                 for (const auto& exit : block(local).exits) {
-                    if (!internal_exit(exit) || !in_region(exit.resume)) continue;
+                    if (!internal_exit(image_, exit) || !in_region(exit.resume)) continue;
                     auto out = in[local];
                     assigned(exit, out);
                     const auto target = local_.at(exit.resume);
@@ -1088,7 +1118,7 @@ private:
             };
             for (const auto& input : b.inputs) read(input);
             for (const auto& exit : b.exits) {
-                if (!internal_exit(exit)) continue;
+                if (!internal_exit(image_, exit)) continue;
                 for (const auto& assignment : exit.assignments) read(assignment.value);
                 for (const auto& argument : exit.arguments) read(argument);
                 assigned(exit, written);
@@ -1126,7 +1156,7 @@ private:
                 continue;
             }
             const auto& exit = exits[next++];
-            if (!internal_exit(exit) || !in_region(exit.resume)) continue;
+            if (!internal_exit(image_, exit) || !in_region(exit.resume)) continue;
             const auto target = local_.at(exit.resume);
             if (state[target] == 1) {
                 header[target] = 1;
@@ -1639,7 +1669,8 @@ Formation form_region(const nvr::Image& image, std::uint32_t function, std::uint
             f.kind = BlockForm::Kind::None;
         }
         if (f.kind != BlockForm::Kind::None &&
-            std::none_of(blocks[b].exits.begin(), blocks[b].exits.end(), internal_exit)) {
+            std::none_of(blocks[b].exits.begin(), blocks[b].exits.end(),
+                         [&](const nvr::Exit& exit) { return internal_exit(image, exit); })) {
             f.kind = BlockForm::Kind::None;
         }
         forms.emplace(b, f);
@@ -1653,7 +1684,7 @@ Formation form_region(const nvr::Image& image, std::uint32_t function, std::uint
     std::set<std::uint32_t> seen{entry};
     for (std::size_t next = 0; next < members.size(); ++next) {
         for (const auto& exit : blocks[members[next]].exits) {
-            if (!internal_exit(exit) || seen.contains(exit.resume) || members.size() >= max_blocks) continue;
+            if (!internal_exit(image, exit) || seen.contains(exit.resume) || members.size() >= max_blocks) continue;
             if (!admissible(exit.resume)) continue;
             seen.insert(exit.resume);
             members.push_back(exit.resume);
@@ -1661,7 +1692,7 @@ Formation form_region(const nvr::Image& image, std::uint32_t function, std::uint
     }
     const bool internal_edge = std::any_of(members.begin(), members.end(), [&](std::uint32_t b) {
         return std::any_of(blocks[b].exits.begin(), blocks[b].exits.end(),
-                           [&](const nvr::Exit& exit) { return internal_exit(exit) && seen.contains(exit.resume); });
+                           [&](const nvr::Exit& exit) { return internal_exit(image, exit) && seen.contains(exit.resume); });
     });
     if (!internal_edge) {
         result.reason = "no exit stays in the region";

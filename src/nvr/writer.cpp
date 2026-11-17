@@ -12,7 +12,9 @@ namespace neura::nvr {
 
 unsigned lane_count(const Type& type) {
     switch (type.kind) {
-    case TypeKind::Void: return 0;
+    case TypeKind::Void:
+    // An aggregate is never a value, so it has no lanes.
+    case TypeKind::Aggregate: return 0;
     case TypeKind::Bool: return 1;
     case TypeKind::Unsigned:
     case TypeKind::Signed:
@@ -303,6 +305,7 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
             case TypeKind::Float:
             case TypeKind::BFloat: o.u8(type.width); break;
             case TypeKind::Object:
+            case TypeKind::Aggregate:
             case TypeKind::Array:
             case TypeKind::List: o.u32(type.reference); break;
             default: break;
@@ -335,6 +338,17 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    if (std::ranges::any_of(image.types, [](const Type& type) { return type.kind == TypeKind::Aggregate; })) return 7;
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State &&
+                    (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent)) {
+                    return 7;
+                }
+            }
+        }
+    }
     if (std::ranges::any_of(image.functions, [](const Function& f) { return !f.more_results.empty(); })) return 7;
     if (!image.kernels.empty()) return 6;
     for (const auto& function : image.functions) {

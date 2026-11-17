@@ -681,6 +681,145 @@ NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
     check_clean(image, "multi-word results", {});
 }
 
+const char* const aggregate_output =
+    "3\n2\n3.5\n9.25\n4\n5\n8\n4\n7\n2\n2\n42\n40\n780\n70\n37\n0.25\n300\n6\n105\n12066\n2\n1.5\n";
+
+NEURA_TEST(tier, aggregate_collections_run_on_the_reference_path_in_every_tier) {
+    // Arrays and lists of two- and three-component elements (NVR 1.7, mixing int,
+    // float, text, object and array components): allocate, repeat, append,
+    // remove, read and write a component, length, version, and loops. The texts,
+    // objects and arrays are kept alive only by components, under many
+    // collections. Tier 2 and tier 3 decline every operation on such a
+    // collection (docs/design/Storage030.md, "Images and runtime"), so every
+    // mode must end with the reference run's output, steps and peak heap.
+    const auto image = aggregate_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs at tier 0");
+    check_equal(reference.output, std::string{aggregate_output}, "tier 0 output");
+    // Garbage alone is over 4000 cells, so the peak shows that collections ran,
+    // and the output that they kept every component's referent.
+    check(reference.result.peak_heap_cells < 1500, "collections ran: peak " +
+                                                       std::to_string(reference.result.peak_heap_cells));
+    check_same(run_captured(image, limits_at(0)), reference, "a second tier 0 run");
+    using Tier3 = nvm::TierOptions::Tier3;
+    for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+        for (const bool programs : {false, true}) {
+            auto options = eager_programs();
+            options.tier3 = tier3;
+            options.native_after = 1;
+            if (!programs) options.programs = nvm::TierOptions::Programs::Off;
+            const std::string label =
+                std::string("tier3 ") + (tier3 == Tier3::Off ? "off" : tier3 == Tier3::Interp ? "interp" : "native") +
+                (programs ? " with programs" : " with regions");
+            nvm::TierCache cache(image, options);
+            compare_with_tier_0(image, cache, label, {});
+            compare_with_tier_0(image, cache, label + " again", {});
+            if (programs && programs_run()) {
+                const auto counts = cache.statistics();
+                check(counts.lifted_by_hint > 0 && counts.programs > 0,
+                      label + ": the hinted blocks were lifted into programs");
+                check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
+                      label + ": calls and returns still run in programs");
+                check(counts.region_counts.exits > 0, label + ": the aggregate exits were declined");
+                if (tier3 != Tier3::Off && nvm::tier_ceiling() >= 3) {
+                    check(counts.native_programs > 0 && counts.native.steps > 0,
+                          label + ": tier 3 built and ran programs around the declined exits");
+                }
+            }
+        }
+    }
+    nvm::TierCache tier_one(image, eager_programs());
+    check_same(run_captured(image, limits_at(1, &tier_one)), reference, "tier 1");
+    nvm::TierCache defaults(image, nvm::TierOptions{});
+    check_same(run_captured(image, limits_at(2, &defaults)), reference, "default thresholds");
+    // Limits that land inside the aggregate operations and between collections.
+    for (const std::uint64_t steps : {1ULL, 7ULL, 40ULL, 333ULL, 1500ULL, 4000ULL}) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "step limit " + std::to_string(steps), {},
+                            [&](nvm::RunLimits& limits) { limits.max_steps = steps; });
+    }
+    for (std::uint64_t cells = 1; cells <= reference.result.peak_heap_cells + 1; cells += cells < 64 ? 1 : 7) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "heap limit " + std::to_string(cells), {},
+                            [&](nvm::RunLimits& limits) { limits.max_heap_cells = cells; });
+    }
+    // The run that fits in exactly the peak completes: nothing live was freed
+    // and nothing dead was counted.
+    {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "the peak as the limit", {},
+                            [&](nvm::RunLimits& limits) { limits.max_heap_cells = reference.result.peak_heap_cells; });
+        auto limits = limits_at(0);
+        limits.max_heap_cells = reference.result.peak_heap_cells;
+        const auto exact = run_captured(image, limits);
+        check(exact.result.completed && exact.output == aggregate_output, "the run fits its own peak");
+    }
+    // The shadow oracle compares the heap, whose collections of aggregates it
+    // reads word by word.
+    check_clean(image, "aggregate collections", {});
+}
+
+NEURA_TEST(tier, aggregate_traps_are_the_same_in_every_tier) {
+    const auto image = aggregate_image(environment);
+    // 1: index 1 of a one-element array, 2: an array slot never assigned, 3: a
+    // write to index 5, 4: removal of index 3 from a one-element list.
+    const std::vector<std::pair<std::size_t, std::string>> cases{
+        {1, "index 1 for length 1"}, {2, "slot 4"}, {3, "index 5 for length 1"}, {4, "index 3 for length 1"}};
+    for (const auto& [count, detail] : cases) {
+        const std::vector<std::string> arguments(count, "x");
+        const auto reference = run_captured(image, limits_at(0), std::nullopt, arguments);
+        check(!reference.result.completed, "case " + std::to_string(count) + " traps");
+        check_equal(reference.output, std::string{aggregate_output}, "case " + std::to_string(count) + " output");
+        check(reference.result.trap.detail.find(detail) != std::string::npos,
+              "case " + std::to_string(count) + " detail: " + reference.result.trap.detail);
+        check(reference.result.trap.kind == (count == 2 ? nvm::TrapKind::UninitializedSlot
+                                                         : nvm::TrapKind::IndexOutOfBounds),
+              "case " + std::to_string(count) + " kind");
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "case " + std::to_string(count), arguments);
+        compare_with_tier_0(image, cache, "case " + std::to_string(count) + " again", arguments);
+        check_clean(image, "case " + std::to_string(count), arguments);
+    }
+    // A fifth argument selects no case.
+    const auto none = run_captured(image, limits_at(0), std::nullopt, std::vector<std::string>(5, "x"));
+    check(none.result.completed && none.result.status == 0, "five arguments run to the end");
+}
+
+NEURA_TEST(tier, aggregate_collections_cost_one_cell_per_word_and_are_declined_by_tiers_2_and_3) {
+    // tests/backend/tier/aggregate-cells.nvra: 1 (arguments) + 7 (three two-word
+    // elements) + 10 (two three-word elements, then one more) = 18 cells at the
+    // peak, and 15 after the removal.
+    const auto image = aggregate_cells_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs");
+    check_equal(reference.result.peak_heap_cells, std::uint64_t{18}, "peak cells");
+    for (const std::uint64_t cells : {17ULL, 16ULL, 15ULL, 7ULL}) {
+        auto limits = limits_at(0);
+        limits.max_heap_cells = cells;
+        const auto run = run_captured(image, limits);
+        check(!run.result.completed && run.result.trap.kind == nvm::TrapKind::HeapLimit,
+              "a limit of " + std::to_string(cells) + " cells is exceeded");
+    }
+    auto limits = limits_at(0);
+    limits.max_heap_cells = 18;
+    check(run_captured(image, limits).result.completed, "a limit of 18 cells holds");
+    for (const bool programs : {false, true}) {
+        auto options = eager_programs();
+        options.native_after = 1;
+        if (!programs) options.programs = nvm::TierOptions::Programs::Off;
+        nvm::TierCache cache(image, options);
+        compare_with_tier_0(image, cache, programs ? "programs" : "regions", {});
+        if (programs && programs_run()) {
+            const auto counts = cache.statistics();
+            // Every state operation of this image is on an aggregate collection:
+            // none runs as a program helper, and each is a declined exit.
+            check_equal(counts.region_counts.helpers, std::uint64_t{0}, "no aggregate operation runs as a helper");
+            check(counts.region_counts.exits >= 4, "the aggregate operations were declined");
+        }
+    }
+    check_clean(image, "aggregate cells", {});
+}
+
 NEURA_TEST(tier, the_shadow_oracle_syncs_inside_a_long_loop_of_a_program_and_finds_a_planted_difference) {
     // A loop of about half a million blocks that runs in one program: the
     // oracle looks every shadow_sync_blocks blocks, not once at the end.

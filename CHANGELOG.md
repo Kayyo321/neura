@@ -19,6 +19,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- NVR 1.7 aggregate elements: the aggregate type (kind 11), whose elements are a fixed run of typed words, and the state operations `read-component` and `write-component`; arrays and lists of aggregates store their words inline, count one cell per word, are traced component by component, and run on the reference path only ([format](docs/runtime/NVR.md#aggregate-elements-17)). This is a format and runtime capability; the compiler does not emit it yet, so every image it builds is unchanged.
 - NVR 1.7 multi-word function results: a function record can list result words after the first, a return carries one value per word, and a call writes them to consecutive slots ([format](docs/runtime/NVR.md#multi-word-results-17)). This is a format and runtime capability; the compiler does not emit it yet, so every image it builds is unchanged.
 - Research-candidate editor tooling for the separate Neura VS Code extension: `neura lsp --stdio`, compiler-backed unsaved analysis and semantic editing, `neura fmt`, `neura debug --stdio`, and `neura capabilities --json`.
 - Semantic test discovery (`test --list --format=json`), stable exact test filters, a versioned live JSON reporter, and mapped-block source-line coverage. Existing terminal test output remains the default.

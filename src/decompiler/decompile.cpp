@@ -34,6 +34,13 @@ std::string type_name(const nvr::Image& image, std::uint32_t index) {
     case nvr::TypeKind::List: return type_name(image, t.reference) + "[list]";
     case nvr::TypeKind::Float: return "float" + std::to_string(t.width);
     case nvr::TypeKind::BFloat: return "bfloat16";
+    case nvr::TypeKind::Aggregate: {
+        // One array or list element's words, each by its type.
+        std::string text = "(";
+        const auto& fields = image.layouts.at(t.reference).fields;
+        for (std::size_t i = 0; i < fields.size(); ++i) text += (i == 0 ? "" : ", ") + type_name(image, fields[i]);
+        return text + ")";
+    }
     }
     return "t" + std::to_string(index);
 }
@@ -213,6 +220,13 @@ public:
         }
         case nvr::ExitKind::State: {
             const auto a = [&](std::size_t i) { return value(function, args.at(i), lifted, inputs); };
+            // The arguments from `first` on, comma separated: the words of
+            // one element, one for a single-word element.
+            const auto words = [&](std::size_t first) {
+                std::string text;
+                for (std::size_t i = first; i < args.size(); ++i) text += (i == first ? "" : ", ") + a(i);
+                return text;
+            };
             std::string operation;
             switch (exit.operation) {
             case nvr::StateOp::AllocateObject: operation = "new L" + std::to_string(exit.immediate); break;
@@ -226,12 +240,18 @@ public:
                 operation = type_name(image_, exit.immediate) + " [" + values(function, args, lifted, inputs) + "]";
                 break;
             case nvr::StateOp::RepeatCollection:
-                operation = type_name(image_, exit.immediate) + " repeat(" + a(0) + ", " + a(1) + ")";
+                operation = type_name(image_, exit.immediate) + " repeat(" + a(0) + ", " + words(1) + ")";
                 break;
             case nvr::StateOp::ReadLength: operation = "length(" + a(0) + ")"; break;
             case nvr::StateOp::ReadElement: operation = a(0) + "[" + a(1) + "]"; break;
             case nvr::StateOp::WriteElement: operation = a(0) + "[" + a(1) + "] = " + a(2); break;
-            case nvr::StateOp::AppendElement: operation = "append(" + a(0) + ", " + a(1) + ")"; break;
+            case nvr::StateOp::AppendElement: operation = "append(" + a(0) + ", " + words(1) + ")"; break;
+            case nvr::StateOp::ReadComponent:
+                operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate);
+                break;
+            case nvr::StateOp::WriteComponent:
+                operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate) + " = " + a(2);
+                break;
             case nvr::StateOp::RemoveElement: operation = "remove_at(" + a(0) + ", " + a(1) + ")"; break;
             case nvr::StateOp::ConstructText:
                 operation = type_name(image_, exit.immediate) + "(" + a(0) + ")";

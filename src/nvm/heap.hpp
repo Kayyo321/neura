@@ -331,6 +331,29 @@ public:
         ++item.version;
     }
 
+    // Adds one aggregate element (NVR 1.7): its words, in order, as one
+    // structural change, so the version rises by one. The list holds eight-byte
+    // words (an aggregate collection is never narrowed), so no word widens it.
+    void append_words(Ref ref, std::span<const std::uint64_t> words) {
+        auto& item = list(ref);
+        for (const auto bits : words) {
+            if (item.array.head.count == item.capacity) grow(item);
+            store(bits, item.array.data + item.array.head.count * 8, ElementWidth::W8);
+            ++item.array.head.count;
+        }
+        ++item.version;
+    }
+
+    // Removes the `words` words that start at word `first` (one aggregate
+    // element); later words move down and the version rises by one.
+    void remove_words(Ref ref, std::size_t first, std::size_t words) {
+        auto& item = list(ref);
+        const auto after = static_cast<std::size_t>(item.array.head.count) - first - words;
+        if (after != 0) std::memmove(item.array.data + first * 8, item.array.data + (first + words) * 8, after * 8);
+        item.array.head.count -= words;
+        ++item.version;
+    }
+
     // Removes element `index` (below length()); later elements move down.
     void remove(Ref ref, std::size_t index) {
         auto& item = list(ref);
@@ -411,6 +434,19 @@ public:
         return store_new(&item->head);
     }
 
+    // A collection of `length` aggregate elements (NVR 1.7), each a copy of
+    // `words`: length * words.size() eight-byte words, element-major.
+    std::uint64_t create_repeated(EntryKind kind, std::uint32_t type, std::size_t length,
+                                  std::span<const std::uint64_t> words) {
+        reserve_handle();
+        auto* item = new_collection(kind, type, ElementWidth::W8, ElementWidth::W8, length * words.size());
+        auto* out = reinterpret_cast<std::uint64_t*>(item->data);
+        for (std::size_t i = 0; i < length; ++i) {
+            std::memcpy(out + i * words.size(), words.data(), words.size() * 8);
+        }
+        return store_new(&item->head);
+    }
+
     // A text or bytes entry holding `bytes`.
     std::uint64_t create_text(EntryKind kind, std::uint32_t type, std::string_view bytes) {
         reserve_handle();
@@ -483,6 +519,23 @@ public:
         for (auto at = positions.size(); at-- > 0;) {
             const auto field = positions[at];
             if (((flags[field >> 6] >> (field & 63U)) & 1U) != 0) visit(fields[field]);
+        }
+    }
+
+    // For a collection of aggregates (NVR 1.7), whose entry holds `stride`
+    // words per element: calls `visit(bits)` for the words at the ascending
+    // `positions` within each element, from the last element to the first and
+    // within an element from the last position to the first.
+    template <typename Visit>
+    void visit_components_reverse(Ref ref, std::size_t stride, std::span<const std::size_t> positions,
+                                  Visit&& visit) const {
+        const auto& item = sequence(ref);
+        const auto elements = static_cast<std::size_t>(item.head.count) / stride;
+        const auto s = static_cast<std::size_t>(item.head.storage);
+        for (auto element = elements; element-- > 0;) {
+            for (auto at = positions.size(); at-- > 0;) {
+                visit(load(item.data + (element * stride + positions[at]) * s, item.head.storage));
+            }
         }
     }
 
@@ -1387,6 +1440,13 @@ public:
     template <typename Visit>
     void visit_elements_reverse(Visit&& visit) const {
         for (auto at = cells_.size(); at-- > 0;) visit(cells_[at]);
+    }
+    // As Heap::visit_components_reverse(), for the collection being built.
+    template <typename Visit>
+    void visit_components_reverse(std::size_t stride, std::span<const std::size_t> positions, Visit&& visit) const {
+        for (auto element = cells_.size() / stride; element-- > 0;) {
+            for (auto at = positions.size(); at-- > 0;) visit(cells_[element * stride + positions[at]]);
+        }
     }
 
 private:
