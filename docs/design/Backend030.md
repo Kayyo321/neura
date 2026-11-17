@@ -4,7 +4,7 @@ This note fixes the backend contracts before they are implemented: the server ho
 
 The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A4. Later changes to a row are made here, with the reason.
 
-Nothing below exists in the repository: it has TCP streams and listeners and no HTTP, TLS or SQL code ([inventory](Apps030.md#inventory-of-reusable-code)). The note adds no syntax and depends, by name, on records, `using`, `?` on a `Result`, constructor shorthand and named arguments.
+The worker wire library implements the framing, identity check and message order below. The note adds no syntax and depends, by name, on records, `using`, `?` on a `Result`, constructor shorthand and named arguments.
 
 <!-- example: fragment: Std.App, Std.Net.Http and Std.Data.Sql are not implemented until A4 -->
 ```neura
@@ -58,7 +58,7 @@ One channel per worker: a socket pair on POSIX. Frames are a 4-byte little-endia
 
 | Kind | Version 1 byte | Direction | Body |
 | --- | --- | --- | --- |
-| `Hello` | `0x01` | both | Protocol version (1), image digest, provider versions |
+| `Hello` | `0x01` | both | Protocol version (1), sender role, image digest, provider versions |
 | `Assign` | `0x02` | host to worker | Request identifier, deadline, peer address, method, target, headers, body length, the leases granted |
 | `BodyChunk` | `0x03` | both | Bytes of a request or response body, with backpressure by credit |
 | `BodyEnd` | `0x04` | both | Empty. Marks the end of a request or response body |
@@ -70,9 +70,22 @@ One channel per worker: a socket pair on POSIX. Frames are a 4-byte little-endia
 
 The version 1 length counts the kind byte and the body. It excludes the four-byte length field and is at least one. `C-2` covers the full wire frame, including those four bytes. For `BodyChunk`, the limit is 65,536 body bytes regardless of `C-2`. Other kind bytes are reserved.
 
-Each direction starts with `Hello`. The frame decoder validates lengths, kinds, directions and the empty control forms. The channel uses a frame after its completion event, validates the `Hello` payload and enforces the order of later messages. EOF is clean only between frames.
+Each direction starts with `Hello`. Its 39-byte fixed prefix contains a little-endian `uint32` protocol version, the sender role byte (`01` host, `02` worker), the 32 raw bytes of the image SHA-256, and a little-endian `uint16` provider count (0 to 256). Each provider entry contains a name length byte (1 to 255), that many ASCII bytes from `[A-Za-z0-9_.-]`, and a little-endian `uint32` interface version. Names are unique and appear in increasing byte order. The count covers the exact body with no trailing data. The Hello body uses at most 66,599 bytes and its frame must also fit `C-2`.
 
-A frame the receiver cannot decode, a version it does not speak, or a digest that differs ends the worker before `Assign`.
+The following host frame uses the SHA-256 of the ASCII bytes `abc` and the provider map `app = 1`, `sql = 0x01020304`. The worker frame for the same identity has `02` at byte offset 9.
+
+```text
+38 00 00 00 01 01 00 00 00 01
+ba 78 16 bf 8f 01 cf ea 41 41 40 de 5d ae 22 23
+b0 03 61 a3 96 17 7a 9c b4 10 ff 61 f2 00 15 ad
+02 00 03 61 70 70 01 00 00 00 03 73 71 6c 04 03 02 01
+```
+
+Each endpoint checks both complete greetings against the expected image and provider map from its verified configuration. The role must match the direction of the frame. A malformed frame, unsupported protocol version, wrong sender role, image mismatch or provider mismatch rejects the channel before `Assign` can be accepted. An endpoint observes inbound frames after decoder completion and checks outbound frames before submitting them to its ordered transport. The first failure rejects the channel and is retained for reporting. EOF is clean at the framing boundary between frames. EOF inside the header or body is a truncation and rejects the channel.
+
+After both greetings, the host sends at most one `Assign`. All other request and response messages require that assignment. `BodyChunk` may repeat in either direction until that direction sends `BodyEnd`. The worker sends one `Head` before its response chunks or response `BodyEnd`, including an empty response. Its `Done` follows that `BodyEnd` and closes the response stream. The host can still finish sending the request body because the response may finish early. The host may send one `Cancel` after assignment, including when it races with `Done`. `Cancel` leaves the response outcome to the worker and transport.
+
+Calls may overlap. Each `Return` requires an outstanding `Call`, and call and return traffic may continue after `BodyEnd` or `Done` for request cleanup. The sequence checks the outstanding count. Call identifiers, payload validation beyond `Hello` and the empty control forms, body credit, process termination, and request outcome handling belong to the worker and host integration.
 
 ## HTTP
 

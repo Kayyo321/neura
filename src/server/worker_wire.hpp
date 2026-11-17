@@ -3,7 +3,10 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <map>
 #include <span>
+#include <string>
+#include <vector>
 
 namespace neura::server::worker {
 
@@ -12,6 +15,13 @@ constexpr std::size_t frame_header_bytes = 5;
 constexpr std::size_t default_frame_bytes = 1 * 1024 * 1024; // Apps030 C-2
 constexpr std::size_t max_frame_bytes = 64 * 1024 * 1024;
 constexpr std::size_t max_body_chunk_bytes = 64 * 1024;
+constexpr std::size_t max_provider_versions = 256;
+constexpr std::size_t max_provider_name_bytes = 255;
+
+using ImageDigest = std::array<std::uint8_t, 32>;
+constexpr std::size_t hello_prefix_bytes = 4 + 1 + ImageDigest{}.size() + 2;
+constexpr std::size_t max_hello_body_bytes =
+    hello_prefix_bytes + max_provider_versions * (1 + max_provider_name_bytes + 4);
 
 enum class FrameKind : std::uint8_t {
     Hello = 0x01,
@@ -96,6 +106,100 @@ private:
     unsigned length_bytes_ = 0;
     FrameHeader header_{};
     std::size_t remaining_ = 0;
+};
+
+enum class PeerRole : std::uint8_t { Host = 0x01, Worker = 0x02 };
+
+struct WorkerIdentity {
+    ImageDigest image{};
+    std::map<std::string, std::uint32_t, std::less<>> providers;
+
+    bool operator==(const WorkerIdentity&) const = default;
+};
+
+struct Hello {
+    std::uint32_t version = protocol_version;
+    PeerRole role = PeerRole::Host;
+    WorkerIdentity identity;
+
+    bool operator==(const Hello&) const = default;
+};
+
+enum class ProtocolError {
+    None,
+    Framing,
+    MalformedHello,
+    UnsupportedVersion,
+    WrongPeerRole,
+    ImageMismatch,
+    ProviderMismatch,
+    ExpectedHello,
+    DuplicateHello,
+    ExpectedAssign,
+    DuplicateAssign,
+    RequestBodyEnded,
+    DuplicateCancel,
+    ExpectedHead,
+    DuplicateHead,
+    ResponseBodyEnded,
+    ExpectedResponseBodyEnd,
+    DuplicateDone,
+    UnexpectedReturn,
+    TooManyCalls,
+};
+
+struct EncodedHello {
+    ProtocolError error;
+    std::vector<std::uint8_t> bytes; // Body only, defined on success.
+};
+
+struct DecodedHello {
+    ProtocolError error;
+    Hello value{}; // Defined on success.
+};
+
+EncodedHello encode_hello(const Hello& hello);
+DecodedHello decode_hello(std::span<const std::uint8_t> body);
+
+struct ProtocolFailure {
+    ProtocolError error = ProtocolError::None;
+    FrameError framing = FrameError::None; // Specific failure if error is Framing.
+
+    bool operator==(const ProtocolFailure&) const = default;
+};
+
+// One instance per endpoint, shared by both directions of its channel. The
+// expected identity comes from the verified image and configured providers.
+class ChannelSequence {
+public:
+    explicit ChannelSequence(WorkerIdentity expected, FrameLimits limits = {});
+
+    // Observe a complete received frame or check a complete outgoing frame
+    // before sending. Supply exact body bytes only for Hello. The transport
+    // owns streaming, serialized writes and terminating the channel on error.
+    ProtocolFailure accept(Direction direction, FrameHeader frame, std::span<const std::uint8_t> hello_body = {});
+    ProtocolFailure reject_frame(FrameError error); // Pass a frame decoder's rejection here.
+
+    ProtocolFailure failure() const { return failure_; }
+    bool ready() const;
+    bool response_done() const { return response_ == Response::Done; }
+
+private:
+    enum class Response { AwaitingHead, Body, BodyEnded, Done };
+    ProtocolError accept_hello(Direction direction, std::size_t body_bytes, std::span<const std::uint8_t> body);
+    ProtocolError advance(Direction direction, FrameKind kind);
+    ProtocolError advance_body(Direction direction, bool end);
+
+    WorkerIdentity expected_;
+    FrameLimits limits_;
+    ProtocolFailure failure_;
+    bool host_hello_ = false;
+    bool worker_hello_ = false;
+    bool assigned_ = false;
+    bool request_body_ended_ = false;
+    bool cancelled_ = false;
+    Response response_ = Response::AwaitingHead;
+    std::uint64_t outstanding_calls_ = 0;
 };
 
 } // namespace neura::server::worker
