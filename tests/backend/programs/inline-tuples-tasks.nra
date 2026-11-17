@@ -62,6 +62,23 @@ let Main = module:program.Entry (
                 console.print_line(selected(message));
             },
         }
+        // A select send arm boxes its value, and a select join arm takes the task's boxed result.
+        let [pass_out, pass_in, pass_closer] = channels.open<[int, [string, bool]]>(1);
+        select {
+            let sent = pass_out.send([5, ["five", false]]) => {
+                console.print_line("sent " + sent.to_string());
+            },
+        }
+        console.print_line(selected(pass_in.receive()));
+        scope {
+            let finisher = spawn weigh([6, "six"]);
+            select {
+                let joined = finisher.join() => {
+                    console.print_line("joined " + joined[1][0] + joined[0].to_string());
+                },
+            }
+        }
+        pass_closer.close();
         closer.close();
 
         // A guard whose state is a tuple.

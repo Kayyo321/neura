@@ -99,6 +99,15 @@ bool is_comparison(const std::string& op) {
     return op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=";
 }
 
+// True when `type` is, or holds in a tuple, an array or list whose elements are tuples. The runtime builds and
+// reads such a collection element by element as objects, so it cannot cross a host call or a callback unconverted.
+bool holds_collection_of_tuples(const IrType& type) {
+    if (type.kind == TypeKind::Tuple)
+        return std::ranges::any_of(type.arguments, [](const IrType& part) { return holds_collection_of_tuples(part); });
+    if (type.kind != TypeKind::Array && type.kind != TypeKind::List) return false;
+    return type.arguments.front().kind == TypeKind::Tuple || holds_collection_of_tuples(type.arguments.front());
+}
+
 class Converter;
 
 // The value words of a value: one operand for a type that is not a tuple, and
@@ -172,7 +181,6 @@ private:
     Operand box(const IrType& tuple, Values words, const Span& span);
     Values unbox(const IrType& tuple, Operand handle, const Span& span);
     Operand box_words(const IrType& tuple, const Values& words, std::size_t& cursor, const Span& span);
-    Values call_values(const IrNode& node);
     // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
     Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
                       std::uint32_t result_type, const Span& span);
@@ -815,17 +823,10 @@ std::optional<std::uint32_t> Converter::external_import(SymbolId function, const
     if (!host_import(item)) return std::nullopt;
     // The runtime builds and reads a host collection element by element, as
     // objects; a collection of tuples would need its elements converted.
-    const auto holds_tuples = [](const auto& self, const IrType& type) -> bool {
-        if (type.kind == TypeKind::Tuple) return std::ranges::any_of(type.arguments, [&](const IrType& part) {
-            return self(self, part);
-        });
-        if (type.kind != TypeKind::Array && type.kind != TypeKind::List) return false;
-        return type.arguments.front().kind == TypeKind::Tuple || self(self, type.arguments.front());
-    };
     if (std::ranges::any_of(item.parameters, [&](SymbolId parameter) {
-            return holds_tuples(holds_tuples, symbol(parameter).type);
+            return holds_collection_of_tuples(symbol(parameter).type);
         }) || std::ranges::any_of(symbol(host_variants(program_, item.type).value().success).payload_types,
-                                  [&](const IrType& type) { return holds_tuples(holds_tuples, type); }))
+                                  [](const IrType& type) { return holds_collection_of_tuples(type); }))
         throw Diagnostic(where, "a collection of tuples cannot cross the host call '" + item.host_binding->name +
                                     "': IRtoNeuronConversion does not convert its elements")
             .with_code("E0801");
@@ -3934,6 +3935,13 @@ void FunctionCompiler::compile_boundary() {
     const auto& function = c_.symbol(origin_.symbol);
     const auto& span = function.span;
     const auto owner = function.owner;
+    if (holds_collection_of_tuples(function.type) ||
+        std::ranges::any_of(function.parameters, [&](SymbolId parameter) {
+            return holds_collection_of_tuples(c_.symbol(parameter).type);
+        }))
+        throw Diagnostic(span, "a collection of tuples cannot cross the boundary of '" + function.name +
+                                   "': IRtoNeuronConversion does not convert its elements")
+            .with_code("E0801");
     Values arguments;
     if (owner != no_symbol && (c_.symbol(owner).kind == SymbolKind::Class ||
                                c_.symbol(owner).kind == SymbolKind::Interface)) {
