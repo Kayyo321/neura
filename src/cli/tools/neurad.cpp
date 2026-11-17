@@ -25,6 +25,9 @@ int main(int argc, char** argv) {
         std::printf("%s\n", neura::service::own_build().c_str());
         return 0;
     }
+    if (!arguments.empty() && arguments.front() == "--foreground") {
+        return neura::service::supervisor_main(arguments, neura::tool::executable_path(argv[0]));
+    }
     std::fprintf(stderr,
                  "usage: neurad --foreground --root ROOT\n"
                  "neurad is the runtime service of Neura; use 'neura run --runtime=auto' and 'neura runtime'.\n");

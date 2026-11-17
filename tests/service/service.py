@@ -15,6 +15,7 @@ Exit status 0 when every check passes.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import shutil
@@ -508,10 +509,300 @@ def worker_suite(work: Work) -> None:
     process.stderr.close()
 
 
+# --------------------------------------------------------------------------
+# Step 6: the supervisor, through a client of the protocol written in Python.
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import protocol_client as pc  # noqa: E402
+
+
+def launch(service, connection, image: bytes, path: str, stdout: int, stdin: int | None = None,
+           arguments: list[bytes] | None = None, env: dict | None = None, wait: bool = True):
+    """Prepare, send the image when asked, commit, and wait for the outcome."""
+    connection.send("Prepare", pc.envelope(image, path=path, arguments=arguments, environment=env or service.env))
+    prepared = connection.receive()
+    if prepared is None or prepared.kind != "Prepared":
+        return prepared, None
+    token = prepared.get("Token")
+    if prepared.number("ImageNeeded"):
+        fd = pc.memory_file(image)
+        connection.send("Image", [("Token", token), ("Descriptors", pc.u8(1))], [fd])
+        os.close(fd)
+        reply = connection.receive()
+        if reply.kind != "Prepared":
+            return reply, None
+    cwd = os.open(".", os.O_RDONLY)
+    read_end = None
+    if stdin is None:
+        read_end, write_end = os.pipe()
+        os.close(write_end)
+        stdin = read_end
+    connection.send("Commit", [("Token", token), ("Descriptors", pc.u8(4))], [cwd, stdin, stdout, 2])
+    os.close(cwd)
+    if read_end is not None:
+        os.close(read_end)
+    committed = connection.receive()
+    if not wait or committed is None or committed.kind != "Committed":
+        return committed, None
+    return committed, connection.receive()
+
+
+def protocol_suite(work: Work) -> None:
+    service = pc.Service(work.bin, work.env)
+    hello_image = Path(work.image("hello", path=HELLO)).read_bytes()
+    hello_path = str(work.images["hello"])
+    output = work.root / "out.txt"
+
+    def out_fd():
+        return os.open(output, os.O_CREAT | os.O_WRONLY | os.O_APPEND)
+
+    # Case 9: a socket file and no supervisor; the next supervisor removes it.
+    service.directory.mkdir(parents=True, mode=0o700)
+    os.chmod(service.directory.parent, 0o700)
+    stale = socket_file(service.socket)
+    check(service.socket.exists() and stale, "case 9: a stale socket file is in place")
+    work.env["SERVICE_TEST_MARKER"] = "environment-marker-value"
+    service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "reservation=1500"})
+    connection = service.hello()
+    check(connection.welcome is not None and connection.welcome.kind == "Welcome",
+          "case 9: a new supervisor replaced the stale socket and answers")
+    check(oct(service.socket.stat().st_mode & 0o777) == "0o600" and
+          oct(service.directory.stat().st_mode & 0o777) == "0o700", "the socket is 0600 in a 0700 directory")
+
+    # A launch runs, and its record is written.
+    fd = out_fd()
+    committed, outcome = launch(service, connection, hello_image, hello_path, fd)
+    os.close(fd)
+    check(committed.kind == "Committed" and outcome is not None and outcome.kind == "Outcome"
+          and pc.TERMINALS[outcome.number("Terminal")] == "exited" and output.read_bytes() == b"Hello, World!\n",
+          "a launch through the supervisor runs to exited")
+    record = json.loads((service.state / "records" / committed.text("ApplicationId")).read_text())
+    check(record["state"] == "exited" and record["status"] == 0 and record["digest"] ==
+          hashlib.sha256(hello_image).hexdigest(), "its record is written whole")
+    check("Hello" not in (service.state / "records" / committed.text("ApplicationId")).read_text()
+          and "environment-marker-value" not in json.dumps(record),
+          "a record holds no output and no environment value")
+
+    # Case 16: Commit sent twice with one token.
+    output.unlink()
+    connection.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+    prepared = connection.receive()
+    token = prepared.get("Token")
+    fd = out_fd()
+    cwd = os.open(".", os.O_RDONLY)
+    connection.send("Commit", [("Token", token), ("Descriptors", pc.u8(4))], [cwd, 0, fd, 2])
+    first = connection.receive()
+    connection.send("Commit", [("Token", token), ("Descriptors", pc.u8(4))], [cwd, 0, fd, 2])
+    messages = [connection.receive(), connection.receive()]
+    second = next(m for m in messages if m.kind == "Committed")
+    os.close(fd)
+    os.close(cwd)
+    time.sleep(0.3)
+    check(first.kind == "Committed" and second.text("ApplicationId") == first.text("ApplicationId")
+          and output.read_bytes() == b"Hello, World!\n", "case 16: a second Commit gets the same Committed")
+
+    # Case 15: Commit after the reservation expired.
+    connection.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+    token = connection.receive().get("Token")
+    time.sleep(1.8)
+    fd = out_fd()
+    cwd = os.open(".", os.O_RDONLY)
+    connection.send("Commit", [("Token", token), ("Descriptors", pc.u8(4))], [cwd, 0, fd, 2])
+    os.close(fd)
+    os.close(cwd)
+    reply = connection.receive()
+    check(reply.kind == "Rejected" and reply.text("Reason") in ("token-expired", "token-unknown")
+          and reply.number("NotStarted") == 1 and output.read_bytes() == b"Hello, World!\n",
+          f"case 15: a late Commit is refused and nothing runs ({reply.text('Reason')})")
+
+    # Case 14: seventeen Prepares without Commit; released after the reservation time.
+    replies = []
+    for _ in range(17):
+        connection.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+        replies.append(connection.receive())
+    check([r.kind for r in replies[:16]] == ["Prepared"] * 16 and replies[16].kind == "Rejected"
+          and replies[16].text("Reason") == "admission-pending", "case 14: the seventeenth Prepare is admission-pending")
+    time.sleep(1.8)
+    connection.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+    reply = connection.receive()
+    check(reply.kind == "Prepared", "case 14: after the reservation time the sixteen are released")
+    connection.send("Cancel", [("Token", reply.get("Token"))])
+
+    # Case 20: the bytes are not those the envelope names.
+    other = Path(work.image("exit", path=PROGRAMS / "exit-status.nra")).read_bytes()
+    connection.send("Prepare", pc.envelope(b"the bytes the client read", path=hello_path, environment=work.env))
+    token = connection.receive().get("Token")
+    fd = pc.memory_file(b"the bytes the file held later")
+    connection.send("Image", [("Token", token), ("Descriptors", pc.u8(1))], [fd])
+    os.close(fd)
+    reply = connection.receive()
+    check(reply.kind == "Rejected" and reply.text("Reason") == "image-mismatch", "case 20: changed bytes are image-mismatch")
+
+    # Case 22: one path, two contents: two digests, two entries.
+    output.unlink()
+    for image in (other, hello_image):
+        fd = out_fd()
+        launch(service, connection, image, hello_path, fd, arguments=[b"3"])
+        os.close(fd)
+    connection.send("List", [])
+    listing = connection.receive()
+    check(output.read_bytes() == b"argument: 3\nHello, World!\n" and
+          listing.number("CacheBytes") == len(other) + len(hello_image),
+          "case 22: the same path with two contents runs each its own bytes")
+
+    # Case 24: cache clear while an application runs leaves its entry.
+    echo_image = Path(program(work, "echo")).read_bytes()
+    read_end, write_end = os.pipe()
+    fd = out_fd()
+    committed, _ = launch(service, connection, echo_image, "echo.nvr", fd, stdin=read_end, wait=False)
+    os.close(read_end)
+    control = service.hello(purpose=2)
+    control.send("CacheClear", [])
+    cleared = control.receive()
+    check(committed.kind == "Committed" and cleared.number("CacheBytes") == len(echo_image),
+          f"case 24: cache clear keeps the entry a running application uses ({committed.kind}, "
+          f"{cleared.number('CacheBytes')}, {len(echo_image)})")
+    os.write(write_end, b"x\n")
+    os.close(write_end)
+    outcome = connection.receive()
+    os.close(fd)
+    control.send("CacheClear", [])
+    check(outcome.kind == "Outcome" and control.receive().number("CacheBytes") == 0,
+          "case 24: once it ended, cache clear drops it")
+
+    # Case 25: an image larger than the cache; three of 100 MiB.
+    connection.send("Prepare", pc.envelope(size=300 << 20, digest=b"\1" * 32, environment=work.env))
+    reply = connection.receive()
+    check(reply.kind == "Rejected" and reply.text("Reason") == "image-too-large", "case 25: 300 MiB is image-too-large")
+    tokens = []
+    for index in range(2):
+        data = bytes([index]) * (100 << 20)
+        connection.send("Prepare", pc.envelope(data, environment=work.env))
+        token = connection.receive().get("Token")
+        fd = pc.memory_file(data)
+        connection.send("Image", [("Token", token), ("Descriptors", pc.u8(1))], [fd])
+        os.close(fd)
+        check(connection.receive().kind == "Prepared", f"case 25: 100 MiB image {index + 1} is held")
+        tokens.append(token)
+    third = bytes([2]) * (100 << 20)
+    connection.send("Prepare", pc.envelope(third, environment=work.env))
+    reply = connection.receive()
+    check(reply.kind == "Rejected" and reply.text("Reason") == "admission-cache",
+          "case 25: the third 100 MiB image is admission-cache")
+    connection.send("Cancel", [("Token", tokens[0])])
+    connection.send("Prepare", pc.envelope(third, environment=work.env))
+    reply = connection.receive()
+    check(reply.kind == "Prepared", "case 25: it is admitted once the first is released")
+    connection.send("Cancel", [("Token", reply.get("Token"))])
+    connection.send("Cancel", [("Token", tokens[1])])
+
+    # Case 43: eight launches at once and one ready worker; none refused.
+    import threading
+    results = []
+    def one():
+        own = service.hello()
+        fd = os.open(os.devnull, os.O_WRONLY)
+        committed, outcome = launch(service, own, hello_image, hello_path, fd)
+        os.close(fd)
+        results.append((committed.kind, committed.number("Path"), outcome.kind if outcome else None))
+        own.close()
+    time.sleep(0.5)
+    threads = [threading.Thread(target=one) for _ in range(8)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    paths = sorted(path for _, path, _ in results)
+    check(len(results) == 8 and all(r[0] == "Committed" and r[2] == "Outcome" for r in results)
+          and paths.count(1) >= 1, f"case 43: eight at once all run, one or more on a ready worker ({paths})")
+
+    # Case 57: malformed messages; the supervisor keeps serving others.
+    bad_cases = [
+        ("a message of 2 MiB", pc.u32(2 << 20) + b"\0" * 12),
+        ("a field length past the end", pc.frame(1, [(1, b"\1\0")])[:-2] + b"\0\0" if False else
+         pc.u32(16) + pc.u16(1) + pc.u16(0) + pc.u64(1) + pc.u16(1) + pc.u32(99) + b"xx"),
+        ("an unknown kind", pc.frame(999, [])),
+    ]
+    for label, data in bad_cases:
+        bad = service.hello()
+        bad.send_raw(data)
+        reply = bad.receive()
+        closed = bad.receive()
+        check(reply is not None and reply.kind == "Rejected" and reply.text("Reason") == "protocol" and closed is None,
+              f"case 57: {label}: one Rejected protocol, then the connection closes")
+        bad.close()
+    bad = service.hello()
+    bad.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+    token = bad.receive().get("Token")
+    cwd = os.open(".", os.O_RDONLY)
+    bad.send("Commit", [("Token", token), ("Descriptors", pc.u8(4))], [cwd, 0, 1])
+    os.close(cwd)
+    reply = bad.receive()
+    check(reply is not None and reply.text("Reason") == "protocol" and bad.receive() is None,
+          "case 57: a Commit with three descriptors is malformed")
+    check(service.hello().welcome.kind == "Welcome", "case 57: the supervisor keeps serving others")
+    first = pc.Connection(service.socket)
+    first.send("List", [])
+    reply = first.receive()
+    check(reply is not None and reply.text("Reason") == "protocol", "a first message that is not Hello is malformed")
+
+    # A Hello of another installation, or with no common protocol.
+    other_installation = service.hello(installation="0000000000000000")
+    check(other_installation.welcome.kind == "Rejected" and other_installation.welcome.text("Reason") == "identity",
+          "a client of another installation is identity")
+    newer = service.hello(low=2, high=3)
+    check(newer.welcome.kind == "Rejected" and newer.welcome.text("Reason") == "unsupported-protocol",
+          "no common protocol major is unsupported-protocol")
+    other_build = service.hello(build="neura 9.9.9 (other)")
+    other_build.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+    reply = other_build.receive()
+    check(other_build.welcome.kind == "Welcome" and reply.kind == "Rejected" and reply.text("Reason") == "identity",
+          "case 11: a launch from another build is identity; control is still answered")
+
+    # Case 17: a token from before the supervisor restarted.
+    connection.send("Prepare", pc.envelope(hello_image, path=hello_path, environment=work.env))
+    token = connection.receive().get("Token")
+    service.process.kill()
+    service.process.wait()
+    service.start()
+    again = service.hello()
+    cwd = os.open(".", os.O_RDONLY)
+    again.send("Commit", [("Token", token), ("Descriptors", pc.u8(4))], [cwd, 0, 1, 2])
+    os.close(cwd)
+    reply = again.receive()
+    check(reply.kind == "Rejected" and reply.text("Reason") == "token-unknown",
+          "case 17: a token of an earlier epoch is token-unknown")
+    service.process.kill()
+    service.process.wait()
+
+    # Case 44: a worker that never reports ready.
+    service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "ready=400,never-ready=1"})
+    connection = service.hello()
+    fd = os.open(os.devnull, os.O_WRONLY)
+    committed, _ = launch(service, connection, hello_image, hello_path, fd)
+    check(committed.kind == "Rejected" and committed.number("NotStarted") == 1,
+          f"case 44: a worker that never reports ready: the launch is refused before commit ({committed.text('Reason')})")
+    committed, outcome = launch(service, connection, hello_image, hello_path, fd)
+    os.close(fd)
+    check(committed.kind == "Committed" and outcome.kind == "Outcome", "case 44: the next launch tries again and runs")
+    service.process.kill()
+    service.process.wait()
+
+
+def socket_file(path: Path) -> bool:
+    """Leaves a socket file with nothing listening, as a killed supervisor does."""
+    import socket as sockets
+    listener = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM)
+    listener.bind(str(path))
+    listener.close()
+    return path.exists()
+
+
 SUITES = {
     "cli-options": cli_options,
     "off-default": off_default,
     "worker": worker_suite,
+    "protocol": protocol_suite,
 }
 
 
