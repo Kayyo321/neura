@@ -334,7 +334,7 @@ NEURA_TEST(structure, summaries_report_allocation_traps_host_scheduler_and_class
 
     const auto& fresh = summary_of(program, purity, "Facts.fresh_list");
     check_equal(static_cast<int>(fresh.allocation()), static_cast<int>(Allocation::May), "a list is allocated");
-    check(fresh.allocates && fresh.allocates->span.line == line_of(summaries(environment) / "facts.nra", "= [n];"),
+    check(fresh.allocates && fresh.allocates->span.line == line_of(summaries(environment) / "facts.nra", "= new([n]);"),
           "the allocation is attributed to the list literal");
 
     const auto& prints = summary_of(program, purity, "Facts.prints");
@@ -378,7 +378,7 @@ NEURA_TEST(structure, summaries_reach_a_fixed_point_over_mutual_recursion) {
     }
     const auto cause = purity.origin(find_symbol(program, "Facts.ping"), Fact::Allocation);
     check(cause && cause->callee == no_symbol &&
-              cause->span.line == line_of(summaries(environment) / "facts.nra", "[n as int64];"),
+              cause->span.line == line_of(summaries(environment) / "facts.nra", "new([n as int64]);"),
           "ping's allocation is attributed to pong's list literal");
 }
 

@@ -346,7 +346,7 @@ NEURA_TEST(structure, escape_of_an_array_into_a_field_a_global_or_a_list) {
     expect_escapes(environment, "escapes.nra", "Escapes.appended",
                    {{E::ArrayInListElement, at.of("rows.append(source)"), at.of("export let appended")}});
     expect_escapes(environment, "escapes.nra", "Escapes.listed",
-                   {{E::ArrayInListElement, at.of("= [source]"), at.of("export let listed")}});
+                   {{E::ArrayInListElement, at.of("= new([source])"), at.of("export let listed")}});
     // The declaration of the storage is the parameter that holds the array.
     const auto program = lowered(environment, "escapes.nra");
     for (const auto& escape : find_storage_escapes(program)) {

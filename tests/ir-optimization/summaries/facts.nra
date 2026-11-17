@@ -16,8 +16,8 @@ let Orphan = interface (
 
 let Counter = class (
     // A runtime static initializer: the first use of the class runs it.
-    export static let created: int64[list] = [];
-    export let items: int64[list] = [];
+    export static let created: int64[list] = new;
+    export let items: int64[list] = new;
 );
 
 // An immutable class: its instances are values that a summary does not track.
@@ -39,13 +39,13 @@ let Square = class implements Shape (
 
 let Blob = class implements Shape (
     export let area = func() -> int64 {
-        let cells: int64[list] = [1, 2, 3];
+        let cells: int64[list] = new([1, 2, 3]);
         return cells[0];
     };
 );
 
 let Facts = module (
-    export let registry: int64[list] = [];
+    export let registry: int64[list] = new;
 
     // No fact at all: it reads two numbers and compares them.
     export let quiet = func(a: int8, b: int8) -> bool => a < b;
@@ -57,7 +57,7 @@ let Facts = module (
     // Allocates a list and hands it to the caller.
 
     export let fresh_list = func(n: int64) -> int64[list] {
-        let items: int64[list] = [n];
+        let items: int64[list] = new([n]);
         return items;
     };
 
@@ -143,7 +143,7 @@ let Facts = module (
     };
 
     export let pong = func(n: int8) -> int64 {
-        let cells: int64[list] = [n as int64];
+        let cells: int64[list] = new([n as int64]);
         return cells[0] + ping(n);
     };
 
