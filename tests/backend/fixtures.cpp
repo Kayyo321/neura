@@ -322,6 +322,10 @@ nvr::Image region_image(const Environment& environment) {
     return hinted_image(environment, "region-storage.nvra");
 }
 
+nvr::Image region_tiers_image(const Environment& environment) {
+    return hinted_image(environment, "region-tiers.nvra");
+}
+
 nvr::Image region_tasks_image(const Environment& environment, bool token_variant) {
     std::ifstream file(backend_dir(environment) / "tier" / (token_variant ? "region-tasks-token.nvra" : "region-tasks.nvra"));
     const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

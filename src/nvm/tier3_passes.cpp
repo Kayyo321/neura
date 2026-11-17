@@ -178,7 +178,8 @@ void Replacements::apply(Function& f) {
         for (std::uint32_t i = 0; i < in.count; ++i) {
             if (in.op == Op::Gather && (i % 2) != 0) continue;
             if (in.op != Op::Gather && in.op != Op::Phi && in.op != Op::StateCall && in.op != Op::Helper &&
-                in.op != Op::Call && in.op != Op::Select && in.op != Op::AllocObject && in.op != Op::Append) {
+                in.op != Op::Call && in.op != Op::Select && in.op != Op::AllocObject && in.op != Op::Append &&
+                in.op != Op::Return) {
                 continue;
             }
             auto& extra = f.extras[in.extra + i];
@@ -737,6 +738,12 @@ public:
     static std::uint64_t global(std::uint64_t index) { return (std::uint64_t{4} << 56) | index; }
     // Entries live, and words only helpers and calls write.
     static constexpr std::uint64_t entries = std::uint64_t{5} << 56;
+    // The words of one component of the elements of collections of
+    // aggregates (NVR 1.7): a component access names it in `aux`.
+    static std::uint64_t component(std::uint64_t index) { return (std::uint64_t{6} << 56) | index; }
+    static std::uint64_t element_class(const Inst& in) {
+        return in.aux != none ? component(in.aux) : elements(in.imm);
+    }
 
     explicit Memory(std::uint64_t& counter) : counter_(&counter), base_(++counter) {}
 
@@ -754,7 +761,7 @@ public:
     void apply(const Inst& in) {
         switch (in.op) {
         case Op::StoreField: kill(field(in.imm)); break;
-        case Op::StoreElement: kill(elements(in.imm)); break;
+        case Op::StoreElement: kill(element_class(in)); break;
         case Op::StoreGlobal: kill(global(in.imm)); break;
         case Op::Widen:
             kill(storage);
@@ -782,7 +789,7 @@ private:
 std::uint64_t depends_on(const Inst& in) {
     switch (in.op) {
     case Op::LoadField: return Memory::field(in.imm);
-    case Op::LoadElement: return Memory::elements(in.imm);
+    case Op::LoadElement: return Memory::element_class(in);
     case Op::LoadData:
     case Op::LoadStorage: return Memory::storage;
     case Op::LoadGlobal: return Memory::global(in.imm);

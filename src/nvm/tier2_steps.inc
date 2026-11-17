@@ -740,16 +740,17 @@
                 // commit_exit's Return for a frame that is neither the last of
                 // its task nor a callback's: anything else is tier 1's.
                 const auto value = op.a == nvr::absent ? 0 : reg(op.a);
+                // A function with several result words (NVR 1.7) returns one
+                // register per word; they are read before the frame is popped.
+                std::array<std::uint64_t, 255> words;
+                for (unsigned i = 1; i < op.width; ++i) words[i] = reg(program->operands[op.other + i]);
                 const auto depth = frames_.size();
                 bool simple = depth >= 2 && !frames_.header(depth - 1).boundary;
                 if (simple && scheduler_) {
                     const auto& scopes = current_task().scopes;
                     simple = scopes.empty() || scopes.back().frame_depth != depth;
                 }
-                // A frame that still owns a storage region is popped by tier 1,
-                // which releases it (NVR 1.7).
-                if (simple && !frames_.regions.empty() && frames_.regions.back().depth >= depth) simple = false;
-                // So is a frame with a class hook event open, which tier 1 checks.
+                // Tier 1 validates a frame that returns with a class hook event open.
                 if (simple && !frames_.hooks.empty() && frames_.hooks.back().depth >= depth) simple = false;
                 if (!simple) return end(op.block, true, region_counts_.exits);
                 ++done;
@@ -757,11 +758,18 @@
                 flush();
                 const auto header = frames_.header(depth - 1);
                 if (scheduler_) remove_live_cells(frame_cells(header.function));
+                // The storage regions the frame entered and did not release
+                // (NVR 1.7), as commit_exit's Return releases them.
+                if (!frames_.regions.empty()) release_regions_from(frames_, depth);
                 frames_.pop_back();
                 auto caller = frames_.back();
                 if (header.return_slot != nvr::absent) {
                     caller.slots[header.return_slot] = value;
                     caller.initialized[header.return_slot] = 1;
+                    for (unsigned i = 1; i < op.width; ++i) {
+                        caller.slots[header.return_slot + i] = words[i];
+                        caller.initialized[header.return_slot + i] = 1;
+                    }
                 }
                 caller.block = header.return_block;
                 ++region_counts_.returns;

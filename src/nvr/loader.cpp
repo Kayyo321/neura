@@ -730,6 +730,13 @@ void Validator::constants() {
         case TypeKind::Object:
             if (size != 0) invalid(where + ": a nil object constant has no payload");
             break;
+        case TypeKind::Array:
+        case TypeKind::List:
+            // NVR 1.7: the nil collection, the value of a payload enum's word
+            // that the enum's variant does not use.
+            if (image_.minor_version < 7) invalid(where + ": collection constants require NVR 1.7");
+            if (size != 0) invalid(where + ": a nil collection constant has no payload");
+            break;
         default:
             invalid(where + ": constants cannot have this type");
         }

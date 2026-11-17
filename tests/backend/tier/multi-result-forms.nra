@@ -5,6 +5,12 @@
 // (tests/backend/fixtures.cpp, multi_result_image).
 let program = import:Std.Program;
 
+// The forms name image types by index, so this program's types must be the
+// fixtures' (text, text[], int32, uint32, void, bool, int64). Program start
+// meets uint32 and then void first in this call, which runs before main.
+let prepare = func(code: uint32) {};
+prepare(0 as uint32);
+
 let Forms = module:program.Entry (
     let add = func(a: int64, b: int64) -> int64 => a + b;
 

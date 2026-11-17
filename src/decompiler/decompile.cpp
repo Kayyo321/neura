@@ -17,7 +17,10 @@ using nvr::absent;
 using ScopeLocation = std::pair<std::uint32_t, std::size_t>;
 using ScopePairs = std::map<const nvr::Exit*, ScopeLocation>;
 
-std::string type_name(const nvr::Image& image, std::uint32_t index) {
+// The name of a type. An aggregate element may hold a collection of its own
+// aggregate (an enum with a payload such as Node[list]); inside its own name
+// that aggregate is named by its layout, as "agg L12".
+std::string type_name(const nvr::Image& image, std::uint32_t index, std::vector<std::uint32_t>& naming) {
     if (index >= image.types.size()) {
         return "t" + std::to_string(index);
     }
@@ -30,19 +33,28 @@ std::string type_name(const nvr::Image& image, std::uint32_t index) {
     case nvr::TypeKind::Text: return "text";
     case nvr::TypeKind::Bytes: return "bytes";
     case nvr::TypeKind::Object: return "L" + std::to_string(t.reference);
-    case nvr::TypeKind::Array: return type_name(image, t.reference) + "[]";
-    case nvr::TypeKind::List: return type_name(image, t.reference) + "[list]";
+    case nvr::TypeKind::Array: return type_name(image, t.reference, naming) + "[]";
+    case nvr::TypeKind::List: return type_name(image, t.reference, naming) + "[list]";
     case nvr::TypeKind::Float: return "float" + std::to_string(t.width);
     case nvr::TypeKind::BFloat: return "bfloat16";
     case nvr::TypeKind::Aggregate: {
+        if (std::ranges::find(naming, index) != naming.end()) return "agg L" + std::to_string(t.reference);
         // One array or list element's words, each by its type.
+        naming.push_back(index);
         std::string text = "(";
         const auto& fields = image.layouts.at(t.reference).fields;
-        for (std::size_t i = 0; i < fields.size(); ++i) text += (i == 0 ? "" : ", ") + type_name(image, fields[i]);
+        for (std::size_t i = 0; i < fields.size(); ++i)
+            text += (i == 0 ? "" : ", ") + type_name(image, fields[i], naming);
+        naming.pop_back();
         return text + ")";
     }
     }
     return "t" + std::to_string(index);
+}
+
+std::string type_name(const nvr::Image& image, std::uint32_t index) {
+    std::vector<std::uint32_t> naming;
+    return type_name(image, index, naming);
 }
 
 std::string quoted(const std::string& text) {

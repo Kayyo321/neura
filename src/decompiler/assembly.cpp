@@ -108,7 +108,9 @@ std::string constant_comment(const nvr::Image& image, const nvr::Constant& const
         return std::to_string(value);
     }
     case nvr::TypeKind::Text: return quoted(std::string(constant.payload.begin(), constant.payload.end()));
-    case nvr::TypeKind::Object: return constant.payload.empty() ? "nil" : std::string{};
+    case nvr::TypeKind::Object:
+    case nvr::TypeKind::Array:
+    case nvr::TypeKind::List: return constant.payload.empty() ? "nil" : std::string{};
     default: return {};
     }
 }
