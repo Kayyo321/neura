@@ -55,6 +55,10 @@ A worker runs one application and exits. The supervisor keeps one ready worker, 
 
 What a service launch does not have of the caller's process: its session, process group, controlling terminal and parent, its descriptors above 2, and its control group. Reading a terminal through the passed descriptors works; the terminal's signals reach the client, which forwards `INT`, `TERM`, `HUP`, `QUIT` and `WINCH` to the application's process group.
 
+## Across an update
+
+In an installed generation the supervisor and each of its workers hold the generation's lease ([generations in use](Install#generations-in-use)), so an application keeps the generation it was launched from. `neura update` tells the supervisor of the generation it replaced that it is retired: that supervisor keeps no ready worker, its applications run to their end, `neura runtime ps` and `stop` still reach them, and it exits once it has no application and no connection, after which the generation can be removed. New launches go to a supervisor of the new generation. A supervisor also retires by itself when it sees that `current` names another generation. `neura uninstall` and a removal of the service component are refused while applications run, unless `--terminate` stops them first; a supervisor that runs no application is stopped without it.
+
 ## Statuses and messages
 
 Errors of the service are lines that begin `neura: runtime: `, printed by the client; the program's own output is never prefixed.

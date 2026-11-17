@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import hashlib
 import io
+import json
 import os
 import re
 import shutil
@@ -30,6 +31,8 @@ import stat
 import subprocess
 import sys
 import tarfile
+import tempfile
+import time
 from pathlib import Path
 
 REPOSITORY = Path(__file__).resolve().parents[2]
@@ -107,11 +110,18 @@ class Kit:
                 self._prefixes[component] = prefix
         return self._prefixes
 
-    def variant(self, name: str, version: str | None = None, neurad: bool = False, change: str | None = None) -> dict[str, Path]:
+    def has_neurad(self) -> bool:
+        """Whether the build's service component holds the real neurad."""
+        return (self.prefixes()["service"] / "bin/neurad").is_file()
+
+    def variant(self, name: str, version: str | None = None, neurad: bool = False, change: str | None = None,
+                without_neurad: bool = False) -> dict[str, Path]:
         """A copy of the component prefixes. With `version`, bin/neura is a
         script that reports that version; with `neurad`, the service prefix
-        holds a stand-in neurad; with `change`, that file of the sdk prefix
-        gets a byte more, which makes another build of the same version."""
+        holds a stand-in neurad in place of the build's; with
+        `without_neurad`, it holds none, as in a build without the service;
+        with `change`, that file of the sdk prefix gets a byte more, which
+        makes another build of the same version."""
         base = self.work / "variants" / name
         shutil.rmtree(base, ignore_errors=True)
         result = {}
@@ -128,6 +138,8 @@ class Kit:
             daemon.parent.mkdir(parents=True, exist_ok=True)
             daemon.write_text("#!/bin/sh\n# A stand-in for neurad: the service component's tool.\nexit 0\n")
             daemon.chmod(0o755)
+        if without_neurad:
+            (result["service"] / "bin/neurad").unlink(missing_ok=True)
         if change is not None:
             with open(result["sdk"] / change, "ab") as file:
                 file.write(b"\n")
@@ -272,16 +284,18 @@ def suite_archives(kit: Kit) -> None:
     out = kit.work / "archives"
     shutil.rmtree(out, ignore_errors=True)
     with_daemon = kit.variant("with-neurad", neurad=True)
+    without_daemon = kit.variant("without-neurad", without_neurad=True)
     sdk = kit.pack("sdk", out / "a")
     runtime = kit.pack("runtime", out / "a")
     legacy = kit.pack("legacy", out / "a")
     runtime_daemon = kit.pack("runtime", out / "daemon", with_daemon)
+    runtime_bare = kit.pack("runtime", out / "bare", without_daemon)
     v, t = kit.version, kit.triple
     check(sdk.name == f"neura-sdk-{v}-{t}.tar.gz" and runtime.name == f"neura-runtime-{v}-{t}.tar.gz"
           and legacy.name == f"neura-{v}-{t}.tar.gz", "archive names")
     trees = {}
     for path, top in ((sdk, f"neura-sdk-{v}-{t}"), (runtime, f"neura-runtime-{v}-{t}"), (legacy, f"neura-{v}-{t}"),
-                      (runtime_daemon, f"neura-runtime-{v}-{t}")):
+                      (runtime_daemon, f"neura-runtime-{v}-{t}"), (runtime_bare, f"neura-runtime-{v}-{t}")):
         members = archive_members(path)
         check(all(name == top or name.startswith(top + "/") for name in members), f"{path.name}: one top directory {top}")
         check(all(kind in ("file", "dir") for kind, _, _ in members.values()), f"{path.name}: regular files and directories only")
@@ -326,14 +340,23 @@ def suite_archives(kit: Kit) -> None:
             check(not tools & set(SDK_TOOLS) and not any(n.startswith("share/neura/stdlib") for n in tree),
                   f"{path.name}: no SDK tool and no standard library")
             check(set(CORE_TOOLS) <= tools, f"{path.name}: every core tool")
-            check(("neurad" in tools) == (path == runtime_daemon), f"{path.name}: neurad only when the service prefix has it")
+            check(("neurad" in tools) == (path == runtime_daemon or (path == runtime and kit.has_neurad())),
+                  f"{path.parent.name}/{path.name}: neurad only when the service prefix has it")
         else:
             # Case 1 as an archive: every core and SDK tool, and no service.
             check(set(CORE_TOOLS) | set(SDK_TOOLS) == tools, f"{path.name}: the core and SDK tools, no neurad")
     service = parse_manifest(trees[runtime_daemon]["share/neura/components/service.txt"][2].decode())
     check(service["tools"] == ["neurad"] and list(service["files"]) == ["bin/neurad"], "a service prefix with neurad: its manifest")
-    empty = parse_manifest(trees[runtime]["share/neura/components/service.txt"][2].decode())
-    check(empty["tools"] == [] and empty["files"] == {}, "a service prefix without neurad: an empty service manifest")
+    empty = parse_manifest(trees[runtime_bare]["share/neura/components/service.txt"][2].decode())
+    check(empty["tools"] == [] and empty["files"] == {} and empty["protocol"] == "service 1.0",
+          "a service prefix without neurad: an empty service manifest")
+    # The service component of this build: the real neurad (Service030.md).
+    if kit.has_neurad():
+        real = parse_manifest(trees[runtime]["share/neura/components/service.txt"][2].decode())
+        check(real["tools"] == ["neurad"] and list(real["files"]) == ["bin/neurad"] and real["requires"] == ["core"],
+              "the build's service component: neurad, requiring core")
+        check(trees[runtime]["bin/neurad"][2] == (kit.prefixes()["service"] / "bin/neurad").read_bytes(),
+              "the runtime archive's neurad is the build's")
     # Case 3 as archives: the core is byte-identical in the three archives.
     core = parse_manifest(trees[sdk]["share/neura/components/core.txt"][2].decode())
     for other in (runtime, legacy):
@@ -1805,6 +1828,175 @@ def suite_service(kit: Kit) -> None:
     application.wait()
 
 
+class RealService:
+    """The real neurad of an installation: its run directory (short, so
+    that the socket path fits), its state, and the processes that hold a
+    generation's lease, read from /proc/locks."""
+
+    def __init__(self, home: Home):
+        self.home = home
+        self.run_dir = Path(tempfile.mkdtemp(prefix="neura-run-", dir="/tmp"))
+
+    def env(self) -> dict:
+        # The service refuses a launch that may use a graph device.
+        return {"XDG_RUNTIME_DIR": str(self.run_dir), "NEURA_GPU": "off"}
+
+    def id(self) -> str:
+        return hashlib.sha256(str(self.home.real_root()).encode()).hexdigest()[:16]
+
+    def log(self, generation: str) -> str:
+        path = self.home.path / ".local/state/neura" / self.id() / generation / "log"
+        return path.read_text() if path.exists() else ""
+
+    def holders(self, generation: str) -> dict[int, list[str]]:
+        """The processes that hold a lock on the generation's lease, with
+        their command lines."""
+        inode = os.stat(self.home.root / "leases" / generation).st_ino
+        holders = {}
+        for line in Path("/proc/locks").read_text().splitlines():
+            fields = line.split()
+            if len(fields) < 6 or fields[1] != "FLOCK":
+                continue
+            if int(fields[5].split(":")[2]) != inode:
+                continue
+            pid = int(fields[4])
+            try:
+                holders[pid] = Path(f"/proc/{pid}/cmdline").read_bytes().decode(errors="replace").split("\0")
+            except OSError:
+                pass
+        return holders
+
+    def supervisor_running(self, generation: str) -> bool:
+        return any("--foreground" in command for command in self.holders(generation).values())
+
+    def end(self) -> None:
+        shutil.rmtree(self.run_dir, ignore_errors=True)
+
+
+def wait_for(condition, seconds: float = 20) -> bool:
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.05)
+    return condition()
+
+
+def suite_neurad(kit: Kit) -> None:
+    """The real neurad across a change: a supervisor and an application of
+    the installed generation while `neura update` moves to a stand-in
+    release. The update sends Retire through the service's control client;
+    the application keeps its generation, whose lease its worker and
+    supervisor hold, and the retired supervisor exits once the application
+    ends, after which the generation is removable. Then uninstall against
+    the real service: refused while an application runs, an idle
+    supervisor stopped, --terminate."""
+    if not sys.platform.startswith("linux") or not kit.has_neurad():
+        print("NOT RUN: the real neurad across a change: it needs Linux and a build with neurad")
+        return
+    v, t = kit.version, kit.triple
+    release = kit.release(kit.work / "release")
+    tops = {p: unpack(release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
+    newer = kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9"), version="9.9.9")
+    newest = kit.release(kit.work / "newest", kit.variant("newest", version="9.9.10"), version="9.9.10")
+    echo = REPOSITORY / "tests/service/programs/echo.nra"
+
+    home = Home(kit, "neurad")
+    check(home.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "the combined install with the real neurad")
+    first = home.current()
+    check(re.fullmatch(re.escape(v) + r"\+[0-9a-f]{12}", first) is not None, f"the generation is named <version>+<id>: {first}")
+    service = RealService(home)
+    env = home.env(service.env())
+    image = home.path / "echo.nvr"
+    result = home.neura("build", echo, "-o", image)
+    check(result.returncode == 0, f"the echo image builds: {result.stderr}")
+
+    def start_application(neura: Path) -> subprocess.Popen:
+        application = subprocess.Popen([neura, "run", "--runtime=required", image], stdin=subprocess.PIPE,
+                                       stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=env, cwd=home.path)
+        application.stdin.write(b"one\n")
+        application.stdin.flush()
+        check(application.stdout.readline() == b"[one]\n", "the application runs through the service")
+        return application
+
+    def ps(generation: str) -> list[dict]:
+        result = home.tool(generation, "neura", "runtime", "ps", "--json", env=service.env())
+        check(result.returncode == 0, f"runtime ps: {result.stderr}")
+        return json.loads(result.stdout)["applications"] if result.returncode == 0 else []
+
+    application = start_application(home.bin / "neura")
+    holders = service.holders(first)
+    check(any("--foreground" in c for c in holders.values()) and any("--worker" in c for c in holders.values()),
+          f"the supervisor and the application's worker hold the generation's lease: {holders}")
+    workers = [pid for pid, command in holders.items() if "--worker" in command]
+    check(all(os.path.realpath(f"/proc/{pid}/exe").startswith(str(home.real_root() / "versions" / first)) for pid in workers),
+          "the worker runs the generation's neurad")
+    running = ps(first)
+    check(len(running) == 1 and running[0]["id"].startswith(first + "."), f"ps lists the application of {first}: {running}")
+
+    # The control client answers for the service: uninstall is refused while
+    # the application runs, and the count is the service's.
+    result = run([home.bin / "neura-uninstall", "uninstall", "--yes"], env=env)
+    check(result.returncode == 1 and "1 applications of this installation are running" in result.stderr
+          and home.current() == first, f"uninstall refused while an application runs: {result.stderr}")
+
+    # The update: Retire, and the application keeps its generation.
+    result = run([home.bin / "neura-update", "update", "--source", newer], env=env)
+    second = home.current()
+    check(result.returncode == 0 and second != first, f"the update while the application runs: {result.stderr}")
+    check(wait_for(lambda: "retired by an update" in service.log(first), 5), f"the old supervisor got Retire: {service.log(first)}")
+    application.stdin.write(b"two\n")
+    application.stdin.flush()
+    check(application.stdout.readline() == b"[two]\n" and application.poll() is None, "the application runs on")
+    check(first in home.generations() and service.supervisor_running(first), "its generation and supervisor stay")
+    check([a["id"] for a in ps(first)] == [r["id"] for r in running], "ps from the old generation still lists it")
+    status = home.tool(first, "neura", "runtime", "status", "--json", env=service.env())
+    supervisors = {s["generation"]: s for s in json.loads(status.stdout)["supervisors"]} if status.returncode == 0 else {}
+    check(supervisors.get(first, {}).get("state") == "retiring", f"status says the supervisor is retiring: {status.stdout}")
+    # A second update keeps the application's generation, which is in use.
+    result = run([home.bin / "neura-update", "update", "--source", newest], env=env)
+    check(result.returncode == 0 and first in home.generations(), f"the generation in use is kept: {result.stderr}")
+
+    # The application ends; the retired supervisor exits with it, and the
+    # generation is then removed.
+    application.stdin.close()
+    check(application.stdout.read() == b"end\n" and application.wait(30) == 0, "the application ends normally")
+    check(wait_for(lambda: not lease_held(home, first)), f"the retired supervisor exits: {service.holders(first)}")
+    check("exiting" in service.log(first), "its log says it exited")
+    result = run([home.bin / "neura-update", "update", "--repair"], env=env)
+    check(result.returncode == 0 and first not in home.generations(), f"the generation is removed afterwards: {result.stderr}")
+    service.end()
+
+    # Uninstall against the real service.
+    other = Home(kit, "neurad-uninstall")
+    check(other.install(tops["runtime"]).returncode == 0, "a runtime install")
+    service = RealService(other)
+    env = other.env(service.env())
+    generation = other.current()
+    # An idle supervisor is stopped, not refused.
+    result = run([other.bin / "neura", "runtime", "start"], env=env)
+    check(result.returncode == 0 and service.supervisor_running(generation), f"runtime start: {result.stderr}")
+    result = run([other.bin / "neura-uninstall", "uninstall", "--dry-run"], env=env)
+    check(result.returncode == 0 and "would stop the service's supervisor, which runs no application" in result.stdout
+          and service.supervisor_running(generation), f"--dry-run names the idle supervisor and leaves it: {result.stdout}")
+    reinstall = Home(kit, "neurad-terminate")
+    check(reinstall.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "a combined install for --terminate")
+    result = run([other.bin / "neura-uninstall", "uninstall", "--yes"], env=env)
+    check(result.returncode == 0 and "stopping the service's supervisor, which runs no application" in result.stdout
+          and not other.root.exists() and not other.links(), f"uninstall stops an idle supervisor: {result.stdout}{result.stderr}")
+    service.end()
+    # --terminate stops a running application.
+    home, service = reinstall, RealService(reinstall)
+    env = home.env(service.env())
+    image = home.path / "echo.nvr"
+    check(home.neura("build", echo, "-o", image).returncode == 0, "the echo image builds")
+    application = start_application(home.bin / "neura")
+    result = run([home.bin / "neura-uninstall", "uninstall", "--yes", "--terminate"], env=env)
+    check(result.returncode == 0 and not home.root.exists(), f"uninstall --terminate: {result.stdout}{result.stderr}")
+    check(application.wait(30) != 0, "the application was terminated")
+    service.end()
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
@@ -1815,6 +2007,7 @@ SUITES = {
     "components": suite_components,
     "uninstall": suite_uninstall,
     "service": suite_service,
+    "neurad": suite_neurad,
 }
 
 

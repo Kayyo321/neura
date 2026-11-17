@@ -1278,7 +1278,7 @@ if(BUILD_TESTING AND NEURA_SDK)
     )
     # The scenario suites of the 0.3 lifecycle (docs/design/Lifecycle030.md).
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    foreach(suite IN ITEMS archives install bootstrap update migrate doctor components uninstall service)
+    foreach(suite IN ITEMS archives install bootstrap update migrate doctor components uninstall service neurad)
         add_test(NAME lifecycle-${suite} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/scenarios.py" ${suite}
             "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/lifecycle-${suite}-tests" "${CMAKE_COMMAND}")

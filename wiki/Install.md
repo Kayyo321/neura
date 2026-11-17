@@ -354,7 +354,7 @@ The 0.2 updater removes the old version at once, so close editor sessions first;
 
 ### Test-only hooks
 
-These environment variables exist for the tests only and are not a supported interface. `NEURA_TEST_UPDATE_FAULT=<step>` makes the named step fail, and `NEURA_TEST_UPDATE_CRASH=<step>` ends the process there without cleanup, with status 70; the steps are those of [a change](#a-change-step-by-step) (`download`, `checksum`, `extract`, `verify`, `compose`, `journal`, `place`, `links-remove`, `activate-link`, `links-add`, `activate-marker`, `retire`, `prune`), and `links-add-<n>` after the n-th added link. `NEURA_TEST_SERVICE_CONTROL=<program>` names a stand-in for the service's own commands (`shutdown --terminate`, `retire`) when no control client is linked.
+These environment variables exist for the tests only and are not a supported interface. `NEURA_TEST_UPDATE_FAULT=<step>` makes the named step fail, and `NEURA_TEST_UPDATE_CRASH=<step>` ends the process there without cleanup, with status 70; the steps are those of [a change](#a-change-step-by-step) (`download`, `checksum`, `extract`, `verify`, `compose`, `journal`, `place`, `links-remove`, `activate-link`, `links-add`, `activate-marker`, `retire`, `prune`), and `links-add-<n>` after the n-th added link. `NEURA_TEST_SERVICE_CONTROL=<program>` names a stand-in for the service's own commands (`shutdown --terminate`, `retire`), which then takes the place of the control client that `neura update` and `neura uninstall` link.
 
 ## Uninstall
 
@@ -370,7 +370,7 @@ neura uninstall --component sdk|service [--terminate]
 | `--terminate` | First stop the applications and the supervisor of this installation's service. Without it, a removal that affects running applications is refused. |
 | `--component <name>` | Remove one component, by a new generation without it, as `neura update --components` does. Removing `sdk` from an SDK, or `service` from a runtime, is refused with `removing <name> would leave no product; use "neura uninstall"`. Removing `service` keeps `core`, so the SDK still runs, tests and debugs. |
 
-A full uninstall is refused while applications of this installation's service run (unless `--terminate`), and while another process holds a lease, with the list of generations in use: other holders, such as an editor session or a build, must end first. For an `archive` install `neura uninstall` removes:
+A full uninstall is refused while applications of this installation's service run (unless `--terminate`), and while another process holds a lease, with the list of generations in use: other holders, such as an editor session or a build, must end first. A supervisor that runs no application is stopped first (`--dry-run` says it would be), since it holds its generation's lease. For an `archive` install `neura uninstall` removes:
 
 - every generation in `<root>/versions`, `<root>/current`, `<root>/leases` and `<root>/.lock`;
 - each link the marker lists, only if it is a symbolic link whose target resolves inside `<root>`; otherwise it leaves the path and says so;
@@ -418,11 +418,12 @@ To turn the notice and the check off, set `NEURA_NO_UPDATE_CHECK=1` in your envi
 | The state a 0.2 updater leaves, built by hand, the refusals while unmigrated, and `--migrate-install`, including an interrupted one | `lifecycle-migrate` |
 | `doctor` on every state, and that the read-only commands change nothing | `lifecycle-doctor` |
 | `--components`, `uninstall --component`, `--terminate`, and the full uninstall with service state, against a stand-in service | `lifecycle-components`, `lifecycle-uninstall`, `lifecycle-service` |
+| The real `neurad` across a change: a supervisor and an application of the installed generation during an update to a stand-in release, `Retire`, the leases of the supervisor and the worker, the old supervisor's exit and the removal of its generation; uninstall refused while an application runs, an idle supervisor stopped, and `--terminate` (Linux) | `lifecycle-neurad` |
 | Every command through `neura` and through its tool; missing, incomplete, and mixed components; an install on `PATH`, a relocated install, and two installs on `PATH` | `tools-parity`, `tools-components`, `tools-install` |
 
 The CTest entries above run on Linux and macOS, on x86-64 and arm64. The release workflow then runs [the lifecycle checks](ReleaseProcess#what-the-release-workflow-checks) on the packed archives, including the update from the published `v0.2.1-rc.3` and `v0.2.0` with their own 0.2 clients, and for a release candidate runs the one-line install command against the published files, which covers a download over HTTPS and `gh attestation verify`.
 
-These are not tested: `neura update` downloading over HTTPS (the release workflow updates from a local copy of the published files), the update notice and its network refresh (they need a terminal, so only their absence without a terminal is tested), the interactive `uninstall` prompt, the real service (`neurad`) across a change, which the service milestone tests, and any run on Windows outside WSL 2.
+These are not tested: `neura update` downloading over HTTPS (the release workflow updates from a local copy of the published files), the update notice and its network refresh (they need a terminal, so only their absence without a terminal is tested), the interactive `uninstall` prompt, and any run on Windows outside WSL 2.
 
 ## Build from source
 
