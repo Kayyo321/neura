@@ -598,6 +598,9 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")
     set_tests_properties(matching-programs PROPERTIES TIMEOUT 180)
+    add_test(NAME matching-nir COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/nir_versions.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).
     add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"

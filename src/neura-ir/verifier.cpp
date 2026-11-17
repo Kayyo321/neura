@@ -897,11 +897,9 @@ private:
         require_assignable(source.type, destination.type, node.span, "stored value");
     }
 
+    // NeuraIR 1.12: a return may leave a scoped value, as the postfix `?`
+    // does (docs/design/Matching030.md); break and continue still cannot.
     void check_return(const IrNode& node, Context& context) {
-        if (context.scoped_value) {
-            report(node.span, "return cannot leave a scoped value");
-            return;
-        }
         if (context.function == no_symbol) {
             report(node.span, "return appears outside a function body");
             return;

@@ -1,0 +1,9 @@
+error[E0202]: expected ':'
+ --> $DIR/propagate-minus.nra:7:33
+  |
+7 |     let value = parse(text)? - 1;
+  |                                 ^ expected ':', found ';'
+  |
+  = help: to return an error here, write '(parse(text)?) - 1'
+
+For more information about this error, try `neura explain E0202`.

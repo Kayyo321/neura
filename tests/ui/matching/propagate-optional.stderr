@@ -1,0 +1,9 @@
+error[E0496]: '?' on a value that is not a Result
+ --> $DIR/propagate-optional.nra:8:17
+  |
+8 |     let value = lookup(key)?;
+  |                 ^^^^^^^^^^^ this has type Optional<int32>
+  |
+  = help: convert it to a Result first, as in 'to_result(error)?'
+
+For more information about this error, try `neura explain E0496`.

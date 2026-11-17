@@ -1,0 +1,9 @@
+error[E0497]: '?' outside a function that returns a Result
+ --> $DIR/propagate-file-level.nra:6:23
+  |
+6 | let value = parse("1")?;
+  |                       ^ this context has no result to return an error through
+  |
+  = help: handle the result with 'match'
+
+For more information about this error, try `neura explain E0497`.

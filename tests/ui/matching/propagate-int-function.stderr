@@ -1,0 +1,11 @@
+error[E0497]: '?' outside a function that returns a Result
+ --> $DIR/propagate-int-function.nra:7:23
+  |
+6 | let read = func(text: string) -> int {
+  |                                  --- declared here
+7 |     return parse(text)?;
+  |                       ^ the enclosing function returns int32
+  |
+  = help: handle the result with 'match'
+
+For more information about this error, try `neura explain E0497`.

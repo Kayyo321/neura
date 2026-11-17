@@ -1,0 +1,7 @@
+// Edge case 77: '?' followed by '.'.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let Pet = class ( export let age: int = 0; );
+let read = func(pet: Pet) -> int => pet ? .age;

@@ -452,12 +452,12 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // Minor 11 is newer than this reader.
+    // Minor 13 is newer than this reader.
     auto newer = bytes;
-    newer[6] = 11;
-    expect_nir_error(newer, "NeuraIR format 1.11 is not supported; this reader accepts 1.0 through 1.10");
+    newer[6] = 13;
+    expect_nir_error(newer, "NeuraIR format 1.13 is not supported; this reader accepts 1.0 through 1.12");
     newer[6] = 200;
-    expect_nir_error(newer, "this reader accepts 1.0 through 1.10");
+    expect_nir_error(newer, "this reader accepts 1.0 through 1.12");
 
     // An operation tag above the newest one, in a 1.9 file.
     IrProgram above;

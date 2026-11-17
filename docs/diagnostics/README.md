@@ -51,6 +51,7 @@ Errors about declarations, scopes, and name resolution.
 | --- | --- |
 | [E0230](E0230.md) | malformed match.is |
 | [E0231](E0231.md) | pattern form that is not supported |
+| [E0232](E0232.md) | postfix ? that needs parentheses |
 | [E0233](E0233.md) | malformed optional access |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
@@ -140,6 +141,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0491](E0491.md) | unreachable match arm |
 | [E0494](E0494.md) | optional access on a receiver that is never absent |
 | [E0495](E0495.md) | invalid operands of ?? |
+| [E0496](E0496.md) | ? on a value that is not a Result |
+| [E0497](E0497.md) | ? outside a function that returns a Result |
 | [E0501](E0501.md) | invalid static member |
 | [E0502](E0502.md) | invalid override |
 | [E0503](E0503.md) | invalid inheritance |

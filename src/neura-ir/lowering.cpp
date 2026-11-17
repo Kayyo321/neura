@@ -452,6 +452,7 @@ private:
     IrNode optional_access(const Expr& access, const Expr* call, Context& context);
     IrNode member_of_optional(const Expr& member, Context& context, bool for_call);
     IrNode coalesce(const Expr& expr, Context& context);
+    IrNode propagate(const Expr& expr, Context& context);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
     IrNode do_loop(const Statement& stmt, Context& context);
@@ -3335,6 +3336,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return optional_access(expr, nullptr, context);
     case ExprKind::Coalesce:
         return coalesce(expr, context);
+    case ExprKind::Propagate:
+        return propagate(expr, context);
     case ExprKind::Call:
         return call(expr, context, expected);
     case ExprKind::Index: {

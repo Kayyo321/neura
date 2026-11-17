@@ -1,0 +1,24 @@
+// Edge cases 86, 87, 89, 90 and 95 to 98: postfix '?' forms that are accepted.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let check = func() -> Result<bool> => Result<bool>.Ok(true);
+let nested = func() -> Result<Result<int>> => Result<Result<int>>.Ok(Result<int>.Ok(1));
+let add = func(a: int, b: int) -> int => a + b;
+let forms = func(ok: bool, text: string) -> Result<int> {
+    let a = parse(text)? + 1;
+    let b = ok ? parse(text)? : parse(text)?;
+    let c = nested()? ?;
+    let d = (nested()?)?;
+    let e = !check()?;
+    let f = -parse(text)?;
+    let g = add(a: parse(text)?, b: 2);
+    let h = $"{parse(text)?}";
+    check()?;
+    return Result<int>.Ok(a + b + c + d + f + g);
+};
+let typed = func() -> Result<int> {
+    let run: func(string) -> Result<int> = func(text) => Result<int>.Ok(parse(text)?);
+    return run("1");
+};

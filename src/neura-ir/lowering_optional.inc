@@ -255,3 +255,78 @@ IrNode Lowering::member_of_optional(const Expr& member, Context& context, bool f
             .help("continue the chain with '?." + member.text + "', which skips when the value is absent");
     }
 }
+
+// `operand?`: the operand is a Std.Core.Result<T>, evaluated once. Ok(v)
+// gives v; Err(e) returns Result<U>.Err(e) from the innermost function or
+// lambda, whose written or expected result is Result<U>. The return is an
+// ordinary Return node.
+IrNode Lowering::propagate(const Expr& expr, Context& context) {
+    const auto& at = expr.operator_span ? *expr.operator_span : expr.span;
+    const auto outside = [&](const std::string&) {
+        return Diagnostic(at, "'?' outside a function that returns a Result").with_code("E0497");
+    };
+    const auto function = context.function;
+    if (function == no_symbol) {
+        auto error = outside("");
+        error.label("this context has no result to return an error through")
+            .help("handle the result with 'match'");
+        throw error;
+    }
+    const auto& enclosing = symbol(function);
+    if (enclosing.kind == SymbolKind::Function && (enclosing.name == "init" || enclosing.name == "deinit") &&
+        owner_kind(enclosing.owner, SymbolKind::Class) != no_symbol) {
+        auto error = outside("");
+        error.label(std::string("a ") + (enclosing.name == "init" ? "constructor" : "destructor") + " returns no result")
+            .help("handle the result with 'match'");
+        throw error;
+    }
+    const auto result_type = enclosing.type;
+    if (!library_enum_type(result_type, "std/core/result.nra", "Result")) {
+        auto error = outside("");
+        error.label(result_type.kind == TypeKind::Void ? std::string("the enclosing function returns no result")
+                                                       : "the enclosing function returns " + describe(result_type));
+        if (const auto written = result_spans_.find(function); written != result_spans_.end())
+            error.label(written->second, "declared here");
+        error.help("handle the result with 'match'");
+        throw error;
+    }
+    auto operand = value(expr.operands.front(), context);
+    const auto operand_type = operand.type;
+    if (!library_enum_type(operand_type, "std/core/result.nra", "Result")) {
+        auto error = Diagnostic(expr.operands.front().span, "'?' on a value that is not a Result").with_code("E0496")
+            .label("this has type " + describe(operand_type));
+        if (library_enum_type(operand_type, "std/core/optional.nra", "Optional"))
+            error.help("convert it to a Result first, as in 'to_result(error)?'");
+        else
+            error.note("'?' returns the error of a Std.Core.Result from the enclosing function");
+        throw error;
+    }
+    const auto payload = operand_type.arguments.front();
+    const auto ok = library_variant(operand_type.symbol, "Ok", at);
+    const auto err = library_variant(operand_type.symbol, "Err", at);
+    const auto saved = hidden_local("$propagate", operand_type, operand.span, context);
+    auto load = node(IrOp::Load, operand.span, operand_type);
+    load.symbol = saved;
+    auto error_value = node(IrOp::EnumProject, at, symbol(err).payload_types.front());
+    error_value.symbol = err;
+    error_value.text = "0";
+    error_value.operands.push_back(load);
+    auto exit = node(IrOp::Return, at);
+    exit.operands.push_back(variant_value(library_variant(result_type.symbol, "Err", at), result_type,
+                                          std::move(error_value), at));
+    auto failed = node(IrOp::Branch, at);
+    failed.operands.push_back(tag_is(load, err, at));
+    failed.body.push_back(std::move(exit));
+    auto success = node(IrOp::EnumProject, expr.span, payload);
+    success.symbol = ok;
+    success.text = "0";
+    success.operands.push_back(load);
+    auto result = node(IrOp::ScopedValue, expr.span, payload);
+    auto save = node(IrOp::Initialize, operand.span);
+    save.symbol = saved;
+    save.operands.push_back(std::move(operand));
+    result.body.push_back(std::move(save));
+    result.body.push_back(std::move(failed));
+    result.body.push_back(std::move(success));
+    return result;
+}

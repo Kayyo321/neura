@@ -60,6 +60,28 @@ bool scoped_statements(const IrNode& node) {
                     [](const IrNode& prefix) { return prefix.op != IrOp::Initialize; });
 }
 
+// A return anywhere inside a scoped value (NeuraIR 1.12).
+bool contains_return(const IrNode& node) {
+    if (node.op == IrOp::Return) return true;
+    for (const auto* region : {&node.operands, &node.body, &node.alternative})
+        for (const auto& child : *region)
+            if (contains_return(child)) return true;
+    return false;
+}
+
+bool scoped_return(const IrNode& node) {
+    return node.op == IrOp::ScopedValue && contains_return(node);
+}
+
+bool needs_any_minor(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (scoped_return(node)) return true;
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            if (needs_any_minor(*region)) return true;
+    }
+    return false;
+}
+
 bool class_qualified_load(const IrNode& node) {
     return node.op == IrOp::Load && !node.operands.empty() &&
         node.operands.front().type.kind != TypeKind::Module;
@@ -153,6 +175,8 @@ public:
             if (version >= newest_node_minor) break;
             version = std::max(version, required_minor(body.instructions));
         }
+        if (std::ranges::any_of(program.bodies, [](const IrBody& body) { return needs_any_minor(body.instructions); }))
+            version = std::max(version, nir_any_minor);
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -376,7 +400,8 @@ public:
         }
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_9};
+        static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -699,6 +724,8 @@ private:
         value.alternative = nodes(depth + 1);
         if (minor_ < 4 && scoped_statements(value))
             fail("statements in a scoped value require NeuraIR format 1.4");
+        if (minor_ < nir_any_minor && scoped_return(value))
+            fail("a return inside a scoped value requires NeuraIR format 1." + std::to_string(nir_any_minor));
         if (value.op == IrOp::Loop && !value.alternative.empty() && !latches_) {
             fail("a loop latch requires NeuraIR format 1.1");
         }

@@ -1,4 +1,5 @@
 #include "syntax.hpp"
+#include "util/source_map.hpp"
 
 #include <algorithm>
 #include <charconv>
@@ -1760,8 +1761,26 @@ private:
             range.span = span_from(start);
             left = std::move(range);
         }
-        if (minimum_precedence == 1 && match("?")) {
+        if (minimum_precedence == 1 && at("?")) {
+            const auto after = tokens_[cursor_ + 1];
+            advance();
             auto when_true = expression(1, false);
+            if (!at(":")) {
+                try {
+                    expect(":");
+                } catch (Diagnostic& error) {
+                    // `r? - 1` is a conditional (docs/design/Matching030.md).
+                    if (after.kind == TokenKind::Symbol &&
+                        (after.text == "-" || after.text == "(" || after.text == "[" || after.text == "{" ||
+                         after.text == "++" || after.text == "--" || after.text == "!" || after.text == "~")) {
+                        const auto operand = source_text(left.span);
+                        const auto rest = source_text(when_true.span);
+                        error.help("to return an error here, write '(" + operand.value_or("r") + "?) " +
+                                   rest.value_or("") + "'");
+                    }
+                    throw;
+                }
+            }
             expect(":");
             auto when_false = expression(1, range_step, branch_keyword);
             auto conditional = make_expression(Expr::Kind::Conditional, span_from(start));
@@ -1932,7 +1951,46 @@ private:
 
     Expr postfix(std::string_view branch_keyword) {
         const auto start = cursor_;
-        return postfix_tail(start, primary(branch_keyword));
+        return propagation(start, postfix_tail(start, primary(branch_keyword)));
+    }
+
+    // A postfix `?` (docs/design/Matching030.md) is decided by the next
+    // token alone: one that can begin an expression makes the `?` the
+    // conditional operator's, `.` is an error, and anything else makes it
+    // propagation.
+    Expr propagation(std::size_t start, Expr result) {
+        while (at("?")) {
+            const auto& next = tokens_[cursor_ + 1];
+            if (begins_expression(next)) break;
+            if (next.kind == TokenKind::Symbol && next.text == ".")
+                throw Diagnostic(current().span, "'?' is followed by '.'").with_code("E0232")
+                    .label("a postfix '?' cannot take a member")
+                    .help("to read a member of the success value, write '(r?).name'; for optional access, write 'r?.name'");
+            const auto token = advance().span;
+            auto propagate = make_expression(Expr::Kind::Propagate, span_from(start), "?");
+            propagate.operator_span = token;
+            propagate.operands.push_back(std::move(result));
+            result = std::move(propagate);
+        }
+        return result;
+    }
+
+    static bool begins_expression(const Token& token) {
+        switch (token.kind) {
+        case TokenKind::Identifier:
+        case TokenKind::Integer:
+        case TokenKind::Float:
+        case TokenKind::String:
+            return true;
+        case TokenKind::Keyword:
+            return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
+                   token.text == "true" || token.text == "false" || token.text == "nil";
+        case TokenKind::Symbol:
+            return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
+                   token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";
+        default:
+            return false;
+        }
     }
 
     Expr postfix_tail(std::size_t start, Expr result) {
