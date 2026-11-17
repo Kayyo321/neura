@@ -725,10 +725,15 @@ NEURA_TEST(tier, aggregate_collections_run_on_the_reference_path_in_every_tier) 
                 const auto counts = cache.statistics();
                 check(counts.lifted_by_hint > 0 && counts.programs > 0,
                       label + ": the hinted blocks were lifted into programs");
-                check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
-                      label + ": calls and returns still run in programs");
+                // As in the multi-word test: program counts are kept where tier
+                // 3 native code is supported; elsewhere NEURA_JIT=on compiles
+                // tier 2 code and the identical runs above are the evidence.
+                if (jit::native::supported()) {
+                    check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
+                          label + ": calls and returns still run in programs");
+                }
                 check(counts.region_counts.exits > 0, label + ": the aggregate exits were declined");
-                if (tier3 != Tier3::Off && nvm::tier_ceiling() >= 3) {
+                if (tier3 != Tier3::Off && jit::native::supported()) {
                     check(counts.native_programs > 0 && counts.native.steps > 0,
                           label + ": tier 3 built and ran programs around the declined exits");
                 }
