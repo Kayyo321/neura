@@ -1053,6 +1053,11 @@ NEURA_TEST(tier3, storage_regions_run_as_helpers_and_their_callees_are_not_inlin
             // The read after the release, in the program that released, failed in machine code.
             check(trapping.statistics().native.state_traps > 0, "case 1: the released read failed in machine code");
         }
+        if (count == 2 && thresholds_kept()) {
+            // The overflow is in add, inlined into the loop that holds the region.
+            const auto* loop = native_ir(trapping, 12);
+            check(loop != nullptr && inlines(*loop, 2), "case 2: add is inlined into the loop with the open region");
+        }
     }
     nvm::TierShadowHooks hooks;
     std::vector<std::string> reports;

@@ -1223,7 +1223,7 @@ NEURA_TEST(tier, storage_regions_are_released_on_every_exit_of_compiled_code) {
     }
     // Limits land inside compiled code with regions open: a step limit deoptimizes at every
     // point, a frame limit inside the recursion, and a stack limit at each region allocation.
-    for (const auto tier3 : {Tier3::Interp, Tier3::Native}) {
+    for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
         const auto label = region_mode_label(tier3, true);
         nvm::TierCache cache(image, region_mode(tier3, true));
         for (std::uint64_t steps = 1; steps <= reference.result.steps + 1; steps += steps < 64 ? 3 : 61) {
@@ -1284,9 +1284,14 @@ NEURA_TEST(tier, storage_regions_are_released_on_every_exit_of_compiled_code) {
     }
     check_clean(image, "region tiers", {});
     check_clean(image, "region tiers without profile", {}, no_profile);
-    for (const std::uint64_t steps : {100ULL, 1000ULL, 4000ULL}) {
+    // Deoptimizations with regions open, inside inlined code too (the standard variant, without
+    // --profile, inlines), are sync points: the oracle compares the region stacks there.
+    for (std::uint64_t steps = 50; steps <= reference.result.steps; steps += 487) {
         check_clean(image, "region tiers with " + std::to_string(steps) + " steps", {},
-                    [&](nvm::RunLimits& limits) { limits.max_steps = steps; });
+                    [&](nvm::RunLimits& limits) {
+                        limits.max_steps = steps;
+                        limits.profile = false;
+                    });
     }
 }
 
