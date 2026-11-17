@@ -473,6 +473,20 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
+if(UNIX AND NOT EMSCRIPTEN)
+    add_library(neura_server_http STATIC EXCLUDE_FROM_ALL
+        src/server/http_wire.cpp
+        src/server/http_connection.cpp
+        src/server/http_tcp.cpp)
+    target_include_directories(neura_server_http PUBLIC src)
+    neura_target_defaults(neura_server_http)
+
+    add_library(neura_server_listeners STATIC EXCLUDE_FROM_ALL src/server/http_listener.cpp)
+    target_include_directories(neura_server_listeners PUBLIC src)
+    target_link_libraries(neura_server_listeners PRIVATE neura_server_http)
+    neura_target_defaults(neura_server_listeners)
+endif()
+
 option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 server TLS transport" OFF)
 if(NEURA_ENABLE_SERVER_TLS)
     if(NOT UNIX OR EMSCRIPTEN)
@@ -487,13 +501,12 @@ if(NEURA_ENABLE_SERVER_TLS)
             message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 3.5 static archives")
         endif()
 
-        add_library(neura_server_tls STATIC
-            src/server/http_wire.cpp
-            src/server/http_connection.cpp
-            src/server/http_tls.cpp)
+        add_library(neura_server_tls STATIC src/server/http_tls.cpp)
         target_include_directories(neura_server_tls PUBLIC src)
-        target_link_libraries(neura_server_tls PRIVATE OpenSSL::SSL)
+        target_link_libraries(neura_server_tls PRIVATE neura_server_http OpenSSL::SSL)
         neura_target_defaults(neura_server_tls)
+        target_compile_definitions(neura_server_listeners PRIVATE NEURA_SERVER_TLS_ENABLED)
+        target_link_libraries(neura_server_listeners PRIVATE neura_server_tls)
 
         if(BUILD_TESTING)
             find_package(Threads REQUIRED)
@@ -518,16 +531,15 @@ if(BUILD_TESTING)
 
     if(UNIX AND NOT EMSCRIPTEN)
         find_package(Threads REQUIRED)
-        add_executable(neura_http_connection_tests
-            src/server/http_wire.cpp
-            src/server/http_connection.cpp
-            src/server/http_tcp.cpp
-            tests/server/http_connection_tests.cpp)
-        target_include_directories(neura_http_connection_tests PRIVATE src)
-        target_link_libraries(neura_http_connection_tests PRIVATE Threads::Threads)
+        add_executable(neura_http_connection_tests tests/server/http_connection_tests.cpp)
+        target_link_libraries(neura_http_connection_tests PRIVATE neura_server_http Threads::Threads)
         neura_target_defaults(neura_http_connection_tests)
         add_test(NAME server-http-connection COMMAND neura_http_connection_tests)
         set_tests_properties(server-http-connection PROPERTIES TIMEOUT 15)
+
+        add_executable(neura_http_listener_foreground tests/server/http_listener_foreground.cpp)
+        target_link_libraries(neura_http_listener_foreground PRIVATE neura_server_listeners Threads::Threads)
+        neura_target_defaults(neura_http_listener_foreground)
     endif()
 
     if(TARGET neura_launcher)
@@ -606,6 +618,17 @@ if(BUILD_TESTING)
     )
     # Editor protocol contracts execute real compiler and runtime paths.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    if(TARGET neura_http_listener_foreground)
+        set(NEURA_SERVER_LISTENER_TEST_OPTIONS)
+        if(NEURA_ENABLE_SERVER_TLS)
+            find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
+            list(APPEND NEURA_SERVER_LISTENER_TEST_OPTIONS --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        endif()
+        add_test(NAME server-http-listeners COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/http_listener_foreground.py"
+            "$<TARGET_FILE:neura_http_listener_foreground>" ${NEURA_SERVER_LISTENER_TEST_OPTIONS})
+        set_tests_properties(server-http-listeners PROPERTIES TIMEOUT 20)
+    endif()
     foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
             add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"

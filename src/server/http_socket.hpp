@@ -31,18 +31,23 @@ inline ssize_t send(int descriptor, const void* data, std::size_t size) {
     return ::send(descriptor, data, size, flags);
 }
 
-inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time_point deadline) {
+inline int poll_until(std::span<pollfd> entries, ConnectionClock::time_point deadline) {
     for (;;) {
         const auto left = deadline - ConnectionClock::now();
-        if (left <= ConnectionClock::duration::zero()) return StreamStatus::TimedOut;
+        if (left <= ConnectionClock::duration::zero()) return 0;
         const auto milliseconds = std::chrono::ceil<std::chrono::milliseconds>(left).count();
-        pollfd entry{descriptor, events, 0};
         const int timeout = milliseconds > INT_MAX ? INT_MAX : static_cast<int>(milliseconds);
-        const int ready = ::poll(&entry, 1, timeout);
-        // A hangup or error goes back through recv/send to report the outcome.
-        if (ready > 0) return (entry.revents & POLLNVAL) ? StreamStatus::Failed : StreamStatus::Ready;
-        if (ready < 0 && errno != EINTR) return StreamStatus::Failed;
+        const int ready = ::poll(entries.data(), static_cast<nfds_t>(entries.size()), timeout);
+        if (ready > 0 || (ready < 0 && errno != EINTR)) return ready;
     }
+}
+
+inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time_point deadline) {
+    pollfd entry{descriptor, events, 0};
+    const int ready = poll_until(std::span(&entry, 1), deadline);
+    if (ready == 0) return StreamStatus::TimedOut;
+    // A hangup or error goes back through recv/send to report the outcome.
+    return ready < 0 || (entry.revents & POLLNVAL) ? StreamStatus::Failed : StreamStatus::Ready;
 }
 
 } // namespace neura::server::http::socket_io
