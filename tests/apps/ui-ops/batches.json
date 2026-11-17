@@ -1,0 +1,67 @@
+[
+  {
+    "name": "mount, then reuse and move siblings",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"ul","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":3,"parent":2,"before":null,"value":"Alpha"},
+          {"op":"element","id":4,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":5,"parent":4,"before":null,"value":"Beta"},
+          {"op":"element","id":6,"parent":1,"before":null,"name":"li","svg":false},
+          {"op":"text","id":7,"parent":6,"before":null,"value":"Gamma"},
+          {"op":"attribute","id":1,"name":"aria-label","value":"Items"},
+          {"op":"attribute","id":4,"name":"data-selected","value":"true"}
+        ],
+        "tree": [
+          {"tag":"ul","attrs":{"aria-label":"Items"},"children":[
+            {"tag":"li","children":["Alpha"]},
+            {"tag":"li","attrs":{"data-selected":"true"},"children":["Beta"]},
+            {"tag":"li","children":["Gamma"]}
+          ]}
+        ]
+      },
+      {
+        "operations": [
+          {"op":"remove","id":2},
+          {"op":"move","id":6,"parent":1,"before":4},
+          {"op":"element","id":8,"parent":1,"before":4,"name":"li","svg":false},
+          {"op":"text","id":9,"parent":8,"before":null,"value":"Delta"},
+          {"op":"attribute","id":4,"name":"data-selected","value":null},
+          {"op":"setText","id":5,"value":"Beta updated"}
+        ],
+        "tree": [
+          {"tag":"ul","attrs":{"aria-label":"Items"},"children":[
+            {"tag":"li","children":["Gamma"]},
+            {"tag":"li","children":["Delta"]},
+            {"tag":"li","children":["Beta updated"]}
+          ]}
+        ]
+      }
+    ]
+  },
+  {
+    "name": "SVG namespace and literal text",
+    "commits": [
+      {
+        "operations": [
+          {"op":"element","id":1,"parent":0,"before":null,"name":"div","svg":false},
+          {"op":"element","id":2,"parent":1,"before":null,"name":"svg","svg":true},
+          {"op":"element","id":3,"parent":2,"before":null,"name":"path","svg":true},
+          {"op":"text","id":4,"parent":1,"before":null,"value":"<b>plain & literal</b>"},
+          {"op":"attribute","id":2,"name":"viewBox","value":"0 0 4 4"},
+          {"op":"attribute","id":3,"name":"d","value":"M 0 0 L 4 4"}
+        ],
+        "tree": [
+          {"tag":"div","children":[
+            {"tag":"svg","svg":true,"attrs":{"viewBox":"0 0 4 4"},"children":[
+              {"tag":"path","svg":true,"attrs":{"d":"M 0 0 L 4 4"}}
+            ]},
+            "<b>plain & literal</b>"
+          ]}
+        ]
+      }
+    ]
+  }
+]
