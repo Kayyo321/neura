@@ -86,6 +86,7 @@ REPOSITORY_ONLY = (
     "docs/design/Concurrency.md",
     "docs/design/GpuExecution.md",
     "docs/design/Release030.md",
+    "docs/design/Representation030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )
