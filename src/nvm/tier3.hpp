@@ -380,6 +380,11 @@ struct Function {
     // frame state holds. Without them K is not an SSA value at all, and the
     // context's K stays what the activation chain has charged.
     bool inline_kernels = false;
+    // Whether the function has an EnterRegion exit (NVR 1.7; from the image,
+    // lifted or not, tier2::Region::enters_region): its frame may own storage
+    // regions, so its Return goes through the return helper, which releases
+    // them, and native code never pops its frame in place.
+    bool enters_region = false;
     // By SSA value, after place_canons (tier3_float.cpp): 32 or 64 for a
     // value whose bits a frame write canonicalizes in that format (a
     // Deferred result, or a value of only such results and canonical ones);

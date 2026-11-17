@@ -168,6 +168,7 @@ public:
         budgets();
         floats();
         guards();
+        regions();
         return violations_;
     }
 
@@ -1346,6 +1347,32 @@ private:
             }
             if (!available(in.guard, block_of_[id], position_[id])) {
                 fail("V10", at(id) + " is not dominated by the guard that covers it");
+            }
+        }
+    }
+
+    // --- V11: storage regions (NVR 1.7) ------------------------------------------------------
+    //
+    // A storage region operation runs as a Helper of the program's own frame, through the
+    // reference state that keeps the task's regions: never as a state call or a fast path, and
+    // never inside an inlined callee, whose frame a region would outlive. A program that enters
+    // one is marked, so that its Return goes through the return helper, which releases it.
+
+    void regions() {
+        for (std::uint32_t id = 0; id < f_.insts.size(); ++id) {
+            const auto& in = f_.insts[id];
+            if (block_of_[id] == none || !reachable(block_of_[id])) continue;
+            if (in.op != Op::Helper && in.op != Op::StateCall && in.op != Op::AllocObject && in.op != Op::Append) continue;
+            if (in.aux >= f_.exits.size()) continue;
+            const auto& exit = *f_.exits[in.aux];
+            if (exit.kind != nvr::ExitKind::State || !nvr::is_region_operation(exit.operation)) continue;
+            if (in.op != Op::Helper) {
+                fail("V11", at(id) + " runs a storage region operation other than as a helper");
+            } else if (in.state != none && in.state < f_.states.size() && f_.states[in.state].caller != none) {
+                fail("V11", at(id) + " runs a storage region operation inside an inlined callee");
+            }
+            if (exit.operation == nvr::StateOp::EnterRegion && !f_.enters_region) {
+                fail("V11", at(id) + " enters a storage region in a program not marked as entering one");
             }
         }
     }

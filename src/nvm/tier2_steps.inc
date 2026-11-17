@@ -750,15 +750,15 @@
                     const auto& scopes = current_task().scopes;
                     simple = scopes.empty() || scopes.back().frame_depth != depth;
                 }
-                // A frame that still owns a storage region is popped by tier 1,
-                // which releases it (NVR 1.7).
-                if (simple && !frames_.regions.empty() && frames_.regions.back().depth >= depth) simple = false;
                 if (!simple) return end(op.block, true, region_counts_.exits);
                 ++done;
                 ++blocks;
                 flush();
                 const auto header = frames_.header(depth - 1);
                 if (scheduler_) remove_live_cells(frame_cells(header.function));
+                // The storage regions the frame entered and did not release
+                // (NVR 1.7), as commit_exit's Return releases them.
+                if (!frames_.regions.empty()) release_regions_from(frames_, depth);
                 frames_.pop_back();
                 auto caller = frames_.back();
                 if (header.return_slot != nvr::absent) {

@@ -838,8 +838,10 @@ private:
             }
             store_kernel_steps(ia, first_word + step.index);
             // A function with several result words returns through the
-            // helper: popping the frame in place writes one result slot.
-            if (f_.variant == t3::Variant::Standard && step.index == 0) inline_pop();
+            // helper: popping the frame in place writes one result slot. So
+            // does a function that enters a storage region (NVR 1.7): the
+            // helper releases the regions its frame left open.
+            if (f_.variant == t3::Variant::Standard && step.index == 0 && !f_.enters_region) inline_pop();
             a_.mov(S64, x64::rdx, counter);
             a_.mov(S64, x64::rdi, context);
             a_.mov(S32, x64::rcx, imm32(step.index));

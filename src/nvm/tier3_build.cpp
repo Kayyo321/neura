@@ -248,6 +248,7 @@ private:
         f_->slot_count = slots_;
         f_->parameter_count = region_.parameter_count;
         f_->uses_float = region_.uses_float;
+        f_->enters_region = region_.enters_region;
         // A function with an inline kernel keeps K as an SSA value, and its
         // native code depends on the floating-point environment.
         for (const auto& op : region_.code) {

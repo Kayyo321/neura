@@ -27,7 +27,9 @@
 // write-back: inlined code writes a frame only on the slow path of an
 // allocation or append (AllocObject, Append), which materializes every frame
 // of its state, runs the helper, and leaves at the helper's resume block. Its arguments and return
-// values fit the types of the slots they go to. Host, scheduler and message
+// values fit the types of the slots they go to. A callee whose function has a storage region
+// operation (NVR 1.7), lifted or not, is never inlined: its regions belong to its own frame,
+// which only a call pushes, and its Return releases them through the return helper. Host, scheduler and message
 // exits are deoptimizations in function programs already.
 //
 // Dispatch and closure sites: the exits the recorded tags select (at most 6,
@@ -321,6 +323,7 @@ private:
         for (const auto slot : program->entries.front().reads) {
             if (slot >= program->parameter_count) return std::nullopt;
         }
+        if (uses_storage_regions(image_.functions.at(function))) return std::nullopt;
         const auto base = size_of(*program);
         if (base.blocks > max_blocks || base.ops > max_callee_ops) return std::nullopt;
         auto key = chain;
@@ -345,6 +348,16 @@ private:
         slot = Callee{std::make_shared<const Function>(std::move(ir)), own};
         if (slot->size.blocks > max_blocks) return std::nullopt;
         return slot;
+    }
+
+    // Whether a function has a storage region operation (NVR 1.7) in any
+    // block, lifted or not.
+    static bool uses_storage_regions(const nvr::Function& function) {
+        return std::any_of(function.blocks.begin(), function.blocks.end(), [](const nvr::Block& block) {
+            return std::any_of(block.exits.begin(), block.exits.end(), [](const nvr::Exit& exit) {
+                return exit.kind == nvr::ExitKind::State && nvr::is_region_operation(exit.operation);
+            });
+        });
     }
 
     // The callee's code from entry 0 never writes a frame, never calls, and

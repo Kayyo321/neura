@@ -28,8 +28,9 @@ std::uint32_t result_slot_count(const nvr::Image& image, const nvr::Exit& exit) 
 }
 
 // Whether `exit` is a state operation that runs inside a region or program
-// as an inline operation. A storage region operation never does (NVR 1.7:
-// the reference path runs it).
+// as an inline operation. A storage region operation never does (NVR 1.7):
+// a function program runs it as a helper, through the reference state, and
+// a region ends there.
 bool internal_exit(const nvr::Exit& exit) {
     return exit.kind == nvr::ExitKind::Continue ||
            (exit.kind == nvr::ExitKind::State && inline_state_operation(exit) &&
@@ -694,7 +695,7 @@ public:
         : image_(image), function_(image.functions[function]), blocks_(blocks), forms_(forms), program_(program),
           checkable_(checkable) {
         region_.function = function;
-        enters_region_ = std::ranges::any_of(function_.blocks, [](const nvr::Block& block) {
+        region_.enters_region = std::ranges::any_of(function_.blocks, [](const nvr::Block& block) {
             return std::ranges::any_of(block.exits, [](const nvr::Exit& exit) {
                 return exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::EnterRegion;
             });
@@ -773,11 +774,10 @@ private:
     bool takes(std::uint32_t local, const nvr::Exit& exit) const {
         if (stub(local)) return false;
         if (exit.arguments.size() > max_count) return false;
-        // Storage regions (NVR 1.7): their operations run on the reference
-        // path, never as a helper; and the return of a function that enters a
-        // region does too, as that is where the frame's regions are released.
-        if (exit.kind == nvr::ExitKind::State && nvr::is_region_operation(exit.operation)) return false;
-        if (exit.kind == nvr::ExitKind::Return && enters_region_) return false;
+        // Storage regions (NVR 1.7): a region operation is not internal, so a
+        // function program runs it as a helper (the reference state keeps the
+        // task's regions beside its frames), and its Return releases what the
+        // frame left open (tier2_steps.inc, run_program).
         if (internal_exit(exit)) return true;
         if (!program_ || checkable_) return false;
         return exit.kind == nvr::ExitKind::Call || exit.kind == nvr::ExitKind::Return ||
@@ -1625,8 +1625,6 @@ private:
 
     const nvr::Image& image_;
     const nvr::Function& function_;
-    // Whether the function enters a storage region (NVR 1.7).
-    bool enters_region_ = false;
     const std::vector<std::uint32_t>& blocks_;
     const std::vector<BlockForm>& forms_;
     // A function program (Region::program), compiled for the region check.

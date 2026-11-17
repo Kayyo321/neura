@@ -637,6 +637,12 @@ struct ProgramOps {
     std::uint64_t image_multi_calls = 0;
     std::uint64_t image_components = 0;
     std::uint64_t image_aggregate_helpers = 0;
+    // Storage region operations (NVR 1.7) run as helpers, those exits in the
+    // image's functions that formed a program, and the Return ops of programs
+    // of functions that enter a region (which release what the frame left open).
+    std::uint64_t region_helpers = 0;
+    std::uint64_t image_region_ops = 0;
+    std::uint64_t region_returns = 0;
 };
 
 ProgramOps program_ops(const nvr::Image& image, nvm::TierCache& cache) {
@@ -669,6 +675,7 @@ ProgramOps program_ops(const nvr::Image& image, nvm::TierCache& cache) {
                     ++ops.image_multi_calls;
                 }
                 if (exit.kind != nvr::ExitKind::State) continue;
+                ops.image_region_ops += nvr::is_region_operation(exit.operation);
                 if (exit.operation == nvr::StateOp::ReadComponent || exit.operation == nvr::StateOp::WriteComponent) {
                     ++ops.image_components;
                 } else if (exit.operation == nvr::StateOp::AllocateCollection ||
@@ -683,6 +690,10 @@ ProgramOps program_ops(const nvr::Image& image, nvm::TierCache& cache) {
         for (const auto& op : program.code) {
             using Code = nvm::tier2::Code;
             if (op.code == Code::Return && op.width > 1) ++ops.multi_returns;
+            if (op.code == Code::Return && program.enters_region) ++ops.region_returns;
+            if (op.code == Code::Helper && nvr::is_region_operation(program.exits[op.index]->operation)) {
+                ++ops.region_helpers;
+            }
             if (op.code == Code::Call && !image.functions[op.a].more_results.empty()) ++ops.multi_calls;
             if (op.code == Code::State || op.code == Code::Helper) {
                 const auto operation = program.exits[op.index]->operation;
@@ -949,15 +960,16 @@ std::string region_mode_label(nvm::TierOptions::Tier3 tier3, bool programs) {
            (programs ? " with programs" : " with regions");
 }
 
-NEURA_TEST(tier, storage_regions_run_on_the_reference_path_in_every_tier) {
+NEURA_TEST(tier, storage_regions_run_in_every_tier) {
     // tests/backend/tier/region-storage.nvra (NVR 1.7): nested regions per block and per loop
     // iteration, release on return and on break and continue paths, a fresh array and a holder
     // moved to the caller's region on return, region lists that grow in place (the hot loop
     // appends, which tier 3 inlines for a heap list), allocation through a token, and region
-    // entries that hold the only references to heap objects across collections. Tier 2 and
-    // tier 3 decline every region operation and the return of a function that enters a region
-    // (docs/design/Storage030.md, "Images and runtime"), so every mode must end with the
-    // reference run's output, steps, peak heap cells and peak stack cells.
+    // entries that hold the only references to heap objects across collections. Function
+    // programs of tier 2 and tier 3 run every region operation as a helper through the reference
+    // state, and the return of a function that enters a region releases what its frame left
+    // open, so every mode must end with the reference run's output, steps, peak heap cells and
+    // peak stack cells.
     const auto image = region_image(environment);
     const auto reference = run_captured(image, limits_at(0));
     check(reference.result.completed, "the image runs at tier 0");
@@ -979,16 +991,19 @@ NEURA_TEST(tier, storage_regions_run_on_the_reference_path_in_every_tier) {
                 const auto counts = cache.statistics();
                 check(counts.lifted_by_hint > 0 && counts.programs > 0,
                       label + ": the hinted blocks were lifted into programs");
-                check(counts.region_counts.exits > 0, label + ": the region operations were declined");
+                const auto ops = program_ops(image, cache);
+                check(ops.region_helpers > 0, label + ": region operations are helpers of the programs");
+                check(ops.region_returns > 0, label + ": returns of functions that enter a region are program ops");
                 // Where tier 3 native code is unsupported (AArch64, macOS), NEURA_JIT=on compiles
                 // tier 2 code instead and these counters differ; the identical runs above are the
                 // evidence there.
                 if (jit::native::supported()) {
-                    check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
-                          label + ": calls and returns that own no region still run in programs");
+                    check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0 &&
+                              counts.region_counts.helpers > 0,
+                          label + ": calls, returns and helpers ran in programs");
                     if (tier3 != Tier3::Off) {
                         check(counts.native_programs > 0 && counts.native.steps > 0,
-                              label + ": tier 3 built and ran programs around the declined exits");
+                              label + ": tier 3 built and ran the programs");
                     }
                 }
             }
@@ -1159,6 +1174,120 @@ NEURA_TEST(tier, storage_regions_of_tasks_are_their_own) {
     nvm::TierCache cache(stolen, eager_programs());
     compare_with_tier_0(stolen, cache, "the token variant", {});
     check_clean(stolen, "the token variant", {});
+}
+
+const char* const region_tiers_output = "19900\n6375\n1400\n5050\n4950\n";
+
+NEURA_TEST(tier, storage_regions_are_released_on_every_exit_of_compiled_code) {
+    // tests/backend/tier/region-tiers.nvra (NVR 1.7): region operations inside hot loops that
+    // tiers 2 and 3 compile. A callee returns with its region open from a native caller (F3, F4),
+    // continue and break paths each release (F5), a region stays open around an inlined call (F6),
+    // each level of a recursion owns a region its return releases (F7), and a callee moves a
+    // fresh array to its caller's region (F9, F10). Every mode ends with tier 0's output, steps,
+    // peak heap cells and peak stack cells, with no region cell left, under every step, frame and
+    // stack limit; and the shadow oracle, which compares every task's regions at each return of
+    // compiled code, deoptimization included, finds no difference.
+    const auto image = region_tiers_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs at tier 0");
+    check_equal(reference.output, std::string{region_tiers_output}, "tier 0 output");
+    // The recursion of F7: 101 levels of 1 + 2 cells.
+    check_equal(reference.result.peak_stack_cells, std::uint64_t{303}, "peak stack cells");
+    check_equal(reference.result.live_stack_cells, std::uint64_t{0}, "no region cell outlives the run");
+    // Tier 3 pops a frame in place only without --profile, so both are compared.
+    const Adjust no_profile = [](nvm::RunLimits& limits) { limits.profile = false; };
+    using Tier3 = nvm::TierOptions::Tier3;
+    for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+        for (const bool programs : {false, true}) {
+            const auto label = region_mode_label(tier3, programs);
+            nvm::TierCache cache(image, region_mode(tier3, programs));
+            compare_with_tier_0(image, cache, label, {});
+            compare_with_tier_0(image, cache, label + " again", {});
+            compare_with_tier_0(image, cache, label + " without profile", {}, no_profile);
+            if (!programs || !programs_run()) continue;
+            const auto ops = program_ops(image, cache);
+            // Every block of the functions with regions ran, so their programs hold every one of
+            // their region operations, each as a helper.
+            check(ops.image_region_ops >= 20, label + ": the image has region operations");
+            check_equal(ops.region_helpers, ops.image_region_ops, label + ": every region operation is a helper");
+            check(ops.region_returns >= 4, label + ": the returns of functions that enter regions are program ops");
+            if (jit::native::supported()) {
+                const auto counts = cache.statistics();
+                check(counts.region_counts.helpers > 0 && counts.region_counts.returns > 0,
+                      label + ": helpers and returns ran in programs");
+                if (tier3 != Tier3::Off) {
+                    check(counts.native_programs > 0 && counts.native.steps > 0, label + ": tier 3 ran the programs");
+                }
+            }
+        }
+    }
+    // Limits land inside compiled code with regions open: a step limit deoptimizes at every
+    // point, a frame limit inside the recursion, and a stack limit at each region allocation.
+    for (const auto tier3 : {Tier3::Interp, Tier3::Native}) {
+        const auto label = region_mode_label(tier3, true);
+        nvm::TierCache cache(image, region_mode(tier3, true));
+        for (std::uint64_t steps = 1; steps <= reference.result.steps + 1; steps += steps < 64 ? 3 : 61) {
+            compare_with_tier_0(image, cache, label + " step limit " + std::to_string(steps), {},
+                                [&](nvm::RunLimits& limits) {
+                                    limits.max_steps = steps;
+                                    limits.profile = false;
+                                });
+        }
+        for (const std::uint32_t frames : {1U, 2U, 3U, 50U, 101U, 102U, 103U}) {
+            compare_with_tier_0(image, cache, label + " frame limit " + std::to_string(frames), {},
+                                [&](nvm::RunLimits& limits) {
+                                    limits.max_frames = frames;
+                                    limits.profile = false;
+                                });
+        }
+        for (std::uint64_t cells = 1; cells <= 305; cells += cells < 12 ? 1 : 13) {
+            compare_with_tier_0(image, cache, label + " stack limit " + std::to_string(cells), {},
+                                [&](nvm::RunLimits& limits) {
+                                    limits.max_stack_cells = cells;
+                                    limits.profile = false;
+                                });
+        }
+        for (const std::uint64_t cells : {302ULL, 303ULL}) {
+            compare_with_tier_0(image, cache, label + " stack limit " + std::to_string(cells), {},
+                                [&](nvm::RunLimits& limits) { limits.max_stack_cells = cells; });
+        }
+    }
+    {
+        auto limits = limits_at(0);
+        limits.max_stack_cells = 302;
+        const auto run = run_captured(image, limits);
+        check(!run.result.completed && run.result.trap.kind == nvm::TrapKind::StackLimit,
+              "one cell below the recursion's peak traps");
+        check_equal(run.result.live_stack_cells, std::uint64_t{0}, "the trap releases every level's region");
+    }
+    // Case 1 reads its array after releasing it, in the program that summed it; case 2 overflows
+    // in F2, inlined into a loop, while the loop's region is open.
+    const std::vector<nvm::TrapKind> cases{nvm::TrapKind::ReleasedStorage, nvm::TrapKind::Program};
+    for (std::size_t c = 0; c < cases.size(); ++c) {
+        const std::vector<std::string> arguments(c + 1, "x");
+        const auto name = "case " + std::to_string(c + 1);
+        const auto trapped = run_captured(image, limits_at(0), std::nullopt, arguments);
+        check(!trapped.result.completed && trapped.result.trap.kind == cases[c],
+              name + " traps: " + describe_trap(trapped.result, image));
+        check_equal(trapped.result.live_stack_cells, std::uint64_t{0}, name + " releases every region");
+        for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+            nvm::TierCache cache(image, region_mode(tier3, true));
+            const auto label = name + " " + region_mode_label(tier3, true);
+            compare_with_tier_0(image, cache, label, arguments);
+            compare_with_tier_0(image, cache, label + " again", arguments, no_profile);
+            if (c == 0 && tier3 == Tier3::Native && programs_run() && jit::native::supported()) {
+                // The read after the release found no entry in machine code.
+                check(cache.statistics().native.state_traps > 0, label + ": the released read failed in machine code");
+            }
+        }
+        check_clean(image, name, arguments);
+    }
+    check_clean(image, "region tiers", {});
+    check_clean(image, "region tiers without profile", {}, no_profile);
+    for (const std::uint64_t steps : {100ULL, 1000ULL, 4000ULL}) {
+        check_clean(image, "region tiers with " + std::to_string(steps) + " steps", {},
+                    [&](nvm::RunLimits& limits) { limits.max_steps = steps; });
+    }
 }
 
 NEURA_TEST(tier, the_shadow_oracle_syncs_inside_a_long_loop_of_a_program_and_finds_a_planted_difference) {

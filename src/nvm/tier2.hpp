@@ -198,6 +198,10 @@ struct Region {
     std::vector<const nvr::Exit*> exits;
     std::vector<Checkpoint> checkpoints;
     bool uses_float = false;
+    // Whether the function has an EnterRegion exit (NVR 1.7), lifted or not:
+    // a frame of it may own storage regions, which its return releases, so
+    // tier 3 never pops such a frame in place (tier3::Function::enters_region).
+    bool enters_region = false;
     // Overflow checks removed by the region's range analysis (each proven
     // never to fail; the image keeps them).
     std::uint32_t eliminated_checks = 0;
