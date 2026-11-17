@@ -1967,6 +1967,19 @@ def suite_neurad(kit: Kit) -> None:
     status = home.tool(first, "neura", "runtime", "status", "--json", env=service.env())
     supervisors = {s["generation"]: s for s in json.loads(status.stdout)["supervisors"]} if status.returncode == 0 else {}
     check(supervisors.get(first, {}).get("state") == "retiring", f"status says the supervisor is retiring: {status.stdout}")
+    # From the new generation (its neura-run is the build's; only its neura
+    # is a stand-in): ps lists the old application, and a new launch goes to
+    # a supervisor of the new generation.
+    new_run = home.real_root() / "versions" / second / "bin/neura-run"
+    result = run([new_run, "runtime", "ps", "--json"], env=env)
+    listed = json.loads(result.stdout)["applications"] if result.returncode == 0 else []
+    check([a["id"] for a in listed] == [r["id"] for r in running], f"ps from the new generation lists the old application: {result.stdout}{result.stderr}")
+    launch = subprocess.run([new_run, "run", "--runtime=required", image], input=b"new\n", capture_output=True, env=env,
+                            cwd=home.path, timeout=60)
+    check(launch.returncode == 0 and launch.stdout == b"[new]\nend\n", f"a launch from the new generation: {launch.stderr}")
+    result = run([new_run, "runtime", "ps", "--all", "--json"], env=env)
+    ids = [a["id"] for a in json.loads(result.stdout)["applications"]] if result.returncode == 0 else []
+    check(any(i.startswith(second + ".") for i in ids), f"it ran on a supervisor of the new generation: {ids}")
     # A second update keeps the application's generation, which is in use.
     result = run([home.bin / "neura-update", "update", "--source", newest], env=env)
     check(result.returncode == 0 and first in home.generations(), f"the generation in use is kept: {result.stderr}")
@@ -1977,6 +1990,7 @@ def suite_neurad(kit: Kit) -> None:
     check(application.stdout.read() == b"end\n" and application.wait(30) == 0, "the application ends normally")
     check(wait_for(lambda: not lease_held(home, first)), f"the retired supervisor exits: {service.holders(first)}")
     check("exiting" in service.log(first), "its log says it exited")
+    check(wait_for(lambda: not service.supervisor_running(second)), "the second generation's supervisor, retired too, exits")
     result = run([home.bin / "neura-update", "update", "--repair"], env=env)
     check(result.returncode == 0 and first not in home.generations(), f"the generation is removed afterwards: {result.stderr}")
     service.end()
@@ -2005,6 +2019,10 @@ def suite_neurad(kit: Kit) -> None:
     image = home.path / "echo.nvr"
     check(home.neura("build", echo, "-o", image).returncode == 0, "the echo image builds")
     application = start_application(home.bin / "neura")
+    stopped = start_application(home.bin / "neura")
+    identifier = next(a["id"] for a in ps(home.current()) if a["state"] == "running" and a["id"].endswith(".2"))
+    result = run([home.bin / "neura", "runtime", "stop", identifier], env=env)
+    check(result.returncode == 0 and "stopped" in result.stdout and stopped.wait(30) != 0, f"runtime stop reaches an application: {result.stdout}{result.stderr}")
     result = run([home.bin / "neura-uninstall", "uninstall", "--yes", "--terminate"], env=env)
     check(result.returncode == 0 and not home.root.exists(), f"uninstall --terminate: {result.stdout}{result.stderr}")
     check(application.wait(30) != 0, "the application was terminated")
