@@ -109,6 +109,7 @@ neura_target_defaults(neura_nvr)
 # runtime-only distribution needs no compiler code.
 set(neura_nvm_sources
     src/nvm/driver.cpp
+    src/nvm/environment.cpp
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -1206,6 +1207,13 @@ if(BUILD_TESTING AND NEURA_SDK)
     target_link_libraries(neura_service_protocol_tests PRIVATE neura_service_protocol)
     neura_target_defaults(neura_service_protocol_tests)
     add_test(NAME service-unit-protocol COMMAND neura_service_protocol_tests)
+    if(NOT WIN32)
+        # The cached environment readers abort while the environment is held.
+        add_executable(neura_service_environment_tests tests/service/environment_tests.cpp)
+        target_link_libraries(neura_service_environment_tests PRIVATE neura_nvm)
+        neura_target_defaults(neura_service_environment_tests)
+        add_test(NAME service-unit-environment COMMAND neura_service_environment_tests)
+    endif()
     # The service end to end, one suite per test (tests/service/service.py).
     foreach(suite IN ITEMS cli-options off-default)
         add_test(NAME service-${suite} COMMAND "${Python3_EXECUTABLE}"

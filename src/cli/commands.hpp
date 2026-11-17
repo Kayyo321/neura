@@ -47,6 +47,21 @@ inline void write_text(const Options& options, const std::string& text) {
 
 // The execution core (neura-run, neura-inspect).
 int run(const Options& options);
+
+// The bytes of an image file, or of the image inside a native executable.
+std::vector<std::uint8_t> image_bytes_of(std::vector<std::uint8_t> bytes);
+// Decodes and validates image bytes read from `path`, with the loader's
+// message prefixed by the path on failure.
+neura::nvr::Image load_image_bytes(std::span<const std::uint8_t> bytes, const fs::path& path);
+
+// One run of an image, as `neura run` makes it: the code a direct run and a
+// worker of the runtime service share (docs/design/Service030.md, "The
+// worker"). `bytes` are the image's own bytes, `path` names it in messages,
+// and `started` is when the command began, for --tier-stats. `ending`
+// receives whether the run trapped.
+int run_image(const Options& options, std::span<const std::uint8_t> bytes, const fs::path& path,
+              std::optional<std::chrono::steady_clock::time_point> started,
+              neura::runner::RunOptions::Ending* ending = nullptr);
 int inspect(const Options& options);
 
 // The compiler (neurac, neura-doc, neura-cbind, neura-test).

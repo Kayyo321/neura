@@ -44,12 +44,25 @@ bool has_image_magic(std::span<const std::uint8_t> bytes) {
     return bytes.size() >= 4 && std::ranges::equal(bytes.first(4), std::string_view("NEUR"));
 }
 
+std::vector<std::uint8_t> image_bytes_of(std::vector<std::uint8_t> bytes) {
+    if (!has_image_magic(bytes) && neura::launcher::is_container(bytes)) {
+        return neura::launcher::read_container(bytes).image;
+    }
+    return bytes;
+}
+
+neura::nvr::Image load_image_bytes(std::span<const std::uint8_t> bytes, const fs::path& path) {
+    try {
+        return neura::nvr::load(bytes);
+    } catch (const neura::nvr::LoadError& error) {
+        throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
+                                 error.what());
+    }
+}
+
 neura::nvr::Image load_image(const fs::path& path, std::size_t* byte_count) {
     try {
-        auto bytes = read_file(path);
-        if (!has_image_magic(bytes) && neura::launcher::is_container(bytes)) {
-            bytes = neura::launcher::read_container(bytes).image;
-        }
+        const auto bytes = image_bytes_of(read_file(path));
         auto image = neura::nvr::load(bytes);
         if (byte_count) *byte_count = bytes.size();
         return image;
@@ -192,8 +205,25 @@ int run(const Options& options) {
     // --tier-stats times the command from before the image is read.
     const auto started = options.tier_stats ? std::optional(std::chrono::steady_clock::now()) : std::nullopt;
     const auto& path = options.files.front();
-    std::size_t image_bytes = 0;
-    const auto image = load_image(path, &image_bytes);
+    std::vector<std::uint8_t> bytes;
+    try {
+        bytes = image_bytes_of(read_file(path));
+    } catch (const neura::nvr::LoadError& error) {
+        throw std::runtime_error(path.string() + ": " + std::string(neura::nvr::describe(error.kind)) + ": " +
+                                 error.what());
+    }
+    return run_image(options, bytes, path, started);
+}
+
+int run_image(const Options& options, std::span<const std::uint8_t> bytes, const fs::path& path,
+              std::optional<std::chrono::steady_clock::time_point> started,
+              neura::runner::RunOptions::Ending* ending) {
+    const auto image = load_image_bytes(bytes, path);
+    if (ending) {
+        ending->loaded = true;
+        ending->loaded_at = std::chrono::steady_clock::now();
+    }
+    const std::size_t image_bytes = bytes.size();
     auto lists = options.each ? neura::cli::read_argument_lists(*options.each) : std::vector<neura::cli::ArgumentList>{};
     const auto max_jobs = options.each ? std::min<std::size_t>(lists.size(), neura::nvm::FleetOptions{}.window) : 1;
     neura::cli::GpuRun gpu(options.gpu, image, max_jobs);
@@ -211,6 +241,7 @@ int run(const Options& options) {
     run_options.virtual_time = options.virtual_time;
     run_options.tier_stats = options.tier_stats;
     run_options.started = started;
+    run_options.ending = ending;
     const auto status = neura::runner::run(image, host, options.arguments, run_options, path.string(), image_bytes);
     return gpu.finish(status, options.stats);
 }

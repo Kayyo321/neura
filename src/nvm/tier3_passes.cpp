@@ -1,4 +1,5 @@
 #include "tier3_passes.hpp"
+#include "environment.hpp"
 
 #include "lift/evaluate.hpp"
 
@@ -1080,6 +1081,7 @@ bool remove_dead(Function& f, Counts& counts) {
 
 bool passes_enabled() {
     static const bool enabled = [] {
+        require_bound_environment("NEURA_TIER3_PASSES");
         const char* text = std::getenv("NEURA_TIER3_PASSES");
         return !(text && std::strcmp(text, "0") == 0);
     }();
