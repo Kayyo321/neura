@@ -89,6 +89,7 @@ REPOSITORY_ONLY = (
     "docs/design/Representation030.md",
     "docs/design/Parameters030.md",
     "docs/design/Storage030.md",
+    "docs/design/Lifecycle030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )
