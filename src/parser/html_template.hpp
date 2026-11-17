@@ -63,12 +63,18 @@ struct TemplateSyntax {
     std::vector<TemplateNode> nodes;
 };
 
+struct ResolvedTemplate {
+    TemplateSyntax body;
+    std::string sha256;
+};
+
 struct HtmlFactorySyntax {
     bool retained;
     std::vector<Parameter> parameters;
     std::variant<TemplateSyntax, Token> source;
     // Additional signatures in a declaration written with 'or html'.
     std::vector<Expr> overloads{};
+    std::optional<ResolvedTemplate> external{};
 };
 
 struct StylesheetSyntax {

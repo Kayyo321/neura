@@ -259,6 +259,17 @@ Errors about application forms and their build limits.
 
 | Code | Error |
 | --- | --- |
+| [E1001](E1001.md) | unknown element |
+| [E1002](E1002.md) | unknown attribute, property or event |
+| [E1003](E1003.md) | modifier not valid for this event |
+| [E1004](E1004.md) | value cannot be rendered |
+| [E1005](E1005.md) | attribute or property value of the wrong type |
+| [E1006](E1006.md) | handler does not match the event |
+| [E1007](E1007.md) | URL not allowed |
+| [E1008](E1008.md) | value cannot be iterated by a template |
+| [E1009](E1009.md) | key of the wrong type |
+| [E1011](E1011.md) | template or stylesheet file cannot be used |
+| [E1014](E1014.md) | invalid static document structure |
 | [E1015](E1015.md) | template or stylesheet exceeds a limit |
 
 ## Warnings

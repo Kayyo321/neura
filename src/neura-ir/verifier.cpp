@@ -418,6 +418,13 @@ private:
                     report(entry.span, "a host-effects contract belongs to a host binding without a body, not " +
                                            name(id));
                 break;
+            case AttributeId::UiFactory: {
+                const auto descriptor = attribute.value.symbol;
+                if (valid(descriptor) && (symbol(descriptor).kind != SymbolKind::Global ||
+                    !symbol(descriptor).constant || symbol(descriptor).type.kind != TypeKind::String))
+                    report(entry.span, "the descriptor of " + name(id) + " must be a string constant");
+                break;
+            }
             case AttributeId::KernelBinding:
                 if (attribute.value.items[0].text.empty())
                     report(entry.span, "a kernel binding of " + name(id) + " needs a kernel name");

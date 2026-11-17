@@ -1,6 +1,10 @@
+#include "cli/source_loader.hpp"
 #include "parser/html_template.hpp"
+#include "util/source_map.hpp"
 
+#include <filesystem>
 #include <iostream>
+#include <map>
 #include <stdexcept>
 #include <string_view>
 
@@ -150,6 +154,26 @@ void overloads() {
     CHECK(std::get<Token>(primary.overloads[1].html_factory->source).text == "\"./row.html\"");
 }
 
+void template_digest() {
+    const auto root = std::filesystem::weakly_canonical(std::filesystem::absolute("template-overlay"));
+    const auto source = root / "page.nra";
+    const auto external = root / "view.html";
+    const std::map<std::string, std::string, std::less<>> overlay{
+        {source.generic_string(), "let view = html() from \"./view.html\";"},
+        {external.generic_string(), "\xEF\xBB\xBF<p>Ready</p>\r\n"},
+    };
+    SourceMap sources;
+    SourceMapScope source_map(sources);
+    SourceOverlayScope documents(overlay);
+    const auto files = read_sources({source}, {});
+    const auto& template_source = *initializer(files.at(0), 0).html_factory->external;
+    CHECK(template_source.sha256 == "e2ca32dec9451274a62f98dde17cabb3eecec095e606a5a4862c743a01ffdd22");
+    CHECK(template_source.body.span.file == external.generic_string());
+    CHECK(template_source.body.span.offset == 3);
+    CHECK(template_source.body.span.column == 1);
+    CHECK(text(element(template_source.body.nodes[0]).children[0]) == "Ready");
+}
+
 } // namespace
 
 int main() {
@@ -159,6 +183,7 @@ int main() {
         contextual_forms();
         recovery();
         overloads();
+        template_digest();
     } catch (const neura::Diagnostic& error) {
         std::cerr << error.code() << " at " << error.span.line << ':' << error.span.column << ": " << error.what() << '\n';
         return 1;

@@ -1,0 +1,57 @@
+let ui = import:Std.Ui;
+let storage = import:Std.Ui.Internal.Storage;
+
+/// @brief Constructs a view from typed slot values in render order.
+#Internal
+export let Build = module (
+    #NotThreadSafe
+    export let Builder = class (
+        export let first: storage.Slot = nil;
+        let tail: storage.Slot = nil;
+
+        export let push = func(slot: storage.Slot) {
+            if (tail == nil) {
+                first = slot;
+            } else {
+                tail.next = slot;
+            }
+            tail = slot;
+        };
+    );
+
+    #NotThreadSafe
+    export let Item = class (
+        export last key: string;
+        export last view: ui.View;
+        export let next: Item = nil;
+
+        export let init = func(key: string, view: ui.View) => set;
+    );
+
+    #NotThreadSafe
+    export let Items = class (
+        export let first: Item = nil;
+        export let tail: Item = nil;
+    );
+
+    export let begin = func -> Builder => new Builder();
+
+    export let put = func<T>(builder: Builder, slot: uint32, value: T) {
+        builder.push(new storage.Payload<T>(slot, value));
+    };
+
+    export let finish = func(builder: Builder, descriptor: string, fragment: uint32) -> ui.View =>
+        new ui.View(descriptor, fragment, builder.first);
+
+    export let begin_items = func -> Items => new Items();
+
+    export let add_item = func(items: Items, key: string, view: ui.View) {
+        let item = new Item(key, view);
+        if (items.tail == nil) {
+            items.first = item;
+        } else {
+            items.tail.next = item;
+        }
+        items.tail = item;
+    };
+);

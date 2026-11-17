@@ -1,0 +1,201 @@
+let storage = import:Std.Ui.Internal.Storage;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Error;
+
+/// @brief Values produced by native HTML factories.
+export let Ui = module (
+    /// @brief One rendered fragment and its evaluated slot values.
+    #[Final, NotThreadSafe]
+    export let View = class (
+        #Internal
+        export last descriptor: string;
+        #Internal
+        export last fragment: uint32;
+        #Internal
+        export last slots: storage.Slot;
+
+        #Internal
+        export let init = func(descriptor: string, fragment: uint32, slots: storage.Slot) => set;
+    );
+
+    /// @brief A URL checked for use in a template attribute.
+    #[Final, Immutable]
+    export let Url = class (
+        #Internal
+        export last text: string;
+
+        #Internal
+        export let init = func(text: string) => set;
+    );
+
+    /// @brief A numeric CSS custom property value and its unit.
+    #[Final, Immutable]
+    export let CssValue = class (
+        #Internal
+        export last value: float64;
+        #Internal
+        export last unit: string;
+
+        #Internal
+        export let init = func(value: float64, unit: string) => set;
+    );
+
+    /// @brief Returns a URL after checking that it is a reference or uses an allowed scheme.
+    export let url = func(text: string) -> Url {
+        let delimiter = true;
+        let i = 0;
+        while (i < text.byte_length) {
+            last byte = text.byte_at(i);
+            if (byte <= 32 || byte == 127 || byte == 92) {
+                trap_with_message("invalid UI URL character");
+            }
+            if (delimiter && byte == 58) {
+                last scheme = strings.to_ascii_lower(text.slice(0, i));
+                if (scheme != "http" && scheme != "https" && scheme != "mailto" && scheme != "tel") {
+                    trap_with_message("URL scheme not allowed in a template");
+                }
+                delimiter = false;
+            }
+            if (byte == 47 || byte == 63 || byte == 35) {
+                delimiter = false;
+            }
+            i += 1;
+        }
+        return new Url(text);
+    };
+
+    let css_value = func(value: float64, unit: string) -> CssValue {
+        if (value - value != 0.0) {
+            trap_with_message("a CSS value must be finite");
+        }
+        return new CssValue(value, unit);
+    };
+
+    /// @brief A CSS length with a supported unit.
+    export let length = func(value: float64, unit: string) -> CssValue {
+        if (unit != "px" && unit != "em" && unit != "rem" && unit != "ch" && unit != "vw" && unit != "vh"
+            && unit != "cm" && unit != "mm" && unit != "in" && unit != "pt" && unit != "pc") {
+            trap_with_message("invalid CSS length unit");
+        }
+        return css_value(value, unit);
+    };
+
+    /// @brief A CSS color from a 24-bit RGB value.
+    export let color = func(rgb: uint32) -> CssValue {
+        if (rgb > 16777215) {
+            trap_with_message("CSS color requires a 24-bit RGB value");
+        }
+        return css_value(rgb as float64, "rgb");
+    };
+
+    /// @brief A unitless CSS number.
+    export let number = func(value: float64) -> CssValue => css_value(value, "");
+
+    /// @brief A CSS percentage.
+    export let percent = func(value: float64) -> CssValue => css_value(value, "%");
+
+    /// @brief The device that supplied a pointer event.
+    export let PointerKind = enum (Mouse, Pen, Touch, Other);
+
+    #[Final, Immutable]
+    export let Modifiers = class (
+        export last alt: bool;
+        export last ctrl: bool;
+        export last meta: bool;
+        export last shift: bool;
+
+        #Internal
+        export let init = func(alt: bool, ctrl: bool, meta: bool, shift: bool) => set;
+    );
+
+    #[Final, Immutable]
+    export let ClickEvent = class (
+        export last button: uint8;
+        export last x: float64;
+        export last y: float64;
+        export last modifiers: Modifiers;
+        export last detail: int32;
+
+        #Internal
+        export let init = func(button: uint8, x: float64, y: float64, modifiers: Modifiers, detail: int32) => set;
+    );
+
+    #[Final, Immutable]
+    export let InputEvent = class (
+        export last value: string;
+        export last checked: bool;
+        export last composing: bool;
+
+        #Internal
+        export let init = func(value: string, checked: bool, composing: bool) => set;
+    );
+
+    #[Final, Immutable]
+    export let ChangeEvent = class (
+        export last value: string;
+        export last checked: bool;
+
+        #Internal
+        export let init = func(value: string, checked: bool) => set;
+    );
+
+    #[Final, Immutable]
+    export let SubmitEvent = class (
+        export last submitter: string;
+
+        #Internal
+        export let init = func(submitter: string) => set;
+    );
+
+    #[Final, Immutable]
+    export let KeyEvent = class (
+        export last key: string;
+        export last code: string;
+        export last modifiers: Modifiers;
+        export last repeat: bool;
+
+        #Internal
+        export let init = func(key: string, code: string, modifiers: Modifiers, repeat: bool) => set;
+    );
+
+    #[Final, Immutable]
+    export let FocusEvent = class (
+    );
+
+    #[Final, Immutable]
+    export let PointerEvent = class (
+        export last x: float64;
+        export last y: float64;
+        export last button: uint8;
+        export last kind: PointerKind;
+        export last modifiers: Modifiers;
+
+        #Internal
+        export let init = func(x: float64, y: float64, button: uint8, kind: PointerKind, modifiers: Modifiers) => set;
+    );
+
+    #[Final, Immutable]
+    export let ScrollEvent = class (
+        export last top: float64;
+        export last left: float64;
+
+        #Internal
+        export let init = func(top: float64, left: float64) => set;
+    );
+
+    #[Final, Immutable]
+    export let ToggleEvent = class (
+        export last open: bool;
+
+        #Internal
+        export let init = func(open: bool) => set;
+    );
+
+    #[Final, Immutable]
+    export let CloseEvent = class (
+        export last return_value: string;
+
+        #Internal
+        export let init = func(return_value: string) => set;
+    );
+);

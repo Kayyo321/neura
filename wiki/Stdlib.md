@@ -214,6 +214,12 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Time.SystemClock`](Stdlib-Time-SystemClock) | [Contracts](Stdlib-Time-SystemClock#detailed-contracts) | [Declarations](Stdlib-Time-SystemClock#exported-declarations) |
 | [`Std.Time.ZoneOffset`](Stdlib-Time-ZoneOffset) | [Contracts](Stdlib-Time-ZoneOffset#detailed-contracts) | [Declarations](Stdlib-Time-ZoneOffset#exported-declarations) |
 
+### `Std.Ui`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Ui`](Stdlib-Ui) | [Contracts](Stdlib-Ui#detailed-contracts) | [Declarations](Stdlib-Ui#exported-declarations) |
+
 ## Specification sections
 
 The [complete specification](Stdlib-Design) has these sections.

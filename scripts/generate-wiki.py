@@ -66,6 +66,7 @@ GENERATED: dict[str, str] = {
     "docs/lang/Status.md": "Status",
     "docs/lang/Tags.md": "Tags",
     "docs/lang/Stdlib.md": "Stdlib-Design",
+    "docs/apps/Html.md": "HtmlFactories",
     "docs/lang/Testing.md": "Testing",
     "docs/lang/Tooling.md": "Tooling",
     "docs/lang/Tutorial.md": "Tutorial",

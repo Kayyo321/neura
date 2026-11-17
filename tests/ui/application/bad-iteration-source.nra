@@ -1,0 +1,1 @@
+let view = html(items: int32[list]) { @for (let item in items; key: item) { <p>{item}</p> } };

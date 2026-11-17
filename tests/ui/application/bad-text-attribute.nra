@@ -1,0 +1,1 @@
+let view = html(count: int32) { <p title={count}></p> };

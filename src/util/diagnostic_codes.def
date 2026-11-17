@@ -222,6 +222,17 @@ NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchroni
 NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding without a body")
 
 // Applications
+NEURA_DIAGNOSTIC(E1001, "unknown element")
+NEURA_DIAGNOSTIC(E1002, "unknown attribute, property or event")
+NEURA_DIAGNOSTIC(E1003, "modifier not valid for this event")
+NEURA_DIAGNOSTIC(E1004, "value cannot be rendered")
+NEURA_DIAGNOSTIC(E1005, "attribute or property value of the wrong type")
+NEURA_DIAGNOSTIC(E1006, "handler does not match the event")
+NEURA_DIAGNOSTIC(E1007, "URL not allowed")
+NEURA_DIAGNOSTIC(E1008, "value cannot be iterated by a template")
+NEURA_DIAGNOSTIC(E1009, "key of the wrong type")
+NEURA_DIAGNOSTIC(E1011, "template or stylesheet file cannot be used")
+NEURA_DIAGNOSTIC(E1014, "invalid static document structure")
 NEURA_DIAGNOSTIC(E1015, "template or stylesheet exceeds a limit")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,

@@ -25,6 +25,10 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 Arrays use [activation and static regions](Collections.md#array-lifetime). An owned result transfers to the caller. [Primitive borrows](Types.md#primitive-references) and nonescaping [closure environments](CoreLanguage.md#function-values-and-closures) also use activation regions. E0451–E0453 check storage escapes in source and in linked NeuraIR.
 
+## Application platform development
+
+[HTML factories](../apps/Html.md) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. Host reconciliation, application packaging, and full render effect checks are separate milestones.
+
 ## Outside this release
 
 | Area | Status |

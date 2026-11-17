@@ -262,6 +262,17 @@ Errors about application forms and their build limits.
 
 | Code | Error |
 | --- | --- |
+| [E1001](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1001.md) | unknown element |
+| [E1002](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1002.md) | unknown attribute, property or event |
+| [E1003](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1003.md) | modifier not valid for this event |
+| [E1004](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1004.md) | value cannot be rendered |
+| [E1005](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1005.md) | attribute or property value of the wrong type |
+| [E1006](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1006.md) | handler does not match the event |
+| [E1007](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1007.md) | URL not allowed |
+| [E1008](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1008.md) | value cannot be iterated by a template |
+| [E1009](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1009.md) | key of the wrong type |
+| [E1011](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1011.md) | template or stylesheet file cannot be used |
+| [E1014](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1014.md) | invalid static document structure |
 | [E1015](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1015.md) | template or stylesheet exceeds a limit |
 
 ## Warnings

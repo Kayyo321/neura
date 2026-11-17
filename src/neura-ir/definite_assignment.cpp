@@ -1,4 +1,5 @@
 #include "definite_assignment.hpp"
+#include "parser/html_template.hpp"
 
 #include "parser/syntax.hpp"
 
@@ -265,7 +266,8 @@ private:
         if (const auto index = tracked(expr)) use(*index, expr.span, flow);
         switch (expr.kind) {
         case ExprKind::Lambda:
-            capture(*expr.lambda, expr.span, flow);
+        case ExprKind::HtmlFactory:
+            capture(expr, flow);
             return;
         case ExprKind::Conditional: {
             read(expr.operands[0], flow);
@@ -304,9 +306,8 @@ private:
 
     // A closure copies the locals it captures when it is created, and a
     // closure created in a constructor may run before a field is assigned.
-    void capture(const Declaration& lambda, const Span& at, const Flow& flow) {
-        scopes_.emplace_back();
-        for (const auto& parameter : lambda.parameters) hide(parameter.name);
+    void capture(const Expr& closure, const Flow& flow) {
+        const auto& at = closure.span;
         const auto captured = [&](const Expr& expr) {
             const auto index = tracked(expr);
             if (!index || slot(flow, *index).state == State::Assigned) return;
@@ -326,8 +327,7 @@ private:
             error.help("assign " + quoted(*index) + " before creating the closure");
             throw error;
         };
-        scan_body(lambda.body, captured);
-        scopes_.pop_back();
+        scan(closure, captured);
     }
 
     using Visit = std::function<void(const Expr&)>;
@@ -342,12 +342,48 @@ private:
             scopes_.pop_back();
             return;
         }
+        if (expr.html_factory) {
+            const auto& factory = *expr.html_factory;
+            scopes_.emplace_back();
+            for (const auto& parameter : factory.parameters) hide(parameter.name);
+            if (const auto* body = std::get_if<TemplateSyntax>(&factory.source))
+                scan_template(body->nodes, visit);
+            else if (factory.external)
+                scan_template(factory.external->body.nodes, visit);
+            scopes_.pop_back();
+            return;
+        }
         for (const auto& operand : expr.operands) scan(operand, visit);
         if (expr.match) {
             scan(expr.match->expressions.front(), visit);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
                 scan(*arm.value, visit);
+                scopes_.pop_back();
+            }
+        }
+    }
+
+    void scan_template(const std::vector<TemplateNode>& nodes, const Visit& visit) {
+        for (const auto& node : nodes) {
+            if (const auto* hole = std::get_if<TemplateHole>(&node.value)) {
+                scan(hole->expression, visit);
+            } else if (const auto* element = std::get_if<std::shared_ptr<TemplateElement>>(&node.value)) {
+                for (const auto& attr : (*element)->attributes) {
+                    if (const auto* expression = std::get_if<Expr>(&attr.value)) scan(*expression, visit);
+                }
+                scan_template((*element)->children, visit);
+            } else if (const auto* choice = std::get_if<std::shared_ptr<TemplateIf>>(&node.value)) {
+                for (const auto& branch : (*choice)->branches) {
+                    if (branch.condition) scan(*branch.condition, visit);
+                    scan_template(branch.children, visit);
+                }
+            } else if (const auto* loop = std::get_if<std::shared_ptr<TemplateFor>>(&node.value)) {
+                scan((*loop)->head.input, visit);
+                scopes_.emplace_back();
+                hide((*loop)->head.binding.text);
+                scan((*loop)->head.key, visit);
+                scan_template((*loop)->children, visit);
                 scopes_.pop_back();
             }
         }

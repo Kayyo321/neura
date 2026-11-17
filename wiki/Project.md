@@ -71,6 +71,8 @@ A C header import (`import:c(...)`) runs before parsing for the importing file's
 
 The stages should be inspectable independently. A diagnostic or test should be able to identify whether a discrepancy came from source analysis, an IR transformation, lowering, serialization, or circuit execution.
 
+[HTML factories](HtmlFactories) lower to ordinary library calls, branches, and loops. Their canonical descriptors are string constants read by executable code. The NeuraIR `ui.factory` attribute and source maps provide provenance, including for external template files.
+
 A stage reports an error by throwing a diagnostic: a primary span, a message, and a code registered in `src/util/diagnostic_codes.def`, secondary labels at other spans, notes, suggested edits with how safely a tool may apply them, and named arguments for programs that consume diagnostics. The lexer and the parser recover from an error and go on, up to a limit, so that one run reports every syntax error; the first one thrown carries the others, and any of them stops compilation before NeuraIR lowering. From lowering on, the first error ends compilation: lowering resolves declarations on demand and abandons speculative work by catching errors, so it does not continue after one. A warning goes to a sink that the command line installs, and work that a stage does speculatively, such as trying a parse or ranking an overload, discards the warnings it reported. Stages never format diagnostics: the command line renders them, with source snippets from the files that the source loader recorded, in the formats of [Tooling](Tooling#diagnostics).
 
 ## NeuraIR and optimization

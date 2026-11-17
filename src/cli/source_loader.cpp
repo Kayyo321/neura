@@ -7,6 +7,9 @@
 #include "neura-ir/linker.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/storage.hpp"
+#include "nvr/format.hpp"
+#include "parser/html_template.hpp"
+#include "util/sha256.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
 
@@ -74,53 +77,137 @@ fs::path find_c_header(const std::string& header, const fs::path& base, const st
     throw Diagnostic(span, "cannot find C header '" + header + "'").with_code("E0709");
 }
 
-void collect_imports(const Declaration& declaration, std::vector<const Expr*>& imports);
-void collect_imports(const Statement& statement, std::vector<const Expr*>& imports);
+struct SourceDependencies {
+    fs::path root;
+    std::vector<const Expr*> imports;
+    std::set<fs::path> active_templates;
+};
 
-void collect_imports(const Expr& expression, std::vector<const Expr*>& imports) {
+void collect_imports(const Declaration& declaration, SourceDependencies& dependencies);
+void collect_imports(const Statement& statement, SourceDependencies& dependencies);
+void collect_imports(const Expr& expression, SourceDependencies& dependencies);
+
+[[noreturn]] void template_file_error(const Token& path, const fs::path& root, std::string reason) {
+    throw Diagnostic(path.span, "template or stylesheet file cannot be used").with_code("E1011")
+        .label(std::move(reason)).note("allowed source root: " + root.generic_string() + '/');
+}
+
+ResolvedTemplate read_template(const Token& path, const fs::path& root) {
+    constexpr std::size_t maximum = 1024 * 1024;
+    const auto written = decode_string_literal(path.text);
+    const fs::path relative(written);
+    if (relative.empty() || relative.has_root_path() || written.find(':') != std::string::npos ||
+        written.find('\\') != std::string::npos)
+        template_file_error(path, root, "write a relative path using '/' separators");
+    const auto requested = fs::path(path.span.file).parent_path() / relative;
+    std::error_code error;
+    const auto normalized = fs::weakly_canonical(requested, error);
+    if (error) template_file_error(path, root, "cannot resolve this path");
+    const auto within = normalized.lexically_relative(root);
+    if (within.empty() || *within.begin() == "..") template_file_error(path, root, "this path leaves the source root");
+    const auto name = normalized.generic_string();
+    std::string source;
+    if (source_overlays && source_overlays->contains(name) &&
+        (!overlay_hidden_sources || !overlay_hidden_sources->contains(name))) {
+        source = source_overlays->at(name);
+    } else {
+        if (!source_exists(normalized)) template_file_error(path, root, "no template file exists at this path");
+        std::ifstream input(normalized, std::ios::binary);
+        if (!input) template_file_error(path, root, "cannot open this template");
+        source.resize(maximum + 1);
+        input.read(source.data(), static_cast<std::streamsize>(source.size()));
+        source.resize(static_cast<std::size_t>(input.gcount()));
+        if (input.bad()) template_file_error(path, root, "cannot read this template");
+    }
+    if (source.size() > maximum) template_file_error(path, root, "the template exceeds 1 MiB");
+    if (!nvr::valid_utf8(source)) template_file_error(path, root, "the template must contain valid UTF-8");
+    const auto bom = source.starts_with("\xEF\xBB\xBF") ? 3u : 0u;
+    SourceMap::global().add(name, source, SourceKind::User);
+    return {parse_template(std::string_view(source).substr(bom), {name, 1, 1, bom, source.size() - bom}),
+            util::sha256_hex(source)};
+}
+
+void collect_template_imports(const std::vector<TemplateNode>& nodes, SourceDependencies& dependencies) {
+    for (const auto& node : nodes) {
+        if (const auto* hole = std::get_if<TemplateHole>(&node.value)) {
+            collect_imports(hole->expression, dependencies);
+        } else if (const auto* element = std::get_if<std::shared_ptr<TemplateElement>>(&node.value)) {
+            for (const auto& attribute : (*element)->attributes) {
+                if (const auto* value = std::get_if<Expr>(&attribute.value)) collect_imports(*value, dependencies);
+            }
+            collect_template_imports((*element)->children, dependencies);
+        } else if (const auto* choice = std::get_if<std::shared_ptr<TemplateIf>>(&node.value)) {
+            for (const auto& branch : (*choice)->branches) {
+                if (branch.condition) collect_imports(*branch.condition, dependencies);
+                collect_template_imports(branch.children, dependencies);
+            }
+        } else if (const auto* loop = std::get_if<std::shared_ptr<TemplateFor>>(&node.value)) {
+            collect_imports((*loop)->head.input, dependencies);
+            collect_imports((*loop)->head.key, dependencies);
+            collect_template_imports((*loop)->children, dependencies);
+        }
+    }
+}
+
+void collect_imports(const Expr& expression, SourceDependencies& dependencies) {
     if (expression.kind == Expr::Kind::Import) {
-        imports.push_back(&expression);
+        dependencies.imports.push_back(&expression);
     }
     for (const auto& operand : expression.operands) {
-        collect_imports(operand, imports);
+        collect_imports(operand, dependencies);
     }
     if (expression.lambda) {
-        collect_imports(*expression.lambda, imports);
+        collect_imports(*expression.lambda, dependencies);
     }
-    if (expression.match) collect_imports(*expression.match, imports);
+    if (expression.match) collect_imports(*expression.match, dependencies);
+    if (expression.html_factory) {
+        auto& factory = *expression.html_factory;
+        if (const auto* body = std::get_if<TemplateSyntax>(&factory.source)) {
+            collect_template_imports(body->nodes, dependencies);
+        } else {
+            const auto& path = std::get<Token>(factory.source);
+            factory.external = read_template(path, dependencies.root);
+            const fs::path actual = factory.external->body.span.file;
+            if (!dependencies.active_templates.insert(actual).second)
+                template_file_error(path, dependencies.root, "this template is already being loaded");
+            collect_template_imports(factory.external->body.nodes, dependencies);
+            dependencies.active_templates.erase(actual);
+        }
+        for (const auto& alternative : factory.overloads) collect_imports(alternative, dependencies);
+    }
 }
 
-void collect_imports(const Declaration& declaration, std::vector<const Expr*>& imports) {
+void collect_imports(const Declaration& declaration, SourceDependencies& dependencies) {
     if (declaration.initializer) {
-        collect_imports(*declaration.initializer, imports);
+        collect_imports(*declaration.initializer, dependencies);
     }
     for (const auto& member : declaration.members) {
-        collect_imports(member, imports);
+        collect_imports(member, dependencies);
     }
     for (const auto& overload : declaration.overloads) {
-        collect_imports(overload, imports);
+        collect_imports(overload, dependencies);
     }
     for (const auto& statement : declaration.body) {
-        collect_imports(statement, imports);
+        collect_imports(statement, dependencies);
     }
 }
 
-void collect_imports(const Statement& statement, std::vector<const Expr*>& imports) {
+void collect_imports(const Statement& statement, SourceDependencies& dependencies) {
     if (statement.declaration) {
-        collect_imports(*statement.declaration, imports);
+        collect_imports(*statement.declaration, dependencies);
     }
     for (const auto& expression : statement.expressions) {
-        collect_imports(expression, imports);
+        collect_imports(expression, dependencies);
     }
     for (const auto& child : statement.body) {
-        collect_imports(child, imports);
+        collect_imports(child, dependencies);
     }
     for (const auto& child : statement.alternative) {
-        collect_imports(child, imports);
+        collect_imports(child, dependencies);
     }
     for (const auto& arm : statement.arms) {
-        for (const auto& child : arm.body) collect_imports(child, imports);
-        if (arm.value) collect_imports(*arm.value, imports);
+        for (const auto& child : arm.body) collect_imports(child, dependencies);
+        if (arm.value) collect_imports(*arm.value, dependencies);
     }
 }
 
@@ -359,9 +446,9 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
         }
         auto syntax = parse(lex(source, name));
         syntax.library_path = library_path(file, trusted);
-        std::vector<const Expr*> imports;
+        SourceDependencies dependencies{pending.front().parent_path(), {}, {}};
         for (const auto& statement : syntax.statements) {
-            collect_imports(statement, imports);
+            collect_imports(statement, dependencies);
         }
         std::set<std::pair<std::string, std::string>> seen_imports;
         if (syntax.untyped_variadic) {
@@ -372,7 +459,7 @@ std::vector<ParsedFile> read_sources_impl(const std::vector<fs::path>& files, co
             seen_imports.emplace(dependency.text, std::string{});
             pending.push_back(std::move(path));
         }
-        for (const auto* import : imports) {
+        for (const auto* import : dependencies.imports) {
             const auto requested_path = import->import_path.value_or("");
             if (!seen_imports.emplace(import->text, requested_path).second) {
                 continue;

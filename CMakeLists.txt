@@ -264,10 +264,11 @@ endif()
 # The data side of the install lifecycle (docs/Install.md): SHA-256, version
 # precedence, and the marker and release metadata formats. It has no
 # dependency on the rest of the tool, so the unit tests link only this.
-add_library(neura_lifecycle STATIC
-    src/cli/install_layout.cpp
-    src/util/sha256.cpp
-)
+add_library(neura_hash STATIC src/util/sha256.cpp)
+neura_target_defaults(neura_hash)
+
+add_library(neura_lifecycle STATIC src/cli/install_layout.cpp)
+target_link_libraries(neura_lifecycle PUBLIC neura_hash)
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
@@ -357,7 +358,7 @@ add_library(neura_compiler STATIC
 )
 target_include_directories(neura_compiler PUBLIC src)
 target_include_directories(neura_compiler PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
-target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang)
+target_link_libraries(neura_compiler PUBLIC neura_circuit neura_lift neura_nvr PRIVATE neura_libclang neura_hash)
 neura_target_defaults(neura_compiler)
 
 # The decompiler reads images through the shared loader and lifts their
@@ -606,6 +607,9 @@ if(BUILD_TESTING)
     target_link_libraries(neura_html_template_tests PRIVATE neura_compiler)
     neura_target_defaults(neura_html_template_tests)
     add_test(NAME parser-html-templates COMMAND neura_html_template_tests)
+    add_test(NAME app-html-typed COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/typed.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(app-html-typed PROPERTIES TIMEOUT 180)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.
