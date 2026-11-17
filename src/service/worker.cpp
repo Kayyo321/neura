@@ -4,6 +4,8 @@
 
 #include "service.hpp"
 
+#include "cli/tool.hpp"
+
 #include "cli/commands.hpp"
 #include "nvm/environment.hpp"
 
@@ -49,8 +51,8 @@ int lift(int fd, int floor) {
     return moved;
 }
 
-// Closes every descriptor at or above `first`.
-void close_from(int first) {
+// Closes every descriptor at or above `first`, except `keep`.
+void close_from(int first, int keep) {
 #if defined(__linux__)
     const char* listing = "/proc/self/fd";
 #else
@@ -61,14 +63,16 @@ void close_from(int first) {
         const int own = ::dirfd(directory);
         while (const dirent* entry = ::readdir(directory)) {
             const int fd = std::atoi(entry->d_name);
-            if (entry->d_name[0] >= '0' && entry->d_name[0] <= '9' && fd >= first && fd != own) open.push_back(fd);
+            if (entry->d_name[0] >= '0' && entry->d_name[0] <= '9' && fd >= first && fd != own && fd != keep) open.push_back(fd);
         }
         ::closedir(directory);
     } else {
         rlimit limit{};
         ::getrlimit(RLIMIT_NOFILE, &limit);
         const auto top = std::min<rlim_t>(limit.rlim_cur, 65536);
-        for (int fd = first; fd < static_cast<int>(top); ++fd) open.push_back(fd);
+        for (int fd = first; fd < static_cast<int>(top); ++fd) {
+            if (fd != keep) open.push_back(fd);
+        }
     }
     for (const int fd : open) ::close(fd);
 }
@@ -116,6 +120,15 @@ int worker_main(const std::vector<std::string>& arguments) {
     }
     if (build != own_build()) {
         refuse("the supervisor is from another build (" + build + "); this worker is " + own_build());
+    }
+    // The lease of its generation, held until it exits, so that an
+    // application that runs holds the generation it runs from (docs/Install.md,
+    // "Generations in use").
+    int lease = -1;
+    {
+        bool removed = false;
+        lease = tool::take_lease(tool::executable_path("").c_str(), removed);
+        if (removed) refuse("its generation was removed");
     }
 #if defined(__linux__)
     ::prctl(PR_SET_PDEATHSIG, SIGKILL);
@@ -173,6 +186,11 @@ int worker_main(const std::vector<std::string>& arguments) {
         const int high_channel = lift(channel, 100);
         const int high_image = lift(fds[0].get(), 100);
         const int high_streams[3] = {lift(fds[2].get(), 100), lift(fds[3].get(), 100), lift(fds[4].get(), 100)};
+        if (lease >= 0) {
+            const int high_lease = lift(lease, 100);
+            ::close(lease);
+            lease = high_lease;
+        }
         for (auto& fd : fds) fd.reset();
         for (int stream = 0; stream < 3; ++stream) {
             if (::dup2(high_streams[stream], stream) < 0) refuse("cannot install a stream");
@@ -181,7 +199,7 @@ int worker_main(const std::vector<std::string>& arguments) {
         ::dup2(high_image, 4);
         set_cloexec(3);
         set_cloexec(4);
-        close_from(5);
+        close_from(5, lease);
         channel = 3;
 
         // 6. The signal dispositions and mask a direct run would inherit.

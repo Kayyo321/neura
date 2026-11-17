@@ -5,6 +5,8 @@
 
 #include "service.hpp"
 
+#include "cli/tool.hpp"
+
 #include "tooling/json.hpp"
 #include "util/sha256.hpp"
 
@@ -228,6 +230,7 @@ private:
     bool retired_ = false;
     Endpoint endpoint_;
     UniqueFd lock_;
+    UniqueFd lease_;
     UniqueFd listener_;
     fs::path state_dir_;
     fs::path records_;
@@ -1345,6 +1348,17 @@ int Supervisor::run() {
         }
         for (const int fd : inherited) ::close(fd);
     }
+    // The lease of its generation, held until it exits, as every tool of an
+    // installed generation holds one (docs/Install.md, "Generations in
+    // use"). Its workers take their own.
+    {
+        bool removed = false;
+        lease_.reset(tool::take_lease(self_.c_str(), removed));
+        if (removed) {
+            std::fprintf(stderr, "%s", tool::removed_generation_message);
+            return 1;
+        }
+    }
     timers_.read();
     build_ = own_build();
     // The workers are of this build; only the supervisor's answers differ.
@@ -1458,6 +1472,12 @@ int Supervisor::run() {
     }
     log("exiting");
     for (auto& [pid, worker] : workers_) ::kill(pid, SIGKILL);
+    // The workers end before the supervisor does, so that a supervisor that
+    // is gone leaves no process holding its generation's lease.
+    for (auto& [pid, worker] : workers_) {
+        while (::waitpid(pid, nullptr, 0) < 0 && errno == EINTR) {
+        }
+    }
     // Live records of a supervisor that exits are kept for `inspect`;
     // its readers report them as unknown.
     ::unlink(endpoint_.socket.c_str());
