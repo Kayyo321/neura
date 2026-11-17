@@ -56,15 +56,21 @@ export let serve = func(context: app.Context) -> result.Result<unit.Unit> {
 
 One channel per worker: a socket pair on POSIX. Frames are a 4-byte little-endian length, a 1-byte kind, and a body; no frame exceeds `C-2` except body chunks, which are at most 64 KiB.
 
-| Kind | Direction | Body |
-| --- | --- | --- |
-| `Hello` | both | Protocol version (1), image digest, provider versions |
-| `Assign` | host to worker | Request identifier, deadline, peer address, method, target, headers, body length, the leases granted |
-| `BodyChunk`, `BodyEnd` | both | Bytes of a request or response body, with backpressure by credit |
-| `Call`, `Return` | worker to host, host to worker | A host service request by import name and version, and its completion |
-| `Cancel` | host to worker | The request's deadline passed, the client left, or the host is draining |
-| `Head` | worker to host | Status and headers of the response |
-| `Done` | worker to host | The response is complete |
+| Kind | Version 1 byte | Direction | Body |
+| --- | --- | --- | --- |
+| `Hello` | `0x01` | both | Protocol version (1), image digest, provider versions |
+| `Assign` | `0x02` | host to worker | Request identifier, deadline, peer address, method, target, headers, body length, the leases granted |
+| `BodyChunk` | `0x03` | both | Bytes of a request or response body, with backpressure by credit |
+| `BodyEnd` | `0x04` | both | Empty. Marks the end of a request or response body |
+| `Call` | `0x05` | worker to host | A host service request by import name and version |
+| `Return` | `0x06` | host to worker | Completion of a host service request |
+| `Cancel` | `0x07` | host to worker | The request's deadline passed, the client left, or the host is draining |
+| `Head` | `0x08` | worker to host | Status and headers of the response |
+| `Done` | `0x09` | worker to host | Empty. Marks completion of the response |
+
+The version 1 length counts the kind byte and the body. It excludes the four-byte length field and is at least one. `C-2` covers the full wire frame, including those four bytes. For `BodyChunk`, the limit is 65,536 body bytes regardless of `C-2`. Other kind bytes are reserved.
+
+Each direction starts with `Hello`. The frame decoder validates lengths, kinds, directions and the empty control forms. The channel uses a frame after its completion event, validates the `Hello` payload and enforces the order of later messages. EOF is clean only between frames.
 
 A frame the receiver cannot decode, a version it does not speak, or a digest that differs ends the worker before `Assign`.
 

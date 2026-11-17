@@ -473,6 +473,10 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
+add_library(neura_server_worker_wire STATIC EXCLUDE_FROM_ALL src/server/worker_wire.cpp)
+target_include_directories(neura_server_worker_wire PUBLIC src)
+neura_target_defaults(neura_server_worker_wire)
+
 if(UNIX AND NOT EMSCRIPTEN)
     add_library(neura_server_http STATIC EXCLUDE_FROM_ALL
         src/server/http_wire.cpp
@@ -522,6 +526,11 @@ if(NEURA_ENABLE_SERVER_TLS)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(neura_worker_wire_tests tests/server/worker_wire_tests.cpp)
+    target_link_libraries(neura_worker_wire_tests PRIVATE neura_server_worker_wire)
+    neura_target_defaults(neura_worker_wire_tests)
+    add_test(NAME server-worker-wire COMMAND neura_worker_wire_tests)
+
     add_executable(neura_http_wire_tests
         src/server/http_wire.cpp
         tests/server/http_wire_tests.cpp)
