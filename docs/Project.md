@@ -29,6 +29,8 @@ When source imports prebuilt NeuraIR, the linker verifies each artifact and rema
 
 Primitive reference bindings name a mutable location in typed NeuraIR. After linkage and before specialization, the compiler moves address-taken storage into heap cells and rewrites ordinary accesses and aliases to use the same cell. Constructors prepare addressed fields and startup prepares addressed global storage. Calls and layout access use the existing object operations. The NVM traces the cell for as long as any alias can reach it.
 
+The compiler derives [class hook](lang/Types.md#class-hooks) events after specialization. The [task-safety](lang/Concurrency.md#52-task-safe-calls) check includes the calls introduced by those events before optimization or conversion.
+
 Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
 
 Class static fields lower to global slots in a class-owned scope. NeuraIR

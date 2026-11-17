@@ -5,6 +5,7 @@
 #include "kernel_signature.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
+#include "task_analysis.hpp"
 
 #include <algorithm>
 #include <set>
@@ -494,6 +495,7 @@ void elaborate_class_hooks(IrProgram& program) {
     // A clause's own effects join every function with an event, so #Pure is
     // checked again on the elaborated program (case 52).
     check_pure_tags(program, {}, true);
+    check_task_safety(program);
 }
 
 } // namespace neura

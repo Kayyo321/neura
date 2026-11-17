@@ -43,6 +43,12 @@ public:
     // The distinct clause functions of `kind` that a reference of `type` may
     // run, in ascending symbol order. Empty when the event is identity.
     std::vector<SymbolId> targets(const IrType& type, HookKind kind) const;
+    std::vector<SymbolId> targets(const IrNode& event) const {
+        if (event.operands.size() != 1) return {};
+        if (event.op == IrOp::HookRead) return targets(event.operands.front().type, HookKind::Get);
+        if (event.op == IrOp::HookAdmit) return targets(event.type, HookKind::Set);
+        return {};
+    }
 
 private:
     struct View {
@@ -53,8 +59,8 @@ private:
 
 // Derives the events of the linked, specialized program (docs/design/
 // Hooks030.md, Derivation) and wraps each operand in IrOp::HookRead or
-// IrOp::HookAdmit, then reports E0544 and E0546. Does nothing when the
-// program declares no clause, so that its bytes are unchanged.
+// IrOp::HookAdmit, checks the hook-specific rules, and checks the effects of
+// the new calls. Does nothing when the program declares no clause.
 void elaborate_class_hooks(IrProgram& program);
 // The derivation alone, for the verifier: the program with its hook nodes
 // removed and derived again, compared with `program`. The message of the

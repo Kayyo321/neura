@@ -14,7 +14,7 @@ A reference into a table is its zero-based `u32` index. `0xffffffff` marks absen
 | --- | --- | --- |
 | Magic | 4 bytes | ASCII `NEUR` |
 | Major | u16 | 1 |
-| Minor | u16 | 0 through 7 |
+| Minor | u16 | 0 through 8 |
 | Graph profile | u32 | 1 for checked integer identity and ReLU graphs |
 | Section count | u32 | Number of directory records |
 | File size | u64 | Total size in bytes, including the header and directory |

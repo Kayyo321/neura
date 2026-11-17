@@ -414,7 +414,96 @@ let channels = import:Std.Concurrent.Channel;
         let [sender, receiver, closer] = channels.open<int>(1);
 ]=] "8:42" "a program that uses a scope, a channel, or another scheduler operation cannot use Std.DynamicForeign or import:c")
 
+# Hook dispatch follows all clause targets of the static type. A base
+# reference can run the derived getter, even when the base getter is safe.
+set(hooked_getter [=[
+let count: int = 0;
+let Base = class (
+    | get: instance;
+    export let id = func() -> int => 7;
+);
+let Token = class:Base (
+    | get.override: {
+        count = 1;
+        return instance;
+    };
+);
+let child = func() -> int {
+    last value: Base = new Token();
+    return value.id();
+};
+]=])
+check_rejection(hooked_spawn "${hooked_getter}" [=[
+        scope {
+            last work = spawn child();
+            work.join();
+        }
+]=] "21:25" [[error\[E0601\]: the spawned call is not task-safe: .*uses the reassignable binding 'count']])
+check_labels(hooked_spawn [[calls '\$class_get']] "uses the reassignable binding 'count' here")
+
+check_rejection(hooked_parallel "let parallel = import:Std.Concurrent.Parallel;\n${hooked_getter}" [=[
+        last values = parallel.map<int, int>([1], func(x: int) -> int => x + child(), parallel.limits(10000, 10000));
+]=] "21:23" [[error\[E0601\]: the worker of a parallel map is not task-safe: .*uses the reassignable binding 'count']])
+
+check_accepted(hooked_root "${hooked_getter}" [=[
+        console.print_line(child().to_string());
+        console.print_line(count.to_string());
+]=] "7\n1\n")
+
+check_rejection(hooked_thread_safe [=[
+let count: int = 0;
+let record = func() {
+    count = 1;
+};
+let Token = class (
+    | set: {
+        record();
+        return value;
+    };
+    export let id = func() -> int => 7;
+);
+#ThreadSafe
+let admitted = func() -> int {
+    last value: Token = new Token();
+    return value.id();
+};
+]=] "" "14:1" [[error\[E0608\]: .*uses the reassignable binding 'count']])
+check_labels(hooked_thread_safe [[calls '\$class_set']] "calls 'record'")
+
+check_accepted(hooked_spawn_safe [=[
+const Answer: int = 42;
+let allowed = func() -> int => Answer;
+let Token = class (
+    | get: {
+        if (allowed() == 42) {
+            return instance;
+        }
+        return nil;
+    };
+    | set: value;
+    export let id = func() -> int => 7;
+);
+#ThreadSafe
+let child = func() -> int {
+    last value: Token = new Token();
+    return value.id();
+};
+]=] [=[
+        scope {
+            last work = spawn child();
+            console.print_line(work.join().to_string());
+        }
+]=] "7\n")
+
 # `check --task-safety` reports each function of the linked program.
+write_program(hooked_report "${hooked_getter}" "")
+execute_process(COMMAND "${NEURA}" check --task-safety hooked_report.nra WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status STREQUAL "0" OR NOT stderr STREQUAL "" OR NOT stdout MATCHES
+   "\n  child: not task-safe: uses the reassignable binding 'count' at hooked_report.nra:10:9\n")
+    message(FATAL_ERROR "hooked task-safety report: status ${status}\n${stdout}\n${stderr}")
+endif()
+
 file(WRITE "${TEST_DIR}/report.nra" "${prelude}let counter: int = 0;
 let pure = func(x: int) -> int => x + 1;
 let counting = func(x: int) -> int { counter = counter + 1; return x; };
