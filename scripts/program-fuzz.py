@@ -1103,24 +1103,35 @@ def section_class_hooks(p, k):
     """Carry live and nil policies through calls, inline values and collection elements."""
     p.feature("class-hooks", "classes", "lists", "arrays", "tuples")
     codes = p.random.sample(range(1, 24), 5)
-    p.declarations.append(fill("""let s${k}_trace: int64 = 0;
-
-let S${k}Item = class (
+    p.declarations.append(fill("""let S${k}Item = class (
     | get: {
-        s${k}_trace = mix(s${k}_trace, instance == nil ? $a : $b);
+        if (instance != nil) {
+            instance.gets = mix(instance.gets, $b);
+        }
         return instance;
     };
     | set: {
-        s${k}_trace = mix(s${k}_trace, instance == nil ? $c : $d);
+        if (instance != nil) {
+            instance.sets = mix(instance.sets, $d);
+        } else if (value != nil) {
+            value.sets = mix(value.sets, $c);
+        }
         return value;
     };
 
+    export let gets: int64 = 0;
+    export let sets: int64 = 0;
+    export let alternate_sets: int64 = 0;
     export let code = func() -> int64 => $b;
 );
 
 let S${k}Alternate = class:S${k}Item (
     | set.override: {
-        s${k}_trace = mix(s${k}_trace, $e);
+        if (value != nil) {
+            value.alternate_sets = mix(value.alternate_sets, $e);
+        } else if (instance != nil) {
+            instance.alternate_sets = mix(instance.alternate_sets, $a);
+        }
         return value;
     };
 );
@@ -1130,8 +1141,10 @@ let s${k}_pass = func(value: S${k}Item) -> S${k}Item => value;
 let s${k}_run = func(size: int32, faults: int32) -> int64 {
     let previous: S${k}Item = nil;
     last saved: S${k}Item[list] = new;
+    last owned: S${k}Item[list] = new;
     for (let i = 0; i < size; i++) {
         last value: S${k}Item = i % 3 == 0 ? new S${k}Item() : new S${k}Alternate();
+        owned.append(value);
         last row: S${k}Item[] = [value, previous];
         previous = s${k}_pass(row[i % 2]);
         last pair: [S${k}Item, int32] = [previous, i];
@@ -1144,8 +1157,14 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
             total = mix(total, value.code());
         }
     }
-    console.println("s$k class hooks {} {}", s${k}_trace, total);
-    return mix(s${k}_trace, total);
+    let trace: int64 = 0;
+    for (let value in owned) {
+        trace = mix(trace, value.gets);
+        trace = mix(trace, value.sets);
+        trace = mix(trace, value.alternate_sets);
+    }
+    console.println("s$k class hooks {} {}", trace, total);
+    return mix(trace, total);
 };
 """, k=k, a=codes[0], b=codes[1], c=codes[2], d=codes[3], e=codes[4]))
     p.calls.append(k)
