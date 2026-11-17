@@ -1,0 +1,4 @@
+// Edge case 83: an any on the left of '??'.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let pick = func(v: any, x: any) -> any => v ?? x;

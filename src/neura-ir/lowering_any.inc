@@ -35,8 +35,8 @@ IrNode Lowering::pack_any(IrNode inner, const Span& span) {
     if (inner.type.kind == TypeKind::Any) return inner;
     reject_erasure(inner.type, any_type, span);
     if (!any_holdable(inner.type) && inner.type.kind != TypeKind::TypeParameter)
-        throw Diagnostic(span, "a value of type " + describe(inner.type) + " cannot be held in any").with_code("E0492")
-            .label("this has type " + describe(inner.type))
+        throw Diagnostic(span, "a value of type " + shown(inner.type) + " cannot be held in any").with_code("E0492")
+            .label("this has type " + shown(inner.type))
             .note("an any holds a bool, a sized integer, a float, a string, a class or interface reference, or nil")
             .help("hold it in a class and pack the reference");
     auto result = node(IrOp::AnyPack, span, any_type);

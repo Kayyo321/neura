@@ -2,7 +2,8 @@
 """NeuraIR versions of the matching milestone (docs/design/Matching030.md).
 
 A program that uses no feature of the milestone writes the version it wrote
-before. A program whose postfix `?` returns from inside a scoped value is
+before. A program that uses `any` passes the verifier before and after
+optimization and stops at the converter (E0801) until its value words land. A program whose postfix `?` returns from inside a scoped value is
 written as NeuraIR 1.12 (nir_any_minor), and the same file marked 1.10 is
 rejected by the reader.
 
@@ -48,6 +49,14 @@ def main():
         expected = f'a return inside a scoped value requires NeuraIR format 1.{ANY_MINOR}'
         if result.returncode == 0 or expected not in result.stderr:
             failures.append(f'a 1.10 file with a scoped return: expected "{expected}", got:\n{result.stderr}')
+        # A program that uses any passes the verifier before and after
+        # optimization, and the converter declines it until its value
+        # words land (docs/design/Matching030.md, step 7).
+        fixture = PROGRAMS.parent.parent / 'backend' / 'nir-versions' / 'any.nra'
+        for flags in ([], ['--no-optimize']):
+            result = run('build', *flags, str(fixture), '-o', str(scratch / 'any.nvr'))
+            if result.returncode == 0 or 'E0801' not in result.stderr or 'not supported by IRtoNeuronConversion' not in result.stderr:
+                failures.append(f'any fixture {flags}: expected E0801 from the converter, got:\n{result.stderr}')
     for failure in failures:
         print(failure)
     print(f'{len(failures)} failures')

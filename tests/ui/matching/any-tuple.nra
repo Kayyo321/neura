@@ -1,0 +1,5 @@
+// Edge case 48: a tuple cannot be held in any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let pair: [int, int] = [1, 2];
+let v: any = pair;

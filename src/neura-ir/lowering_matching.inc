@@ -405,6 +405,8 @@ Lowering::IsCover Lowering::is_pattern(const PatternSyntax& pattern, const IrNod
         steps.push_back({std::move(test), std::nullopt});
     }
     if (pattern.kind == Kind::Binding) {
+        // A binding that forgets a scope-bound subject is E0605.
+        reject_erasure(subject, tested, pattern.span);
         auto& names = context.scopes.back();
         const auto local = add(SymbolKind::Local, pattern.name, pattern.name_span, owner);
         names.emplace(pattern.name, local);

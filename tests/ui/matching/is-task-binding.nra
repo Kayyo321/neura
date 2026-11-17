@@ -1,0 +1,13 @@
+// A match.is binding that would convert a scope-bound subject to class.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let work = func() -> int => 1;
+let run = func() {
+    scope {
+        let task = spawn work();
+        let n = match.is (task) {
+            c: class => 1,
+            _ => 0,
+        };
+    }
+};

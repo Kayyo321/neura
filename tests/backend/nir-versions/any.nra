@@ -2,6 +2,7 @@
 // parameter and a local, packing, `is`, and `match.is` over an `any`. The
 // tests check the round trip and the verifier's rules for the operations.
 let program = import:Std.Program;
+let.promote _ = import:Std.Core.Optional;
 
 let Values = module:program.Entry (
     let Shape = class (
@@ -19,11 +20,33 @@ let Values = module:program.Entry (
         _ => 6,
     };
     let test = func(value: any) -> bool => value is Shape || value is float64;
+    let count = func(values: ...any) -> int32 {
+        let integers = 0;
+        for (let value: any in values) {
+            if (value is int64) {
+                integers += 1;
+            }
+        }
+        return integers;
+    };
+    let pick = func(x: int32) -> int32 {
+        return 1;
+    } or func(x: any) -> int32 {
+        return 2;
+    };
+    let wrap = func<T>(value: T) -> any => value as any;
+    let forms = func(ready: bool) -> int32 {
+        let list = new any[list]([1, "a", nil]);
+        let tuple: [any, int32] = [wrap(3), 2];
+        let either: any = ready ? 1 : "x";
+        let maybe = Optional<any>.Some(either);
+        return count(7 as int64, "seven", 7.0, nil) + pick(1 as int32) + pick("s") + describe(tuple[0]);
+    };
     export let.override main = func(args: string[]) -> program.ExitCode {
         let holder = new Holder();
         holder.value = 7 as int64;
         let local: any = "seven";
-        let result = describe(holder.value) + describe(local);
+        let result = describe(holder.value) + describe(local) + forms(true);
         return test(local) ? program.ExitCode.Ok : program.ExitCode.Ok;
     };
 );

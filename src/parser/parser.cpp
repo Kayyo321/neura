@@ -1756,8 +1756,8 @@ private:
         if (minimum_precedence == 1 && match("..")) {
             auto range = make_expression(Expr::Kind::Range, left.span);
             range.operands.push_back(std::move(left));
-            range.operands.push_back(expression(2, true, branch_keyword));
-            if (range_step && match(":")) range.operands.push_back(expression(2, true, branch_keyword));
+            range.operands.push_back(range_bound(branch_keyword));
+            if (range_step && match(":")) range.operands.push_back(range_bound(branch_keyword));
             range.span = span_from(start);
             left = std::move(range);
         }
@@ -1790,6 +1790,15 @@ private:
             return conditional;
         }
         return left;
+    }
+
+    // A range's end or step: `??` is tighter than `..`, so `a .. b ?? c`
+    // ends at `b ?? c`.
+    Expr range_bound(std::string_view branch_keyword) {
+        const auto start = cursor_;
+        auto bound = expression(2, true, branch_keyword);
+        if (at("??")) bound = coalesce(start, std::move(bound), branch_keyword);
+        return bound;
     }
 
     // `left ?? right` (docs/design/Matching030.md): looser than '||',

@@ -601,7 +601,17 @@ private:
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
         }
-        if (node.op == IrOp::AnyPack && !result.operands.empty() && !any_holdable(result.operands.front().type)) {
+        // A function value has become an object layout of a callable type,
+        // which an any does not take for a reference.
+        const auto function_layout = [&](const IrType& item) {
+            if (item.kind != TypeKind::Object) return false;
+            for (auto scope = item.symbol; scope != no_symbol && scope < program_.symbols.size();
+                 scope = program_.symbols[scope].base)
+                if (callable_methods_.contains(scope)) return true;
+            return false;
+        };
+        if (node.op == IrOp::AnyPack && !result.operands.empty() &&
+            (!any_holdable(result.operands.front().type) || function_layout(result.operands.front().type))) {
             // What an `any` holds is checked on the specialized program
             // (docs/design/Matching030.md, E0492).
             auto error = Diagnostic(node.span, "a value of type " + type_text(result.operands.front().type) +

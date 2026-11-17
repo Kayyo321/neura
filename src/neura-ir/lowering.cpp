@@ -3258,7 +3258,12 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
 }
 
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
-    auto result = any_guard(expr, context, [&] { return expression_node(expr, context, expected, call_argument); });
+    const bool guarded = expr.kind == ExprKind::Binary || expr.kind == ExprKind::Unary ||
+                         expr.kind == ExprKind::PrefixUpdate || expr.kind == ExprKind::PostfixUpdate ||
+                         expr.kind == ExprKind::ComparisonChain || expr.kind == ExprKind::Member ||
+                         expr.kind == ExprKind::Index || expr.kind == ExprKind::Call;
+    auto result = guarded ? any_guard(expr, context, [&] { return expression_node(expr, context, expected, call_argument); })
+                          : expression_node(expr, context, expected, call_argument);
     if (is_primitive_reference(result.type) && (!expected || result.type != *expected))
         return read_reference(std::move(result));
     return result;
