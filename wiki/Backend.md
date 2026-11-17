@@ -207,7 +207,7 @@ A tuple is not an object. IRtoNeuronConversion stores a tuple-typed NeuraIR valu
 | Operation | Representation |
 | --- | --- |
 | Construction | `E.V(a, b)` evaluates its payloads in written order, even when named payloads are reordered, and gives the tag and each payload's words at their positions, and zero, nil, empty text or the nil collection elsewhere. Nothing is allocated. |
-| `match` | The tag is the enum's first word, and a payload binding is its words. Over a local or a parameter both are slot reads with no step; over a field, element or global, a match reads the tag and then only the words of the payloads it binds. |
+| `match` | A match evaluates its subject once into a local, as before, so a subject in a field, element or global is read whole, one state exit for each word. The tag is then the local's first word and a payload binding its words, slot reads with no step. |
 | Everywhere else | As a tuple, in the table above: slots, parameters, results, fields, globals, captures, aggregate elements, nested in tuples and enums, and boxed at the one-word boundaries below. |
 | Value members | A payload enum has none, as before ([Types](Types#enums)). |
 

@@ -46,20 +46,40 @@ let describe = func(token: Token) -> string => match (token) {
 };
 
 let make = func(i: int) -> Token {
-    if (i == 0) { return Token.Empty; }
-    if (i == 1) { return Token.Number(i * 10); }
-    if (i == 2) { return Token.Wide((5000000 as int64) * (1000 as int64), i); }
-    if (i == 3) { return Token.Real(0.25); }
-    if (i == 4) { return Token.Flag(true); }
-    if (i == 5) { return Token.Word("five"); }
-    if (i == 6) { return Token.Words("s", "ix", 6); }
-    if (i == 7) { return Token.Bytes(new([1, 2, 3])); }
-    if (i == 8) { return Token.At(new Point(8)); }
-    if (i == 9) { return Token.Maybe(optional.Optional<int>.Some(9)); }
+    if (i == 0) {
+        return Token.Empty;
+    }
+    if (i == 1) {
+        return Token.Number(i * 10);
+    }
+    if (i == 2) {
+        return Token.Wide((5000000 as int64) * (1000 as int64), i);
+    }
+    if (i == 3) {
+        return Token.Real(0.25);
+    }
+    if (i == 4) {
+        return Token.Flag(true);
+    }
+    if (i == 5) {
+        return Token.Word("five");
+    }
+    if (i == 6) {
+        return Token.Words("s", "ix", 6);
+    }
+    if (i == 7) {
+        return Token.Bytes(new([1, 2, 3]));
+    }
+    if (i == 8) {
+        return Token.At(new Point(8));
+    }
+    if (i == 9) {
+        return Token.Maybe(optional.Optional<int>.Some(9));
+    }
     return Token.Range { label: "ten", span: [1, 10] };
 };
 
-// An enum in a field, read whole and matched in place.
+// An enum in a field and in a tuple field.
 let Holder = class (
     export let token: Token = Token.Empty;
     export let history: [Token, int] = [Token.Empty, 0];

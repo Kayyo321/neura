@@ -100,7 +100,7 @@ Amended on 2026-11-16: declining every new operation in tiers 2 and 3 would hold
 
 From step 5 on, an image no longer matches rc.3 byte for byte. A step is accepted when:
 
-- every program of the identity set, the extended set and the fuzzer gives the output, exit status and trap of rc.3. Two parts of a trap's text depend on layout as counts do and are listed rather than compared: the handle number in `invalid reference handle: handle N`, which counts allocations, and the source position of a `--max-steps` trap, which depends on which operations a block runs;
+- every program of the identity set, the extended set and the fuzzer gives the output, exit status and trap of rc.3. Two parts of a trap's text depend on layout as counts do and are listed rather than compared: the handle number in `invalid reference handle: handle N`, which counts allocations, and the source position of a `--max-steps` trap, which depends on which operations a block runs. A run stopped by `--max-steps` is a count too, and so is how far it got: from step 7 on, every console write takes fewer steps because its outcome enum is no longer allocated, and a step-limit sweep's run prints more lines before the same limit (step 7: 362 of the 15,136 extended captures, every one a step-limit sweep, amended 2026-11-17);
 - on the new binary, every execution mode gives exactly what tier 0 gives, including steps, `peak_heap_cells` and peak stack cells;
 - the change in steps and peak cells is listed for each program it changes, with the reason;
 - the performance gate of the plan holds: no program and not the geometric mean more than 5% slower than rc.3.
