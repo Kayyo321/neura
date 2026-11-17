@@ -1,0 +1,5 @@
+// The lookahead reads the first tokens only: an unannotated initializer that
+// begins `record(name:` is a record even when an operator follows the ')'
+// (docs/design/Records030.md, Grammar); write `(record)(...)` for the call.
+let record = func(count: int) -> int => count;
+let sum = record(count: 1) + 1;

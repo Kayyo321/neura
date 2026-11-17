@@ -211,30 +211,49 @@ std::optional<IrType> Lowering::companion_primitive(SymbolId module) const {
 // implementation static.implements for the companion's primitive.
 void Lowering::check_module_conformance(SymbolId id) {
     if (!conformance_checked_.insert(id).second) return;
-    const auto& decl = *entries_[id].declaration;
-    if (decl.interfaces.empty()) return;
-    const auto at = decl.implements_span.value_or(decl.name_span.value_or(decl.span));
+    const auto* decl = entries_[id].declaration;
+    // A companion linked from a .nir module has no declaration here; its
+    // conformances are those its source declares for its kind of primitive.
+    if (decl && decl->interfaces.empty()) return;
+    const auto at = decl ? decl->implements_span.value_or(decl->name_span.value_or(decl->span)) : symbol(id).span;
     const auto primitive = companion_primitive(id);
-    if (!primitive)
+    if (!primitive) {
+        if (!decl) return;
         throw Diagnostic(at, "conformance declared by a module").with_code("E0578")
             .label("only a primitive's companion in the standard library declares 'implements'")
             .note("a class conforms to an interface by listing it after 'implements'; a primitive conforms only "
                   "through its companion")
             .help("declare a class that implements the interface");
+    }
     auto ctx = context(symbol(id).owner);
-    for (const auto& syntax : decl.interfaces) {
+    std::vector<std::pair<TypeSyntax, Span>> contracts;
+    if (decl) {
+        for (const auto& syntax : decl->interfaces) contracts.emplace_back(syntax, syntax.span);
+    } else {
+        std::vector<std::string> names;
+        if (primitive->kind == TypeKind::Integer) names = {"Additive", "Multiplicative", "Ordered", "Parseable"};
+        else if (primitive->kind == TypeKind::Float) names = {"Additive", "Multiplicative", "Parseable"};
+        else if (primitive->kind == TypeKind::Bool) names = {"Ordered", "Parseable"};
+        for (const auto& name : names) {
+            TypeSyntax syntax{at, name, {}, {}};
+            syntax.arguments.push_back(TypeSyntax{at, primitive->name, {}, {}});
+            contracts.emplace_back(std::move(syntax), at);
+        }
+    }
+    for (const auto& [syntax, span] : contracts) {
         // A companion names the contracts of Std.Core.Arithmetic without
         // importing them, so that a program that checks no conformance never
         // loads that file and its image is unchanged.
         IrType interface;
-        const auto arithmetic = library_module("std/core/arithmetic.nra", "Arithmetic", syntax.span, ctx,
+        const auto arithmetic = library_module("std/core/arithmetic.nra", "Arithmetic", span, ctx,
                                                "the contracts of Std.Core.Arithmetic are needed here");
         if (const auto contract = own_member(arithmetic, syntax.name);
             contract != no_symbol && symbol(contract).kind == SymbolKind::Interface) {
             resolve(contract);
             interface = symbol(contract).type;
             interface.arguments.clear();
-            for (const auto& argument : syntax.arguments) interface.arguments.push_back(type(argument, ctx));
+            for (const auto& argument : syntax.arguments)
+                interface.arguments.push_back(decl ? type(argument, ctx) : *primitive);
         } else {
             interface = type(syntax, ctx);
         }

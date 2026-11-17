@@ -151,7 +151,15 @@ void record_declaration(Declaration& result) {
                 .help("a record's components are not grouped: write each as 'name: Type'");
         }
         advance();
-        auto component_type = type();
+        auto component_type = [&] {
+            try {
+                return type();
+            } catch (Diagnostic& error) {
+                error.help("a record component is 'name: Type'; if 'record(...)' is meant as a call, write "
+                           "'(record)(...)'");
+                throw;
+            }
+        }();
         if (at("=")) {
             syntax->problems.emplace_back(current().span, "a record component has no default value");
             advance();

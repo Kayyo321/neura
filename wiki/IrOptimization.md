@@ -209,7 +209,7 @@ Because the callee cannot trap, call, allocate, or touch the heap, no trap is ra
 
 ## Tasks, polls, and scheduler operations
 
-A program that uses [tasks](Concurrency) contains three more operations (`task_scope`, `spawn`, `scheduler_call`) and a `poll` flag on calls and loops ([NeuraIR format](NirFormat#revision-19-tasks)). The stage contract is that the optimized program executes the same scheduler operations and the same polls in the same order as the unoptimized one, so the schedule at every quantum is the same tick for tick. No pass removes an executed call, an executed loop back edge, a `spawn`, a task scope, or a scheduler call, duplicates one, or moves one past another. The reasons, pass by pass:
+A `conformance_call` ([NeuraIR format](NirFormat#revision-113-conformance-calls)) never reaches the optimizer: specialization replaces each one that runs with a direct call. A program that uses [tasks](Concurrency) contains three more operations (`task_scope`, `spawn`, `scheduler_call`) and a `poll` flag on calls and loops ([NeuraIR format](NirFormat#revision-19-tasks)). The stage contract is that the optimized program executes the same scheduler operations and the same polls in the same order as the unoptimized one, so the schedule at every quantum is the same tick for tick. No pass removes an executed call, an executed loop back edge, a `spawn`, a task scope, or a scheduler call, duplicates one, or moves one past another. The reasons, pass by pass:
 
 | Pass | Why it preserves tasks, polls, and scheduler operations |
 | --- | --- |

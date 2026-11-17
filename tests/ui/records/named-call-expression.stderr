@@ -1,0 +1,9 @@
+error[E0202]: expected an identifier
+ --> $DIR/named-call-expression.nra:5:25
+  |
+5 | let sum = record(count: 1) + 1;
+  |                         ^ expected an identifier, found '1'
+  |
+  = help: a record component is 'name: Type'; if 'record(...)' is meant as a call, write '(record)(...)'
+
+For more information about this error, try `neura explain E0202`.

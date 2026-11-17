@@ -1,0 +1,6 @@
+// A record is declared where a class is, and a class is not a local binding
+// (docs/design/Records030.md, Grammar).
+let f = func() -> int {
+    let P = record (x: int);
+    return 1;
+};

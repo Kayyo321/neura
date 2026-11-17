@@ -85,7 +85,7 @@ mapping      = ( "field" | "variant" ) qualified-name ":" string ";"
 | `new with` always begins copy construction. A class named `with` can no longer be constructed by `new with(...)`; no source in the repository does. The source expression is one expression in parentheses, the braces are required, and they may be empty. | implemented, proposed |
 | `derive` begins a derivation only as the first token of a declaration's initializer and only when an identifier follows it. Two adjacent identifiers begin no expression, so no accepted program changes. | proposed |
 | `field` and `variant` are words only at the start of a mapping inside a derivation's braces. A mapping's right side is one string literal: no concatenation, no constant name, no interpolation. | proposed |
-| A clause belongs to the member whose `;` it follows. A clause before the first member of a class is not an accessor clause; the hooks milestone uses that position for class hooks, including its own `get.override` and `set.override`, and nothing in this note reads a clause there. | implemented, proposed |
+| A clause belongs to the member whose `;` it follows. A clause before the first member of a class is not an accessor clause; the hooks milestone uses that position for class hooks, including its own `get.override` and `set.override`, and nothing in this note reads a clause there. | proposed |
 | An accessor clause's word may be followed by `.virtual` or `.override`. The three tokens may be separated by spaces or comments; `neura fmt` writes them joined. A bodyless clause `\| get;` is accepted only on an interface property, and a clause with a body only in a class. | implemented, proposed |
 | A record's components are not grouped (`record (x, y: float64)` is not a record), take no default value, and take no `export`, `let`, `last`, `const` or `static`. Tags and documentation comments before a component apply to its field. A trailing comma is allowed. | implemented, proposed |
 | A record is not generic in 0.3.0, has no base, and its body holds components only: no methods, constructors, destructors, accessors, casts, nested types or static members. | implemented, proposed |
@@ -109,7 +109,7 @@ A record is a nominal class that is final and deeply immutable, with a generated
 | A field's type must be *record-eligible* (table below); otherwise `E0571` at the component's type. | implemented, proposed |
 | A record needs at least one component. A component may not be named `init`, `deinit`, `equals`, `hash_code`, `to_string` or `instance`. Two components with one name are `E0303`. | implemented, proposed |
 | `destroy` of a record is an error (`E0514`): copies share their children, so the collector owns every record. | implemented, proposed |
-| A record declares no class hook, and the hooks milestone gives it the identity hooks. No record field holds a class whose hooks could change the stored view, because the only class types a field may hold are records. | implemented, proposed |
+| A record declares no class hook, and the hooks milestone gives it the identity hooks. No record field holds a class whose hooks could change the stored view, because the only class types a field may hold are records. | proposed |
 | A record has no deconstruction protocol. `let [a, b] = user;` stays an error. | implemented, proposed |
 
 | Field type | Record-eligible |

@@ -304,6 +304,49 @@ class StaticRequirementTests(unittest.TestCase):
             listing = run('emit-ir', '--no-optimize', 'numbers.nir', cwd=directory)
             self.assertIn('conformance_call', listing.stdout)
 
+    def test_a_nir_library_bounded_by_arithmetic_specializes_for_int32(self):
+        # Edge case 110 with a primitive: the library is bounded by
+        # Std.Core.Arithmetic, the importing program imports neither it nor a
+        # companion, and lowering loads both for the bound; source and .nir
+        # build the same image.
+        library = '''
+let.promote _ = import:Std.Core.Arithmetic;
+export let Totals = module (
+    export let sum = func<T: Additive<T>>(items: T[]) -> T {
+        let total = T.zero();
+        for (let item in items) {
+            total = T.add(total, item);
+        }
+        return total;
+    };
+);
+'''
+        app = '''
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let totals = import:{source};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {{
+        let items: int32[] = [1, 2, 39];
+        console.print_line(totals.sum<int32>(items).to_string());
+        return program.ExitCode.Ok;
+    }};
+);
+'''
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = pathlib.Path(scratch)
+            (directory / 'totals.nra').write_text(library)
+            self.assertEqual(run('emit-ir', 'totals.nra', '-o', 'totals.nir', cwd=directory).returncode, 0)
+            images = []
+            for source, files in (('"totals.nir".Totals', []), ('Totals', ['totals.nra'])):
+                (directory / 'app.nra').write_text(app.format(source=source))
+                result = run('build', '--no-source-map', 'app.nra', *files, '-o', 'app.nvr', cwd=directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(run('run', 'app.nvr', cwd=directory).stdout, '42\n')
+                images.append((directory / 'app.nvr').read_bytes())
+            self.assertEqual(images[0], images[1])
+
     def test_a_reader_rejects_a_newer_minor_version(self):
         # The operation is written under its minor version, which an earlier
         # reader rejects; this reader rejects the next one in the same way.

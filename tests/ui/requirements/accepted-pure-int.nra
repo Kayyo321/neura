@@ -1,0 +1,13 @@
+// #Pure on a generic function is decided per specialization: the int32
+// specialization of a sum through Additive is pure (edge case 109).
+let.promote _ = import:Std.Core.Arithmetic;
+#Pure
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+let numbers: int32[] = [1, 2, 3];
+let total = sum<int32>(numbers);
