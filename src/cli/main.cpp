@@ -79,7 +79,8 @@ int dispatch(const Options& options) {
         usage(std::cout);
         return 0;
     case Command::Doctor:
-        return neura::lifecycle::doctor(options.executable, {options.library});
+        return neura::lifecycle::doctor(options.executable,
+                                        {options.library, [] { return neura::probe_libclang(neura::CImportOptions{}); }});
     case Command::Update:
         return neura::lifecycle::update(options.executable, options.update);
     case Command::Uninstall:

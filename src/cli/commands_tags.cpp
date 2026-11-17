@@ -1,6 +1,5 @@
 #include "commands.hpp"
 
-#include "explain.hpp"
 #include "neura-ir/tags.hpp"
 #include "util/suggest.hpp"
 
@@ -27,12 +26,6 @@ int tags(const Options& options) {
         message += "; did you mean " + *close + "?";
     else message += "; `neura tags` lists the tags";
     throw std::runtime_error(message);
-}
-
-int explain(const Options& options) {
-    if (options.explain_list) neura::cli::explain_list(std::cout);
-    else neura::cli::explain(options.explain_code, std::cout);
-    return 0;
 }
 
 } // namespace neura::cli

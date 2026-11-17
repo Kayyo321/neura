@@ -7,6 +7,7 @@
 // links no compiler code.
 
 #include "c-import/c_import.hpp"
+#include "tool.hpp"
 #include "diagnostic_render.hpp"
 #include "gpu_run.hpp"
 #include "lifecycle.hpp"
@@ -24,16 +25,14 @@ namespace neura::cli {
 
 namespace fs = std::filesystem;
 
-void usage(std::ostream& out);
+using neura::tool::usage;
 
 enum class Command {
     Check, Docs, EmitIr, Build, Inspect, Run, Test, Disassemble, Assemble, Decompile, CBindings,
     Version, Help, Doctor, Update, Uninstall, Explain, Tags
 };
 
-inline constexpr const char* commands =
-    "expected check, docs, emit-ir, build, inspect, run, test, disassemble, assemble, decompile, c-bindings, "
-    "doctor, update, uninstall, explain, tags, version, or help";
+inline constexpr const char* commands = neura::tool::command_list;
 
 neura::nvm::Capabilities granted_capabilities();
 
@@ -109,9 +108,7 @@ struct Options {
     neura::lifecycle::UninstallOptions uninstall;
 };
 
-// The real path of the running executable: /proc/self/exe on Linux, the
-// loader's path on macOS, else `launch` resolved against PATH.
-fs::path executable_path(const fs::path& launch);
+using neura::tool::executable_path;
 
 // The standard library next to an executable in <prefix>/bin.
 fs::path standard_library(const fs::path& executable);

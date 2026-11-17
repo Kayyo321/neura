@@ -1,6 +1,7 @@
 #include "lifecycle.hpp"
 
 #include "install_layout.hpp"
+#include "tool.hpp"
 #include "release_channel.hpp"
 #include "neura/version.hpp"
 #include "util/sha256.hpp"
@@ -25,7 +26,6 @@
 #include <vector>
 
 #ifndef _WIN32
-#include "c-import/c_import.hpp"
 #ifdef NEURA_HAS_GPU
 #include "gpu/device.hpp"
 #endif
@@ -45,7 +45,7 @@ namespace neura::lifecycle {
 namespace fs = std::filesystem;
 
 std::string version_line() {
-    return std::string("neura ") + version::full + " (" + version::triple + ", commit " + version::commit + ")";
+    return tool::version_line();
 }
 
 #ifdef _WIN32
@@ -1117,13 +1117,54 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         break;
     }
 
-    if (options.library.empty()) {
+    // The components whose executables are next to this one
+    // (docs/design/Products030.md, "Doctor and components"). Without the
+    // SDK, the compiler's standard library, launchers, libclang and C
+    // compiler are not needed.
+    bool sdk = true;
+    if (!executable.empty()) {
+        const auto directory = executable.parent_path();
+        std::vector<std::string> missing_core;
+        std::vector<std::string> missing_sdk;
+        std::size_t sdk_found = 0;
+        std::error_code error;
+        if (!fs::is_regular_file(directory / tool::executable_file("neura"), error)) missing_core.emplace_back("neura");
+        for (const auto& each : tool::tools()) {
+            const bool found = fs::is_regular_file(directory / tool::executable_file(each.name), error);
+            if (each.component == tool::Component::Core && !found) missing_core.emplace_back(each.name);
+            if (each.component != tool::Component::Sdk) continue;
+            if (found) ++sdk_found;
+            else missing_sdk.emplace_back(each.name);
+        }
+        const auto list = [](const std::vector<std::string>& names) {
+            std::string text;
+            for (const auto& name : names) text += (text.empty() ? "" : ", ") + name;
+            return text;
+        };
+        sdk = sdk_found > 0;
+        if (!missing_core.empty()) {
+            report.fail("components", "the Neura core is incomplete: " + list(missing_core) + " missing from " + directory.string() +
+                                          ". Reinstall Neura");
+        } else if (sdk && !missing_sdk.empty()) {
+            report.fail("components", "the Neura-sdk component is incomplete: " + list(missing_sdk) + " missing from " +
+                                          directory.string() + ". Reinstall Neura");
+        } else {
+            report.ok("components", sdk ? "core, sdk" : "core (runtime only: the Neura-sdk component is not installed)");
+        }
+    }
+    const std::string no_sdk = "not needed: the Neura-sdk component is not installed";
+
+    if (!sdk) {
+        report.ok("stdlib", no_sdk);
+    } else if (options.library.empty()) {
         report.fail("stdlib", "the standard library directory (share/neura/stdlib/std) was not found next to this executable");
     } else {
         report.ok("stdlib", options.library.string());
     }
 
-    {
+    if (!sdk) {
+        report.ok("launchers", no_sdk);
+    } else {
         auto prefix = executable.parent_path();
         if (prefix.filename() == "bin") prefix = prefix.parent_path();
         const auto triple = nvm::native_target_triple();
@@ -1136,8 +1177,14 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         }
     }
 
-    {
-        const auto status = probe_libclang(CImportOptions{});
+    if (!sdk) {
+        report.ok("libclang", no_sdk);
+        report.ok("clang-headers", no_sdk);
+    } else if (!options.probe_libclang) {
+        report.warn("libclang", "not checked: this doctor was built without the Neura-sdk component");
+        report.warn("clang-headers", "not checked: libclang was not loaded");
+    } else {
+        const auto status = options.probe_libclang();
         if (status.loaded) {
             report.ok("libclang", status.path + (status.major != 0 ? " (LLVM " + std::to_string(status.major) + ")" : ""));
             if (status.resource_dir.empty()) {
@@ -1163,7 +1210,9 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         }
     }
 
-    {
+    if (!sdk) {
+        report.ok("c-compiler", no_sdk);
+    } else {
         const char* cc = std::getenv("CC");
         const std::string compiler = cc != nullptr && *cc != '\0' ? cc : "cc";
         if (find_in_path(compiler).empty()) {

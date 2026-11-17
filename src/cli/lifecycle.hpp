@@ -4,7 +4,10 @@
 // `doctor`, `update`, `uninstall`, and the update notice. The data formats
 // they read and write are in install_layout.hpp.
 
+#include "c-import/c_import.hpp"
+
 #include <filesystem>
+#include <functional>
 #include <string>
 
 namespace neura::lifecycle {
@@ -25,6 +28,10 @@ std::string version_line();
 struct DoctorOptions {
     // The standard library directory the tool resolved; empty when none.
     std::filesystem::path library;
+    // Loads libclang to report it. The SDK's C import stage supplies it, so
+    // that the doctor of the execution core links no compiler code; without
+    // it the libclang lines say they were not checked.
+    std::function<LibclangStatus()> probe_libclang;
 };
 
 struct UpdateOptions {

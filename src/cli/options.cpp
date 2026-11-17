@@ -1,4 +1,5 @@
 #include "options.hpp"
+#include "tool.hpp"
 
 #include "jit/jit.hpp"
 #include "util/diagnostic.hpp"
@@ -26,170 +27,14 @@
 #include <system_error>
 #include <vector>
 
-#ifdef __APPLE__
-#include <mach-o/dyld.h>
-#endif
 
 namespace neura::cli {
-
-void usage(std::ostream& out) {
-    out << "usage: neura lsp --stdio\n"
-           "       neura debug --stdio\n"
-           "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
-           "       neura capabilities --json\n"
-           "       neura check [-I source-root] [--task-safety | --fix] <file.nra>...\n"
-           "       neura docs <file.nra>... [-o <file.json>]\n"
-           "       neura docs --doxygen <file.nra>\n"
-           "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
-           "       neura emit-ir [--no-optimize] <file.nir>\n"
-           "       neura build [-I source-root] [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nra>... -o <file.nvr>\n"
-           "       neura build [--no-optimize] [--no-source-map] [--no-lift-hints] <file.nir> -o <file.nvr>\n"
-           "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
-           "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
-           "       neura inspect <file> [-o <file.nvr>]\n"
-           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--max-stack-cells N] [--stats] [--profile] [--tier=0|1|2] "
-           "[--jit=off|on|auto] [--tier-stats] [capabilities] "
-           "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
-           "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
-           "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
-           "                  [--list --format=json] [--filter <exact-id>] [--reporter=json]\n"
-           "                  [--workspace-root <directory>]\n"
-           "                  [--max-heap-cells N] [--max-stack-cells N] [--stats] [--tier=0|1|2] [--jit=off|on|auto]\n"
-           "                  [--tier-stats] [capabilities]\n"
-           "                  [--gpu=auto|always|off] [--no-gpu]\n"
-           "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
-           "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
-           "       neura assemble <file.nvra> -o <file.nvr>\n"
-           "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
-           "       neura c-bindings [--linked] [c-options] <header.h>\n"
-           "       neura explain <code> | --explain <code> | explain --list\n"
-           "       neura tags [<Name>]\n"
-           "       neura --version | version\n"
-           "       neura --help | help\n"
-           "       neura doctor\n"
-           "       neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]\n"
-           "       neura uninstall [--dry-run] [--yes]\n"
-           "\n"
-           "doctor, update, and uninstall manage an installed neura and are described in docs/Install.md.\n"
-           "update and uninstall exit with status 3 for an install that neura did not make, and update --check\n"
-           "exits with status 4 when a newer version is available.\n"
-           "\n"
-           "capabilities: run and test, and the policy that build --native records, grant every host\n"
-           "service by default: files, network, environment, clock, entropy, and native code. A denied\n"
-           "service fails with error 14 (CapabilityDenied). Options apply in command-line order.\n"
-           "  --deny-fs                files and directories\n"
-           "  --deny-net               TCP connections and listeners\n"
-           "  --deny-env               environment variables\n"
-           "  --deny-clock             wall and monotonic clocks and sleeping\n"
-           "  --deny-entropy           operating-system entropy\n"
-           "  --deny-native            native libraries, memory, and calls\n"
-           "  --deny-all               every group above\n"
-           "  --allow-fs[=prefix,...]  grant files again: every path, or only below the prefixes\n"
-           "  --allow-net, --allow-env, --allow-clock, --allow-entropy, --allow-native\n"
-           "                           grant that group again after a --deny option (native code is unsafe)\n"
-           "  Run an image you do not trust with --deny-all, plus the --allow options it needs.\n"
-           "  --record <file>          (run) write every host request and response to a trace\n"
-           "  --profile                (run) print the steps each function took\n"
-           "  --tier=0|1|2             the highest execution tier: 0 evaluates every graph by reference, 1 also\n"
-           "                           runs proven lifted blocks natively, 2 (the default) also runs regions of\n"
-           "                           them without returning to the dispatcher; the result is the same\n"
-           "  --jit=off|on|auto        tier 2 runs its regions as native code: on fails the run when this platform\n"
-           "                           cannot, auto (the default) uses it where it is enabled by default, off\n"
-           "                           interprets them (and, with it, runs no native tier 3 programs); the result\n"
-           "                           is the same (--deny-native does not apply)\n"
-           "  --tier-stats             print the blocks lifted, the regions formed, the steps each tier ran, and\n"
-           "                           where the wall time went\n"
-           "  --replay <file>          (run) answer host requests from a trace instead of services; a trace of a\n"
-           "                           concurrent run carries its own quantum and limits, which replace the options\n"
-           "\n"
-           "graph execution: run and test choose between the CPU and a GPU by predicted speed.\n"
-           "  --gpu=auto               decide automatically (default)\n"
-           "  --gpu=always             evaluate every eligible graph on a GPU when one is usable\n"
-           "  --gpu=off, --no-gpu      evaluate graphs on the CPU\n"
-           "  --require-gpu            --gpu=always, and fail unless a GPU device is available\n"
-           "  --gpu-software           also accept software Vulkan implementations\n"
-           "  --gpu-verify             check every GPU evaluation against the CPU\n"
-           "  --each <lists>           (run) run the image once per line of <lists>; each line is one argument list\n"
-           "  --max-tasks N            bound the number of live tasks in a concurrent image\n"
-           "  --task-quantum N         polls per turn for a concurrent image\n"
-           "  --max-queued-messages N  bound the values buffered in all channels\n"
-           "  --max-pending-requests N bound the overlapping host requests in flight\n"
-           "  --parallel-workers N     threads that evaluate the items of a parallel map (default 1)\n"
-           "  --task-dump[=text|json]  print every task when one traps; SIGQUIT prints a dump at any time\n"
-           "  --virtual-time           timers, deadlines, and the clock follow a clock that moves only when\n"
-           "                           every task is parked, so a timeout takes no real time\n"
-           "  --schedules N            (test) run each test under up to N legal task schedules\n"
-           "  --schedule-seed S        (test) the seed of the explored schedules (default 0)\n"
-           "  --save-schedule FILE     (test) write the first failing schedule to FILE\n"
-           "  --schedule FILE          (test) run the test of a saved schedule under exactly that schedule\n"
-           "  --trace-events FILE      write one JSON line per scheduler event (run only)\n"
-           "  --trace-wall-time        add wall-clock times to --trace-events\n"
-           "\n"
-           "c-options: check, emit-ir, build, test, and c-bindings accept these for import:c(...)\n"
-           "  --c-include <dir>        search a directory for C headers\n"
-           "  --c-define <name[=value]> define a macro while reading C headers\n"
-           "  --libclang <file>        the libclang library to load (default: NEURA_LIBCLANG, then a search)\n"
-           "  --cc <compiler>          the C compiler that links the native library (default: $CC, then cc)\n"
-           "  --c-link-arg <arg>       pass an argument to that link\n"
-           "\n"
-           "diagnostics: every command accepts the first two; the others apply to check, emit-ir, build, and test\n"
-           "  --error-format=human|short|json\n"
-           "                           human (default) shows source snippets; short is one stable line\n"
-           "                           per diagnostic, file:line:column: error[CODE]: message; json is one\n"
-           "                           object per line\n"
-           "  --color=auto|always|never\n"
-           "                           color human output; auto colors a terminal unless NO_COLOR is set\n"
-           "                           or TERM is dumb\n"
-           "  --max-errors N           stop after N syntax errors (default 20); the lexer and the parser\n"
-           "                           recover and report several, and any of them stops compilation\n"
-           "  -W<name>, -Wno-<name>    enable or disable the warning <name>\n"
-           "  -Werror                  report every warning as an error\n"
-           "  --warn-library           also report warnings in the standard library\n"
-           "  --fix                    (check) apply machine-applicable suggestions to the source files\n";
-}
 
 neura::nvm::Capabilities granted_capabilities() {
     neura::nvm::Capabilities capabilities;
     capabilities.fs = capabilities.net = capabilities.env = capabilities.clock = capabilities.entropy = true;
     capabilities.native = true;
     return capabilities;
-}
-
-fs::path executable_path(const fs::path& launch) {
-    std::error_code error;
-#ifdef __linux__
-    if (const auto actual = fs::canonical("/proc/self/exe", error); !actual.empty()) return actual;
-#endif
-#ifdef __APPLE__
-    {
-        std::uint32_t size = 0;
-        _NSGetExecutablePath(nullptr, &size);
-        std::string buffer(size, '\0');
-        if (_NSGetExecutablePath(buffer.data(), &size) == 0) {
-            buffer.resize(std::strlen(buffer.c_str()));
-            if (const auto actual = fs::canonical(buffer, error); !actual.empty()) return actual;
-        }
-    }
-#endif
-    if (launch.has_parent_path()) return fs::canonical(launch, error);
-    const auto* path = std::getenv("PATH");
-    if (!path) return {};
-#ifdef _WIN32
-    constexpr char separator = ';';
-    auto file = launch;
-    if (!file.has_extension()) file += ".exe";
-#else
-    constexpr char separator = ':';
-    const auto& file = launch;
-#endif
-    std::string_view remaining(path);
-    for (;;) {
-        const auto end = remaining.find(separator);
-        const auto candidate = fs::path(remaining.substr(0, end)) / file;
-        if (fs::is_regular_file(candidate, error)) return fs::canonical(candidate, error);
-        if (end == std::string_view::npos) return {};
-        remaining.remove_prefix(end + 1);
-    }
 }
 
 fs::path standard_library(const fs::path& executable) {

@@ -179,7 +179,7 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         set_target_properties(${target} PROPERTIES OUTPUT_NAME "${name}"
             RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/${neura_launcher_directory}")
         neura_target_defaults(${target})
-        install(TARGETS ${target} RUNTIME DESTINATION "${neura_launcher_directory}")
+        install(TARGETS ${target} RUNTIME DESTINATION "${neura_launcher_directory}" COMPONENT sdk)
     endfunction()
     neura_add_launcher(neura_launcher neura-launcher 0)
     target_link_libraries(neura_launcher PRIVATE neura_runner neura_nvm "${NEURA_STATIC_LIBFFI}")
@@ -382,32 +382,121 @@ endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pages.inc"
     CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
 
-add_executable(neura src/cli/main.cpp src/cli/options.cpp src/cli/commands_run.cpp src/cli/commands_inspect.cpp
-    src/cli/commands_compile.cpp src/cli/commands_test.cpp src/cli/commands_artifact.cpp src/cli/commands_info.cpp
-    src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
-    src/launcher/descriptor.cpp src/tooling/debug.cpp src/tooling/inspect.cpp)
-target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
+# --- The Neura tools (docs/design/Products030.md) ------------------------------
+# `neura` is a dispatcher: each command runs a sibling tool from the same
+# directory. The tools share the command code below as static libraries, so
+# a tool links only the libraries of its own commands, and the execution core
+# (component `core`) links no compiler code.
+
+# The tool registry, the dispatch token, the version line and the usage text.
+add_library(neura_cli_tool STATIC src/cli/tool.cpp)
+target_include_directories(neura_cli_tool PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+neura_target_defaults(neura_cli_tool)
+
+# The option reader and the commands of the execution core: run, inspect,
+# inspect-image, doctor, update and uninstall, and the update notice.
+add_library(neura_cli_core STATIC
+    src/cli/argument_lists.cpp
+    src/cli/commands_inspect.cpp
+    src/cli/commands_run.cpp
+    src/cli/driver_core.cpp
+    src/cli/gpu_run.cpp
+    src/cli/lifecycle.cpp
+    src/cli/options.cpp
+    src/launcher/descriptor.cpp
+    src/tooling/inspect.cpp
+)
+target_include_directories(neura_cli_core PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(neura_cli_core PUBLIC neura_cli_tool neura_runner neura_lifecycle)
+if(NEURA_HAS_GPU)
+    # The GPU options change the layout of the option types, so every user of
+    # them is built with the same setting.
+    target_link_libraries(neura_cli_core PUBLIC neura_gpu)
+    target_compile_definitions(neura_cli_core PUBLIC NEURA_HAS_GPU=1)
+endif()
+neura_target_defaults(neura_cli_core)
+
+# The commands of the SDK: the compiler's, test, the decompiler's and the
+# reference pages, and the driver that renders source diagnostics.
+add_library(neura_cli_sdk STATIC
+    src/cli/commands_compile.cpp
+    src/cli/commands_test.cpp
+    src/cli/driver_sdk.cpp
+)
+target_link_libraries(neura_cli_sdk PUBLIC neura_cli_core neura_compiler)
+neura_target_defaults(neura_cli_sdk)
+
+add_library(neura_cli_artifact STATIC src/cli/commands_artifact.cpp)
+target_link_libraries(neura_cli_artifact PUBLIC neura_cli_sdk neura_decompiler)
+neura_target_defaults(neura_cli_artifact)
+
+add_library(neura_cli_explain STATIC src/cli/commands_explain.cpp src/cli/explain.cpp)
+target_include_directories(neura_cli_explain PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(neura_cli_explain PUBLIC neura_cli_sdk)
+neura_target_defaults(neura_cli_explain)
+
+add_library(neura_cli_tags STATIC src/cli/commands_tags.cpp)
+target_link_libraries(neura_cli_tags PUBLIC neura_cli_sdk)
+neura_target_defaults(neura_cli_tags)
+
+set(NEURA_TOOL_TARGETS)
+# neura_add_tool(<name> <component> <source> <libraries>...): one executable
+# in bin/, named <name> in the build tree and the install.
+function(neura_add_tool name component source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE ${ARGN})
+    target_include_directories(${name} PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(${name} PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
+    neura_target_defaults(${name})
+    install(TARGETS ${name} RUNTIME DESTINATION bin COMPONENT ${component})
+    set(NEURA_TOOL_TARGETS ${NEURA_TOOL_TARGETS} ${name} PARENT_SCOPE)
+endfunction()
+
+neura_add_tool(neura-run core src/cli/tools/neura-run.cpp neura_cli_core)
+neura_add_tool(neura-inspect core src/cli/tools/neura-inspect.cpp neura_cli_core)
+neura_add_tool(neura-doctor core src/cli/tools/neura-doctor.cpp neura_cli_core)
+neura_add_tool(neura-update core src/cli/tools/neura-update.cpp neura_cli_core)
+neura_add_tool(neura-uninstall core src/cli/tools/neura-uninstall.cpp neura_cli_core)
+neura_add_tool(neurac sdk src/cli/tools/neurac.cpp neura_cli_sdk)
+neura_add_tool(neura-test sdk src/cli/tools/neura-test.cpp neura_cli_sdk)
+neura_add_tool(neura-doc sdk src/cli/tools/neura-doc.cpp neura_cli_sdk)
+neura_add_tool(neura-cbind sdk src/cli/tools/neura-cbind.cpp neura_cli_sdk)
+neura_add_tool(neura-decompile sdk src/cli/tools/neura-decompile.cpp neura_cli_artifact)
+neura_add_tool(neura-asm sdk src/cli/tools/neura-asm.cpp neura_cli_artifact)
+neura_add_tool(neura-disasm sdk src/cli/tools/neura-disasm.cpp neura_cli_artifact)
+neura_add_tool(neura-explain sdk src/cli/tools/neura-explain.cpp neura_cli_explain)
+neura_add_tool(neura-tags sdk src/cli/tools/neura-tags.cpp neura_cli_tags)
+neura_add_tool(neura-debug sdk src/cli/tools/neura-debug.cpp neura_cli_sdk)
+target_sources(neura-debug PRIVATE src/tooling/debug.cpp)
+neura_add_tool(neura-lsp sdk src/cli/tools/neura-lsp.cpp neura_cli_sdk)
+neura_add_tool(neura-fmt sdk src/cli/tools/neura-fmt.cpp neura_cli_sdk)
+# The doctor reports libclang through the C import stage's probe, which
+# loads libclang only when it runs.
+target_link_libraries(neura-doctor PRIVATE neura_compiler)
+target_compile_definitions(neura-doctor PRIVATE NEURA_DOCTOR_PROBES_LIBCLANG=1)
+
+add_executable(neura src/cli/main.cpp src/tooling/debug.cpp)
+target_link_libraries(neura PRIVATE neura_cli_artifact neura_cli_explain neura_cli_tags)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)
 endif()
 target_include_directories(neura PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+# Building neura builds every tool it starts and the launchers, so a test or
+# a workflow that builds the target neura gets a complete set.
+add_dependencies(neura ${NEURA_TOOL_TARGETS})
 if(TARGET neura_launcher)
     add_dependencies(neura neura_launcher)
 endif()
 if(TARGET neura_launcher_static)
     add_dependencies(neura neura_launcher_static)
 endif()
-if(NEURA_HAS_GPU)
-    target_link_libraries(neura PRIVATE neura_gpu)
-    target_compile_definitions(neura PRIVATE NEURA_HAS_GPU=1)
-endif()
 neura_target_defaults(neura)
 
-# The compiler and the runner ship as one executable: `neura run` loads
-# images through the same NVM library as any other embedder.
-install(TARGETS neura RUNTIME DESTINATION bin)
-install(FILES LICENSE DESTINATION share/doc/neura)
-install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL
+install(TARGETS neura RUNTIME DESTINATION bin COMPONENT core)
+install(FILES LICENSE DESTINATION share/doc/neura COMPONENT core)
+install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL COMPONENT sdk
     FILES_MATCHING PATTERN "*.nra")
 
 include(CTest)
