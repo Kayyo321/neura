@@ -110,13 +110,14 @@ same_bytes("repeated source builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-a
 build_image("${TEST_DIR}/hello-from-nir-again.nvr" "${TEST_DIR}/hello.nir")
 same_bytes("repeated .nir builds" "${TEST_DIR}/hello.nvr" "${TEST_DIR}/hello-from-nir-again.nvr")
 
-# Std.Program's ExitCode is a payload enum, so every program now needs NVR
-# 1.2. Images built before the standard library existed are NVR 1.0 and still
-# run: the legacy fixtures are lossless disassemblies of a SysIo Hello World
-# and of a program that used the retired Test assertion services.
+# Std.Program's ExitCode is a payload enum, stored inline as two words, so
+# every program's main returns two result words and needs NVR 1.7. Images
+# built before the standard library existed are NVR 1.0 and still run: the
+# legacy fixtures are lossless disassemblies of a SysIo Hello World and of a
+# program that used the retired Test assertion services.
 file(READ "${TEST_DIR}/hello.nvr" hello_version OFFSET 4 LIMIT 4 HEX)
-if(NOT hello_version STREQUAL "01000200")
-    message(FATAL_ERROR "Hello World should be an NVR 1.2 image, found version bytes ${hello_version}")
+if(NOT hello_version STREQUAL "01000700")
+    message(FATAL_ERROR "Hello World should be an NVR 1.7 image, found version bytes ${hello_version}")
 endif()
 neura(legacy "${TEST_DIR}" assemble "${tests}/legacy/legacy-hello.nvra" -o "${TEST_DIR}/legacy-hello.nvr")
 if(NOT legacy_status STREQUAL "0")
@@ -186,11 +187,11 @@ endfunction()
 # The step-count lines of a fixed run are those of the runtime without the
 # time line, which follows them.
 string(CONCAT hello_tier_lines
-    "tier: blocks 59, hinted 1, attempted 0, lifted 0 (0 by hint, 0 by search), hints rejected 0; proving 0.0 ms, searching 0.0 ms\n"
-    "tier: steps 24: tier 2 0.0% (in regions 0), tier 1 91.7% (lifted 0, wired 0, empty 22), tier 0 8.3% (reference 2, declined 0)\n"
+    "tier: blocks 49, hinted 1, attempted 0, lifted 0 (0 by hint, 0 by search), hints rejected 0; proving 0.0 ms, searching 0.0 ms\n"
+    "tier: steps 18: tier 2 0.0% (in regions 0), tier 1 88.9% (lifted 0, wired 0, empty 16), tier 0 11.1% (reference 2, declined 0)\n"
     "tier: jit off\n"
-    "tier: tier 0 steps 1 in function 2 block 9: below the threshold\n"
-    "tier: tier 0 steps 1 in function 0 block 11: below the threshold\n")
+    "tier: tier 0 steps 1 in function 2 block 3: below the threshold\n"
+    "tier: tier 0 steps 1 in function 0 block 10: below the threshold\n")
 # The lines are those of a run without tier 3: --jit=off leaves the default
 # tier 3 off, and the exact text holds whatever the environment of the suite
 # asks (NEURA_TIER3, NEURA_TIER_EAGER, NEURA_TIER_PROGRAMS change the lines).
@@ -581,7 +582,8 @@ endforeach()
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
                       stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
-                      last-bindings target-typed-new anonymous-classes inline-tuples inline-tuples-tasks)
+                      last-bindings target-typed-new anonymous-classes inline-tuples inline-tuples-tasks inline-enums
+                      inline-enums-tasks)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")

@@ -13,6 +13,7 @@
 #include "launcher/container.hpp"
 #include "lifecycle.hpp"
 #include "lift/hints.hpp"
+#include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
@@ -1477,6 +1478,7 @@ int run_tests(const Options& options) {
     }
     neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_containment(program);
     neura::check_inline_limit(program);
     if (options.optimize) {
         neura::optimize(program);

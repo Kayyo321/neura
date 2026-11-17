@@ -17,7 +17,8 @@ inline constexpr std::size_t max_inline_words = 64;
 // elements shortened to `T x N`, as in "[int32 x 65]".
 std::string describe_shape(const IrProgram& program, const IrType& type);
 
-// E0449 for a tuple type of more than max_inline_words value words, at `span`.
+// E0449 for a tuple or payload enum type of more than max_inline_words value
+// words, at `span`.
 Diagnostic inline_limit_diagnostic(const IrProgram& program, const IrType& type, const Span& span);
 
 // Checks every type the specialized program declares or computes: a symbol's

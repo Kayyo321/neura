@@ -1,8 +1,9 @@
 // The containment analysis of value types (src/neura-ir/containment.hpp,
 // docs/design/Representation030.md "Finite aggregates"). Each case lowers and
 // specializes a program from tests/ir-optimization/containment and checks the
-// cycles it closes: the path, and the code, place and text of E0448. No stage
-// enforces the error yet, so these cases are its only evidence.
+// cycles it closes: the path, and the code, place and text of E0448. `neura
+// build`, `neura test` and the debugger enforce it before conversion, now that
+// payload enums are stored inline.
 #include "neura-ir/containment.hpp"
 #include "neura-ir/specialize.hpp"
 #include "support.hpp"
@@ -89,9 +90,10 @@ NEURA_TEST(structure, containment_follows_a_generic_instance) {
 }
 
 NEURA_TEST(structure, containment_of_the_standard_library) {
-    // Error and PortableError hold their cause through a link class, so only
-    // the regular expression parser's Node contains itself. Result<int>
-    // contains Error and closes no cycle.
+    // Error and PortableError hold their cause through a link class, and the
+    // regular expression parser's Node holds its Repeat and Group items
+    // through NodeLink, so no enum contains itself. Result<int> contains Error
+    // and closes no cycle.
     const auto program = specialized(environment, "standard-library.nra");
     std::set<std::string> starts;
     for (const auto& cycle : find_containment_cycles(program)) {
@@ -99,14 +101,14 @@ NEURA_TEST(structure, containment_of_the_standard_library) {
     }
     std::string found;
     for (const auto& name : starts) found += (found.empty() ? "" : ", ") + name;
-    check_equal(found, std::string("Node"), "standard library cycles");
+    check_equal(found, std::string(), "standard library cycles");
 }
 
 NEURA_TEST(structure, containment_of_the_backend_programs) {
-    // Every program in tests/backend/programs, each lowered on its own: only
-    // aggregates.nra declares an enum that contains itself (its Tree), and
-    // the others close only the standard library's cycles. Tree in
-    // generic-enums.nra recurses through a list and closes none.
+    // Every program in tests/backend/programs, each lowered on its own: none
+    // declares an enum that contains itself. The Tree of aggregates.nra holds
+    // its subtrees through TreeLink, and Tree in generic-enums.nra recurses
+    // through a list.
     std::vector<fs::path> files;
     for (const auto& entry : fs::directory_iterator(environment.source_dir / "tests" / "backend" / "programs")) {
         if (entry.is_regular_file() && entry.path().extension() == ".nra") files.push_back(entry.path());
@@ -118,14 +120,10 @@ NEURA_TEST(structure, containment_of_the_backend_programs) {
         auto program = lower_files({file});
         specialize(program);
         for (const auto& cycle : find_containment_cycles(program)) {
-            const auto& name = program.symbols[cycle.steps.front().from].name;
-            if (name != "Error" && name != "PortableError" && name != "Node") {
-                found.insert(file.filename().string() + ": " + describe_containment_cycle(program, cycle));
-            }
+            found.insert(file.filename().string() + ": " + describe_containment_cycle(program, cycle));
         }
     }
-    check_equal(joined({found.begin(), found.end()}), std::string("aggregates.nra: Tree -> Tree.Node.0: Tree"),
-                "cycles declared by the backend programs");
+    check_equal(joined({found.begin(), found.end()}), std::string(), "cycles declared by the backend programs");
 }
 
 } // namespace
