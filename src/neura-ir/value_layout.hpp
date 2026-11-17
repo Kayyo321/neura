@@ -1,6 +1,6 @@
 #pragma once
 
-#include "ir.hpp"
+#include "class_hooks.hpp"
 
 #include <cstddef>
 #include <map>
@@ -29,9 +29,12 @@ struct ValueLayout {
         // type. Each variant uses the first words of each type in payload
         // order; a word that a variant does not use holds zero or nil.
         Enum,
+        // A class handle and the policy of an admitted nil.
+        Reference,
     };
 
     Form form = Form::Word;
+    bool carries_policy = false;
     // The type of each word: never a tuple or another several-word value.
     // A pooled word has the type of its first use.
     std::vector<IrType> words;
@@ -91,6 +94,7 @@ private:
     ValueLayout build(const IrType& type, const Span& where);
 
     const IrProgram& program_;
+    HookIndex hooks_;
     std::map<SymbolId, std::vector<SymbolId>> variants_;
     std::set<SymbolId> payload_enums_;
     std::map<SymbolId, Counts> enum_counts_;

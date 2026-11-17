@@ -37,7 +37,7 @@ export let Fs = module (
         };
 
         /// @brief Tests equality of the kind, size, and modification time.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is FileMetadata)) {
                 return false;

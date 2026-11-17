@@ -34,11 +34,12 @@ std::string type_identity(const IrType& type) {
 
 bool inline_value(const IrProgram& program, const IrType& type) {
     if (type.kind == TypeKind::Tuple) return true;
+    if (type.kind == TypeKind::Object) return HookIndex(program).carrying(type);
     return type.kind == TypeKind::Enum && type.symbol < program.symbols.size() &&
            has_enum_payload(program, type.symbol);
 }
 
-ValueLayouts::ValueLayouts(const IrProgram& program) : program_(program) {
+ValueLayouts::ValueLayouts(const IrProgram& program) : program_(program), hooks_(program) {
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
         if (item.kind != SymbolKind::Variant || item.owner == no_symbol) continue;
@@ -49,7 +50,7 @@ ValueLayouts::ValueLayouts(const IrProgram& program) : program_(program) {
 
 bool ValueLayouts::inline_value(const IrType& type) const {
     if (type.kind == TypeKind::Tuple) return true;
-    return type.kind == TypeKind::Enum && payload_enums_.contains(type.symbol);
+    return hooks_.carrying(type) || (type.kind == TypeKind::Enum && payload_enums_.contains(type.symbol));
 }
 
 const std::vector<SymbolId>& ValueLayouts::variants(SymbolId enumeration) const {
@@ -115,6 +116,7 @@ ValueLayouts::Counts ValueLayouts::counts(const IrType& type) {
         }
     };
     if (!inline_value(type)) return {{word_key(type), 1}};
+    if (type.kind == TypeKind::Object) return {{word_key(type), 1}, {"u32", 1}};
     Counts result;
     if (type.kind == TypeKind::Tuple) {
         for (const auto& element : type.arguments) add(result, counts(element));
@@ -161,11 +163,19 @@ ValueLayout ValueLayouts::build(const IrType& type, const Span& where) {
         result.suffixes = {""};
         return result;
     }
+    if (type.kind == TypeKind::Object) {
+        result.form = ValueLayout::Form::Reference;
+        result.carries_policy = true;
+        result.words = {type, tag_type};
+        result.suffixes = {"", ".policy"};
+        return result;
+    }
     if (type.kind == TypeKind::Tuple) {
         result.form = ValueLayout::Form::Tuple;
         result.parts = type.arguments;
         for (std::size_t i = 0; i < type.arguments.size(); ++i) {
             const auto& inner = layout(type.arguments[i], where);
+            result.carries_policy |= inner.carries_policy;
             auto& positions = result.elements.emplace_back();
             for (std::size_t word = 0; word < inner.words.size(); ++word) {
                 positions.push_back(result.words.size());
@@ -202,6 +212,7 @@ ValueLayout ValueLayouts::build(const IrType& type, const Span& where) {
         for (std::size_t p = 0; p < variant.payload_types.size(); ++p) {
             result.parts.push_back(variant.payload_types[p]);
             const auto& inner = layout(variant.payload_types[p], where);
+            result.carries_policy |= inner.carries_policy;
             for (std::size_t w = 0; w < inner.words.size(); ++w) {
                 const auto key = word_key(inner.words[w]);
                 auto found = std::ranges::find(pools, key, &Pool::key);

@@ -140,7 +140,7 @@ export let StringBuilder = module (
         };
 
         /// @brief The current UTF-8 bytes determine equality and hashing.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is StringBuilder)) {
                 return false;

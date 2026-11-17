@@ -1653,6 +1653,7 @@ private:
 } // namespace
 
 bool inline_state_operation(const nvr::Exit& exit) {
+    if (nvr::extended_reference_state(exit)) return false;
     switch (exit.operation) {
     case nvr::StateOp::ReadTag:
     case nvr::StateOp::ReadField:

@@ -46,17 +46,14 @@ def check(condition, message):
         failures.append(message)
 
 
-ENTER = "state hook-enter immediate {kind} arguments [ constant:8:{policy} slot:11:0 ] result - resume {next} assign [ ]"
+ENTER = "state hook-enter immediate {kind} arguments [ constant:{u32}:{policy} slot:{handle}:0 ] result - resume {next} assign [ ]"
 LEAVE = "state hook-leave immediate 0 arguments [ ] result - resume {next} assign [ ]"
-READ = "state read-field immediate 0 arguments [ slot:11:0 ] result 1 resume {next} assign [ ]"
-RETURN = "return arguments [ slot:2:1 ] assign [ ]"
-TOUCH = re.compile(r"function 3 parameters 1 result 2 frame \[ 11 2 \]\n(?:  block .*\n    exit .*\n)+")
-
-
-def function(blocks, policy, kind=0):
-    text = "function 3 parameters 1 result 2 frame [ 11 2 ]\n"
+READ = "state read-field immediate 0 arguments [ slot:{handle}:0 ] result 1 resume {next} assign [ ]"
+RETURN = "return arguments [ slot:{i32}:1 ] assign [ ]"
+def function(blocks, policy, header, types):
+    text = header + "\n"
     for index, exit in enumerate(blocks):
-        line = exit.format(next=index + 1, kind=kind, policy=policy)
+        line = exit.format(next=index + 1, kind=0, policy=policy, **types)
         text += f"  block {index} graph 0 selector 0 inputs [ ]\n    exit {line}\n"
     return text
 
@@ -83,28 +80,33 @@ def main():
         check(result.returncode == 0, "disassemble failed: " + result.stderr)
         text = (work / "operations.nvra").read_text()
         text = re.sub(r"^nvr 1\.\d+ ", "nvr 1.8 ", text, count=1, flags=re.M)
-        text = "\n".join(line for line in text.split("\n") if not line.startswith("location 3 "))
-        check(TOUCH.search(text) is not None, "touch is not function 3")
-        # The policy word of Session: its layout (the one whose parent is the
-        # root class and whose only field is an int32) plus 1, as a constant.
-        session = re.search(r"^layout (\d+) parent \d+ fields \[ 2 \]", text, re.M)
-        check(session is not None, "Session's layout is not found")
+        i32 = re.search(r"^type (\d+) signed 32$", text, re.M)[1]
+        u32 = re.search(r"^type (\d+) unsigned 32$", text, re.M)[1]
+        session = re.search(rf"^layout (\d+) parent \d+ fields \[ {i32} \]", text, re.M)[1]
+        handle = re.search(rf"^type (\d+) object {session}$", text, re.M)[1]
+        types = dict(handle=handle, i32=i32, u32=u32)
+        touch = re.compile(rf"^(function (\d+) parameters 1 result {i32} frame \[ {handle} {i32} \])\n"
+                           r"(?:  block .*\n    exit .*\n)+", re.M)
+        match = touch.search(text)
+        assert match and "state read-field" in match[0], "the raw touch function was not found"
+        header, index = match.groups()
+        text = "\n".join(line for line in text.split("\n") if not line.startswith(f"location {index} "))
         constants = [int(m) for m in re.findall(r"^constant (\d+) ", text, re.M)]
         policy = max(constants) + 1
         last = list(re.finditer(r"^constant \d+ .*$", text, re.M))[-1]
-        word = int(session.group(1)) + 1 if session else 1
-        text = text[:last.end()] + f"\nconstant {policy} type 8 bytes {word:02x}000000" + text[last.end():]
+        word = int(session) + 1
+        text = text[:last.end()] + f"\nconstant {policy} type {u32} bytes {word:02x}000000" + text[last.end():]
         expected_out = run(["run", str(base)]).stdout
         # 65 events with distinct policy words: the 65th passes the limit.
         first = max(int(m) for m in re.findall(r"^constant (\d+) ", text, re.M)) + 1
         last = list(re.finditer(r"^constant \d+ .*$", text, re.M))[-1]
-        text = text[:last.end()] + "".join(f"\nconstant {first + i} type 8 bytes {i + 100:02x}000000"
+        text = text[:last.end()] + "".join(f"\nconstant {first + i} type {u32} bytes {i + 100:02x}000000"
                                            for i in range(65)) + text[last.end():]
         deep = [ENTER.replace("{policy}", str(first + i)) for i in range(65)] + [READ] + [LEAVE] * 65 + [RETURN]
         CASES["limit"] = (deep, 139, r"trap: class hook nesting limit exceeded: 64 events are open")
         for name, (blocks, status, pattern) in CASES.items():
             source = work / f"{name}.nvra"
-            source.write_text(TOUCH.sub(function(blocks, policy), text, count=1))
+            source.write_text(touch.sub(function(blocks, policy, header, types), text, count=1))
             image = work / f"{name}.nvr"
             result = run(["assemble", str(source), "-o", str(image)])
             if result.returncode != 0:
@@ -140,7 +142,7 @@ def main():
             "an older version": (balanced.replace("nvr 1.8 ", "nvr 1.7 ", 1), "require NVR 1.8"),
             "a third kind": (balanced.replace("hook-enter immediate 0", "hook-enter immediate 2", 1),
                              "a get (0) or a set (1)"),
-            "a missing argument": (balanced.replace(f"arguments [ constant:8:{policy} slot:11:0 ]", "arguments [ slot:11:0 ]", 1),
+            "a missing argument": (balanced.replace(f"arguments [ constant:{u32}:{policy} slot:{handle}:0 ]", f"arguments [ slot:{handle}:0 ]", 1),
                                    "argument"),
             "a result": (balanced.replace("hook-leave immediate 0 arguments [ ] result -", "hook-leave immediate 0 arguments [ ] result 1", 1),
                          "result"),

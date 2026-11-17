@@ -256,6 +256,19 @@ struct Exit {
     bool operator==(const Exit&) const = default;
 };
 
+// NVR 1.8 can read an unwritten field/global with a typed fallback, commit
+// a consecutive run of words in one transition, or check a nil cast's policy.
+inline bool extended_reference_state(const Exit& exit) {
+    switch (exit.operation) {
+    case StateOp::ReadField: case StateOp::ClassCast: return exit.arguments.size() > 1;
+    case StateOp::ReadGlobal: return !exit.arguments.empty();
+    case StateOp::WriteField: return exit.arguments.size() > 2;
+    case StateOp::WriteGlobal: return exit.arguments.size() > 1;
+    case StateOp::WriteComponent: return exit.arguments.size() > 3;
+    default: return false;
+    }
+}
+
 struct Block {
     std::uint32_t graph = 0;
     std::vector<Value> inputs;

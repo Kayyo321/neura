@@ -29,10 +29,6 @@ SymbolId hook_owner(const IrSymbol& function);
 // True when some class of the program declares a clause.
 bool has_class_hooks(const IrProgram& program);
 
-// Step 3 of the milestone: a program with a clause is checked but cannot be
-// converted yet. Throws for such a program and does nothing otherwise.
-void require_executable_hooks(const IrProgram& program);
-
 // The clauses of a linked, specialized program, by the types they apply to.
 // A class, interface or `class` type is policy-carrying when some class
 // assignable to it has an effective clause.
@@ -41,6 +37,9 @@ public:
     explicit HookIndex(const IrProgram& program);
     bool any() const { return !views_.empty(); }
     bool carrying(const IrType& type) const;
+    // Whether the value contains a policy word, following inline tuples and
+    // enum payloads. At an external boundary also inspect collection elements.
+    bool contains_reference(const IrProgram& program, const IrType& type, bool collections = false) const;
     // The distinct clause functions of `kind` that a reference of `type` may
     // run, in ascending symbol order. Empty when the event is identity.
     std::vector<SymbolId> targets(const IrType& type, HookKind kind) const;

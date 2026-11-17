@@ -244,11 +244,23 @@ public:
             switch (exit.operation) {
             case nvr::StateOp::AllocateObject: operation = "new L" + std::to_string(exit.immediate); break;
             case nvr::StateOp::ReadTag: operation = "tag(" + a(0) + ")"; break;
-            case nvr::StateOp::ReadField: operation = a(0) + "." + field(exit, args) ; break;
-            case nvr::StateOp::WriteField: operation = a(0) + "." + field(exit, args) + " = " + a(1); break;
+            case nvr::StateOp::ReadField:
+                operation = a(0) + "." + field(exit, args);
+                if (args.size() == 2) operation = "read_or(" + operation + ", " + a(1) + ")";
+                break;
+            case nvr::StateOp::WriteField:
+                operation = a(0) + "." + field(exit, args) + " = " + a(1);
+                if (args.size() > 2) operation = "write_words(" + a(0) + "." + field(exit, args) + ", " + words(1) + ")";
+                break;
             case nvr::StateOp::FreeObject: operation = "free " + a(0); break;
-            case nvr::StateOp::ReadGlobal: operation = global(exit.immediate); break;
-            case nvr::StateOp::WriteGlobal: operation = global(exit.immediate) + " = " + a(0); break;
+            case nvr::StateOp::ReadGlobal:
+                operation = global(exit.immediate);
+                if (!args.empty()) operation = "read_or(" + operation + ", " + a(0) + ")";
+                break;
+            case nvr::StateOp::WriteGlobal:
+                operation = global(exit.immediate) + " = " + a(0);
+                if (args.size() > 1) operation = "write_words(" + global(exit.immediate) + ", " + words(0) + ")";
+                break;
             case nvr::StateOp::AllocateCollection:
                 operation = type_name(image_, exit.immediate) + " [" + values(function, args, lifted, inputs) + "]";
                 break;
@@ -263,7 +275,9 @@ public:
                 operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate);
                 break;
             case nvr::StateOp::WriteComponent:
-                operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate) + " = " + a(2);
+                operation = a(0) + "[" + a(1) + "].c" + std::to_string(exit.immediate);
+                operation = args.size() == 3 ? operation + " = " + a(2)
+                                             : "write_words(" + operation + ", " + words(2) + ")";
                 break;
             case nvr::StateOp::RemoveElement: operation = "remove_at(" + a(0) + ", " + a(1) + ")"; break;
             case nvr::StateOp::ConstructText:
@@ -276,7 +290,10 @@ public:
             case nvr::StateOp::ClassHash: operation = "class_hash(" + a(0) + ")"; break;
             case nvr::StateOp::ClassText: operation = "class_text(" + a(0) + ", " + a(1) + ")"; break;
             case nvr::StateOp::ClassIs: operation = a(0) + " is L" + std::to_string(exit.immediate); break;
-            case nvr::StateOp::ClassCast: operation = a(0) + " as L" + std::to_string(exit.immediate); break;
+            case nvr::StateOp::ClassCast:
+                operation = a(0) + " as L" + std::to_string(exit.immediate);
+                if (args.size() == 2) operation += " with nil policy " + a(1);
+                break;
             case nvr::StateOp::ScalarText:
                 operation = "scalar_text(" + values(function, args, lifted, inputs) + ")";
                 break;
@@ -295,7 +312,7 @@ public:
             // class when the image has names, and the reference.
             case nvr::StateOp::HookEnter:
                 operation = std::string("hook_enter(") + (exit.immediate == 0 ? "get" : "set") + ", " + a(0) +
-                            policy_comment(args.at(0)) + ", " + a(1) + ")";
+                            policy_comment(args.at(0)) + ", " + a(1) + (args.size() == 3 ? ", " + a(2) : "") + ")";
                 break;
             case nvr::StateOp::HookLeave: operation = "hook_leave()"; break;
             case nvr::StateOp::Kernel: {

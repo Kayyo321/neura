@@ -600,7 +600,9 @@ if(BUILD_TESTING)
     add_test(NAME hook-operations COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/hooks/operations.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}")
-    set_tests_properties(hook-operations PROPERTIES TIMEOUT 300)
+    add_test(NAME hook-references COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/hooks/references.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(hook-operations hook-references PROPERTIES TIMEOUT 300)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

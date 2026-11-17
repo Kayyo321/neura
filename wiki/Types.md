@@ -471,7 +471,11 @@ let Admin = class:Session (
 - Interfaces, modules, enums and anonymous classes cannot declare clauses (`E0216`), nor can a class with `#Synchronized` methods or whose base has one (`E0541`). A clause of a class that is not `#Final` cannot return a `new` object (`E0543`), and a hook cannot use the scheduler (`E0544`).
 - A field or static field of a class type that has a `set` clause needs an initializer (`E0545`); `= nil` is one, which the setter then admits.
 
-The compiler parses and checks clauses, writes them to `.nir` (NeuraIR 1.11), and derives on the linked program each read and admission at which a clause runs. A program that declares a clause cannot be built into an image in this release (`E0801`): the runtime operations exist (NVR 1.8), but references of a hooked class do not yet carry the class policy that the rules for `nil` need ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md)).
+A live object's dynamic class selects its hook. A nil keeps the class policy of the admission or getter that produced it. If an incoming nil has no policy, a setter uses the previous stored value's policy, then the declared class. A getter of a plain nil also falls back to the declared class. An empty interface or umbrella `class` binding supplies no fallback class of its own. All nils compare equal and fail a type test. A checked cast of a typed nil uses its policy to decide whether that cast is valid.
+
+The setter receives nil as its previous instance on a first initialization, parameter or result admission, or if the previous object is outside the clause's declaring class. Its result must be nil or an object of exactly the selected class. A trap preserves the previous destination. The right-hand side and the hook keep any effects they already performed. Each written argument is admitted before the next one is evaluated, and a result is admitted before the function leaves its scopes. A debugger can show `nil (policy Admin)` from raw storage.
+
+The compiler records clauses in NeuraIR 1.11 and derives events after linking. A library can therefore acquire a hooked subclass from its importer. The compiled NVR 1.8 image runs independently of either source file. [Hook event rules](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md#events) · [Runnable class hook example](https://github.com/Kayyo321/neura/blob/main/examples/types/class-hooks.nra)
 
 ### Anonymous classes
 

@@ -32,6 +32,8 @@ function(stat_value out name text)
 endfunction()
 
 file(GLOB benchmarks "${bench_dir}/*.nra")
+# Hook syntax has no executable 0.2 counterpart in the cross-version image set.
+list(APPEND benchmarks "${bench_dir}/hooks/hook-read.nra")
 list(SORT benchmarks)
 set(lines "# name size steps peak_heap_cells neurons image_bytes steps_at_second_size")
 set(failures "")

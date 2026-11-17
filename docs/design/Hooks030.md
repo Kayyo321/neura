@@ -133,8 +133,8 @@ An *event* is one run of an effective clause. The table gives every source opera
 | Derivation | The pass applies [the derivation table](#derivation) to the tree, and reports `E0544` and `E0546`, which need the linked program's summaries and specialized signatures. | proposed; implemented |
 | Stored form | `HookRead` and `HookAdmit` exist only after elaboration. The `.nir` writer refuses them, the verifier accepts them only in an elaborated program, and there it derives the events again and requires each to be wrapped exactly once. `emit-ir` prints them. | proposed; implemented |
 | Summaries | Elaboration sets `Summary::hooks`, with the clause as its cause, on every function that contains an event with a clause that is not identity, and the clause's own effects join that function's summary. `#Pure` and the other checked tags are checked again after elaboration; a violation is reported with today's code and a label at the clause. | proposed; implemented |
-| Literal nil | An initializer the pass wraps in `HookAdmit` is not a literal, so `constant_initializer` no longer makes it an image constant: it becomes a startup action at its place in source order. The converter decides nothing about hooks. | proposed |
-| Converter | `HookRead` and `HookAdmit` become: select the policy, compare it against the classes of the operand's static type that have a clause, in ascending layout identifier, and call the clause's function, or do nothing for identity. A setter's result goes to fresh slots, and one exit's `assignments` then writes handle, policy word and flags to the destination. | proposed |
+| Literal nil | An initializer the pass wraps in `HookAdmit` is not a literal, so `constant_initializer` no longer makes it an image constant: it becomes a startup action at its place in source order. | proposed; implemented |
+| Converter | `HookRead` and `HookAdmit` become: select the policy, compare it against the classes of the operand's static type that have a clause, in ascending layout identifier, and call the clause's function, or do nothing for identity. A setter's result goes to fresh slots, and one exit's `assignments` then writes handle, policy word and flags to the destination. | proposed; implemented |
 | NVR | The next free NVR minor version: the state operations `HookEnter(kind, policy, handle)` and `HookLeave`, which the hidden functions run first and last, and the trap reasons `HookRecursion` and `HookLimit`. The result check is a `ReadTag` and a compare. The writer emits the version only for an image with a clause. | proposed; implemented |
 | Decompiler | Reads and writes the two operations, shows a policy word by its class name when the image carries names, and reports a hidden hook function as inferred structure only from its `HookEnter`. | proposed |
 
@@ -194,9 +194,9 @@ A hook is a call with effects, whatever its body does. A getter whose body is `i
 
 | Rule | Status |
 | --- | --- |
-| Hook clauses have source maps. Step-in from a statement with an event enters the clause; step-over runs it; a breakpoint in a clause stops there. | proposed |
-| Stopping, stepping and inspecting run no clause, call neither `HookEnter` nor `HookLeave`, and change no step count. Variables show the stored handle and, for a nil with a policy, `nil (policy Session)`. | proposed |
-| A test runs one program with and without breakpoints and inspection at every stop and compares output, steps, peak cells and a counter each clause increments. | proposed |
+| Hook clauses have source maps. Step-in from a statement with an event enters the clause; step-over runs it; a breakpoint in a clause stops there. | implemented |
+| Stopping, stepping and inspecting run no clause, call neither `HookEnter` nor `HookLeave`, and change no step count. Variables show the stored handle and, for a nil with a policy, `nil (policy Session)`. | implemented |
+| A test runs one program with and without breakpoints and inspection at every stop and compares output, steps, peak cells and a counter each clause increments. | implemented |
 
 ## Startup blocks
 
@@ -423,3 +423,12 @@ No existing source changes meaning: no class has a hook, and `static scope` did 
 | `class hook recursion` has status 134 (like a failed cast), `class hook nesting limit exceeded` 139 (like the frame depth limit) | Each takes the status of the trap it resembles. |
 | A poll may preempt a task inside a hook; its open events stay with its frames | The stack of events is per task, so another task's events never see them; only a scheduler operation inside an event is an error. |
 | Tier 3 needs no change of its own: a function program whose block tier 2 declines has a `Leave`, which tier 3's inliner already refuses | The rule "not inlined" holds by construction. |
+
+
+### Converter and image decisions
+
+- A hidden function for an inherited clause is compiled for each concrete event policy that invokes it. Its body resolves static names in the declaring class. The compiled event carries its concrete class name as an optional constant argument to `hook-enter`, so a stripped image still reports the class on recursion.
+- Frame slots commit both words on one exit. Fields, globals and aggregate elements use a consecutive state write in the same NVR minor as hooks. Existing one-word writes and strict reads keep their encoding. A previous-value read of an uninitialized field or global supplies a typed fallback. An ordinary read still traps. A present nil policy is an optional argument to `class-cast`. [NVR 1.8](../runtime/NVR.md#class-hooks-18)
+- A setter that returns its previous `instance` can return a sibling that inherits the same clause. The converter checks its exact result class. The incoming `value`, the getter's `instance`, and literal nil are already known to satisfy that check.
+- Twenty-two library `equals(other: class)` overrides across twenty files relinquish `#Pure`. A linked application's getter can write observable state when the override reads its argument. User-declared purity contracts are checked after elaboration. [Standard library](../lang/Stdlib.md)
+- The hot-read cost fixture checks that repeated reads of the same object invoke its getter once per iteration. At 1,000 and 2,000 reads the compiled program uses 16,052 and 32,052 steps, with 190 peak heap cells at both sizes. [Recorded benchmark](../../tests/benchmarks/hooks/hook-read.nra)

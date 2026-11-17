@@ -183,7 +183,7 @@ export let MemorySegment = module (
         };
 
         /// @brief Segments are equal when their addresses and sizes are.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is MemorySegment)) {
                 return false;

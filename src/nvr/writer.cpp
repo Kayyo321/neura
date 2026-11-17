@@ -354,7 +354,8 @@ std::uint16_t required_minor_version(const Image& image) {
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
-                if (exit.kind == ExitKind::State && is_hook_operation(exit.operation)) return hooks_minor_version;
+                if (exit.kind == ExitKind::State && (is_hook_operation(exit.operation) || extended_reference_state(exit)))
+                    return hooks_minor_version;
             }
         }
     }

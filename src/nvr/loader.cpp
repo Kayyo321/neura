@@ -1283,11 +1283,14 @@ void Validator::state(const Function& function, const Exit& exit,
         }
     };
 
+    const bool extended = extended_reference_state(exit);
+    if (extended && image_.minor_version < hooks_minor_version)
+        invalid(where + ": reference state operation requires NVR 1.8");
     switch (exit.operation) {
     case StateOp::ReadComponent:
     case StateOp::WriteComponent: {
         const bool write = exit.operation == StateOp::WriteComponent;
-        arity(write ? 3 : 2);
+        if (!extended) arity(write ? 3 : 2);
         require_kind(0, {TypeKind::Array, TypeKind::List});
         const auto* words = components(0);
         if (words == nullptr) invalid(where + ": a component operation needs a collection of aggregates");
@@ -1296,7 +1299,9 @@ void Validator::state(const Function& function, const Exit& exit,
         }
         require_index(1);
         if (write) {
-            assign(args[2].type, (*words)[exit.immediate], where + " component value");
+            if (args.size() - 2 > words->size() - exit.immediate) invalid(where + ": component write exceeds element");
+            for (std::size_t i = 2; i < args.size(); ++i)
+                assign(args[i].type, (*words)[exit.immediate + i - 2], where + " component value");
             no_result();
         } else {
             result_of((*words)[exit.immediate]);
@@ -1304,7 +1309,10 @@ void Validator::state(const Function& function, const Exit& exit,
         break;
     }
     case StateOp::HookEnter:
-        arity(2);
+        if (args.size() == 3) {
+            require_kind(2, {TypeKind::Text});
+            if (args[2].kind != ValueKind::Constant) invalid(where + ": a policy name must be a text constant");
+        } else arity(2);
         if (exit.immediate > 1) invalid(where + ": a class hook event is a get (0) or a set (1)");
         if (!is_unsigned(args[0].type, 32)) invalid(where + ": argument 0 must be a uint32 policy word");
         if (image_.types[args[1].type].kind != TypeKind::Object)
@@ -1406,20 +1414,23 @@ void Validator::state(const Function& function, const Exit& exit,
         require_slot_type([&](std::uint32_t slot) { return is_unsigned(slot, 32); }, "uint32");
         break;
     case StateOp::ReadField:
-        arity(1);
+        arity(extended ? 2 : 1);
         require_kind(0, {TypeKind::Object});
         if (exit.immediate >= field_types(0).size()) {
             invalid(where + ": field " + std::to_string(exit.immediate) + " is out of range");
         }
+        if (extended) assign(args[1].type, field_types(0)[exit.immediate], where + " fallback");
         result_of(field_types(0)[exit.immediate]);
         break;
     case StateOp::WriteField:
-        arity(2);
+        if (!extended) arity(2);
         require_kind(0, {TypeKind::Object});
         if (exit.immediate >= field_types(0).size()) {
             invalid(where + ": field " + std::to_string(exit.immediate) + " is out of range");
         }
-        assign(args[1].type, field_types(0)[exit.immediate], where + " field value");
+        if (args.size() - 1 > field_types(0).size() - exit.immediate) invalid(where + ": field write exceeds layout");
+        for (std::size_t i = 1; i < args.size(); ++i)
+            assign(args[i].type, field_types(0)[exit.immediate + i - 1], where + " field value");
         no_result();
         break;
     case StateOp::FreeObject:
@@ -1429,18 +1440,21 @@ void Validator::state(const Function& function, const Exit& exit,
         no_result();
         break;
     case StateOp::ReadGlobal:
-        arity(0);
+        arity(extended ? 1 : 0);
         if (exit.immediate >= image_.globals.size()) {
             invalid(where + ": global " + std::to_string(exit.immediate) + " is out of range");
         }
+        if (extended) assign(args[0].type, image_.globals[exit.immediate].type, where + " fallback");
         result_of(image_.globals[exit.immediate].type);
         break;
     case StateOp::WriteGlobal:
-        arity(1);
+        if (!extended) arity(1);
         if (exit.immediate >= image_.globals.size()) {
             invalid(where + ": global " + std::to_string(exit.immediate) + " is out of range");
         }
-        assign(args[0].type, image_.globals[exit.immediate].type, where + " global value");
+        if (args.size() > image_.globals.size() - exit.immediate) invalid(where + ": global write exceeds table");
+        for (std::size_t i = 0; i < args.size(); ++i)
+            assign(args[i].type, image_.globals[exit.immediate + i].type, where + " global value");
         no_result();
         break;
     case StateOp::RepeatCollection:
@@ -1609,7 +1623,8 @@ void Validator::state(const Function& function, const Exit& exit,
         break;
     case StateOp::ClassIs:
     case StateOp::ClassCast:
-        arity(1);
+        arity(extended ? 2 : 1);
+        if (extended && !is_unsigned(args[1].type, 32)) invalid(where + ": cast policy must be uint32");
         require_kind(0, {TypeKind::Object});
         if (exit.immediate >= image_.layouts.size()) invalid(where + ": class layout is out of range");
         require_slot_type([&](std::uint32_t slot) {

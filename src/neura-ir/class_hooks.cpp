@@ -1,6 +1,7 @@
 #include "class_hooks.hpp"
 
 #include "attributes.hpp"
+#include "kernel_signature.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 
@@ -37,18 +38,6 @@ bool has_class_hooks(const IrProgram& program) {
     return std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
         return has_attribute(item, AttributeId::HookGet) || has_attribute(item, AttributeId::HookSet);
     });
-}
-
-void require_executable_hooks(const IrProgram& program) {
-    for (const auto& item : program.symbols) {
-        for (const auto kind : {HookKind::Get, HookKind::Set}) {
-            const auto function = declared_hook(item, kind);
-            if (function == no_symbol) continue;
-            throw Diagnostic(program.symbols[function].span, "class hooks are not executable yet").with_code("E0801")
-                .label("class '" + item.name + "' declares a '" + hook_word(kind) + "' hook")
-                .note("this compiler checks class hooks but cannot build an image that runs them");
-        }
-    }
 }
 
 } // namespace neura
@@ -401,17 +390,39 @@ std::optional<std::string> first_difference(const IrNode& expected, const IrNode
 
 namespace {
 
-bool carries_policy(const HookIndex& index, const IrType& type) {
+bool contains_reference(const IrProgram& program, const HookIndex& index, const IrType& type,
+                        bool collections, std::set<SymbolId>& visited) {
     if (index.carrying(type)) return true;
-    return type.kind == TypeKind::Tuple &&
-           std::ranges::any_of(type.arguments, [&](const IrType& part) { return carries_policy(index, part); });
+    if (type.kind == TypeKind::Tuple || (collections && (type.kind == TypeKind::Array || type.kind == TypeKind::List))) {
+        return std::ranges::any_of(type.arguments, [&](const auto& part) {
+            return contains_reference(program, index, part, collections, visited);
+        });
+    }
+    if (type.kind == TypeKind::Enum && visited.insert(type.symbol).second) {
+        for (const auto& variant : program.symbols) {
+            if (variant.kind != SymbolKind::Variant || variant.owner != type.symbol) continue;
+            for (const auto& payload : variant.payload_types)
+                if (contains_reference(program, index, payload, collections, visited)) return true;
+        }
+    }
+    return false;
 }
+
+} // namespace
+
+bool HookIndex::contains_reference(const IrProgram& program, const IrType& type, bool collections) const {
+    if (!any()) return false;
+    std::set<SymbolId> visited;
+    return neura::contains_reference(program, *this, type, collections, visited);
+}
+
+namespace {
 
 // E0546: the other side of a host binding, a kernel or a foreign function
 // has no policy word and could not keep one.
 void check_hook_boundaries(const IrProgram& program, const HookIndex& index) {
     for (const auto& item : program.symbols) {
-        if (item.kind != SymbolKind::Function || !item.generics.empty() || (!item.host_binding && !item.external))
+        if (item.kind != SymbolKind::Function || !item.generics.empty() || (!item.host_binding && !item.external && !kernel_bound(item)))
             continue;
         const auto reject = [&](const IrType& type, const Span& at, const std::string& what) {
             const auto cls = type.kind == TypeKind::Object && type.symbol < program.symbols.size()
@@ -423,9 +434,9 @@ void check_hook_boundaries(const IrProgram& program, const HookIndex& index) {
         };
         for (const auto parameter : item.parameters) {
             const auto& p = program.symbols[parameter];
-            if (carries_policy(index, p.type)) reject(p.type, p.span, "a parameter");
+            if (index.contains_reference(program, p.type, true)) reject(p.type, p.span, "a parameter");
         }
-        if (carries_policy(index, item.type)) reject(item.type, item.span, "the result");
+        if (index.contains_reference(program, item.type, true)) reject(item.type, item.span, "the result");
     }
 }
 
