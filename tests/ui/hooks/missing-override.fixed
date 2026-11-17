@@ -1,0 +1,10 @@
+// Case 26: a clause that replaces an inherited one says so.
+let Session = class (
+    | set: value;
+);
+
+let Middle = class:Session ();
+
+let Admin = class:Middle (
+    | set.override: value;
+);

@@ -1,0 +1,13 @@
+// Class hook clauses for the .nir version tests (docs/design/Hooks030.md).
+let Session = class (
+    | get: instance;
+    | set: value;
+
+    export let user: string = "";
+);
+
+let Admin = class:Session (
+    | set.override: {
+        return value;
+    };
+);

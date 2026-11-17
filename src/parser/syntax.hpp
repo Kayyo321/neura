@@ -186,6 +186,27 @@ struct AccessorClause {
     bool block{};
 };
 
+// A class hook clause, written after the '(' of a declared class and before
+// its first member (docs/design/Hooks030.md, Class hook clauses):
+// `| get: expression;`, `| set.override: { block };`. `get`, `set`, and
+// `value` are contextual words; `override` after the '.' is the keyword.
+struct HookClause {
+    bool setter{};
+    // From the '|' through the clause's ';'.
+    Span span;
+    // The word `get` or `set`.
+    Span keyword;
+    // The word `override` of `.override`, when written.
+    std::optional<Span> override_word{};
+    // The expression form. Empty for a block body.
+    std::optional<Expr> expression{};
+    // The statements of a block body.
+    std::vector<Statement> body{};
+    bool block{};
+    // The block's closing '}', where a path that falls through ends.
+    Span close{};
+};
+
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
     enum class Kind { Binding, Function, Class, Module, Enum, Interface };
@@ -231,6 +252,8 @@ struct Declaration {
     std::optional<Span> name_span{};
     // Accessor clauses after the member's ';', in source order.
     std::vector<AccessorClause> accessors{};
+    // The class hook clauses after a declared class's '(', in source order.
+    std::vector<HookClause> hooks{};
     // The startup blocks written among a module's members, in source order
     // (Modules.md, Startup blocks). Each is a Block statement with `startup`.
     std::vector<Statement> startup_blocks{};

@@ -686,6 +686,19 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
             statement(s, id, d.span);
         for (const auto &s : d.startup_blocks)
             statement(s, id, d.span);
+        for (const auto &hook : d.hooks) {
+            // `value` and `instance` are the clause's immutable parameters;
+            // their selection is the clause's word, so the outline hides them.
+            if (hook.setter)
+                add("value", hook.keyword, hook.span, hook.span, id, 13, 6, modifier("readonly"),
+                    "value: " + d.name, d.name);
+            add("instance", hook.keyword, hook.span, hook.span, id, 13, 6, modifier("readonly"),
+                "instance: " + d.name, d.name);
+            for (const auto &s : hook.body)
+                statement(s, id, hook.span);
+            if (hook.expression)
+                expression(*hook.expression, id, hook.span);
+        }
         for (const auto &accessor : d.accessors) {
             if (accessor.setter)
                 add("value", accessor.keyword, accessor.span, accessor.span, id, 13, 6, 0,
@@ -1148,6 +1161,13 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
             statement(s);
         for (const auto &s : d.startup_blocks)
             statement(s);
+        for (const auto &hook : d.hooks) {
+            put(hook.keyword, hook.setter ? 23 : 22, modifier("declaration"), 5);
+            for (const auto &s : hook.body)
+                statement(s);
+            if (hook.expression)
+                expression(*hook.expression);
+        }
         if (d.initializer)
             expression(*d.initializer);
     };
@@ -1252,6 +1272,13 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 comment < token.span.offset + token.span.length) in_string = true;
         if (!in_string) return Json{{"isIncomplete", false}, {"items", items}};
         comment = doc.source.find("//", comment + 2);
+    }
+    // After a leading '|' of a class hook or accessor clause, offer the
+    // clause words (docs/design/Hooks030.md); `||` is an operator.
+    if (before != std::string::npos && doc.source[before] == '|' && (before == 0 || doc.source[before - 1] != '|')) {
+        add("get", 14, "class hook or accessor clause", "`| get: instance;` runs when a reference is read.");
+        add("set", 14, "class hook or accessor clause", "`| set: value;` runs when a reference is stored or passed.");
+        return Json{{"isIncomplete", false}, {"items", items}};
     }
     if (before != std::string::npos && doc.source[before] == '#') {
         for (const auto &tag : tag_registry()) {
@@ -1824,7 +1851,8 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
     std::map<std::size_t, std::vector<std::size_t>> children;
     const auto visible = [&](const EditorSymbol &symbol) {
         return symbol.file == doc.path && !symbol.name.empty() && !symbol.name.starts_with('$') &&
-               !(symbol.name == "value" && symbol.selection.length != 5);
+               !(symbol.name == "value" && symbol.selection.length != 5) &&
+               !(symbol.name == "instance" && symbol.selection.length != 8);
     };
     for (std::size_t i = 0; i < symbols.size(); ++i) {
         const auto &s = symbols[i];
@@ -2037,6 +2065,12 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 statement(child);
             for (const auto &child : item.startup_blocks)
                 statement(child);
+            for (const auto &hook : item.hooks) {
+                for (const auto &child : hook.body)
+                    statement(child);
+                if (hook.expression)
+                    expression(*hook.expression);
+            }
             for (const auto &accessor : item.accessors) {
                 for (const auto &child : accessor.body)
                     statement(child);

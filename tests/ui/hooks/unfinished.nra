@@ -1,0 +1,13 @@
+// Case 17: an unfinished clause is E0215; the class keeps its symbol, and the
+// members after the next ';' are parsed.
+let Empty = class ( | );
+
+let Partial = class (
+    | get:
+    export let skipped: int32 = 0;
+    export let kept: int32 = 1;
+);
+
+let use = func(item: Partial) -> int32 {
+    return item.kept + item.missing;
+};

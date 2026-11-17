@@ -1,6 +1,7 @@
 #include "specialize.hpp"
 
 #include "attributes.hpp"
+#include "class_hooks.hpp"
 
 #include "monitors.hpp"
 #include "purity.hpp"
@@ -177,17 +178,42 @@ private:
     // True for a declaration inside a generic class or function, including
     // the generic declaration itself and its parameters and locals.
     bool in_template(SymbolId id) const {
+        bool hook = false;
         for (auto scope = id; scope != no_symbol && scope < original_symbols_;
              scope = program_.symbols[scope].owner) {
             const auto& item = program_.symbols[scope];
             if (!item.generics.empty() || item.kind == SymbolKind::TypeParameter) {
                 return true;
             }
+            hook = hook || has_attribute(item, AttributeId::HookOf);
             // Class static members are shared across all instances and
-            // cannot refer to the containing class's type parameters.
-            if (is_static_scope(item)) return false;
+            // cannot refer to the containing class's type parameters. A
+            // class hook function is the exception: each instance has its
+            // own (docs/design/Hooks030.md).
+            if (is_static_scope(item) && !hook) return false;
         }
         return false;
+    }
+
+    // The hook function of `generic`'s class hook clause, cloned for
+    // `instance` with the instance as its class.
+    void clone_hooks(SymbolId generic, SymbolId instance, const Substitution& substitution, const Context& context) {
+        for (const auto kind : {HookKind::Get, HookKind::Set}) {
+            const auto function = declared_hook(program_.symbols[generic], kind);
+            if (function == no_symbol || function >= original_symbols_) continue;
+            const auto copy = clone_function(function, program_.symbols[function].owner, substitution,
+                                             program_.symbols[function].name, context);
+            set_attribute(symbol(copy), AttributeId::HookOf,
+                          attribute_list({attribute_symbol(instance),
+                                          attribute_unsigned(kind == HookKind::Set ? 1 : 0)}));
+            member_map_[instance][function] = copy;
+        }
+    }
+
+    bool generic_hook(SymbolId id) const {
+        if (id == no_symbol || id >= original_symbols_) return false;
+        const auto cls = hook_owner(program_.symbols[id]);
+        return cls != no_symbol && cls < original_symbols_ && !program_.symbols[cls].generics.empty();
     }
 
     std::size_t depth(const IrType& type) const {
@@ -273,7 +299,8 @@ private:
                     return;
                 }
             }
-            if (context.instance != no_symbol && owned_by_generic_class(item)) item = member_of(item, context.instance);
+            if (context.instance != no_symbol && (owned_by_generic_class(item) || generic_hook(item)))
+                item = member_of(item, context.instance);
         });
         return attributes;
     }
@@ -399,6 +426,7 @@ private:
                 }
             }
         }
+        if (symbol(generic).kind == SymbolKind::Class) clone_hooks(generic, instance, substitution, inner);
         // Every eager member exists now, so links between members resolve.
         specialize_attributes(instance, inner);
         std::vector<SymbolId> copies;

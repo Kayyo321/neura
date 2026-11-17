@@ -1,0 +1,5 @@
+// Case 7: a clause is `get` or `set`.
+let Session = class (
+    | got: instance;
+    export let user: string = "";
+);

@@ -42,15 +42,15 @@ hook-clause = "|" ("get" | "set") [ "." "override" ] ":" (expression | block) ";
 
 | Rule | Status |
 | --- | --- |
-| Hook clauses are written after the `(` of a declared class and before its first member. A `\|` clause after a member's `;` stays a field accessor clause of that member, with today's rules and diagnostics. | proposed |
-| A class has at most one `get` and one `set` clause, in either order. Each ends with `;`, including one whose body is a block. A clause takes no tags and no `export`. | proposed |
-| Both clauses yield a reference of the class. The body is an expression of the class's type, or a block that returns one on every path or traps. A getter that only reads is written `\| get: instance;`. | proposed |
+| Hook clauses are written after the `(` of a declared class and before its first member. A `\|` clause after a member's `;` stays a field accessor clause of that member, with today's rules and diagnostics. | proposed; implemented |
+| A class has at most one `get` and one `set` clause, in either order. Each ends with `;`, including one whose body is a block. A clause takes no tags and no `export`. | proposed; implemented |
+| Both clauses yield a reference of the class. The body is an expression of the class's type, or a block that returns one on every path or traps. A getter that only reads is written `\| get: instance;`. | proposed; implemented |
 | In a getter, `instance` is the stored reference being read. In a setter, `value` is the incoming reference and `instance` is the reference the destination held before, or nil when the destination held none, held an object that is not of the class that declares the clause, or is a parameter or a result. Both names are immutable inside the clause. | proposed |
-| `get`, `set`, `value` and `override` after the `.` keep their meaning only in a clause. Everywhere else `get`, `set` and `value` stay ordinary identifiers. | proposed |
-| A class without a clause inherits each one from the nearest base class that declares it. A class that declares a clause its base already has, declared or inherited, writes `\| get.override:` or `\| set.override:`; without it the clause is `E0539`, and `.override` with nothing to override is `E0540`. A class with no effective clause of a kind has *identity* behavior for that kind. | proposed |
-| Interfaces, modules, enums and anonymous classes cannot declare hook clauses (`E0216`). A class with a `#Synchronized` method, or one whose base has one, cannot either (`E0541`): a hook would read the instance outside its guard. | proposed |
+| `get`, `set`, `value` and `override` after the `.` keep their meaning only in a clause. Everywhere else `get`, `set` and `value` stay ordinary identifiers. | proposed; implemented |
+| A class without a clause inherits each one from the nearest base class that declares it. A class that declares a clause its base already has, declared or inherited, writes `\| get.override:` or `\| set.override:`; without it the clause is `E0539`, and `.override` with nothing to override is `E0540`. A class with no effective clause of a kind has *identity* behavior for that kind. | proposed; implemented |
+| Interfaces, modules, enums and anonymous classes cannot declare hook clauses (`E0216`). A class with a `#Synchronized` method, or one whose base has one, cannot either (`E0541`): a hook would read the instance outside its guard. | proposed; implemented |
 | A singleton class may declare hooks. They apply to references to its instance and do not make the class constructible. A generic class may declare hooks; each specialization has its own policy. | proposed |
-| The formatter writes each clause on its own line at the indentation of the members, with one blank line between the clauses and the first member. It does not reorder clauses. The language server offers `get` and `set` after a leading `\|`, `instance` and `value` inside a clause, shows the effective clauses and where they come from in a class's hover, and treats a clause as a definition for navigation from an `.override`. | proposed |
+| The formatter writes each clause on its own line at the indentation of the members, with one blank line between the clauses and the first member. It does not reorder clauses. The language server offers `get` and `set` after a leading `\|`, `instance` and `value` inside a clause, shows the effective clauses and where they come from in a class's hover, and treats a clause as a definition for navigation from an `.override`. | proposed; implemented |
 
 ## Policies
 
@@ -96,7 +96,7 @@ An *event* is one run of an effective clause. The table gives every source opera
 | An extension function's receiver is a written parameter and is admitted like one. This row waits for extension sets, which belong to the calls milestone. | proposed |
 | A constructor's own-field stores bypass field accessors as today and keep their class hook events. | proposed |
 | A read of storage that is not initialized, or of a destroyed object, fails as today before any getter runs. | proposed |
-| A declaration of class type whose type has an effective setter, and that has no initializer, is `E0545`: a local, a global, an instance field or a static field. A deferred `last` binding is exempt, since it has no default. `= nil` is an initializer and is admitted at run time. | proposed |
+| A declaration of class type whose type has an effective setter, and that has no initializer, is `E0545`: a local, a global, an instance field or a static field. A deferred `last` binding is exempt, since it has no default. `= nil` is an initializer and is admitted at run time. | proposed; implemented |
 | `RepeatCollection` of a class type admits its value once per element, in index order. | proposed |
 
 ### Recursion
@@ -126,9 +126,9 @@ An *event* is one run of an effective clause. The table gives every source opera
 
 | Stage | Change | Status |
 | --- | --- | --- |
-| Parser | `class_hook_clauses` beside `accessor_clauses`, called after the `(` of a declared class; the result is `Declaration::hooks`, a list of `HookClause` (kind, override, spans, expression or block). `skip_accessor_clauses` recovers past a bad clause. | proposed |
-| Lowering | A new `lowering_hooks.inc`. Each clause becomes a hidden static function `$class_get(instance, policy)` or `$class_set(value, instance, policy)` of its class, with the attributes `hook.get` and `hook.set` on the class and `hook.of` on the function (the next three free identifiers in `attributes.def` when the change lands). The checks `E0538` to `E0543` and `E0545` run here. | proposed |
-| NeuraIR | A module that declares a clause is written with the next free NeuraIR minor version when the change lands, so that an older reader refuses it. The encoding gains nothing else. Events are not stored: they are derived from the tree. | proposed |
+| Parser | `class_hook_clauses` beside `accessor_clauses`, called after the `(` of a declared class; the result is `Declaration::hooks`, a list of `HookClause` (kind, override, spans, expression or block). `skip_accessor_clauses` recovers past a bad clause. | proposed; implemented |
+| Lowering | A new `lowering_hooks.inc`. Each clause becomes a hidden static function `$class_get(instance, policy)` or `$class_set(value, instance, policy)` of its class, with the attributes `hook.get` and `hook.set` on the class and `hook.of` on the function (the next three free identifiers in `attributes.def` when the change lands). The checks `E0538` to `E0543` and `E0545` run here. | proposed; implemented |
+| NeuraIR | A module that declares a clause is written with the next free NeuraIR minor version when the change lands, so that an older reader refuses it. The encoding gains nothing else. Events are not stored: they are derived from the tree. | proposed; implemented |
 | Elaboration | A new pass, `elaborate_class_hooks` (`src/neura-ir/class_hooks.cpp`), runs on the linked program after `specialize` and before `optimize`, at every place those two are called together (`build_image_bytes`, `emit_ir`, the test runner and `tooling/debug.cpp`). It computes the policy-carrying types and wraps each event's operand in `IrOp::HookRead` or `IrOp::HookAdmit`. It does nothing when the program has no clause. | proposed |
 | Derivation | The pass applies [the derivation table](#derivation) to the tree, and reports `E0544` and `E0546`, which need the linked program's summaries and specialized signatures. | proposed |
 | Stored form | `HookRead` and `HookAdmit` exist only after elaboration. The `.nir` writer refuses them, the verifier accepts them only in an elaborated program, and there it derives the events again and requires each to be wrapped exactly once. `emit-ir` prints them. | proposed |
@@ -402,3 +402,13 @@ No existing source changes meaning: no class has a hook, and `static scope` did 
 | `static scope` is rejected in a generic declaration and takes no tags | A block per specialization would run more than once; tags have no meaning for it yet. |
 | `;` after a startup block is an error with a fix | The form has none, and one spelling keeps formatted sources uniform. |
 | NeuraIR and NVR take "the next free minor" instead of a number | Other milestones allocate versions at the same time; the format pages record the number when the step lands. |
+| The implementation names the versions and identifiers as constants: NeuraIR minor `nir_hooks_minor` = 11, attributes `hook.get` 15, `hook.set` 16, `hook.of` 17 | Identifiers 12 to 14 are claimed by the calls milestone; the lead renumbers at merge by changing one constant each. |
+| `module<T>` stays a syntax error (`E0202`) | Modules take no type parameters today, so `E0218` for a startup block in a generic module cannot be reached; a generic class gives `E0218`. |
+| With a line comment between `static scope` and `{`, the formatter keeps the comment and the brace on the next line | Joining them would move the comment; a line break alone is joined. |
+| A global or a local without an initializer stays `E0404` | Both already need an initializer, so `E0545` is reached by instance and static fields only. |
+| `E0541` also rejects a `#Synchronized` method in a class that inherits a hook | The note forbids declaring a hook next to a guard; inheriting one would open the same hole, and rejection is the stricter choice. |
+| An unfinished clause, `\| get:` with no expression, is `E0215` "a class hook clause needs an expression or a block after ':'" | Case 17 asks for `E0215`; the generic expression error would name the wrong rule. |
+| The note for a misplaced hook is added to `E0518` (a clause after a method) and to a getter's type mismatch when the getter is `instance` | Those are the shapes of cases 12 and 13; other accessor errors keep their text. |
+| `E0543` is checked after the clause's types, so `return new Other();` is `E0542` | A `new` of another class is a wrong type first. |
+| Until step 6, a program with a clause is rejected where an image is produced, with the existing `E0801` (not supported by circuit conversion) | `neura check` and `neura emit-ir` must accept clauses for their tests; nothing unimplemented can run. |
+| A hook function of a generic class is copied for each instance of the class by specialization, although it is a static function | Each specialization has its own policy; other statics of a generic class stay shared. |

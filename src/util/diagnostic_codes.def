@@ -40,6 +40,8 @@ NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
 NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
 NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
+NEURA_DIAGNOSTIC(E0215, "malformed class hook clause")
+NEURA_DIAGNOSTIC(E0216, "class hook outside a declared class")
 NEURA_DIAGNOSTIC(E0217, "malformed startup block")
 NEURA_DIAGNOSTIC(E0218, "misplaced startup block")
 
@@ -140,6 +142,13 @@ NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous clas
 NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
 NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
 NEURA_DIAGNOSTIC(E0537, "constructor shorthand names no instance field")
+NEURA_DIAGNOSTIC(E0538, "duplicate class hook clause")
+NEURA_DIAGNOSTIC(E0539, "class hook replaces an inherited one without `.override`")
+NEURA_DIAGNOSTIC(E0540, "`.override` on a class hook that overrides nothing")
+NEURA_DIAGNOSTIC(E0541, "class hook on a class with synchronized methods")
+NEURA_DIAGNOSTIC(E0542, "class hook that does not yield its class")
+NEURA_DIAGNOSTIC(E0543, "class hook that returns a new object")
+NEURA_DIAGNOSTIC(E0545, "hooked class storage without an initializer")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

@@ -1,0 +1,8 @@
+// Case 19: a block clause returns a reference on every path.
+let Session = class (
+    | get: {
+        if (instance != nil) {
+            return instance;
+        }
+    };
+);

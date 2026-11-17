@@ -220,6 +220,14 @@ private:
             }
         });
 
+        // Class hook clauses: each on its own line at the members' depth,
+        // with one blank line before the first member.
+        for (const auto& hook : value.hooks) {
+            hints_.before.insert(hook.span.offset);
+            if (hook.expression) expression(*hook.expression);
+            for (const auto& item : hook.body) statement(item);
+        }
+        if (!value.hooks.empty() && !value.members.empty()) hints_.blank_before.insert(first_offset(value.members.front()));
         for (std::size_t i = 0; i < value.members.size(); ++i) {
             const auto& member = value.members[i];
             if (i > 0) {

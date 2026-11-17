@@ -4,6 +4,7 @@
 #include "integer.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <string_view>
@@ -30,6 +31,11 @@ constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
 constexpr std::uint16_t newest_node_minor = attribute_minor;
+
+bool hook_attribute(const IrSymbol& symbol) {
+    return has_attribute(symbol, AttributeId::HookGet) || has_attribute(symbol, AttributeId::HookSet) ||
+           has_attribute(symbol, AttributeId::HookOf);
+}
 
 bool may_poll(IrOp op) {
     return op == IrOp::Loop || op == IrOp::Call || op == IrOp::VirtualCall || op == IrOp::CallClosure;
@@ -138,6 +144,7 @@ public:
             if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
             if (host_callback(item)) version = std::max<std::uint16_t>(version, 8);
             if (!item.attributes.empty()) version = std::max(version, attribute_minor);
+            if (hook_attribute(item)) version = std::max(version, nir_hooks_minor);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -376,7 +383,8 @@ public:
         }
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9};
+        static_assert(std::size(operation_limits) == nir_minor_version + 1, "one operation limit per minor version");
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -628,6 +636,8 @@ private:
                 }
                 if (const auto problem = attribute_problem(value.kind, value.attributes))
                     fail("symbol '" + value.name + "': " + *problem);
+                if (hook_attribute(value) && minor_ < nir_hooks_minor)
+                    fail("class hooks require NeuraIR format 1." + std::to_string(nir_hooks_minor));
                 if (has_attribute(value, AttributeId::HostEffects) &&
                     (value.has_body || !value.external || !value.host_binding))
                     fail("symbol '" + value.name + "': a host-effects contract belongs to a host binding without a body");

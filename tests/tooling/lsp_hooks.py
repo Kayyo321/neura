@@ -65,5 +65,78 @@ class StartupEditorTests(unittest.TestCase):
         self.assertEqual(formatted('static scope { }\n'), 'static scope {}\n')
 
 
+HOOKS = ('let Session = class (\n'
+         '    | get: instance;\n'
+         '    | set: value;\n'
+         '\n'
+         '    export let user: string = "";\n'
+         ');\n'
+         'let Admin = class:Session (\n'
+         '    | set.override: {\n'
+         '        return value;\n'
+         '    };\n'
+         ');\n')
+
+
+class HookEditorTests(unittest.TestCase):
+    def setUp(self):
+        self.directory = tempfile.TemporaryDirectory(prefix='neura-hooks-')
+        self.root = pathlib.Path(self.directory.name).resolve()
+        self.client = Client(self.root)
+        self.count = 0
+
+    def tearDown(self):
+        self.client.close()
+        self.directory.cleanup()
+
+    def open(self, source):
+        self.count += 1
+        path = self.root / f'hooks-{self.count}.nra'
+        self.client.open(path, source)
+        return path
+
+    def test_completion_offers_the_clause_words_after_a_bar(self):
+        path = self.open('let Session = class (\n    | \n);\n')
+        result = self.client.request('textDocument/completion', params(path, 1, 6))
+        labels = [item['label'] for item in result['items']]
+        self.assertEqual(labels, ['get', 'set'])
+
+    def test_completion_offers_instance_and_value_inside_a_setter(self):
+        path = self.open(HOOKS)
+        result = self.client.request('textDocument/completion', params(path, 8, 15))
+        labels = [item['label'] for item in result['items']]
+        self.assertIn('value', labels)
+        self.assertIn('instance', labels)
+
+    def test_outline_hides_the_clause_parameters(self):
+        path = self.open(HOOKS)
+        symbols = self.client.request('textDocument/documentSymbol', params(path))
+        self.assertEqual([child['name'] for child in symbols[0]['children']], ['user'])
+
+    def test_hover_lists_the_effective_clauses_and_their_origin(self):
+        path = self.open(HOOKS)
+        hover = self.client.request('textDocument/hover', params(path, 6, 5))
+        value = hover['contents']['value']
+        self.assertIn('`get` inherited from `Session`', value)
+        self.assertIn('`set` declared here', value)
+
+    def test_override_navigates_to_the_inherited_clause(self):
+        path = self.open(HOOKS)
+        location = self.client.request('textDocument/definition', params(path, 7, 15))
+        self.assertEqual(location['range']['start'], {'line': 2, 'character': 4})
+
+    def test_formatter_puts_clauses_on_their_own_lines_before_the_members(self):
+        source = 'let Session = class ( | get: instance; | set:value; export let user: string = ""; );\n'
+        self.assertEqual(formatted(source),
+                         'let Session = class (\n'
+                         '    | get: instance;\n'
+                         '    | set: value;\n'
+                         '\n'
+                         '    export let user: string = "";\n'
+                         ');\n')
+        source = 'let Session = class (\n    | set: {\n        return value;\n    };\n    | get: instance;\n);\n'
+        self.assertEqual(formatted(source), source)
+
+
 if __name__ == '__main__':
     unittest.main()

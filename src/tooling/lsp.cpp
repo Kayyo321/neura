@@ -3,6 +3,7 @@
 #include "cli/module_path.hpp"
 #include "cli/source_loader.hpp"
 #include "formatter.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/tags.hpp"
 #include "neura/version.hpp"
 #include "protocol.hpp"
@@ -130,6 +131,50 @@ class Server {
 
   private:
     AnalysisSession session_;
+    // Class hooks (docs/design/Hooks030.md): a class's hover lists its
+    // effective clauses and where each comes from.
+    std::string hook_summary(const EditorSymbol &symbol) const {
+        if (!session_.program || symbol.compiler_id == no_symbol ||
+            symbol.compiler_id >= session_.program->symbols.size())
+            return {};
+        const auto &program = *session_.program;
+        if (program.symbols[symbol.compiler_id].kind != SymbolKind::Class)
+            return {};
+        std::string result;
+        for (const auto kind : {HookKind::Get, HookKind::Set}) {
+            const auto function = effective_hook(program, symbol.compiler_id, kind);
+            if (function == no_symbol)
+                continue;
+            const auto owner = hook_owner(program.symbols[function]);
+            result += std::string(result.empty() ? "\n\nClass hooks: " : "; ") + "`" + hook_word(kind) + "` " +
+                      (owner == symbol.compiler_id ? "declared here"
+                                                   : "inherited from `" + program.symbols[owner].name + "`");
+        }
+        return result.empty() ? result : result + ".";
+    }
+    // The clause that `.override` at `offset` replaces, for navigation.
+    std::optional<Span> overridden_hook(const EditorDocument &doc, std::size_t offset) const {
+        if (!session_.program)
+            return std::nullopt;
+        const auto &program = *session_.program;
+        for (const auto &symbol : session_.symbols) {
+            if (!symbol.declaration || symbol.file != doc.path || symbol.compiler_id == no_symbol ||
+                symbol.compiler_id >= program.symbols.size())
+                continue;
+            for (const auto &clause : symbol.declaration->hooks) {
+                if (!clause.override_word || offset < clause.override_word->offset ||
+                    offset > clause.override_word->offset + clause.override_word->length)
+                    continue;
+                const auto base = program.symbols[symbol.compiler_id].base;
+                const auto inherited =
+                    effective_hook(program, base, clause.setter ? HookKind::Set : HookKind::Get);
+                if (inherited == no_symbol)
+                    return std::nullopt;
+                return program.symbols[inherited].span;
+            }
+        }
+        return std::nullopt;
+    }
     bool initialized_{}, shutdown_{};
     bool code_lens_enabled_{true};
     InlayOptions inlay_options_;
@@ -647,9 +692,12 @@ class Server {
                 markdown += "\n\nAccessor-backed property. Reads and writes through external "
                             "receivers use its declared getter and setter; storage inside "
                             "the declaring class follows Neura's receiver rules.";
+            markdown += hook_summary(*symbol);
             return Json{{"contents", Json{{"kind", "markdown"}, {"value", markdown}}}};
         }
         if (method == "textDocument/definition" || method == "textDocument/declaration") {
+            if (const auto inherited = overridden_hook(*doc, offset))
+                return session_.location(*inherited);
             const auto *symbol = session_.symbol_at(*doc, offset);
             return symbol ? session_.location(symbol->selection) : Json{};
         }

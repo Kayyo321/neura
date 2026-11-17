@@ -323,7 +323,11 @@ private:
     // A class member declaration starts at `offset`: the same words that
     // begin a declaration anywhere, including a contextual `last` binding,
     // or the '#' of its tags, which no expression starts with.
-    bool at_class_member(std::size_t offset) const { return at_declaration(offset) || next_is(offset, "#"); }
+    // A '|' there begins a class hook clause, which an anonymous class cannot
+    // have (E0216), and no expression begins with '|' either.
+    bool at_class_member(std::size_t offset) const {
+        return at_declaration(offset) || next_is(offset, "#") || next_is(offset, "|");
+    }
 
     bool next_keyword(std::size_t offset, std::string_view text) const {
         if (cursor_ + offset >= tokens_.size()) return false;
@@ -373,6 +377,7 @@ private:
             unsigned saved;
             ~Restore() { depth = saved; }
         } restore{block_depth_, depth};
+        hook_clauses(*body, "an anonymous class");
         while (!at_end() && !at(")")) {
             if (startup_member(*body)) continue;
             auto member = tagged_declaration(Declaration::Kind::Class);
@@ -879,6 +884,7 @@ private:
                 result.kind = Declaration::Kind::Enum;
                 result.generics = generic_parameters();
                 expect("(");
+                hook_clauses(result, "an enum");
                 while (!at(")")) {
                     if (startup_member(result)) continue;
                     const auto tags_start = cursor_;
@@ -942,6 +948,8 @@ private:
                     } while (match(","));
                 }
                 expect("(");
+                hook_clauses(result, result.kind == Declaration::Kind::Class ? nullptr
+                                     : result.kind == Declaration::Kind::Interface ? "an interface" : "a module");
                 while (!at_end() && !at(")")) {
                     const auto member_start = cursor_;
                     if (startup_member(result)) continue;
@@ -1099,6 +1107,154 @@ private:
         if (owner.kind == Declaration::Kind::Module && block_depth_ == 0) owner.startup_blocks.push_back(std::move(block));
         else record(misplaced_startup_block(block.keyword));
         return true;
+    }
+
+    // Class hook clauses (docs/design/Hooks030.md, Class hook clauses):
+    //   hook-clause = "|" ("get" | "set") [ "." "override" ] ":" (expression | block) ";"
+    // written after the '(' of a declared class and before its first member.
+    // A clause there in an interface, a module, an enum or an anonymous class
+    // is E0216 and is dropped. Tags or `export` before a clause are E0215.
+    bool at_hook_clause() const {
+        if (at("|")) return true;
+        if (at("export")) return next_is(1, "|");
+        if (!at("#")) return false;
+        auto i = cursor_;
+        const auto skip = [&](std::string_view open, std::string_view close) {
+            std::size_t depth = 0;
+            for (; i < tokens_.size() && tokens_[i].kind != TokenKind::End; ++i) {
+                if (tokens_[i].kind != TokenKind::Symbol) continue;
+                if (tokens_[i].text == open) ++depth;
+                else if (tokens_[i].text == close && --depth == 0) {
+                    ++i;
+                    return;
+                }
+            }
+        };
+        while (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "#") {
+            ++i;
+            if (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "[") {
+                skip("[", "]");
+                continue;
+            }
+            if (i >= tokens_.size() || tokens_[i].kind != TokenKind::Identifier) return false;
+            ++i;
+            if (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "(") skip("(", ")");
+        }
+        return i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "|";
+    }
+
+    static Diagnostic malformed_hook(const Span& at, std::string message) {
+        return Diagnostic(at, std::move(message)).with_code("E0215")
+            .help("a class hook clause is '| get: <expression>;' or '| set: { ... };'");
+    }
+
+    // `outside` names what the clauses are written in when it cannot have
+    // hooks, such as "an interface"; null for a declared class.
+    void hook_clauses(Declaration& owner, const char* outside) {
+        while (at_hook_clause()) {
+            try {
+                auto clause = hook_clause();
+                if (!outside) {
+                    owner.hooks.push_back(std::move(clause));
+                    continue;
+                }
+                std::string kind = outside;
+                const Span bar{clause.span.file, clause.span.line, clause.span.column, clause.span.offset, 1};
+                record(Diagnostic(bar, kind + " cannot declare class hooks").with_code("E0216")
+                           .label("class hook clause in " + kind)
+                           .help("declare the hooks on a named class"));
+            } catch (const Diagnostic& error) {
+                if (stopped_) throw;
+                record(error);
+                skip_hook_clause();
+            }
+        }
+    }
+
+    HookClause hook_clause() {
+        if (at("#")) {
+            const auto first = cursor_;
+            tag_list();
+            record(malformed_hook(span_from(first), "a class hook clause takes no tags")
+                       .label("tags before a class hook clause")
+                       .note("a tag of the class is written before 'let'"));
+        } else if (at("export")) {
+            const auto word = advance().span;
+            record(malformed_hook(word, "a class hook clause takes no tags")
+                       .label("'export' does not apply to a class hook clause")
+                       .suggest("remove 'export'", Span{word.file, word.line, word.column, word.offset,
+                                                        current().span.offset - word.offset},
+                                "", Applicability::MachineApplicable));
+        }
+        const auto start = cursor_;
+        advance();
+        const auto& keyword = current();
+        if (keyword.kind != TokenKind::Identifier || (keyword.text != "get" && keyword.text != "set"))
+            throw malformed_hook(keyword.span, "expected 'get' or 'set' after '|'")
+                .label(keyword.kind == TokenKind::End ? "expected 'get' or 'set' before the end of the file"
+                                                      : "expected 'get' or 'set', " + found_text(keyword));
+        advance();
+        HookClause clause;
+        clause.setter = keyword.text == "set";
+        clause.keyword = keyword.span;
+        if (match(".")) {
+            if (!at("override"))
+                throw malformed_hook(current().span, "only '.override' may follow 'get' or 'set'")
+                    .label("expected 'override', " + found_text(current()));
+            clause.override_word = advance().span;
+        }
+        if (!at(":"))
+            throw malformed_hook(current().kind == TokenKind::End ? after_previous() : current().span,
+                                 "expected ':'")
+                .label(current().kind == TokenKind::End ? "expected ':' before the end of the file"
+                                                        : "expected ':', " + found_text(current()));
+        advance();
+        if (at("{")) {
+            clause.block = true;
+            clause.body = block();
+            clause.close = tokens_[cursor_ - 1].span;
+        } else {
+            if (at(")") || at(";") || at_end() || at_declaration())
+                throw malformed_hook(current().kind == TokenKind::End ? after_previous() : current().span,
+                                     "a class hook clause needs an expression or a block after ':'")
+                    .label(current().kind == TokenKind::End ? "expected an expression before the end of the file"
+                                                            : "expected an expression, " + found_text(current()));
+            clause.expression = expression();
+        }
+        if (!at(";")) {
+            const auto after = after_previous();
+            record(malformed_hook(current().kind == TokenKind::End ? after : current().span,
+                                  "a class hook clause ends with ';'")
+                       .label(current().kind == TokenKind::End ? "expected ';' before the end of the file"
+                                                               : "expected ';', " + found_text(current()))
+                       .suggest("add the missing ';'", after, ";", Applicability::MachineApplicable));
+        } else {
+            advance();
+        }
+        clause.span = span_from(start);
+        return clause;
+    }
+
+    // After an error in a clause: skips to its ';', or to the ')' or '}'
+    // that closes the enclosing body, which is left for the caller.
+    void skip_hook_clause() {
+        std::size_t depth = 0;
+        while (!at_end()) {
+            const auto& token = current();
+            if (token.kind == TokenKind::Symbol) {
+                const auto& text = token.text;
+                if (text == "(" || text == "[" || text == "{") {
+                    ++depth;
+                } else if (text == ")" || text == "]" || text == "}") {
+                    if (depth == 0) return;
+                    --depth;
+                } else if (text == ";" && depth == 0) {
+                    advance();
+                    return;
+                }
+            }
+            advance();
+        }
     }
 
     // Accessor clauses after a member's ';' (Types.md, Accessors). No member

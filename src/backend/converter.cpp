@@ -9,6 +9,7 @@
 #include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/inline_limit.hpp"
@@ -4191,6 +4192,7 @@ void FunctionCompiler::compile() {
 } // namespace
 
 Conversion convert(const IrProgram& program, const ConversionOptions& options) {
+    require_executable_hooks(program);
     return Converter(program, options).run();
 }
 
