@@ -1,0 +1,9 @@
+error[E0571]: field 'state' has type 'Optional<Node>', which a record cannot hold
+ --> $DIR/field-payload-enum.nra:5:24
+  |
+5 | let P = record (state: Optional<Node>);
+  |                        ^^^^^^^^^^^^^^ 'Optional<Node>' is a payload enum, which has no value members in this release yet
+  |
+  = help: hold a record, a tuple or an enum of eligible types, or declare 'P' as an #Immutable class and not as a record
+
+For more information about this error, try `neura explain E0571`.

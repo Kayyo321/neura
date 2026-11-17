@@ -1,0 +1,57 @@
+// Records that compile (docs/design/Records030.md, edge cases 1, 2, 12, 14,
+// 15, 16, 21, 22 in part, 25 and 39).
+let Named = interface (
+    export let name = func() -> string;
+);
+
+// Case 1: a trailing comma changes nothing.
+let P = record (x: int, y: int);
+let Q = record(x: int, y: int,);
+
+// Case 2: comments between components; the documentation attaches to the
+// next component.
+let Split = record (
+    // An ordinary comment.
+    id: int64,
+    /// The display name.
+    name: string,
+);
+
+// Case 12: `record` stays a name everywhere else.
+let record = func(value: string) -> int => value.byte_length;
+let first = "A";
+let second = "BC";
+let entry = record("B");
+let total = record(first) + record(second);
+
+// Case 15: tags on the record and on a field.
+#Since("0.3.0")
+let Tagged = record (#Deprecated("use b") a: int, b: int);
+
+// Case 16: writing the implied tags changes nothing.
+#Immutable
+#Final
+let Plain = record (x: int);
+
+// Case 21: a record may hold its own type.
+let Node = record (value: int, next: Node);
+let chain = new Node(1, new Node(2, nil));
+
+// Case 22, in part: tuples and fieldless enums of eligible types.
+let Mode = enum (Fast, Slow);
+let Parts = record (pair: [int, string], mode: Mode, node: Node);
+
+// Case 25: positional, target-typed and named construction.
+let p = new P(1, 2);
+let typed: P = new(1, 2);
+let named = new P(y: 2, x: 1);
+
+// Case 39: a record in a module and as a static member of a class.
+let Shapes = module (
+    export let Point = record (x: float64, y: float64);
+);
+let Holder = class (
+    export static let Inner = record (value: int);
+);
+let point = new Shapes.Point(1.0, 2.0);
+let inner = new Holder.Inner(3);

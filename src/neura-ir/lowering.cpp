@@ -26,6 +26,7 @@
 #include <cmath>
 #include <functional>
 #include <cstdint>
+#include <deque>
 #include <limits>
 #include <map>
 #include <optional>
@@ -524,6 +525,21 @@ private:
     std::optional<IrNode> extension_member(const Expr& expr, const IrNode& receiver, Context& context, bool for_call);
     IrNode extension_call(const Expr& expr, IrNode callee, Context& context, const IrType* expected);
     static bool lambda_fits(const Expr& expr, const IrType& expected);
+
+    // Records (docs/design/Records030.md). The implementation is in
+    // lowering_records.inc.
+    std::deque<Declaration> generated_declarations_;
+    // The value members lowering generated for each record.
+    std::map<SymbolId, std::vector<Declaration*>> record_members_;
+    bool record_class(SymbolId cls) const;
+    void check_record_syntax(const Declaration& decl) const;
+    void declare_record(SymbolId id, const Declaration& decl);
+    void lower_record_members(SymbolId id);
+    std::vector<TagSyntax> record_tags(const Declaration& decl) const;
+    std::optional<std::string> record_ineligible(const IrType& type, IrType& inner) const;
+    void check_record(SymbolId id);
+    void reject_record_destroy(const IrNode& object) const;
+    static void record_call_help(const Expr& initializer, Diagnostic& error);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -720,6 +736,7 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
 }
 
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
+    if (decl.record) check_record_syntax(decl);
     if (!decl.accessors.empty()) check_accessor_member(decl, owner);
     if (decl.name == "_" && kind != SymbolKind::Variant) {
         if (decl.kind != DeclKind::Binding || decl.exported || decl.override_member ||
@@ -811,12 +828,13 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(instance).constant = true;
     }
     if (!decl.accessors.empty()) declare_accessors(decl, id);
-    attach_tags(program_, id, tag_target(program_, id), decl.tags, decl.name_span.value_or(decl.span),
-                entries_[id].overloads);
+    attach_tags(program_, id, tag_target(program_, id), decl.record ? record_tags(decl) : decl.tags,
+                decl.name_span.value_or(decl.span), entries_[id].overloads);
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
     for (const auto& child : decl.members) declare(child, id, member_kind);
+    if (decl.record) declare_record(id, decl);
     return id;
 }
 
@@ -1577,7 +1595,14 @@ void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
             symbol(id).type = std::move(builtin);
             return;
         }
-        auto initializer = expression(init, ctx);
+        auto initializer = [&] {
+            try {
+                return expression(init, ctx);
+            } catch (Diagnostic& error) {
+                record_call_help(init, error);
+                throw;
+            }
+        }();
         if (initializer.op == IrOp::Reference && initializer.symbol != no_symbol) {
             auto kind = symbol(initializer.symbol).kind;
             if (kind == SymbolKind::Alias || class_or_interface(kind) || kind == SymbolKind::Enum) {
@@ -4187,6 +4212,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         if (object.type.kind != TypeKind::Object) {
             throw Diagnostic(object.span, "destroy requires an object").with_code("E0514");
         }
+        reject_record_destroy(object);
         if (entries_[object.type.symbol].singleton_instance != no_symbol)
             throw Diagnostic(object.span, "a singleton cannot be destroyed").with_code("E0511");
         auto result = node(IrOp::Destroy, stmt.span);
@@ -4795,6 +4821,7 @@ void Lowering::lower_declaration(SymbolId id) {
         const auto branches = entries_[id].overloads;
         for (const auto branch : branches) lower_declaration(branch);
     } else if (declaration.kind == DeclKind::Module || class_or_interface(symbol(id).kind)) {
+        if (declaration.record) check_record(id);
         if (symbol(id).kind == SymbolKind::Class) {
             const auto fields = reference_fields(declaration);
             if (!fields.empty()) {
@@ -4866,6 +4893,7 @@ void Lowering::lower_declaration(SymbolId id) {
                 region.push_back(std::move(instruction));
             }
         }
+        lower_record_members(id);
         if (!initializers.empty()) program_.bodies.push_back({id, std::move(initializers)});
         if (!static_initializers.empty())
             program_.bodies.push_back({entries_[id].static_scope, std::move(static_initializers)});
@@ -5082,6 +5110,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 }
 
 #include "lowering_accessors.inc"
+#include "lowering_records.inc"
 #include "lowering_calls.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;

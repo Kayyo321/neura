@@ -869,6 +869,7 @@ private:
             result.name_span = name.span;
             if (match(":")) {
                 result.type = type();
+                check_record_type(result);
             }
         }
 
@@ -1016,8 +1017,11 @@ private:
                 }
                 expect(")");
                 expand_constructor_shorthands(result);
+            } else if (!result.type && !result.last && record_initializer(result)) {
+                // A record (parser_records.inc).
             } else {
                 result.initializer = expression();
+                check_record_expression(result);
             }
         } else if (!result.type && result.last) {
             throw deferred_last_without_type(result);
@@ -1169,6 +1173,8 @@ private:
             }
         }
     }
+
+#include "parser_records.inc"
 
     static void definition_has_no_annotation(const Declaration& declaration) {
         if (declaration.type) {

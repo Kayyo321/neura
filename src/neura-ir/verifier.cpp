@@ -440,9 +440,31 @@ private:
                     report(entry.span, "an extension function needs a receiver parameter, and " + name(id) +
                                            " has none");
                 break;
+            case AttributeId::ClassRecord:
+                check_record(id, entry, attribute.value.symbol);
+                break;
+            case AttributeId::Generated: {
+                const auto& generator = attribute.value.items[0].text;
+                if (generator != "record" && generator != "property.adapter" && generator != "derive:json.codec")
+                    report(entry.span, name(id) + " names the unknown generator '" + generator + "'");
+                break;
+            }
             default:
                 break;
             }
+        }
+    }
+
+    // A record (docs/design/Records030.md) names its own constructor, and
+    // every instance field it declares is assigned once.
+    void check_record(SymbolId id, const IrSymbol& entry, SymbolId constructor) {
+        if (symbol(constructor).kind != SymbolKind::Function || symbol(constructor).owner != id ||
+            symbol(constructor).name != "init")
+            report(entry.span, "record " + name(id) + " names " + name(constructor) + " as its constructor");
+        for (SymbolId field = 0; field < program_.symbols.size(); ++field) {
+            const auto& item = symbol(field);
+            if (item.kind == SymbolKind::Field && item.owner == id && !last_binding(item))
+                report(item.span, "field " + name(field) + " of record " + name(id) + " is not 'last'");
         }
     }
 

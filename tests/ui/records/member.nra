@@ -1,0 +1,2 @@
+// A record holds components only (edge case 10).
+let P = record (x: int; export let f = func() -> int => x;);

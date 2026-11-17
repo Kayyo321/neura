@@ -1,0 +1,9 @@
+error[E0421]: 'limit' is not a type
+ --> $DIR/named-call.nra:5:23
+  |
+5 | let x = record(count: limit);
+  |                       ^^^^^
+  |
+  = help: if 'record(...)' is meant as a call, write '(record)(...)'
+
+For more information about this error, try `neura explain E0421`.

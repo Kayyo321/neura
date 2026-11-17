@@ -84,6 +84,10 @@ struct Hints {
     // The ':' of a conditional or of a range's step, which is spaced on
     // both sides, unlike a label's or an annotation's.
     std::set<std::size_t> spaced_colons;
+    // The '(' of a record's components, which is spaced like a class body's,
+    // and the ')' of a multiline record that needs a trailing ',' before it.
+    std::set<std::size_t> record_bodies;
+    std::set<std::size_t> trailing_commas;
 };
 
 class SyntaxHints {
@@ -220,23 +224,39 @@ private:
                                value.kind == Declaration::Kind::Interface || value.kind == Declaration::Kind::Enum;
         bool head = false;
         bool found_body = false;
+        const bool single_line = source_.substr(value.span.offset, value.span.length).find_first_of("\r\n") ==
+                                 std::string_view::npos;
         in_span(value.span, [&](const Token& token) {
             if (!head && (token.text == "class" || token.text == "module" || token.text == "interface" ||
-                          token.text == "enum" || token.text == "singleton" || token.text == "func")) head = true;
+                          token.text == "enum" || token.text == "singleton" || token.text == "func" ||
+                          (value.record && token.span.offset == value.record->keyword.offset))) head = true;
             else if (head && !found_body) {
                 if (token.text == "<" || token.text == ">") hints_.angles.insert(token.span.offset);
                 if (token.text == "(") {
                     found_body = true;
-                    const bool multiline_enum = value.kind != Declaration::Kind::Enum ||
-                        source_.substr(value.span.offset, value.span.length).find_first_of("\r\n") != std::string_view::npos;
+                    // An enum or a record written on one line stays on one line.
+                    const bool multiline_enum = (value.kind != Declaration::Kind::Enum && !value.record) || !single_line;
                     if (container && multiline_enum) hints_.bodies.insert(token.span.offset);
+                    if (value.record) hints_.record_bodies.insert(token.span.offset);
                 }
                 if (token.text == "{") found_body = true;
             }
         });
+        // A record written over several lines has one component per line and
+        // a trailing comma.
+        if (value.record && !single_line) {
+            const auto close = value.record->close.offset;
+            const Token* last = nullptr;
+            for (const auto& token : tokens_) {
+                if (token.span.offset >= close) break;
+                last = &token;
+            }
+            if (last && last->text != "," && last->text != "(") hints_.trailing_commas.insert(close);
+        }
 
         for (std::size_t i = 0; i < value.members.size(); ++i) {
             const auto& member = value.members[i];
+            if (member.generated) continue;
             if (i > 0) {
                 const auto& previous = value.members[i - 1];
                 const bool multiline = previous.kind != Declaration::Kind::Binding ||
@@ -245,7 +265,7 @@ private:
                     source_.substr(previous.span.offset, previous.span.length).find_first_of("\r\n") != std::string_view::npos;
                 if (multiline || !previous.accessors.empty()) hints_.blank_before.insert(first_offset(member));
             }
-            declaration(member, value.kind == Declaration::Kind::Enum);
+            declaration(member, value.kind == Declaration::Kind::Enum || value.record != nullptr);
         }
         for (const auto& body : value.body) statement(body);
         for (const auto& overload : value.overloads) declaration(overload);
@@ -425,7 +445,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
         } else if (text == "(" ) {
             const bool control = before == "if" || before == "while" || before == "for" || before == "match" || before == "scope";
             const bool body = hints.bodies.contains(item.offset);
-            space = control || body || before == "module" || before == "class" || before == "interface" || before == "enum" || before == "singleton";
+            space = control || body || hints.record_bodies.contains(item.offset) || before == "module" ||
+                    before == "class" || before == "interface" || before == "enum" || before == "singleton";
             out.text(text, indent(), space);
             const bool multiline = body && next != ")";
             delimiters.push_back({text, multiline, control});
@@ -445,6 +466,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
                 multiline = delimiters.back().multiline;
                 delimiters.pop_back();
             }
+            if (multiline && hints.trailing_commas.contains(item.offset)) out.text(",", indent(), false);
             if (multiline) { --depth; out.line(); }
             out.text(text, indent(), text == "}" && !multiline && before != "{");
             if (text == "}" && next != ";" && next != "," && next != ")" && next != "]" && next != "." &&
@@ -517,10 +539,16 @@ std::string format_source(std::string_view source, const std::string& file, Form
     const auto hints = SyntaxHints(tokens, source).collect(syntax);
     auto formatted = render(source, tokens, hints, options);
     const auto result = lex(formatted, file);
-    if (tokens.size() != result.size()) throw std::runtime_error("formatter refused a change to source tokenization");
-    for (std::size_t i = 0; i < tokens.size(); ++i) {
+    // The only token the formatter adds is the trailing ',' of a multiline
+    // record, directly before its ')'.
+    if (tokens.size() + hints.trailing_commas.size() != result.size())
+        throw std::runtime_error("formatter refused a change to source tokenization");
+    for (std::size_t i = 0, j = 0; i < tokens.size(); ++i, ++j) {
         const auto& before = tokens[i];
-        const auto& after = result[i];
+        if (hints.trailing_commas.contains(before.span.offset) && j + 1 < result.size() && result[j].text == "," &&
+            result[j].kind == TokenKind::Symbol)
+            ++j;
+        const auto& after = result[j];
         if (before.kind != after.kind || before.text != after.text)
             throw std::runtime_error("formatter refused a change to source tokenization");
         if (static_cast<bool>(before.documentation) != static_cast<bool>(after.documentation) ||

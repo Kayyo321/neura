@@ -1,0 +1,5 @@
+// A record needs at least one component (edge case 4).
+let Named = interface (
+    export let name = func() -> string;
+);
+let P = record implements Named ();

@@ -1,0 +1,5 @@
+// Payload enums have no value members until the step that follows the
+// storage milestone, so a record cannot hold one yet (edge case 22).
+let.promote _ = import:Std.Core.Optional;
+let Node = record (value: int, next: Node);
+let P = record (state: Optional<Node>);

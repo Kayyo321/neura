@@ -1,0 +1,3 @@
+// The names of the generated members' parameters and locals stay usable.
+let R = record (other: int, that: int, hash: int);
+let text = new R(1, 2, 3).to_string();

@@ -1,0 +1,9 @@
+error[E0570]: invalid record declaration
+ --> $DIR/reserved.nra:2:17
+  |
+2 | let P = record (init: int);
+  |                 ^^^^ a record component cannot be named 'init'
+  |
+  = help: rename the component
+
+For more information about this error, try `neura explain E0570`.

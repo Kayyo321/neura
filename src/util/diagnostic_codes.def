@@ -154,6 +154,8 @@ NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
 NEURA_DIAGNOSTIC(E0537, "constructor shorthand names no instance field")
 NEURA_DIAGNOSTIC(E0560, "parameter names differ from the overridden method")
 NEURA_DIAGNOSTIC(E0561, "defaults differ from the overridden method")
+NEURA_DIAGNOSTIC(E0570, "invalid record declaration")
+NEURA_DIAGNOSTIC(E0571, "record field of a type a record cannot hold")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

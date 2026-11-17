@@ -1,0 +1,7 @@
+error[E0304]: unknown name 'record'
+ --> $DIR/annotated.nra:2:16
+  |
+2 | let P: class = record (x: int);
+  |                ^^^^^^ not found in this scope
+
+For more information about this error, try `neura explain E0304`.

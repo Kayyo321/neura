@@ -223,6 +223,18 @@ struct AccessorClause {
     bool block{};
 };
 
+// A record class (docs/design/Records030.md, Records). The parser has built
+// its fields, one `export last` field per component, and its generated
+// constructor `init = func(components) => set`, already expanded.
+struct RecordSyntax {
+    // The word `record`, and the ')' that ends the components.
+    Span keyword;
+    Span close;
+    // Parts a record does not take, in source order, each with the message
+    // of its E0570; lowering reports the first.
+    std::vector<std::pair<Span, std::string>> problems{};
+};
+
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
     enum class Kind { Binding, Function, Class, Module, Enum, Interface };
@@ -292,6 +304,12 @@ struct Declaration {
     bool extension{};
     bool extension_set{};
     std::optional<Span> extension_word{};
+    // A record (docs/design/Records030.md): a class whose members the parser
+    // built from its components. Lowering adds its value members.
+    std::shared_ptr<const RecordSyntax> record{};
+    // A member that lowering generated and no source spells, such as a
+    // record's value members. Tools skip it where they show written source.
+    bool generated{};
 };
 
 struct ResolvedImport {

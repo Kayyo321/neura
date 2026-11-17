@@ -1,0 +1,5 @@
+// A field cannot be assigned again (edge case 27).
+let P = record (x: int, y: int);
+let f = func(p: P) {
+    p.x = 3;
+};

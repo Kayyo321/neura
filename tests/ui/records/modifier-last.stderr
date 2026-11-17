@@ -1,0 +1,9 @@
+error[E0570]: invalid record declaration
+ --> $DIR/modifier-last.nra:2:17
+  |
+2 | let P = record (last x: int);
+  |                 ^^^^ a record component takes no 'last'
+  |
+  = help: remove it, or declare a class instead of a record
+
+For more information about this error, try `neura explain E0570`.

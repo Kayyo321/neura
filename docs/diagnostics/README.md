@@ -166,6 +166,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0537](E0537.md) | constructor shorthand names no instance field |
 | [E0560](E0560.md) | parameter names differ from the overridden method |
 | [E0561](E0561.md) | defaults differ from the overridden method |
+| [E0570](E0570.md) | invalid record declaration |
+| [E0571](E0571.md) | record field of a type a record cannot hold |
 
 ## E06xx: Concurrency
 

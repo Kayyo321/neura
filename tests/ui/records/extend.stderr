@@ -1,0 +1,11 @@
+error[E0912]: class 'Q' extends the final class 'P'
+ --> $DIR/extend.nra:3:17
+  |
+2 | let P = record (x: int);
+  |         ------ 'P' is marked #Final here
+3 | let Q = class : P ();
+  |                 ^ extends a final class
+  |
+  = help: extend another class, or hold a 'P' in a field instead
+
+For more information about this error, try `neura explain E0912`.

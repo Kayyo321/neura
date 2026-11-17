@@ -500,6 +500,49 @@ The body has accessors, so it is a class of its own: `code` and `non_zero` take 
 
 **Separate compilation.** A fields-only class is the same class in every module that writes its fields, including prebuilt NeuraIR modules compiled separately: a program can pass an object that one module created to a function of another module whose parameter writes the same fields. In NeuraIR the class is declared in a generated file of its own, named after a hash of its fields, so every module that writes those fields declares the same file and linking coalesces it ([NeuraIR format](NirFormat#anonymous-classes)). A class of its own belongs to the source file where it is written. Every anonymous class carries the [`class.anonymous`](NirFormat#symbol-attributes) attribute.
 
+### Records
+
+*Status: proposed in [the 0.3.0 records note](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md); implemented except that a record cannot yet hold a payload enum.*
+
+A record is a nominal class that is final and deeply immutable, with a generated constructor and generated value members. It is declared by its components, written where `class` is: `let User = record (id: int64, name: string);`.
+
+```text
+record    := "record" ["implements" type ("," type)*] "(" component ("," component)* [","] ")"
+component := tag* name ":" type
+```
+
+`record` is a contextual word. It begins a record only as the first token of the initializer of a `let` or `const` declaration without a type annotation, and only when `implements`, or `(` followed by any tags and then a name and `:`, follows it; everywhere else `record` is an ordinary name, so `record()`, `record("B")` and `record < limit` keep their meaning. A call of a function named `record` whose first argument is named, written as the whole initializer of an unannotated declaration, is written `(record)(count: limit)`.
+
+Each component becomes an `export last` field, in order, and the record has exactly one constructor, `export let init = func(id: int64, name: string) => set;`, so a record is constructed like any class: `new User(7, "Ada")`, target-typed `new(7, "Ada")`, or with [named arguments](CoreLanguage#named-arguments) whose labels are the field names. A component takes no default, no modifier and no grouping ([E0570](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0570.md)); a record needs at least one component, and its body holds components only: no methods, constructors, accessors, nested types or static members. A record is not generic and has no base class.
+
+A record behaves as a class tagged [`#Final`](Tags) and [`#Immutable`](#immutable-classes): extending it is [E0912](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0912.md), its instances are shared between tasks, and writing either tag changes nothing. It is a reference type: `nil` is a value of every record type, `==` compares identity, `is` and `as` work as for classes, and `destroy` of a record is [E0514](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0514.md), since copies share their children. A record may implement interfaces whose requirements its fields, its generated members or interface defaults satisfy.
+
+A field's type must be one a record can hold ([E0571](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0571.md)): `bool`, the integer and floating-point types, `string`, a fieldless enum, a record (the record being declared included), or a tuple of those. In this release a record cannot hold a payload enum, `Optional` included, until payload enums have value members.
+
+Lowering generates three members, ordinary exported methods with bodies:
+
+| Member | Result |
+| --- | --- |
+| `equals(other: class) -> bool` | False when `other` is nil or not this record type; otherwise the fields compared in declaration order with the value equality of each field's type, stopping at the first unequal pair. A nil record field equals only nil. |
+| `hash_code() -> uint32` | Start with 1; for each field in declaration order, 31 times the hash plus the field's hash, wrapping. A nil record field hashes to 0. |
+| `to_string() -> string` | The qualified name, `(`, each field as `name: text` separated by `, `, `)`, such as `App.User(id: 7, name: Ada)`. A nil record field prints `nil`. |
+
+Field equality, hashing and text are those of [the standard library](Stdlib-Design#52-equality-hashing-and-text): a float is equal by bit pattern with every NaN equal to every NaN. The text and hash use no identity number and no image-local name, so they are the same in every build and without the `NAME` and `SMAP` sections.
+
+<!-- example: check -->
+```neura
+let Point = record (x: int, y: int);
+let Path = record (start: Point, end: Point, label: string);
+
+let a = new Path(new Point(1, 2), new Point(3, 4), "diagonal");
+let b = new Path(new Point(1, 2), new Point(3, 4), "diagonal");
+let same = a === b;
+let identical = a == b;
+let text = a.to_string();
+```
+
+`same` is true and `identical` false. See [records.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/records.nra).
+
 ## Enums
 
 An enum declares a closed set of named variants. Variants are written qualified by the enum's name.

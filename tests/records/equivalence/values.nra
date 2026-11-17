@@ -1,0 +1,71 @@
+// The value members of records (docs/design/Records030.md, edge cases 25 and
+// 30 to 35): identity under `==`, value equality under `===`, the hash
+// formula checked against hand-computed constants, and the text, which does
+// not depend on the NAME and SMAP sections.
+let console = import:Std.Io.Console;
+let hash_map = import:Std.Collections.HashMap;
+let program = import:Std.Program;
+
+let P = record (x: int, y: int);
+let A = record (value: int);
+let B = record (value: int);
+let Node = record (value: int, next: Node);
+let F = record (f: float64);
+let Mode = enum (Fast, Slow);
+let Mixed = record (pair: [int, string], mode: Mode, node: Node, wide: int64, small: uint8, ok: bool);
+
+let App = module (
+    export let User = record (id: int64, name: string, active: bool);
+);
+
+let say = func(label: string, value: bool) {
+    console.print_line(label + " " + value.to_string());
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // Case 25.
+        let p = new P(1, 2);
+        let typed: P = new(1, 2);
+        let named = new P(y: 2, x: 1);
+        console.print_line(p.to_string() + " " + typed.to_string() + " " + named.to_string());
+        // Case 30.
+        say("new P(1, 2) == new P(1, 2):", new P(1, 2) == new P(1, 2));
+        say("new P(1, 2) === new P(1, 2):", new P(1, 2) === new P(1, 2));
+        say("p == p:", p == p);
+        say("p === named:", p === named);
+        say("p === new P(2, 1):", p === new P(2, 1));
+        // Case 31.
+        say("new A(1) === new B(1):", new A(1) === new B(1));
+        say("p.equals(nil):", p.equals(nil));
+        // Case 32.
+        let zero = 0.0;
+        let nan = zero / zero;
+        say("NaN === NaN:", new F(nan) === new F(nan));
+        say("0.0 === -0.0:", new F(0.0) === new F(-0.0));
+        say("hash(NaN) == hash(NaN):", new F(nan).hash_code() == new F(-nan).hash_code());
+        say("hash(0.0) != hash(-0.0):", new F(0.0).hash_code() != new F(-0.0).hash_code());
+        // Case 33: 31 * (31 * 1 + 1) + 2 = 994; Node(1, Node(2, nil)) is
+        // 31 * (31 * 1 + 1) + (31 * (31 * 1 + 2) + 0) = 2015.
+        console.print_line(p.hash_code().to_string());
+        let chain = new Node(1, new Node(2, nil));
+        console.print_line(chain.hash_code().to_string());
+        say("hash(P(1, 2)) == 994:", p.hash_code() == 994);
+        // Case 34.
+        console.print_line(chain.to_string());
+        console.print_line(new App.User(7, "Ada", true).to_string());
+        let mixed = new Mixed([3, "three"], Mode.Slow, chain, -9000000000, 255, false);
+        console.print_line(mixed.to_string());
+        console.print_line(mixed.hash_code().to_string());
+        say("mixed === copy:", mixed === new Mixed([3, "three"], Mode.Slow, new Node(1, new Node(2, nil)),
+                                                   -9000000000, 255, false));
+        say("mixed === other mode:", mixed === new Mixed([3, "three"], Mode.Fast, chain, -9000000000, 255, false));
+        // Case 35: two equal records are one key.
+        let map = hash_map.create<P, string>();
+        map.set(new P(1, 2), "first");
+        map.set(new P(1, 2), "second");
+        map.set(new P(2, 1), "third");
+        console.print_line(map.size().to_string() + " " + map.get_or(new P(1, 2), "none"));
+        return program.ExitCode.Ok;
+    };
+);

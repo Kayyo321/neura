@@ -1,0 +1,2 @@
+// The annotation makes the initializer an expression (edge case 11).
+let P: class = record (x: int);

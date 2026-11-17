@@ -1,0 +1,9 @@
+error[E0304]: unknown name 'record'
+ --> $DIR/empty-call.nra:2:9
+  |
+2 | let P = record ();
+  |         ^^^^^^ not found in this scope
+  |
+  = help: a record needs at least one component, written 'name: Type'
+
+For more information about this error, try `neura explain E0304`.

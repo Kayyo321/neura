@@ -169,6 +169,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
 | [E0560](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0560.md) | parameter names differ from the overridden method |
 | [E0561](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0561.md) | defaults differ from the overridden method |
+| [E0570](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0570.md) | invalid record declaration |
+| [E0571](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0571.md) | record field of a type a record cannot hold |
 
 ## E06xx: Concurrency
 

@@ -213,6 +213,30 @@ let r=f(new(0..10:2));
         self.assertIn("transform(names, func(word) => word.byte_length)", formatted)
         self.assertIn("new(0 .. 10 : 2)", formatted)
 
+    def test_records(self):
+        # docs/design/Records030.md, Formatter: a record is laid out like an
+        # enum with named payloads, one component per line with a trailing
+        # comma, or on one line when it was written on one line. A call of a
+        # function named record keeps its spacing.
+        source = '''let P=record(x:int,y:int);
+let Q=record (
+  // first
+  id:int64,
+  /// the name
+  #Deprecated("no") name:string
+);
+let total=record(first);
+'''
+        self.assertEqual(self.formatted(source), '''let P = record (x: int, y: int);
+let Q = record (
+    // first
+    id: int64,
+    /// the name
+    #Deprecated("no") name: string,
+);
+let total = record(first);
+''')
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

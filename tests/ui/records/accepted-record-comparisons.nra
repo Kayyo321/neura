@@ -1,0 +1,5 @@
+// `record` followed by an operator is an expression (edge case 145).
+let record = 3;
+let limit = 4;
+let small = record < limit;
+let pair = record > 0 ? record : 0;

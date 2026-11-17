@@ -1,0 +1,9 @@
+error[E0202]: unexpected '(' after the type 'record'
+ --> $DIR/type-position.nra:4:15
+  |
+4 | let p: record (x: int) = q;
+  |               ^ a type ends before this
+  |
+  = help: a record is declared as 'let Name = record (...);' and named by that name in a type
+
+For more information about this error, try `neura explain E0202`.

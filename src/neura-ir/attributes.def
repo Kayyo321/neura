@@ -69,3 +69,22 @@ NEURA_ATTRIBUTE(ParameterDefaultVariant, 13, "parameter.default.variant", on_par
 // function that a module enabled with `let.extensions` may call as a member
 // of its first parameter's type. The value is true.
 NEURA_ATTRIBUTE(FunctionExtension, 14, "function.extension", on_function, false, "b")
+// Records, property contracts, static requirements and derivation
+// (docs/design/Records030.md). The milestone's identifiers start at 18 and
+// are renumbered when it merges.
+//
+// A record class: its generated constructor.
+NEURA_ATTRIBUTE(ClassRecord, 18, "class.record", on_class, false, "s")
+// A bodyless `$get_<name>` or `$set_<name>` function of an interface that a
+// property requirement declares: [the property's name, 0 get or 1 set].
+NEURA_ATTRIBUTE(PropertyRequirement, 19, "property.requirement", on_function, false, "[t u1]")
+// A hidden accessor that establishes a slot a subclass may override.
+NEURA_ATTRIBUTE(AccessorVirtual, 20, "accessor.virtual", on_function, false, "b")
+// A static function that implements a static requirement of an interface:
+// [the requirement, the class or primitive whose declaration lists the
+// conformance]. Repeatable.
+NEURA_ATTRIBUTE(StaticImplements, 21, "static.implements", on_function, true, "[s y]")
+// A symbol a generator produced: [the generator, one of "record",
+// "property.adapter" or "derive:json.codec", and the span of the declaration
+// that caused it].
+NEURA_ATTRIBUTE(Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false, "[t p]")

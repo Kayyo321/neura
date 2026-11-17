@@ -1,0 +1,5 @@
+// An interface's implementations need not be records (edge case 19).
+let Named = interface (
+    export let name = func() -> string;
+);
+let P = record (n: Named);

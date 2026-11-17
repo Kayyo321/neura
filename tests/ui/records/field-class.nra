@@ -1,0 +1,2 @@
+// The umbrella type holds any class (edge case 19).
+let P = record (c: class);

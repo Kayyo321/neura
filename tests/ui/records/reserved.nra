@@ -1,0 +1,2 @@
+// A component cannot take a reserved name (edge case 18).
+let P = record (init: int);

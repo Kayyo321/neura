@@ -1,0 +1,3 @@
+// A component cannot take the name of its record, which the generated
+// equals uses for its type.
+let R = record (R: int);

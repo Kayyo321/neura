@@ -1,0 +1,5 @@
+// The collector owns every record (edge case 28).
+let P = record (x: int, y: int);
+let f = func(p: P) {
+    destroy p;
+};

@@ -1,0 +1,2 @@
+// Components are not grouped, so this is a call (edge case 5).
+let P = record (x, y: float64);

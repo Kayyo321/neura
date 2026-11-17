@@ -1,0 +1,9 @@
+error[E0304]: unknown name 'record'
+ --> $DIR/grouped.nra:2:9
+  |
+2 | let P = record (x, y: float64);
+  |         ^^^^^^ not found in this scope
+  |
+  = help: a record's components are not grouped: write 'a: T, b: T'
+
+For more information about this error, try `neura explain E0304`.

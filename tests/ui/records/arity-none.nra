@@ -1,0 +1,3 @@
+// The constructor takes every component (edge case 26).
+let P = record (x: int, y: int);
+let p = new P();

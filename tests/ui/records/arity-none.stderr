@@ -1,0 +1,11 @@
+error[E0407]: expected 2 argument(s)
+ --> $DIR/arity-none.nra:3:9
+  |
+2 | let P = record (x: int, y: int);
+  |         ------ 'init' takes 2 parameters
+3 | let p = new P();
+  |         ^^^^^^^ expected 2 arguments, found 0
+  |
+  = note: parameter 'x' is not given a value
+
+For more information about this error, try `neura explain E0407`.

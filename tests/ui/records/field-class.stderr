@@ -1,0 +1,9 @@
+error[E0571]: field 'c' has type 'class', which a record cannot hold
+ --> $DIR/field-class.nra:2:20
+  |
+2 | let P = record (c: class);
+  |                    ^^^^^ 'class' is the umbrella type 'class', which holds any class
+  |
+  = help: hold a record, a tuple or an enum of eligible types, or declare 'P' as an #Immutable class and not as a record
+
+For more information about this error, try `neura explain E0571`.

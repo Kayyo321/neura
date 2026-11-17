@@ -1,0 +1,3 @@
+// A record is final, so #Sealed conflicts (edge case 16).
+#Sealed
+let P = record (x: int);

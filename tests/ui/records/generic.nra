@@ -1,0 +1,2 @@
+// A record is not generic in this release (edge case 8).
+let P = record<T> (x: T);
