@@ -18,7 +18,7 @@ Status: *proposed* on 2026-11-16. The owner was away and had asked for autonomou
 | --- | --- |
 | A list is constructed with `new`: `new([1, 2, 3])` where the list type is known from context, `new int[list]([1, 2, 3])` with the type written, `new` alone for an empty list of a known type, and `new(0 .. count)` or `new int[list](0 .. count)` from a range. The elements, or the range's bounds, are evaluated once, in written order, straight into the list; no array is built and copied. | proposed |
 | A bare literal or range where a list is expected is an error, `E0450`, with a fix that inserts `new` and keeps the literal, its comments and its order. A bare literal where an array is expected stays an array. A nested list needs its own `new`. | proposed |
-| A function value that captures nothing needs no `new`. One that captures and is stored, returned, passed to a parameter that retains it, or captured by another escaping function value is written `new func(...) ...`. A bound method that escapes is written `new bound(receiver.method)`. Whether a capture escapes follows from the retention summaries of M2. | proposed |
+| A function value that captures nothing needs no `new`. One that captures and is stored, returned, passed to a parameter that retains it, or captured by another escaping function value is written `new func(...) ...`. A bound method that escapes is written `new bound(receiver.method)`. Whether a capture escapes follows from the retention summaries of M2. | implemented (step 10), proposed |
 | An ordinary call that allocates inside, such as a factory or a list that grows, needs no `new`; its summary says it allocates. | proposed |
 
 The record form `new with(original) { ... }` belongs to the records milestone.
@@ -59,12 +59,12 @@ Arrays, primitive-reference storage and non-escaping closure environments that b
 | Rule | Status |
 | --- | --- |
 | A region belongs to a block, a loop iteration, or a function. It is released on every exit from its owner: the end of the block, `break`, `continue`, `return`, a trap, cancellation, and task teardown. A loop releases each iteration's region before the next. | proposed |
-| A fresh array belongs to the region of the block that creates it. Returning a fresh array moves it, and every entry it owns, to the caller's region. A function that returns an array it did not create, borrowed from a parameter, global or field, is an error. | proposed |
-| Assigning an array created in an inner block to a binding of an outer block is an error. An inner binding may borrow an outer array. | proposed |
-| An array may not be stored in a class field, a list element, a channel message, an escaping closure, or a task argument. A tuple or enum that contains an array has the array's lifetime. | proposed |
-| A primitive reference to a local or parameter is a borrow of a region box that lives as long as the binding's block. It may not be returned, stored in a field, or captured by an escaping closure. Returning `&T` is allowed only for global storage or a field of an owner the result summary names. `reference_storage.cpp` no longer promotes storage to the heap. | proposed |
-| A closure environment that does not escape is a region entry of the block that creates it; `new func` and `new bound` allocate on the heap. | proposed |
-| Escapes are checked on lowering and again on the linked, specialized program, with the storage and transfer facts of M2. | proposed |
+| A fresh array belongs to the region of the block that creates it. Returning a fresh array moves it, and every entry it owns, to the caller's region. A function that returns an array it did not create, borrowed from a parameter, global or field, is an error. | implemented (step 9), proposed |
+| Assigning an array created in an inner block to a binding of an outer block is an error. An inner binding may borrow an outer array. | implemented (step 9), proposed |
+| An array may not be stored in a class field, a list element, a channel message, an escaping closure, or a task argument. A tuple or enum that contains an array has the array's lifetime. | implemented (step 9), proposed |
+| A primitive reference to a local or parameter is a borrow of a region box that lives as long as the binding's block. It may not be returned, stored in a field, or captured by an escaping closure. Returning `&T` is allowed only for global storage or a field of an owner the result summary names. `reference_storage.cpp` no longer promotes storage to the heap. | implemented (step 10), proposed |
+| A closure environment that does not escape is a region entry of the block that creates it; `new func` and `new bound` allocate on the heap. | implemented (step 10), proposed |
+| Escapes are checked on lowering and again on the linked, specialized program, with the storage and transfer facts of M2. | implemented (step 10), proposed |
 | Region cells are counted as stack cells, not heap cells. A run reports `peak stack cells` beside `peak heap cells`, and `--max-stack-cells` limits them (default 2^24). Exceeding it is the trap `stack limit exceeded`. | proposed |
 | A handle is never reused, so an access to a released entry finds no entry and traps, in every tier, with `released storage accessed`. The checks above make that unreachable in a verified program. The trap is the runtime's backstop for a malformed image. | proposed |
 | The collector does not sweep a region entry. It traces the references a live region entry holds. | proposed |
@@ -95,6 +95,10 @@ Amended on 2026-11-16: declining every new operation in tiers 2 and 3 would hold
 | 9 | Arrays in regions, with the escape checks | yes |
 | 10 | Primitive references as checked borrows, and closures in regions | yes |
 | 11 | The performance gate | no |
+
+Step 9 implements array placement, transfer, lexical release and E0451 ([Arrays and lists](../lang/Collections.md#array-lifetime)). The converter combines region release and task-scope joins in its existing exit path. At the lifetime milestone, the region token and release move to that milestone's existing exit-stack entry. A task-scope block joins its children before releasing its region. Startup and static arrays live for the execution, and pooled inactive enum words carry no ownership.
+
+Step 10 implements a region box for each addressed local or value parameter. A primitive borrow of an instance field keeps the containing object reachable through an owner field in the borrow box. Conversion emits an owner liveness check before a read or write through that borrow. Unowned closure environments use the lexical region. Noncapturing callable descriptors are fieldless NVR constants in static storage. Explicit `new func` and `new bound` environments use the heap. The compiler keeps the written form in the existing NeuraIR operation text and derives escape and placement facts from the linked bodies.
 
 ## Gate
 

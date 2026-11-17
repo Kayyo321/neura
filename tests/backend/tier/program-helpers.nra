@@ -61,7 +61,7 @@ let ProgramHelpers = module:program.Entry (
             let node = new Node();
             node.value = i as int64;
             node.payload.append(i as int64);
-            let repeated = {0 .. (i % 4 + 1)};
+            let repeated: int[list] = new(0 .. (i % 4 + 1));
             let pair: int64[] = [i as int64, (i + 1) as int64];
             let label = "n" + i.to_string();
             total = (total + node.value + (node.payload.length as int64) + (repeated.length as int64) + pair[1] +

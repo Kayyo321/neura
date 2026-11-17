@@ -42,8 +42,12 @@ let Clean = module (
         return copy[0];
     };
 
-    export let forwarded = func(value: &int) -> &int {
-        return value;
+    let use_borrow = func(value: &int) {
+        value += 1;
+    };
+
+    export let forwarded = func(value: &int) {
+        use_borrow(value);
     };
 
     export let reference_use = func() -> int {

@@ -8,7 +8,7 @@ let program = import:Std.Program;
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let buffer = byte_buffer.create();
-        buffered_writer.with_capacity(buffer.write, 15);
+        buffered_writer.with_capacity(new bound(buffer.write), 15);
         return program.ExitCode.Ok;
     };
 );

@@ -728,7 +728,13 @@ void Validator::constants() {
         case TypeKind::Bytes:
             break;
         case TypeKind::Object:
-            if (size != 0) invalid(where + ": a nil object constant has no payload");
+            if (is_static_object_constant(t, constant)) {
+                if (image_.minor_version < 7) invalid(where + ": static object constants require NVR 1.7");
+                if (!image_.layouts[t.reference].fields.empty())
+                    invalid(where + ": a static object constant requires a fieldless layout");
+            } else if (size != 0) {
+                invalid(where + ": a nil object constant has no payload");
+            }
             break;
         case TypeKind::Array:
         case TypeKind::List:
@@ -1131,7 +1137,11 @@ void Validator::scheduler(const Function& function, const Exit& exit, const std:
     case SchedulerOp::ParallelFinish:
         // A list of item identities in, the array of their results out. Each
         // result is checked against the array's element type as it arrives.
-        arity(1);
+        if (image_.minor_version >= 7 && exit.arguments.size() == 2) {
+            typed_operand(1, unsigned64, "a uint64 region token");
+        } else {
+            arity(1);
+        }
         typed_operand(0, [&](std::uint32_t type) {
             return image_.types[type].kind == TypeKind::List && is_unsigned(image_.types[type].reference, 64);
         }, "a list of uint64");
@@ -1348,8 +1358,9 @@ void Validator::state(const Function& function, const Exit& exit,
     }
     case StateOp::MoveToRegion:
         arity(2);
-        zero_immediate();
-        require_kind(0, {TypeKind::Object, TypeKind::Array, TypeKind::List});
+        if (exit.immediate > 1) invalid(where + ": unknown move-to-region mode");
+        if (exit.immediate == 1) require_kind(0, {TypeKind::Array});
+        else require_kind(0, {TypeKind::Object, TypeKind::Array, TypeKind::List});
         require_token(1);
         no_result();
         break;
@@ -1657,8 +1668,11 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
             const auto token = [&](const Value& operand) {
                 return operand.kind == ValueKind::Slot && tokens[operand.index] != 0;
             };
-            if (std::ranges::any_of(exit.arguments, token)) {
-                invalid(exit_where + ": a region token cannot be a task or channel operand");
+            for (std::size_t i = 0; i < exit.arguments.size(); ++i) {
+                // Parallel finish uses the token in this task to allocate its result.
+                if (exit.scheduler == SchedulerOp::ParallelFinish && i == 1) continue;
+                if (token(exit.arguments[i]))
+                    invalid(exit_where + ": a region token cannot be a task or channel operand");
             }
         }
         switch (exit.kind) {

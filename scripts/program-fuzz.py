@@ -4,7 +4,7 @@ under limit sweeps, so that a runtime change that alters anything observable
 shows up as a difference with a reproduction.
 
 The runtime contract (docs/runtime/NVM.md, "Execution tiers") is that one image
-and one input give the same exit status, trap, steps, peak heap cells, standard
+and one input give the same exit status, trap, steps, peak heap and stack cells, standard
 output, and profile at every tier and in every mode. Hand-written tests cover the
 shapes someone thought of. This tool covers shapes nobody did:
 
@@ -505,13 +505,13 @@ def section_closures(p, k):
     bit = p.fault("closure-division")
     a, b = p.between(2, 9), p.between(1, 30)
     p.declarations.append(fill("""let s${k}_make = func(offset: int64) -> func(int64) -> int64 {
-    return func(value: int64) -> int64 {
+    return new func(value: int64) -> int64 {
         return (value * $a + offset) & Mask;
     };
 };
 
 let s${k}_compose = func(first: func(int64) -> int64, second: func(int64) -> int64) -> func(int64) -> int64 {
-    return func(value: int64) -> int64 {
+    return new func(value: int64) -> int64 {
         return second(first(value));
     };
 };
@@ -523,7 +523,13 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     let bump = func(value: int64) -> int64 {
         return value + scale;
     };
-    let check: int64 = 0;
+    let state: int64 = scale;
+    last alias: &int64 = state;
+    last increment = func {
+        alias += 1;
+    };
+    increment();
+    let check: int64 = state;
     for (let i: int32 = 0; i < size * $m; i++) {
         check = mix(check, both(adders[i % 3](bump(check) & 255)));
     }
@@ -559,7 +565,15 @@ def section_collections(p, k):
         "items.remove_at(items.length);",
         "check = mix(check, grid[1][items.length + 5] as int64);",
     ])
-    p.declarations.append(fill("""let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    p.declarations.append(fill("""let s${k}_grid = func(size: int32) -> int32[][] {
+    last row = 0 .. size;
+    {
+        last middle = [size, $a];
+        return [row, middle, row];
+    }
+};
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
     let items: $E[list] = new;
     for (let i: int32 = 0; i < size * $m + 3; i++) {
         items.append($make);
@@ -575,13 +589,21 @@ def section_collections(p, k):
         }
     }
     items.append(items[0]);
-    let grid: int32[][] = [[1, 2, $b], [size, $a], [3]];
+    let grid = s${k}_grid(4);
+    grid[2][2] = $b;
     let marks: bool[] = [true, false, true, false];
     for (let i: int32 = 0; i < items.length; i++) {
         let swap = items[i];
         items[i] = items[items.length - 1 - i];
         items[items.length - 1 - i] = swap;
         marks[i % 4] = !marks[i % 4];
+    }
+    for (let i = 0; i < items.length; i++) {
+        last iteration = s${k}_grid(i % 4);
+        if (i % 2 == 0) {
+            continue;
+        }
+        check = mix(check, (iteration[0].length + iteration[2].length) as int64);
     }
     let flags: int64 = 0;
     for (let flag in marks) {
@@ -1308,7 +1330,7 @@ class Runner:
         return Outcome(result.returncode, result.stdout, result.stderr)
 
 
-STATS = re.compile(rb"stats: steps (\d+), peak heap cells (\d+)")
+STATS = re.compile(rb"stats: steps (\d+), peak heap cells (\d+)(?:, peak stack cells (\d+))?")
 HEAP_ENTRY = re.compile(rb"heap limit exceeded: allocation of (\d+) cells before entry")
 
 
@@ -1337,6 +1359,8 @@ def limit_options(kind, value):
         return ["--max-steps", str(value)]
     if kind == "heap":
         return ["--max-heap-cells", str(value)]
+    if kind == "stack":
+        return ["--max-stack-cells", str(value)]
     if kind == "frames":
         return ["--max-frames", str(value)]
     if kind == "quantum":
@@ -1367,7 +1391,7 @@ class SeedResult:
 
 def check_seed(seed, coarse, runner, work, modes):
     """Builds a seed's program, runs it at tier 0 and in every mode, and sweeps the limits. Each mode's first
-    difference in each kind of run (no limit, steps, heap, frames, quantum) is a failure."""
+    difference in each kind of run (no limit, steps, heap, stack, frames, quantum) is a failure."""
     result = SeedResult(seed)
     started = time.monotonic()
     source, arguments, program = build_program(seed)
@@ -1441,6 +1465,13 @@ def check_seed(seed, coarse, runner, work, modes):
         heap_points = list(range(low, high + 1))
     for value in heap_points:
         compare("heap", value, limit_options("heap", value))
+
+    peak_stack = int(stats.group(3) or 0)
+    if peak_stack:
+        top = peak_stack + 2
+        stack_points = range(1, top + 1) if top <= 500 and coarse == 1 else spread(1, top, max(2, 200 // coarse))
+        for value in stack_points:
+            compare("stack", value, limit_options("stack", value))
 
     # The deepest call depth: the smallest frame limit under which the run does not trap on the limit.
     def trapped(limit):

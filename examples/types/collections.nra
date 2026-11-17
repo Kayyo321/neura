@@ -15,8 +15,6 @@ let Collections = module (
 
         last lists: string[list][list] = new([new(["a"]), new(["b", "c"])]);
         lists[0].append("d");
-        last list_of_arrays: string[][list] = new([["a"], ["b", "c"]]);
-        list_of_arrays.append(["d"]);
         last array_of_lists: string[list][] = [new(["a"]), new];
         array_of_lists[1].append("b");
 

@@ -35,7 +35,7 @@ let WorkerGroupTests = module (
 
     // A worker function that records each job it runs.
     let recording = func(processed: channels.Sender<int>) -> func(int) -> void {
-        return func(job: int) -> void {
+        return new func(job: int) -> void {
             processed.send(job);
         };
     };
@@ -135,7 +135,7 @@ let WorkerGroupTests = module (
 
     // A worker that blocks until the gate gives it a value: with one worker, the jobs queue up behind the first.
     let gated = func(gate: channels.Receiver<int>, processed: channels.Sender<int>) -> func(int) -> void {
-        return func(job: int) -> void {
+        return new func(job: int) -> void {
             gate.receive();
             processed.send(job);
         };
@@ -195,7 +195,7 @@ let WorkerGroupTests = module (
     // job it was on and stops, and the three jobs still queued are not run.
     let run_cancelled_group = func(gate: channels.Receiver<int>, processed: channels.Sender<int>,
             started: channels.Sender<int>) -> int {
-        let announce_and_wait = func(job: int) -> void {
+        let announce_and_wait = new func(job: int) -> void {
             started.send(job);
             gate.receive();
             processed.send(job);

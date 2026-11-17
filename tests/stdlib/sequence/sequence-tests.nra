@@ -27,7 +27,7 @@ let SequenceTests = module (
         test.assert_equal_string("[]", sequence.range(6, 3).to_list().to_string());
         test.assert_equal_string("[-2, -1]", sequence.range(-2, 0).to_list().to_string());
         let counter = cell.of<int>(0);
-        let generated = sequence.generate<int>(func() -> int {
+        let generated = sequence.generate<int>(new func() -> int {
             counter.value = counter.value + 1;
             return counter.value * 10;
         }).take(3).to_list();
@@ -35,7 +35,7 @@ let SequenceTests = module (
         test.assert_equal_int32(3, counter.value);
         // iterate calls step only when the next element is pulled.
         let steps = cell.of<int>(0);
-        let powers = sequence.iterate<int>(1, func(v: int) -> int {
+        let powers = sequence.iterate<int>(1, new func(v: int) -> int {
             steps.value = steps.value + 1;
             return v * 3;
         }).take(4).to_list();
@@ -73,7 +73,7 @@ let SequenceTests = module (
         test.assert_equal_string("[0, 1]", sequence.range(0, 2).skip(0).to_list().to_string());
         // take stops pulling after the n-th element.
         let pulled = cell.of<int>(0);
-        let firsts = sequence.range(0, 100).peek(func(v: int) -> void {
+        let firsts = sequence.range(0, 100).peek(new func(v: int) -> void {
             pulled.value = pulled.value + 1;
         }).take(3).to_list();
         test.assert_equal_string("[0, 1, 2]", firsts.to_string());
@@ -132,12 +132,12 @@ let SequenceTests = module (
     // through the whole pipeline before the next is requested.
     export let test_lazy_pull_order = func() -> void {
         let log = cell.of<string>("");
-        let pipeline = sequence.range(0, 3).peek(func(v: int) -> void {
+        let pipeline = sequence.range(0, 3).peek(new func(v: int) -> void {
             log.value = log.value + "a" + v.to_string();
-        }).map<int>(func(v: int) -> int {
+        }).map<int>(new func(v: int) -> int {
             log.value = log.value + "m" + v.to_string();
             return v * 10;
-        }).peek(func(v: int) -> void {
+        }).peek(new func(v: int) -> void {
             log.value = log.value + "b" + v.to_string();
         });
         test.assert_equal_string("", log.value);
@@ -175,7 +175,7 @@ let SequenceTests = module (
     export let test_any_all_none = func() -> void {
         let pulled = cell.of<int>(0);
         let counted = func(items: int[list]) -> sequence.Sequence<int> {
-            return sequence.from_list<int>(items).peek(func(v: int) -> void {
+            return sequence.from_list<int>(items).peek(new func(v: int) -> void {
                 pulled.value = pulled.value + 1;
             });
         };

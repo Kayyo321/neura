@@ -538,6 +538,10 @@
                       [] { return std::string("released handle intervals"); })) {
             return d.text;
         }
+        if (static_handles_ != other.static_handles_) {
+            d.note("static region handles", "one set", "another");
+            return d.text;
+        }
         if (released_handles_ != other.released_handles_) {
             d.note("released handles", "one set", "another");
             return d.text;
