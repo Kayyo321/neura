@@ -1,0 +1,23 @@
+error[E0103]: unterminated string literal
+ --> $DIR/interpolation-line-break.nra:2:12
+  |
+2 | let text = $"one
+  |            ^^ this interpolated string is not closed
+  |                 - the line ends here
+  |
+  = note: an interpolated string, its holes included, ends on the line where it starts
+
+error[E0103]: unterminated string literal
+ --> $DIR/interpolation-line-break.nra:3:4
+  |
+3 | two";
+  |    ^ this string is not closed
+  |      - the line ends here
+  |
+  = note: a string literal ends on the line where it starts
+help: close the string
+  |
+3 | two"";
+  |     +
+
+For more information about this error, try `neura explain E0103`.

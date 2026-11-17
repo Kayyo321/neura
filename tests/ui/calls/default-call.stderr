@@ -1,0 +1,9 @@
+error[E0485]: a default is a literal, nil, or a variant without payload
+ --> $DIR/default-call.nra:3:23
+  |
+3 | let f = func(a: int = limit()) -> int => a;
+  |                       ^^^^^^^ not a constant
+  |
+  = help: use an overload, or test for a marker value in the body
+
+For more information about this error, try `neura explain E0485`.

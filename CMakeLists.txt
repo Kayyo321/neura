@@ -592,6 +592,11 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence")
     set_tests_properties(parameters-equivalence PROPERTIES TIMEOUT 180)
+    # The compile-time check of interpolated strings agrees with the
+    # formatting library on a corpus of specifications (docs/design/Calls030.md).
+    add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/calls/format_corpus.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(calls-format-corpus PROPERTIES TIMEOUT 300)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

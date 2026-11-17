@@ -312,6 +312,12 @@ private:
                 if (!parameter.name.empty()) result += parameter.name + ": ";
                 if (parameter.variadic) result += "...";
                 result += type_text(parameter.type);
+                // A default as written (docs/design/Calls030.md).
+                if (parameter.default_value) {
+                    const auto& value = parameter.default_value->span;
+                    result += " = ";
+                    result += source_.substr(value.offset, value.length);
+                }
             }
             result += declaration.named_payload ? '}' : ')';
         }
@@ -449,6 +455,15 @@ std::string doxygen_type(const TypeSyntax& type) {
     return result;
 }
 
+// A default as the source spells it: a literal, a negated number, nil, or
+// a qualified variant.
+std::string default_spelling(const Expr& value) {
+    if (value.kind == Expr::Kind::Unary && !value.operands.empty()) return value.text + value.operands.front().text;
+    if (value.kind == Expr::Kind::Member && !value.operands.empty())
+        return default_spelling(value.operands.front()) + "." + value.text;
+    return value.text;
+}
+
 std::string doxygen_parameters(const Declaration& decl) {
     std::string result = "(";
     for (std::size_t i = 0; i < decl.parameters.size(); ++i) {
@@ -458,6 +473,7 @@ std::string doxygen_parameters(const Declaration& decl) {
         if (param.variadic) type = "NeuraVariadic<" + type + '>';
         result += type;
         if (!param.name.empty()) result += ' ' + param.name;
+        if (param.default_value) result += " = " + default_spelling(*param.default_value);
     }
     result += ')';
     return result;

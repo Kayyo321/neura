@@ -425,14 +425,16 @@ let Derived = class:Base (
     };
 );
 ]=] "8:5" "override does not match inherited member 'make'")
+# A call writes all of its type arguments or none (docs/design/Calls030.md,
+# Contextual inference); none are inferred, some are an error.
 check_rejection(missing-type-arguments [=[
-let identity = func<T>(value: T) -> T {
-    return value;
+let pair = func<A, B>(a: A, b: B) -> B {
+    return b;
 };
-let use = func() -> int32 {
-    return identity(3);
+let use = func() -> string {
+    return pair<int32>(3, "three");
 };
-]=] "6:12" "expected 1 type argument")
+]=] "6:12" "expected 2 type argument")
 
 # Enums: variants are qualified values of their enum; only equality and
 # conversion to an integer apply.

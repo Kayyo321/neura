@@ -1,0 +1,6 @@
+// A call of a function with a variadic parameter is positional (edge case 21).
+let log = func(level: int, parts: ...string) {
+};
+let use = func {
+    log(level: 2, "a", "b");
+};

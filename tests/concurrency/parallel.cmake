@@ -137,7 +137,7 @@ let guards = import:Std.Concurrent.Guarded;
 let maps = import:Std.Collections.HashMap;
 ]=])
 function(check_rejection name declarations body location message_pattern)
-    file(WRITE "${TEST_DIR}/${name}.nra" "${prelude}${declarations}export let Main = module : program.Entry (\n    export let.override main = func(arguments: string[]) -> program.ExitCode {\n${body}        return program.ExitCode.Ok;\n    };\n);\n")
+    file(WRITE "${TEST_DIR}/${name}.nra" "${prelude}${declarations}export let Main = module : program.Entry (\n    export let.override main = func(args: string[]) -> program.ExitCode {\n${body}        return program.ExitCode.Ok;\n    };\n);\n")
     neura(check check --error-format=short "${name}.nra")
     if(check_status STREQUAL "0" OR NOT check_stderr MATCHES "${name}[.]nra:${location}: error(\\[[EW][0-9]+\\])?: " OR NOT check_stderr MATCHES "${message_pattern}")
         message(FATAL_ERROR "${name}: expected a diagnostic at ${location} matching '${message_pattern}'\n${check_stderr}")

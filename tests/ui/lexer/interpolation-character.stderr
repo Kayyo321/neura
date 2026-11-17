@@ -1,0 +1,8 @@
+error[E0486]: format specification is invalid for the argument type
+ --> $DIR/interpolation-character.nra:4:17
+  |
+4 | let text = $"{a:c}";
+  |                 ^ the 'c' presentation is checked only when it runs, against the value; an interpolated string does not use it
+  |               - this hole is int32
+
+For more information about this error, try `neura explain E0486`.

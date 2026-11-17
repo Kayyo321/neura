@@ -1,0 +1,8 @@
+error[E0203]: expected ')'
+ --> $DIR/default-function-type.nra:2:30
+  |
+2 | let apply = func(g: func(int = 1) -> int) -> int => g(2);
+  |                              ^ expected ')', found '='
+  |                         - unclosed '(' opened here
+
+For more information about this error, try `neura explain E0203`.

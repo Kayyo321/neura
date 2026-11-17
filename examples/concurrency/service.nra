@@ -91,7 +91,7 @@ let count_visit = func(visits: guards.Guarded<maps.HashMap<string, int>>, page: 
 };
 
 export let Main = module:program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         // State owned by a task.
         const [requests, incoming, requests_closer] = channels.open<Request>(8);
         scope {

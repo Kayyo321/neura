@@ -1,13 +1,18 @@
 #!/usr/bin/env python3
-"""A program written with grouped parameters or the constructor shorthand
-must build the same image as the program written out in full, and run alike.
+"""A program written with grouped parameters, the constructor shorthand, or
+named arguments in parameter order must build the same image as the program
+written out in full, and run alike.
 
-Each `<name>.grouped.nra` has a `<name>.expanded.nra`. The images are built
-with `--no-source-map`, because a source map records where each construct is
-written and the two spellings are written differently; everything that
-executes, and the optional lift section, must be byte for byte the same.
+Each `<name>.<form>.nra`, such as `groups.grouped.nra` or `named.named.nra`,
+has a `<name>.expanded.nra`. The images are built with `--no-source-map`,
+because a source map records where each construct is written and the two
+spellings are written differently; everything that executes, and the
+optional lift section, must be byte for byte the same.
 `<name>.nra` with `<name>.expected` is a program with no written-out form,
-which is built and run for its output.
+which is built and run for its standard output: from source, unoptimized,
+from a `.nir` module, and without names and a source map, each at the
+default tier and at tier 0. A program that traps keeps the output printed
+before the trap.
 
 Usage: equivalence.py <neura> <directory>
 """
@@ -32,11 +37,11 @@ class EquivalenceTests(unittest.TestCase):
         self.assertEqual(result.returncode, 0, result.stderr)
 
     def test_grouped_and_expanded_forms_build_the_same_image(self):
-        pairs = sorted(DIRECTORY.glob('*.grouped.nra'))
-        self.assertGreaterEqual(len(pairs), 2)
+        pairs = sorted(path for path in DIRECTORY.glob('*.*.nra') if not path.name.endswith('.expanded.nra'))
+        self.assertGreaterEqual(len(pairs), 3)
         with tempfile.TemporaryDirectory() as scratch:
             for grouped in pairs:
-                expanded = grouped.with_name(grouped.name.replace('.grouped.', '.expanded.'))
+                expanded = grouped.with_name(grouped.name.split('.')[0] + '.expanded.nra')
                 with self.subTest(program=grouped.name.split('.')[0]):
                     images = []
                     for source in (grouped, expanded):
@@ -53,15 +58,29 @@ class EquivalenceTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as scratch:
             for expected in sorted(DIRECTORY.glob('*.expected')):
                 source = expected.with_suffix('.nra')
-                image = pathlib.Path(scratch) / (source.name + '.nvr')
-                self.build(source, image)
-                self.assertEqual(run('run', str(image)).stdout, expected.read_text())
+                module = pathlib.Path(scratch) / (source.name + '.nir')
+                result = run('emit-ir', str(source), '-o', str(module))
+                self.assertEqual(result.returncode, 0, result.stderr)
+                builds = {'source': [str(source)], 'unoptimized': ['--no-optimize', str(source)],
+                          'nir': [str(module)], 'stripped': ['--no-source-map', str(source)]}
+                for build, arguments in builds.items():
+                    image = pathlib.Path(scratch) / (source.name + '.' + build + '.nvr')
+                    result = run('build', *arguments, '-o', str(image))
+                    self.assertEqual(result.returncode, 0, result.stderr)
+                    if build == 'stripped':
+                        listing = run('disassemble', str(image), '-o', str(image) + '.nvra')
+                        self.assertEqual(listing.returncode, 0, listing.stderr)
+                        self.assertNotIn('section "NAME"', pathlib.Path(str(image) + '.nvra').read_text())
+                    for tier in ([], ['--tier=0']):
+                        with self.subTest(program=source.name, build=build, tier=tier):
+                            self.assertEqual(run('run', *tier, str(image)).stdout, expected.read_text())
 
     def test_default_images_differ_only_in_what_records_the_source(self):
         # The grouped spelling is a different text, so the default image,
         # which carries a source map, is allowed to differ; it must still run.
         with tempfile.TemporaryDirectory() as scratch:
-            for grouped in sorted(DIRECTORY.glob('*.grouped.nra')):
+            for grouped in sorted(path for path in DIRECTORY.glob('*.*.nra')
+                                  if not path.name.endswith('.expanded.nra')):
                 image = pathlib.Path(scratch) / 'default.nvr'
                 result = run('build', str(grouped), '-o', str(image))
                 self.assertEqual(result.returncode, 0, result.stderr)

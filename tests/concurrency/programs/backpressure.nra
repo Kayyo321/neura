@@ -71,7 +71,7 @@ let run = func(label: string, delay: int) -> void {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         run("slow consumer", 3000);
         run("fast consumer", 0);
         return program.ExitCode.Ok;

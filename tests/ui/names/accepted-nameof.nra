@@ -1,0 +1,38 @@
+// nameof operands that are accepted (docs/design/Calls030.md, edge cases
+// 86, 89 and 90).
+let console = import:Std.Io.Console;
+
+let Invoice = class (
+    export let total: int64 = 0;
+    export let add = func(amount: int64) {
+        total += amount;
+    };
+);
+
+let Box = class<T> (
+    export let value: T;
+);
+
+let Light = enum (Red, Green);
+
+let overloaded = func(a: int) -> int => a
+    or func(a: string) -> int => 0;
+
+let use = func<T>(invoice: Invoice, item: T) {
+    let total = 1;
+    let local = nameof(total);
+    let field = nameof(Invoice.total);
+    let through_value = nameof(invoice.total);
+    let generic = nameof(Box<int>.value);
+    let alias = nameof(console);
+    let method = nameof(invoice.add);
+    let kind = nameof(Invoice);
+    let variant = nameof(Light.Green);
+    let parameter = nameof(item);
+    let type_parameter = nameof(T);
+    let group = nameof(overloaded);
+    let function = nameof(console.print_line);
+    last later: int;
+    let before = nameof(later);
+    later = 2;
+};

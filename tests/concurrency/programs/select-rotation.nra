@@ -106,7 +106,7 @@ let parked_select = func(kind: int) -> void {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         two_ready_arms();
         three_ready_arms();
         parked_select(1);

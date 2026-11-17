@@ -1,0 +1,4 @@
+// A nested width hole has no specification of its own.
+let a = 1;
+let w = 4;
+let text = $"{a:{w:d}}";

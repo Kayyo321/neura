@@ -1,0 +1,9 @@
+// A '&int' receiver obeys the borrow rules of a '&int' argument (edge case 70).
+let.extension bump = func(value: &int) {
+    value += 1;
+};
+let use = func {
+    let count = 1;
+    count.bump();
+    3.bump();
+};

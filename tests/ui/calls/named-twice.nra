@@ -1,0 +1,3 @@
+// The same label twice (edge case 4).
+let area = func(a: int, b: int) -> int => a * b;
+let size = area(b: 1, b: 2);

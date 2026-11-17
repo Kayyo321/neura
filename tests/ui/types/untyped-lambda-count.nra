@@ -1,0 +1,3 @@
+// The lambda takes more parameters than the expected function type (edge case 51).
+let sort = func<T>(items: T[list], before: func(T, T) -> bool) -> int => items.length;
+let use = func(names: string[list]) -> int => sort(names, func(a, b, c) => true);

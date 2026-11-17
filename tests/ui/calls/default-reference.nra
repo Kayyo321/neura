@@ -1,0 +1,3 @@
+// A primitive reference parameter takes no default (edge case 23).
+let bump = func(a: &int = 1) {
+};

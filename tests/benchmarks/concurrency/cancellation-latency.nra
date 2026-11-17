@@ -29,8 +29,8 @@ let running = func(ready: channels.Sender<int>) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
-        let spin = arguments.length > 0 && arguments[0] == "running";
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let spin = args.length > 0 && args[0] == "running";
         let [ready, started, ready_closer] = channels.open<int>(64);
         let [unused, never, never_closer] = channels.open<int>(1);
         let stopped = 0;

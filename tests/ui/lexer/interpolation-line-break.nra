@@ -1,0 +1,3 @@
+// A line break inside the literal (edge case 79).
+let text = $"one
+two";

@@ -1,0 +1,12 @@
+error[E0227]: malformed interpolated string
+ --> $DIR/interpolation-lone-brace.nra:2:15
+  |
+2 | let text = $"a}";
+  |               ^ a single '}' closes no hole
+  |
+help: double it to write a brace
+  |
+2 | let text = $"a}}";
+  |               ~~
+
+For more information about this error, try `neura explain E0227`.

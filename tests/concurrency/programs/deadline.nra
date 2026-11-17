@@ -69,7 +69,7 @@ let ready_arm_beats_the_timer = func -> void {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("== a deadline wakes a parked receive");
         deadline_wakes_a_receive();
         console.print_line("== a timer arm gives up on a channel");

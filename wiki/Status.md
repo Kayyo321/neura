@@ -9,11 +9,11 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 | Area | Supported | Specification |
 | --- | --- | --- |
-| Core | Bindings (`let`, `const`, and assign-once `last` with definite assignment) and destructuring (with a tuple annotation and a value per name), functions and closures, fixed-arity function overloads, variadic parameters, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage) |
+| Core | Bindings (`let`, `const`, and assign-once `last` with definite assignment) and destructuring (with a tuple annotation and a value per name), functions and closures, lambdas with untyped parameters where a function type is expected, fixed-arity function overloads, variadic parameters, named arguments and constant defaults, interpolated strings, `nameof`, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage) |
 | Numbers | Sized integers and floats, aliases, checked arithmetic and conversions, update and compound assignment operators, bitwise operations and shifts, exact float bit reinterpretation | [Numbers](Numbers) |
 | Types | Classes and interfaces with first-use static initialization, getters and setters of exported fields, startup singletons, umbrella `class`, explicit `nil`, reference identity and checked casts, object casts, non-null primitive references, primitive companion calls, value members and `===`, UTF-8 text, tuples, payload enums with exhaustive matching, and anonymous classes in type positions | [Types](Types) |
-| Generics | Generic functions, classes, enums, interfaces, methods and closures, with explicit type arguments, intersection bounds, and specialization | [Polymorphism](Polymorphism) |
-| Modules | Source and prebuilt NeuraIR imports, promoted and wildcard imports, discard bindings, exports, module inheritance, initialization, trusted `Std` sources with host and kernel bindings, and the library-defined or legacy entry point | [Modules](Modules) |
+| Generics | Generic functions, classes, enums, interfaces, methods and closures, with explicit or inferred type arguments, intersection bounds, and specialization | [Polymorphism](Polymorphism) |
+| Modules | Source and prebuilt NeuraIR imports, promoted and wildcard imports, extension sets (`let.extension`, `let.extensions`), discard bindings, exports, module inheritance, initialization, trusted `Std` sources with host and kernel bindings, and the library-defined or legacy entry point | [Modules](Modules) |
 | Lifecycle | Constructors and constructor overloads, target-typed `new`, field initializers, `last` fields assigned once by each constructor, `destroy`, destructors, deterministic tracing garbage collection | [Object lifecycle](ObjectLifecycle) |
 | Collections | Arrays, lists, stepped ranges, `length`, indexing, `append`, `remove_at`, structural versions, and for-each over built-ins or `Iterable<T>` | [Collections](Collections) |
 | Errors | Expected failures as returned values, plus runtime traps and explicit message traps | [Errors](Errors) |
@@ -43,8 +43,8 @@ These are not decided. For most of them the compiler rejects or does not offer t
 | Area | Open decisions |
 | --- | --- |
 | Core | Whether shadowing stays allowed, Unicode identifiers and escapes |
-| Types | Type inference beyond local bindings, static non-nil types, nested enum patterns, match guards, overridable accessors and accessor requirements in interfaces |
-| Generics | Inference of type arguments, generic class inheritance, variance |
+| Types | Type inference beyond local bindings and the arguments of a call, static non-nil types, nested enum patterns, match guards, overridable accessors and accessor requirements in interfaces |
+| Generics | Inference of the type arguments of `new` and of enum constructors, which stay written or target-typed; generic class inheritance, variance |
 | Modules | Package-level resolution, and with it the boundary of `#Internal`, which is a directory tree until packages exist |
 | Lifecycle | Ownership, alias safety beyond the shared-object rule below, definite initialization of `let` fields (`last` fields are checked), failure cleanup |
 
@@ -54,6 +54,7 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 
 | Area | Decision |
 | --- | --- |
+| Calls (0.3.0, proposed) | Named arguments, constant defaults, contextual inference of type arguments and lambda parameters, extension sets, interpolated strings and `nameof`, as [the calls design](https://github.com/Kayyo321/neura/blob/main/docs/design/Calls030.md) states them, implemented autonomously and awaiting the owner's confirmation. A call's admission events for class hooks wait for the class-hook milestone. |
 | Lifecycle: shared objects | An object may be shared between tasks, without its ownership moving, in exactly three cases: a `Std.Concurrent` handle, an instance of an `#Immutable` class, and an instance of a monitor. A monitor is a class whose exported methods are all `#Synchronized`, whose exported fields are `last` or `const` of an immutable type or have accessors, whose fields all have transferable types, whose state no code reaches except through the receiver of its own methods, and whose subclasses are monitors. A synchronized method runs under a per-instance guard built on the scheduler's guard operations, first come, first served, and re-entrant for calls on its own receiver ([Concurrency, section 8.1](Concurrency#81-monitors)). General shared mutable objects stay open. |
 
 ## Frontend conventions

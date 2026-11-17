@@ -655,7 +655,7 @@ Under the last rule a program cannot both use tasks and use `Std.DynamicForeign`
 
 ## Inference, conversions, equality, and absence
 
-An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. The compiler does not infer the type arguments of a generic call; `id(7)` is rejected with `expected 1 type argument(s)`, and `id<int>(7)` is accepted ([Polymorphism](Polymorphism)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections).
+An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. A call of a generic function infers the type arguments it does not write: `id(7)` is `id<int32>(7)` ([Polymorphism](Polymorphism#type-argument-inference)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections).
 
 There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers#conversions). Floating-point equality follows IEEE 754. String equality compares bytes. `==` and `!=` on class and interface references compare identity; `equals` is a separate method ([Umbrella class and nil](#umbrella-class-and-nil)). A fieldless enum supports `==`; an enum with payloads has no built-in equality. Basic scalar comparisons are illustrated in [core.nra](https://github.com/Kayyo321/neura/blob/main/examples/guide/core.nra).
 

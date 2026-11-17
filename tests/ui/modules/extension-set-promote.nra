@@ -1,0 +1,2 @@
+// An extension set is not promoted (edge case 67).
+let.promote.extensions words = import:App.Words;
