@@ -1,0 +1,4 @@
+// A static function without a body outside an interface (edge case 95).
+let Money = class (
+    static let zero = func() -> Money;
+);

@@ -63,7 +63,7 @@ The tags follow the declaration order of the enumerations in [`src/neura-ir/ir.h
 | --- | --- |
 | Type kind | 0 void, 1 bool, 2 string, 3 integer, 4 float, 5 array, 6 list, 7 object, 8 type parameter, 9 module, 10 enum, 11 callable, 12 tuple (1.2) |
 | Symbol kind | 0 file, 1 module, 2 class, 3 alias, 4 import, 5 field, 6 function, 7 parameter, 8 local, 9 global, 10 type parameter, 11 enum, 12 variant, 13 interface (1.3) |
-| Operation | 0 initialize, 1 store, 2 load, 3 reference, 4 receiver, 5 field, 6 index, 7 collection, 8 integer, 9 float, 10 string, 11 boolean, 12 unary, 13 binary, 14 short circuit, 15 call, 16 virtual call, 17 external call, 18 base initialize, 19 allocate, 20 length, 21 append, 22 remove at, 23 return, 24 block, 25 branch, 26 loop, 27 break, 28 continue, 29 destroy, 30 discard. In 1.1, 31 convert, 32 collection version, 33 fail. In 1.2, 34 tuple, 35 project, 36 enum construct, 37 enum tag, 38 enum project, 39 comparison chain, 40 scoped value, 41 select value. In 1.3, 42 make closure, 43 call closure, 44 text length, 45 text byte at, 46 text slice, 47 text from UTF-8, 48 text equal, 49 reinterpret float, 50 trap message, 51 nil, 52 class hash, 53 class text, 54 class is, 55 class cast, 56 value equals, 57 value hash, 58 value text. In 1.4, 59 repeat collection. In 1.7, 60 reference place. In 1.9, 61 task scope, 62 spawn, 63 scheduler call. |
+| Operation | 0 initialize, 1 store, 2 load, 3 reference, 4 receiver, 5 field, 6 index, 7 collection, 8 integer, 9 float, 10 string, 11 boolean, 12 unary, 13 binary, 14 short circuit, 15 call, 16 virtual call, 17 external call, 18 base initialize, 19 allocate, 20 length, 21 append, 22 remove at, 23 return, 24 block, 25 branch, 26 loop, 27 break, 28 continue, 29 destroy, 30 discard. In 1.1, 31 convert, 32 collection version, 33 fail. In 1.2, 34 tuple, 35 project, 36 enum construct, 37 enum tag, 38 enum project, 39 comparison chain, 40 scoped value, 41 select value. In 1.3, 42 make closure, 43 call closure, 44 text length, 45 text byte at, 46 text slice, 47 text from UTF-8, 48 text equal, 49 reinterpret float, 50 trap message, 51 nil, 52 class hash, 53 class text, 54 class is, 55 class cast, 56 value equals, 57 value hash, 58 value text. In 1.4, 59 repeat collection. In 1.7, 60 reference place. In 1.9, 61 task scope, 62 spawn, 63 scheduler call. In 1.13, 64 conformance call. |
 
 Adding an operation, symbol kind, or type kind changes these tables and requires a new format version. Region order is evaluation order. A short-circuit node keeps its right operand in `body`. A branch keeps its arms in `body` and `alternative`. A loop keeps its condition as its operand, its statements in `body`, and, in 1.1, its latch in `alternative`: statements that run after the body and on `continue`, before the condition. A convert node changes its operand to the node's type. A collection-version node reads a list's structural version as `uint64`. A fail statement ends the run with the failure its text names; the only one is `iteration`, a list modified during for-each.
 
@@ -137,6 +137,11 @@ Each registered attribute has a stable identifier, the symbol kinds that may car
 | 12 | `parameter.default` | parameter | no | `[u5 a]` | A constant default of the parameter ([Core language](CoreLanguage#default-values)): a kind and a literal. Kind 0 is a Boolean, 1 a signed integer, 2 an unsigned integer, 3 a float, whose literal is the value's encoding at the parameter's width as an unsigned integer, 4 text, and 5 `nil`, whose literal is false. A caller that leaves the parameter out passes this value |
 | 13 | `parameter.default.variant` | parameter | no | `s` | A default that is an enum variant without payload |
 | 14 | `function.extension` | function | no | `b` | An extension function, which a file or module that enables its module's set may call as a member of its first parameter's type ([Modules](Modules#extension-sets)). The value is true |
+| 18 | `class.record` | class | no | `s` | A [record](Types#records): its generated constructor |
+| 19 | `property.requirement` | function | no | `[t u1]` | On a bodyless `$get_<name>` or `$set_<name>` of an interface: the [property requirement](Polymorphism#interface-properties) it declares, by the property's name, and 0 for get or 1 for set |
+| 20 | `accessor.virtual` | function | no | `b` | A hidden accessor that is a [virtual slot](Polymorphism#virtual-accessors), which a subclass may override. The value is true |
+| 21 | `static.implements` | function | yes | `[s y]` | A static function that implements a [static requirement](Polymorphism#static-interface-requirements): the requirement, and the class or primitive whose declaration lists the conformance |
+| 22 | `generated` | function, class, module | no | `[t p]` | A symbol a generator produced: the generator, `record`, `property.adapter` or `derive:json.codec`, and the span of the declaration that caused it |
 
 Identifier 0 is reserved, and identifiers are never reused. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
 
@@ -148,6 +153,11 @@ The reader rejects an unknown identifier, an unknown value kind, a bool other th
 - A kernel binding names a kernel.
 - `host.effects` marks a function bound to a host service that has no body. The reader rejects the same: a contract on a function with a body, on a kernel, or on a function that is no host binding.
 - A `function.extension` marks a function with at least one parameter.
+- `class.record` names the `init` of its class, and every field of the class is `binding.last`.
+- `property.requirement` marks a bodyless `$get_<name>` or `$set_<name>` of an interface, with no parameter or one.
+- `accessor.virtual` marks a hidden accessor with a body. An accessor that overrides another serves the field that the one it overrides serves, and a property adapter (`generated` with `property.adapter`) serves a field without accessors, which does not name it.
+- `static.implements` names a bodyless static function of an interface, and marks a static function with a body and as many parameters.
+- `generated` names one of the three generators.
 - A `parameter.default` or `parameter.default.variant` belongs to a parameter of a function without a variadic parameter, and its value is a value of the parameter's type: a literal of the kind and width the type names, `nil` for a class or interface, or a variant of the parameter's enum without payload.
 
 Linking a prebuilt module renumbers the symbol references, types, and span files in attributes, as it does for the symbol's own fields. Two definitions coalesce only when their attributes are equal. As with the 1.6 linkage fields, an embedded standard library definition without attributes still links against an installed one that has them. Specialization copies the attributes of every symbol it copies. A reference to a member of the generic class then names the instance's copy, which specialization creates if needed. A reference to a parameter or local of the copied function names its copy.
@@ -178,6 +188,20 @@ The verifier does no flow analysis. It does not check that a store precedes ever
 #### Versioning
 
 A file is written as 1.10 only when a symbol has an attribute or a body contains a deferred initialization. Every other program is written in the earliest version that can encode it, and its bytes are unchanged. A 1.9 reader rejects a 1.10 file with `NeuraIR format 1.10 is not supported; this reader accepts 1.0 through 1.9`. A 1.10 reader reads every earlier file. In a file that declares an earlier version, it rejects the attribute bit (`symbol attributes require NeuraIR format 1.10`) and deferred initialization (`deferred initialization requires NeuraIR format 1.10`).
+
+### Revision 1.13: conformance calls
+
+*The minor version is a placeholder that the 0.3.0 milestones renumber when they merge ([records note](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md)).*
+
+Version 1.13 adds one operation for [static interface requirements](Polymorphism#static-interface-requirements).
+
+| Operation | Region | Fields |
+| --- | --- | --- |
+| Conformance call (64) | An expression whose type is the requirement's result, with the interface's type arguments substituted. | `symbol` is the requirement: a bodyless static function of an interface. `type_arguments` holds one type, the type the call goes through: a type parameter that a bound of the interface constrains. `operands` are the arguments in evaluation order. `text`, `body`, and `alternative` are empty. |
+
+Specialization replaces each conformance call with a direct call of the function whose `static.implements` names the requirement and the type argument, or the nearest base of a class type argument that has one. The verifier accepts the operation only through a type parameter, so none can remain in a specialized function; a conformance call through a concrete type is an error. Analyses that run before specialization treat it as deferred, as they treat a value member of a type parameter.
+
+A file is written as 1.13 only when a body contains a conformance call; every other program keeps the earliest version that can encode it, and its bytes are unchanged. A 1.10 reader rejects a 1.13 file with `NeuraIR format 1.13 is not supported; this reader accepts 1.0 through 1.10`. A build from a 1.13 file produces the same image bytes as a build from the source that wrote it.
 
 ## Reading
 

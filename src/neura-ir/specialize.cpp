@@ -101,6 +101,11 @@ std::string display(const std::vector<IrType>& arguments) {
 }
 
 class Specializer {
+    // Static requirements (docs/design/Records030.md): by requirement and
+    // type key, the function that implements it.
+    bool implementations_built_ = false;
+    std::map<std::pair<SymbolId, std::string>, SymbolId> implementations_;
+
 public:
     Specializer(IrProgram& program, const SpecializationLimits& limits)
         : program_(program), limits_(limits), original_symbols_(program.symbols.size()),
@@ -176,6 +181,17 @@ private:
 
     // True for a declaration inside a generic class or function, including
     // the generic declaration itself and its parameters and locals.
+    // Whether `id` is a static requirement of an interface, or one of its
+    // parameters, and `scope` the interface's static scope.
+    bool requirement_signature(SymbolId id, const IrSymbol& scope) const {
+        if (scope.owner == no_symbol || program_.symbols[scope.owner].kind != SymbolKind::Interface) return false;
+        auto function = id;
+        if (program_.symbols[function].kind == SymbolKind::Parameter) function = program_.symbols[function].owner;
+        const auto& item = program_.symbols[function];
+        return item.kind == SymbolKind::Function && !item.has_body && !item.external &&
+               &program_.symbols[item.owner] == &scope;
+    }
+
     bool in_template(SymbolId id) const {
         for (auto scope = id; scope != no_symbol && scope < original_symbols_;
              scope = program_.symbols[scope].owner) {
@@ -184,8 +200,10 @@ private:
                 return true;
             }
             // Class static members are shared across all instances and
-            // cannot refer to the containing class's type parameters.
-            if (is_static_scope(item)) return false;
+            // cannot refer to the containing class's type parameters, except
+            // the static requirements of an interface, bodyless signatures
+            // that are never called directly (docs/design/Records030.md).
+            if (is_static_scope(item) && !requirement_signature(id, item)) return false;
         }
         return false;
     }
@@ -619,6 +637,15 @@ private:
             }
         }
         switch (node.op) {
+        case IrOp::ConformanceCall:
+            // docs/design/Records030.md: the direct call of the implementation
+            // for the type the call now goes through, once it is concrete.
+            if (concrete(result.type_arguments.front())) {
+                result.op = IrOp::Call;
+                result.symbol = implementation(node.symbol, result.type_arguments.front(), node.span);
+                result.type_arguments.clear();
+            }
+            break;
         case IrOp::Reference:
         case IrOp::EnumConstruct:
             if (result.type.kind == TypeKind::Enum) {
@@ -688,6 +715,40 @@ private:
             break;
         }
         return result;
+    }
+
+    // The function that implements static requirement `requirement` for
+    // `type`: the one whose static.implements names the requirement and the
+    // type, or the nearest base of a class type that has one. A class
+    // instance is looked up as its generic class.
+    SymbolId implementation(SymbolId requirement, const IrType& type, const Span& span) {
+        if (!implementations_built_) {
+            implementations_built_ = true;
+            for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+                for (const auto* attribute : find_attributes(program_.symbols[id], AttributeId::StaticImplements)) {
+                    const auto& items = attribute->value.items;
+                    implementations_.emplace(std::pair{items[0].symbol, key(items[1].type)}, id);
+                }
+            }
+        }
+        const auto lookup = [&](const IrType& item) -> SymbolId {
+            const auto found = implementations_.find({requirement, key(item)});
+            return found == implementations_.end() ? no_symbol : found->second;
+        };
+        if (type.kind == TypeKind::Object) {
+            std::set<SymbolId> seen;
+            for (auto cls = type.symbol; cls < program_.symbols.size() && seen.insert(cls).second;
+                 cls = program_.symbols[cls].base) {
+                auto generic = cls;
+                if (const auto instance = instance_of_.find(cls); instance != instance_of_.end())
+                    generic = instance->second.first;
+                if (const auto found = lookup(program_.symbols[generic].type); found != no_symbol) return found;
+            }
+        } else if (const auto found = lookup(type); found != no_symbol) {
+            return found;
+        }
+        throw Diagnostic(span, "no implementation of the static requirement '" + program_.symbols[requirement].name +
+                                   "' for " + display(type)).with_code("E0899");
     }
 
     void check_type(const IrType& type, const std::string& where) const {

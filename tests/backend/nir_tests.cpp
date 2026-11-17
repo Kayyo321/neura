@@ -452,18 +452,20 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // Minor 11 is newer than this reader.
+    // The minor version after this reader's newest is newer than it.
     auto newer = bytes;
-    newer[6] = 11;
-    expect_nir_error(newer, "NeuraIR format 1.11 is not supported; this reader accepts 1.0 through 1.10");
+    newer[6] = nir_minor_version + 1;
+    const auto accepted = "this reader accepts 1.0 through 1." + std::to_string(nir_minor_version);
+    expect_nir_error(newer, "NeuraIR format 1." + std::to_string(nir_minor_version + 1) + " is not supported; " +
+                                accepted);
     newer[6] = 200;
-    expect_nir_error(newer, "this reader accepts 1.0 through 1.10");
+    expect_nir_error(newer, accepted);
 
     // An operation tag above the newest one, in a 1.9 file.
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
-    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::SchedulerCall) + 1);
+    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::ConformanceCall) + 1);
     above.bodies.push_back({0, {tagged}});
     const auto above_bytes = write_nir(above);
     check_equal(static_cast<int>(above_bytes[6]), 9, "an operation above the 1.7 set is written as 1.9");
@@ -472,6 +474,16 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     IrProgram newest = above;
     newest.bodies.front().instructions.front().op = IrOp::SchedulerCall;
     check_equal(read_nir(write_nir(newest), "newest").bodies.size(), std::size_t{1}, "SchedulerCall reads");
+    // A conformance call (docs/design/Records030.md) needs its own minor
+    // version: a file that claims 1.10 cannot hold one.
+    IrProgram conformance = above;
+    conformance.bodies.front().instructions.front().op = IrOp::ConformanceCall;
+    auto conformance_bytes = write_nir(conformance);
+    check_equal(static_cast<int>(conformance_bytes[6]), static_cast<int>(nir_records_minor),
+                "a conformance call is written under its minor version");
+    conformance_bytes[6] = 10;
+    expect_nir_error(conformance_bytes,
+                     "invalid operation tag " + std::to_string(static_cast<int>(IrOp::ConformanceCall)));
 
     // A file that claims an older minor cannot use the task operations: 1.8
     // has neither the tags nor the poll bit.
@@ -810,6 +822,14 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]"},
         {AttributeId::ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s"},
         {AttributeId::FunctionExtension, 14, "function.extension", on_function, false, "b"},
+        // docs/design/Records030.md; the milestone's identifiers are
+        // renumbered when it merges.
+        {AttributeId::ClassRecord, 18, "class.record", on_class, false, "s"},
+        {AttributeId::PropertyRequirement, 19, "property.requirement", on_function, false, "[t u1]"},
+        {AttributeId::AccessorVirtual, 20, "accessor.virtual", on_function, false, "b"},
+        {AttributeId::StaticImplements, 21, "static.implements", on_function, true, "[s y]"},
+        {AttributeId::Generated, 22, "generated", on_function | on_class | symbol_kind_bit(SymbolKind::Module), false,
+         "[t p]"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -840,13 +860,47 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
     check(problem("q", attribute_bool(true)).starts_with("invalid attribute schema"), "unknown schema letter");
 }
 
+NEURA_TEST(nir, records_attributes_and_conformance_calls_round_trip) {
+    // docs/design/Records030.md: lowering attaches every attribute of the
+    // milestone, a conformance call makes the file nir_records_minor, and the
+    // program reads back equal, rewrites to the same bytes, and builds the
+    // image of its source.
+    const auto source = backend_dir(environment) / "nir-versions" / "records.nra";
+    const auto program = lower_files({source});
+    const auto issues = verify_ir(program);
+    check(issues.empty(), issues.empty() ? "" : issues.front().message);
+    for (const auto id : {AttributeId::ClassRecord, AttributeId::PropertyRequirement, AttributeId::AccessorVirtual,
+                          AttributeId::StaticImplements, AttributeId::Generated}) {
+        check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, id); }),
+              std::string(attribute_info(id).name) + " is attached by lowering");
+    }
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6]), static_cast<int>(nir_records_minor), "a conformance call sets the minor");
+    std::uint16_t minor = 0;
+    const auto read = read_nir(bytes, "records.nir", &minor);
+    check_equal(static_cast<int>(minor), static_cast<int>(nir_records_minor), "minor version read");
+    mismatch.clear();
+    check(same_program(program, read), mismatch);
+    check(write_nir(read) == bytes, "rewriting the read program changes its bytes");
+    check(printed(read) == printed(program), "listing differs after the round trip");
+    check(image_bytes(read) == image_bytes(program), "the image from the read program differs");
+    // Without the conformance call the same attributes need only 1.10.
+    auto plain = program;
+    for (auto& body : plain.bodies) {
+        if (plain.symbols[body.owner].name == "twice") body.instructions.clear();
+    }
+    check_equal(static_cast<int>(write_nir(plain)[6]), 10, "attributes alone are 1.10");
+}
+
 NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10) {
     const auto fixture = attributed_fixture(environment);
     const auto& program = fixture.program;
     const auto issues = verify_ir(program);
     check(issues.empty(), issues.empty() ? "" : issues.front().message);
-    // Every pre-registered attribute is exercised.
+    // Every pre-registered attribute is exercised; those of the records
+    // milestone by records_attributes_and_conformance_calls_round_trip.
     for (const auto& info : attribute_registry()) {
+        if (static_cast<std::uint16_t>(info.id) >= static_cast<std::uint16_t>(AttributeId::ClassRecord)) continue;
         check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, info.id); }),
               std::string(info.name) + " is not attached by the fixture");
     }

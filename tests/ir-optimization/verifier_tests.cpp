@@ -2,6 +2,7 @@
 // each deliberately malformed program is rejected with a specific issue.
 #include "concurrency_support.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
@@ -134,6 +135,43 @@ NEURA_TEST(verifier, accepts_lowered_and_optimized_programs) {
         issues = verify_ir(program);
         check(issues.empty(), label + " after optimization:" + issues_text(issues));
     }
+}
+
+// docs/design/Records030.md: a conformance call names a static requirement
+// and goes through a type parameter that a bound of its interface
+// constrains; specialization leaves none through a concrete type.
+NEURA_TEST(verifier, rejects_invalid_conformance_calls) {
+    const auto conformance = [](IrProgram& program, std::string_view function) -> IrNode& {
+        return first(body_of(program, function), IrOp::ConformanceCall);
+    };
+    expect_issue(environment, "verifier/requirements.nra", "remains after specialization", [&](IrProgram& program) {
+        auto& call = conformance(program, "Requirements.twice");
+        call.type_arguments.front() = call.operands.front().type;
+        call.type_arguments.front() = IrType{TypeKind::Integer, "int32", no_symbol, {}};
+    });
+    expect_issue(environment, "verifier/requirements.nra", "which is not a static requirement of an interface",
+                 [&](IrProgram& program) {
+        auto& call = conformance(program, "Requirements.start");
+        call.symbol = first(body_of(program, "Requirements.plain"), IrOp::Call).symbol;
+    });
+    expect_issue(environment, "verifier/requirements.nra", "it goes through exactly one", [&](IrProgram& program) {
+        conformance(program, "Requirements.start").type_arguments.clear();
+    });
+    expect_issue(environment, "verifier/requirements.nra", "argument(s) to", [&](IrProgram& program) {
+        conformance(program, "Requirements.twice").operands.pop_back();
+    });
+}
+
+NEURA_TEST(verifier, rejects_invalid_static_implements_attributes) {
+    expect_issue(environment, "verifier/requirements.nra", "static.implements", [&](IrProgram& program) {
+        for (auto& item : program.symbols) {
+            if (item.kind == SymbolKind::Function && item.name == "zero" && item.has_body) {
+                auto* attribute = const_cast<IrAttribute*>(find_attribute(item, AttributeId::StaticImplements));
+                // Name the implementation itself as the requirement.
+                attribute->value.items[0].symbol = static_cast<SymbolId>(&item - program.symbols.data());
+            }
+        }
+    });
 }
 
 NEURA_TEST(verifier, rejects_mismatched_binary_operands) {

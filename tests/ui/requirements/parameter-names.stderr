@@ -1,0 +1,15 @@
+error[E0560]: parameter 'a' is named 'left' in the method it overrides
+  --> $DIR/parameter-names.nra:10:34
+   |
+ 4 |     static let add = func(left: T, right: T) -> T;
+   |                           ---- the parameter is named 'left' here
+...
+10 |     export static let add = func(a: Money, b: Money) -> Money => a;
+   |                                  ^ a call may name this parameter 'left'
+   |
+help: rename it to the base name
+   |
+10 |     export static let add = func(left: Money, b: Money) -> Money => a;
+   |                                  ~~~~
+
+For more information about this error, try `neura explain E0560`.

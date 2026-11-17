@@ -1,0 +1,16 @@
+// An inherited static function does not implement a requirement (edge case 99).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let Base = class (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Money => new Money(0);
+    export static let add = func(left: Money, right: Money) -> Money => left;
+);
+let Money = class : Base implements Additive<Money> (
+    export let init = func(cents: int64) {
+        super.init(cents);
+    };
+);

@@ -583,10 +583,24 @@ private:
     };
     std::vector<PendingTwin> pending_twins_;
     std::map<SymbolId, OverrideClause> override_contexts_;
-    SymbolId ensure_twin(SymbolId function);
-    void lower_pending_twins();
     void lower_accessor_overrides(SymbolId id);
     IrNode override_access(IrNode field, const Expr& expr);
+    SymbolId ensure_twin(SymbolId function);
+    void lower_pending_twins();
+
+    // Static interface requirements (docs/design/Records030.md). The
+    // implementation is in lowering_static.inc.
+    // The interface whose static requirement's signature is being resolved,
+    // whose type parameters it may use.
+    SymbolId requirement_scope_ = no_symbol;
+    bool static_requirement(SymbolId function) const;
+    void check_static_requirement_syntax(const Declaration& decl) const;
+    void check_static_requirements(SymbolId id);
+    std::vector<IrType> parameter_bounds(SymbolId parameter) const;
+    std::optional<std::pair<SymbolId, Substitution>> bound_requirement(SymbolId parameter, const std::string& name,
+                                                                       const Span& at);
+    std::optional<IrNode> conformance_call(const Expr& expr, Context& context);
+    [[noreturn]] void requirement_misuse(const Span& at, const std::string& name, bool value) const;
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -785,6 +799,9 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
     if (accessor_override_syntax(decl) && symbol(owner).kind == SymbolKind::Class)
         return declare_accessor_override(decl, owner);
+    if (decl.static_member && decl.kind == DeclKind::Function && !decl.has_body &&
+        symbol(owner).kind == SymbolKind::Interface)
+        check_static_requirement_syntax(decl);
     if (decl.record) check_record_syntax(decl);
     if (!decl.accessors.empty()) check_accessor_member(decl, owner);
     if (decl.name == "_" && kind != SymbolKind::Variant) {
@@ -1073,7 +1090,8 @@ SymbolId Lowering::find(std::string_view name, const Context& context, const Spa
     for (auto scope = context.owner; scope != no_symbol; scope = symbol(scope).owner) {
         static_context |= is_static_scope(symbol(scope));
         if (auto id = member(scope, name, false); id != no_symbol) {
-            if (static_context && symbol(id).kind == SymbolKind::TypeParameter && class_or_interface(symbol(scope).kind))
+            if (static_context && symbol(id).kind == SymbolKind::TypeParameter && class_or_interface(symbol(scope).kind) &&
+                scope != requirement_scope_)
                 throw Diagnostic(span, "static member cannot use an enclosing class type parameter").with_code("E0501");
             return id;
         }
@@ -1740,6 +1758,17 @@ void Lowering::resolve(SymbolId id) {
     entries_[id].resolution = Resolution::Resolving;
     const TagScope tag_scope(id);
     const auto& decl = *entries_[id].declaration;
+    // A static requirement's signature may use its interface's type
+    // parameters (lowering_static.inc).
+    struct RequirementScope {
+        SymbolId& scope;
+        SymbolId saved;
+        ~RequirementScope() { scope = saved; }
+    } requirement_scope{requirement_scope_, requirement_scope_};
+    if (decl.kind == DeclKind::Function && decl.static_member && !decl.has_body && symbol(id).owner != no_symbol &&
+        is_static_scope(symbol(symbol(id).owner)) &&
+        symbol(symbol(symbol(id).owner).owner).kind == SymbolKind::Interface)
+        requirement_scope_ = symbol(symbol(id).owner).owner;
     auto ctx = context(id);
     if (class_or_interface(symbol(id).kind) || decl.kind == DeclKind::Module) {
         auto kind = decl.kind == DeclKind::Module ? TypeKind::Module : TypeKind::Object;
@@ -1852,7 +1881,7 @@ void Lowering::resolve(SymbolId id) {
             !class_or_interface(symbol(symbol(id).owner).kind))
             throw Diagnostic(decl.span, "only class, interface or module members may omit a function body")
                 .with_code("E0434");
-        if (!decl.has_body && decl.static_member)
+        if (!decl.has_body && decl.static_member && !static_requirement(id))
             throw Diagnostic(decl.span, "a static function requires a body").with_code("E0501");
         if (decl.host_binding) {
             const auto file = source_file(program_, id);
@@ -2227,6 +2256,22 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         const auto builtin = primitive(operand.text);
         if (builtin && primitive_wrapper(*builtin) && find(operand.text, context, operand.span) == no_symbol)
             return wrapped_member(expr, *builtin, context);
+        // `T.name` without a call (lowering_static.inc).
+        if (const auto parameter = find(operand.text, context, operand.span);
+            parameter != no_symbol && symbol(parameter).kind == SymbolKind::TypeParameter) {
+            if (bound_requirement(parameter, expr.text, expr.span)) requirement_misuse(expr.span, expr.text, true);
+            throw Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " + operand.text)
+                .with_code("E0305")
+                .label("no bound of '" + operand.text + "' requires a static function '" + expr.text + "'");
+        }
+    }
+    // `Interface<...>.name` for a static requirement (lowering_static.inc).
+    if (operand.kind == ExprKind::TypeApplication && !operand.operands.empty() &&
+        operand.operands.front().kind == ExprKind::Name) {
+        const auto named = find(operand.operands.front().text, context, operand.span);
+        if (named != no_symbol && symbol(named).kind == SymbolKind::Interface &&
+            static_requirement(own_member(named, expr.text)))
+            requirement_misuse(expr.span, expr.text, false);
     }
     auto receiver = expression(operand, context);
     if (auto extension = extension_member(expr, receiver, context, for_call)) return std::move(*extension);
@@ -2296,6 +2341,13 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
         ? member(nominal.symbol, expr.text, exported) : no_symbol;
     if (target == no_symbol && nominal.kind == TypeKind::Object)
         target = value_member(receiver.type, expr.text, exported);
+    // A static requirement is not called through its interface or a value.
+    if (static_requirement(target)) requirement_misuse(expr.span, expr.text, false);
+    if (target == no_symbol && nominal.kind == TypeKind::Object) {
+        for (const auto& view : nominal_views(program_, receiver.type))
+            if (symbol(view.symbol).kind == SymbolKind::Interface && static_requirement(own_member(view.symbol, expr.text)))
+                requirement_misuse(expr.span, expr.text, false);
+    }
     if (target == no_symbol) {
         auto error = Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
                                            describe(nominal)).with_code("E0305")
@@ -2539,6 +2591,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
 
 IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected) {
     if (auto result = primitive_call(expr, context)) return std::move(*result);
+    if (auto result = conformance_call(expr, context)) return std::move(*result);
     const auto& callee_expr = expr.operands.front();
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
     // say what the form requires (Concurrency.md section 4.4).
@@ -4921,6 +4974,7 @@ void Lowering::lower_declaration(SymbolId id) {
         if (class_or_interface(symbol(id).kind)) {
             check_interfaces(id);
             check_property_requirements(id);
+            check_static_requirements(id);
         }
         const auto casts = entries_[id].casts;
         std::vector<IrType> cast_types;
@@ -5177,6 +5231,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 #include "lowering_accessors.inc"
 #include "lowering_records.inc"
 #include "lowering_properties.inc"
+#include "lowering_static.inc"
 #include "lowering_calls.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;

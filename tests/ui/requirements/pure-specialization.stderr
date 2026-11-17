@@ -1,0 +1,20 @@
+error[E0917]: #Pure function 'sum<Loud>' is not pure: it reaches 'print_line', which makes the host request neura.console.write_line
+  --> $DIR/pure-specialization.nra:22:1
+   |
+12 |         console.print_line("add");
+   |         ------------------------- calls 'print_line'
+...
+22 | #Pure
+   | ^^^^^ the function is marked #Pure here
+23 | let sum = func<T: Additive<T>>(a: T, b: T) -> T => T.add(a, b);
+   |                                                    ----------- calls 'add'
+  ::: /home/dev/neura-m7-int/stdlib/std/io/console.nra:72:16
+   |
+72 |         match (write_line(s)) {
+   |                ------------- makes the host request neura.console.write_line here
+   |
+   = note: in the specialization 'sum<Loud>': a generic function is checked with the type arguments of each specialization, whose members it calls
+   = note: a #Pure function may allocate and trap, but it writes only objects it allocates, reads no reassignable state, and calls only pure functions
+   = help: remove #Pure, or move the effect to the caller
+
+For more information about this error, try `neura explain E0917`.

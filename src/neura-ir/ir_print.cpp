@@ -112,6 +112,7 @@ std::string_view spelling(IrOp op) {
     case IrOp::TaskScope: return "task_scope";
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
+    case IrOp::ConformanceCall: return "conformance_call";
     }
     return "<invalid>";
 }

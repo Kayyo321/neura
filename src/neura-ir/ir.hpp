@@ -161,7 +161,14 @@ enum class IrOp {
     // yields the uint64 task identity. SchedulerCall asks the NVM scheduler
     // for the operation its text names; the scheduler defines each
     // operation's arguments and result.
-    TaskScope, Spawn, SchedulerCall
+    TaskScope, Spawn, SchedulerCall,
+    // NeuraIR nir_records_minor (docs/design/Records030.md, Static interface
+    // requirements). A call of a static requirement through a type: its
+    // symbol is the bodyless static function of an interface, its one type
+    // argument the type the call goes through, a type parameter bounded by
+    // the interface, and its operands the arguments. Specialization replaces
+    // it with a direct call of the implementation; none remains after it.
+    ConformanceCall
 };
 
 struct IrNode {

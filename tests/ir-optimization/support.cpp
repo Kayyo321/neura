@@ -73,6 +73,7 @@ std::string_view op_name(IrOp op) {
     case IrOp::TaskScope: return "task_scope";
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
+    case IrOp::ConformanceCall: return "conformance_call";
     }
     return "<invalid>";
 }
@@ -163,9 +164,14 @@ std::vector<fs::path> fixture_files(const Environment& environment) {
     // The concurrent fixtures are entry programs for the scheduler and have
     // their own suites (concurrency_support.hpp); the per-function sampling
     // of the other suites does not apply to them.
+    // The verifier's fixtures hold generic bodies, which the sampling
+    // cannot call, for the verifier suite alone.
     auto files = nra_files(environment.fixtures());
     const auto concurrent = fs::canonical(environment.fixtures() / "concurrency");
-    std::erase_if(files, [&](const fs::path& file) { return file.parent_path() == concurrent; });
+    const auto verifier = fs::canonical(environment.fixtures() / "verifier");
+    std::erase_if(files, [&](const fs::path& file) {
+        return file.parent_path() == concurrent || file.parent_path() == verifier;
+    });
     return files;
 }
 

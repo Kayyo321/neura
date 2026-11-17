@@ -1,0 +1,4 @@
+// A requirement is not variadic (edge case 96).
+let Joiner = interface (
+    static let join = func(parts: ...string) -> string;
+);

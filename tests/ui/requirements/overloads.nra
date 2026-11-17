@@ -1,0 +1,4 @@
+// A requirement is not an overload group (edge case 96).
+let Parser = interface (
+    static let parse = func(text: string) -> int or func(bytes: uint8[]) -> int;
+);

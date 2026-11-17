@@ -24,12 +24,13 @@ constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
 constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollection);
 constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
 constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
+constexpr std::uint8_t max_op_records = static_cast<std::uint8_t>(IrOp::ConformanceCall);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
-constexpr std::uint16_t newest_node_minor = attribute_minor;
+constexpr std::uint16_t newest_node_minor = nir_records_minor;
 
 bool may_poll(IrOp op) {
     return op == IrOp::Loop || op == IrOp::Call || op == IrOp::VirtualCall || op == IrOp::CallClosure;
@@ -69,8 +70,10 @@ std::uint16_t required_minor(const std::vector<IrNode>& nodes) {
     std::uint16_t version = 0;
     for (const auto& node : nodes) {
         const auto op = static_cast<std::uint8_t>(node.op);
-        if (is_deferred_initialize(node)) return attribute_minor;
-        if (op > max_op_1_7 || node.poll) {
+        if (node.op == IrOp::ConformanceCall) return nir_records_minor;
+        if (is_deferred_initialize(node)) {
+            version = std::max(version, attribute_minor);
+        } else if (op > max_op_1_7 || node.poll) {
             version = std::max(version, task_minor);
         } else if (op > max_op_1_4) {
             version = std::max<std::uint16_t>(version, 7);
@@ -374,9 +377,12 @@ public:
             fail("NeuraIR format " + std::to_string(major) + "." + std::to_string(minor_) +
                  " is not supported; this reader accepts 1.0 through 1." + std::to_string(nir_minor_version));
         }
+        // 1.11 and 1.12 belong to milestones merged beside this one and add
+        // no operation here.
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_9, max_op_records};
+        static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;

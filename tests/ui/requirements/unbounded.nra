@@ -1,0 +1,2 @@
+// An unbounded type parameter requires nothing (edge case 103).
+let make = func<T>() -> T => T.zero();

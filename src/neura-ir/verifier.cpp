@@ -461,6 +461,23 @@ private:
             case AttributeId::ClassRecord:
                 check_record(id, entry, attribute.value.symbol);
                 break;
+            case AttributeId::StaticImplements: {
+                // docs/design/Records030.md: the requirement is a bodyless
+                // static function of an interface, and its implementation a
+                // static function with a body and as many parameters.
+                const auto requirement = attribute.value.items[0].symbol;
+                const auto& required = symbol(requirement);
+                const bool is_requirement = required.kind == SymbolKind::Function && !required.has_body &&
+                    !required.external && valid(required.owner) && is_static_scope(symbol(required.owner)) &&
+                    valid(symbol(required.owner).owner) &&
+                    symbol(symbol(required.owner).owner).kind == SymbolKind::Interface;
+                if (!is_requirement || !entry.has_body || !valid(entry.owner) ||
+                    symbol(entry.owner).kind != SymbolKind::Module ||
+                    entry.parameters.size() != required.parameters.size())
+                    report(entry.span, "static.implements of " + name(id) + " names " + name(requirement) +
+                                           ", which it does not implement");
+                break;
+            }
             case AttributeId::AccessorVirtual:
                 if (!find_attribute(entry, AttributeId::AccessorOf) || !entry.has_body)
                     report(entry.span, "accessor.virtual marks an accessor with a body, not " + name(id));
@@ -1188,6 +1205,9 @@ private:
             check_arity(node, 1);
             check_type_arguments(node);
             break;
+        case IrOp::ConformanceCall:
+            check_conformance_call(node);
+            break;
         case IrOp::ExternalCall:
             if (check_symbol_kind(node, {SymbolKind::Function}, "external call") &&
                 !symbol(node.symbol).external) {
@@ -1287,6 +1307,48 @@ private:
             return false;
         }
         return true;
+    }
+
+    // A call of a static requirement (docs/design/Records030.md) names a
+    // bodyless static function of an interface and goes through a type
+    // parameter that a bound of that interface constrains. Specialization
+    // replaces every one that runs, so one through a concrete type is left
+    // over.
+    void check_conformance_call(const IrNode& node) {
+        if (!check_symbol_kind(node, {SymbolKind::Function}, "conformance call")) return;
+        const auto& requirement = symbol(node.symbol);
+        const auto scope = requirement.owner;
+        if (requirement.has_body || requirement.external || !valid(scope) || !is_static_scope(symbol(scope)) ||
+            !valid(symbol(scope).owner) || symbol(symbol(scope).owner).kind != SymbolKind::Interface) {
+            report(node.span, "conformance call targets " + name(node.symbol) +
+                                  ", which is not a static requirement of an interface");
+            return;
+        }
+        check_arity(node, 0);
+        if (node.type_arguments.size() != 1) {
+            report(node.span, "conformance call names " + std::to_string(node.type_arguments.size()) +
+                                  " types; it goes through exactly one");
+            return;
+        }
+        const auto& through = node.type_arguments.front();
+        if (through.kind != TypeKind::TypeParameter) {
+            report(node.span, "conformance call through " + describe(through) + " remains after specialization");
+            return;
+        }
+        const auto interface = symbol(scope).owner;
+        bool bounded = false;
+        if (valid(through.symbol)) {
+            const auto& parameter = symbol(through.symbol);
+            std::vector<IrType> bounds;
+            if (parameter.bound) bounds.push_back(*parameter.bound);
+            bounds.insert(bounds.end(), parameter.additional_bounds.begin(), parameter.additional_bounds.end());
+            for (const auto& bound : bounds) {
+                for (const auto& view : nominal_views(program_, bound)) bounded = bounded || view.symbol == interface;
+            }
+        }
+        if (!bounded)
+            report(node.span, "conformance call through " + describe(through) + ", which no bound of " +
+                                  name(interface) + " constrains");
     }
 
     void check_arity(const IrNode& node, std::size_t leading) {

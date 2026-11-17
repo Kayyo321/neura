@@ -599,6 +599,10 @@ private:
             allocate(node, "allocates");
             trap(node, "allocates");
             break;
+        case IrOp::ConformanceCall:
+            // Its implementation is decided on each specialization.
+            trap(node, "calls a function, which may reach the frame-depth limit");
+            break;
         case IrOp::Call:
             // Every call can reach the frame-depth limit.
             trap(node, "calls a function, which may reach the frame-depth limit");
@@ -805,6 +809,11 @@ public:
                 impure(Reason{"makes a host request", node.span});
             }
             return typed(node.type, unknown());
+        case IrOp::ConformanceCall:
+            // Deferred, as a value member of a type parameter is: each
+            // specialization calls its implementation directly.
+            operands(node, 0);
+            return {};
         case IrOp::ValueEquals:
         case IrOp::ValueHash:
         case IrOp::ValueText: {

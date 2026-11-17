@@ -172,6 +172,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0573](E0573.md) | invalid interface property |
 | [E0574](E0574.md) | invalid virtual accessor |
 | [E0575](E0575.md) | invalid accessor override |
+| [E0576](E0576.md) | invalid static requirement or call of one |
+| [E0577](E0577.md) | ambiguous static requirement |
 
 ## E06xx: Concurrency
 

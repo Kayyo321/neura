@@ -1,0 +1,7 @@
+error[E0501]: a static function requires a body
+ --> $DIR/class-requirement.nra:3:5
+  |
+3 |     static let zero = func() -> Money;
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0501`.

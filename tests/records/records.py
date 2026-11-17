@@ -239,6 +239,103 @@ class VirtualAccessorTests(unittest.TestCase):
             self.assertEqual(outputs[0], outputs[1])
 
 
+STATIC = '''
+export let Numbers = module (
+    export let Additive = interface<T> (
+        static let zero = func() -> T;
+        static let add = func(left: T, right: T) -> T;
+    );
+    export let sum = func<T: Additive<T>>(items: T[]) -> T {
+        let total = T.zero();
+        for (let item in items) {
+            total = T.add(total, item);
+        }
+        return total;
+    };
+);
+'''
+
+STATIC_APP = '''
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let numbers = import:{source};
+
+let Money = class implements numbers.Additive<Money> (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Money => new Money(0);
+    export static let add = func(left: Money, right: Money) -> Money => new Money(left.cents + right.cents);
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {{
+        let items: Money[] = [new Money(1), new Money(2), new Money(39)];
+        console.print_line(numbers.sum<Money>(items).cents.to_string());
+        return program.ExitCode.Ok;
+    }};
+);
+'''
+
+
+class StaticRequirementTests(unittest.TestCase):
+    def test_a_generic_function_from_a_nir_module_specializes_for_an_importing_class(self):
+        # Edge case 110 with a class of the importing program: the same image
+        # from source and through .nir, and no conformance call is left after
+        # specialization.
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = pathlib.Path(scratch)
+            (directory / 'numbers.nra').write_text(STATIC)
+            result = run('emit-ir', 'numbers.nra', '-o', 'numbers.nir', cwd=directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual((directory / 'numbers.nir').read_bytes()[4:8], bytes([1, 0, 13, 0]))
+            images = []
+            for source, files in (('"numbers.nir".Numbers', []), ('Numbers', ['numbers.nra'])):
+                (directory / 'app.nra').write_text(STATIC_APP.format(source=source))
+                result = run('build', '--no-source-map', 'app.nra', *files, '-o', 'app.nvr', cwd=directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(run('run', 'app.nvr', cwd=directory).stdout, '42\n')
+                images.append((directory / 'app.nvr').read_bytes())
+                listing = run('emit-ir', 'app.nra', *files, cwd=directory)
+                self.assertEqual(listing.returncode, 0, listing.stderr)
+                self.assertNotIn('conformance_call', listing.stdout)
+                self.assertIn('@static.implements(', listing.stdout)
+            self.assertEqual(images[0], images[1])
+            # The unspecialized program keeps the operation.
+            listing = run('emit-ir', '--no-optimize', 'numbers.nir', cwd=directory)
+            self.assertIn('conformance_call', listing.stdout)
+
+    def test_a_reader_rejects_a_newer_minor_version(self):
+        # The operation is written under its minor version, which an earlier
+        # reader rejects; this reader rejects the next one in the same way.
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = pathlib.Path(scratch)
+            (directory / 'numbers.nra').write_text(STATIC)
+            self.assertEqual(run('emit-ir', 'numbers.nra', '-o', 'numbers.nir', cwd=directory).returncode, 0)
+            data = bytearray((directory / 'numbers.nir').read_bytes())
+            data[6] = 14
+            (directory / 'newer.nir').write_bytes(bytes(data))
+            result = run('emit-ir', 'newer.nir', cwd=directory)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn('NeuraIR format 1.14 is not supported; this reader accepts 1.0 through 1.13', result.stderr)
+
+    def test_images_from_source_and_through_nir_are_the_same(self):
+        directory = pathlib.Path(__file__).resolve().parent / 'equivalence'
+        with tempfile.TemporaryDirectory() as scratch:
+            for name in ('values', 'copies', 'properties', 'virtual', 'static'):
+                with self.subTest(program=name):
+                    source = directory / (name + '.nra')
+                    module = pathlib.Path(scratch) / (name + '.nir')
+                    self.assertEqual(run('emit-ir', str(source), '-o', str(module)).returncode, 0)
+                    first = pathlib.Path(scratch) / (name + '.source.nvr')
+                    second = pathlib.Path(scratch) / (name + '.nir.nvr')
+                    self.assertEqual(run('build', str(source), '-o', str(first)).returncode, 0)
+                    self.assertEqual(run('build', str(module), '-o', str(second)).returncode, 0)
+                    self.assertEqual(first.read_bytes(), second.read_bytes())
+                    # A repeated build reproduces the image.
+                    self.assertEqual(run('build', str(source), '-o', str(second)).returncode, 0)
+                    self.assertEqual(first.read_bytes(), second.read_bytes())
+
+
 if __name__ == '__main__':
     sys.argv = sys.argv[:1]
     unittest.main()

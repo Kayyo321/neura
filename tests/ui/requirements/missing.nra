@@ -1,0 +1,10 @@
+// A class must declare each requirement (edge case 98).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let Money = class implements Additive<Money> (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let add = func(left: Money, right: Money) -> Money => left;
+);

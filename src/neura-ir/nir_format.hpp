@@ -17,7 +17,10 @@ inline constexpr std::uint16_t nir_major_version = 1;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = 10;
+// ConformanceCall (docs/design/Records030.md) is written under this minor
+// version, which the lead assigns when the milestone merges.
+inline constexpr std::uint16_t nir_records_minor = 13;
+inline constexpr std::uint16_t nir_minor_version = nir_records_minor;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 

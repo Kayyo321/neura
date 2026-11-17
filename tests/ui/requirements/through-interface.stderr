@@ -1,0 +1,9 @@
+error[E0576]: invalid call of a static requirement
+ --> $DIR/through-interface.nra:6:9
+  |
+6 | let x = Additive<int>.zero();
+  |         ^^^^^^^^^^^^^^^^^^ a static requirement is called through a type parameter or an implementing class
+  |
+  = help: call it as 'T.zero(...)' in a function with a type parameter 'T' bounded by the interface, or through the name of a class that implements it
+
+For more information about this error, try `neura explain E0576`.

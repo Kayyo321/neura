@@ -1,0 +1,4 @@
+// A requirement is not generic (edge case 96).
+let Maker = interface (
+    static let make = func<U>() -> U;
+);

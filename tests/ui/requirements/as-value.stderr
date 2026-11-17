@@ -1,0 +1,9 @@
+error[E0576]: invalid call of a static requirement
+ --> $DIR/as-value.nra:7:13
+  |
+7 |     let f = T.add;
+  |             ^^^^^ 'add' is a static requirement, which is called, not taken as a value
+  |
+  = help: call it as 'T.add(...)' in a function with a type parameter 'T' bounded by the interface, or through the name of a class that implements it
+
+For more information about this error, try `neura explain E0576`.

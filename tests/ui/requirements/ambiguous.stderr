@@ -1,0 +1,15 @@
+error[E0577]: ambiguous static requirement
+ --> $DIR/ambiguous.nra:9:57
+  |
+3 |     static let zero = func() -> T;
+  |                ---- required by 'Additive<T>' here
+...
+7 |     static let zero = func() -> int;
+  |                ---- and by 'Counted<T>' here
+8 | );
+9 | let make = func<T: [Additive<T>, Counted<T>]>() -> T => T.zero();
+  |                                                         ^^^^^^ 'zero' is required by 'Additive<T>' and by 'Counted<T>' with different signatures
+  |
+  = help: call it through one bound only, or rename one of the requirements
+
+For more information about this error, try `neura explain E0577`.

@@ -1,0 +1,9 @@
+// Two bounds require one name with different signatures (edge case 104).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let Counted = interface<T> (
+    static let zero = func() -> int;
+);
+let make = func<T: [Additive<T>, Counted<T>]>() -> T => T.zero();

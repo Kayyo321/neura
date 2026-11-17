@@ -1,0 +1,20 @@
+// A specialization whose implementation may run a static initializer is not
+// task-safe, as any call that may initialize is (edge case 108).
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+let start = func() -> int64 => 5;
+let Money = class implements Additive<Money> (
+    export static let base: int64 = start();
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Money => new Money(base);
+    export static let add = func(left: Money, right: Money) -> Money => new Money(left.cents + right.cents);
+);
+let make = func<T: Additive<T>>() -> T => T.zero();
+let run = func() {
+    scope {
+        last task = spawn make<Money>();
+    }
+};

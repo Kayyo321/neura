@@ -1,0 +1,21 @@
+// Static requirements (docs/design/Records030.md): a conformance call through
+// a type parameter, and an implementation marked static.implements.
+let Requirements = module (
+    export let Additive = interface<T> (
+        static let zero = func() -> T;
+        static let add = func(left: T, right: T) -> T;
+    );
+
+    export let Money = class implements Additive<Money> (
+        export last cents: int64;
+        export let init = func(cents: int64) => set;
+        export static let zero = func() -> Money => new Money(0);
+        export static let add = func(left: Money, right: Money) -> Money => new Money(left.cents + right.cents);
+    );
+
+    export let twice = func<T: Additive<T>>(value: T) -> T => T.add(value, value);
+
+    export let start = func<T: Additive<T>>() -> T => T.zero();
+
+    export let plain = func() -> Money => Money.zero();
+);

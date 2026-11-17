@@ -160,6 +160,8 @@ NEURA_DIAGNOSTIC(E0572, "copy construction of a value that is not a record")
 NEURA_DIAGNOSTIC(E0573, "invalid interface property")
 NEURA_DIAGNOSTIC(E0574, "invalid virtual accessor")
 NEURA_DIAGNOSTIC(E0575, "invalid accessor override")
+NEURA_DIAGNOSTIC(E0576, "invalid static requirement or call of one")
+NEURA_DIAGNOSTIC(E0577, "ambiguous static requirement")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

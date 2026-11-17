@@ -1,0 +1,9 @@
+error[E0305]: unknown or inaccessible member 'zero' of T
+ --> $DIR/unbounded.nra:2:30
+  |
+2 | let make = func<T>() -> T => T.zero();
+  |                              ^^^^^^ no bound of 'T' requires a static function 'zero'
+  |
+  = help: bound 'T' by an interface with a static requirement, as in '<T: I<T>>'
+
+For more information about this error, try `neura explain E0305`.

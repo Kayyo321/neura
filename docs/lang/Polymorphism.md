@@ -189,3 +189,40 @@ let describe = func(shape: Shape) -> string => shape.label;
 ```
 
 A slot's accessor is the field's hidden method with the attribute `accessor.virtual`; an override is a hidden method of the same name in the subclass, linked to the method it overrides and to the inherited field by `accessor.of`. No field is added to any layout. Since the runtime calls a method only by dispatch, each slot and override also has a hidden *twin* with the same body under a name that only its class declares, which is what an override clause calls for the base's accessor.
+
+### Static interface requirements
+
+*Status: proposed in [the 0.3.0 records note](../design/Records030.md); implemented for classes. Primitive conformance through the standard library's companions is listed in [Status](Status.md).*
+
+A static function without a body in an interface is a *static requirement*. Unlike other static members, it may use the interface's type parameters. It is not generic, not variadic, not an overload group and has no parameter default ([E0576](../diagnostics/E0576.md)); elsewhere a static function still needs a body ([E0501](../diagnostics/E0501.md)).
+
+A class that lists the interface after `implements`, directly or through an interface that extends it, must itself declare an exported static function of that name with exactly the requirement's parameter types and result type after substituting the interface's type arguments, and parameter names that agree; otherwise [E0504](../diagnostics/E0504.md). An inherited static function does not implement it, and a subclass inherits its base's conformance. A generic class cannot implement a requirement that mentions its own type parameters, since its static members cannot use them.
+
+Inside a generic body, `T.name(arguments)` calls the requirement `name` of the bounds of the type parameter `T`. A name that no bound requires is [E0305](../diagnostics/E0305.md); one that two bounds require with different signatures is [E0577](../diagnostics/E0577.md), and with equal signatures it is one requirement. Arguments are evaluated in written order, named ones included. A requirement is called only through a type parameter or through an implementing class's own name; `Additive<int>.zero()`, `value.zero()` on an interface-typed value, and `T.zero` without a call are E0576. A local named like the type parameter hides it.
+
+<!-- example: check -->
+```neura
+let Additive = interface<T> (
+    static let zero = func() -> T;
+    static let add = func(left: T, right: T) -> T;
+);
+
+let Money = class implements Additive<Money> (
+    export last cents: int64;
+    export let init = func(cents: int64) => set;
+    export static let zero = func() -> Money => new Money(0);
+    export static let add = func(left: Money, right: Money) -> Money => new Money(left.cents + right.cents);
+);
+
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+
+let total = sum<Money>([new Money(1), new Money(2)]);
+```
+
+Specialization replaces every such call with a direct call of the implementation for the type argument, the class's own function or that of its nearest base that has one, so nothing is resolved at run time. A requirement adds no storage. A contract's name promises nothing: each specialization has the effects of the implementation it calls, and `#Pure` and task safety are checked on the specialized program. In NeuraIR the call is the operation `conformance call` and each implementation carries `static.implements` ([NeuraIR format](../NirFormat.md#revision-113-conformance-calls)).
