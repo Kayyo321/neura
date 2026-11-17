@@ -18,6 +18,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -458,10 +459,7 @@ def worker_suite(work: Work) -> None:
                                 echo], stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                                env=dict(work.env, PROBE_VARIABLE="caller"), cwd=caller, preexec_fn=settings,
                                pass_fds=(extra,))
-    deadline = time.monotonic() + 20
-    while not pid_file.exists() and time.monotonic() < deadline:
-        time.sleep(0.05)
-    time.sleep(0.3)
+    wait_until(lambda: pid_file.exists() and pid_file.read_text().endswith("\n"), 20)
     pid = int(pid_file.read_text())
     proc = Path(f"/proc/{pid}")
     status_lines = dict(line.split(":", 1) for line in (proc / "status").read_text().splitlines() if ":" in line)
@@ -789,6 +787,319 @@ def protocol_suite(work: Work) -> None:
     service.process.wait()
 
 
+# --------------------------------------------------------------------------
+# Step 7: the client of `neura run --runtime=auto|required`.
+
+def copy_build(work: Work, name: str, neurad: str | None = "neurad") -> Path:
+    """A copy of the build's tools; `neurad` is left out, or replaced by a script."""
+    copy = work.root / name
+    copy.mkdir()
+    for entry in work.bin.iterdir():
+        if entry.is_file() and os.access(entry, os.X_OK) and (entry.name == "neura" or entry.name.startswith("neura-")):
+            shutil.copy2(entry, copy / entry.name)
+    shutil.copytree(work.bin / "lib", copy / "lib")
+    if neurad == "neurad":
+        shutil.copy2(work.bin / "neurad", copy / "neurad")
+    elif neurad is not None:
+        (copy / "neurad").write_text(neurad)
+        os.chmod(copy / "neurad", 0o755)
+    return copy
+
+
+def assigned_workers(work: Work) -> list[int]:
+    """Workers of this suite that were given an application: they lead a process group."""
+    found = []
+    for pid in supervisors(work):
+        try:
+            command = (Path(f"/proc/{pid}") / "cmdline").read_bytes()
+            state = (Path(f"/proc/{pid}") / "stat").read_text().split()[2]
+        except OSError:
+            continue
+        if b"--worker" in command and state != "Z" and os.getpgid(pid) == pid:
+            found.append(pid)
+    return found
+
+
+def wait_until(condition, timeout: float = 10) -> bool:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if condition():
+            return True
+        time.sleep(0.05)
+    return condition()
+
+
+def run_suite(work: Work) -> None:
+    hello = str(work.image("hello", path=HELLO))
+    echo = program(work, "echo")
+    exit_status = program(work, "exit-status")
+    report = work.root / "report.json"
+
+    def neura_run(arguments, env=None, stdin=b"", neura=None, timeout=60):
+        result = subprocess.run([str(neura or work.neura), "run", *arguments], input=stdin, capture_output=True,
+                                env=env or work.env, cwd=work.root, timeout=timeout)
+        return result.returncode, result.stdout, result.stderr
+
+    def path_taken() -> str | None:
+        return json.loads(report.read_text())["path"] if report.exists() else None
+
+    # Cases 3 and 4: no neurad in the installation.
+    bare = copy_build(work, "bare", neurad=None)
+    status, out, err = neura_run(["--runtime=auto", hello], neura=bare / "neura")
+    check((status, out) == (0, b"Hello, World!\n") and err == b"neura: runtime: running directly: the service "
+          b"component is not installed; install Neura-runtime, or run without --runtime\n" or
+          err.startswith(b"neura: runtime: running directly: the service component is not installed"),
+          "case 3: --runtime=auto without neurad runs directly with one line")
+    status, out, err = neura_run(["--runtime=required", hello], neura=bare / "neura")
+    check((status, out, err) == (5, b"", b"neura: runtime: the service component is not installed; install "
+                                          b"Neura-runtime, or run without --runtime\n"),
+          "case 4: --runtime=required without neurad is status 5")
+
+    # Case 7: a detached launch when the service cannot start.
+    broken = copy_build(work, "broken", neurad="#!/bin/sh\nexit 1\n")
+    started = time.monotonic()
+    status, out, err = neura_run(["--runtime=auto", "--detach", f"--stdout={work.root / 'd.out'}",
+                                  f"--stderr={work.root / 'd.err'}", hello], neura=broken / "neura")
+    check(status == 5 and out == b"" and b"did not start within 2 seconds" in err and
+          (work.root / "d.out").read_bytes() == b"", "case 7: --detach --runtime=auto never falls back")
+    status, out, err = neura_run(["--runtime=auto", hello], neura=broken / "neura")
+    check(status == 0 and out == b"Hello, World!\n" and b"running directly: the service did not start" in err,
+          "the service cannot start: auto runs directly")
+    status, out, err = neura_run(["--runtime=required", hello], neura=broken / "neura")
+    check(status == 5 and out == b"", "the service cannot start: required is status 5")
+    for pid in supervisors(work):
+        os.kill(pid, signal.SIGKILL)
+
+    # Case 8: two clients start the first launch at once.
+    processes = [subprocess.Popen([str(work.neura), "run", "--runtime=required", hello], stdout=subprocess.PIPE,
+                                  stderr=subprocess.PIPE, env=work.env, cwd=work.root) for _ in range(2)]
+    results = [process.communicate(timeout=60) + (process.returncode,) for process in processes]
+    foreground = [pid for pid in supervisors(work) if b"--foreground" in Path(f"/proc/{pid}/cmdline").read_bytes()]
+    check(all(r == (b"Hello, World!\n", b"", 0) for r in results) and len(foreground) == 1,
+          f"case 8: two first launches at once: both run, one supervisor ({len(foreground)})")
+
+    # The launch through the service, and its report.
+    status, out, err = neura_run(["--runtime=required", f"--runtime-report={report}", exit_status, "--", "3", "x y"])
+    data = json.loads(report.read_text())
+    check((status, out, err) == (3, b"argument: 3\nargument: x y\n", b"") and data["schema"] == 1 and
+          data["path"] in ("service-warm", "service-fresh") and data["state"] == "exited" and data["status"] == 3 and
+          data["application"].startswith("dev."), "a service launch reports its path, application and outcome")
+    status, out, err = neura_run([f"--runtime-report={report}", hello])
+    check(status == 0 and path_taken() == "direct", "--runtime-report of a direct run says direct")
+
+    # Case 58: what the service does not support.
+    lists = work.root / "lists.txt"
+    lists.write_text("a\n")
+    trace = work.root / "hello.trace"
+    for label, options in (("--record", ["--record", str(trace)]), ("--each", ["--each", str(lists)])):
+        status, out, err = neura_run(["--runtime=required", *options, hello])
+        check(status == 5 and out == b"" and err == f"neura: runtime: {label} is not supported by the service; run "
+              f"without --runtime\n".encode(), f"case 58: {label} with required is status 5")
+        status, out, err = neura_run(["--runtime=auto", f"--runtime-report={report}", *options, hello])
+        check(status == 0 and err.startswith(f"neura: runtime: running directly: {label} is not supported".encode())
+              and path_taken() == "direct-fallback", f"case 58: {label} with auto runs directly with the line")
+    status, out, err = neura_run(["--runtime=required", "--replay", str(trace), hello])
+    check(status == 5 and b"--replay is not supported" in err, "case 58: --replay with required is status 5")
+
+    # Case 23: an image that fails validation.
+    bad = work.root / "bad.nvr"
+    bad.write_bytes(b"NEUR" + b"\xff" * 64)
+    expected = neura_run([str(bad)])
+    got = neura_run(["--runtime=required", f"--runtime-report={report}", str(bad)])
+    check(got == expected and got[0] == 1 and json.loads(report.read_text())["state"] == "load-failed",
+          "case 23: an invalid image is load-failed with the direct run's message and status")
+
+    # Case 31: an environment over the 1 MiB message limit. exec() takes at
+    # most ARG_MAX (often 2 MiB) of arguments and environment together and
+    # 128 KiB per string, so the test uses 1.5 MiB in 100 KiB variables.
+    big = dict(work.env, **{f"BIG{index}": "x" * (100 << 10) for index in range(15)})
+    status, out, err = neura_run(["--runtime=auto", hello], env=big)
+    check(status == 0 and out == b"Hello, World!\n" and b"running directly: " in err,
+          "case 31: a 1.5 MiB environment runs directly under auto")
+    status, out, err = neura_run(["--runtime=required", hello], env=big)
+    check(status == 5 and out == b"", "case 31: a 1.5 MiB environment is status 5 under required")
+
+    # Case 21: the image file replaced after the commit.
+    moving = work.root / "moving.nvr"
+    shutil.copy2(echo, moving)
+    process = subprocess.Popen([str(work.neura), "run", "--runtime=required", str(moving)], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+    wait_until(lambda: assigned_workers(work))
+    shutil.copy2(hello, moving)
+    out, err = process.communicate(b"still echo\n", timeout=30)
+    check(process.returncode == 0 and out == b"[still echo]\nend\n",
+          "case 21: a file replaced after the commit: the committed bytes run")
+
+    # Case 39: the worker killed with SIGKILL.
+    process = subprocess.Popen([str(work.neura), "run", "--runtime=required", f"--runtime-report={report}", echo],
+                               stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env,
+                               cwd=work.root)
+    check(wait_until(lambda: assigned_workers(work)), "case 39: the application runs")
+    for pid in assigned_workers(work):
+        os.kill(pid, signal.SIGKILL)
+    out, err = process.communicate(timeout=30)
+    check(process.returncode == 137 and err == b"neura: runtime: the application was ended by signal 9\n" and
+          json.loads(report.read_text())["state"] == "worker-lost", "case 39: a killed worker is worker-lost, status 137")
+
+    # Signals: Ctrl-C and SIGTERM reach the application only.
+    for number in (signal.SIGINT, signal.SIGTERM):
+        # A shell may start the test with SIGINT ignored, which a direct run
+        # and the application would inherit: give the client the default.
+        process = subprocess.Popen([str(work.neura), "run", "--runtime=required", f"--runtime-report={report}", echo],
+                                   stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+                                   env=work.env, cwd=work.root,
+                                   preexec_fn=lambda: signal.signal(signal.SIGINT, signal.SIG_DFL))
+        wait_until(lambda: assigned_workers(work))
+        process.send_signal(number)
+        # Its input stays open until the client ends, so only the signal can end it.
+        process.wait(timeout=30)
+        out, err = process.communicate(timeout=30)
+        check(process.returncode == 128 + number and json.loads(report.read_text())["state"] == "signaled",
+              f"signal {number} is forwarded to the application, which it ends ({process.returncode}, {err!r}, "
+              f"{report.read_text() if report.exists() else ''})")
+
+    # Case 37: the client killed during a foreground run.
+    process = subprocess.Popen([str(work.neura), "run", "--runtime=required", echo], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+    wait_until(lambda: assigned_workers(work))
+    workers = assigned_workers(work)
+    process.kill()
+    process.wait(timeout=30)
+    # Its input stays open: only the client's end can end the application.
+    check(workers and wait_until(lambda: not assigned_workers(work), 12),
+          "case 37: a killed client ends its application within the grace period")
+    service = pc.Service(work.bin, work.env)
+    control = service.hello(purpose=2)
+    control.send("List", [])
+    records = [json.loads(r) for r in control.receive().all("Record")]
+    check(any(r["state"] == "client-lost" for r in records), "case 37: the application is client-lost")
+    process.communicate(timeout=30)
+
+    # Case 38: the client gone after a detached commit; the application goes on.
+    fifo = work.root / "input.fifo"
+    os.mkfifo(fifo)
+    out_file = work.root / "detached.out"
+    process = subprocess.Popen([str(work.neura), "run", "--runtime=required", "--detach", f"--stdout={out_file}",
+                                f"--stderr={work.root / 'detached.err'}", f"--stdin={fifo}", echo],
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+    writer = os.open(fifo, os.O_WRONLY)
+    out, err = process.communicate(timeout=30)
+    application = out.decode().strip()
+    check(process.returncode == 0 and application.startswith("dev.") and out.endswith(b"\n"),
+          "--detach prints the application ID and exits 0")
+    os.write(writer, b"after the client\n")
+    os.close(writer)
+    check(wait_until(lambda: out_file.read_bytes() == b"[after the client]\nend\n"),
+          "case 38: the detached application continues after its client is gone")
+
+    # Case 13: sixty-four applications, a sixty-fifth.
+    connection = service.hello()
+    echo_bytes = Path(echo).read_bytes()
+    holders = []
+    for _ in range(64):
+        read_end, write_end = os.pipe()
+        committed, _ = launch(service, connection, echo_bytes, echo, os.open(os.devnull, os.O_WRONLY),
+                              stdin=read_end, wait=False)
+        os.close(read_end)
+        holders.append(write_end)
+    status, out, err = neura_run(["--runtime=required", hello])
+    check(status == 5 and b"(admission-applications)" in err, "case 13: the sixty-fifth under required is status 5")
+    status, out, err = neura_run(["--runtime=auto", hello])
+    check(status == 0 and out == b"Hello, World!\n" and b"running directly:" in err and b"admission-applications" in err,
+          "case 13: the sixty-fifth under auto runs directly")
+    for fd in holders:
+        os.close(fd)
+    connection.close()
+    wait_until(lambda: not assigned_workers(work), 20)
+
+    # Case 10: the endpoint directory with a wrong mode.
+    os.chmod(service.directory, 0o755)
+    for mode in ("auto", "required"):
+        status, out, err = neura_run([f"--runtime={mode}", hello])
+        check(status == 5 and out == b"" and b"nothing was run" in err, f"case 10: a wrong mode is identity under {mode}")
+    os.chmod(service.directory, 0o700)
+
+    # Case 30: a soft limit above the supervisor's hard limit.
+    import resource
+    for pid in supervisors(work):
+        os.kill(pid, signal.SIGKILL)
+    wait_until(lambda: not supervisors(work))
+    service = pc.Service(work.bin, work.env)
+    service.start(preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256)))
+    for mode, expected_status in (("required", 5), ("auto", 0)):
+        status, out, err = neura_run([f"--runtime={mode}", hello])
+        check(status == expected_status and b"not-reproducible" in err, f"case 30: not-reproducible under {mode}")
+    service.process.kill()
+    service.process.wait()
+
+    # Case 29: LD_LIBRARY_PATH takes a fresh worker; the program sees it.
+    # The supervisor is started by a launch without the variable.
+    environment = program(work, "environment")
+    neura_run(["--runtime=required", hello])
+    env = dict(work.env, LD_LIBRARY_PATH=str(work.root))
+    status, out, _ = neura_run(["--runtime=required", f"--runtime-report={report}", "--allow-env", environment, "--",
+                                "LD_LIBRARY_PATH"], env=env)
+    check(status == 0 and out == f"LD_LIBRARY_PATH={work.root}\n".encode() and path_taken() == "service-fresh",
+          f"case 29: a caller's LD_LIBRARY_PATH: the path is fresh ({status}, {out!r}, {path_taken()})")
+
+    # Case 11: a supervisor of another build of the same generation.
+    for pid in supervisors(work):
+        os.kill(pid, signal.SIGKILL)
+    wait_until(lambda: not supervisors(work))
+    service = pc.Service(work.bin, work.env)
+    service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "other-build=1"})
+    for mode in ("auto", "required"):
+        status, out, err = neura_run([f"--runtime={mode}", hello])
+        check(status == 5 and out == b"" and b"another build" in err and b"nothing was run" in err,
+              f"case 11: another build is identity under {mode}, not a fallback")
+    control = service.hello(purpose=2)
+    control.send("List", [])
+    check(control.receive().kind == "Listing", "case 11: control still works with another build")
+    service.process.kill()
+    service.process.wait()
+
+    # Cases 18 and 19: the connection lost after the commit.
+    service = pc.Service(work.bin, work.env)
+    service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "drop-after-commit=1"})
+    status, out, err = neura_run(["--runtime=required", exit_status, "--", "4"])
+    check((status, out, err) == (4, b"argument: 4\n", b""),
+          f"({status}, {out!r}, {err!r}) case 18: the connection dropped after the commit: the client asks and exits with the application's status")
+    service.process.kill()
+    service.process.wait()
+    process = subprocess.Popen([str(work.neura), "run", "--runtime=required", echo], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+    wait_until(lambda: assigned_workers(work))
+    for pid in supervisors(work):
+        if b"--foreground" in Path(f"/proc/{pid}/cmdline").read_bytes():
+            os.kill(pid, signal.SIGKILL)
+    time.sleep(0.5)
+    out, err = process.communicate(b"", timeout=30)
+    check(process.returncode == 6 and b"is unknown; it was not run again" in err and out == b"",
+          f"({process.returncode}, {out!r}, {err!r}) case 19: the supervisor gone after the commit: status 6, not run again")
+
+
+def parity_suite(work: Work) -> None:
+    """The direct identity cases through --runtime=required (the note's parity gate)."""
+    script = REPOSITORY / "scripts/runtime-identity.py"
+    images = work.root / "images"
+    captures = {}
+    for name, extra in (("direct", []), ("service", ["--service"])):
+        out = work.root / name
+        result = subprocess.run([sys.executable, str(script), "capture", "--neura", str(work.neura), "--images",
+                                 str(images), "--out", str(out), *extra], capture_output=True, env=work.env,
+                                timeout=1800)
+        captures[name] = result.stdout.decode()
+        check(result.returncode == 0, f"the {name} capture ran\n{result.stderr.decode()[-2000:]}")
+    runs = re.search(r"; (\d+) runs through the service", captures["service"])
+    check(runs is not None and int(runs.group(1)) > 100,
+          f"the service capture reached the service ({runs.group(1) if runs else 0} runs)")
+    result = subprocess.run([sys.executable, str(script), "compare", str(work.root / "direct"),
+                             str(work.root / "service")], capture_output=True, env=work.env)
+    print(result.stdout.decode()[:2000])
+    check(result.returncode == 0 and b"identical: " in result.stdout,
+          "the identity cases through the service equal the direct run's: output, status, traps, steps, profile")
+
+
 def socket_file(path: Path) -> bool:
     """Leaves a socket file with nothing listening, as a killed supervisor does."""
     import socket as sockets
@@ -803,6 +1114,8 @@ SUITES = {
     "off-default": off_default,
     "worker": worker_suite,
     "protocol": protocol_suite,
+    "run": run_suite,
+    "parity": parity_suite,
 }
 
 

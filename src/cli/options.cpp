@@ -579,9 +579,11 @@ Options read_options(int argc, char** argv) {
     if (!options.detach && (options.detach_stdout || options.detach_stderr || options.detach_stdin)) {
         throw RuntimeError("--stdout, --stderr and --stdin apply only with --detach", 1);
     }
+#ifdef _WIN32
     if (options.runtime && *options.runtime != RuntimeMode::Off) {
-        throw RuntimeError("the service is not available in this build; run without --runtime", 5);
+        throw RuntimeError("the service is not available on this platform; run without --runtime", 5);
     }
+#endif
     if (options.virtual_time && options.replay) {
         throw std::runtime_error("--virtual-time cannot be combined with --replay: a replay takes its clock from the trace");
     }

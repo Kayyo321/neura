@@ -49,6 +49,10 @@ struct Timers {
     Millis idle{15 * 60'000};
     Millis grace{10'000};
     bool never_ready = false;
+    // Answer as another build (case 11), and close a client's connection
+    // right after Committed (case 18).
+    bool other_build = false;
+    bool drop_after_commit = false;
 
     void read() {
         const char* text = std::getenv("NEURA_TEST_SERVICE_TIMERS");
@@ -66,6 +70,8 @@ struct Timers {
                 else if (name == "idle") idle = value;
                 else if (name == "grace") grace = value;
                 else if (name == "never-ready") never_ready = value.count() != 0;
+                else if (name == "other-build") other_build = value.count() != 0;
+                else if (name == "drop-after-commit") drop_after_commit = value.count() != 0;
             }
             if (comma == std::string_view::npos) break;
             rest.remove_prefix(comma + 1);
@@ -216,6 +222,7 @@ private:
     bool on_demand_;
     Timers timers_;
     std::string build_;
+    std::string worker_build_;
     Epoch epoch_{};
     SupervisorState state_ = SupervisorState::Accepting;
     bool retired_ = false;
@@ -812,11 +819,11 @@ void Supervisor::start_worker(Application* for_application) {
     const bool fresh = for_application && for_application->path == LaunchPath::Fresh;
     try {
         if (fresh) {
-            worker.process = spawn_worker(self_, build_, &for_application->envelope.environment,
+            worker.process = spawn_worker(self_, worker_build_, &for_application->envelope.environment,
                                           &for_application->envelope.resource_limits);
             worker.environment = for_application->envelope.environment;
         } else {
-            worker.process = spawn_worker(self_, build_, nullptr, nullptr, timers_.never_ready && ready_retry_);
+            worker.process = spawn_worker(self_, worker_build_, nullptr, nullptr, timers_.never_ready && ready_retry_);
             worker.environment = own_environment_;
         }
     } catch (const std::exception& error) {
@@ -887,6 +894,13 @@ void Supervisor::assign(Application& application) {
         .add_u8(Tag::Path, static_cast<std::uint8_t>(application.used_ready ? LaunchPath::Warm : LaunchPath::Fresh));
     application.commit_replied = true;
     if (application.connection >= 0) reply(application.connection, std::move(committed));
+    if (timers_.drop_after_commit && application.connection >= 0) {
+        // A test of a connection lost after the commit: the application
+        // runs on, and its client must find its outcome by asking.
+        const int key = application.connection;
+        application.connection = -1;
+        connections_.erase(key);
+    }
     replenish();
 }
 
@@ -964,7 +978,7 @@ void Supervisor::handle_worker(int pid) {
                 if (at != applications_.end()) application = &at->second;
             }
             if (message.kind == Kind::WorkerReady) {
-                if (message.get(Tag::Build) != build_) throw ProtocolError("a worker of another build");
+                if (message.get(Tag::Build) != worker_build_) throw ProtocolError("a worker of another build");
                 worker.process.ready = true;
                 ready_retry_ = true;
                 if (application) assign(*application);
@@ -1114,8 +1128,8 @@ void Supervisor::query(int key, const Message& message) {
     const Application* found = nullptr;
     if (const auto* request = message.find(Tag::RequestId)) {
         for (const auto& [number, application] : applications_) {
-            if (request->bytes.size() == 16 && std::equal(request->bytes.begin(), request->bytes.end(),
-                                                          application.request.begin())) {
+            if (request->bytes.size() == 16 &&
+                std::memcmp(request->bytes.data(), application.request.data(), 16) == 0) {
                 found = &application;
             }
         }
@@ -1259,6 +1273,9 @@ void Supervisor::timers() {
 int Supervisor::run() {
     timers_.read();
     build_ = own_build();
+    // The workers are of this build; only the supervisor's answers differ.
+    worker_build_ = build_;
+    if (timers_.other_build) build_ += " (a test of another build)";
     for (char** entry = environ; entry && *entry; ++entry) own_environment_.emplace_back(*entry);
     random_bytes(epoch_);
     const auto run = run_directory(true);

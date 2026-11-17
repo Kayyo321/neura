@@ -89,6 +89,10 @@ struct Report {
 };
 void write_report(const fs::path& file, const Report& report);
 
+// A direct run that writes the --runtime-report object it was given, with
+// how the run ended, when --runtime-report is set.
+int run_direct(const cli::Options& options, Clock::time_point client_start, Report report);
+
 // The exit statuses of the service (Service030.md, "Diagnostics").
 inline constexpr int status_not_run = 5;
 inline constexpr int status_unknown = 6;

@@ -6,6 +6,9 @@
 #include "nvm/fleet.hpp"
 #include "nvm/host.hpp"
 #include "nvm/schedule.hpp"
+#ifndef _WIN32
+#include "service/service.hpp"
+#endif
 
 #include <algorithm>
 #include <charconv>
@@ -203,7 +206,20 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
 
 int run(const Options& options) {
     // --tier-stats times the command from before the image is read.
-    const auto started = options.tier_stats ? std::optional(std::chrono::steady_clock::now()) : std::nullopt;
+    const auto client_start = std::chrono::steady_clock::now();
+    const auto started = options.tier_stats ? std::optional(client_start) : std::nullopt;
+#ifndef _WIN32
+    // Through the runtime service only when the command asks for it
+    // (docs/design/Service030.md); --runtime-report also describes a direct run.
+    if (options.runtime && *options.runtime != RuntimeMode::Off) {
+        return neura::service::run_with_service(options, client_start);
+    }
+    if (options.runtime_report) {
+        neura::service::Report report;
+        report.path = "direct";
+        return neura::service::run_direct(options, client_start, report);
+    }
+#endif
     const auto& path = options.files.front();
     std::vector<std::uint8_t> bytes;
     try {

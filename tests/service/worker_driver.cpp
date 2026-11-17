@@ -118,7 +118,6 @@ int main(int argc, char** argv) {
         assignment.add_u8(Tag::Descriptors, 5).add(Tag::ApplicationId, "dev.00000000.1");
         put_envelope(assignment, envelope);
         send_message(worker.channel.get(), assignment, {image.get(), cwd.get(), 0, 1, 2});
-        if (!pid_path.empty()) std::ofstream(pid_path) << worker.pid << '\n';
 
         std::string terminal = "worker-lost";
         int status = -1;
@@ -134,6 +133,8 @@ int main(int argc, char** argv) {
             if (!received) break;
             const auto& message = received->message;
             if (message.kind == Kind::WorkerStarted) {
+                // The worker has applied every setting of the launch.
+                if (!pid_path.empty()) std::ofstream(pid_path) << worker.pid << '\n';
                 for (const auto value : message.all(Tag::Time)) times.push_back(read_named_value(value).first);
                 if (exit_after_started) std::_Exit(99);
             } else if (message.kind == Kind::WorkerFinished) {
