@@ -80,6 +80,11 @@ struct ServiceHooks {
     // Tells the supervisor of `generation`, if one runs, that it is retired,
     // waiting at most 250 ms.
     std::function<void(const std::filesystem::path& root, const std::string& generation)> retire;
+    // Stops the supervisors of the installation when they run no
+    // application, terminating nothing. Returns an empty string on success,
+    // else the reason. Only the control client supplies it; without it an
+    // idle supervisor holds its generation's lease like any other process.
+    std::function<std::string(const std::filesystem::path& root)> stop_idle;
 };
 void set_service_hooks(ServiceHooks hooks);
 

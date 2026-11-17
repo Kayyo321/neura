@@ -100,6 +100,11 @@ int run_with_service(const cli::Options& options, Clock::time_point client_start
 // `neura runtime ...`: the arguments after the command word.
 int runtime_command(const std::vector<std::string>& arguments, const fs::path& self);
 
+// Gives the install lifecycle (neura update, neura uninstall) this control
+// client: the applications that run, terminating them, stopping idle
+// supervisors, and Retire (docs/design/Lifecycle030.md, decision 17).
+void install_lifecycle_hooks();
+
 // `neura runtime enable` and `disable`, and the file they write.
 int login_command(const Installation& installation, bool enable, const std::vector<std::string>& arguments);
 fs::path login_unit_path(const Installation& installation);

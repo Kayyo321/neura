@@ -122,6 +122,9 @@ struct Installation {
 
 // The installation of the executable at `executable` (its real path).
 Installation installation_of(const fs::path& executable);
+// The installation at an install root, as the lifecycle names it: its
+// generation is the one `current` names, its bin that generation's.
+Installation installation_at_root(const fs::path& root);
 
 // <endpoint> for a generation of an installation.
 std::string endpoint_of(const fs::path& root, std::string_view generation);

@@ -5,6 +5,7 @@
 
 #include "service.hpp"
 
+#include "cli/lifecycle.hpp"
 #include "tooling/json.hpp"
 
 #include <algorithm>
@@ -14,6 +15,8 @@
 #include <sstream>
 #include <thread>
 
+#include <fcntl.h>
+#include <sys/file.h>
 #include <unistd.h>
 
 namespace neura::service {
@@ -380,15 +383,25 @@ int stop(const Installation& installation, std::vector<std::string> arguments) {
     }
 }
 
-int shutdown(const Installation& installation, std::vector<std::string> arguments) {
-    const bool terminate = flag(arguments, "--terminate");
-    const auto only = option(arguments, "--generation");
-    const auto timeout_text = option(arguments, "--timeout");
-    const auto timeout = Millis(timeout_text ? seconds_of(*timeout_text, "--timeout") : 60'000);
-    no_more(arguments, "shutdown");
-    std::vector<std::string> waiting;
-    for (const auto& generation : live_generations(installation)) {
-        if (only && *only != generation) continue;
+// Whether a supervisor holds the lock of `generation`'s endpoint, which it
+// does from its start to its exit, whether or not it answers.
+bool supervisor_holds_lock(const Installation& installation, const std::string& generation) {
+    try {
+        const auto endpoint = endpoint_files(run_directory(false), installation.root, generation);
+        UniqueFd fd(::open(endpoint.lock.c_str(), O_RDONLY | O_CLOEXEC | O_NOFOLLOW));
+        if (!fd) return false;
+        return ::flock(fd.get(), LOCK_SH | LOCK_NB) != 0 && errno == EWOULDBLOCK;
+    } catch (const std::exception&) {
+        return false;
+    }
+}
+
+// Sends Shutdown to the supervisors of `generations` that answer and waits,
+// until `timeout`, for them to exit. Returns the generations whose
+// supervisor still runs; `waiting` receives those that were sent Shutdown.
+std::vector<std::string> shut_down(const Installation& installation, const std::vector<std::string>& generations,
+                                   bool terminate, Millis timeout, std::vector<std::string>& waiting) {
+    for (const auto& generation : generations) {
         auto found = running(installation, generation);
         if (!found) continue;
         Message request;
@@ -412,6 +425,21 @@ int shutdown(const Installation& installation, std::vector<std::string> argument
         if (still.empty() || Clock::now() >= deadline) break;
         std::this_thread::sleep_for(Millis(50));
     }
+    return still;
+}
+
+int shutdown(const Installation& installation, std::vector<std::string> arguments) {
+    const bool terminate = flag(arguments, "--terminate");
+    const auto only = option(arguments, "--generation");
+    const auto timeout_text = option(arguments, "--timeout");
+    const auto timeout = Millis(timeout_text ? seconds_of(*timeout_text, "--timeout") : 60'000);
+    no_more(arguments, "shutdown");
+    std::vector<std::string> generations;
+    for (const auto& generation : live_generations(installation)) {
+        if (!only || *only == generation) generations.push_back(generation);
+    }
+    std::vector<std::string> waiting;
+    const auto still = shut_down(installation, generations, terminate, timeout, waiting);
     if (still.empty()) {
         std::cout << (waiting.empty() ? "no supervisor is running\n" : "the service has shut down\n");
         return 0;
@@ -449,6 +477,97 @@ int cache_clear(const Installation& installation, std::vector<std::string> argum
     return 0;
 }
 
+// --- The lifecycle's side ----------------------------------------------------------------
+
+// Every generation of the installation at `root` that may have a supervisor:
+// the directories in versions/ and those with records.
+std::vector<std::string> generations_at(const Installation& installation) {
+    std::vector<std::string> generations;
+    std::error_code error;
+    for (const auto& entry : fs::directory_iterator(installation.root / "versions", error)) {
+        const auto name = entry.path().filename().string();
+        if (!name.starts_with(".") && entry.is_directory(error)) generations.push_back(name);
+    }
+    for (const auto& recorded : recorded_generations(installation)) {
+        if (std::ranges::find(generations, recorded) == generations.end()) generations.push_back(recorded);
+    }
+    std::ranges::sort(generations);
+    return generations;
+}
+
+// The applications that are not terminal, over every supervisor of the
+// installation; nothing when a supervisor holds its lock but does not
+// answer, or answers as another installation.
+std::optional<std::size_t> running_applications(const fs::path& root) {
+    const auto installation = installation_at_root(root);
+    std::size_t count = 0;
+    for (const auto& generation : generations_at(installation)) {
+        std::optional<Running> found;
+        try {
+            found = running(installation, generation);
+        } catch (const std::exception&) {
+            return std::nullopt;
+        }
+        if (!found) {
+            if (supervisor_holds_lock(installation, generation)) return std::nullopt;
+            continue;
+        }
+        for (const auto value : found->listing.all(Tag::Record)) {
+            try {
+                const auto state = terminal_named(Json::parse(value)["state"].string());
+                if (state && is_live(*state)) ++count;
+            } catch (const std::exception&) {
+                return std::nullopt;
+            }
+        }
+    }
+    return count;
+}
+
+// Stops every supervisor of the installation, terminating its applications
+// or, without `terminate`, only once it has none.
+std::string stop_service(const fs::path& root, bool terminate, Millis timeout) {
+    const auto installation = installation_at_root(root);
+    const auto generations = generations_at(installation);
+    std::vector<std::string> asked;
+    std::vector<std::string> still;
+    try {
+        still = shut_down(installation, generations, terminate, timeout, asked);
+    } catch (const std::exception& error) {
+        return std::string("the service did not stop: ") + error.what();
+    }
+    // A supervisor that holds its lock without answering is not stopped.
+    const auto deadline = Clock::now() + Millis(2000);
+    for (const auto& generation : generations) {
+        if (std::ranges::find(still, generation) != still.end()) continue;
+        while (supervisor_holds_lock(installation, generation) && Clock::now() < deadline) {
+            std::this_thread::sleep_for(Millis(20));
+        }
+        if (supervisor_holds_lock(installation, generation)) still.push_back(generation);
+    }
+    if (still.empty()) return {};
+    std::string text = "the service did not stop: the supervisor of generation " + still.front();
+    for (std::size_t i = 1; i < still.size(); ++i) text += ", " + still[i];
+    return text + (still.size() == 1 ? " still runs" : " still run");
+}
+
+// Retire to the supervisor of `generation`, if one answers, within 250 ms.
+void retire_supervisor(const fs::path& root, const std::string& generation) {
+    const auto deadline = Clock::now() + Millis(250);
+    try {
+        auto session = connect_service(installation_at_root(root), generation, Purpose::Control, StartMode::No);
+        if (Clock::now() >= deadline) return;
+        Message request;
+        request.kind = Kind::Retire;
+        request.sequence = ++session.sequence;
+        send_message(session.fd.get(), request, {}, deadline);
+        receive_message(session.fd.get(), deadline);
+    } catch (const std::exception&) {
+        // A supervisor also retires by itself once `current` moves.
+    } catch (const NotRun&) {
+    }
+}
+
 } // namespace
 
 int runtime_command(const std::vector<std::string>& all, const fs::path& self) {
@@ -473,6 +592,18 @@ int runtime_command(const std::vector<std::string>& all, const fs::path& self) {
     throw RuntimeError("unknown runtime command '" + command +
                            "'; expected start, status, ps, inspect, stop, shutdown, enable, disable, or cache clear",
                        1);
+}
+
+void install_lifecycle_hooks() {
+    // The tests' stand-in for the service's commands takes this client's
+    // place (docs/Install.md, "Test-only hooks").
+    if (const char* stand_in = std::getenv("NEURA_TEST_SERVICE_CONTROL"); stand_in && *stand_in) return;
+    lifecycle::ServiceHooks hooks;
+    hooks.applications = running_applications;
+    hooks.terminate = [](const fs::path& root) { return stop_service(root, true, Millis(60'000)); };
+    hooks.stop_idle = [](const fs::path& root) { return stop_service(root, false, Millis(10'000)); };
+    hooks.retire = retire_supervisor;
+    lifecycle::set_service_hooks(std::move(hooks));
 }
 
 } // namespace neura::service

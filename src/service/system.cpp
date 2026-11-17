@@ -321,6 +321,18 @@ Installation installation_of(const fs::path& executable) {
     return installation;
 }
 
+Installation installation_at_root(const fs::path& root) {
+    Installation installation;
+    std::error_code error;
+    installation.root = fs::canonical(root, error);
+    if (error) installation.root = root;
+    installation.generation = fs::read_symlink(installation.root / "current", error).filename().string();
+    installation.bin = installation.root / "versions" / installation.generation / "bin";
+    installation.installed = true;
+    installation.id = short_digest(installation.root.string());
+    return installation;
+}
+
 bool private_directory(const fs::path& directory) {
     struct stat status{};
     if (::lstat(directory.c_str(), &status) != 0) return false;

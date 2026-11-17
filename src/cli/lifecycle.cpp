@@ -2356,6 +2356,9 @@ int run_uninstall(const fs::path& executable, const Detection& detection, const 
         for (const auto& item : plan) std::cout << "would remove " << item.path.string() << "\n";
         for (const auto& path : service) std::cout << "would remove " << path << " (the service's)\n";
         for (const auto& name : in_use) std::cout << "generation " << name << " is in use by a running neura process\n";
+        if (!service_running && service_hooks().stop_idle && !running_supervisors(root).empty()) {
+            std::cout << "would stop the service's supervisor, which runs no application\n";
+        }
         if (service_running) {
             std::cout << (applications ? std::to_string(*applications) + " applications of this installation are running (neura runtime ps)"
                                        : std::string("a supervisor of this installation is running (neura runtime status)"))
@@ -2377,6 +2380,12 @@ int run_uninstall(const fs::path& executable, const Detection& detection, const 
         return exit_ok;
     }
     if (service_running) check_applications(root, options.terminate, "neura: uninstall: ");
+    // A supervisor that runs no application holds its generation's lease;
+    // with the control client it is stopped like any idle one.
+    if (!service_running && service_hooks().stop_idle && !running_supervisors(root).empty()) {
+        std::cout << "stopping the service's supervisor, which runs no application\n";
+        if (const auto problem = service_hooks().stop_idle(root); !problem.empty()) throw Failure{problem + ". Nothing was changed"};
+    }
     // Holders other than the service's applications must end first.
     in_use.clear();
     for (const auto& name : generations_on_disk(root)) {
@@ -2452,6 +2461,7 @@ void set_service_hooks(ServiceHooks hooks) {
     if (hooks.applications) current.applications = std::move(hooks.applications);
     if (hooks.terminate) current.terminate = std::move(hooks.terminate);
     if (hooks.retire) current.retire = std::move(hooks.retire);
+    if (hooks.stop_idle) current.stop_idle = std::move(hooks.stop_idle);
 }
 
 int uninstall(const fs::path& executable, const UninstallOptions& options) {

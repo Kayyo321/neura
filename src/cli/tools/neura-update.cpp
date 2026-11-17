@@ -5,6 +5,9 @@
 #include "cli/driver.hpp"
 #include "cli/lifecycle.hpp"
 #include "cli/tool.hpp"
+#ifndef _WIN32
+#include "service/service.hpp"
+#endif
 
 #include <filesystem>
 #include <system_error>
@@ -36,5 +39,10 @@ int command(const Options& options) {
 int main(int argc, char** argv) {
     auto start = neura::tool::start(*neura::tool::find_tool("neura-update"), argc, argv);
     if (start.status) return *start.status;
+#ifndef _WIN32
+    // The service's control client, for the applications that run and for
+    // Retire (docs/design/Lifecycle030.md, decision 17).
+    neura::service::install_lifecycle_hooks();
+#endif
     return core_options_main(std::move(start.arguments), command);
 }
