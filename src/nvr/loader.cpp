@@ -1286,6 +1286,19 @@ void Validator::state(const Function& function, const Exit& exit,
         }
         break;
     }
+    case StateOp::HookEnter:
+        arity(2);
+        if (exit.immediate > 1) invalid(where + ": a class hook event is a get (0) or a set (1)");
+        if (!is_unsigned(args[0].type, 32)) invalid(where + ": argument 0 must be a uint32 policy word");
+        if (image_.types[args[1].type].kind != TypeKind::Object)
+            invalid(where + ": argument 1 must be a class reference");
+        no_result();
+        break;
+    case StateOp::HookLeave:
+        arity(0);
+        zero_immediate();
+        no_result();
+        break;
     case StateOp::EnterRegion:
         arity(0);
         zero_immediate();

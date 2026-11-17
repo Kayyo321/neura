@@ -749,6 +749,8 @@
                 // A frame that still owns a storage region is popped by tier 1,
                 // which releases it (NVR 1.7).
                 if (simple && !frames_.regions.empty() && frames_.regions.back().depth >= depth) simple = false;
+                // So is a frame with a class hook event open, which tier 1 checks.
+                if (simple && !frames_.hooks.empty() && frames_.hooks.back().depth >= depth) simple = false;
                 if (!simple) return end(op.block, true, region_counts_.exits);
                 ++done;
                 ++blocks;

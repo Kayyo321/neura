@@ -103,11 +103,11 @@ An *event* is one run of an effective clause. The table gives every source opera
 
 | Rule | Status |
 | --- | --- |
-| Each task has a stack of active events. An entry is the kind (get or set), the policy, and the identity of the reference: the object's handle, or nil. Handles are never reused, so no entry can name a released object. | proposed |
-| Starting an event equal to an active one is the trap `class hook recursion: <get or set> of <Policy>`. A hook may freely read or admit other objects, and references of other classes. | proposed |
-| The stack holds 64 entries. A 65th is the trap `class hook nesting limit exceeded`. | proposed |
+| Each task has a stack of active events. An entry is the kind (get or set), the policy, and the identity of the reference: the object's handle, or nil. Handles are never reused, so no entry can name a released object. | proposed; implemented |
+| Starting an event equal to an active one is the trap `class hook recursion: <get or set> of <Policy>`. A hook may freely read or admit other objects, and references of other classes. | proposed; implemented |
+| The stack holds 64 entries. A 65th is the trap `class hook nesting limit exceeded`. | proposed; implemented |
 | A hook body may not use the scheduler: a channel operation, a guard, `spawn`, `scope`, `select`, or a call whose summary says it may (`E0544`). An event therefore starts and ends without its task being suspended. | proposed; implemented |
-| Both traps are NVM trap reasons with their own names in `--trace` and in the debugger's stop reason. | proposed |
+| Both traps are NVM trap reasons with their own names in `--trace` and in the debugger's stop reason. | proposed; implemented |
 
 ## Representation
 
@@ -135,7 +135,7 @@ An *event* is one run of an effective clause. The table gives every source opera
 | Summaries | Elaboration sets `Summary::hooks`, with the clause as its cause, on every function that contains an event with a clause that is not identity, and the clause's own effects join that function's summary. `#Pure` and the other checked tags are checked again after elaboration; a violation is reported with today's code and a label at the clause. | proposed; implemented |
 | Literal nil | An initializer the pass wraps in `HookAdmit` is not a literal, so `constant_initializer` no longer makes it an image constant: it becomes a startup action at its place in source order. The converter decides nothing about hooks. | proposed |
 | Converter | `HookRead` and `HookAdmit` become: select the policy, compare it against the classes of the operand's static type that have a clause, in ascending layout identifier, and call the clause's function, or do nothing for identity. A setter's result goes to fresh slots, and one exit's `assignments` then writes handle, policy word and flags to the destination. | proposed |
-| NVR | The next free NVR minor version: the state operations `HookEnter(kind, policy, handle)` and `HookLeave`, which the hidden functions run first and last, and the trap reasons `HookRecursion` and `HookLimit`. The result check is a `ReadTag` and a compare. The writer emits the version only for an image with a clause. | proposed |
+| NVR | The next free NVR minor version: the state operations `HookEnter(kind, policy, handle)` and `HookLeave`, which the hidden functions run first and last, and the trap reasons `HookRecursion` and `HookLimit`. The result check is a `ReadTag` and a compare. The writer emits the version only for an image with a clause. | proposed; implemented |
 | Decompiler | Reads and writes the two operations, shows a policy word by its class name when the image carries names, and reports a hidden hook function as inferred structure only from its `HookEnter`. | proposed |
 
 ### Derivation
@@ -184,8 +184,8 @@ A hook is a call with effects, whatever its body does. A getter whose body is `i
 | IR `remove-pure-discards`, `remove-dead-stores` | A discarded event stays. A store that is an admission stays even when the stored value is never read. | proposed; implemented |
 | IR `inline-calls` (`inlinable`) | A function that contains an event, and a hook function, is not inlined. | proposed; implemented |
 | IR `propagate-copies`, `fold-constants` | A read through a `HookRead` is not a copy of the storage, and a `HookAdmit` of a literal nil is not a constant. | proposed; implemented |
-| Tier 2 | A block that contains `HookEnter` or `HookLeave` is declined and runs at tier 1. A block that calls a hook function is an ordinary block with a `Call` exit. | proposed |
-| Tier 3 inlining (`inline_calls`) | A function with `HookEnter` or `HookLeave` is not inlined at first, as a callee with a `Helper` is not. Native inlining follows in its own change, and then keeps both operations and the result check in place. | proposed |
+| Tier 2 | A block that contains `HookEnter` or `HookLeave` is declined and runs at tier 1. A block that calls a hook function is an ordinary block with a `Call` exit. | proposed; implemented |
+| Tier 3 inlining (`inline_calls`) | A function with `HookEnter` or `HookLeave` is not inlined at first, as a callee with a `Helper` is not. Native inlining follows in its own change, and then keeps both operations and the result check in place. | proposed; implemented |
 | Tier 3 value numbering (`number_values`, `Memory::apply`) and LICM (`hoist_invariants`) | The call of a hook function is a `Call`: `is_effect`, never numbered or hoisted, and it kills every memory class. `HookEnter` and `HookLeave` are added to `is_effect` and are never hoisted. | proposed |
 | Tier 3 flags (`analyse_flags`) | Arguments are admitted in the caller, so "parameters are initialized at entry 0" holds. A destination is written only by the commit exit after the setter's call returns, so across that call its flag is still 0, and the handle word and policy word of one reference always change in the same exit. The entry that resumes after the call is analysed with the destination not initialized. A hook-bearing global is never an image constant, so no flag is proven for it from the image. | proposed |
 | Checks | `NEURA_TIER3_VERIFY=1` and `NEURA_TIER_CHECK=2` run over every hook test program, and each pass above has a program in which it must leave the operation in place. | proposed |
@@ -418,3 +418,8 @@ No existing source changes meaning: no class has a hook, and `static scope` did 
 | The audit of lowering's hidden symbols found every temporary already named with `$`. Three compiler-written places are exempt in `class_hooks.cpp` instead: the bodies of the root class's members (`other` of `equals`), the constructor of a closure layout (its `$capture<N>` parameters and stores, which the `MakeClosure` already admitted), and the initialization of a singleton's instance | None of them is a binding the program writes. |
 | The body of an accessor adapter reads and writes its own field's storage without an event | `object.field` is one getter and `object.field = x` one setter, at the call (`HookAdmit` names the field for its previous value). |
 | `#Pure` is checked again on the specialized, elaborated program only when the program declares a clause | A program without clauses is unchanged. |
+| NVR minor `hooks_minor_version` = 8, state operations 33 (`hook-enter`) and 34 (`hook-leave`) | The next free values on this base; the lead renumbers at merge. |
+| A third trap kind, `invalid class hook operation` (status 132), for a `hook-leave` with no event of its frame open, a return with one open, and a scheduler exit with any open | The note asks a malformed image that leaves an event open or closes one twice to be rejected or trapped; the loader cannot see balance across blocks, so the machine traps. |
+| `class hook recursion` has status 134 (like a failed cast), `class hook nesting limit exceeded` 139 (like the frame depth limit) | Each takes the status of the trap it resembles. |
+| A poll may preempt a task inside a hook; its open events stay with its frames | The stack of events is per task, so another task's events never see them; only a scheduler operation inside an event is an error. |
+| Tier 3 needs no change of its own: a function program whose block tier 2 declines has a `Leave`, which tier 3's inliner already refuses | The rule "not inlined" holds by construction. |

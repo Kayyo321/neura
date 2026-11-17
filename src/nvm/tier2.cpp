@@ -56,7 +56,7 @@ bool aggregate_exit(const nvr::Image& image, const nvr::Exit& exit) {
 bool internal_exit(const nvr::Image& image, const nvr::Exit& exit) {
     return exit.kind == nvr::ExitKind::Continue ||
            (exit.kind == nvr::ExitKind::State && inline_state_operation(exit) && !aggregate_exit(image, exit) &&
-            !nvr::is_region_operation(exit.operation));
+            !nvr::is_region_operation(exit.operation) && !nvr::is_hook_operation(exit.operation));
 }
 
 // --- Region optimization (tier2.hpp, "Optimization") ---------------------
@@ -691,7 +691,8 @@ public:
         region_.function = function;
         enters_region_ = std::ranges::any_of(function_.blocks, [](const nvr::Block& block) {
             return std::ranges::any_of(block.exits, [](const nvr::Exit& exit) {
-                return exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::EnterRegion;
+                return exit.kind == nvr::ExitKind::State && (exit.operation == nvr::StateOp::EnterRegion ||
+                                                             exit.operation == nvr::StateOp::HookEnter);
             });
         });
         region_.entry = blocks.front();
@@ -783,6 +784,10 @@ private:
         // path, never as a helper; and the return of a function that enters a
         // region does too, as that is where the frame's regions are released.
         if (exit.kind == nvr::ExitKind::State && nvr::is_region_operation(exit.operation)) return false;
+        // Class hook events (docs/design/Hooks030.md, Optimization and tiers):
+        // a block that opens or closes one is declined and runs at tier 1,
+        // and so is the return of a hook function (enters_region_ counts it).
+        if (exit.kind == nvr::ExitKind::State && nvr::is_hook_operation(exit.operation)) return false;
         if (exit.kind == nvr::ExitKind::Return && enters_region_) return false;
         if (internal_exit(image_, exit)) return true;
         if (!program_ || checkable_) return false;
@@ -1624,7 +1629,8 @@ private:
 
     const nvr::Image& image_;
     const nvr::Function& function_;
-    // Whether the function enters a storage region (NVR 1.7).
+    // Whether the function enters a storage region (NVR 1.7) or opens a
+    // class hook event: its returns run at tier 1.
     bool enters_region_ = false;
     const std::vector<std::uint32_t>& blocks_;
     const std::vector<BlockForm>& forms_;

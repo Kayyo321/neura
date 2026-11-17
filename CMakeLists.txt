@@ -594,6 +594,13 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence")
     set_tests_properties(parameters-equivalence PROPERTIES TIMEOUT 180)
 
+    # The NVR class hook operations in every execution mode, the loader's
+    # rejections, and the assembler and decompiler (docs/design/Hooks030.md).
+    add_test(NAME hook-operations COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/hooks/operations.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    set_tests_properties(hook-operations PROPERTIES TIMEOUT 300)
+
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.
     add_executable(neura_diagnostic_tests tests/diagnostics/unit_tests.cpp)

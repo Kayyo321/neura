@@ -278,6 +278,13 @@ public:
                 operation = type_name(image_, exit.immediate) + " repeat(" + a(1) + ", " + words(2) + ") in " + a(0);
                 break;
             case nvr::StateOp::MoveToRegion: operation = "move " + a(0) + " to " + a(1); break;
+            // Class hooks: the event's kind, its policy word, shown as the
+            // class when the image has names, and the reference.
+            case nvr::StateOp::HookEnter:
+                operation = std::string("hook_enter(") + (exit.immediate == 0 ? "get" : "set") + ", " + a(0) +
+                            policy_comment(args.at(0)) + ", " + a(1) + ")";
+                break;
+            case nvr::StateOp::HookLeave: operation = "hook_leave()"; break;
             case nvr::StateOp::Kernel: {
                 // A built-in C kernel: named by its KERN entry and opaque, as
                 // its behaviour is not in the circuit (Decompiler.md).
@@ -320,6 +327,19 @@ public:
 private:
     const nvr::Image& image_;
     const std::optional<nvr::Names>& names_;
+
+    // A constant policy word names a layout plus 1; with names, its class.
+    std::string policy_comment(const nvr::Value& word) const {
+        if (word.kind != nvr::ValueKind::Constant || word.index >= image_.constants.size()) return {};
+        std::uint64_t policy = 0;
+        const auto& payload = image_.constants[word.index].payload;
+        for (std::size_t i = 0; i < payload.size() && i < 8; ++i) policy |= std::uint64_t{payload[i]} << (8 * i);
+        if (policy == 0) return " /* no policy */";
+        const auto layout = policy - 1;
+        if (names_ && layout < names_->layouts.size() && !names_->layouts[layout].empty())
+            return " /* policy " + names_->layouts[layout] + " */";
+        return " /* policy L" + std::to_string(layout) + " */";
+    }
     std::map<std::pair<std::uint32_t, std::uint32_t>, std::string> locations_;
 };
 

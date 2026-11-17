@@ -67,7 +67,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(8), Kind::Unsupported, "format version 1.8 is not supported");
+    expect_rejected(version_bytes(nvr::minor_version + 1), Kind::Unsupported, "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -457,8 +457,8 @@ NEURA_TEST(format, multi_word_results_need_version_1_7) {
     }
     check(rejected, "a 1.7 function table under a 1.6 header is rejected as malformed or invalid");
     auto future = bytes;
-    future[6] = 8;
-    expect_rejected(future, Kind::Unsupported, "format version 1.8 is not supported");
+    future[6] = static_cast<std::uint8_t>(nvr::minor_version + 1);
+    expect_rejected(future, Kind::Unsupported, "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported");
 
     // Writer checks: a return carries one value per word, and no word is void.
     auto short_return = image;
@@ -643,8 +643,8 @@ NEURA_TEST(format, aggregate_elements_need_version_1_7) {
     six.minor = 6;
     expect_rejected(assemble(aggregate_sections(6), six), Kind::Malformed, "uses NVR 1.7 features but declares 1.6");
     auto future = assemble(aggregate_sections(7), seven);
-    future[6] = 8;
-    expect_rejected(future, Kind::Unsupported, "format version 1.8 is not supported");
+    future[6] = static_cast<std::uint8_t>(nvr::minor_version + 1);
+    expect_rejected(future, Kind::Unsupported, "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported");
 }
 
 NEURA_TEST(format, aggregate_elements_are_validated) {
@@ -767,7 +767,9 @@ NEURA_TEST(format, storage_regions_need_version_1_7) {
     check_equal(static_cast<unsigned>(nvr::StateOp::RegionCollection), 30U, "the region-collection number");
     check_equal(static_cast<unsigned>(nvr::StateOp::RegionRepeat), 31U, "the region-repeat number");
     check_equal(static_cast<unsigned>(nvr::StateOp::MoveToRegion), 32U, "the move-to-region number");
-    check_equal(static_cast<unsigned>(nvr::state_op_count), 33U, "the operation count");
+    check_equal(static_cast<unsigned>(nvr::StateOp::HookEnter), 33U, "the hook-enter number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::HookLeave), 34U, "the hook-leave number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 35U, "the operation count");
     const auto image = region_image(environment);
     check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
     check(nvr::uses_regions(image), "the image uses regions");
@@ -1117,9 +1119,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 8;
+    newer_minor.minor = nvr::minor_version + 1;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.8 is not supported; this loader accepts 1.0 through 1.7");
+                    "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported" + "; this loader accepts 1.0 through 1." + std::to_string(nvr::minor_version));
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");

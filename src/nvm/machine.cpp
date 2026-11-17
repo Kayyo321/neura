@@ -70,6 +70,9 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::StackLimit: return "stack limit exceeded";
     case TrapKind::ReleasedStorage: return "released storage accessed";
     case TrapKind::InvalidRegion: return "invalid region operation";
+    case TrapKind::HookRecursion: return "class hook recursion";
+    case TrapKind::HookLimit: return "class hook nesting limit exceeded";
+    case TrapKind::InvalidHook: return "invalid class hook operation";
     }
     return "trap";
 }
@@ -92,7 +95,10 @@ int exit_status(const Trap& trap) {
         default: return illegal_instruction;
         }
     case TrapKind::InvalidCast:
+    case TrapKind::HookRecursion:
     case TrapKind::Deadlock: return abort;
+    case TrapKind::HookLimit: return segmentation_fault;
+    case TrapKind::InvalidHook: return illegal_instruction;
     case TrapKind::UninitializedSlot:
     case TrapKind::UninitializedField:
     case TrapKind::UninitializedGlobal:
@@ -709,6 +715,16 @@ private:
         std::vector<std::uint64_t> handles;
     };
 
+    // One open class hook event: its kind, policy word and reference, and the
+    // depth of the frame that opened it.
+    struct HookEvent {
+        std::uint32_t kind = 0;
+        std::uint32_t policy = 0;
+        std::uint64_t handle = 0;
+        std::size_t depth = 0;
+        bool operator==(const HookEvent&) const = default;
+    };
+
     // The frames of one task, outermost first. Every frame's slots and
     // initialized flags live in two arenas, one frame after another, so a
     // call or return only moves the end of the arenas. The headers and the
@@ -769,6 +785,7 @@ private:
         void clear() {
             record_.size = 0;
             record_.slot_size = 0;
+            hooks.clear();
         }
 
         // What native code reads and writes (tier3::FrameRecord).
@@ -779,6 +796,10 @@ private:
         // indexes; they move with the stack when the task parks, and native
         // code never touches them: a frame that owns one is never popped there.
         std::vector<StorageRegion> regions;
+        // The task's open class hook events, oldest first
+        // (docs/design/Hooks030.md, Recursion). Native code never touches
+        // them: a block that opens or closes one runs at tier 1.
+        std::vector<HookEvent> hooks;
 
     private:
         // Room for `frames` headers and `slots` slots, keeping what is there.
@@ -1283,6 +1304,9 @@ private:
         while (!frames.regions.empty() && frames.regions.back().depth >= depth) {
             release_region(frames, frames.regions.size() - 1);
         }
+        // A trap or the end of a run also ends the class hook events it had
+        // open; a frame's return checks its own after this.
+        if (depth == 0) frames.hooks.clear();
     }
 
     void release_all_regions() {
@@ -2690,7 +2714,22 @@ private:
         }
     }
 
+    // The class name of a policy word, from the image's names when it has
+    // them: the word is the layout identifier plus 1.
+    std::string policy_name(std::uint32_t policy) {
+        if (!policy_names_) {
+            policy_names_.emplace();
+            if (const auto names = nvr::decode_names(image_)) *policy_names_ = names->layouts;
+        }
+        const auto layout = policy == 0 ? nvr::absent : policy - 1;
+        if (layout < policy_names_->size() && !(*policy_names_)[layout].empty()) return (*policy_names_)[layout];
+        return policy == 0 ? std::string("no policy") : "layout " + std::to_string(layout);
+    }
+
     void scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        // A hook cannot use the scheduler (E0544): an event never spans a
+        // suspension.
+        if (!frames_.hooks.empty()) fault(TrapKind::InvalidHook, "a scheduler operation with a class hook event open");
         using Op = nvr::SchedulerOp;
         using Outcome = nvr::SchedulerOutcome;
         const auto self = scheduler_->current;
@@ -3454,6 +3493,9 @@ private:
             }
             // The regions the frame entered and did not release (NVR 1.7).
             if (!frames_.regions.empty()) release_regions_from(frames_, frames_.size());
+            // A hook function closes the event it opened before it returns.
+            if (!frames_.hooks.empty() && frames_.hooks.back().depth >= frames_.size())
+                fault(TrapKind::InvalidHook, "a frame returns with a class hook event open");
             frames_.pop_back();
             if (scheduler_ && frames_.empty() && scheduler_->current != 0) {
                 finish_task(result);
@@ -3764,6 +3806,26 @@ private:
                                       heap_.initialized(item, exit.immediate), args[1]});
             }
             heap_.set_field(item, exit.immediate, args[1]);
+            return 0;
+        }
+        case nvr::StateOp::HookEnter: {
+            auto& events = frames_.hooks;
+            const HookEvent event{exit.immediate, static_cast<std::uint32_t>(args[0]), args[1], frames_.size()};
+            for (const auto& open : events) {
+                if (open.kind == event.kind && open.policy == event.policy && open.handle == event.handle)
+                    fault(TrapKind::HookRecursion, std::string(event.kind == 0 ? "get" : "set") + " of " +
+                                                       policy_name(event.policy));
+            }
+            if (events.size() >= nvr::max_hook_events)
+                fault(TrapKind::HookLimit, std::to_string(nvr::max_hook_events) + " events are open");
+            events.push_back(event);
+            return 0;
+        }
+        case nvr::StateOp::HookLeave: {
+            auto& events = frames_.hooks;
+            if (events.empty() || events.back().depth != frames_.size())
+                fault(TrapKind::InvalidHook, "no event of this frame is open");
+            events.pop_back();
             return 0;
         }
         case nvr::StateOp::EnterRegion: {
@@ -4366,6 +4428,7 @@ private:
     std::uint64_t live_stack_cells_ = 0;
     std::uint64_t peak_stack_cells_ = 0;
     std::uint64_t region_serial_ = 0;
+    std::optional<std::vector<std::string>> policy_names_;
     std::map<std::uint64_t, std::uint64_t> released_handles_;
     FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.
