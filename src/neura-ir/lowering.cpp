@@ -4,6 +4,7 @@
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
 #include "float.hpp"
+#include "hook_arguments.hpp"
 #include "host_binding.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"

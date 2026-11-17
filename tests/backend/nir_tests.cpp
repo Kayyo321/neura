@@ -788,6 +788,33 @@ IrProgram attributed_function(std::vector<IrAttribute> attributes) {
 
 } // namespace
 
+// Before hooked admissions were executable, omitted nil defaults already
+// carried the call span and the formal's recorded default in the artifact.
+NEURA_TEST(nir, calls_with_older_nil_defaults_keep_hook_order) {
+    const auto directory = environment.source_dir / "tests" / "parameters" / "equivalence";
+    for (const auto name : {"hook-order", "hook-spawn"}) {
+        const auto source = directory / (std::string(name) + ".nra");
+        auto program = lower_files({source});
+        std::size_t omitted = 0;
+        const std::function<void(IrNode&)> legacy = [&](IrNode& node) {
+            if (node.op == IrOp::Nil && node.text == "$default_nil") {
+                node.text.clear();
+                ++omitted;
+            }
+            for (auto* region : {&node.operands, &node.body, &node.alternative})
+                for (auto& child : *region) legacy(child);
+        };
+        for (auto& body : program.bodies) for (auto& instruction : body.instructions) legacy(instruction);
+        check(omitted > 0, "the program omits nil defaults");
+        const auto restored = read_nir(write_nir(program), source.string());
+        const auto image = nvr::load(nvr::encode(backend::build(restored).image));
+        const auto run = run_captured(image);
+        check(run.result.completed, describe_trap(run.result, image));
+        const auto expected = read_bytes(directory / (std::string(name) + ".expected"));
+        check_equal(run.output, std::string(expected.begin(), expected.end()), name);
+    }
+}
+
 NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
     struct Row {
         AttributeId id;
@@ -824,7 +851,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
                   info->repeats == row.repeats && info->schema == row.schema,
               std::string(row.name) + " differs from the documented registry");
     }
-    check(find_attribute_info(0) == nullptr && find_attribute_info(15) == nullptr, "ids 0 and 15 are unregistered");
+    check(find_attribute_info(0) == nullptr && find_attribute_info(18) == nullptr, "ids 0 and 18 are unregistered");
     check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
 
     // Schemas accept the payloads of the helpers and reject other shapes.

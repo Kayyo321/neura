@@ -1,4 +1,5 @@
 #include "class_hooks.hpp"
+#include "hook_arguments.hpp"
 
 #include "attributes.hpp"
 #include "kernel_signature.hpp"
@@ -163,7 +164,7 @@ private:
     }
 
     bool read_site(const IrNode& node) const {
-        if (!index_.carrying(node.type)) return false;
+        if (!index_.carrying(node.type) || transports_argument(node)) return false;
         switch (node.op) {
         case IrOp::Load:
         case IrOp::Field:
@@ -222,7 +223,7 @@ private:
                 !declared.arguments.empty() && node.operands[i].type != declared) {
                 declared = declared.arguments.front();
             }
-            admit(node.operands[i], declared);
+            if (!transports_argument(node.operands[i])) admit(node.operands[i], declared);
         }
     }
 
@@ -284,7 +285,8 @@ private:
         case IrOp::Initialize: {
             for (auto& operand : node.operands) value(operand);
             const auto* target = symbol(node.symbol);
-            if (node.operands.size() != 1 || !target || !source_binding(node.symbol)) return;
+            if (node.operands.size() != 1 || !target ||
+                (!source_binding(node.symbol) && node.text != parameter_admission)) return;
             // A singleton's instance is created by the compiler, not stored
             // by the program; reading it is an event.
             if (singletons_.contains(node.symbol)) return;
@@ -293,7 +295,7 @@ private:
         }
         case IrOp::Return: {
             for (auto& operand : node.operands) value(operand);
-            if (node.operands.size() == 1 && !exempt_signature_)
+            if (node.operands.size() == 1 && !exempt_signature_ && node.text != argument_transport)
                 if (const auto* function = symbol(function_)) admit(node.operands.front(), function->type);
             return;
         }
@@ -484,6 +486,7 @@ void elaborate_class_hooks(IrProgram& program) {
     if (!has_class_hooks(program)) return;
     const HookIndex index(program);
     check_hook_boundaries(program, index);
+    prepare_class_hook_arguments(program, index);
     Elaborator elaborator(program, index);
     for (auto& body : program.bodies) elaborator.body(body);
     program.hooks_elaborated = true;

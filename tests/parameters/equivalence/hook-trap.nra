@@ -1,0 +1,32 @@
+// The second written admission traps: the final argument and call are skipped.
+let failure = import:Std.Core.Failure;
+let program = import:Std.Program;
+
+let log: string = "";
+let record = func(line: string) { log += line + "\n"; };
+
+let Session = class (
+    | set: {
+        record("admit");
+        if (value != nil && value.fail) {
+            record("trap admission");
+            failure.trap(log);
+        }
+        return value;
+    };
+    export let fail: bool;
+    export let init = func(label: string, should_fail: bool) {
+        record("evaluate " + label);
+        fail = should_fail;
+    };
+);
+let call = func(first: Session, second: Session, third: Session) {
+    record("call");
+};
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        call(third: new Session("third", false), second: new Session("second", true),
+             first: new Session("first", false));
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,5 +1,6 @@
 #include "nir_format.hpp"
 #include "attributes.hpp"
+#include "hook_arguments.hpp"
 #include "host_binding.hpp"
 #include "integer.hpp"
 
@@ -351,6 +352,7 @@ private:
         // Events are derived on the linked program and never stored.
         if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
             throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
+        if (linked_argument_annotation(value)) throw NirError("argument transport is derived after linking");
         // Only bodies carry polls, and a body with one makes the file 1.9.
         u8(static_cast<std::uint8_t>(value.op) | (polls_ && value.poll ? poll_bit : 0));
         type(value.type);
@@ -702,6 +704,7 @@ private:
         value.span = span();
         value.symbol = reference();
         value.text = text();
+        if (linked_argument_annotation(value)) fail("argument transport is derived after linking");
         if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);
         if (minor_ < attribute_minor && is_deferred_initialize(value))

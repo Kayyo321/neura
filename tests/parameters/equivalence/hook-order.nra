@@ -1,0 +1,41 @@
+// Named arguments interleave expression evaluation and parameter admission.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let log: string = "";
+let record = func(line: string) {
+    if (log != "") { log += "\n"; }
+    log += line;
+};
+
+let Session = class (
+    | set: {
+        if (value == nil) { record("admit nil"); }
+        else { record("admit object"); }
+        return value;
+    };
+    export let init = func(label: string) { record("evaluate " + label); };
+);
+
+let FirstDefault = class (
+    | set: { record("admit first default"); return value; };
+);
+let LastDefault = class (
+    | set: { record("admit last default"); return value; };
+);
+
+let call = func(first: Session, second: Session, third: Session) {
+    record("call");
+};
+let defaults = func(first: FirstDefault = nil, written: Session, last: LastDefault = nil) {
+    record("call defaults");
+};
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        call(third: new Session("third"), first: new Session("first"), second: new Session("second"));
+        defaults(written: new Session("written"));
+        console.print_line(log);
+        return program.ExitCode.Ok;
+    };
+);

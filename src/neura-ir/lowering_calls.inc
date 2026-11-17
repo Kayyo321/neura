@@ -417,8 +417,11 @@ IrNode Lowering::default_value(SymbolId parameter, const IrType& type, const Spa
         result.text = literal.text;
         return result;
     }
-    default:
-        return node(IrOp::Nil, span, type);
+    default: {
+        auto result = node(IrOp::Nil, span, type);
+        result.text = default_argument_nil;
+        return result;
+    }
     }
 }
 

@@ -318,6 +318,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/specialize.cpp
     src/neura-ir/containment.cpp
     src/neura-ir/inline_limit.cpp
+    src/neura-ir/hook_arguments.cpp
     src/neura-ir/class_hooks.cpp
     src/neura-ir/value_layout.cpp
     src/neura-ir/storage.cpp

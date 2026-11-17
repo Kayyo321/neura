@@ -141,12 +141,13 @@ Each registered attribute has a stable identifier, the symbol kinds that may car
 | 12 | `parameter.default` | parameter | no | `[u5 a]` | A constant default of the parameter ([Core language](CoreLanguage#default-values)): a kind and a literal. Kind 0 is a Boolean, 1 a signed integer, 2 an unsigned integer, 3 a float, whose literal is the value's encoding at the parameter's width as an unsigned integer, 4 text, and 5 `nil`, whose literal is false. A caller that leaves the parameter out passes this value |
 | 13 | `parameter.default.variant` | parameter | no | `s` | A default that is an enum variant without payload |
 | 14 | `function.extension` | function | no | `b` | An extension function, which a file or module that enables its module's set may call as a member of its first parameter's type ([Modules](Modules#extension-sets)). The value is true |
-
 | 15 | `hook.get` | class | no | `s` | The hidden function of the class's `get` hook clause ([Revision 1.11](#revision-111-class-hooks)) |
 | 16 | `hook.set` | class | no | `s` | The hidden function of the class's `set` hook clause |
 | 17 | `hook.of` | function | no | `[s u1]` | On a hidden hook function: the class that declares the clause, and 0 for `get` or 1 for `set` |
 
-Identifier 0 is reserved, and identifiers are never reused. Identifiers 12 to 14 are reserved for attributes of the calls milestone. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
+A call that omits a nil default records `$default_nil` as the text of the generated Nil operand. This distinguishes the default from an explicitly written nil when linking introduces a class admission hook on the parameter. Earlier writers give only the omitted literal the span of the entire call.
+
+Identifier 0 is reserved, and identifiers are never reused. A new attribute takes the next free identifier and is added to this table. Registering one does not require a new format version: the version describes the encoding, and a reader that predates an identifier rejects the file as it rejects any unknown identifier.
 
 The reader rejects an unknown identifier, an unknown value kind, a bool other than 0 or 1, an absent or out-of-range symbol reference, an attribute on a kind of symbol that the registry does not allow, a repeat of an attribute that does not repeat, and a payload that does not match its schema. The [NeuraIR verifier](IrOptimization#neurair-verifier) applies the same registry rules to programs built in memory. It also checks the following:
 
