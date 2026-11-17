@@ -12,6 +12,7 @@ namespace neura::project {
 class Sha256Digest {
 public:
     static std::optional<Sha256Digest> parse(std::string_view hex);
+    static Sha256Digest from_bytes(const std::array<std::uint8_t, 32>& bytes);
     std::string_view hex() const { return {hex_.data(), hex_.size()}; }
     bool operator==(const Sha256Digest&) const = default;
 
@@ -53,6 +54,7 @@ struct ResolvedLockInputs {
     std::optional<Sha256Digest> contracts_digest;
 };
 
+Sha256Digest dependency_pin(std::string_view name, const ExternalDependency& dependency);
 ProjectLock parse_lock(std::string_view bytes, std::string_view file);
 ProjectLock make_lock(const Manifest& manifest, const ResolvedLockInputs& inputs);
 // Serialize a lock returned by parse_lock or make_lock.

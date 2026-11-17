@@ -97,9 +97,9 @@ formats = ["deb", "tar.gz"]
 | An unknown key or a key of the wrong type is `E1020` at the key. A missing required key is `E1020` at its containing table unless a more specific rule below applies. | manifest model implemented |
 | `schema` is 1. Another value is `E1021`. `project.language` is the language version the sources are written for, `"0.3"`. A compiler that does not implement it reports `E1021`. | manifest model implemented |
 | `project.name` is lowercase letters, digits and hyphens. `project.id` is a lowercase reverse-domain identifier and names the desktop application, its origin and its data directory. `project.version` has three decimal components with no redundant leading zeroes. | manifest model implemented |
-| A package is a source root with `root`, optional `assets` roots and optional `depends`. The dependency names refer to project packages or declared external dependencies. Local project paths are relative to the manifest, use `/` and stay inside the project directory (`E1025`). Internal package dependencies form no cycle. | manifest model implemented, real filesystem validation proposed |
+| A package is a source root with `root`, optional `assets` roots and optional `depends`. The dependency names refer to project packages or declared external dependencies. Local project paths are relative to the manifest, use `/` and stay inside the project directory (`E1025`). Internal package dependencies form no cycle. | manifest model and declared path resolution implemented |
 | A module belongs to the package whose root contains its file. An import of a module in a package that is not the importer's own, not `Std`, and not in its `depends` closure is `E1030`. This is how a server module is kept out of a browser bundle: the `ui` package does not depend on `server`. | proposed |
-| An external package is `[dependencies.name]` with `path` (a relative path to a directory outside the project) or `archive` (a relative path to a file inside it), and `digest`. Its name is distinct from project package names. There is no registry and no network fetch in 0.3.0. An unpinned or unresolved dependency reports `E1032`. | manifest declaration implemented, resolution proposed |
+| An external package is `[dependencies.name]` with `path` (a relative path to a directory outside the project) or `archive` (a relative path to a file inside it), and `digest`. Its name is distinct from project package names. There is no registry and no network fetch in 0.3.0. An unpinned or unresolved dependency reports `E1032`. | manifest declaration, location resolution and hashing implemented |
 | A target has `kind` (`web`, `server` or `desktop`), `package`, `entry`, `capabilities`, and by kind the tables below. A `desktop` target has `ui`, the name of a `web` target of the same project, whose built bundle it embeds unchanged (`E1023` otherwise). A shared-package project may omit `[targets]` or leave it empty. | manifest model implemented |
 | The entry module exports the function its kind requires: `start: func(web.Context) -> Result<Unit>`, `serve: func(app.Context) -> Result<Unit>`, or `start: func(desktop.Context) -> Result<Unit>` (`E1024`). | proposed |
 | `capabilities` lists the capability groups the target's image may use, from those its kind allows ([overview](Apps030.md#capability-groups)). The console, clock and entropy groups are always available. A manifest cannot list them. An unknown or disallowed entry in the list reports `E1020`. A host service of a group that is not listed, or that the kind does not allow, reachable from the entry, is `E1027` at build. At run time the host grants only the listed groups in addition to the groups that are always available. | declaration check implemented, reachability and enforcement proposed |
@@ -155,7 +155,31 @@ strings, and uses LF line endings with a final newline.
 | It records `schema = 1`, the language version, each external dependency with its digest, each target component a target uses (the browser runtime, the desktop engine, each provider) with its version and digest, and the digest of `contracts.lock`. It records no source state, paths, timestamps or machine names. | lock model implemented |
 | `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, a missing or extra entry, or a mismatch with a manifest pin or installed component metadata reports `E1022`. | model comparison implemented, command integration proposed |
 | `neura build --update-lock` and `neura new` write it. `neura dev` writes it only when it is missing. | proposed |
-| A digest that differs from resolved dependency or `contracts.lock` content reports `E1026`, with the expected and found digests. A build never downloads anything. | in-memory comparison implemented, filesystem resolution proposed |
+| A digest that differs from resolved dependency or `contracts.lock` content reports `E1026`, with the expected and found digests. A build never downloads anything. | file resolution and lock comparison implemented, command integration proposed |
+
+The resolver anchors path resolution at the manifest's canonical parent directory. It
+resolves declared source, asset and migration roots to existing directories,
+and declared stylesheets, icons, contract manifests and vendored archives to
+existing regular files. Each component of a declared project path must resolve
+inside the project. A symlink alias to another location inside the project
+uses its canonical destination. An external dependency directory must be
+disjoint from the project directory, including its ancestors. Component
+availability and generated `contracts.lock` discovery belong to the caller.
+The resolver hashes the caller's project-relative generated lock path if the
+file is present. Archive and generated lock pins are SHA-256 of their raw bytes.
+
+An external directory pin is SHA-256 of the ASCII bytes
+`neura-project-tree-v1` followed by LF and then its entries in increasing
+root-relative UTF-8 byte order. Each entry is encoded as a kind byte (`D` for
+directory or `F` for regular file), an unsigned 64-bit little-endian path-byte
+count, and the slash-separated path bytes. A file then adds its unsigned
+64-bit little-endian byte count and 64 ASCII lowercase hexadecimal digits
+of its SHA-256. Empty directories get entries. The root name, permissions,
+timestamps and inode identifiers are absent. A regular hard link contributes
+a record for its logical path and file bytes. Symlinks, repeated directory
+identities, non-regular files, and names lacking an unambiguous UTF-8 spelling
+fail resolution. The entry sort makes the pin independent of traversal order.
+Keep the input tree stable while resolving it.
 
 ## Bundles
 

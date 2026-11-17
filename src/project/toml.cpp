@@ -448,6 +448,15 @@ TomlDocument parse_toml(std::string_view bytes, std::string_view file) {
     return TomlReader(bytes, file).read();
 }
 
+bool valid_utf8(std::string_view value) {
+    while (!value.empty()) {
+        const auto width = utf8_width(value);
+        if (width == 0) return false;
+        value.remove_prefix(width);
+    }
+    return true;
+}
+
 std::string quote_toml_string(std::string_view value) {
     constexpr std::string_view hex = "0123456789abcdef";
     std::string result = "\"";

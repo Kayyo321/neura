@@ -264,10 +264,11 @@ endif()
 # The data side of the install lifecycle (docs/Install.md): SHA-256, version
 # precedence, and the marker and release metadata formats. It has no
 # dependency on the rest of the tool, so the unit tests link only this.
-add_library(neura_lifecycle STATIC
-    src/cli/install_layout.cpp
-    src/util/sha256.cpp
-)
+add_library(neura_hash STATIC src/util/sha256.cpp)
+neura_target_defaults(neura_hash)
+
+add_library(neura_lifecycle STATIC src/cli/install_layout.cpp)
+target_link_libraries(neura_lifecycle PUBLIC neura_hash)
 target_include_directories(neura_lifecycle PUBLIC src)
 neura_target_defaults(neura_lifecycle)
 
@@ -473,8 +474,14 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
-add_library(neura_project STATIC EXCLUDE_FROM_ALL src/project/toml.cpp src/project/manifest.cpp src/project/lock.cpp)
+add_library(neura_project STATIC EXCLUDE_FROM_ALL
+    src/project/toml.cpp
+    src/project/manifest.cpp
+    src/project/lock.cpp
+    src/project/resolve.cpp
+)
 target_include_directories(neura_project PUBLIC src)
+target_link_libraries(neura_project PRIVATE neura_hash)
 neura_target_defaults(neura_project)
 
 if(BUILD_TESTING)
@@ -494,6 +501,11 @@ if(BUILD_TESTING)
     neura_target_defaults(neura_project_lock_tests)
     add_test(NAME project-lock
         COMMAND neura_project_lock_tests "${CMAKE_CURRENT_SOURCE_DIR}/docs/design/Projects030.md")
+
+    add_executable(neura_project_resolve_tests tests/project/resolve_tests.cpp)
+    target_link_libraries(neura_project_resolve_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_resolve_tests)
+    add_test(NAME project-resolve COMMAND neura_project_resolve_tests)
 
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)

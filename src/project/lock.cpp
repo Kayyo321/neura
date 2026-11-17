@@ -19,6 +19,22 @@ std::optional<Sha256Digest> Sha256Digest::parse(std::string_view hex) {
     return result;
 }
 
+Sha256Digest Sha256Digest::from_bytes(const std::array<std::uint8_t, 32>& bytes) {
+    constexpr char hex[] = "0123456789abcdef";
+    Sha256Digest result;
+    for (std::size_t i = 0; i < bytes.size(); ++i) {
+        result.hex_[i * 2] = hex[bytes[i] >> 4];
+        result.hex_[i * 2 + 1] = hex[bytes[i] & 15];
+    }
+    return result;
+}
+
+Sha256Digest dependency_pin(std::string_view name, const ExternalDependency& dependency) {
+    if (const auto pin = Sha256Digest::parse(dependency.digest.value)) return *pin;
+    throw Diagnostic(dependency.span, "dependency '" + std::string(name) + "' requires a SHA-256 pin")
+        .with_code("E1032").label(dependency.digest.span, "expected 64 lowercase hexadecimal digits here");
+}
+
 namespace {
 
 constexpr std::int64_t lock_schema = 1;
@@ -105,15 +121,11 @@ ProjectLock expected_lock(const Manifest& manifest, const ResolvedLockInputs& in
     const auto& language = manifest.project.language;
     ProjectLock expected{manifest.schema.span, {lock_schema, manifest.schema.span}, language, {}, {}, std::nullopt};
     for (const auto& [name, external] : manifest.dependencies) {
-        const auto pin = Sha256Digest::parse(external.digest.value);
-        if (!pin) {
-            throw Diagnostic(external.span, "dependency '" + name + "' requires a SHA-256 pin").with_code("E1032")
-                .label(external.digest.span, "expected 64 lowercase hexadecimal digits here");
-        }
+        const auto pin = dependency_pin(name, external);
         if (!inputs.dependencies.contains(name)) {
             throw Diagnostic(external.span, "dependency '" + name + "' was not resolved").with_code("E1032");
         }
-        expected.dependencies.emplace(name, Located<Sha256Digest>{*pin, external.digest.span});
+        expected.dependencies.emplace(name, Located<Sha256Digest>{pin, external.digest.span});
     }
     for (const auto& [name, digest] : inputs.dependencies) {
         if (!expected.dependencies.contains(name)) stale(language.span, "resolution contains an undeclared dependency '" + name + "'");
