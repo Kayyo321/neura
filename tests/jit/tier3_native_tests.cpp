@@ -55,7 +55,12 @@ struct Fake {
     std::vector<std::uint64_t> helper_slots;
     std::uint32_t helper_block = 0;
     std::uint64_t helper_counter = 0;
-
+    // What the return helper was given (NVR 1.7): the value, the words after
+    // it and their count, and C.
+    std::uint64_t returned = 0;
+    std::uint32_t returned_words = 0;
+    std::vector<std::uint64_t> returned_extra;
+    std::uint64_t returned_counter = 0;
 };
 
 Fake& fake_of(t3::Context* context) { return *static_cast<Fake*>(context->owner); }
@@ -99,7 +104,16 @@ std::uint64_t fake_evaluate(t3::Context* context, std::uint32_t inst, std::uint6
 std::uint64_t fake_state(t3::Context*, std::uint32_t, const std::uint64_t*, std::uint32_t) { unexpected(); }
 std::uint64_t fake_check_reference(t3::Context*, std::uint32_t, std::uint64_t) { unexpected(); }
 std::uint64_t fake_call(t3::Context*, std::uint32_t, std::uint32_t, const std::uint64_t*, std::uint32_t) { unexpected(); }
-std::uint64_t fake_return(t3::Context*, std::uint64_t, std::uint64_t, std::uint32_t) { unexpected(); }
+std::uint64_t fake_return(t3::Context* context, std::uint64_t value, std::uint64_t blocks, std::uint32_t words) {
+    auto& fake = fake_of(context);
+    fake.returned = value;
+    fake.returned_words = words;
+    fake.returned_extra.assign(context->result_words, context->result_words + words);
+    fake.returned_counter = blocks;
+    context->C = blocks + 1;
+    context->status = 0;
+    return value;
+}
 // An R3 helper: it records the frame and the counter it is called with, and
 // returns 1000 + its argument.
 std::uint64_t fake_helper(t3::Context* context, std::uint32_t, const std::uint64_t* arguments, std::uint32_t count) {
@@ -732,6 +746,81 @@ NEURA_TEST(jit, tier_3_deferred_floats_are_canonical_wherever_their_bits_are_rea
                         }
                         ++tally.failures;
                     }
+                }
+            }
+        }
+    }
+    check(tally.failures == 0, std::to_string(tally.failures) + " of " + std::to_string(tally.cases) +
+                                   " cases differ; the first: " + tally.first);
+}
+
+// A function that returns several words (NVR 1.7): the value is in rsi, the
+// words after the first are in the context's result_words, their count in the
+// helper's last argument, and a deferred float word is the canonical NaN where
+// the reference's sum is a NaN, as a frame write makes it.
+NEURA_TEST(jit, tier_3_a_return_of_several_words_hands_every_word_to_the_helper) {
+    if (!native_runs()) return;
+    Tally tally;
+    const std::vector<std::uint64_t> doubles{0, 0x8000000000000000ULL, 0x3FF0000000000000ULL, 0x7FF0000000000000ULL,
+                                             0x7FF8000000000000ULL, 0xFFF8000000000001ULL, 0x7FF0000000000001ULL,
+                                             0xFFFFFFFFFFFFFFFFULL};
+    const t3::ValueType type{t3::Type::F64, 64};
+    for (const std::uint32_t extra_words : {1U, 2U, 5U}) {
+        Builder b(3);
+        b.f.slot_types.assign(3, type);
+        const auto x = b.value(0, t3::Op::EntryLoad, 64, 0);
+        const auto y = b.value(0, t3::Op::EntryLoad, 64, 1);
+        b.f.insts[x].type = b.f.insts[y].type = type;
+        const auto c = b.value(0, t3::Op::EntryCounter, 64, 0);
+        t3::Inst jump;
+        jump.op = t3::Op::Jump;
+        b.add(0, jump);
+        lift::Instruction add;
+        add.op = Opcode::FloatAdd;
+        add.width = 64;
+        add.format = lift::FloatType::Binary64;
+        t3::Inst sum;
+        sum.op = t3::Op::Lift;
+        sum.lifted = add;
+        sum.type = type;
+        sum.operands[0] = x;
+        sum.operands[1] = y;
+        const auto s = b.add(1, sum);
+        // The words after the first: the sum, then the inputs again.
+        std::vector<std::uint32_t> rest{s};
+        for (std::uint32_t i = 1; i < extra_words; ++i) rest.push_back(i % 2 ? y : x);
+        t3::Inst ret;
+        ret.op = t3::Op::Return;
+        ret.operands[0] = c;
+        ret.operands[1] = x;
+        ret.flags = t3::Checked | t3::Effect;
+        ret.state = b.state(c, 0);
+        ret.extra = static_cast<std::uint32_t>(b.f.extras.size());
+        ret.count = extra_words;
+        b.f.extras.insert(b.f.extras.end(), rest.begin(), rest.end());
+        b.add(1, ret);
+        const nvr::Image image;
+        t3::place_canons(image, b.f, false);
+        const auto compiled = compile(std::move(b.f));
+        check(compiled.program != nullptr, "the function compiles: " + compiled.failure);
+        if (!compiled.program) continue;
+        for (const auto a : doubles) {
+            for (const auto other : doubles) {
+                bool failed = false;
+                const auto canonical = lift::evaluate(add, a, other, failed);
+                const auto fake = run(*compiled.program, {a, other, 0x77});
+                ++tally.cases;
+                bool same = fake.returned == a && fake.returned_words == extra_words && fake.returned_counter == 0 &&
+                            fake.returned_extra.size() == extra_words && fake.returned_extra[0] == canonical;
+                for (std::uint32_t i = 1; same && i < extra_words; ++i) same = fake.returned_extra[i] == (i % 2 ? other : a);
+                if (!same) {
+                    if (tally.failures == 0) {
+                        tally.first = std::to_string(extra_words) + " words, a=" + std::to_string(a) + " b=" +
+                                      std::to_string(other) + ": sum " +
+                                      std::to_string(fake.returned_extra.empty() ? 0 : fake.returned_extra[0]) +
+                                      ", expected " + std::to_string(canonical);
+                    }
+                    ++tally.failures;
                 }
             }
         }
