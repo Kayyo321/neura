@@ -1,0 +1,7 @@
+// Case 64: a startup block cannot be left early.
+static scope {
+    let ready = true;
+    if (ready) {
+        return;
+    }
+}

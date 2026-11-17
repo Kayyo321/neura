@@ -211,6 +211,8 @@ A tuple is not an object. IRtoNeuronConversion stores a tuple-typed NeuraIR valu
 | Everywhere else | As a tuple, in the table above: slots, parameters, results, fields, globals, captures, aggregate elements, nested in tuples and enums, and boxed at the one-word boundaries below. |
 | Value members | A payload enum has none, as before ([Types](Types#enums)). |
 
+**A hooked reference has two words.** When a linked, specialized program has a hooked class assignable to a class or interface view, that view takes a typed object handle plus a `uint32` policy word. A live object's policy comes from its header. A nil produced by a class admission or getter can keep its concrete policy through storage, calls, tuples, enums and boxed scheduler boundaries. Its handle still compares equal to nil. The converter runs each elaborated getter or admission in source order, passes the previous raw reference to a setter, and checks that a live result has the exact event class. A setter returns into fresh slots before their words are committed to the destination. Method receivers still take one handle. The debugger names the companion word `.policy` and reads the pair without invoking user code. [Class hooks](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md) · [NVR reference state operations](NVR#class-hooks-18)
+
 **The words have names.** With a source map, the converter's `NAME` section names a tuple's words `name.0`, `name.1.0`, and so on, and an enum's `name.tag` and `name.Variant.0`, where a pooled word lists every payload that uses it: the `int32` word of a `Result<int>` named `r` is `r.Ok.0|Err.0.Parse.1|Encoding.0`, `Ok`'s value and the offset of the error's `Parse` and `Encoding` variants. The debugger shows these names, and a boxed enum's layout is named after the enum, with the same names for its fields.
 
 **An enum may not contain itself.** A value type that contains itself, directly or through tuples and other enums, would have no finite size. `check_containment` (`src/neura-ir/containment.cpp`) reports [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) on the specialized program before optimization, at the variant whose payload closes the cycle, and names the path; a list, array, class or function value breaks a cycle. The layout code throws the same error for a cycle it meets on a conversion route that skips the check.
@@ -233,6 +235,14 @@ A tuple is not an object. IRtoNeuronConversion stores a tuple-typed NeuraIR valu
 No source construct creates an object constant of a tuple type (a constant initializer is a literal), so a tuple has no constant boundary. A collection of tuples cannot be an argument or a result of a host call; the compiler does not convert it, and no standard library binding has one.
 
 Images that use a tuple or a payload enum change. A function that returns one, or a program with an array of them, makes the image NVR 1.7. Every program's `main` returns `Std.Program.ExitCode`, whose `Status(int)` makes it a payload enum of two words, so every program image is NVR 1.7; the start function reads the status from those words instead of from an object. An image of NVR 1.6 or earlier still runs as before. Tiers 2 and 3 run several-word returns and calls and component reads and writes themselves ([execution tiers](NVM#execution-tiers)). Steps and `peak_heap_cells` of a program that uses tuples drop where a tuple used to be allocated and was only passed or read, and rise where a whole tuple is read from a field, global or element, which now costs one state exit for each word; boxing at a boundary costs an allocation and a read for each field.
+
+## Region-backed values
+
+Conversion receives checked, specialized storage facts. A lexical block that creates arrays, local borrow boxes, or nonescaping closure environments enters an NVR region. Its exits release the region after any task-scope join. Functions that return owned array words receive a destination region token in an extra frame slot, and the converter emits a move before releasing the callee's regions.
+
+A primitive borrow of an object field uses a box with a reference to the containing object. The converter checks the owner's liveness before each access through the box. Local and static boxes carry a nil owner and use their storage region's lifetime. The collector follows the stored owner handle from a live box.
+
+A noncapturing callable uses a fieldless static object constant. Explicit `new func` and `new bound` use ordinary heap objects. All environments share the ordinary virtual dispatch interface.
 
 ## Format decisions
 

@@ -1,0 +1,3 @@
+let alias = func(values: int[]) -> int[] {
+    return values;
+};

@@ -1,0 +1,9 @@
+error[E0215]: only '.override' may follow 'get' or 'set'
+ --> $DIR/final.nra:3:11
+  |
+3 |     | get.final: instance;
+  |           ^^^^^ expected 'override', found 'final'
+  |
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+
+For more information about this error, try `neura explain E0215`.

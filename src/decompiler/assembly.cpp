@@ -29,7 +29,7 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "class-is",        "class-cast",       "scalar-text", "repeat-collection", "kernel",
     "read-component",  "write-component",
     "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
-    "move-to-region",
+    "move-to-region",  "hook-enter",       "hook-leave",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -109,6 +109,8 @@ std::string constant_comment(const nvr::Image& image, const nvr::Constant& const
     }
     case nvr::TypeKind::Text: return quoted(std::string(constant.payload.begin(), constant.payload.end()));
     case nvr::TypeKind::Object:
+        if (nvr::is_static_object_constant(type, constant)) return "static L" + std::to_string(type.reference);
+        return constant.payload.empty() ? "nil" : std::string{};
     case nvr::TypeKind::Array:
     case nvr::TypeKind::List: return constant.payload.empty() ? "nil" : std::string{};
     default: return {};
@@ -732,6 +734,9 @@ nvr::Image assemble(std::string_view text) {
                 }
                 if (nvr::is_region_operation(exit.operation) && image.minor_version < 7) {
                     in.error("region operations require NVR 1.7");
+                }
+                if (nvr::is_hook_operation(exit.operation) && image.minor_version < nvr::hooks_minor_version) {
+                    in.error("class hook operations require NVR 1." + std::to_string(nvr::hooks_minor_version));
                 }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");

@@ -1,0 +1,33 @@
+error[E0216]: an interface cannot declare class hooks
+ --> $DIR/outside-class.nra:3:5
+  |
+3 |     | get: instance;
+  |     ^ class hook clause in an interface
+  |
+  = help: declare the hooks on a named class
+
+error[E0216]: a module cannot declare class hooks
+ --> $DIR/outside-class.nra:8:5
+  |
+8 |     | get: instance;
+  |     ^ class hook clause in a module
+  |
+  = help: declare the hooks on a named class
+
+error[E0216]: an enum cannot declare class hooks
+  --> $DIR/outside-class.nra:13:5
+   |
+13 |     | get: instance;
+   |     ^ class hook clause in an enum
+   |
+   = help: declare the hooks on a named class
+
+error[E0216]: an anonymous class cannot declare class hooks
+  --> $DIR/outside-class.nra:17:19
+   |
+17 | let point: class (| get: instance; export let x: int32 = 0;) = nil;
+   |                   ^ class hook clause in an anonymous class
+   |
+   = help: declare the hooks on a named class
+
+For more information about this error, try `neura explain E0216`.

@@ -35,8 +35,6 @@ export let Formatting = module (
     let Cursor = class (
         /// @brief The UTF-8 format pattern.
         last pattern: string;
-        /// @brief The packed values available to replacement fields.
-        last values: Argument[];
         /// @brief The current UTF-8 byte offset in the pattern.
         let position: int = 0;
         /// @brief The next index for an automatically numbered field.
@@ -51,13 +49,12 @@ export let Formatting = module (
         let issue_kind: errors.ParseErrorKind = errors.ParseErrorKind.Syntax;
 
         /// @brief Starts parsing at the beginning of the pattern with the given argument pack.
-        export let init = func(source: string, arguments: Argument[]) {
+        export let init = func(source: string) {
             pattern = source;
-            values = arguments;
         };
 
         /// @brief Renders the pattern or returns its first parse or formatting error.
-        export let render = func -> Result<string> {
+        export let render = func(values: Argument[]) -> Result<string> {
             last output = string_builder.create();
             let literal_start = 0;
             while (position < pattern.byte_length) {
@@ -72,7 +69,7 @@ export let Formatting = module (
                     output.append(pattern.slice(position, position + 1));
                     position += 1;
                 } else if (b == 123) {
-                    last field = replacement();
+                    last field = replacement(values);
                     if (issue != "") {
                         return Result<string>.Err(errors.Error.Parse {
                             kind: issue_kind, offset: issue_offset, message: issue
@@ -92,19 +89,19 @@ export let Formatting = module (
         };
 
         /// @brief Parses one replacement field and renders its selected argument.
-        let replacement = func -> string {
+        let replacement = func(values: Argument[]) -> string {
             if (position == pattern.byte_length) {
                 fail(errors.ParseErrorKind.UnexpectedEnd, "unclosed replacement field");
                 return "";
             }
-            last index = read_index();
+            last index = read_index(values.length);
             if (issue != "") {
                 return "";
             }
             last spec: Spec = new;
             if (peek() == 58) {
                 position += 1;
-                read_spec(spec);
+                read_spec(spec, values);
             }
             if (issue != "") {
                 return "";
@@ -123,7 +120,7 @@ export let Formatting = module (
         };
 
         /// @brief Reads an argument index and rejects mixing automatic and manual indexing.
-        let read_index = func -> int {
+        let read_index = func(count: int) -> int {
             last start = position;
             let mode = 1;
             let index = next_auto;
@@ -142,7 +139,7 @@ export let Formatting = module (
             if (issue == "") {
                 if (index_mode != 0 && index_mode != mode) {
                     fail_at(errors.ParseErrorKind.Syntax, start, "cannot mix automatic and explicit argument indexes");
-                } else if (index >= values.length) {
+                } else if (index >= count) {
                     fail_at(errors.ParseErrorKind.OutOfRange, start, "format argument index out of range");
                 } else if (mode == 1) {
                     next_auto += 1;
@@ -153,7 +150,7 @@ export let Formatting = module (
         };
 
         /// @brief Parses fill, alignment, sign, width, precision, and presentation options.
-        let read_spec = func(spec: Spec) {
+        let read_spec = func(spec: Spec, values: Argument[]) {
             // A single Unicode scalar followed by an alignment character is
             // the fill. Otherwise an alignment character can appear alone.
             let b = peek();
@@ -187,7 +184,7 @@ export let Formatting = module (
             if (is_digit(peek())) {
                 spec.width = read_number();
             } else if (peek() == 123) {
-                spec.width = read_dynamic();
+                spec.width = read_dynamic(values);
             }
             if (issue != "") {
                 return;
@@ -197,7 +194,7 @@ export let Formatting = module (
                 if (is_digit(peek())) {
                     spec.precision = read_number();
                 } else if (peek() == 123) {
-                    spec.precision = read_dynamic();
+                    spec.precision = read_dynamic(values);
                 } else {
                     fail(errors.ParseErrorKind.Syntax, "expected a precision");
                 }
@@ -214,10 +211,10 @@ export let Formatting = module (
         };
 
         /// @brief Reads a nested field as a nonnegative integer width or precision.
-        let read_dynamic = func -> int {
+        let read_dynamic = func(values: Argument[]) -> int {
             position += 1;
             last start = position;
-            last index = read_index();
+            last index = read_index(values.length);
             if (issue != "") {
                 return 0;
             }
@@ -441,8 +438,8 @@ export let Formatting = module (
         if (!strings.contains(pattern, "{") && !strings.contains(pattern, "}")) {
             return Result<string>.Ok(pattern);
         }
-        last cursor: Cursor = new(pattern, args);
-        return cursor.render();
+        last cursor: Cursor = new(pattern);
+        return cursor.render(args);
     };
 
     /// @brief Recognizes an ASCII decimal digit.

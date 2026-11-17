@@ -1,0 +1,17 @@
+// The base program of tests/backend/hooks/operations.py, which writes the
+// class hook operations of NVR 1.8 into `touch` by editing its disassembly.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let Session = class (
+    export let id: int32 = 0;
+);
+let touch = func(s: Session) -> int32 {
+    return s.id;
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let s = new Session();
+        console.print_line(touch(s).to_string());
+        return program.ExitCode.Ok;
+    };
+);

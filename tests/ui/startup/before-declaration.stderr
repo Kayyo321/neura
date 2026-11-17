@@ -1,0 +1,12 @@
+error[E0306]: 'current' is used before its declaration
+ --> $DIR/before-declaration.nra:3:24
+  |
+3 |     let early: int32 = current;
+  |                        ^^^^^^^ used here
+...
+6 | let current: int32 = 1;
+  |     ------- 'current' is declared here, later in the file
+  |
+  = help: move the declaration of 'current' above its first use
+
+For more information about this error, try `neura explain E0306`.

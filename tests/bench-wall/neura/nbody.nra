@@ -14,29 +14,29 @@ export let NBody = module:program.Entry (
     const DaysPerYear: float64 = 365.24;
 
     let Planets = class (
-        export let x: float64[];
-        export let y: float64[];
-        export let z: float64[];
-        export let vx: float64[];
-        export let vy: float64[];
-        export let vz: float64[];
-        export let mass: float64[];
+        export let x: float64[list];
+        export let y: float64[list];
+        export let z: float64[list];
+        export let vx: float64[list];
+        export let vy: float64[list];
+        export let vz: float64[list];
+        export let mass: float64[list];
 
         // The sun, Jupiter, Saturn, Uranus, and Neptune.
         export let init = func {
             let pi = 3.141592653589793;
             let solar_mass = 4.0 * pi * pi;
-            x = [0.0, 4.84143144246472090, 8.34336671824457987, 12.8943695621391310, 15.3796971148509165];
-            y = [0.0, -1.16032004402742839, 4.12479856412430479, -15.1111514016986312, -25.9193146099879641];
-            z = [0.0, -0.103622044471123109, -0.403523417114321381, -0.223307578892655734, 0.179258772950371181];
-            vx = [0.0, 1.66007664274403694e-3 * DaysPerYear, -2.76742510726862411e-3 * DaysPerYear,
-                  2.96460137564761618e-3 * DaysPerYear, 2.68067772490389322e-3 * DaysPerYear];
-            vy = [0.0, 7.69901118419740425e-3 * DaysPerYear, 4.99852801234917238e-3 * DaysPerYear,
-                  2.37847173959480950e-3 * DaysPerYear, 1.62824170038242295e-3 * DaysPerYear];
-            vz = [0.0, -6.90460016972063023e-5 * DaysPerYear, 2.30417297573763929e-5 * DaysPerYear,
-                  -2.96589568540237556e-5 * DaysPerYear, -9.51592254519715870e-5 * DaysPerYear];
-            mass = [solar_mass, 9.54791938424326609e-4 * solar_mass, 2.85885980666130812e-4 * solar_mass,
-                    4.36624404335156298e-5 * solar_mass, 5.15138902046611451e-5 * solar_mass];
+            x = new([0.0, 4.84143144246472090, 8.34336671824457987, 12.8943695621391310, 15.3796971148509165]);
+            y = new([0.0, -1.16032004402742839, 4.12479856412430479, -15.1111514016986312, -25.9193146099879641]);
+            z = new([0.0, -0.103622044471123109, -0.403523417114321381, -0.223307578892655734, 0.179258772950371181]);
+            vx = new([0.0, 1.66007664274403694e-3 * DaysPerYear, -2.76742510726862411e-3 * DaysPerYear,
+                  2.96460137564761618e-3 * DaysPerYear, 2.68067772490389322e-3 * DaysPerYear]);
+            vy = new([0.0, 7.69901118419740425e-3 * DaysPerYear, 4.99852801234917238e-3 * DaysPerYear,
+                  2.37847173959480950e-3 * DaysPerYear, 1.62824170038242295e-3 * DaysPerYear]);
+            vz = new([0.0, -6.90460016972063023e-5 * DaysPerYear, 2.30417297573763929e-5 * DaysPerYear,
+                  -2.96589568540237556e-5 * DaysPerYear, -9.51592254519715870e-5 * DaysPerYear]);
+            mass = new([solar_mass, 9.54791938424326609e-4 * solar_mass, 2.85885980666130812e-4 * solar_mass,
+                    4.36624404335156298e-5 * solar_mass, 5.15138902046611451e-5 * solar_mass]);
             let px = 0.0;
             let py = 0.0;
             let pz = 0.0;

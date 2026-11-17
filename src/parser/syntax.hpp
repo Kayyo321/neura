@@ -185,6 +185,9 @@ struct Statement {
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};
+    // A Block written `static scope { ... }` (Modules.md, Startup blocks).
+    // `keyword` spans the two words `static scope`.
+    bool startup{};
 };
 
 struct MatchArm {
@@ -221,6 +224,27 @@ struct AccessorClause {
     // A setter's single statement, or the statements of a block body.
     std::vector<Statement> body;
     bool block{};
+};
+
+// A class hook clause, written after the '(' of a declared class and before
+// its first member (docs/design/Hooks030.md, Class hook clauses):
+// `| get: expression;`, `| set.override: { block };`. `get`, `set`, and
+// `value` are contextual words; `override` after the '.' is the keyword.
+struct HookClause {
+    bool setter{};
+    // From the '|' through the clause's ';'.
+    Span span;
+    // The word `get` or `set`.
+    Span keyword;
+    // The word `override` of `.override`, when written.
+    std::optional<Span> override_word{};
+    // The expression form. Empty for a block body.
+    std::optional<Expr> expression{};
+    // The statements of a block body.
+    std::vector<Statement> body{};
+    bool block{};
+    // The block's closing '}', where a path that falls through ends.
+    Span close{};
 };
 
 struct Declaration {
@@ -268,6 +292,11 @@ struct Declaration {
     std::optional<Span> name_span{};
     // Accessor clauses after the member's ';', in source order.
     std::vector<AccessorClause> accessors{};
+    // The class hook clauses after a declared class's '(', in source order.
+    std::vector<HookClause> hooks{};
+    // The startup blocks written among a module's members, in source order
+    // (Modules.md, Startup blocks). Each is a Block statement with `startup`.
+    std::vector<Statement> startup_blocks{};
     // The tags written before the declaration, in source order. They apply
     // to every branch of an `or func` group.
     std::vector<TagSyntax> tags{};

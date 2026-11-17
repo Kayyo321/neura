@@ -34,7 +34,7 @@ std::uint32_t result_slot_count(const nvr::Image& image, const nvr::Exit& exit) 
 bool internal_exit(const nvr::Exit& exit) {
     return exit.kind == nvr::ExitKind::Continue ||
            (exit.kind == nvr::ExitKind::State && inline_state_operation(exit) &&
-            !nvr::is_region_operation(exit.operation));
+            !nvr::is_region_operation(exit.operation) && !nvr::is_hook_operation(exit.operation));
 }
 
 // --- Region optimization (tier2.hpp, "Optimization") ---------------------
@@ -695,11 +695,15 @@ public:
         : image_(image), function_(image.functions[function]), blocks_(blocks), forms_(forms), program_(program),
           checkable_(checkable) {
         region_.function = function;
-        region_.enters_region = std::ranges::any_of(function_.blocks, [](const nvr::Block& block) {
-            return std::ranges::any_of(block.exits, [](const nvr::Exit& exit) {
-                return exit.kind == nvr::ExitKind::State && exit.operation == nvr::StateOp::EnterRegion;
+        const auto uses = [&](nvr::StateOp operation) {
+            return std::ranges::any_of(function_.blocks, [&](const nvr::Block& block) {
+                return std::ranges::any_of(block.exits, [&](const nvr::Exit& exit) {
+                    return exit.kind == nvr::ExitKind::State && exit.operation == operation;
+                });
             });
-        });
+        };
+        opens_hook_ = uses(nvr::StateOp::HookEnter);
+        region_.enters_region = opens_hook_ || uses(nvr::StateOp::EnterRegion);
         region_.entry = blocks.front();
         region_.blocks = blocks;
         region_.program = program;
@@ -774,6 +778,9 @@ private:
     bool takes(std::uint32_t local, const nvr::Exit& exit) const {
         if (stub(local)) return false;
         if (exit.arguments.size() > max_count) return false;
+        // Class hook events and their frame returns run at tier 1.
+        if (exit.kind == nvr::ExitKind::State && nvr::is_hook_operation(exit.operation)) return false;
+        if (exit.kind == nvr::ExitKind::Return && opens_hook_) return false;
         // Storage regions (NVR 1.7): a region operation is not internal, so a
         // function program runs it as a helper (the reference state keeps the
         // task's regions beside its frames), and its Return releases what the
@@ -1203,16 +1210,18 @@ private:
 
     // The register of constant `index` masked to `width` bits. A scalar
     // constant's value is its payload, little-endian, as the executor
-    // reads it (Execution::State::start): it becomes an immediate. A text
-    // or bytes constant is a handle the run assigns: it is loaded from the
-    // run's constants at entry.
+    // reads it (Execution::State::start): it becomes an immediate. Text,
+    // bytes and static objects use handles the run assigns and load the
+    // materialized value from the run's constants at entry.
     std::uint32_t constant_register(std::uint32_t index, unsigned width) {
         const auto key = std::make_pair(index, std::min(width, 64U));
         if (const auto it = constant_registers_.find(key); it != constant_registers_.end()) return it->second;
         const auto reg = temporary();
         const auto& constant = image_.constants[index];
-        const auto kind = image_.types[constant.type].kind;
-        if (kind != nvr::TypeKind::Text && kind != nvr::TypeKind::Bytes && constant.payload.size() <= 8) {
+        const auto& type = image_.types[constant.type];
+        const bool materialized = type.kind == nvr::TypeKind::Text || type.kind == nvr::TypeKind::Bytes ||
+                                  nvr::is_static_object_constant(type, constant);
+        if (!materialized && constant.payload.size() <= 8) {
             std::uint64_t bits = 0;
             for (std::size_t b = 0; b < constant.payload.size(); ++b) {
                 bits |= std::uint64_t{constant.payload[b]} << (8 * b);
@@ -1630,6 +1639,7 @@ private:
     // A function program (Region::program), compiled for the region check.
     bool program_ = false;
     bool checkable_ = false;
+    bool opens_hook_ = false;
     std::map<std::uint32_t, std::uint32_t> local_;
     Region region_;
     std::map<std::uint32_t, std::uint32_t> slot_registers_;
@@ -1643,6 +1653,7 @@ private:
 } // namespace
 
 bool inline_state_operation(const nvr::Exit& exit) {
+    if (nvr::extended_reference_state(exit)) return false;
     switch (exit.operation) {
     case nvr::StateOp::ReadTag:
     case nvr::StateOp::ReadField:

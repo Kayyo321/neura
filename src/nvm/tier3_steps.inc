@@ -454,6 +454,8 @@
         auto& self = tier3_self(context);
         const auto depth = self.frames_.size();
         if (depth < 2 || self.frames_.header(depth - 1).boundary) return tier3::Status::Fault;
+        // Tier 1 validates a frame that returns with a class hook event open.
+        if (!self.frames_.hooks.empty() && self.frames_.hooks.back().depth >= depth) return tier3::Status::Fault;
         context->C = blocks + 1;
         self.tier3_flush(*context);
         const auto header = self.frames_.header(depth - 1);

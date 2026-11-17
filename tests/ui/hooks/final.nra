@@ -1,0 +1,5 @@
+// Case 8: only `.override` may follow the word.
+let Session = class (
+    | get.final: instance;
+    export let user: string = "";
+);

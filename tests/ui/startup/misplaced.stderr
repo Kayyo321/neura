@@ -1,0 +1,57 @@
+error[E0218]: a startup block is written at file or module level
+ --> $DIR/misplaced.nra:3:5
+  |
+3 |     static scope { }
+  |     ^^^^^^^^^^^^ not at file or module level
+  |
+  = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+error[E0218]: a startup block is written at file or module level
+ --> $DIR/misplaced.nra:7:5
+  |
+7 |     static scope { }
+  |     ^^^^^^^^^^^^ not at file or module level
+  |
+  = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+error[E0218]: a startup block is written at file or module level
+  --> $DIR/misplaced.nra:11:5
+   |
+11 |     static scope { }
+   |     ^^^^^^^^^^^^ not at file or module level
+   |
+   = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+error[E0218]: a startup block is written at file or module level
+  --> $DIR/misplaced.nra:15:5
+   |
+15 |     static scope { }
+   |     ^^^^^^^^^^^^ not at file or module level
+   |
+   = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+error[E0218]: a startup block is written at file or module level
+  --> $DIR/misplaced.nra:19:5
+   |
+19 |     static scope { }
+   |     ^^^^^^^^^^^^ not at file or module level
+   |
+   = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+error[E0218]: a startup block is written at file or module level
+  --> $DIR/misplaced.nra:24:5
+   |
+24 |     static scope { }
+   |     ^^^^^^^^^^^^ not at file or module level
+   |
+   = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+error[E0218]: a startup block is written at file or module level
+  --> $DIR/misplaced.nra:28:5
+   |
+28 |     static scope { }
+   |     ^^^^^^^^^^^^ not at file or module level
+   |
+   = help: move it to the top level of the file or into a module, or call a function from a file-level block
+
+For more information about this error, try `neura explain E0218`.

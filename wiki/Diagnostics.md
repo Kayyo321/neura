@@ -41,6 +41,10 @@ Errors about the grammar.
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
+| [E0215](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0215.md) | malformed class hook clause |
+| [E0216](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0216.md) | class hook outside a declared class |
+| [E0217](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0217.md) | malformed startup block |
+| [E0218](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0218.md) | misplaced startup block |
 | [E0225](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0225.md) | positional argument after a named argument |
 | [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
 | [E0227](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0227.md) | malformed interpolated string |
@@ -120,6 +124,10 @@ Errors about types, values, calls, and statements.
 | [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) | a value type that contains itself |
 | [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md) | a value type larger than its inline limit |
 | [E0450](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0450.md) | a list literal without new |
+| [E0451](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0451.md) | an array escapes its owner |
+| [E0452](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0452.md) | a primitive borrow escapes its owner |
+| [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md) | an escaping closure requires explicit construction |
+| [E0470](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0470.md) | return in a startup block |
 | [E0480](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0480.md) | conflicting inferred type arguments |
 | [E0481](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0481.md) | lambda does not fit its callable context |
 | [E0482](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0482.md) | unknown argument label |
@@ -167,6 +175,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0536.md) | destructuring declared with last |
 | [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
+| [E0538](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0538.md) | duplicate class hook clause |
+| [E0539](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0539.md) | class hook replaces an inherited one without `.override` |
+| [E0540](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0540.md) | `.override` on a class hook that overrides nothing |
+| [E0541](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0541.md) | class hook on a class with synchronized methods |
+| [E0542](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0542.md) | class hook that does not yield its class |
+| [E0543](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0543.md) | class hook that returns a new object |
+| [E0544](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0544.md) | class hook that may suspend |
+| [E0545](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0545.md) | hooked class storage without an initializer |
+| [E0546](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0546.md) | hooked class reference at a bodyless function |
 | [E0560](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0560.md) | parameter names differ from the overridden method |
 | [E0561](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0561.md) | defaults differ from the overridden method |
 

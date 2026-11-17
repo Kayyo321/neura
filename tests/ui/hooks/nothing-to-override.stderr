@@ -1,0 +1,12 @@
+error[E0540]: no base of 'Session' has a 'get' hook
+ --> $DIR/nothing-to-override.nra:3:11
+  |
+3 |     | get.override: instance;
+  |           ^^^^^^^^ there is no 'get' hook to override
+  |
+help: remove '.override'
+  |
+3 |     | get.override: instance;
+  |          ---------
+
+For more information about this error, try `neura explain E0540`.

@@ -750,6 +750,8 @@
                     const auto& scopes = current_task().scopes;
                     simple = scopes.empty() || scopes.back().frame_depth != depth;
                 }
+                // Tier 1 validates a frame that returns with a class hook event open.
+                if (simple && !frames_.hooks.empty() && frames_.hooks.back().depth >= depth) simple = false;
                 if (!simple) return end(op.block, true, region_counts_.exits);
                 ++done;
                 ++blocks;

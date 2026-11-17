@@ -1,0 +1,38 @@
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let guarded = import:Std.Concurrent.Guarded;
+
+#Immutable
+let Session = class(
+    | get: instance;
+    | set: value;
+);
+
+#[Final, Immutable]
+let Token = class:Session();
+
+let nil_session = func -> Session {
+    let token: Token = nil;
+    return token;
+};
+
+let Main = module:program.Entry(
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let [out, inbox, closer] = channels.open<Session>(1);
+        out.send(nil_session());
+        match (inbox.receive()) {
+            channels.Received.Value(item) => { if ((item as Token) != nil) { return program.ExitCode.Failure; } },
+            _ => { return program.ExitCode.Failure; },
+        }
+        closer.close();
+        let guard = guarded.create<Session>(nil_session);
+        let absent = guard.with<bool>(func(item: Session) -> bool => (item as Token) == nil);
+        if (!absent) { return program.ExitCode.Failure; }
+        scope {
+            let worker = spawn nil_session();
+            let value = worker.join();
+            if ((value as Token) != nil) { return program.ExitCode.Failure; }
+        }
+        return program.ExitCode.Ok;
+    };
+);

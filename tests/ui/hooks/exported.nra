@@ -1,0 +1,5 @@
+// Case 10: a clause is not exported.
+let Session = class (
+    export | get: instance;
+    export let user: string = "";
+);

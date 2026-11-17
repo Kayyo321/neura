@@ -26,7 +26,7 @@ build/neura check -I examples/guide examples/testing/math-tests.nra
 
 Both commands accept multiple input paths and resolve imports across the source roots. `check` validates the source and succeeds silently on valid input. It does not run the optimizer. `emit-ir` writes a typed NeuraIR listing with resolved symbol references and explicit operations for control flow, state, and calls. The listing is for inspection. A source diagnostic reports the path, line, and column and returns a nonzero exit status.
 
-`check --task-safety` prints a report instead of only checking: for every function of the linked program, whether a spawned task may call it, the reason when it may not, and whether it could also be the worker of a parallel map ([Concurrency](Concurrency#52-task-safe-calls)). Functions are grouped by source file, and a generic function is listed once for each specialization the program uses. The report ends with a count, and the command exits with status 0 whatever the report says. The option applies only to `check`.
+`check --task-safety` validates the linked program, including storage checks after specialization, before producing a report. For each function it reports whether a spawned task may call it, the reason when it may not, and whether it can serve as a parallel-map worker. Functions are grouped by source file, with one entry per specialization of a generic function. A completed report ends with totals and returns status 0. The option applies only to `check`. [Concurrency](Concurrency#52-task-safe-calls)
 
 `emit-ir` prints optimized IR by default. Pass `--no-optimize` to print the IR exactly as lowered. To see what the optimizer changed, compare the two listings:
 

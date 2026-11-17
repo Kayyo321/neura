@@ -496,6 +496,9 @@ foreach(quantum IN ITEMS 1 64 1024)
 endforeach()
 
 # Target-typed new, typed destructuring, and an anonymous class.
+build_image("${TEST_DIR}/primitive-reference-example.nvr" "${SOURCE_DIR}/examples/types/primitive-references.nra")
+expect_run("primitive references example" "${TEST_DIR}/primitive-reference-example.nvr" "Hello, World!\n" 0 "")
+
 build_image("${TEST_DIR}/construction.nvr" "${SOURCE_DIR}/examples/types/construction.nra")
 expect_run("construction example" "${TEST_DIR}/construction.nvr"
     "Ada has 250\nGrace has 10\n4 accounts, 260 in total\n" 0 "")
@@ -554,6 +557,47 @@ foreach(mode IN ITEMS "" --no-optimize)
     file(READ "${tests}/initialization-cycle/main.out" expected)
     expect_run("initialization cycle ${mode}" "${TEST_DIR}/initialization-cycle${mode}.nvr" "${expected}" 0 "")
 endforeach()
+# Startup blocks (Modules.md, Startup blocks): source order across files, a
+# file imported twice, an unused file, an import cycle, a module's block, and
+# a class first used in a block, from source and from .nir, and a library
+# whose blocks a second .nir module links again runs them once.
+foreach(mode IN ITEMS "" --no-optimize)
+    build_image("${TEST_DIR}/startup${mode}.nvr" ${mode} "${tests}/startup/main.nra")
+    file(READ "${tests}/startup/main.out" expected)
+    expect_run("startup blocks ${mode}" "${TEST_DIR}/startup${mode}.nvr" "${expected}" 0 "")
+endforeach()
+neura(emit "${TEST_DIR}" emit-ir "${tests}/startup/main.nra" -o "${TEST_DIR}/startup.nir")
+build_image("${TEST_DIR}/startup-from-nir.nvr" "${TEST_DIR}/startup.nir")
+same_bytes("startup blocks from .nir" "${TEST_DIR}/startup.nvr" "${TEST_DIR}/startup-from-nir.nvr")
+file(MAKE_DIRECTORY "${TEST_DIR}/startup-nir")
+neura(emit "${TEST_DIR}" emit-ir "${tests}/startup/registry.nra" -o "${TEST_DIR}/startup-nir/registry.nir")
+file(WRITE "${TEST_DIR}/startup-nir/user.nra" [=[
+let registry = import:"registry.nir";
+export let User = module (
+    export let count = func() -> int32 => registry.count;
+);
+]=])
+neura(emit "${TEST_DIR}/startup-nir" emit-ir "${TEST_DIR}/startup-nir/user.nra" -o "${TEST_DIR}/startup-nir/user.nir")
+file(WRITE "${TEST_DIR}/startup-nir/app.nra" [=[
+let registry = import:"registry.nir";
+let user = import:"user.nir";
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line((registry.count + user.count()).to_string());
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+build_image("${TEST_DIR}/startup-nir/app.nvr" "${TEST_DIR}/startup-nir/app.nra")
+expect_run("startup blocks of a .nir module linked twice" "${TEST_DIR}/startup-nir/app.nvr"
+    "registry: block, count 2\n4\n" 0 "")
+expect_build_failure("startup library" "error(\\[E0803\\])?: the program has no entry point"
+    "${TEST_DIR}/startup-library.nvr" "${tests}/startup/registry.nra")
+file(READ "${tests}/testing/startup-suite.out" expected)
+expect_tests("startup blocks run again for each test" "${expected}" 0 "${tests}/testing/startup-suite.nra")
+
 foreach(library IN ITEMS guide/core guide/errors testing/math-tests types/classes types/collections
                          types/overlay types/polymorphism modules/multi-file/acme/greetings
                          modules/multi-file/acme/greetings/punctuation)
@@ -579,11 +623,17 @@ foreach(program IN LISTS programs)
     endforeach()
 endforeach()
 
+# An iteration releases its allocations on continue and on break. The
+# successful bound stays below what a hundred retained iterations would use.
+expect_run("array-region stack reclamation" "${TEST_DIR}/array-regions.nvr" "" 0 "" --max-stack-cells 64)
+expect_failure("array-region stack limit" "stack limit exceeded" run --max-stack-cells 4
+               "${TEST_DIR}/array-regions.nvr")
+
 # The new source constructs produce the same image after a NIR round trip.
 foreach(name IN ITEMS operators closures aggregates class-nil generic-closures generic-enums interfaces
                       stdlib-primitives control-and-updates ranges-and-variadics overloads primitive-references
                       last-bindings target-typed-new anonymous-classes inline-tuples inline-tuples-tasks inline-enums
-                      inline-enums-tasks)
+                      inline-enums-tasks array-regions)
     neura(emit "${TEST_DIR}" emit-ir "${tests}/programs/${name}.nra" -o "${TEST_DIR}/${name}.nir")
     if(NOT emit_status STREQUAL "0")
         message(FATAL_ERROR "${name}: emitting NIR failed with status ${emit_status}\n${emit_stderr}")

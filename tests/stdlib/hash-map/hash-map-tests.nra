@@ -305,9 +305,9 @@ let HashMapTests = module (
             let [valid, text] = string.from_utf8(bytes);
             return text;
         };
-        let map = hash_map.with_keys<string, int>(func(key: string) -> uint32 {
+        let map = hash_map.with_keys<string, int>(new func(key: string) -> uint32 {
             return lower(key).hash_code();
-        }, func(a: string, b: string) -> bool {
+        }, new func(a: string, b: string) -> bool {
             return lower(a) == lower(b);
         });
         map.set("Alpha", 1);
@@ -315,9 +315,9 @@ let HashMapTests = module (
         map.set("beta", 3);
         test.assert_equal_string("{Alpha: 2, beta: 3}", map.to_string());
         test.assert(map.contains_key("BETA"));
-        let copy = hash_map.with_keys_and_capacity<string, int>(func(key: string) -> uint32 {
+        let copy = hash_map.with_keys_and_capacity<string, int>(new func(key: string) -> uint32 {
             return lower(key).hash_code();
-        }, func(a: string, b: string) -> bool {
+        }, new func(a: string, b: string) -> bool {
             return lower(a) == lower(b);
         }, 2);
         copy.put_all(map);

@@ -1,0 +1,11 @@
+error[E0203]: expected '}'
+ --> $DIR/unclosed.nra:5:19
+  |
+4 | static scope {
+  |              - unclosed '{' opened here
+5 |     let count = 1;
+  |                   ^ expected '}' here
+6 |
+  | - found the end of the file
+
+For more information about this error, try `neura explain E0203`.

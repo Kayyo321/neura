@@ -1,5 +1,6 @@
 #include "aggregate.hpp"
 #include "attributes.hpp"
+#include "class_hooks.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
 #include "float.hpp"
@@ -183,6 +184,8 @@ struct Context {
     // found at or above it was declared inside that scope. Without a task
     // scope every local of the function body qualifies; parameters never do.
     std::size_t task_scope_base = 0;
+    // Inside a startup block (Modules.md, Startup blocks).
+    bool startup_block = false;
 };
 
 struct ClosureEnvironment {
@@ -348,7 +351,7 @@ private:
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
     IrNode lambda(const Declaration& declaration, Context& context, const IrType* expected = nullptr);
-    IrNode bind_function(IrNode callee, Context& context);
+    IrNode bind_function(IrNode callee, Context& context, bool owned = false);
     std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
     IrNode capture(ClosureEnvironment& environment, SymbolId key, IrNode input, const Span& span);
@@ -524,6 +527,16 @@ private:
     std::optional<IrNode> extension_member(const Expr& expr, const IrNode& receiver, Context& context, bool for_call);
     IrNode extension_call(const Expr& expr, IrNode callee, Context& context, const IrType* expected);
     static bool lambda_fits(const Expr& expr, const IrType& expected);
+    // Startup blocks (Modules.md, Startup blocks); lowering_startup.inc.
+    IrNode startup_block(const Statement& stmt, const Context& context);
+    static Diagnostic return_in_startup_block(const Statement& stmt);
+    // Class hooks (docs/design/Hooks030.md); lowering_hooks.inc.
+    std::map<SymbolId, const HookClause*> hook_clauses_;
+    void declare_hooks(const Declaration& decl, SymbolId cls);
+    SymbolId synchronized_method(SymbolId cls) const;
+    void lower_hooks(SymbolId cls);
+    static std::string describe_found(const std::string& message);
+    void check_hooked_storage(SymbolId first);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -811,6 +824,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(instance).constant = true;
     }
     if (!decl.accessors.empty()) declare_accessors(decl, id);
+    if (!decl.hooks.empty() && kind == SymbolKind::Class) declare_hooks(decl, id);
     attach_tags(program_, id, tag_target(program_, id), decl.tags, decl.name_span.value_or(decl.span),
                 entries_[id].overloads);
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
@@ -1469,7 +1483,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context, const 
     return closure_value(callable, environment, span);
 }
 
-IrNode Lowering::bind_function(IrNode callee, Context& context) {
+IrNode Lowering::bind_function(IrNode callee, Context& context, bool owned) {
     const auto target = callee.symbol;
     if (!entries_[target].overloads.empty())
         throw Diagnostic(callee.span, "an overloaded function must be called directly").with_code("E0433");
@@ -1521,6 +1535,7 @@ IrNode Lowering::bind_function(IrNode callee, Context& context) {
     result.operands.push_back(std::move(invocation));
     program_.bodies.push_back({method, {std::move(result)}});
     auto closure = closure_value(callable, environment, span);
+    if (!closure.operands.empty()) closure.text = owned ? owned_bound : bound_closure;
     return qualifier ? discard_before(std::move(*qualifier), std::move(closure)) : std::move(closure);
 }
 
@@ -3197,8 +3212,11 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         target.span = expr.span;
         return target;
     }
-    case ExprKind::Lambda:
-        return lambda(*expr.lambda, context, expected);
+    case ExprKind::Lambda: {
+        auto result = lambda(*expr.lambda, context, expected);
+        if (expr.text == "new") result.text = owned_lambda;
+        return result;
+    }
     case ExprKind::Interpolation:
         return interpolation(expr, context);
     case ExprKind::NameOf:
@@ -3331,6 +3349,18 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Range:
         return range(expr, context, expected);
     case ExprKind::New:
+        if (expr.text == "bound") {
+            auto target = expression(expr.operands.front(), context);
+            if (target.op != IrOp::Reference || target.symbol == no_symbol ||
+                symbol(target.symbol).kind != SymbolKind::Function || target.operands.empty() ||
+                target.operands.front().type.kind == TypeKind::Module || static_member(target.symbol)) {
+                throw Diagnostic(expr.operands.front().span, "new bound requires an instance method and its receiver")
+                    .with_code("E0423");
+            }
+            auto result = bind_function(std::move(target), context, true);
+            result.span = expr.span;
+            return result;
+        }
         return construct(expr, context, expected);
     case ExprKind::NamedVariant: {
         const auto target = expression(expr.operands.front(), context);
@@ -3941,6 +3971,7 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     program_.bodies.push_back({method, std::move(instructions)});
     auto started = node(IrOp::Spawn, expr.span, uint64_type);
     started.operands.push_back(closure_value(callable, environment, expr.span));
+    started.operands.back().text = task_closure;
 
     if (!handle) {
         // Nothing can join this task, so the runtime need not keep its
@@ -4106,6 +4137,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return store_place(std::move(destination), std::move(source), stmt.span);
     }
     case StmtKind::Block: {
+        if (stmt.startup && !context.startup_block)
+            throw Diagnostic(stmt.keyword, "a startup block is written at file or module level").with_code("E0218");
         auto result = node(IrOp::Block, stmt.span);
         result.body = body(stmt.body, context);
         return result;
@@ -4136,6 +4169,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::ForEach:
         return for_each(stmt, context);
     case StmtKind::Return: {
+        if (context.function == no_symbol && context.startup_block) throw return_in_startup_block(stmt);
         if (context.function == no_symbol) {
             throw Diagnostic(stmt.span, "return is only allowed inside a function").with_code("E0431");
         }
@@ -4866,6 +4900,11 @@ void Lowering::lower_declaration(SymbolId id) {
                 region.push_back(std::move(instruction));
             }
         }
+        if (symbol(id).kind == SymbolKind::Class) lower_hooks(id);
+        for (const auto& block : declaration.startup_blocks) {
+            auto ctx = context(id);
+            initializers.push_back(startup_block(block, ctx));
+        }
         if (!initializers.empty()) program_.bodies.push_back({id, std::move(initializers)});
         if (!static_initializers.empty())
             program_.bodies.push_back({entries_[id].static_scope, std::move(static_initializers)});
@@ -5045,7 +5084,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             } else {
                 const auto accepted = neura::check_definite_assignment({}, std::span(&stmt, 1));
                 deferred_assignments_.insert(accepted.begin(), accepted.end());
-                instructions.push_back(statement(stmt, ctx));
+                instructions.push_back(stmt.startup ? startup_block(stmt, ctx) : statement(stmt, ctx));
             }
         }
         if (!instructions.empty()) program_.bodies.push_back({id, std::move(instructions)});
@@ -5064,6 +5103,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     for (const auto& entry : entries_) {
         if (entry.singleton_instance != no_symbol) singletons.insert(entry.singleton_instance);
     }
+    check_hooked_storage(linked_symbols);
     lower_static_initializers(program_, singletons, linked_symbols, linked_bodies);
     // The checked tags (Tags.md): #Synchronized, #Immutable, and monitors on
     // what this compilation declared, then #Pure over the whole program. A
@@ -5083,6 +5123,8 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 
 #include "lowering_accessors.inc"
 #include "lowering_calls.inc"
+#include "lowering_startup.inc"
+#include "lowering_hooks.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

@@ -9,7 +9,7 @@ export let Main = module:program.Entry (
         let set = tree_set.create<int>(int32.compare);
         set.add(1);
         set.add(2);
-        set.remove_if(func(value: int) -> bool {
+        set.remove_if(new func(value: int) -> bool {
             set.remove(2);
             return false;
         });

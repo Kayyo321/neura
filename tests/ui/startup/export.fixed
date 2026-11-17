@@ -1,0 +1,2 @@
+// Case 61: a startup block is not exported.
+static scope { }

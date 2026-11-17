@@ -1,0 +1,10 @@
+error[E0215]: a class hook clause takes no tags
+ --> $DIR/tagged.nra:3:5
+  |
+3 |     #Deprecated
+  |     ^^^^^^^^^^^ tags before a class hook clause
+  |
+  = note: a tag of the class is written before 'let'
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+
+For more information about this error, try `neura explain E0215`.

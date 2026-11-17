@@ -1,6 +1,7 @@
 #include "argument_lists.hpp"
 #include "diagnostic_render.hpp"
 #include "explain.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/tags.hpp"
 #include "util/diagnostic_codes.hpp"
 #include "util/suggest.hpp"
@@ -19,6 +20,7 @@
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/fleet.hpp"
@@ -999,8 +1001,10 @@ int emit_ir(const Options& options) {
     // default listing is what conversion receives: specialized and optimized.
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
         neura::specialize(program);
+        neura::check_storage(program, neura::StorageStage::Specialized);
+        neura::materialize_reference_storage(program);
+        neura::elaborate_class_hooks(program);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
@@ -1476,10 +1480,12 @@ int run_tests(const Options& options) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
                                  "test_* in a module of the listed files");
     }
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     neura::check_containment(program);
     neura::check_inline_limit(program);
+    neura::elaborate_class_hooks(program);
     if (options.optimize) {
         neura::optimize(program);
     } else {
@@ -1759,8 +1765,9 @@ int run_tests(const Options& options) {
 // listed once for each specialization the program uses.
 int task_safety_report(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     const neura::TaskAnalysis analysis(program);
     const auto file_of = [&](neura::SymbolId id) {
         for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
@@ -1826,17 +1833,11 @@ int task_safety_report(neura::IrProgram program) {
 namespace {
 
 int check_program(neura::IrProgram program) {
-    const bool thread_safe_tags = std::any_of(program.symbols.begin(), program.symbols.end(), [](const auto& item) {
-        return neura::has_tag(item, neura::TagId::ThreadSafe);
-    });
-    if (neura::uses_tasks(program) || thread_safe_tags) {
-        // The isolation rules of a spawn, and the #ThreadSafe check, need
-        // concrete types, which exist after specialization (Concurrency.md
-        // section 5).
-        neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
-        neura::specialize(program);
-    }
+    neura::require_valid_ir(program, "before specialization");
+    neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
+    if (neura::has_class_hooks(program)) neura::elaborate_class_hooks(program);
     return 0;
 }
 

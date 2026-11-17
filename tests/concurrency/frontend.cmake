@@ -224,7 +224,7 @@ check_rejection(argument_not_transferable_array "let total = func(items: int[]) 
         scope {
             let task = spawn total(items);
         }
-]=] "8:36" "int32\\[\\] is not transferable")
+]=] "8:24" "error\\[E0451\\]: array passed to a task")
 
 check_rejection(receiver_not_transferable [=[
 let Counter = class (
@@ -246,7 +246,7 @@ let Box = class (
 );
 ]=] [=[
         let box = new Box(1);
-        let read = func -> int => box.value;
+        let read = new func -> int => box.value;
         scope {
             let task = spawn read();
         }
@@ -427,6 +427,22 @@ if(NOT status STREQUAL "0" OR
    NOT stdout MATCHES "(^|\n)report.nra\n  Main.main: task-safe[^\n]*\n  counting: not task-safe: uses the reassignable binding 'counter' at report.nra:5:38\n  noisy: task-safe; not for a parallel map: issues a host request at [^\n]*\n  pure: task-safe\n  relay: not task-safe: uses the reassignable binding 'counter' at report.nra:5:38\n" OR
    NOT stdout MATCHES "\n[0-9]+ function\\(s\\): [0-9]+ task-safe, of which [0-9]+ can also be the worker of a parallel map\n$")
     message(FATAL_ERROR "check --task-safety: unexpected report (status ${status})\n${stdout}\n${stderr}")
+endif()
+
+# The array return is invalid only after the type parameter is specialized.
+file(WRITE "${TEST_DIR}/report-borrowed-array.nra" [=[
+let alias = func<T>(value: T) -> T => value;
+let use = func() -> int {
+    last values = [1];
+    last borrowed = alias<int[]>(values);
+    return borrowed[0];
+};
+]=])
+execute_process(COMMAND "${NEURA}" check --task-safety report-borrowed-array.nra WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status STREQUAL "1" OR NOT stdout STREQUAL "" OR
+   NOT stderr MATCHES "error\\[E0451\\]: array returned but not created")
+    message(FATAL_ERROR "task-safety accepted a specialized borrowed array return (status ${status})\n${stdout}\n${stderr}")
 endif()
 # The audit of section 5.2: with the modules a service needs linked (Std.Core, Std.Text, Std.Collections,
 # Std.Io.Console, Std.Net, Std.Time, Std.Log, and JSON with its big numbers), every library function is task-safe
@@ -782,7 +798,7 @@ check_accepted(channel_of_function_values "${channels_import}" [=[
 
 check_rejection(channel_of_function_values_with_a_capturing_closure "${box_class}${channels_import}" [=[
         let box = new Box(3);
-        let read = func -> int => box.value;
+        let read = new func -> int => box.value;
         let [sender, receiver, closer] = channels.open<func() -> int>(1);
 ]=] "12:42" "a value of type func\\(\\) -> int32 is not transferable, so it cannot be a channel's element type")
 
@@ -906,7 +922,7 @@ check_labels(group_work_writes_a_global
 # When the helper's function value captures an object, the message names the capture.
 check_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
-        let add = func(job: int) -> void { box.value = box.value + job; };
+        let add = new func(job: int) -> void { box.value = box.value + job; };
         groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
 ]=] "14:9"
     "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task")
@@ -929,7 +945,7 @@ check_labels(tasks_all_call_writes_a_global
 
 check_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
-        let calls: (func() -> result.Result<int>)[list] = new([func() -> result.Result<int> => result.Result<int>.Ok(box.value)]);
+        let calls: (func() -> result.Result<int>)[list] = new([new func() -> result.Result<int> => result.Result<int>.Ok(box.value)]);
         tasks.all_ok<int>(calls);
 ]=] "14:9"
     "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task")

@@ -1,0 +1,10 @@
+// Imported by main.nra and by helper.nra: its startup block runs once.
+let console = import:Std.Io.Console;
+
+export let Registry = module (
+    export let count: int32 = 2;
+);
+
+static scope {
+    console.print_line("registry: block, count " + Registry.count.to_string());
+}
