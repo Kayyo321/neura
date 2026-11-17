@@ -2380,33 +2380,29 @@ int run_uninstall(const fs::path& executable, const Detection& detection, const 
         return exit_ok;
     }
     if (service_running) check_applications(root, options.terminate, "neura: uninstall: ");
-    // A supervisor that runs no application holds its generation's lease;
-    // with the control client it is stopped like any idle one.
-    bool service_stopped = service_running;
-    if (!service_running && service_hooks().stop_idle && !running_supervisors(root).empty()) {
-        std::cout << "stopping the service's supervisor, which runs no application\n";
-        if (const auto problem = service_hooks().stop_idle(root); !problem.empty()) throw Failure{problem + ". Nothing was changed"};
-        service_stopped = true;
-    }
     // Holders other than the service's applications must end first. The
     // foreground clients of applications the service just stopped end right
     // after them, so they are given two seconds.
-    const auto find_in_use = [&] {
+    const auto find_in_use = [&](bool wait) {
         in_use.clear();
-        for (const auto& name : generations_on_disk(root)) {
-            if (exists_no_follow(lease_path(root, name)) && generation_in_use(root, name, detection.running_generation)) in_use.push_back(name);
+        for (int attempt = 0; attempt == 0 || (wait && !in_use.empty() && attempt <= 40); ++attempt) {
+            if (attempt > 0) ::usleep(50'000);
+            in_use.clear();
+            for (const auto& name : generations_on_disk(root)) {
+                if (exists_no_follow(lease_path(root, name)) && generation_in_use(root, name, detection.running_generation)) in_use.push_back(name);
+            }
+        }
+        if (!in_use.empty()) {
+            std::string text;
+            for (const auto& name : in_use) text += (text.empty() ? "" : "; ") + std::string("generation ") + name + " is in use by a running neura process";
+            throw Failure{text + "; end it and run the command again"};
         }
     };
-    find_in_use();
-    for (int attempt = 0; service_stopped && !in_use.empty() && attempt < 40; ++attempt) {
-        ::usleep(50'000);
-        find_in_use();
-    }
-    if (!in_use.empty()) {
-        std::string text;
-        for (const auto& name : in_use) text += (text.empty() ? "" : "; ") + std::string("generation ") + name + " is in use by a running neura process";
-        throw Failure{text + "; end it and run the command again"};
-    }
+    // A supervisor that runs no application holds its generation's lease;
+    // with the control client it is stopped like any idle one, but only once
+    // the removal is confirmed, so the holders are checked after it.
+    const bool stop_idle = !service_running && service_hooks().stop_idle && !running_supervisors(root).empty();
+    if (!stop_idle) find_in_use(service_running);
 
     if (!options.yes) {
         if (!::isatty(0)) {
@@ -2421,6 +2417,11 @@ int run_uninstall(const fs::path& executable, const Detection& detection, const 
             std::cout << "nothing was removed\n";
             return exit_failure;
         }
+    }
+    if (stop_idle) {
+        std::cout << "stopping the service's supervisor, which runs no application\n";
+        if (const auto problem = service_hooks().stop_idle(root); !problem.empty()) throw Failure{problem + ". Nothing was removed"};
+        find_in_use(true);
     }
     (void)executable;
 

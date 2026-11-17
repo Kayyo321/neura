@@ -2039,6 +2039,9 @@ def neurad_checks(kit: Kit) -> None:
     result = run([other.bin / "neura-uninstall", "uninstall", "--dry-run"], env=env)
     check(result.returncode == 0 and "would stop the service's supervisor, which runs no application" in result.stdout
           and service.supervisor_running(generation), f"--dry-run names the idle supervisor and leaves it: {result.stdout}")
+    result = run([other.bin / "neura-uninstall", "uninstall"], env=env)
+    check(result.returncode == 1 and "pass --yes" in result.stderr and service.supervisor_running(generation) and other.root.exists(),
+          f"an uninstall that is not confirmed leaves the idle supervisor running: {result.stdout}{result.stderr}")
     reinstall = Home(kit, "neurad-terminate")
     check(reinstall.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "a combined install for --terminate")
     result = run([other.bin / "neura-uninstall", "uninstall", "--yes"], env=env)
