@@ -1762,8 +1762,9 @@ int run_tests(const Options& options) {
 // listed once for each specialization the program uses.
 int task_safety_report(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     const neura::TaskAnalysis analysis(program);
     const auto file_of = [&](neura::SymbolId id) {
         for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
