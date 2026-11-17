@@ -118,13 +118,44 @@ formats = ["deb", "tar.gz"]
 
 `neura.lock` is written by the tools and committed. It is the same TOML subset.
 
+```toml
+schema = 1
+language = "0.3"
+contracts_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[dependencies]
+"charts" = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+[components."server"."postgresql"]
+version = "18.7"
+digest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+[components."web"."browser-runtime"]
+version = "0.3.0"
+digest = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+```
+
+Every digest is a SHA-256 string of 64 lowercase hexadecimal digits. The keys in
+`[dependencies]` match the external dependency aliases in the manifest. Their
+digests match the manifest pins. A component table
+`[components.<target>.<component>]` records the name, version and digest of each
+component resolved for that target. Its version starts with an ASCII letter or digit
+and can also contain dots, underscores, plus signs and hyphens. An explicit
+`[components.<target>]` represents a target whose resolution uses no components.
+`contracts_digest` is present exactly when the resolver supplies a digest for
+`contracts.lock`.
+
+The canonical writer emits the root keys in the order shown above, followed by
+the dependencies and the component tables. It sorts decoded dependency,
+target and component names by byte order, writes dynamic names as basic quoted
+strings, and uses LF line endings with a final newline.
+
 | Rule | Status |
 | --- | --- |
-| It records `schema = 1`, the language version, each external dependency with its digest, each target component a target uses (the browser runtime, the desktop engine, each provider) with its version and digest, and the digest of `contracts.lock`. | proposed |
-| It records nothing about the project's own sources, no time, no path outside the project and no machine name. | proposed |
-| `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, or one that disagrees with the manifest or with an installed component, is `E1022`, with the entry. | proposed |
+| It records `schema = 1`, the language version, each external dependency with its digest, each target component a target uses (the browser runtime, the desktop engine, each provider) with its version and digest, and the digest of `contracts.lock`. It records no source state, paths, timestamps or machine names. | lock model implemented |
+| `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, a missing or extra entry, or a mismatch with a manifest pin or installed component metadata reports `E1022`. | model comparison implemented, command integration proposed |
 | `neura build --update-lock` and `neura new` write it. `neura dev` writes it only when it is missing. | proposed |
-| A digest that differs from the content found is `E1026`. A build never downloads anything. | proposed |
+| A digest that differs from resolved dependency or `contracts.lock` content reports `E1026`, with the expected and found digests. A build never downloads anything. | in-memory comparison implemented, filesystem resolution proposed |
 
 ## Bundles
 

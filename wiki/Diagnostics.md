@@ -249,8 +249,10 @@ Errors about projects and their artifacts.
 | --- | --- |
 | [E1020](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1020.md) | malformed project manifest |
 | [E1021](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1021.md) | unsupported manifest schema or language version |
+| [E1022](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1022.md) | lock file missing or out of date |
 | [E1023](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1023.md) | invalid target |
 | [E1025](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1025.md) | path outside the project |
+| [E1026](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1026.md) | content does not match its digest |
 | [E1028](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1028.md) | limit out of range |
 | [E1032](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1032.md) | dependency not pinned or not found |
 

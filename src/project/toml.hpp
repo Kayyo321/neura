@@ -46,4 +46,7 @@ struct TomlDocument {
 // Throws a Diagnostic (E1020) at the first error.
 TomlDocument parse_toml(std::string_view bytes, std::string_view file);
 
+// Encode one basic TOML string. Invalid UTF-8 is an invalid_argument.
+std::string quote_toml_string(std::string_view value);
+
 } // namespace neura::project

@@ -246,8 +246,10 @@ Errors about projects and their artifacts.
 | --- | --- |
 | [E1020](E1020.md) | malformed project manifest |
 | [E1021](E1021.md) | unsupported manifest schema or language version |
+| [E1022](E1022.md) | lock file missing or out of date |
 | [E1023](E1023.md) | invalid target |
 | [E1025](E1025.md) | path outside the project |
+| [E1026](E1026.md) | content does not match its digest |
 | [E1028](E1028.md) | limit out of range |
 | [E1032](E1032.md) | dependency not pinned or not found |
 

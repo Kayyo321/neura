@@ -209,8 +209,10 @@ NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding w
 
 NEURA_DIAGNOSTIC(E1020, "malformed project manifest")
 NEURA_DIAGNOSTIC(E1021, "unsupported manifest schema or language version")
+NEURA_DIAGNOSTIC(E1022, "lock file missing or out of date")
 NEURA_DIAGNOSTIC(E1023, "invalid target")
 NEURA_DIAGNOSTIC(E1025, "path outside the project")
+NEURA_DIAGNOSTIC(E1026, "content does not match its digest")
 NEURA_DIAGNOSTIC(E1028, "limit out of range")
 NEURA_DIAGNOSTIC(E1032, "dependency not pinned or not found")
 

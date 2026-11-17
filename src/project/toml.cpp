@@ -448,4 +448,34 @@ TomlDocument parse_toml(std::string_view bytes, std::string_view file) {
     return TomlReader(bytes, file).read();
 }
 
+std::string quote_toml_string(std::string_view value) {
+    constexpr std::string_view hex = "0123456789abcdef";
+    std::string result = "\"";
+    while (!value.empty()) {
+        const auto byte = static_cast<unsigned char>(value.front());
+        const auto width = utf8_width(value);
+        if (width == 0) throw std::invalid_argument("TOML strings must be valid UTF-8");
+        switch (byte) {
+        case '"': result += "\\\""; break;
+        case '\\': result += "\\\\"; break;
+        case '\b': result += "\\b"; break;
+        case '\t': result += "\\t"; break;
+        case '\n': result += "\\n"; break;
+        case '\f': result += "\\f"; break;
+        case '\r': result += "\\r"; break;
+        default:
+            if (raw_control(byte)) {
+                result += "\\u00";
+                result += hex[byte >> 4];
+                result += hex[byte & 0x0f];
+            } else {
+                result += value.substr(0, width);
+            }
+        }
+        value.remove_prefix(width);
+    }
+    result += '"';
+    return result;
+}
+
 } // namespace neura::project
