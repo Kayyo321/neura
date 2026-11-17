@@ -300,6 +300,47 @@ NEURA_TEST(tier, a_difference_planted_in_the_run_is_reported_by_name) {
     check(starts_with(selects, "task 0 selects: "), "a task's committed selects are named: " + selects);
 }
 
+NEURA_TEST(tier, the_shadow_compares_the_storage_regions_that_programs_run) {
+    // tests/backend/tier/region-tiers.nvra under function programs, which run the region
+    // operations as helpers and release on return (NVR 1.7): a clean run has no difference, and a
+    // region's owning frame, the released handles or the stack cells changed in the run are each
+    // reported by name at the next sync point.
+    if (!regions_enabled()) return;
+    const auto image = region_tiers_image(environment);
+    auto options = eager_regions();
+    options.programs = nvm::TierOptions::Programs::On;
+    options.native_after = 1;
+    {
+        nvm::TierCache cache(image, options);
+        auto limits = tier_2(&cache);
+        Hooks hooks;
+        limits.tier_shadow = &hooks.hooks;
+        const auto run = run_captured(image, limits);
+        check(run.result.completed, "the region image runs under the oracle");
+        check(hooks.reports.empty(), "no difference" + (hooks.reports.empty() ? "" : ": " + hooks.reports[0]));
+        check(hooks.hooks.syncs > 0, "the oracle reached sync points");
+        check(cache.statistics().region_counts.helpers > 0, "programs ran region operations as helpers");
+    }
+    const std::vector<std::pair<Perturb, std::string>> cases{
+        {Perturb::RegionDepth, "frame region "}, {Perturb::ReleasedHandles, "released handle"},
+        {Perturb::StackCells, "live stack cells: "}};
+    for (const auto& [perturb, expected] : cases) {
+        nvm::TierCache cache(image, options);
+        auto limits = tier_2(&cache);
+        Hooks hooks;
+        hooks.hooks.perturb = perturb;
+        hooks.hooks.at_step = 400;
+        limits.tier_shadow = &hooks.hooks;
+        run_captured(image, limits);
+        check(hooks.hooks.perturbed, expected + ": the run was perturbed");
+        check_equal(hooks.reports.size(), std::size_t{1}, expected + ": one report");
+        if (hooks.reports.empty()) continue;
+        const auto item = item_of(hooks.reports.front());
+        check(starts_with(item, expected), "the difference is named: " + item);
+        if (perturb == Perturb::RegionDepth) check(contains(item, " frame depth: "), "the owning frame is named: " + item);
+    }
+}
+
 NEURA_TEST(tier, a_coverage_observer_sees_each_block_once_with_the_oracle) {
     // RunLimits::block_observer belongs to the run: the shadow's steps do
     // not reach it.
