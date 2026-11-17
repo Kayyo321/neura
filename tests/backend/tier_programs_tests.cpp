@@ -3,6 +3,7 @@
 // observably the same as one at tier 0, wherever a limit is reached, a
 // callee traps, a task parks, or the shadow oracle looks. Part of the
 // `tier` suite (backend-tier).
+#include "jit/tier3_native.hpp"
 #include "graph_test_support.hpp"
 
 #include "nvm/tier1.hpp"
@@ -647,13 +648,19 @@ NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
                 check(counts.lifted_by_hint > 0 && counts.programs > 0,
                       label + ": the hinted blocks were lifted into programs");
                 // rec's single-word calls to add still run in programs; the
-                // multi-word calls and returns are declined.
-                check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
-                      label + ": single-word calls and returns still run in programs");
+                // multi-word calls and returns are declined. Where tier 3
+                // native code is unsupported (AArch64, macOS), NEURA_JIT=on
+                // compiles tier 2 code instead, and this fixture's calls are
+                // not counted in programs there; the identical runs above are
+                // the evidence on those platforms.
+                if (jit::native::supported()) {
+                    check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
+                          label + ": single-word calls and returns still run in programs");
+                }
                 check(counts.region_counts.exits > 0, label + ": the multi-word exits were declined");
                 // Tier 3 inherits the decline: it builds from these programs and
                 // still runs, so its result is the reference's.
-                if (tier3 != Tier3::Off && nvm::tier_ceiling() >= 3) {
+                if (tier3 != Tier3::Off && jit::native::supported()) {
                     check(counts.native_programs > 0 && counts.native.steps > 0,
                           label + ": tier 3 built and ran programs around the declined exits");
                 }
