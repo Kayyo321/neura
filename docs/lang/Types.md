@@ -432,6 +432,44 @@ A field with only `get` is read-only outside its class: assigning it there, or u
 
 **Limits in this release.** Accessors resolve statically to the declaring class: they are not virtual and cannot be overridden, and a subclass cannot redeclare the field. Interfaces cannot require accessors. Accessors are allowed only on exported instance fields (`E0516`, `E0517`, `E0518`, `E0519`). A `const` or `last` field can have a getter but not a setter (`E0521`). A field named `value` cannot have a setter (`E0522`). A primitive reference field cannot have accessors (`E0523`). Calling an accessor through a nil reference traps like any instance method. A getter or setter call is an ordinary method call to the [task-safety](#task-safe-calls) analysis and the optimizer. In NeuraIR the clauses are the hidden methods `$get_<field>` and `$set_<field>`, linked from the field by the [1.10 attributes](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization) `accessor.get`, `accessor.set`, and `accessor.of`, so a program that imports the class from a `.nir` file uses the same accessors. See [accessors.nra](../../examples/types/accessors.nra).
 
+### Class hooks
+
+A class hook clause is a rule about every reference of a class: a `get` clause runs when a reference is read from storage, and a `set` clause when one is admitted to storage, a parameter or a result. It is written after the `(` of a declared class and before its first member; a `|` clause after a member's `;` stays an [accessor](#accessors) of that member.
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let Session = class (
+    | get: instance;
+    | set: {
+        if (value == nil) {
+            failure.trap("a Session reference is never nil");
+        }
+        return value;
+    };
+
+    export last user: string;
+    export let init = func(user: string) => set;
+);
+
+let Admin = class:Session (
+    | set.override: value;
+
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+```
+
+- A class has at most one `get` and one `set` clause, in either order, each ending with `;` (`E0538`, `E0215`). A clause takes no tags and no `export`.
+- Both clauses yield a reference of the class: an expression of the class's type, or a block that returns one on every path or traps (`E0542`). In a getter `instance` is the reference being read; in a setter `value` is the incoming reference and `instance` what the destination held. Both are immutable.
+- A class without a clause of a kind inherits the nearest base class's. Replacing an inherited clause is written `| get.override:` or `| set.override:` (`E0539`); `.override` with nothing to replace is `E0540`.
+- Interfaces, modules, enums and anonymous classes cannot declare clauses (`E0216`), nor can a class with `#Synchronized` methods or whose base has one (`E0541`). A clause of a class that is not `#Final` cannot return a `new` object (`E0543`), and a hook cannot use the scheduler (`E0544`).
+- A field or static field of a class type that has a `set` clause needs an initializer (`E0545`); `= nil` is one, which the setter then admits.
+
+The compiler parses and checks clauses, writes them to `.nir` (NeuraIR 1.11), and derives on the linked program each read and admission at which a clause runs. A program that declares a clause cannot be built into an image in this release (`E0801`): the runtime operations exist (NVR 1.8), but references of a hooked class do not yet carry the class policy that the rules for `nil` need ([design](../design/Hooks030.md)).
+
 ### Anonymous classes
 
 A class body can be written wherever a type is expected: in the annotation of a binding or field, a parameter or result type, a tuple element, a collection element, and a type argument.
