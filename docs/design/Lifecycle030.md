@@ -115,7 +115,7 @@ A 0.3 client asks a release source for `neura-components.txt`. If the source has
 | `install.sh --add <dir>` | Also takes the components of a second unpacked archive of the same build, so that the SDK and runtime archives install as one generation. | proposed |
 | The bootstrap script, `--components sdk`, `runtime` or `sdk,service` | Downloads and verifies the one or two archives the set needs and runs the installer. The default is `sdk`. `--version`, `--source` and `--force` are as today. | proposed |
 | `neura update` | Updates to the newest release, keeping the installed set of components. `--check`, `--nightly`, `--source` and `--require-attestation` are as today, and apply to every archive fetched. | proposed |
-| `neura update --components <set>` | Changes the set: `sdk`, `runtime` (`core` and `service`) or `sdk,service`. Adding a component fetches the archive of the installed build; removing one fetches nothing. | proposed |
+| `neura update --components <set>` | Changes the set: `sdk`, `runtime` (`core` and `service`) or `sdk,service`. Removing a component fetches nothing. Adding one fetches the archive of the installed version from that version's own release (`releases/download/v<version>`, or `--source`), not from the latest release, and requires its `build` to be the installed one. | proposed |
 | `neura update --migrate-install` | Finishes an installation that a 0.2 updater produced. See [the 0.2 bridge](#the-02-bridge). | proposed |
 | `neura update --rollback` | Makes the previous generation active again, when it is still on disk and is a 0.3 generation. Fetches nothing. | proposed |
 | `neura update --repair` | Completes or undoes an interrupted change, restores owned links, and removes generations no one uses beyond the previous one. Fetches nothing. | proposed |
@@ -132,20 +132,20 @@ Every command that changes the root runs these steps. The fault hook `NEURA_TEST
 
 | Step | Name | What happens | Status |
 | --- | --- | --- | --- |
-| 1 | `lock` | An exclusive `flock` on `<root>/.lock`, not waited for: a second command fails at once with `another install, update or uninstall is running`. While it holds the lock the command also keeps the 0.2 lock file `.update-lock`, so a 0.2 updater refuses to run beside it. A `.update-lock` found while the `flock` is free is left over and is removed. | proposed |
-| 2 | `recover` | A journal that is present is from a command that ended early. If `current` already names the journal's new generation the change is completed from step 9; otherwise it is undone: removed links are restored and the new generation's directory is deleted. | proposed |
+| 1 | `lock` | An exclusive `flock` on `<root>/.lock`, not waited for: a second command fails at once with `another install, update or uninstall is running`. On a root with a schema 1 marker, where a 0.2 updater may run, the command also creates the 0.2 lock file `.update-lock` by the 0.2 rules and keeps it until it ends: a file that is already there means a 0.2 update is running, or is reported as stale after an hour for the user to delete, and the command changes nothing. On a schema 2 root no 0.2 client can run, so a `.update-lock` found there is left over from an interrupted migration and is removed. | proposed |
+| 2 | `recover` | A journal that is present is from a command that ended early. If `current` already names the journal's new generation the change is completed from step 9; otherwise it is undone: removed links are restored, and the new generation's directory is deleted only when the journal says this change placed it. A generation that was on disk before, as in a rollback or `--force` on a whole generation, is never deleted by recovery. | proposed |
 | 3 | `download`, `checksum` | As today, for each archive: size, SHA-256, and build provenance when `gh` can check it | proposed |
 | 4 | `extract` | As today: the member names and kinds are checked before anything is unpacked, into a staging directory in the root | proposed |
 | 5 | `verify` | Each manifest parses; every listed file is there with its size, digest and mode; nothing else is there but the manifests, `install.sh` and `VERSION`; all manifests agree on version, build and target; `core` is byte-identical where two archives bring it; the staged `bin/neura --version` prints a line that starts `neura <version> ` | proposed |
 | 6 | `compose` | The components selected are copied into one tree, the generation's name is computed, and every public link is checked: a path that is absent, or a symbolic link into this root, is ours to set; anything else is a conflict. Any conflict ends the command here with every conflicting path listed and nothing changed. | proposed |
-| 7 | `journal`, `place` | The journal is written and synced: the operation, the old and new generation, the links to remove and to add, and the old marker. The tree is renamed to `versions/<generation>` and `leases/<generation>` is created. | proposed |
+| 7 | `journal`, `place` | The journal is written and synced: the operation, the old and new generation, whether this change places the new generation or finds it on disk, the links to remove and to add, and the old marker. A new tree is renamed to `versions/<generation>` and `leases/<generation>` is created. | proposed |
 | 8 | `links-remove` | Links of tools the new set does not have are removed | proposed |
 | 9 | `activate-link` | `current` is replaced by one rename | proposed |
 | 10 | `links-add` | Links of tools the old set did not have are created | proposed |
 | 11 | `activate-marker` | The marker is replaced by one rename and the journal is removed | proposed |
 | 12 | `retire`, `prune` | A running supervisor of the old generation is told it is retired, with a wait of at most 250 ms. Generations other than the active and the previous one are removed when no process holds their lease. A failure here is a warning; the update has succeeded. | proposed |
 
-A failure at steps 3 to 7 removes the staging directory and leaves the installation untouched. A failure at steps 8 to 11 is undone in reverse order, and the command reports `rolled back`. The installation works in every intermediate state: before step 9 every link resolves in the old generation, and after it every link that exists resolves in the new one.
+A failure at steps 3 to 7 removes the staging directory and leaves the installation untouched. A failure at steps 8 to 11 is undone in reverse order, by the rule of step 2, and the command reports `rolled back`. The installation works in every intermediate state: before step 9 every link resolves in the old generation, and after it every link that exists resolves in the new one.
 
 ### Generations in use
 
@@ -153,7 +153,7 @@ A failure at steps 3 to 7 removes the staging directory and leaves the installat
 | --- | --- |
 | Every tool of an installed generation takes a shared `flock` on `leases/<generation>` when it starts, before it opens another file of the generation, and holds it until it exits. A supervisor and its workers hold it too, so an application that is running holds its generation. The descriptor is close-on-exec: a program a tool starts does not hold a lease. | proposed |
 | A generation is removed only by a command that holds the installation lock and has taken an exclusive `flock` on its lease without waiting. The lock is released by the kernel when its holder ends, so a process that died holds nothing and no process ID is trusted. | proposed |
-| A tool that finds its lease file gone ends with `this generation of neura was removed; run the command again`, status 1. | proposed |
+| On a root with a schema 2 marker, a tool that finds its lease file gone ends with `this generation of neura was removed; run the command again`, status 1. On a root with a schema 1 marker, which a 0.2 client made and which has no `leases/`, a tool runs without a lease. | proposed |
 | Where the file system cannot lock, tools run without a lease and no generation is removed automatically; `doctor` says so, and `uninstall` still works. | proposed |
 | The previous generation is kept after an update, in use or not, so that `--rollback` needs no download. The next update removes it. | proposed |
 | `install.sh --force` on a generation that is already there verifies it against its manifests. If it is whole, nothing is copied and the installation is switched to it and its links repaired. If it is damaged and unleased it is set aside and replaced; if it is damaged and leased the command is refused. | proposed |
@@ -246,11 +246,11 @@ Each case is a test of the order of work. *Accept* means the command succeeds wi
 12. `--force` on a damaged generation that a running process holds: refused (reject).
 13. A rebuilt release of the same version: another build, so another generation name; both can be on disk (accept).
 14. Two `neura update` at once: the second fails at the lock (reject).
-15. A 0.2 `neura update` started while a 0.3 command holds the lock: it refuses on `.update-lock` (reject).
-16. `.update-lock` left by a crash: removed by the next command, which proceeds (accept).
+15. On a schema 1 root, a 0.2 `neura update` started while `--migrate-install` or the 0.3 installer runs: it refuses on `.update-lock`. The 0.3 installer or `--migrate-install` started while a 0.2 update runs: it refuses on the same file and changes nothing (reject).
+16. `.update-lock` left on a schema 2 root by an interrupted migration: removed by the next command, which proceeds. The same file on a schema 1 root, more than an hour old: reported as stale, not removed (accept, reject).
 17. A fault at each of `download`, `checksum`, `extract`, `verify`, `compose`, `journal`, `place`: unchanged root, no staging directory (reject).
 18. A fault at each of `links-remove`, `activate-link`, `links-add`, `activate-marker`: rolled back; old links, `current` and marker as before (reject).
-19. A crash at each of steps 7 to 11: the installation works as left; `doctor` reports the interrupted change; the next lifecycle command completes or undoes it by the rule of step 2 (accept).
+19. A crash at each of steps 7 to 11: the installation works as left; `doctor` reports the interrupted change; the next lifecycle command completes or undoes it by the rule of step 2. A crash during `--rollback` before step 9 leaves both generations on disk after recovery (accept).
 20. A crash, then a plain `neura build`: works, before and after the recovery (accept).
 21. An archive member that is a symbolic link, a hard link, absolute, or outside the top directory: refused before unpacking, as today (reject).
 22. An archive with a file its manifest does not list, a listed file missing, a wrong digest, a wrong mode: refused at `verify` (reject).
@@ -270,7 +270,7 @@ Each case is a test of the order of work. *Accept* means the command succeeds wi
 36. `--rollback` when the previous generation is a 0.2 one, or there is none: refused (reject).
 37. `--rollback` to a generation whose file was changed on disk: refused at verification (reject).
 38. `--components sdk,service` on an SDK: the runtime archive of the installed build is fetched; a new generation; the `neurad` link appears; nothing is started or registered (accept).
-39. The same when the release source has moved to a newer version: refused with the advice to update first (reject).
+39. The same on a candidate while a newer release is the latest: the archive comes from the installed version's own release, so it succeeds; with `--source` naming a release of another build, refused with the advice to update first (accept, reject).
 40. `--components sdk` on a combined installation with no application running: a new generation without `neurad`; its link, unit and state are removed; `neura run` still works (accept).
 41. The same with an application running: refused; with `--terminate`: the application is stopped, then the change (reject, accept).
 42. `uninstall --component service` on a runtime installation; `--component sdk` on an SDK: refused (reject).
@@ -280,7 +280,7 @@ Each case is a test of the order of work. *Accept* means the command succeeds wi
 46. `uninstall --yes` of a combined installation with login start enabled and nothing running: every link, the root, the unit and the state directory are gone; a `PATH` line and files the user put in the root are left and listed (accept).
 47. `uninstall` when one owned link was replaced by a regular file: that path is left and listed; the rest is removed (accept).
 48. A second installation's unit and socket: untouched by the first's uninstall (accept).
-49. The bridge from rc.3 and from 0.2.0: after the old `neura update`, `neura --version` reports 0.3.0, `neura build` and `neura run` work, `neurac` is not on `PATH`, and `doctor` fails on `migration` (accept).
+49. The bridge from rc.3 and from 0.2.0: after the old `neura update`, `neura --version` reports 0.3.0, `neura build`, `neura run` and `neura test` work with no `leases/` directory, `neurac` is not on `PATH`, and `doctor` fails on `migration` (accept).
 50. `--migrate-install` then: every link, schema 2, `doctor` exits 0, `neurac --version` works from `PATH` (accept).
 51. `--migrate-install` again, and on a fresh 0.3 installation: `already migrated`, status 0 (accept).
 52. `--migrate-install` with a conflicting file at one tool's path: nothing changed, still unmigrated (reject).
