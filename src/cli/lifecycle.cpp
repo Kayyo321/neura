@@ -1367,7 +1367,11 @@ void run_change(Change& change, const InstallLock& lock) {
             std::error_code made;
             fs::create_directories(change.new_marker.bin, made);
         }
-        for (const auto& path : plan.add) create_link(path, root);
+        for (std::size_t i = 0; i < plan.add.size(); ++i) {
+            create_link(plan.add[i], root);
+            // A crash after some links (the tests' "links-add-<n>").
+            step_point("links-add-" + std::to_string(i + 1));
+        }
         // Step 11.
         step_point("activate-marker");
         write_marker(root, change.new_marker);

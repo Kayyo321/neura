@@ -1164,11 +1164,152 @@ cp "$source" "$output"
     check(nolock_base in nolock.generations() and len(nolock.generations()) == 4, f"case 61: nothing is pruned: {nolock.generations()}")
 
 
+def legacy_state(kit: Kit, home: Home, top: Path, version: str) -> None:
+    """The state a 0.2 updater leaves (docs/design/Lifecycle030.md, "The 0.2
+    bridge"): the whole legacy archive tree at versions/<version>, current,
+    a schema 1 marker, and one link, neura. Built by hand, as the 0.2 code
+    does it; the release workflow runs the real 0.2 clients."""
+    root = home.root
+    (root / "versions").mkdir(parents=True)
+    shutil.copytree(top, root / "versions" / version)
+    os.symlink(f"versions/{version}", root / "current")
+    home.bin.mkdir(parents=True, exist_ok=True)
+    real = root.resolve()
+    os.symlink(f"{real}/current/bin/neura", home.bin / "neura")
+    (root / "neura-install.txt").write_text(f"neura-install 1\nmethod archive\nlink {home.bin.resolve()}/neura\nversion {version}\n")
+
+
+def suite_migrate(kit: Kit) -> None:
+    """The legacy archive, the unmigrated state and --migrate-install (step 6):
+    cases 15, 16 (schema 1), 49 to 56 and 58."""
+    v, t = kit.version, kit.triple
+    release = kit.release(kit.work / "release")
+    legacy_top = unpack(release / f"neura-{v}-{t}.tar.gz", kit.work / "unpacked/legacy")
+    sdk_top = unpack(release / f"neura-sdk-{v}-{t}.tar.gz", kit.work / "unpacked/sdk")
+    every = set(CORE_TOOLS) | set(SDK_TOOLS)
+
+    def update(home: Home, *arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        # Through the dispatcher, the one link a 0.2 client made.
+        return home.neura("update", *arguments, env=env)
+
+    # Case 49: after the 0.2 update.
+    home = Home(kit, "bridge")
+    legacy_state(kit, home, legacy_top, v)
+    check(home.neura("--version").stdout == kit.line + "\n", "case 49: neura --version reports the new version")
+    image = hello(kit, home)
+    check(home.neura("run", image).stdout == "Hello, World!\n", "case 49: neura run")
+    test = home.neura("test", "-I", REPOSITORY / "examples/guide", REPOSITORY / "examples/testing/math-tests.nra")
+    check(test.returncode == 0, f"case 49: neura test: {test.stdout}{test.stderr}")
+    check(not (home.root / "leases").exists(), "case 49: no leases/ directory")
+    check(shutil.which("neurac", path=str(home.bin)) is None, "case 49: neurac is not on PATH")
+    direct = run([home.root / "current/bin/neurac", "--version"], env=home.env())
+    check(direct.returncode == 0, "case 49: the tools run directly")
+    # Case 55: updates, component changes and rollback refuse.
+    instruction = 'this installation was updated by a 0.2 client; run "neura update --migrate-install" first'
+    before = snapshot(home.root)
+    for arguments in (["--source", release], ["--check", "--source", release], ["--rollback"], ["--repair"], ["--components", "runtime"]):
+        result = update(home, *arguments)
+        check(result.returncode == 1 and instruction in result.stderr, f"case 55: update {arguments}: {result.stderr}")
+    result = home.neura("uninstall", "--component", "sdk")
+    check(result.returncode == 1 and instruction in result.stderr, f"case 55: uninstall --component: {result.stderr}")
+    check(snapshot(home.root) == before, "case 55: nothing changed")
+    # Case 54: a file of the generation was altered.
+    altered = home.root / "versions" / v / "share/neura/stdlib/std/core/version.nra"
+    original = altered.read_bytes()
+    altered.write_bytes(original + b"\n")
+    result = update(home, "--migrate-install")
+    check(result.returncode == 1 and "expected" in result.stderr and snapshot(home.root) != before, f"case 54: {result.stderr}")
+    check(home.marker().startswith("neura-install 1\n"), "case 54: still unmigrated")
+    altered.write_bytes(original)
+    # Case 52: a conflicting file at one tool's path.
+    (home.bin / "neura-fmt").write_text("mine\n")
+    result = update(home, "--migrate-install")
+    check(result.returncode == 1 and "neura-fmt exists and is not a link made by neura" in result.stderr, f"case 52: {result.stderr}")
+    check(home.marker().startswith("neura-install 1\n") and set(home.links()) == {"neura"}, "case 52: nothing changed")
+    (home.bin / "neura-fmt").unlink()
+    # Case 15: a 0.2 update runs, so the migration refuses on its lock file.
+    (home.root / ".update-lock").write_text("4242\n")
+    result = update(home, "--migrate-install")
+    check(result.returncode == 1 and "a 0.2 update is running" in result.stderr, f"case 15: {result.stderr}")
+    old = home.root / ".update-lock"
+    os.utime(old, (0, 0))
+    result = update(home, "--migrate-install")
+    check(result.returncode == 1 and "more than an hour old" in result.stderr and old.exists(), f"case 16: a stale 0.2 lock: {result.stderr}")
+    old.unlink()
+    # Case 53: interrupted after some links; the next run completes it.
+    result = update(home, "--migrate-install", env={"NEURA_TEST_UPDATE_CRASH": "links-add-3"})
+    check(result.returncode == 70 and 1 < len(home.links()) < len(every), f"case 53: a crash after some links: {home.links()}")
+    # Case 15: the 0.3 command holds the 0.2 lock file, which a 0.2 updater
+    # creates with O_EXCL, while it runs; the crash left it behind.
+    check((home.root / ".update-lock").read_text().startswith("neura-lifecycle "), "case 15: the 0.2 lock file is held during the change")
+    check(home.neura("run", image).stdout == "Hello, World!\n", "case 53: the installation works as left")
+    # Case 50: the migration.
+    result = update(home, "--migrate-install")
+    check(result.returncode == 0 and "completed an interrupted migrate" in result.stdout, f"case 53/50: {result.stdout}{result.stderr}")
+    check(home.marker().startswith(f"neura-install 2\nmethod archive\nbin {home.bin.resolve()}\ncomponents core sdk\ngeneration {v}\n"),
+          f"case 50: schema 2\n{home.marker()}")
+    expect_links(home, every, "case 50")
+    check((home.root / "leases" / v).is_file() and not (home.root / ".update-lock").exists(), "case 50: the lease, and no 0.2 lock")
+    out = run(["neurac", "--version"], env=home.env())
+    check(out.returncode == 0 and out.stdout == kit.line + "\n", "case 50: neurac --version from PATH")
+    check(home.neura("doctor").returncode == 0, f"case 50: doctor exits 0\n{home.neura('doctor').stdout}")
+    # Case 51: again, and on a fresh 0.3 installation.
+    result = update(home, "--migrate-install")
+    check(result.returncode == 0 and result.stdout.startswith("already migrated"), f"case 51: {result.stdout}")
+    (home.bin / "neura-tags").unlink()
+    result = update(home, "--migrate-install")
+    check(result.returncode == 0 and "restored 1 links" in result.stdout and (home.bin / "neura-tags").is_symlink(), "case 51: restores a link")
+    fresh = Home(kit, "fresh")
+    check(fresh.install(sdk_top).returncode == 0, "a fresh 0.3 install")
+    result = fresh.neura("update", "--migrate-install")
+    check(result.returncode == 0 and result.stdout.startswith("already migrated"), "case 51: on a fresh 0.3 installation")
+    # The legacy generation is named by its version; a later update keeps
+    # the name, and rollback to it is allowed once it has manifests.
+    result = run([home.bin / "neura-update", "update", "--source",
+                  kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9"), version="9.9.9")], env=home.env())
+    check(result.returncode == 0 and v in home.generations(), f"an update after the migration keeps {v}: {result.stderr}")
+
+    # Case 56: uninstall of an unmigrated installation, by the schema 1 rules.
+    gone = Home(kit, "uninstall-unmigrated")
+    legacy_state(kit, gone, legacy_top, v)
+    result = gone.neura("uninstall", "--yes")
+    check(result.returncode == 0 and not gone.root.exists() and not (gone.bin / "neura").is_symlink(), f"case 56: {result.stderr}")
+
+    # Case 58: the 0.3 installer on a 0.2 root migrates and installs; a 0.2
+    # generation (no manifests) becomes the previous one, and --rollback
+    # refuses to return to it (case 36).
+    old_root = Home(kit, "old-root")
+    legacy_state(kit, old_root, legacy_top, "0.2.0")
+    shutil.rmtree(old_root.root / "versions/0.2.0/share/neura/components")
+    (old_root.root / "versions/0.2.0/VERSION").write_text("0.2.0\n")
+    (old_root.root / "neura-install.txt").write_text(old_root.marker().replace(f"version 0.2.0\n", "version 0.2.0\n"))
+    result = old_root.install(sdk_top)
+    check(result.returncode == 0, f"case 58: the 0.3 installer on a 0.2 root: {result.stderr}")
+    check(old_root.marker().startswith("neura-install 2\n") and sorted(old_root.generations()) == sorted(["0.2.0", old_root.current()]),
+          f"case 58: migrated, with the 0.2 generation as the previous one: {old_root.generations()}")
+    expect_links(old_root, every, "case 58")
+    result = run([old_root.bin / "neura-update", "update", "--rollback"], env=old_root.env())
+    check(result.returncode == 1 and "no previous 0.3 generation is installed" in result.stderr, f"case 36: a 0.2 previous generation: {result.stderr}")
+    # A 0.2 install.sh on a schema 2 root stops at the marker's first line.
+    old_installer = run(["git", "-C", REPOSITORY, "show", "v0.2.0:packaging/install.sh"])
+    if old_installer.returncode != 0:
+        print("NOT RUN: case 58 (a 0.2 install.sh on a schema 2 root): the tag v0.2.0 is not in this checkout")
+    else:
+        old_top = kit.work / "unpacked/old-installer"
+        shutil.copytree(legacy_top, old_top)
+        (old_top / "install.sh").write_text(old_installer.stdout)
+        before = snapshot(old_root.root)
+        result = run(["sh", old_top / "install.sh"], env=old_root.env(), cwd=old_top)
+        check(result.returncode != 0 and "is not a neura install marker" in result.stderr and snapshot(old_root.root) == before,
+              f"case 58: a 0.2 install.sh on a schema 2 root: {result.stderr}")
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
     "bootstrap": suite_bootstrap,
     "update": suite_update,
+    "migrate": suite_migrate,
 }
 
 
