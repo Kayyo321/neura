@@ -4,7 +4,7 @@ This note fixes the desktop contracts before they are implemented: the window ho
 
 The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A5. Later changes to a row are made here, with the reason.
 
-Nothing below exists in the repository. The note adds no syntax.
+The [desktop engine lock](../../hosts/desktop/engine.lock) records the approved Electron release and the official archive digests for the five platform and architecture pairs. The packaged engine carries its own license and Chromium third-party notices. The note adds no syntax.
 
 ```text
 window host (Electron main process, shipped script, no application logic)
