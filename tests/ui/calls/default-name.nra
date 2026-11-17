@@ -1,0 +1,3 @@
+// A default is a constant, not the name of a binding (edge case 25).
+let other = 3;
+let f = func(a: int = other) -> int => a;

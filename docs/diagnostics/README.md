@@ -39,6 +39,7 @@ Errors about the grammar.
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
 | [E0225](E0225.md) | positional argument after a named argument |
+| [E0226](E0226.md) | default value on a parameter that takes none |
 
 ## E03xx: Names
 
@@ -115,6 +116,7 @@ Errors about types, values, calls, and statements.
 | [E0482](E0482.md) | unknown argument label |
 | [E0483](E0483.md) | argument supplied twice |
 | [E0484](E0484.md) | labels are not available for this call |
+| [E0485](E0485.md) | default value is not a constant |
 
 ## E05xx: Classes and lifecycle
 
@@ -154,6 +156,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0536](E0536.md) | destructuring declared with last |
 | [E0537](E0537.md) | constructor shorthand names no instance field |
 | [E0560](E0560.md) | parameter names differ from the overridden method |
+| [E0561](E0561.md) | defaults differ from the overridden method |
 
 ## E06xx: Concurrency
 

@@ -180,6 +180,49 @@ let text = value.to_string();
 ]=])
 neura(check "${artifacts}/plain-app.nra")
 
+# Defaults and labels across a prebuilt module (docs/design/Calls030.md): a
+# caller inserts the default recorded in the module's .nir, names its
+# parameters, and the program built through .nir is the program built from
+# source.
+file(WRITE "${source}/defaults.nra" [=[
+let Defaults = module (
+    export let Mode = enum (Fast, Careful);
+    export let schedule = func(job: string, retries: int = 3, mode: Mode = Mode.Careful, ratio: float32 = 0.5) -> string {
+        return job + " " + retries.to_string() + " " + (mode as int).to_string() + " " + ratio.to_string();
+    };
+);
+]=])
+neura(emit-ir "${source}/defaults.nra" -o "${artifacts}/defaults.nir")
+file(WRITE "${artifacts}/defaults-app.nra" [=[
+let defaults = import:"defaults.nir";
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(defaults.schedule("a"));
+        console.print_line(defaults.schedule(mode: defaults.Mode.Fast, job: "b"));
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+neura(build "${artifacts}/defaults-app.nra" -o "${TEST_DIR}/defaults.nvr")
+neura(run "${TEST_DIR}/defaults.nvr")
+if(NOT output STREQUAL "a 3 1 0.5\nb 3 0 0.5\n")
+    message(FATAL_ERROR "defaults from a prebuilt module produced:\n${output}")
+endif()
+neura(emit-ir "${artifacts}/defaults-app.nra" -o "${TEST_DIR}/defaults-combined.nir")
+neura(build "${TEST_DIR}/defaults-combined.nir" -o "${TEST_DIR}/defaults-round-trip.nvr")
+file(SHA256 "${TEST_DIR}/defaults.nvr" original)
+file(SHA256 "${TEST_DIR}/defaults-round-trip.nvr" rebuilt)
+if(NOT original STREQUAL rebuilt)
+    message(FATAL_ERROR "a program with defaults changed through its IR round trip")
+endif()
+file(WRITE "${artifacts}/defaults-label.nra" [=[
+let defaults = import:"defaults.nir";
+let text = defaults.schedule("a", retrys: 1);
+]=])
+reject("defaults-label.nra:2:[0-9]+: error\\[E0482\\]: no parameter named 'retrys'" check "${artifacts}/defaults-label.nra")
+
 file(WRITE "${artifacts}/missing-module.nra" [=[
 let missing = import:"first.nir".Missing;
 ]=])

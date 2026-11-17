@@ -23,6 +23,7 @@
 #include <algorithm>
 #include <array>
 #include <charconv>
+#include <cmath>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -479,6 +480,7 @@ private:
                                   const std::map<SymbolId, ArgumentMap>& maps) const;
     bool has_default(SymbolId parameter) const;
     IrNode default_value(SymbolId parameter, const IrType& type, const Span& span);
+    void record_defaults(SymbolId function, const Declaration& decl, Context& context);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -1400,6 +1402,9 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
     std::vector<IrType> signature;
     std::vector<std::string> names;
     for (const auto& parameter : declaration.parameters) {
+        if (parameter.default_value)
+            throw Diagnostic(*parameter.default_span, "a parameter of a lambda takes no default").with_code("E0226")
+                .label("a lambda is called through a function value, which carries no defaults");
         if (parameter.variadic)
             throw Diagnostic(parameter.span, "a variadic parameter requires a named function").with_code("E0207");
         signature.push_back(parameter_type(parameter, context));
@@ -1716,6 +1721,7 @@ void Lowering::resolve(SymbolId id) {
                     ? VariadicKind::Untyped : VariadicKind::Typed;
             }
         }
+        record_defaults(id, decl, ctx);
         if (!decl.has_body && symbol(symbol(id).owner).kind != SymbolKind::Module &&
             !class_or_interface(symbol(symbol(id).owner).kind))
             throw Diagnostic(decl.span, "only class, interface or module members may omit a function body")

@@ -1,0 +1,7 @@
+error[E0226]: parameter 'a' takes no default
+ --> $DIR/default-variadic.nra:2:23
+  |
+2 | let log = func(a: int = 1, items: ...string) {
+  |                       ^^^ no parameter of a function with a variadic parameter takes a default
+
+For more information about this error, try `neura explain E0226`.

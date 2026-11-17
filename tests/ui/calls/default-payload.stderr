@@ -1,0 +1,7 @@
+error[E0226]: an enum payload field takes no default
+ --> $DIR/default-payload.nra:2:40
+  |
+2 | let Shape = enum (Circle { radius: int = 1 }, Square(int));
+  |                                        ^^^ a variant is constructed with every payload field
+
+For more information about this error, try `neura explain E0226`.

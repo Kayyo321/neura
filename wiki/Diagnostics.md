@@ -42,6 +42,7 @@ Errors about the grammar.
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
 | [E0225](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0225.md) | positional argument after a named argument |
+| [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
 
 ## E03xx: Names
 
@@ -118,6 +119,7 @@ Errors about types, values, calls, and statements.
 | [E0482](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0482.md) | unknown argument label |
 | [E0483](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0483.md) | argument supplied twice |
 | [E0484](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0484.md) | labels are not available for this call |
+| [E0485](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0485.md) | default value is not a constant |
 
 ## E05xx: Classes and lifecycle
 
@@ -157,6 +159,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0536](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0536.md) | destructuring declared with last |
 | [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
 | [E0560](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0560.md) | parameter names differ from the overridden method |
+| [E0561](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0561.md) | defaults differ from the overridden method |
 
 ## E06xx: Concurrency
 

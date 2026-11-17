@@ -1,0 +1,7 @@
+error[E0226]: a parameter of a lambda takes no default
+ --> $DIR/default-lambda.nra:3:25
+  |
+3 |     let g = func(a: int = 1) -> int => a;
+  |                         ^^^ a lambda is called through a function value, which carries no defaults
+
+For more information about this error, try `neura explain E0226`.

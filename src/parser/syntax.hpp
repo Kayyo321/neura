@@ -60,12 +60,18 @@ struct TagSyntax {
     std::vector<TagArgumentSyntax> arguments;
 };
 
+struct Expr;
+
 struct Parameter {
     Span span;
     std::string name;
     TypeSyntax type;
     bool variadic{};
     std::vector<TagSyntax> tags{};
+    // A constant default, `name: Type = value` (docs/design/Calls030.md),
+    // and the span from the '=' through the value. Lowering checks it.
+    std::shared_ptr<Expr> default_value{};
+    std::optional<Span> default_span{};
 };
 
 struct Declaration;

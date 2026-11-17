@@ -441,6 +441,7 @@ private:
                 if (at(")")) throw untyped(group.front());
                 expect(":");
                 const bool variadic = match("...");
+                const auto type_start = cursor_;
                 TypeSyntax parameter_type;
                 if (variadic && (at(")") || at(","))) {
                     parameter_type = {tokens_[cursor_ - 1].span, "[variadic argument]", {}, {}};
@@ -456,9 +457,34 @@ private:
                               group.front().name + ": <type>, " + group.back().name + ": ...<type>)'");
                 if (variadic && at(","))
                     throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
+                // `= value` after the type is a default, checked in lowering.
+                std::shared_ptr<Expr> default_value;
+                std::optional<Span> default_span;
+                if (at("=")) {
+                    const auto equals = cursor_;
+                    advance();
+                    default_value = std::make_shared<Expr>(expression());
+                    default_span = span_from(equals);
+                    if (group.size() > 1) {
+                        std::string written;
+                        for (auto i = type_start; i < equals; ++i)
+                            written += tokens_[i].text + (tokens_[i].text == "," ? " " : "");
+                        throw Diagnostic(*default_span, "a group of several names takes no default")
+                            .with_code("E0226")
+                            .label("this default would belong to " + std::to_string(group.size()) + " parameters")
+                            .help("split the group so that the default belongs to one parameter, as in '" +
+                                  group[group.size() - 2].name + ": " + written + ", " + group.back().name + ": " +
+                                  written + " = ...'");
+                    }
+                    if (variadic)
+                        throw Diagnostic(*default_span, "a variadic parameter takes no default").with_code("E0226")
+                            .label("an omitted variadic argument is an empty array");
+                }
                 for (auto& member : group) {
                     member.type = parameter_type;
                     member.variadic = variadic;
+                    member.default_value = default_value;
+                    member.default_span = default_span;
                     result.push_back(std::move(member));
                 }
                 group.clear();
@@ -878,6 +904,14 @@ private:
                                 expect(":");
                             }
                             auto payload = type();
+                            if (at("=")) {
+                                const auto equals = cursor_;
+                                advance();
+                                expression();
+                                throw Diagnostic(span_from(equals), "an enum payload field takes no default")
+                                    .with_code("E0226")
+                                    .label("a variant is constructed with every payload field");
+                            }
                             member.parameters.push_back({span_from(field_start), std::move(name), std::move(payload)});
                         } while (match(",") && !at(close));
                         expect(close);

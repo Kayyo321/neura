@@ -1,0 +1,7 @@
+// An override does not drop a default (edge case 33).
+let Shape = class (
+    export let area = func(scale: int = 1) -> int => scale;
+);
+let Square = class : Shape (
+    export let.override area = func(scale: int) -> int => scale * 4;
+);

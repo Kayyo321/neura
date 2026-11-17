@@ -717,6 +717,28 @@ Attributed attributed_fixture(const Environment& environment, bool attributes = 
         check(binding != s.end(), "the linked program has a host binding");
         set_attribute(*binding, AttributeId::HostEffects,
                       host_effects_payload({.allocates = true, .traps = true, .scheduler = false, .retains = false}));
+        // Defaults (docs/design/Calls030.md): a literal on sum_to's limit, and
+        // a variant on the first enum parameter of the linked library whose
+        // enum has a variant without payload.
+        const auto limit = find_local(p, a.sum_to, "limit");
+        set_attribute(s[limit], AttributeId::ParameterDefault,
+                      attribute_list({attribute_unsigned(1), attribute_signed(10)}));
+        bool variant_default = false;
+        for (SymbolId id = 0; id < s.size() && !variant_default; ++id) {
+            if (s[id].kind != SymbolKind::Parameter || s[id].type.kind != TypeKind::Enum) continue;
+            const auto owner = s[id].owner;
+            if (owner == no_symbol || s[owner].kind != SymbolKind::Function || s[owner].variadic != VariadicKind::None)
+                continue;
+            for (SymbolId variant = 0; variant < s.size(); ++variant) {
+                if (s[variant].kind != SymbolKind::Variant || s[variant].owner != s[id].type.symbol ||
+                    !s[variant].payload_types.empty())
+                    continue;
+                set_attribute(s[id], AttributeId::ParameterDefaultVariant, attribute_symbol(variant));
+                variant_default = true;
+                break;
+            }
+        }
+        check(variant_default, "the linked program has an enum parameter for a variant default");
     }
     if (deferred) {
         for (const auto local : {a.step, a.point_local}) {
@@ -784,6 +806,8 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::Synchronized, 9, "synchronized", on_function, false, "b"},
         {AttributeId::ClassShareable, 10, "class.shareable", on_class, false, "b"},
         {AttributeId::HostEffects, 11, "host.effects", on_function, false, "[b b b b]"},
+        {AttributeId::ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]"},
+        {AttributeId::ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -792,7 +816,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
                   info->repeats == row.repeats && info->schema == row.schema,
               std::string(row.name) + " differs from the documented registry");
     }
-    check(find_attribute_info(0) == nullptr && find_attribute_info(12) == nullptr, "ids 0 and 12 are unregistered");
+    check(find_attribute_info(0) == nullptr && find_attribute_info(14) == nullptr, "ids 0 and 14 are unregistered");
     check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
 
     // Schemas accept the payloads of the helpers and reject other shapes.
@@ -955,6 +979,24 @@ NEURA_TEST(nir, verifier_checks_attributes_and_deferred_initialization) {
     check(defer_in(program, body_of(program, "Attributes.sum_to"), base.step), "step is declared in sum_to");
     program.symbols[base.step].attributes = {{AttributeId::BindingLast, attribute_bool(false)}};
     expect_issue(program, "store writes to const");
+
+    // A default's literal is a value of its parameter's type, and belongs
+    // to a function without a variadic parameter.
+    program = base.program;
+    const auto limit = find_local(program, base.sum_to, "limit");
+    set_attribute(program.symbols[limit], AttributeId::ParameterDefault,
+                  attribute_list({attribute_unsigned(4), attribute_text("ten")}));
+    expect_issue(program, "is not a value of int32");
+    program = base.program;
+    set_attribute(program.symbols[limit], AttributeId::ParameterDefault,
+                  attribute_list({attribute_unsigned(1), attribute_signed(std::int64_t{1} << 40)}));
+    expect_issue(program, "is not a value of int32");
+    program = base.program;
+    set_attribute(program.symbols[limit], AttributeId::ParameterDefaultVariant, attribute_symbol(base.point));
+    expect_issue(program, "is not a variant without payload of its type");
+    program = base.program;
+    program.symbols[base.sum_to].variadic = VariadicKind::Typed;
+    expect_issue(program, "belongs to a parameter of a function without a variadic parameter");
 
     // Registry rules.
     program = base.program;

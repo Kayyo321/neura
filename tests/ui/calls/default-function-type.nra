@@ -1,0 +1,2 @@
+// A function type has no defaults (edge case 30).
+let apply = func(g: func(int = 1) -> int) -> int => g(2);

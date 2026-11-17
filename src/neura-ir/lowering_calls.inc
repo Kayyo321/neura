@@ -236,13 +236,185 @@ std::vector<IrNode> Lowering::named_call_prelude(IrNode& invocation) {
     return prelude;
 }
 
-// Defaults. Step 3 records them; until then no parameter has one.
-bool Lowering::has_default(SymbolId) const {
-    return false;
+// Constant defaults (Calls030.md, Constant defaults). A default is checked
+// once, at the declaration, against its parameter's type, and recorded as an
+// attribute of the parameter symbol. A caller reads the attribute, so a
+// function from a prebuilt .nir module gives its defaults to its callers.
+
+namespace {
+
+bool mentions_type_parameter(const IrType& type) {
+    return type.kind == TypeKind::TypeParameter || std::ranges::any_of(type.arguments, mentions_type_parameter);
 }
 
-IrNode Lowering::default_value(SymbolId parameter, const IrType&, const Span& span) {
-    throw Diagnostic(span, "parameter '" + symbol(parameter).name + "' has no default").with_code("E0899");
+// A literal, a negated numeric literal, nil, or a qualified name that may
+// name a variant; lowering decides the last.
+bool default_shape(const Expr& expr) {
+    switch (expr.kind) {
+    case ExprKind::Integer:
+    case ExprKind::Float:
+    case ExprKind::String:
+    case ExprKind::Boolean:
+    case ExprKind::Nil:
+        return true;
+    case ExprKind::Unary:
+        return expr.text == "-" && (expr.operands.front().kind == ExprKind::Integer ||
+                                    expr.operands.front().kind == ExprKind::Float);
+    case ExprKind::Member: {
+        const auto* prefix = &expr.operands.front();
+        while (prefix->kind == ExprKind::Member) prefix = &prefix->operands.front();
+        if (prefix->kind == ExprKind::TypeApplication) prefix = &prefix->operands.front();
+        while (prefix->kind == ExprKind::Member) prefix = &prefix->operands.front();
+        return prefix->kind == ExprKind::Name;
+    }
+    default:
+        return false;
+    }
+}
+
+// The shortest decimal that reads back as `value`. Every float16, bfloat16
+// and float32 value is a double, and the decimal nearest a double is nearer
+// to it than to any other value of the narrower format.
+std::string float_text(double value) {
+    std::array<char, 64> buffer{};
+    const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+    std::string text(buffer.data(), error == std::errc{} ? end : buffer.data());
+    if (text.find_first_of(".e") == std::string::npos) text += ".0";
+    return text;
+}
+
+double float_value(std::uint64_t bits, const FloatFormat& format) {
+    const auto fraction = bits & ((std::uint64_t{1} << format.fraction_bits) - 1);
+    const auto exponent = (bits >> format.fraction_bits) & ((std::uint64_t{1} << format.exponent_bits) - 1);
+    const bool negative = ((bits >> (format.width() - 1)) & 1) != 0;
+    const auto bias = static_cast<int>(format.bias());
+    const auto fraction_bits = static_cast<int>(format.fraction_bits);
+    const double magnitude = exponent == 0
+        ? std::ldexp(static_cast<double>(fraction), 1 - bias - fraction_bits)
+        : std::ldexp(static_cast<double>(fraction | (std::uint64_t{1} << format.fraction_bits)),
+                     static_cast<int>(exponent) - bias - fraction_bits);
+    return negative ? -magnitude : magnitude;
+}
+
+} // namespace
+
+void Lowering::record_defaults(SymbolId function, const Declaration& decl, Context& context) {
+    const auto params = symbol(function).parameters;
+    for (std::size_t i = 0; i < decl.parameters.size() && i < params.size(); ++i) {
+        const auto& parameter = decl.parameters[i];
+        if (!parameter.default_value) continue;
+        const auto& span = *parameter.default_span;
+        const auto& type = symbol(params[i]).type;
+        const auto reject = [&](const std::string& reason) {
+            throw Diagnostic(span, "parameter '" + parameter.name + "' takes no default").with_code("E0226")
+                .label(reason);
+        };
+        if (symbol(function).variadic != VariadicKind::None)
+            reject("no parameter of a function with a variadic parameter takes a default");
+        if (decl.host_binding || decl.kernel_binding || decl.scheduler_binding || decl.host_callback)
+            reject("a host, kernel, scheduler or callback binding takes no default");
+        if (is_primitive_reference(type)) reject("a primitive reference parameter is bound to a caller's place");
+        if (mentions_type_parameter(type)) reject("its type mentions a type parameter");
+        const auto& written = *parameter.default_value;
+        const auto not_constant = [&] {
+            return Diagnostic(written.span, "a default is a literal, nil, or a variant without payload")
+                .with_code("E0485")
+                .label("not a constant")
+                .help("use an overload, or test for a marker value in the body");
+        };
+        if (!default_shape(written)) throw not_constant();
+        auto lowered = value(written, context, &type);
+        auto& target = symbol(params[i]);
+        std::uint64_t kind = 0;
+        IrAttributeValue literal;
+        switch (lowered.op) {
+        case IrOp::Boolean:
+            literal = attribute_bool(lowered.text == "true");
+            break;
+        case IrOp::Integer: {
+            const bool negative = lowered.text.starts_with('-');
+            std::uint64_t magnitude = 0;
+            const auto digits = std::string_view(lowered.text).substr(negative ? 1 : 0);
+            std::from_chars(digits.data(), digits.data() + digits.size(), magnitude);
+            if (type.name.starts_with("int")) {
+                kind = 1;
+                literal = attribute_signed(negative ? static_cast<std::int64_t>(0 - magnitude)
+                                                    : static_cast<std::int64_t>(magnitude));
+            } else {
+                kind = 2;
+                literal = attribute_unsigned(magnitude);
+            }
+            break;
+        }
+        case IrOp::Float:
+            kind = 3;
+            literal = attribute_unsigned(parse_float_literal(lowered.text, *float_format(type)).bits);
+            break;
+        case IrOp::String:
+            kind = 4;
+            literal = attribute_text(lowered.text);
+            break;
+        case IrOp::Nil:
+            kind = 5;
+            literal = attribute_bool(false);
+            break;
+        case IrOp::Reference:
+        case IrOp::EnumConstruct:
+            if (lowered.symbol == no_symbol || symbol(lowered.symbol).kind != SymbolKind::Variant ||
+                !lowered.operands.empty())
+                throw not_constant();
+            set_attribute(target, AttributeId::ParameterDefaultVariant, attribute_symbol(lowered.symbol));
+            continue;
+        default:
+            throw not_constant();
+        }
+        set_attribute(target, AttributeId::ParameterDefault, attribute_list({attribute_unsigned(kind), literal}));
+    }
+}
+
+bool Lowering::has_default(SymbolId parameter) const {
+    const auto& item = symbol(parameter);
+    return has_attribute(item, AttributeId::ParameterDefault) || has_attribute(item, AttributeId::ParameterDefaultVariant);
+}
+
+IrNode Lowering::default_value(SymbolId parameter, const IrType& type, const Span& span) {
+    const auto& item = symbol(parameter);
+    if (const auto* variant = find_attribute(item, AttributeId::ParameterDefaultVariant)) {
+        auto result = node(IrOp::Reference, span, type);
+        result.symbol = variant->value.symbol;
+        if (has_enum_payload(program_, symbol(result.symbol).owner)) result.op = IrOp::EnumConstruct;
+        return result;
+    }
+    const auto* recorded = find_attribute(item, AttributeId::ParameterDefault);
+    if (!recorded || recorded->value.items.size() != 2)
+        throw Diagnostic(span, "parameter '" + item.name + "' has no default").with_code("E0899");
+    const auto& literal = recorded->value.items[1];
+    switch (recorded->value.items[0].integer) {
+    case 0: {
+        auto result = node(IrOp::Boolean, span, type);
+        result.text = literal.integer != 0 ? "true" : "false";
+        return result;
+    }
+    case 1:
+    case 2: {
+        auto result = node(IrOp::Integer, span, type);
+        result.text = recorded->value.items[0].integer == 1 ? std::to_string(attribute_signed_value(literal))
+                                                            : std::to_string(literal.integer);
+        return result;
+    }
+    case 3: {
+        auto result = node(IrOp::Float, span, type);
+        result.text = float_text(float_value(literal.integer, *float_format(type)));
+        return result;
+    }
+    case 4: {
+        auto result = node(IrOp::String, span, type);
+        result.text = literal.text;
+        return result;
+    }
+    default:
+        return node(IrOp::Nil, span, type);
+    }
 }
 
 // E0409 for two alternatives that the ranking cannot order. A call that uses
@@ -290,6 +462,37 @@ void Lowering::check_parameter_names(SymbolId method, SymbolId base) {
             error.suggest("rename it to the base name", at, expected, Applicability::MaybeIncorrect);
         else
             error.help("rename it to '" + expected + "'");
+        throw error;
+    }
+    // The defaults too: a caller inserts the default of the method it names,
+    // so an override that changed one would mean a different call through a
+    // base reference.
+    for (std::size_t i = 0; i < ours.size() && i < theirs.size(); ++i) {
+        const auto describe_default = [&](SymbolId parameter) -> std::optional<IrAttributeValue> {
+            if (const auto* variant = find_attribute(symbol(parameter), AttributeId::ParameterDefaultVariant))
+                return variant->value;
+            if (const auto* literal = find_attribute(symbol(parameter), AttributeId::ParameterDefault))
+                return literal->value;
+            return std::nullopt;
+        };
+        const auto mine = describe_default(ours[i]);
+        const auto base_default = describe_default(theirs[i]);
+        if (mine == base_default) continue;
+        const auto& name = symbol(ours[i]).name;
+        const bool implements = symbol(symbol(base).owner).kind == SymbolKind::Interface;
+        const auto what = std::string(implements ? "implements" : "overrides");
+        auto error = Diagnostic(symbol(ours[i]).span,
+                                !mine ? "parameter '" + name + "' drops the default of the method it " + what
+                                : !base_default ? "parameter '" + name + "' has a default that the method it " + what +
+                                                      " does not have"
+                                                : "parameter '" + name + "' changes the default of the method it " +
+                                                      what)
+            .with_code("E0561")
+            .label("a call through the base would pass a different value");
+        if (!symbol(theirs[i]).span.file.empty())
+            error.label(symbol(theirs[i]).span, base_default ? "the base default is given here"
+                                                             : "the base parameter has no default");
+        error.help(base_default ? "copy the base default" : "remove the default");
         throw error;
     }
 }

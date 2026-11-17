@@ -1,0 +1,3 @@
+// No parameter of a variadic function takes a default (edge case 22).
+let log = func(a: int = 1, items: ...string) {
+};
