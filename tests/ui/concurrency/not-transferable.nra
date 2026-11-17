@@ -6,7 +6,7 @@ let Tally = class (
 let apply = func(step: func(int) -> void) {};
 let run = func() {
     let tally = new Tally();
-    let add = func(amount: int) -> void {
+    let add = new func(amount: int) -> void {
         tally.count = tally.count + amount;
     };
     scope {

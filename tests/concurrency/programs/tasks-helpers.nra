@@ -11,12 +11,12 @@ let tasks = import:Std.Concurrent.Tasks;
 const Limit = 30000;
 
 let square = func(x: int) -> func() -> int {
-    return func() -> int => x * x;
+    return new func() -> int => x * x;
 };
 
 // Works until it is cancelled or runs out of work. Cancelled, it says so and fails; otherwise it succeeds.
 let works = func(name: string, value: int) -> func() -> result.Result<int> {
-    return func() -> result.Result<int> {
+    return new func() -> result.Result<int> {
         let rounds = 0;
         while (!cancellation.requested() && rounds < Limit) {
             rounds += 1;
@@ -31,14 +31,14 @@ let works = func(name: string, value: int) -> func() -> result.Result<int> {
 };
 
 let fails = func(name: string) -> func() -> result.Result<int> {
-    return func() -> result.Result<int> {
+    return new func() -> result.Result<int> {
         console.print_line(name + ": fails");
         return result.Result<int>.Err(error.custom("test.failed", name + " failed"));
     };
 };
 
 let succeeds = func(name: string, value: int) -> func() -> result.Result<int> {
-    return func() -> result.Result<int> {
+    return new func() -> result.Result<int> {
         console.print_line(name + ": succeeds");
         return result.Result<int>.Ok(value);
     };

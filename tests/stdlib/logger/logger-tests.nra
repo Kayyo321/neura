@@ -31,7 +31,7 @@ let LoggerTests = module (
     );
 
     let collector = func(lines: string[list]) -> func(string) -> void {
-        return func(line: string) -> void {
+        return new func(line: string) -> void {
             lines.append(line);
         };
     };
@@ -127,7 +127,7 @@ let LoggerTests = module (
     // suggests for sinks that can fail.
     export let test_counting_sink = func() -> void {
         let count = cell.of<int>(0);
-        let log = logger.create("count", func(line: string) -> void { count.value = count.value + line.byte_length; },
+        let log = logger.create("count", new func(line: string) -> void { count.value = count.value + line.byte_length; },
             logger.LogLevel.Info);
         log.info("abc");
         test.assert_equal_int32(15, count.value);

@@ -1,0 +1,12 @@
+error[E0453]: escaping closure requires new func
+ --> $DIR/closure-missing-new.nra:2:12
+  |
+2 |     return func(value: int) -> int => value + offset;
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+help: construct an owned closure
+  |
+2 |     return new func(value: int) -> int => value + offset;
+  |            ++++
+
+For more information about this error, try `neura explain E0453`.

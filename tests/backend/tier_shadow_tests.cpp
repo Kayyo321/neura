@@ -274,9 +274,24 @@ NEURA_TEST(tier, a_difference_planted_in_the_run_is_reported_by_name) {
     // Without a heap comparison at every sync point, a change made to the
     // heap near the end of the run, which nothing reads afterwards, is found
     // by the comparison at the end of the run.
+    nvm::TierCache clean_cache(regions, eager_regions());
+    const auto clean = run_captured(regions, tier_2(&clean_cache));
+    check(clean.result.completed, "the unperturbed region run completes");
+    // Leave enough steps for a sync before completion, but keep the change
+    // close enough to the end that the spaced heap check waits for completion.
+    constexpr std::uint64_t late_margin = 32;
+    check(clean.result.steps > late_margin, "the region run is long enough for a late perturbation");
+    const auto late_step = clean.result.steps > late_margin ? clean.result.steps - late_margin : 0;
     for (const auto perturb : {Perturb::HeapField, Perturb::HeapInitialized, Perturb::ListVersion}) {
+        // Confirm a sync point exists before completion at this threshold.
+        // Comparing every heap makes the injected difference visible there.
+        std::string immediate_report;
+        const auto immediate = perturbed_item(regions, perturb, late_step, "a late heap change at a sync",
+                                              {}, true, &immediate_report);
+        check(starts_with(immediate, "heap handle ") && !contains(immediate_report, " at a completion event;"),
+              "the change is planted before completion: " + immediate_report);
         std::string report;
-        const auto late = perturbed_item(regions, perturb, 9000, "a late heap change", {}, false, &report);
+        const auto late = perturbed_item(regions, perturb, late_step, "a late heap change", {}, false, &report);
         check(starts_with(late, "heap handle ") && contains(report, " at a completion event;"),
               "a late heap change is found at the end of the run: " + report);
     }
