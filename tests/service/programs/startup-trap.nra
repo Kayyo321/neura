@@ -4,7 +4,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let zero = func -> int => 0;
-let ratio = 10 / zero();
+last ratio = 10 / zero();
 
 export let StartupTrap = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {

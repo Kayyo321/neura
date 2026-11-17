@@ -6,14 +6,14 @@ let result = import:Std.Core.Result;
 
 export let Binary = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let block: uint8[list] = new;
+        last block: uint8[list] = new;
         let i = 0;
         while (i < 65536) {
             block.append((i % 256) as uint8);
             i = i + 1;
         }
-        let sink = console.output();
-        let blocks = result.value_or<int>(int.parse(args[0]), 0);
+        last sink = console.output();
+        last blocks = result.value_or<int>(int.parse(args[0]), 0);
         let written = 0;
         while (written < blocks) {
             match (sink(block)) {

@@ -929,6 +929,14 @@ def run_suite(work: Work) -> None:
     else:
         print("skip: no native launcher in this build:", built.stderr.decode()[:200])
 
+    # A graph device is not supported; --gpu=off makes a GPU build's run eligible.
+    no_gpu = {k: v for k, v in work.env.items() if k != "NEURA_GPU"}
+    status, out, err = neura_run(["--runtime=required", "--gpu=off", hello], env=no_gpu)
+    check((status, out, err) == (0, b"Hello, World!\n", b""), "--gpu=off runs through the service")
+    status, out, err = neura_run(["--runtime=required", "--gpu=always", hello], env=no_gpu)
+    check(status == 5 and b"a graph device" in err and b"--gpu=off" in err,
+          "case 58: a graph device with required is status 5 and names --gpu=off")
+
     # Case 23: an image that fails validation.
     bad = work.root / "bad.nvr"
     bad.write_bytes(b"NEUR" + b"\xff" * 64)
@@ -1515,8 +1523,13 @@ def isolation_suite(work: Work) -> None:
         status, out, err, data = through(["--tier-stats", image, "--", "0"], env)
         direct = subprocess.run([str(work.neura), "run", "--tier-stats", image, "--", "0"], capture_output=True,
                                 env=env, cwd=work.root)
-        check(status == 0 and data["path"] == "service-warm" and tier_lines(err) == tier_lines(direct.stderr)
-              and tier_lines(err), f"cases 26, 27: {variables or 'nothing set'} through one warm supervisor shows "
+        def mode_lines(stderr: bytes) -> list[bytes]:
+            # The lines that show the mode; lift counts may depend on timing.
+            lines = tier_lines(stderr)
+            jit = [line.split(b":")[1].strip() for line in lines if line.startswith(b"tier: jit")]
+            return jit + [b"native programs" for line in lines if line.startswith(b"tier: native programs")]
+        check(status == 0 and data["path"] == "service-warm" and mode_lines(err) == mode_lines(direct.stderr)
+              and mode_lines(err), f"cases 26, 27: {variables or 'nothing set'} through one warm supervisor shows "
                                    f"the caller's mode ({data['path']})")
 
     # Simultaneous launches that write globals, statics and files.

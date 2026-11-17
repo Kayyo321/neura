@@ -1333,6 +1333,18 @@ void Supervisor::timers() {
 }
 
 int Supervisor::run() {
+    // Nothing of the process that started it: no directory it could hold
+    // busy, and no descriptor above 2 it inherited.
+    if (::chdir("/") != 0) log_path_.clear();
+    {
+        std::vector<int> inherited;
+        std::error_code error;
+        for (const auto& entry : fs::directory_iterator("/proc/self/fd", error)) {
+            const int fd = std::atoi(entry.path().filename().c_str());
+            if (fd > 2) inherited.push_back(fd);
+        }
+        for (const int fd : inherited) ::close(fd);
+    }
     timers_.read();
     build_ = own_build();
     // The workers are of this build; only the supervisor's answers differ.

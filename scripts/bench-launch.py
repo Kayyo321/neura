@@ -19,7 +19,7 @@ Scenarios, for each workload and mode:
     uncached `--runtime=required` with a supervisor and a ready worker, the
              image dropped from the cache before each sample
     warm     `--runtime=required` with the image cached and a ready worker
-             (each sample waits for it and must report service-warm)
+             (each sample waits for it; the reported pass must say service-warm)
     burst    eight warm launches at once; each one's time is a sample
 
 Workloads: hello-world, the largest image of tests/benchmarks, a program
@@ -190,7 +190,14 @@ def main() -> int:
             row: dict = {}
             phases: dict[str, list[float]] = {}
 
-            def service_sample(label: str) -> float:
+            def service_sample(label: str, reported: bool = False) -> float:
+                # Timed samples write no report, as a direct run writes none;
+                # a reported pass gives the phases and checks the path.
+                if not reported:
+                    elapsed, result = timed([str(neura), "run", "--runtime=required", *options, *tail], env, work)
+                    if result.returncode != 0:
+                        raise SystemExit(f"{workload} {mode} {label}: {result.stderr.decode()}")
+                    return elapsed
                 elapsed, result = timed([str(neura), "run", "--runtime=required", f"--runtime-report={report_file}",
                                          *options, *tail], env, work)
                 report = json.loads(report_file.read_text())
@@ -226,6 +233,9 @@ def main() -> int:
                 wait_ready(control)
                 warm.append(service_sample("warm"))
             row["warm"] = summary(warm)
+            for _ in range(max(5, args.samples // 2)):
+                wait_ready(control)
+                service_sample("warm", reported=True)
             row["warm phases (ms from the client's start)"] = {phase: summary(values)
                                                                 for phase, values in sorted(phases.items())}
             burst = []

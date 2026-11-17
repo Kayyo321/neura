@@ -4,7 +4,7 @@ let console = import:Std.Io.Console;
 let program = import:Std.Program;
 
 let fill = func -> int[list] {
-    let table: int[list] = new;
+    last table: int[list] = new;
     let i = 0;
     while (i < 2000000) {
         table.append((i * 7) % 1000);
@@ -13,7 +13,7 @@ let fill = func -> int[list] {
     return table;
 };
 
-let table = fill();
+last table = fill();
 
 export let LongStartup = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {

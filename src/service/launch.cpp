@@ -57,7 +57,11 @@ std::optional<std::string> unsupported_option(const cli::Options& options) {
     if (options.replay) return "--replay";
 #ifdef NEURA_HAS_GPU
     // A graph device: any mode but off may open one.
-    if (options.gpu.required || !options.gpu.mode || *options.gpu.mode != cli::GpuMode::Off) return "a graph device";
+    // A build with a graph device may use one unless the run says --gpu=off,
+    // --no-gpu or NEURA_GPU=off; the service runs none.
+    if (options.gpu.required || !options.gpu.mode || *options.gpu.mode != cli::GpuMode::Off) {
+        return "a graph device (this build may use one; add --gpu=off or set NEURA_GPU=off)";
+    }
 #else
     if (options.gpu.required || (options.gpu.mode && *options.gpu.mode != cli::GpuMode::Off)) return "a graph device";
 #endif

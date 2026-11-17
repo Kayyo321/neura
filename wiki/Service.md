@@ -19,7 +19,7 @@ neura runtime stop <id>
 
 `--runtime=auto` starts the service when it is not running, and runs directly, with one line `neura: runtime: running directly: <reason>` on standard error, when it is not installed, cannot start, refuses the launch, or does not support an option of the command. `--runtime=required` never runs directly: it exits with status 5 instead. `--detach` prints the application's ID and exits once the launch is committed; it never runs directly. `--runtime-report=FILE` writes one JSON object about the launch in every mode: `schema` 1, the `path` taken (`direct`, `service-warm`, `service-fresh`, `direct-fallback`), the `reason` of a fallback or refusal, the `application` ID, the terminal `state`, the `status`, and the `times` of the launch's phases in nanoseconds from the client's start.
 
-The service does not support `--each`, `--record`, `--replay` or a graph device in 0.3.0. `neura test --runtime=...` is a usage error, and a debug launch whose `runtime` setting is not `off` is refused before anything starts: tests and debugging are direct.
+The service does not support `--each`, `--record`, `--replay` or a graph device in 0.3.0. A build with GPU support may use a graph device for any run that does not say `--gpu=off`, `--no-gpu` or `NEURA_GPU=off`, so on such a build a launch through the service needs one of them; without it `auto` runs directly and `required` exits with status 5, naming the option. `neura test --runtime=...` is a usage error, and a debug launch whose `runtime` setting is not `off` is refused before anything starts: tests and debugging are direct.
 
 | Command | Does |
 | --- | --- |
@@ -84,7 +84,7 @@ The baseline's: one ready worker, 64 applications, 16 prepared launches, 256 MiB
 
 ## Measurements
 
-`scripts/bench-launch.py` measures each launch end to end from outside the command, and the phases of a warm launch from `--runtime-report`. On the machine of the milestone's measurements ([Service030.md](https://github.com/Kayyo321/neura/blob/main/docs/design/Service030.md#measurements)), a direct run of hello-world takes 0.86 ms (p50), a warm launch through the service 1.32 ms, and a launch that starts the service on demand 6.76 ms; a 4.4 MB image is about 12 ms slower warm than directly, because the client hashes it. A warm launch is not faster than a direct run there: the service is for process management (detached applications, `ps`, `stop`, shutdown, login start), not for speed. An idle supervisor holds about 6 MiB and a ready worker about 4 MiB, and neither wakes up while idle. These are the figures of one machine and the budgets of later changes, not promises.
+`scripts/bench-launch.py` measures each launch end to end from outside the command, and the phases of a warm launch from `--runtime-report`. On the machine of the milestone's measurements ([Service030.md](https://github.com/Kayyo321/neura/blob/main/docs/design/Service030.md#measurements)), a direct run of hello-world takes 0.92 ms (p50), a warm launch through the service 1.32 ms, and a launch that starts the service on demand 6.75 ms; a 4.4 MB image is about 14 ms slower warm than directly, because the client hashes it. A warm launch is not faster than a direct run there: the service is for process management (detached applications, `ps`, `stop`, shutdown, login start), not for speed. An idle supervisor holds about 6 MiB and a ready worker about 4 MiB, and neither wakes up while idle. These are the figures of one machine and the budgets of later changes, not promises.
 
 ## What the tests establish
 

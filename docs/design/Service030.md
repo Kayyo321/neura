@@ -53,7 +53,7 @@ The client parses the command with the code of a direct run (`read_options` and 
 | --- | --- | --- |
 | Arguments after `--`, capability options, `--max-steps`, `--max-frames`, `--max-heap-cells`, `--max-stack-cells`, the task limits, `--task-quantum`, `--parallel-workers`, `--tier`, `--jit`, `--stats`, `--profile`, `--tier-stats`, `--task-dump`, `--trace-events`, `--trace-wall-time`, `--virtual-time` | Supported, with the meaning and output of a direct run | proposed; implemented |
 | An image inside a native executable | Supported as today: the client extracts the image, and the image is what runs | proposed; implemented |
-| `--each` (a fleet), `--record`, `--replay`, a graph device (`NEURA_GPU`, a GPU build's device options) | Not supported in 0.3.0. With `auto` the command runs directly; with `required` it fails before anything starts. | proposed; implemented |
+| `--each` (a fleet), `--record`, `--replay`, a graph device (`NEURA_GPU`, a GPU build's device options) | Not supported in 0.3.0. With `auto` the command runs directly; with `required` it fails before anything starts. A GPU build may use a device unless the run says `--gpu=off`, `--no-gpu` or `NEURA_GPU=off`, so there a launch needs one of them, and the message names it. | proposed; implemented |
 | `neura test --runtime=...`, `neura debug` with a service mode, and a debug launch from the editor with one | Rejected as a usage error. Tests and debugging are direct in 0.3.0. | proposed; implemented for `neura test` and the debug adapter's launch request; the editor's launch setting is not (the extension is versioned apart and is not in this repository) |
 
 ### Files
@@ -381,36 +381,43 @@ The gate's other evidence, measured on 2026-11-17 with the build of this milesto
 
 ## Measurements
 
-`scripts/bench-launch.py --samples 20`, on 2026-11-17: Linux x86-64, 8 cores, nice 0, a machine shared with other builds (load average 3.6 to 4.6 during the run). Each figure is p50 / p95 in milliseconds, timed from outside the command, so it includes the dispatcher, the library load and the client. *before* is `neura run` of the build this milestone started from; *direct* is `neura run` of this build; *cold* starts a supervisor on demand; *uncached* has a running supervisor with a ready worker and the image dropped from the cache; *warm* has both, and every warm sample reported `service-warm`; *burst of 8* is eight warm-started launches at once, each one a sample. The `--runtime-report` file a service sample writes is included in its time.
+`scripts/bench-launch.py --samples 20`, on 2026-11-17: Linux x86-64, 8 cores, nice 0, a machine shared with other builds (load average 1.1 to 2.8 during the run). Each figure is p50 / p95 in milliseconds, timed from outside the command, so it includes the dispatcher, the library load and the client. *before* is `neura run` of the build this milestone started from; *direct* is `neura run` of this build; *cold* starts a supervisor on demand; *uncached* has a running supervisor with a ready worker and the image dropped from the cache; *warm* has both; *burst of 8* is eight warm-started launches at once, each one a sample. Timed samples write no `--runtime-report`, as a direct run writes none; a separate reported pass of warm launches gives the phases and checked that each took the path `service-warm`.
 
 | Workload (image bytes) | Mode | before | direct | cold | uncached | warm | burst of 8 |
 | --- | --- | --- | --- | --- | --- | --- | --- |
-| hello-world (12,784) | default | 0.90 / 1.01 | 0.86 / 0.93 | 6.76 / 6.84 | 1.35 / 1.45 | 1.32 / 1.39 | 3.65 / 4.23 |
-| | `NEURA_TIER3=off` | 0.84 / 0.96 | 0.82 / 0.88 | 6.78 / 6.89 | 1.35 / 1.46 | 1.32 / 1.43 | 3.09 / 3.40 |
-| | `--jit=off` | 0.86 / 0.91 | 0.83 / 0.94 | 6.77 / 6.85 | 1.33 / 1.41 | 1.34 / 1.41 | 3.17 / 3.51 |
-| long startup (119,101) | default | 10.44 / 11.30 | 10.40 / 10.74 | 16.46 / 16.77 | 10.96 / 11.18 | 10.66 / 10.91 | 17.64 / 25.62 |
-| | `NEURA_TIER3=off` | 112.53 / 114.16 | 113.85 / 116.29 | 119.81 / 123.65 | 115.17 / 117.88 | 118.71 / 121.81 | 172.99 / 187.61 |
-| | `--jit=off` | 126.37 / 133.46 | 123.39 / 127.38 | 131.52 / 136.28 | 125.08 / 127.61 | 123.26 / 124.73 | 139.70 / 190.85 |
-| tasks, `fan-out.nra` (92,528) | default | 3.38 / 3.55 | 3.37 / 3.53 | 9.67 / 9.83 | 4.23 / 4.38 | 3.99 / 4.08 | 7.63 / 8.78 |
-| | `NEURA_TIER3=off` | 3.35 / 3.43 | 3.37 / 3.51 | 9.59 / 9.73 | 4.26 / 4.34 | 4.04 / 4.09 | 7.60 / 9.82 |
-| | `--jit=off` | 3.32 / 3.47 | 3.35 / 3.51 | 9.62 / 9.83 | 4.31 / 4.52 | 4.01 / 4.12 | 8.23 / 11.53 |
-| largest benchmark, `time-text.nra` (4,436,792) | default | 117.45 / 119.16 | 118.34 / 119.99 | 145.00 / 149.87 | 141.12 / 141.97 | 130.18 / 167.32 | 210.68 / 286.74 |
-| | `NEURA_TIER3=off` | 115.26 / 135.29 | 117.27 / 142.48 | 188.67 / 223.66 | 157.16 / 186.60 | 127.75 / 160.59 | 150.91 / 173.52 |
-| | `--jit=off` | 112.64 / 113.80 | 113.92 / 115.41 | 144.01 / 151.73 | 138.39 / 139.06 | 126.02 / 126.95 | 188.97 / 198.42 |
+| hello-world (12,784) | default | 0.95 / 1.02 | 0.92 / 1.00 | 6.75 / 6.91 | 1.30 / 1.37 | 1.32 / 1.39 | 2.53 / 2.72 |
+| | `NEURA_TIER3=off` | 0.85 / 0.99 | 0.83 / 0.94 | 6.79 / 6.86 | 1.29 / 1.37 | 1.30 / 1.36 | 2.67 / 2.92 |
+| | `--jit=off` | 0.85 / 0.97 | 0.84 / 0.89 | 6.72 / 6.86 | 1.30 / 1.39 | 1.34 / 1.50 | 3.22 / 4.79 |
+| long startup (119,101) | default | 10.62 / 10.96 | 10.71 / 11.00 | 16.27 / 16.54 | 10.76 / 11.24 | 10.54 / 10.73 | 20.94 / 29.49 |
+| | `NEURA_TIER3=off` | 114.20 / 115.18 | 112.93 / 118.48 | 123.90 / 126.87 | 115.68 / 119.58 | 115.24 / 119.59 | 174.74 / 221.85 |
+| | `--jit=off` | 124.27 / 127.44 | 118.38 / 120.28 | 124.99 / 126.51 | 119.64 / 121.18 | 119.03 / 120.14 | 122.67 / 182.98 |
+| tasks, `fan-out.nra` (92,528) | default | 3.37 / 3.59 | 3.42 / 3.53 | 9.66 / 9.77 | 4.20 / 4.35 | 4.03 / 4.15 | 7.78 / 8.49 |
+| | `NEURA_TIER3=off` | 3.39 / 3.54 | 3.38 / 3.47 | 9.66 / 9.82 | 4.37 / 4.57 | 4.04 / 4.28 | 5.70 / 7.41 |
+| | `--jit=off` | 3.35 / 3.55 | 3.44 / 3.55 | 9.68 / 9.87 | 4.35 / 4.48 | 4.12 / 4.22 | 5.94 / 6.96 |
+| largest benchmark, `time-text.nra` (4,436,792) | default | 112.46 / 113.61 | 112.38 / 115.00 | 143.74 / 144.83 | 138.16 / 139.62 | 126.68 / 127.70 | 142.76 / 196.32 |
+| | `NEURA_TIER3=off` | 112.29 / 113.56 | 117.54 / 118.84 | 146.27 / 185.97 | 142.91 / 145.80 | 130.12 / 143.41 | 138.05 / 193.29 |
+| | `--jit=off` | 112.42 / 117.24 | 112.39 / 113.84 | 146.24 / 154.19 | 144.93 / 147.61 | 129.33 / 134.35 | 135.57 / 199.66 |
 
-The phases of a warm hello-world launch, p50 in milliseconds from the start of `cli::run` in the client: connected 0.14, accepted 0.16, committed 0.20, worker started 0.30, image loaded 0.35, run started (the approximate first step) 0.40, exit 0.44, client end 0.55. For the 4.4 MB image the client needs 15.3 ms before it connects: reading the file and its SHA-256, which a direct run does not compute.
+The phases of a warm hello-world launch, p50 in milliseconds from the start of `cli::run` in the client: connected 0.13, accepted 0.15, committed 0.18, worker started 0.29, image loaded 0.35, run started (the approximate first step) 0.39, exit 0.43, client end 0.54. For the 4.4 MB image the client needs 15.1 ms before it connects: reading the file and its SHA-256, which a direct run does not compute.
 
-**What the numbers say.** On this machine a warm launch is not faster than a direct run: it is about 0.5 ms slower for hello-world and tasks, the same within noise for a long startup, and about 12 ms slower for a 4.4 MB image because the client hashes it. A direct run already starts in under a millisecond here, so a ready worker has little to save, and the service is process management (detached applications, `ps`, `stop`, shutdown and login start), not a speed-up. The release notes say this and nothing more. Neither result changes the direct default. The workloads with a native dependency and with a terminal were not measured: the first needs a native library built for the benchmark, and the second a terminal the harness does not have.
+**What the numbers say.** On this machine a warm launch is not faster than a direct run: it is about 0.4 ms slower for hello-world, about 0.6 ms slower for tasks, the same within noise for a long startup, and about 14 ms slower for a 4.4 MB image because the client hashes it. A direct run already starts in under a millisecond here, so a ready worker has little to save, and the service is process management (detached applications, `ps`, `stop`, shutdown and login start), not a speed-up. The release notes say this and nothing more. Neither result changes the direct default. The workloads with a native dependency and with a terminal were not measured: the first needs a native library built for the benchmark, and the second a terminal the harness does not have. On a build with a graph device (this machine's), a launch needs `--gpu=off` or `NEURA_GPU=off` to be eligible for the service; the benchmark sets the variable.
 
 | Budget (a later change may exceed it by at most 10% without saying why) | Measured |
 | --- | --- |
-| Resident size of an idle supervisor, without the cache | 5,956 KiB |
+| Resident size of an idle supervisor, without the cache | 6,124 KiB |
 | Cache bytes with hello-world cached | 12,784 |
-| Resident size of a ready worker | 4,084 KiB |
+| Resident size of a ready worker | 4,088 KiB |
 | Wakeups of an idle supervisor in 60 seconds; of a ready worker | 0; 0 |
 | Warm hello-world launch, p50 / p95 | 1.32 / 1.39 ms |
-| Launch with the service stopped (an on-demand start), hello-world, p50 / p95 | 6.76 / 6.84 ms |
-| `neurad`; `libneura-core` (unstripped, debug information as built) | 22,984 bytes; 5,808,160 bytes |
+| Launch with the service stopped (an on-demand start), hello-world, p50 / p95 | 6.75 / 6.91 ms |
+
+| Size, stripped (unstripped) | Before the milestone | After |
+| --- | --- | --- |
+| `neura`, the dispatcher (at most 1 MiB) | 848,744 (1,002,152) | 852,840 (1,006,520) |
+| `neura-run` | 14,600 (16,984) | 14,744 (18,504) |
+| `neurad` | none | 18,824 (22,984) |
+| `libneura-core` | 4,603,896 (5,213,752) | 5,149,144 (5,812,288): 11.8% larger, the service's client, supervisor and worker |
+| Runtime archive, `make-archive.sh --runtime` of `--component core` and `--component service` (gzip) | | 2,981,482 bytes; 2,978,754 without `neurad` |
 
 ## Migration
 
