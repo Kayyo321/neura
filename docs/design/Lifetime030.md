@@ -35,7 +35,7 @@ defer-statement = "defer" call-expression ";"
 
 | Rule | Status |
 | --- | --- |
-| `defer` at the start of a statement is the keyword when the next token is an identifier or `{`. In every other position it is an ordinary identifier, so `defer(x);`, `defer = 1;` and `let defer = ...` keep their meaning. | proposed |
+| `defer` at the start of a statement is the keyword when the next token is an identifier, `{`, `new` or `spawn`; no statement that begins so is valid today. In every other position it is an ordinary identifier, so `defer(x);`, `defer = 1;` and `let defer = ...` keep their meaning. | proposed |
 | The operand is one call: of a function, a method, a static function, or a function value. A block, a `new` expression, `spawn`, an optional-chained call, and any other expression are `E0219`. | proposed |
 | The call's result type is `void`. Any other result, including `Result`, is `E0471`: a deferred call's failure would be lost. A function that handles the result itself can be deferred. | proposed |
 | At the `defer` statement the callee expression, the receiver and the arguments are evaluated once, in written order, and saved in hidden locals of the frame. Later assignments to the bindings they were read from change nothing. | proposed |
@@ -64,9 +64,9 @@ using-statement = "using" "(" name "=" expression ")" block
 
 | Rule | Status |
 | --- | --- |
-| `using` at the start of a statement is the keyword when it is followed by `(`, an identifier and `=`. Otherwise it is an ordinary identifier. The form binds one resource; several resources nest. It has no type annotation and no `;` after its block. | proposed |
+| `using` at the start of a statement is the keyword when it is followed by `(`, an identifier and `=`, or when its balanced `(...)` is directly followed by `{`, which no call is today. Otherwise it is an ordinary identifier. A keyword `using` that is not the form below is `E0220`. The form binds one resource; several resources nest. It has no type annotation and no `;` after its block. | proposed |
 | The binding is immutable and visible in the block only. Its type implements `Std.Io.Closeable.Closeable`; any other type, and an acquisition written `nil`, is `E0474`. | proposed |
-| `using` is written in a function or lambda whose result type is `Result<T>`, so that a close error has somewhere to go (`E0473`). Outside a function body it is `E0472`. | proposed |
+| `using` is written in a function or lambda whose result type is `Result<T>`, so that a close error has somewhere to go (`E0473`). A generator body is not such a function, so it holds no `using` of its own; a lambda inside it may. Outside a function body it is `E0472`. | proposed |
 | The acquisition is evaluated once and bound with the binding's ordinary admission. If the admitted reference is nil the run fails with the existing nil-reference failure, and nothing is registered. If the acquisition returns early through `?`, traps, or its admission traps, nothing is registered. | proposed |
 | After a successful binding, the admitted reference is saved in a hidden local, the *token*. `close` is called on the token, never on a later read of the binding, so a getter cannot redirect which object is closed. Saving the token and calling `close` on it are not hook events; the body of `close` has its ordinary events. | proposed |
 | On every exit from the block, `close` is called exactly once. Nested `using` blocks close in reverse order of acquisition. | proposed |
@@ -118,9 +118,9 @@ yield     = "yield" expression ";"
 | After the body ends, `has_next()` is false forever and `next()` is the existing `no such element` trap. | proposed |
 | Advancing a generator while its body is running, from inside its own body, is the trap `invalid state: generator already running`. Separate calls of the factory give independent generators, which may be nested. | proposed |
 | The sequence is used once, as every `Sequence` is. Abandoning it, for example by `break` in the consuming loop, runs nothing more; the state is collected like any object. | proposed |
-| A `yield` may not be reached with cleanup pending (`E0476`): it is not inside a `using` block or a `scope` block, and no `defer` precedes it in a block that encloses it. The diagnostic is at the `yield` with a label at the pending construct. | proposed |
+| A `yield` may not be reached with cleanup pending (`E0476`): it is not inside a `scope` block, and no `defer` precedes it in a block that encloses it. The diagnostic is at the `yield` with a label at the pending construct. A `using` cannot be pending, since a generator body has none. | proposed |
 | Nothing owned by the frame may be in scope at a `yield` (`E0477`): an array binding, a primitive reference, a tuple or enum that contains one, or a closure environment held in a region. A generator's parameter may not have such a type. A block that uses an array and ends before the next `yield` is accepted. A list is the owned alternative. | proposed |
-| With class hooks: a parameter or local of the body is a binding with the events of a function's. Copying into and out of the generator's state, and the hidden `has_next` and `next`, add none. The library's wrappers around them are ordinary functions with ordinary events. | proposed |
+| With class hooks: a parameter or local of the body is a binding with the events of a function's, whether it lives in the frame or in the generator's state. The generated `has_next` and `next` add none. The library's wrappers around them are ordinary functions with ordinary events. | proposed |
 | [The iteration contract](../lang/Stdlib.md#54-iteration) is narrowed in the same change: "`has_next` has no effect" holds for collection iterators. For every iterator, `has_next` consumes nothing and repeating it repeats no work. | proposed |
 
 ## Events
@@ -158,12 +158,12 @@ defer subscription.unsubscribe();
 | NeuraIR | Three operations, in the next free NeuraIR minor version when the first of them lands. The writer emits that version only for a module that uses one. `IrOp::Cleanup` is a statement of a block with one or two statement lists: what to run on every exit, and, when present, what to run on a `return` instead. `IrOp::Pending` is the returned value being carried, readable and assignable only in a `Cleanup`'s return list. `IrOp::Yield` is a statement with a suspension index, legal only in a function that carries the attribute `generator.resume`. | proposed |
 | `defer` | The saved values are `Initialize` nodes of hidden locals `$defer<N>_<k>`; the `Cleanup`'s list is the call over loads of them. | proposed |
 | `using` | `Initialize` of the binding; a trap when it is nil; `Initialize` of the token `$using<N>`; a `Cleanup` whose return list assigns `Pending` the result of `Std.Io.Closeable.close_outcome<T>(Pending, token.close())`, and whose other list returns `Err` when `token.close()` fails. `close_outcome` is a new library function that holds the combination rule; `release` is rewritten over it with the same results. | proposed |
-| Generators | Lowering checks the body as a function body, including definite assignment and `last`. A new pass in lowering, `lower_generators`, then makes a hidden class `$generator<N>` that implements `Iterator<T>`: its fields are the resume index, the buffered value, three flags (buffered, finished, running), and one `$capture<M>` field per parameter, capture and local of the body, hidden ones included. The body becomes the method `$resume() -> bool` with every local access rewritten to a field access, and `has_next` and `next` are generated over it. The generator expression becomes a function that returns `Sequence.from_iterator<T>(new $generator<N>(...))`. | proposed |
-| Verifier | A `Cleanup` is a direct statement of a block. `Pending` appears only in a return list of a function that returns a value. A `Yield` is a direct statement, its indexes are 1 to *n* without gaps, its function has no local symbol, and it is not inside a `TaskScope` or after a `Cleanup` in an enclosing block. | proposed |
+| Generators | Lowering checks the body as a function body, including definite assignment and `last`. A new pass in lowering, `lower_generators`, then makes a hidden class `$generator<N>` that implements `Iterator<T>`: its fields are the resume index, the buffered value, three flags (buffered, finished, running), one `$local<M>` field per parameter, capture and written local whose scope contains a `yield`, and one `$temp<M>` field per hidden local whose scope does. A local whose scope contains no `yield` stays a local of the frame, which is where an array of a yield-free block lives. The body becomes the method `$resume() -> bool` with each moved local's accesses rewritten to field accesses, and `has_next` and `next` are generated over it. The generator expression becomes a function that returns `Sequence.from_iterator<T>(new $generator<N>(...))`. | proposed |
+| Verifier | A `Cleanup` is a direct statement of a block. `Pending` appears only in a return list of a function that returns a value. A `Yield` is a direct statement, its indexes are 1 to *n* without gaps, no local symbol's scope contains one, and it is not inside a `TaskScope` or after a `Cleanup` in an enclosing block. | proposed |
 | Converter | `FunctionCompiler` keeps one stack of open cleanups in place of the count of open task scopes: a region, a task scope and a `Cleanup` are entries, pushed as they are entered. `leave_task_scopes` becomes `leave_cleanups(depth, edge)`, which pops innermost first and emits each entry's exit work; `return`, `break`, `continue` and the end of a block call it. A `scope` block enters its region before `ScopeEnter`, which gives the order of the exit table. A `Return` inside a cleanup list is a return edge of the enclosing entries. A returned value is always copied to fresh slots when any entry is open. | proposed |
 | Converter, generators | A function with `generator.resume` starts with a comparison chain on the resume index, in ascending order, to the block after each `Yield`. A `Yield` stores its index and returns true. Nothing else is new: the state is an ordinary object. | proposed |
 | NVR and tiers | No new operation, exit kind or trap reason. The traps are messages. Tier 2 and tier 3 see ordinary functions, calls and field operations. | proposed |
-| Hooks | Three rows are added to the event derivation of the class-hook milestone (`docs/design/Hooks030.md` on its own branch) when both are merged: a read or store of `Pending` is no event; the `Initialize` of `$using<N>` copies the binding without a getter and `close` on the token admits no receiver; the store to a generator's buffer before a `Yield` is the result admission, and the hidden `has_next`, `next` and `$resume` have no events of their own. | proposed |
+| Hooks | Three rows are added to the event derivation of the class-hook milestone (`docs/design/Hooks030.md` on its own branch) when both are merged: a read or store of `Pending` is no event; the `Initialize` of `$using<N>` copies the binding without a getter and `close` on the token admits no receiver; the store to a generator's buffer before a `Yield` is the result admission. In a generator's state a `$local<M>` field is a binding with the events of the local it replaces, except that copying an admitted argument into its field at the factory call is not a second admission; a `$temp<M>` field, the buffer, the index and the flags have none. The body of `$resume` keeps every event of the source body; the generated `has_next` and `next`, and their call of `$resume`, add none. | proposed |
 | Decompiler | Nothing new to decode. With names, a `$generator<N>` class is shown as inferred generator state; without them it is an ordinary class. | proposed |
 
 ### Optimization and tiers
@@ -200,7 +200,7 @@ The milestone shares its assigned codes with the class-hook milestone, which use
 | `E0473` | `using` in a function that cannot return a close error | `using`, with a label at the function's result type | "'using' needs a function that returns 'Result<T>'" |
 | `E0474` | `using` resource that cannot be closed | the acquisition | "'T' does not implement Closeable" or "the resource is nil" |
 | `E0475` | scoped resource leaves its `using` block | the escaping use, with a label at the `using` | "'source' is closed at the end of its 'using' block and cannot be returned (stored, captured, sent, retained by 'f')" |
-| `E0476` | `yield` with cleanup pending | `yield`, with a label at the `defer`, `using` or `scope` | "a generator cannot suspend while a deferred call (a 'using' resource, a task scope) is pending" |
+| `E0476` | `yield` with cleanup pending | `yield`, with a label at the `defer` or `scope` | "a generator cannot suspend while a deferred call (a task scope) is pending" |
 | `E0477` | storage that cannot outlive a suspension | `yield`, with a label at the binding; or the parameter's type | "the array 'buffer' belongs to this frame and would not survive a 'yield'". Help: use a list |
 | `E0478` | `return` with a value in a generator | the returned expression | "a generator's values come from 'yield'; 'return' only ends it". Fix: none; `yield` then `return;` changes behavior and is offered as marked |
 | `E0479` | capturing generator that escapes without `new` | `iterator`, with a label at the capture | "this generator captures 'base' and is returned (stored, retained)". Fix: insert `new` |
@@ -220,7 +220,7 @@ Accepted unless marked *rejected*.
 4. `defer log.end_section()` with no `;`: rejected, `E0219`.
 5. `defer log;` and `defer count + 1;`: rejected, `E0219`.
 6. `defer { cleanup(); }`: rejected, `E0219`.
-7. `defer new Guard();`, `defer spawn work();`: rejected, `E0219`.
+7. `defer new Guard();`, `defer spawn work();`: rejected, `E0219`; `new` and `spawn` after `defer` make it the keyword.
 8. `defer (pick())();`: `defer` is an identifier here, so `E0304` with the help; a callee in parentheses is bound to a name first.
 9. `let defer = func<T>(...) ...; defer(value);`: accepted, unchanged, as in `tests/backend/programs/generic-closures.nra`.
 10. `defer;` and `defer` at the end of an unfinished line in the editor: `defer` is an identifier; `E0304` or `E0201` as today, and the rest of the block is still parsed.
@@ -246,9 +246,9 @@ Accepted unless marked *rejected*.
 27. `using (source = file.open(path)?) { ... }` in a function returning `Result<T>`.
 28. `using` with line breaks inside the parentheses, a comment before the block, an empty block.
 29. `using (source = open()) { ... };`: rejected, `E0220`, with a fix that removes `;`.
-30. `using (a = open(), b = open()) { }`, `using (open()) { }`, `using (source: File = open()) { }`: rejected, `E0220`.
+30. `using (a = open(), b = open()) { }`, `using (open()) { }`, `using (source: File = open()) { }`: rejected, `E0220`; the first by the `=` rule and the others by the `{` after the parentheses.
 31. `using (source = open())` with no block, as in an unfinished edit: `E0220` at the next token; `source` is still bound for completion.
-32. `using(config);` and `let using = 1;`: accepted, `using` is an identifier.
+32. `using(config);`, `using(a, b).run();` and `let using = 1;`: accepted, `using` is an identifier.
 33. `using (x = 1) { }`: rejected, `E0474`. `using (x = nil) { }`: rejected, `E0474`.
 34. `using` in a function that returns `void` or `int`: rejected, `E0473`. In a lambda that returns `Result<T>` inside such a function: accepted.
 35. An acquisition that returns `Err` through `?`: the function returns it; no close.
@@ -264,7 +264,7 @@ Accepted unless marked *rejected*.
 45. `scope { spawn work(source); }` inside the `using` block, with a transferable resource: accepted. A `spawn` capturing `source` when the `scope` is outside the `using`: rejected, `E0475`.
 46. A binding of the same name in an outer block: shadowed as by any block binding.
 47. A getter of the resource's class that returns another object: `close` is still called on the object that was admitted.
-48. A `using` inside a generator body with no `yield` inside it: accepted.
+48. A `using` directly in a generator body: rejected, `E0473`, with the label "a generator returns its values through 'yield'". In a lambda in that body that returns `Result<T>`: accepted.
 49. A trap in the body: no close.
 
 **Generators**
@@ -291,8 +291,8 @@ Accepted unless marked *rejected*.
 69. A generator whose body advances another generator, and one that iterates a list with for-each across a `yield`: accepted.
 70. A generator that calls `next()` on its own sequence: the `generator already running` trap.
 71. The sequence consumed twice: the existing `sequence already used` trap.
-72. `yield` inside `using`, inside `scope`, or after a `defer` in an enclosing block: rejected, `E0476`. A `defer` in an inner block that ends before the `yield`: accepted.
-73. An array binding in scope at a `yield`: rejected, `E0477`. An array in an inner block that ends before it: accepted.
+72. `yield` inside `scope`, or after a `defer` in an enclosing block: rejected, `E0476`. A `defer` in an inner block that ends before the `yield`: accepted.
+73. An array binding in scope at a `yield`: rejected, `E0477`. An array in an inner block that ends before it: accepted, and it stays a frame local.
 74. `iterator(items: int[]) -> int`, and a `&int` parameter: rejected, `E0477`.
 75. A generator that captures an outer local and is returned: rejected, `E0479`; `new iterator(...)`: accepted.
 76. `squares(10).filter(...).map(...)` and `for (v in squares(10))`: accepted.
@@ -331,7 +331,7 @@ Each step is one commit on `m8-integration` with the targeted tests named. The f
 - Every image of the identity set, the extended set and the examples is byte for byte the image built before the milestone, with the same steps and peak cells. `tests/backend/programs/generic-closures.nra`, which names a function `defer`, is among them.
 - Cleanup: early return, propagation, loop exits, nesting, a held return value, a failed acquisition, the close-failure matrix, a getter that would redirect the resource, each rejected escape, cancellation as an ordinary outcome, and a trap that runs nothing.
 - Order: a program in which a deferred channel close lets a task scope's join finish; one in which a resource outside a task scope closes after the join; and the inverted arrangement rejected with `E0475`.
-- Generators: a generator through a `filter` and `map` pipeline with a log of body steps; repeated `has_next`; `next` without it; early break; illegal suspension over a resource, a `defer`, a task scope and an array; re-entry; independent instances; peak heap cells stated per generator.
+- Generators: a generator through a `filter` and `map` pipeline with a log of body steps; repeated `has_next`; `next` without it; early break; illegal suspension over a `defer`, a task scope and an array, and a `using` rejected in a generator body; re-entry; independent instances; peak heap cells stated per generator.
 - Events: retention of a `new func` handler, snapshot delivery, nested emission, idempotent `unsubscribe`, a frame-borrowing handler rejected, a trap in a handler.
 - With class hooks merged: the events of a deferred call at registration and at the exit, the exact object closed by `using`, and one admission per `yield`.
 - Every program above gives the same output, steps and peak cells from source, from `.nir` and from a serialized image, optimized and not, in every execution mode of [the baseline](Release030.md#execution-modes), and with optional metadata stripped.
@@ -364,7 +364,7 @@ No existing source changes meaning: the four words stay identifiers wherever the
 | A value that retains the resource is scoped with it, and unknown retention is an escape | It keeps readers over a resource usable without trusting an unproved summary. |
 | The element type of a generator is required | It makes the form recognizable by lookahead and needs no inference. |
 | A generator is an explicit state object with a resume index, built in lowering; NVR gains no suspended frame | Every tier, the collector, the decompiler and the debugger already handle objects and calls, and deoptimization needs nothing new. |
-| Every local of a generator body lives in its state, not only those live across a `yield` | It is deterministic and needs no liveness analysis to be trusted; the cost is stated in peak cells. |
+| A local lives in a generator's state when its scope contains a `yield`, whether or not it is live across one | The rule is read from the source and needs no liveness analysis to be trusted; the cost is stated in peak cells. |
 | The exit work of blocks is one stack in the converter, driven by NeuraIR nodes; a task scope's region is entered before the scope | One mechanism gives defers, then the join, then the region, for every kind of exit. |
 | A handler removed during an emission is still called by that emission | Delivery follows the registrations at the start of the emission, with no exception to explain. |
 | The guard rule for `emit` is a compile-time check of the resolved call graph | The run time has no query for "a guard is held", and an honest partial check is better than none. |
