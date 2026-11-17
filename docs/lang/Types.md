@@ -531,17 +531,25 @@ a match. An enum with payloads has no built-in equality or numeric cast.
 
 <!-- example: check -->
 ```neura
-let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
+let TreeLink = class (
+    export last tree: Tree;
+
+    export let init = func(value: Tree) {
+        tree = value;
+    };
+);
+
+let Tree = enum (Empty, Leaf(int), Branch { left: TreeLink, right: TreeLink });
 
 let sum = func(tree: Tree) -> int {
     return match (tree) {
         Tree.Empty => 0,
         Tree.Leaf(value) => value,
-        Tree.Branch { left, right } => sum(left) + sum(right),
+        Tree.Branch { left, right } => sum(left.tree) + sum(right.tree),
     };
 };
 
-let tree = Tree.Branch { right: Tree.Leaf(2), left: Tree.Leaf(1) };
+let tree = Tree.Branch { right: new TreeLink(Tree.Leaf(2)), left: new TreeLink(Tree.Leaf(1)) };
 ```
 
 `match (value)` evaluates the subject once and evaluates only the selected arm.

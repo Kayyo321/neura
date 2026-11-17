@@ -152,11 +152,11 @@ export let RegexMachine = module (
                     }
                 },
                 parser.Node.Repeat { item, min, max, greedy } => {
-                    compile_repeat(item, min, max, greedy);
+                    compile_repeat(item.node, min, max, greedy);
                 },
                 parser.Node.Group { item, index } => {
                     emit(Inst.Save(2 * index));
-                    compile(item);
+                    compile(item.node);
                     emit(Inst.Save(2 * index + 1));
                 },
                 parser.Node.Assert(anchor) => {
