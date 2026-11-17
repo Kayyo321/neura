@@ -1722,13 +1722,18 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         return Json{{"isIncomplete", false}, {"items", items}};
     }
     const bool member = before != std::string::npos && doc.source[before] == '.';
+    // After `?.` (docs/design/Matching030.md) the receiver ends before the '?'.
+    const auto receiver_end = [&](std::size_t dot) {
+        if (dot && doc.source[dot - 1] == '?') --dot;
+        while (dot && std::isspace(static_cast<unsigned char>(doc.source[dot - 1]))) --dot;
+        return dot;
+    };
     // The extension functions this file enables whose receiver parameter
     // takes the value's type, with the set that enables them
     // (docs/design/Calls030.md, Extension sets).
     const auto add_extensions = [&] {
         if (!member || !program) return;
-        std::size_t begin = before;
-        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1]))) --begin;
+        std::size_t begin = receiver_end(before);
         while (begin && identifier(doc.source[begin - 1])) --begin;
         const auto *receiver = symbol_at(doc, begin);
         const auto value_kind = receiver && receiver->compiler_id != no_symbol
@@ -1816,8 +1821,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         }
     }
     if (member) {
-        std::size_t end = before;
-        while (end && std::isspace(static_cast<unsigned char>(doc.source[end - 1]))) --end;
+        std::size_t end = receiver_end(before);
         std::size_t begin = end;
         while (begin && (identifier(doc.source[begin - 1]) || doc.source[begin - 1] == '.')) --begin;
         const auto receiver_name = std::string_view(doc.source).substr(begin, end - begin);
@@ -1975,8 +1979,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
     }
     std::optional<SymbolId> owner;
     if (member && program) {
-        std::size_t begin = before;
-        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1]))) --begin;
+        std::size_t begin = receiver_end(before);
         while (begin && identifier(doc.source[begin - 1])) --begin;
         if (const auto *receiver = symbol_at(doc, begin); receiver && receiver->compiler_id != no_symbol) {
             const auto &target = program->symbols[receiver->compiler_id];

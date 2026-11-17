@@ -145,6 +145,8 @@ private:
         }
         if (value.kind == Expr::Kind::Unary || value.kind == Expr::Kind::PrefixUpdate)
             hints_.prefix.insert(value.span.offset);
+        // `r?` is written without a space (docs/design/Matching030.md).
+        if (value.kind == Expr::Kind::Propagate && value.operator_span) hints_.postfix.insert(value.operator_span->offset);
         if (value.kind == Expr::Kind::PostfixUpdate && !value.operands.empty()) {
             const auto operand_end = value.operands.front().span.offset + value.operands.front().span.length;
             in_span(value.span, [&](const Token& token) {
@@ -268,6 +270,19 @@ private:
         }
     }
 
+    void pattern(const PatternSyntax& value) {
+        if (value.kind == PatternSyntax::Kind::Variant && value.named) {
+            bool found = false;
+            in_span(value.span, [&](const Token& token) {
+                if (!found && token.text == "{") {
+                    hints_.inline_braces.insert(token.span.offset);
+                    found = true;
+                }
+            });
+        }
+        for (const auto& element : value.elements) pattern(element);
+    }
+
     void statement(const Statement& value) {
         if (value.declaration) declaration(*value.declaration);
         if (value.binding_type) type(*value.binding_type);
@@ -286,6 +301,8 @@ private:
                     }
                 });
             }
+            // A braced variant pattern nested in a general arm stays inline.
+            if (arm.general && arm.pattern) pattern(*arm.pattern);
             if (arm.guard) expression(*arm.guard);
             for (const auto& item : arm.body) statement(item);
             if (arm.value) expression(*arm.value);
@@ -403,10 +420,10 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
         else if (item.lines_before && in_inline() && text != ")" && text != "]" && text != "}") out.line();
 
         bool space = previous && !previous->comment;
-        if (text == ")" || text == "]" || text == "," || text == ";" || text == "." ||
+        if (text == ")" || text == "]" || text == "," || text == ";" || text == "." || text == "?." ||
             (text == ":" && !hints.spaced_colons.contains(item.offset)))
             space = false;
-        if (before == "(" || before == "[" || before == "." || before == "#") space = false;
+        if (before == "(" || before == "[" || before == "." || before == "?." || before == "#") space = false;
         if (hints.angles.contains(item.offset) || (previous && hints.angles.contains(previous->offset) && before == "<")) space = false;
         if (hints.glued.contains(item.offset) || hints.postfix.contains(item.offset) ||
             (previous && hints.prefix.contains(previous->offset))) space = false;
@@ -424,7 +441,10 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             if (!delimiters.empty() && delimiters.back().open == "<") delimiters.pop_back();
             out.text(text, indent(), false);
         } else if (text == "(" ) {
-            const bool control = before == "if" || before == "while" || before == "for" || before == "match" || before == "scope";
+            // `match.is (x) {` is written as `match (x) {` is.
+            const bool match_is = before == "is" && i >= 3 && items[i - 2].text == "." && items[i - 3].text == "match";
+            const bool control = before == "if" || before == "while" || before == "for" || before == "match" ||
+                                 before == "scope" || match_is;
             const bool body = hints.bodies.contains(item.offset);
             space = control || body || before == "module" || before == "class" || before == "interface" || before == "enum" || before == "singleton";
             out.text(text, indent(), space);

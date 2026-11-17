@@ -5,5 +5,9 @@ error[E0410]: non-exhaustive match.is on a value of type int32
    |                                        ^^^^^ a value may match no arm
    |
    = help: add an arm for int32, or a final '_' arm
+help: insert the '_' arm before the closing brace
+   |
+16 |     _ => <value>,
+   |     +++++++++++++
 
 For more information about this error, try `neura explain E0410`.

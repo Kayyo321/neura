@@ -443,7 +443,9 @@ private:
     bool is_covered(const IsCover& earlier, const IsCover& later, const IrType& subject) const;
     IsCover any_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
                         std::vector<IrNode>& declarations, Context& context, SymbolId owner);
-    void is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered) const;
+    void is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered,
+                       bool produces_value) const;
+    void wildcard_fix(Diagnostic& error, const Statement& stmt, bool produces_value) const;
     // Optional access, coalescing and propagation (lowering_optional.inc).
     SymbolId library_enum(std::string_view path, std::string_view module, std::string_view name, const Span& span,
                           const Context& context);

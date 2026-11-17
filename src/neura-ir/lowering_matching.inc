@@ -179,6 +179,25 @@ std::string Lowering::cover_text(const CoverPattern& pattern, const IrType& type
     return result + (named ? " }" : ")");
 }
 
+// The fix for E0410 in a general match or a `match.is`: a final `_` arm,
+// inserted before the closing brace when it is on a line of its own after a
+// complete arm, as lower_match's fix inserts the missing variants.
+void Lowering::wildcard_fix(Diagnostic& error, const Statement& stmt, bool produces_value) const {
+    const auto close = source_span(stmt.span.file, stmt.span.offset + stmt.span.length - 1, 1);
+    const auto file = SourceMap::global().find(stmt.span.file);
+    if (!close || !file || !user_source(stmt.span.file) || source_text(*close) != "}" || stmt.arms.empty()) return;
+    const auto& text = file->text();
+    const auto line_start = file->line_start(close->line - 1);
+    const auto indent = text.substr(line_start, close->offset - line_start);
+    if (indent.find_first_not_of(" \t") != std::string::npos) return;
+    auto before = line_start;
+    while (before > 0 && std::string_view(" \t\r\n").find(text[before - 1]) != std::string_view::npos) --before;
+    if (before == 0 || (text[before - 1] != ',' && text[before - 1] != '{')) return;
+    const auto arm_indent = std::string(stmt.arms.front().span.column - 1, ' ');
+    error.suggest("insert the '_' arm before the closing brace", *source_span(stmt.span.file, line_start, 0),
+                  arm_indent + (produces_value ? "_ => <value>,\n" : "_ => {},\n"), Applicability::HasPlaceholders);
+}
+
 // The variant a pattern names. A whole pattern names a variant qualified
 // by its enum; an unqualified name that names nothing is E0412, with the
 // qualified spelling when the enum has such a variant.
@@ -469,7 +488,8 @@ bool Lowering::is_covered(const IsCover& earlier, const IsCover& later, const Ir
 
 // A class, interface, `class` or `any` subject needs a final unguarded `_`;
 // a scalar or string one an unguarded arm of its type, or `_`.
-void Lowering::is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered) const {
+void Lowering::is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered,
+                             bool produces_value) const {
     if (std::ranges::any_of(covered, [](const IsCover& item) { return item.kind == IsCover::Kind::Wildcard; }))
         return;
     auto error = Diagnostic(Span{stmt.span.file, stmt.span.line, stmt.span.column, stmt.span.offset, 5},
@@ -480,6 +500,7 @@ void Lowering::is_exhaustive(const Statement& stmt, const IrType& subject, const
     else
         error.note("type patterns never cover a class, an interface, 'class' or 'any', whatever its attributes")
             .help("add a final '_' arm");
+    wildcard_fix(error, stmt, produces_value);
     throw error;
 }
 
@@ -596,7 +617,7 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
         context.scopes.pop_back();
     }
     if (stmt.match_is) {
-        is_exhaustive(stmt, subject_type, covered_types);
+        is_exhaustive(stmt, subject_type, covered_types, produces_value);
     } else if (std::vector<CoverPattern> witness; useful(covered, {CoverPattern{}}, column, witness)) {
         const auto missing = cover_text(witness.front(), subject_type);
         auto error = Diagnostic(Span{stmt.span.file, stmt.span.line, stmt.span.column, stmt.span.offset, 5},
@@ -604,6 +625,7 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
             .with_code("E0410").label("'" + missing + "' is not covered");
         error.note("a guarded arm covers no value; a match without a '_' arm needs an unguarded arm for every value");
         error.help("add an arm for '" + missing + "', or a '_' arm");
+        wildcard_fix(error, stmt, produces_value);
         throw error;
     }
     for (auto& item : declarations) result.body.push_back(std::move(item));

@@ -6,5 +6,9 @@ error[E0410]: non-exhaustive match.is on a value of type class
    |
    = note: type patterns never cover a class, an interface, 'class' or 'any', whatever its attributes
    = help: add a final '_' arm
+help: insert the '_' arm before the closing brace
+   |
+18 |     _ => <value>,
+   |     +++++++++++++
 
 For more information about this error, try `neura explain E0410`.
