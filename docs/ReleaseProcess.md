@@ -20,13 +20,13 @@ A `v*` tag cannot be moved or deleted ([repository settings](RepositorySettings.
 | Job | What it does |
 | --- | --- |
 | Check the tag | The tag has one of the two forms above, names the version in `VERSION`, and points at a commit on `main`. A final tag also needs a dated `## [<VERSION>]` section in `CHANGELOG.md`. |
-| Build and test, once for each target | Builds from the tagged commit with `NEURA_PORTABLE_RELEASE=ON`. Fails on a compiler warning in Neura's sources, on a failed, skipped, or missing test, on a file that needs a library other than the C library or a glibc newer than 2.39, or when `neura --version` does not report the tag's version, target, and commit. Packs the archive. |
-| Qualify the archive, once for each target | On a new runner that has built nothing, runs [`packaging/qualify.sh`](../packaging/qualify.sh) on the packed archive with an empty environment and a new home directory. |
+| Build and test, once for each target | Builds from the tagged commit with `NEURA_PORTABLE_RELEASE=ON`. Fails on a compiler warning in Neura's sources, on a failed, skipped, or missing test, on a file in `bin/` or a launcher that needs a library other than the C library or a glibc newer than 2.39, or when `neura --version` does not report the tag's version, target, and commit. Packs the archive, and packs the `core` component as the runtime-only archive, which is qualified but not published. |
+| Qualify the archive, once for each target | On a new runner that has built nothing, runs [`packaging/qualify.sh`](../packaging/qualify.sh) on the packed archive and the runtime-only archive with an empty environment and a new home directory. |
 | Publish | Runs in the protected `release` environment after a maintainer approves it. Writes `SHA256SUMS` and `neura-release.txt`, attests the build provenance of each file, creates the release, then downloads the release's files again and checks them against the checksums, the built files, and the attestations. For a release candidate it then runs the documented [one-line install command](Install.md#install-with-one-command) against the published candidate and checks that the installed `neura` reports the tagged version and commit. |
 
-The qualification script runs ten checks and prints `PASS`, `FAIL`, or `NOT RUN` for each:
+The qualification script runs eleven checks and prints `PASS`, `FAIL`, or `NOT RUN` for each:
 
-1. The archive holds one directory with the tool, the installer, the license, the standard library, and the version.
+1. The archive holds one directory with `neura` and every tool it starts ([tools](lang/Tooling.md#tools-and-the-neura-dispatcher)), the installer, the license, the standard library, and the version.
 2. `install.sh` installs into a new home directory.
 3. The installed `neura --version` reports the release's version and target.
 4. `neura doctor` reports no failure.
@@ -36,6 +36,7 @@ The qualification script runs ten checks and prints `PASS`, `FAIL`, or `NOT RUN`
 8. `neura update --check` finds the release up to date.
 9. An installation of the previous published release updates to this one with `neura update`, and then builds and runs Hello World. The check is reported as not run when the previous release has no archive for the target, as for the first release, and in a trial started by hand, whose `-dev` version sorts before every published candidate.
 10. `neura uninstall --yes` leaves nothing behind, and installing again works.
+11. The runtime-only archive holds `neura` and the core tools and no SDK tool or standard library, runs Hello World's image through `neura run` and `neura-run`, reports the missing SDK for `neura build`, and its `neura doctor` reports no failure.
 
 Started by hand (`gh workflow run release.yml --ref <branch>`), the workflow builds and qualifies that branch as a `-dev` version and publishes nothing. Use this to try a change to the workflow before spending a tag on it.
 

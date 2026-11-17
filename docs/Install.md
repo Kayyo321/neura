@@ -109,13 +109,16 @@ A refusal changes nothing. Installing a different version beside an existing one
 ```text
 <root>/neura-install.txt        the marker
 <root>/versions/<version>/      a normal prefix
-    bin/neura
+    bin/neura                   the dispatcher
+    bin/neurac, bin/neura-run, ...        the tools it starts
     share/neura/stdlib/...
     share/doc/neura/LICENSE
     lib/neura/launchers/<target>/...      where the platform has launchers
 <root>/current                  symbolic link: versions/<version>
 <bin dir>/neura                 symbolic link: <root>/current/bin/neura
 ```
+
+`neura` starts the tool of each command from `bin/` beside its own real path, so the one link in the bin directory reaches every tool ([Tools](lang/Tooling.md#tools-and-the-neura-dispatcher)). A tool can also be run as `<root>/current/bin/<tool>`; links for the other tools in the bin directory are not made yet.
 
 The marker is line-oriented text that tools parse strictly:
 
@@ -144,9 +147,10 @@ The running `neura` resolves the real path of its executable. If that path is `<
 | Check | Reports | When it is not `ok` |
 | --- | --- | --- |
 | `version` | The version, target, and commit | |
-| `executable` | The real path of the running executable | `warn` if it cannot be determined |
+| `executable` | The real path of `neura` | `warn` if it cannot be determined |
 | `install` | The install method and root | `FAIL` for an invalid marker |
-| `stdlib` | The standard library directory | `FAIL` if `share/neura/stdlib/std` is not found next to the executable |
+| `components` | The components whose tools are next to `neura`: `core, sdk`, or `core` alone for a runtime-only installation | `FAIL` if a tool of the core, or of an SDK that is partly there, is missing; the detail names it |
+| `stdlib` | The standard library directory | `FAIL` if `share/neura/stdlib/std` is not found next to the executable. Without the SDK, this check and the four below report `ok` and that they are not needed |
 | `launchers` | The native launchers for this host | `warn`: `neura build --native` is unavailable |
 | `libclang` | The libclang library that C imports load | `warn`: C imports are unavailable; on Debian and Ubuntu install `libclang1-19 libclang-common-19-dev` |
 | `clang-headers` | libclang's builtin header directory | `warn`: C imports are unavailable |
@@ -291,12 +295,17 @@ To turn the notice and the check off, set `NEURA_NO_UPDATE_CHECK=1` in your envi
 | SHA-256 against the FIPS 180-4 vectors; semantic version precedence; the marker, release metadata, and update-check parsers | `lifecycle-unit-sha256`, `lifecycle-unit-semver`, `lifecycle-unit-release-metadata`, `lifecycle-unit-marker` |
 | `VERSION`, `Std.Core.Version`, and `neura --version` agree | `version-consistency` |
 | Archive and metadata scripts, `install.sh` layout and refusals, the installed tool, `doctor`, no output or state file without terminals | `lifecycle-install` |
+| Every command through `neura` and through its tool; missing, incomplete, and mixed components; an install on `PATH` under a path with a space and a non-ASCII letter, a relocated install, and two installs on `PATH` | `tools-parity`, `tools-components`, `tools-install` |
 | `update` and `update --check` from local directories: success, up to date, each rejected archive and metadata, each fault step with rollback, the lock, unmanaged and package-manager installs, rejected sources; `--nightly` API pagination, selection, failures, and candidate installation through a fixture `curl` | `lifecycle-update` |
 | `uninstall`: `--dry-run`, the refusal without `--yes`, what is removed and what is left | `lifecycle-uninstall` |
 
 The CTest entries above run on Linux and macOS, on x86-64 and arm64. The release workflow then runs [the lifecycle checks](ReleaseProcess.md#what-the-release-workflow-checks) on each packed archive, and for a release candidate runs the one-line install command against the published files, which covers a download over HTTPS and `gh attestation verify`.
 
 These are not tested: `neura update` downloading over HTTPS (the release workflow updates from a local copy of the published files), the update notice and its network refresh (they need a terminal, so only their absence without a terminal is tested), the interactive `uninstall` prompt, and any run on Windows outside WSL 2.
+
+## Runtime-only archive
+
+`packaging/make-archive.sh --runtime <prefix> <output directory> <version> <target>` packs a prefix made by `cmake --install build --component core` as `neura-runtime-<version>-<target>.tar.gz`: `neura` and the core tools, `LICENSE`, and `VERSION`, with no standard library, compiler, or `install.sh`. Unpacked, `bin/neura run` and `bin/neura-run` run images, and source commands report that the SDK is missing. The release workflow builds and qualifies it but does not publish it yet: release metadata for separate components, its installer, and a link for each tool come in a later release.
 
 ## Build from source
 

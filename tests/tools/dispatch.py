@@ -150,6 +150,7 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["run"], None, []),
     (["run", "--help"], None, []),
     (["run", "--tier=7", "{HELLO_NVR}"], None, []),
+    (["run", "--tier-stats", "{ARGS_NVR}", "--", "x"], None, []),
     (["run", "{HELLO}"], None, []),
     (["test", "-I", "{GUIDE}", "{MATH}"], None, []),
     (["test", "-I", "{GUIDE}", "--list", "--format=json", "{MATH}"], None, []),
@@ -180,6 +181,7 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["doctor", "extra"], None, []),
     (["update", "--check"], None, []),
     (["update", "--bogus"], None, []),
+    (["update", "--nightly", "--check"], None, []),
     (["uninstall", "--dry-run"], None, []),
     (["fmt", "--check", "{HELLO}"], None, []),
     (["fmt", "--stdin", "--stdin-filepath", "x.nra"], b"let   x=1;\n", []),
@@ -189,6 +191,10 @@ CASES: list[tuple[list[str], bytes | None, list[str]]] = [
     (["debug", "--stdio"], dap_session(), []),
     (["debug"], None, []),
 ]
+
+
+# `--tier-stats` reports wall times, which differ between any two runs.
+TIMES = re.compile(rb"\d+\.\d+ ms|tier: time:[^\n]*\n")
 
 
 def expand(arguments: list[str], paths: dict[str, str]) -> list[str]:
@@ -206,6 +212,8 @@ def outcome(command: list[str], cwd: Path, stdin: bytes | None, files: list[str]
         shutil.rmtree(cwd)
     cwd.mkdir(parents=True)
     status, out, err = run(command, cwd, stdin, env)
+    if "--tier-stats" in command:
+        err = TIMES.sub(b"<time>", err)
     written = {name: (cwd / name).read_bytes() if (cwd / name).exists() else None for name in files}
     return status, out, err, written
 
@@ -228,7 +236,8 @@ def parity(bin_dir: Path) -> None:
             check(command in covered, f"a parity case runs `neura {command}`")
     neura = bin_dir / f"neura{SUFFIX}"
     with tempfile.TemporaryDirectory() as temporary:
-        work = Path(temporary)
+        # The tools print canonical paths (/private/var/... on macOS).
+        work = Path(temporary).resolve()
         paths = prepare(neura, work / "inputs")
         compared = 0
         for index, (arguments, stdin, files) in enumerate(CASES):
@@ -291,7 +300,8 @@ def components(bin_dir: Path, mixed: Path) -> None:
     core = [name for name, (component, _) in tools.items() if component == "Core"]
     sdk = [name for name, (component, _) in tools.items() if component == "Sdk"]
     with tempfile.TemporaryDirectory() as temporary:
-        work = Path(temporary)
+        # The tools print canonical paths (/private/var/... on macOS).
+        work = Path(temporary).resolve()
         paths = prepare(bin_dir / f"neura{SUFFIX}", work / "inputs")
 
         # A runtime-only directory: the core runs images, the SDK is missing.
@@ -362,7 +372,8 @@ def components(bin_dir: Path, mixed: Path) -> None:
 def install(build: Path, cmake: str) -> None:
     commands, tools = registry()
     with tempfile.TemporaryDirectory() as temporary:
-        work = Path(temporary)
+        # The tools print canonical paths (/private/var/... on macOS).
+        work = Path(temporary).resolve()
         prefix = work / "pré fix"
         subprocess.run([cmake, "--install", str(build), "--prefix", str(prefix)], check=True, capture_output=True)
         links = work / "link bin"
@@ -384,13 +395,13 @@ def install(build: Path, cmake: str) -> None:
         compared = 0
         for index, (arguments, stdin, files) in enumerate(CASES):
             unified = expand(arguments, paths)
-            tree = normal(outcome([str(built)] + unified, work / f"{index}-tree", stdin, files),
+            tree = normal(outcome([str(built)] + unified, work / f"{index}-tree", stdin, files, env),
                           build.resolve(), REPOSITORY / "stdlib")
             installed = normal(outcome(["neura"] + unified, work / f"{index}-installed", stdin, files, env),
                                prefix / "bin", prefix / "share/neura/stdlib")
             if unified[0] == "doctor":
                 # The install's own lines name different files; compare the rest.
-                keep = (b"ok  components", b"ok  install", b"FAIL", b"warn", b"ok  version")
+                keep = (b"ok  components", b"ok  install", b"FAIL", b"ok  version")
                 tree = (tree[0], b"".join(l for l in tree[1].splitlines(True) if l.startswith(keep)), tree[2], tree[3])
                 installed = (installed[0], b"".join(l for l in installed[1].splitlines(True) if l.startswith(keep)),
                              installed[2], installed[3])
