@@ -39,6 +39,8 @@ A tuple or payload-enum value occupies a fixed sequence of *value words* whereve
 | Where the runtime carries one word today, an aggregate is boxed into a runtime-owned transport object at the boundary and unboxed on the other side: a channel message, a task's result, a scheduler outcome, a host call's arguments and results, a kernel's arguments, a parallel item's argument and result, a callback, and an object constant. The box is a heap allocation charged as today. | proposed |
 | Value equality, hashing and text of an aggregate read its words; their results are those of rc.3. | proposed |
 
+Step 5 implements the tuple rows ([Backend](../Backend.md#tuples-are-words)); payload enums stay heap objects until step 7, and a tuple payload of one is several consecutive fields of its object, not yet pooled words. Three rows differ from what the table expects, with the reason. A kernel's arguments are never tuples (the kernel table admits scalars, text and byte lists), so the kernel boundary is its result, the outcome tuple the runtime allocates. No source construct produces an object constant of a tuple type, so that boundary does not arise. And two boundaries the table does not list exist: the pair `string.from_utf8` returns, which the runtime allocates, and the array of results `parallel.finish` builds from boxed tuples, which a compiler-generated function copies into aggregate elements.
+
 `Optional<T>` and `Result<T>` built over a payload that needs no allocation then need none either. `Result<T>` over `Error` takes at most 1 + 7 words more than `T` alone, by the pooling rule.
 
 ## Regions

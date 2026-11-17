@@ -106,6 +106,14 @@ continues to infer an array. A tuple can be indexed with a zero-based integer
 literal in range. The tuple's elements are immutable. A reference stored in a
 tuple retains the behavior of the referenced value.
 
+A tuple is stored inline, not allocated: its elements are a fixed run of value
+words wherever it lives, in a binding, a parameter, a result, a field, a
+captured variable, or an element of an array or list, and a nested tuple is
+flattened into the run. A tuple of more than 64 value words is
+[E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md). Copying a tuple copies its words, so a
+reference stored in it keeps the identity of the object it names. See
+[Backend](Backend#tuples-are-words).
+
 ### Typed and listed destructuring
 
 A destructuring declaration can annotate its names with a tuple type, and it
