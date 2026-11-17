@@ -113,9 +113,9 @@ let Generics = module:program.Entry (
         report(total_sides<Square>(squares) == 8, "a bound permits sides()");
         console.print_line("dispatch through an instance: " + identity<Square>(squares[0]).name());
 
-        let letters: string[list] = ["a", "b", "c"];
+        let letters: string[list] = new(["a", "b", "c"]);
         report(count<string>(letters) == 3, "count<string>");
-        let flags: bool[list] = [];
+        let flags: bool[list] = new;
         report(count<bool>(flags) == 0, "count<bool> of an empty list");
         return program.ExitCode.Ok;
     };

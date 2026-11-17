@@ -137,7 +137,7 @@ let Tier3Inline = module:program.Entry (
 
     let trap = func(kind: string, size: int32) -> int64 {
         let total: int64 = 0;
-        let values: int64[list] = [1, 2, 3];
+        let values: int64[list] = new([1, 2, 3]);
         let square: Shape = new Square(2);
         for (let i = 0; i <= size; i = i + 1) {
             let at = 1;
@@ -172,7 +172,7 @@ let Tier3Inline = module:program.Entry (
     // Squares first; sticks and rings after `size` of them, when the loop may
     // already run with class tests for squares only.
     let dispatch = func(size: int32) -> int64 {
-        let all: Shape[list] = [];
+        let all: Shape[list] = new;
         for (let i = 0; i < size; i = i + 1) {
             all.append(new Square((i % 7) as int64));
         }

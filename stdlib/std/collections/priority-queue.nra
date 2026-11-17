@@ -26,7 +26,7 @@ export let PriorityQueue = module (
         /// @pre The comparator defines a total order and leaves the queue structure unchanged.
         export let init = func(items: T[list], c: func(T, T) -> ordering.Ordering) {
             comparator = c;
-            last values: T[list] = [];
+            last values: T[list] = new;
             last count = items.length;
             let i = 0;
             while (i < count) {
@@ -143,14 +143,14 @@ export let PriorityQueue = module (
 
         /// @brief Removes all queued elements.
         export let clear = func {
-            last empty: T[list] = [];
+            last empty: T[list] = new;
             heap = empty;
             modifications.value = modifications.value + 1;
         };
 
         /// @brief Dequeues everything into a new built-in list, least first.
         export let drain_sorted = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             while (heap.length > 0) {
                 result.append(dequeue());
             }
@@ -169,7 +169,7 @@ export let PriorityQueue = module (
 
         /// @brief A new built-in list in heap order, which is not sorted.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             for (let element in heap) {
                 result.append(element);
             }
@@ -263,7 +263,7 @@ export let PriorityQueue = module (
 
     /// @brief Creates an empty queue using the total order defined by `c`.
     export let create = func<T>(c: func(T, T) -> ordering.Ordering) -> PriorityQueue<T> {
-        last empty: T[list] = [];
+        last empty: T[list] = new;
         return new(empty, c);
     };
 

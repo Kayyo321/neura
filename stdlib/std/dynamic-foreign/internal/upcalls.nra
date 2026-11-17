@@ -12,9 +12,9 @@ let codec = import:Std.DynamicForeign.Internal.Codec;
 /// a downcall. The registry keeps every target alive until the end of the run.
 export let Upcalls = module (
     /// @brief The Neura function of each stub, by stub number.
-    let targets: (func(ForeignValue[list]) -> ForeignValue)[list] = [];
+    let targets: (func(ForeignValue[list]) -> ForeignValue)[list] = new;
     /// @brief The C signature of each stub, by stub number.
-    let signatures: FunctionDescriptor[list] = [];
+    let signatures: FunctionDescriptor[list] = new;
 
     /// @brief Registers `target` with `descriptor` and returns its stub number.
     export let register = func(target: func(ForeignValue[list]) -> ForeignValue, descriptor: FunctionDescriptor)
@@ -31,14 +31,14 @@ export let Upcalls = module (
         last index = stub as int;
         last descriptor = signatures[index];
         last arena = of_confined();
-        last values: ForeignValue[list] = [];
+        last values: ForeignValue[list] = new;
         let offset = 0;
         for (let layout in descriptor.argument_layouts()) {
             values.append(codec.decode_value(arguments, offset, layout, arena));
             offset += codec.packed_size(layout) as int;
         }
         last result = targets[index](values);
-        last bytes: uint8[list] = [];
+        last bytes: uint8[list] = new;
         match (descriptor.return_layout()) {
             Optional.Some(layout) => {
                 codec.encode_value(bytes, result, layout);

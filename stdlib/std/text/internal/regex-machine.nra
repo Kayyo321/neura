@@ -40,23 +40,23 @@ export let RegexMachine = module (
         /// @brief The option bits captured at compile time.
         export let options: int = 0;
         /// @brief The compiled instruction sequence.
-        export let insts: Inst[list] = [];
+        export let insts: Inst[list] = new;
         /// @brief The count of capture and progress slots.
         export let slot_count: int = 2;
         /// @brief The table of candidate first bytes used to skip ahead in the input.
-        export let first_bytes: bool[list] = [];
+        export let first_bytes: bool[list] = new;
         /// @brief Whether the search may skip bytes that cannot start a match.
         export let can_skip: bool = false;
         /// @brief Whether the program requires a match at the start of the input.
         export let anchored: bool = false;
         /// @brief The last visited generation for each program counter.
-        export let marks: int[list] = [];
+        export let marks: int[list] = new;
         /// @brief The generation used to deduplicate threads at the current input position.
         export let generation: int = 0;
         /// @brief The work stack of program counters for pending epsilon transitions.
-        export let stack_pcs: int[list] = [];
+        export let stack_pcs: int[list] = new;
         /// @brief The capture-slot lists corresponding to the pending program counters.
-        export let stack_caps: (int[list])[list] = [];
+        export let stack_caps: (int[list])[list] = new;
     );
 
     /// @brief Compiles a syntax tree with `groups` capturing groups.
@@ -84,7 +84,7 @@ export let RegexMachine = module (
     #Final
     let Compiler = class (
         /// @brief The instructions emitted so far.
-        export let insts: Inst[list] = [];
+        export let insts: Inst[list] = new;
         /// @brief Whether literal and class instructions fold ASCII case.
         last fold_case: bool;
         /// @brief Whether text anchors compile as line anchors.
@@ -115,7 +115,7 @@ export let RegexMachine = module (
                 parser.Node.Literal(value) => {
                     if (fold_case && ((value >= 65 && value <= 90) || (value >= 97 && value <= 122))) {
                         last upper = value & 4294967263;
-                        emit(class_of([upper, upper, upper + 32, upper + 32], false));
+                        emit(class_of(new([upper, upper, upper + 32, upper + 32]), false));
                     } else {
                         emit(Inst.Scalar(value));
                     }
@@ -124,7 +124,7 @@ export let RegexMachine = module (
                     if (any_newline) {
                         emit(Inst.Any);
                     } else {
-                        emit(class_of([10, 10], true));
+                        emit(class_of(new([10, 10]), true));
                     }
                 },
                 parser.Node.Class { ranges, negated } => {
@@ -136,7 +136,7 @@ export let RegexMachine = module (
                     }
                 },
                 parser.Node.Alternate(branches) => {
-                    last jumps: int[list] = [];
+                    last jumps: int[list] = new;
                     last final_branch = branches.length - 1;
                     let k = 0;
                     while (k < final_branch) {
@@ -208,7 +208,7 @@ export let RegexMachine = module (
                 slot = next_slot;
                 next_slot += 1;
             }
-            last splits: int[list] = [];
+            last splits: int[list] = new;
             k = min;
             while (k < max) {
                 splits.append(emit(Inst.Jump(0)));
@@ -239,7 +239,7 @@ export let RegexMachine = module (
     /// @brief A class instruction with its ASCII members as a 128-bit set, so that matching an ASCII scalar is
     /// one read.
     let class_of = func(ranges: uint32[list], negated: bool) -> Inst {
-        last ascii: uint32[list] = [0, 0, 0, 0];
+        last ascii: uint32[list] = new([0, 0, 0, 0]);
         let c: uint32 = 0;
         while (c < 128) {
             if (in_ranges(ranges, c) != negated) {
@@ -253,7 +253,7 @@ export let RegexMachine = module (
 
     /// @brief Sorted, merged ranges; with case folding, each ASCII letter range also adds the other case.
     let normalize = func(ranges: uint32[list], fold_case: bool) -> uint32[list] {
-        last pairs: uint32[list] = [];
+        last pairs: uint32[list] = new;
         let k = 0;
         while (k < ranges.length) {
             last low = ranges[k];
@@ -282,7 +282,7 @@ export let RegexMachine = module (
             pairs[2 * j + 3] = high;
             i += 1;
         }
-        last merged: uint32[list] = [];
+        last merged: uint32[list] = new;
         i = 0;
         while (i < count) {
             last low = pairs[2 * i];
@@ -326,7 +326,7 @@ export let RegexMachine = module (
     /// @brief Finds the bytes that can begin a match, and whether every match must start at offset 0, by
     /// following the epsilon instructions from the start.
     let analyze_start = func(program: Program) {
-        last first: bool[list] = [];
+        last first: bool[list] = new;
         let k = 0;
         while (k < 256) {
             first.append(false);
@@ -346,14 +346,14 @@ export let RegexMachine = module (
     /// instruction or an instruction consuming any scalar is reached (no byte can be ruled out), or, without
     /// `through_start`, when any consuming instruction is.
     let reaches_input = func(insts: Inst[list], first: bool[list], through_start: bool) -> bool {
-        last seen: bool[list] = [];
+        last seen: bool[list] = new;
         let k = 0;
         while (k < insts.length) {
             seen.append(false);
             k += 1;
         }
         let open = false;
-        last stack: int[list] = [0];
+        last stack: int[list] = new([0]);
         while (stack.length > 0) {
             last pc = stack[stack.length - 1];
             stack.remove_at(stack.length - 1);
@@ -457,7 +457,7 @@ export let RegexMachine = module (
     /// @brief Runs the program over `input` from the byte offset `start`. Returns the capture slots of the
     /// match, or an empty list when there is none.
     export let search = func(program: Program, input: string, start: int, mode: int) -> int[list] {
-        last none: int[list] = [];
+        last none: int[list] = new;
         if (program.anchored && start > 0) {
             return none;
         }
@@ -472,7 +472,7 @@ export let RegexMachine = module (
         last skip = program.can_skip && mode != Whole;
         last first = program.first_bytes;
         last length = input.byte_length;
-        last initial: int[list] = [];
+        last initial: int[list] = new;
         let k = 0;
         while (k < program.slot_count) {
             initial.append(-1);
@@ -480,8 +480,8 @@ export let RegexMachine = module (
         }
         let matched = none;
         let found = false;
-        let current_pcs: int[list] = [];
-        let current_caps: (int[list])[list] = [];
+        let current_pcs: int[list] = new;
+        let current_caps: (int[list])[list] = new;
         let pos = start;
         let generation = program.generation + 1;
         do {
@@ -537,8 +537,8 @@ export let RegexMachine = module (
                 }
             }
             generation += 1;
-            last next_pcs: int[list] = [];
-            last next_caps: (int[list])[list] = [];
+            last next_pcs: int[list] = new;
+            last next_caps: (int[list])[list] = new;
             last at_end = pos >= length;
             let i = 0;
             while (i < count) {
@@ -654,13 +654,13 @@ export let RegexMachine = module (
         last count = caps.length;
         if (count == 2) {
             if (slot == 0) {
-                return [value, caps[1]];
+                return new([value, caps[1]]);
             }
-            return [caps[0], value];
+            return new([caps[0], value]);
         }
-        let copy: int[list] = [];
+        let copy: int[list] = new;
         if (count == 4) {
-            copy = [caps[0], caps[1], caps[2], caps[3]];
+            copy = new([caps[0], caps[1], caps[2], caps[3]]);
         } else {
             let k = 0;
             while (k + 4 <= count) {

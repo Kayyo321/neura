@@ -101,8 +101,9 @@ private:
             if (shadowed(expr.text)) return std::nullopt;
         } else if (expr.kind == ExprKind::Member) {
             const auto& receiver = expr.operands.front();
-            if (!options_.instance_is_receiver || receiver.kind != ExprKind::Name ||
-                receiver.text != "instance" || shadowed("instance"))
+            const bool shorthand = receiver.kind == ExprKind::Name && receiver.text == "$instance";
+            if (!shorthand && (!options_.instance_is_receiver || receiver.kind != ExprKind::Name ||
+                               receiver.text != "instance" || shadowed("instance")))
                 return std::nullopt;
         } else {
             return std::nullopt;

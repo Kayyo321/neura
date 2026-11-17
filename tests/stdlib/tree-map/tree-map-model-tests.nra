@@ -24,7 +24,7 @@ let TreeMapModelTests = module (
         let map = tree_map.create<string, int>(func(a: string, b: string) -> ordering.Ordering {
             return int32.compare(a.byte_length, b.byte_length);
         });
-        let keys: string[list] = [];
+        let keys: string[list] = new;
         let text = "";
         while (keys.length < 60) {
             keys.append(text);

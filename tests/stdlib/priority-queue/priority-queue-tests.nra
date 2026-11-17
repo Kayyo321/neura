@@ -22,7 +22,7 @@ let PriorityQueueTests = module (
     };
 
     let ids = func(pairs: [int, int][list]) -> string {
-        let result: int[list] = [];
+        let result: int[list] = new;
         for (let pair in pairs) {
             result.append(pair[1]);
         }
@@ -30,7 +30,7 @@ let PriorityQueueTests = module (
     };
 
     let tagged = func() -> [int, int][list] {
-        let items: [int, int][list] = [];
+        let items: [int, int][list] = new;
         let i = 0;
         while (i < 24) {
             items.append([(i * 7) % 4, i]);
@@ -84,7 +84,7 @@ let PriorityQueueTests = module (
         }
         test.assert_equal_string("[0, 4, 12, 8, 20, 11, 6, 16, 7, 3, 10, 23, 2, 13, 14, 1, 15, 17, 18, 9, 19, 21, 22, 5]",
                                  ids(items.to_list()));
-        let first: [int, int][list] = [];
+        let first: [int, int][list] = new;
         let i = 0;
         while (i < 5) {
             first.append(items.dequeue());
@@ -103,29 +103,29 @@ let PriorityQueueTests = module (
 
     // from_list copies its input.
     export let test_from_list_copies = func() -> void {
-        let source: int[list] = [3, 1, 2];
+        let source: int[list] = new([3, 1, 2]);
         let items = priority_queue.from_list<int>(source, compare);
         source.append(0);
         source[0] = 7;
         test.assert_equal_int32(3, items.size());
         test.assert_equal_string("[1, 2, 3]", items.drain_sorted().to_string());
         test.assert_equal_int32(4, source.length);
-        let empty: int[list] = [];
+        let empty: int[list] = new;
         test.assert(priority_queue.from_list<int>(empty, compare).is_empty());
     };
 
     export let test_iteration_and_search = func() -> void {
-        let items = priority_queue.from_list<int>([5, 3, 8, 1], compare);
+        let items = priority_queue.from_list<int>(new([5, 3, 8, 1]), compare);
         let order = items.to_list();
         let walk = items.iterator();
         test.assert(walk.has_next());
         test.assert(walk.has_next());
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         while (walk.has_next()) {
             seen.append(walk.next());
         }
         test.assert(seen.equals(order));
-        let again: int[list] = [];
+        let again: int[list] = new;
         for (let value in items) {
             again.append(value);
         }
@@ -136,7 +136,7 @@ let PriorityQueueTests = module (
         test.assert_equal_string(order.to_string(), items.to_string());
         test.assert(items.contains(8));
         test.assert(!items.contains(2));
-        test.assert(items.contains_all([1, 5]));
+        test.assert(items.contains_all(new([1, 5])));
         // A to_list copy iterates independently of later changes.
         for (let value in items.to_list()) {
             items.enqueue(value);
@@ -149,8 +149,8 @@ let PriorityQueueTests = module (
 
     // Equality and hashing are by identity.
     export let test_identity_and_text = func {
-        let a = priority_queue.from_list<int>([1], compare);
-        let b = priority_queue.from_list<int>([1], compare);
+        let a = priority_queue.from_list<int>(new([1]), compare);
+        let b = priority_queue.from_list<int>(new([1]), compare);
         test.assert(a === a);
         test.assert(!(a === b));
         let hash = a.hash_code();

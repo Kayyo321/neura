@@ -1,0 +1,4 @@
+// Fields are not grouped.
+let Point = class (
+    export let x, y: int;
+);

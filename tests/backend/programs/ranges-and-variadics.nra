@@ -26,8 +26,8 @@ let Main = module:program.Entry (
         test.assert_equal_int32(1, packed_inspect([variadic.Argument.Unsigned(1)]).length);
 
         let history = [0];
-        let dynamic: int[list] = {touch(history, 0) .. touch(history, 7) : touch(history, 0)};
-        test.assert(dynamic === [0, 2, 4, 6]);
+        let dynamic: int[list] = new({touch(history, 0) .. touch(history, 7) : touch(history, 0)});
+        test.assert(dynamic === new([0, 2, 4, 6]));
         test.assert_equal_int32(3, history[0]);
         test.assert(dynamic.version == 0);
         test.assert((5 .. -2 : -3) === [5, 2, -1]);

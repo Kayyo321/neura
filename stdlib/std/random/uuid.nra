@@ -27,7 +27,7 @@ export let Uuid = module (
         /// @brief The 16 bytes in order, as a new list.
         #Pure
         export let to_bytes = func -> uint8[list] {
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             append_word(bytes, high);
             append_word(bytes, low);
             return bytes;

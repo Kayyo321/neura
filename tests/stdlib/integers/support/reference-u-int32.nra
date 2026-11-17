@@ -22,7 +22,7 @@ export let ReferenceUInt32 = module (
         }
         let base = radix as uint32;
         let rest = v;
-        let digits: uint8[list] = [];
+        let digits: uint8[list] = new;
         do {
             digits.append(integer_text.digit_byte((rest % base) as int));
             rest /= base;

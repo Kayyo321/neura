@@ -118,7 +118,7 @@ export let Sorting = module (
         let count = end - start;
         // The buffer holds references the list already holds, so it keeps
         // nothing extra alive and needs no "empty" element.
-        let buffer: T[list] = [];
+        let buffer: T[list] = new;
         let i = start;
         while (i < end) {
             buffer.append(items[i]);
@@ -189,7 +189,7 @@ export let Sorting = module (
     } or func(items: float64[list]) {
         sort_kernels.f64(items);
     } or func(items: int32[list]) {
-        last wide: int64[list] = [];
+        last wide: int64[list] = new;
         for (let item in items) {
             wide.append(item as int64);
         }
@@ -198,7 +198,7 @@ export let Sorting = module (
             items[i] = wide[i] as int32;
         }
     } or func(items: uint32[list]) {
-        last wide: uint64[list] = [];
+        last wide: uint64[list] = new;
         for (let item in items) {
             wide.append(item as uint64);
         }

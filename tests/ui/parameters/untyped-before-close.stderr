@@ -1,0 +1,9 @@
+error[E0214]: parameter 'b' has no type
+ --> $DIR/untyped-before-close.nra:2:24
+  |
+2 | let add = func(a: int, b, ) -> int {
+  |                        ^ a parameter takes the type that follows its group of names
+  |
+  = help: write ': <type>' after the last name of the group, as in 'func(a, b: int)'
+
+For more information about this error, try `neura explain E0214`.

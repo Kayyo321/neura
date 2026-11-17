@@ -10,7 +10,7 @@ let program = import:Std.Program;
 // removed element would need about 9,000.
 export let Main = module:program.Entry (
     let Blob = class (
-        export let data: int[list] = [];
+        export let data: int[list] = new;
         export let init = func(seed: int, size: int) -> void {
             let i = 0;
             while (i < size) {

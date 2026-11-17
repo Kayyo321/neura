@@ -10,16 +10,16 @@ let tree_set = import:Std.Collections.TreeSet;
 
 let ImmutableSetTests = module (
     export let test_members = func() -> void {
-        let empty = immutable_set.of<string>([]);
+        let empty = immutable_set.of<string>(new);
         test.assert(empty.is_empty());
         test.assert_equal_string("{}", empty.to_string());
-        let set = immutable_set.of<string>(["b", "a", "b", "c"]);
+        let set = immutable_set.of<string>(new(["b", "a", "b", "c"]));
         test.assert_equal_int32(3, set.size());
         test.assert(!set.is_empty());
         test.assert(set.contains("a"));
         test.assert(!set.contains("d"));
-        test.assert(set.contains_all(["c", "b"]));
-        test.assert(!set.contains_all(["c", "d"]));
+        test.assert(set.contains_all(new(["c", "b"])));
+        test.assert(!set.contains_all(new(["c", "d"])));
         test.assert_equal_string("{b, a, c}", set.to_string());
         test.assert_equal_string("[b, a, c]", set.to_list().to_string());
         let items = set.iterator();
@@ -42,7 +42,7 @@ let ImmutableSetTests = module (
     // The set copies its contents: later changes to the source list or to
     // a returned list do not reach it.
     export let test_copies_at_construction = func() -> void {
-        let source: int[list] = [1, 2];
+        let source: int[list] = new([1, 2]);
         let set = immutable_set.of<int>(source);
         source.append(3);
         source[0] = 9;
@@ -52,13 +52,13 @@ let ImmutableSetTests = module (
     };
 
     export let test_equals_and_hash = func() -> void {
-        let a = immutable_set.of<int>([1, 2, 3]);
-        let b = immutable_set.of<int>([3, 2, 1, 1]);
+        let a = immutable_set.of<int>(new([1, 2, 3]));
+        let b = immutable_set.of<int>(new([3, 2, 1, 1]));
         test.assert(a.equals(b));
         test.assert_equal_uint64(6, a.hash_code() as uint64);
         test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
-        test.assert(!a.equals(immutable_set.of<int>([1, 2])));
-        test.assert(!a.equals(immutable_set.of<int>([1, 2, 4])));
+        test.assert(!a.equals(immutable_set.of<int>(new([1, 2]))));
+        test.assert(!a.equals(immutable_set.of<int>(new([1, 2, 4]))));
         let other: class = hash_set.create<int>();
         test.assert(!a.equals(other));
         test.assert(!a.equals(nil));
@@ -68,14 +68,14 @@ let ImmutableSetTests = module (
     // read-only interface.
     export let test_same_elements = func() -> void {
         let hashed = hash_set.create<int>();
-        hashed.add_all([3, 1, 2]);
+        hashed.add_all(new([3, 1, 2]));
         let sorted = tree_set.create<int>(int32.compare);
-        sorted.add_all([2, 3, 1]);
-        let fixed = immutable_set.of<int>([1, 2, 3]);
+        sorted.add_all(new([2, 3, 1]));
+        let fixed = immutable_set.of<int>(new([1, 2, 3]));
         test.assert(sets.same_elements<int>(hashed, sorted));
         test.assert(sets.same_elements<int>(sorted, fixed));
         test.assert(sets.same_elements<int>(fixed, hashed));
-        test.assert(sets.same_elements<int>(immutable_set.of<int>([]), hash_set.create<int>()));
+        test.assert(sets.same_elements<int>(immutable_set.of<int>(new), hash_set.create<int>()));
         sorted.add(4);
         test.assert(!sets.same_elements<int>(hashed, sorted));
         hashed.add(5);
@@ -91,8 +91,8 @@ let ImmutableSetTests = module (
         let generator = random.seeded(61);
         let round = 0;
         while (round < 50) {
-            let source: int[list] = [];
-            let model: int[list] = [];
+            let source: int[list] = new;
+            let model: int[list] = new;
             let length = generator.next_int_below(60);
             while (source.length < length) {
                 let value = generator.next_int_below(80);

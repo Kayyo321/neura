@@ -11,7 +11,7 @@ export let ByteBuffer = module (
     #[Final, NotThreadSafe]
     export let ByteBuffer = class (
         /// @brief Stores all bytes written since construction or the last clear.
-        let data: uint8[list] = [];
+        let data: uint8[list] = new;
 
         /// @brief The current number of bytes. Read-only.
         #Since("0.2.0")
@@ -30,7 +30,7 @@ export let ByteBuffer = module (
 
         /// @brief Discards all accumulated bytes.
         export let clear = func {
-            last empty: uint8[list] = [];
+            last empty: uint8[list] = new;
             data = empty;
         };
 

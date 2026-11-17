@@ -1,0 +1,6 @@
+// `int` and `int32` are the same type, so these alternatives are equal.
+let add = func(a, b: int) -> int {
+    return a + b;
+} or func(a: int32, b: int32) -> int {
+    return a - b;
+};

@@ -54,7 +54,7 @@ export let Sequence = module (
             begin();
             last more = has_next;
             last pull = next;
-            last buffer: T[list] = [];
+            last buffer: T[list] = new;
             return buffered<T>(buffer, func() -> bool {
                 while (more()) {
                     last value = pull();
@@ -72,7 +72,7 @@ export let Sequence = module (
             begin();
             last more = has_next;
             last pull = next;
-            last buffer: U[list] = [];
+            last buffer: U[list] = new;
             return buffered<U>(buffer, func() -> bool {
                 while (more()) {
                     last items = f(pull());
@@ -146,7 +146,7 @@ export let Sequence = module (
             last more = has_next;
             last pull = next;
             last done = cell.of<bool>(false);
-            last buffer: T[list] = [];
+            last buffer: T[list] = new;
             return buffered<T>(buffer, func() -> bool {
                 if (done.value) {
                     return false;
@@ -169,7 +169,7 @@ export let Sequence = module (
             last more = has_next;
             last pull = next;
             last started = cell.of<bool>(false);
-            last buffer: T[list] = [];
+            last buffer: T[list] = new;
             return buffered<T>(buffer, func() -> bool {
                 if (!started.value) {
                     started.value = true;
@@ -258,12 +258,12 @@ export let Sequence = module (
             }
             last more = has_next;
             last pull = next;
-            last buffer: T[list][list] = [];
+            last buffer: T[list][list] = new;
             return buffered<T[list]>(buffer, func() -> bool {
                 if (!more()) {
                     return false;
                 }
-                last chunk: T[list] = [];
+                last chunk: T[list] = new;
                 while (chunk.length < n && more()) {
                     chunk.append(pull());
                 }
@@ -282,8 +282,8 @@ export let Sequence = module (
             }
             last more = has_next;
             last pull = next;
-            last window: T[list] = [];
-            last buffer: T[list][list] = [];
+            last window: T[list] = new;
+            last buffer: T[list][list] = new;
             return buffered<T[list]>(buffer, func() -> bool {
                 if (window.length == n) {
                     if (!more()) {
@@ -299,7 +299,7 @@ export let Sequence = module (
                         window.append(pull());
                     }
                 }
-                last copy: T[list] = [];
+                last copy: T[list] = new;
                 let i = 0;
                 while (i < n) {
                     copy.append(window[i]);
@@ -317,7 +317,7 @@ export let Sequence = module (
             last more = has_next;
             last pull = next;
             last loaded = cell.of<bool>(false);
-            last buffer: T[list] = [];
+            last buffer: T[list] = new;
             return buffered<T>(buffer, func() -> bool {
                 if (loaded.value) {
                     return false;
@@ -337,7 +337,7 @@ export let Sequence = module (
             last more = has_next;
             last pull = next;
             last loaded = cell.of<bool>(false);
-            last buffer: T[list] = [];
+            last buffer: T[list] = new;
             return buffered<T>(buffer, func() -> bool {
                 if (loaded.value) {
                     return false;
@@ -365,7 +365,7 @@ export let Sequence = module (
             last more = has_next;
             last pull = next;
             last seen = hash_set.create<T>();
-            last buffer: T[list] = [];
+            last buffer: T[list] = new;
             return buffered<T>(buffer, func() -> bool {
                 while (more()) {
                     last value = pull();
@@ -381,7 +381,7 @@ export let Sequence = module (
         /// @brief Consumes the sequence into a new built-in list in traversal order.
         export let to_list = func -> T[list] {
             begin();
-            last result: T[list] = [];
+            last result: T[list] = new;
             while (has_next()) {
                 result.append(next());
             }
@@ -394,8 +394,8 @@ export let Sequence = module (
         /// @brief Consumes the sequence into two ArrayLists in input order. The first holds matches and the second holds nonmatches.
         export let partition = func(test: func(T) -> bool) -> [array_list.ArrayList<T>, array_list.ArrayList<T>] {
             begin();
-            last passed: T[list] = [];
-            last failed: T[list] = [];
+            last passed: T[list] = new;
+            last failed: T[list] = new;
             while (has_next()) {
                 last value = next();
                 if (test(value)) {

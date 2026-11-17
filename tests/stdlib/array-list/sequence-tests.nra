@@ -6,16 +6,16 @@ let test = import:Std.Test;
 // iterator, in list order.
 let SequenceTests = module (
     export let test_array_list_sequence = func() -> void {
-        let items = array_list.of<int>([1, 2, 3, 4, 5]);
+        let items = array_list.of<int>(new([1, 2, 3, 4, 5]));
         let evens = items.sequence().filter(func(v: int) -> bool { return v % 2 == 0; })
             .map<string>(func(v: int) -> string { return v.to_string(); }).to_list();
-        test.assert_equal<string[list]>(["2", "4"], evens);
+        test.assert_equal<string[list]>(new(["2", "4"]), evens);
         test.assert_equal_int32(5, items.sequence().count());
         test.assert_equal_int32(0, array_list.create<int>().sequence().count());
     };
 
     export let test_linked_list_sequence = func() -> void {
-        let items = linked_list.of<string>(["a", "b", "c"]);
+        let items = linked_list.of<string>(new(["a", "b", "c"]));
         let joined = items.sequence().fold<string>("", func(text: string, item: string) -> string {
             return text + item;
         });
@@ -23,9 +23,9 @@ let SequenceTests = module (
     };
 
     export let test_sequence_is_lazy = func() -> void {
-        let items = array_list.of<int>([1, 2, 3]);
+        let items = array_list.of<int>(new([1, 2, 3]));
         let pipeline = items.sequence();
         items.set(0, 10);
-        test.assert_equal<int[list]>([10, 2, 3], pipeline.to_list());
+        test.assert_equal<int[list]>(new([10, 2, 3]), pipeline.to_list());
     };
 );

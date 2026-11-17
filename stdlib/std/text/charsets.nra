@@ -73,7 +73,7 @@ export let Charsets = module (
         if (charset == Charset.Utf8) {
             return result.Result<uint8[list]>.Ok(strings.to_bytes(text));
         }
-        last bytes: uint8[list] = [];
+        last bytes: uint8[list] = new;
         last little_endian = charset == Charset.Utf16Le || charset == Charset.Utf32Le;
         last width = unit_width(charset);
         if (charset == Charset.Utf16 || charset == Charset.Utf32) {

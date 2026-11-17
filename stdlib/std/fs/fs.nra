@@ -151,7 +151,7 @@ export let Fs = module (
     export let list = func(path: Path) -> result.Result<Path[list]> {
         match (list_names(path.to_string())) {
             NamesOutcome.Ok(names) => {
-                last entries: Path[list] = [];
+                last entries: Path[list] = new;
                 for (let name in names) {
                     entries.append(path.join(name));
                 }
@@ -310,7 +310,7 @@ export let Fs = module (
 
     /// @brief Reads an open file in chunks until EOF or a read error.
     let read_open = func(file: files.File) -> result.Result<uint8[list]> {
-        let data: uint8[list] = [];
+        let data: uint8[list] = new;
         do {
             match (file.read(CopyBufferSize)) {
                 result.Result.Ok(chunk) => {

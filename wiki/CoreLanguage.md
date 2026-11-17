@@ -156,6 +156,49 @@ One candidate beats another if it ranks at least as high on every argument and h
 
 Distinct alternatives must have distinct resolved parameter types or counts. For example, `func(value: int)` and `func(other: int32)` in one group are duplicates because `int` aliases `int32`. Alternatives require bodies and fixed arity and take no function type parameters. They may use the type parameters of an enclosing class. Call a group directly or use a lambda to select an alternative for a function value. [Constructor overloads](ObjectLifecycle#construction) use the same selection rules.
 
+### Grouped parameters
+
+A parameter list is a sequence of groups. A group is one or more names separated by commas, then `:` and one type that every name of the group takes. `func(x, y: float64, label: string)` is `func(x: float64, y: float64, label: string)`. A name without a type belongs to the next group that has one, and a group never reaches back across an earlier one: in `func(a: int, b, c: string)`, `a` is `int` and `b` and `c` are `string`.
+
+<!-- example: check -->
+```neura
+let distance = func(x, y: float64, label: string) -> string {
+    return label + (x + y).to_string();
+};
+
+let clamp = func(
+    // The bounds share one type.
+    low, high: int,
+    #Note("the value to limit") value: int
+) -> int {
+    if (value < low) {
+        return low;
+    }
+    if (value > high) {
+        return high;
+    }
+    return value;
+};
+
+// A group takes a type of any shape, and one anonymous class is one class.
+let same = func(a, b: class (export let count: int;)) {
+    a.count = b.count;
+};
+let apply = func(f, g: func(int, int) -> int, pair: [int, string][]) -> int => f(1, 2) + g(3, 4);
+```
+
+| Rule | Detail |
+| --- | --- |
+| The type is parsed once. | Every parameter of a group has that one type, so an [anonymous class](Types#anonymous-classes) written in a group is one class, not one per name. |
+| Each parameter keeps its own name and tags. | A [tag](Tags) before a name applies to that name only. Diagnostics name the parameter, and the group's type keeps its own span. |
+| Grouping applies to every parameter list. | Functions, methods, constructors, function values and lambdas, and each alternative of an [overload group](#function-overloads). |
+| A variadic parameter is a group of one name, and it is last. | `func(a, b: int, items: ...string)` is valid. `func(a, items: ...string)` is `E0207`, because `a` would take the variadic type. |
+| A list may not end in names without a type. | The error `E0214` is at the first untyped name, also in a list that mixes typed groups with trailing untyped names. Until contextual typing of lambdas is defined, an untyped parameter is always an error. |
+| Duplicates are found after expansion. | A repeated name is `E0303`, and overload alternatives with equal signatures are `E0433`: `func(a, b: int)` and `func(a: int32, b: int32)` are equal because `int` aliases `int32`. |
+| Locals, fields, and enum payloads are not grouped. | `let a, b: int;` and `Point(x, y: int)` stay errors. |
+
+Tooling follows the expansion: signature help, hovers, and the documentation index count and name each parameter. `neura fmt` keeps the grouping and comments as written; it neither groups nor ungroups a list. A grouped list lowers to the NeuraIR of the written-out list. The two build the same image, apart from a source map, which records where each is written.
+
 ### Variadic parameters
 
 A named function can mark its final parameter `items: ...T` to accept zero or more arguments assignable to `T`. Each call evaluates its fixed arguments and then its variadic arguments in source order. The function receives a new `T[]`. Reading a named variadic function as a function value exposes its packed signature, so an indirect call supplies the final array explicitly.

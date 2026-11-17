@@ -17,9 +17,9 @@ export let OrdinalMap = module (
         /// @brief Maps each legal key to its dense slot, or -1 when absent.
         last position: int[list];
         /// @brief Occupied keys indexed by dense entry slot.
-        let dense_keys: int[list] = [];
+        let dense_keys: int[list] = new;
         /// @brief The values parallel to the occupied keys.
-        let dense_values: V[list] = [];
+        let dense_values: V[list] = new;
         /// @brief The structural modification count shared with iterators.
         last modifications: cell.Cell<uint64> = cell.of<uint64>(0);
         /// @brief Whether this instance's text conversion is running.
@@ -31,7 +31,7 @@ export let OrdinalMap = module (
             if (limit < 0) {
                 trap_with_message("invalid argument: negative size");
             }
-            last slots: int[list] = [];
+            last slots: int[list] = new;
             let i = 0;
             while (i < limit) {
                 slots.append(-1);
@@ -87,8 +87,8 @@ export let OrdinalMap = module (
             for (let key in dense_keys) {
                 position[key] = -1;
             }
-            last no_keys: int[list] = [];
-            last no_values: V[list] = [];
+            last no_keys: int[list] = new;
+            last no_values: V[list] = new;
             dense_keys = no_keys;
             dense_values = no_values;
             changed();
@@ -170,7 +170,7 @@ export let OrdinalMap = module (
 
         /// @brief Copies the keys to a new built-in list in ascending key order.
         export let keys = func -> int[list] {
-            last result: int[list] = [];
+            last result: int[list] = new;
             last limit = position.length;
             let key = 0;
             while (key < limit) {
@@ -184,7 +184,7 @@ export let OrdinalMap = module (
 
         /// @brief Copies the values to a new built-in list in ascending key order.
         export let values = func -> V[list] {
-            last result: V[list] = [];
+            last result: V[list] = new;
             last limit = position.length;
             let key = 0;
             while (key < limit) {
@@ -199,7 +199,7 @@ export let OrdinalMap = module (
 
         /// @brief Copies the `[key, value]` tuples to a new built-in list in ascending key order.
         export let entries = func -> [int, V][list] {
-            last result: [int, V][list] = [];
+            last result: [int, V][list] = new;
             last limit = position.length;
             let key = 0;
             while (key < limit) {

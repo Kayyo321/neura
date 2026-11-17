@@ -170,6 +170,28 @@ let handle=func(value:Shape){match(value){Shape.Point{x,y}=>{if(x>y){return;}},S
                 result = execute(*flags, source=b'let value=1;')
                 self.assertNotEqual(result.returncode, 0)
 
+    def test_grouped_parameters_and_shorthand_keep_the_authors_grouping(self):
+        source = """let Point=class(
+    export last x:int;
+    export last y:int;
+    export let init=func(x,y:int)=>set;
+);
+let distance=func(a,b:float64,label:string)->string{return label;};
+let split=func(a:float64,b:float64,label:string)->string{return label;};
+let commented=func(
+// the corners
+a,   b: float64, // after a group
+#Note("text") label : string
+)->string{return label;};
+"""
+        formatted = self.formatted(source)
+        self.assertIn("func(x, y: int) => set;", formatted)
+        self.assertIn("func(a, b: float64, label: string) -> string {", formatted)
+        self.assertIn("func(a: float64, b: float64, label: string) -> string {", formatted)
+        self.assertIn("// the corners", formatted)
+        self.assertIn("// after a group", formatted)
+        self.assertIn("a, b: float64,", formatted)
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

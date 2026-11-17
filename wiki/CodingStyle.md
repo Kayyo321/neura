@@ -136,7 +136,7 @@ let optional = import:Std.Core.Optional;
 ```
 
 #### Function Parameters (`snake_case`)
-All function parameters must use `snake_case`. A parameter that would have the name of a field it initializes takes another name, so that the constructor can assign the field by its bare name:
+All function parameters must use `snake_case`. Parameters of one type may share it as a group, `func(width, height: int)`. In a constructor written with assignments, a parameter that would have the name of a field it initializes takes another name, so that the constructor can assign the field by its bare name; the [`=> set` shorthand](ObjectLifecycle#constructor-shorthand) needs no such renaming:
 <!-- example: check -->
 ```neura
 let format_log = func(log_message: string, log_level: int) -> string {
@@ -276,7 +276,7 @@ let timeout_ms = func(retrying: bool, attempts: int) -> int {
   let corner = new Point(3, 4);
   let [start, end]: [Point, Point] = new, new(10, 10);
   ```
-- Name the parameters of `init` differently from the fields they set (`left`, not `x`), so the body assigns each field by its bare name.
+- When a constructor only stores each parameter in the field of the same name, write the shorthand `init = func(x, y: int) => set;` and give the parameters the fields' names. Otherwise name the parameters of `init` differently from the fields they set (`left`, not `x`), so the body assigns each field by its bare name.
 
 ### Anonymous Classes
 - Use an anonymous class for a small group of fields that one or two places pass around, and a named class for anything with methods or used across modules. An anonymous class with accessors or `const` or `last` fields suits a single value, such as one settings object; it is a class of its own, so no other place can name its type. Lay out a multi-line anonymous class like a class definition, with the closing parenthesis on its own line:

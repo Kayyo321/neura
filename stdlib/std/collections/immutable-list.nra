@@ -17,7 +17,7 @@ export let ImmutableList = module (
 
         /// @brief Copies `values`.
         export let init = func(values: T[list]) {
-            last copy: T[list] = [];
+            last copy: T[list] = new;
             last count = values.length;
             let i = 0;
             while (i < count) {
@@ -128,7 +128,7 @@ export let ImmutableList = module (
             if (start < 0 || start > end || end > storage.length) {
                 trap_with_message("invalid argument: range");
             }
-            last part: T[list] = [];
+            last part: T[list] = new;
             let i = start;
             while (i < end) {
                 part.append(storage[i]);
@@ -144,7 +144,7 @@ export let ImmutableList = module (
 
         /// @brief A new built-in list in order.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             last count = storage.length;
             let i = 0;
             while (i < count) {

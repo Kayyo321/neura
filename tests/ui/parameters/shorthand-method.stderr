@@ -1,0 +1,13 @@
+error[E0537]: 'grow' is not an instance field of class 'Box'
+ --> $DIR/shorthand-method.nra:5:39
+  |
+3 |     export let grow = func() {};
+  |                ---- 'grow' is declared here as a method
+4 |
+5 |     export let init = func(size: int, grow: int) => set;
+  |                                       ^^^^
+  |                                                     --- '=> set' stores each parameter in the field of the same name
+  |
+  = help: name the parameter after an instance field of this class, or write the constructor with a block
+
+For more information about this error, try `neura explain E0537`.

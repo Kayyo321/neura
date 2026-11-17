@@ -21,7 +21,7 @@ let DeferredGenericMethods = module:program.Entry (
             return new Box<[int, T]>(item);
         };
         export let nest = func() -> Box<T[list]> {
-            let items: T[list] = [value, value];
+            let items: T[list] = new([value, value]);
             return new Box<T[list]>(items);
         };
         export let name = func() -> string {

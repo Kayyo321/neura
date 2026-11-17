@@ -11,7 +11,7 @@ let test = import:Std.Test;
 let Sha256Tests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
     let seeded = func(length: int, seed: uint64) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
             x = (x * 1103515245 + 12345) & 2147483647;
@@ -28,19 +28,19 @@ let Sha256Tests = module (
     // and in two updates split at `piece`.
     let check_pieces = func(bytes: uint8[list], piece: int, expected: string) -> void {
         let digest = sha256s.create();
-        let chunk: uint8[list] = [];
+        let chunk: uint8[list] = new;
         for (let b in bytes) {
             chunk.append(b);
             if (chunk.length == piece) {
                 digest.update(chunk);
-                chunk = [];
+                chunk = new;
             }
         }
         digest.update(chunk);
         test.assert_equal_string(expected, hex.encode(digest.finish()));
         let halves = sha256s.create();
-        let head: uint8[list] = [];
-        let tail: uint8[list] = [];
+        let head: uint8[list] = new;
+        let tail: uint8[list] = new;
         for (let i = 0; i < bytes.length; i = i + 1) {
             if (i < piece) {
                 head.append(bytes[i]);
@@ -74,7 +74,7 @@ let Sha256Tests = module (
         check_text("message digest", "f7846f55cf23e14eebeab5b4e1550cad5b509e3348fbc4efa3a1413d393cb650");
         check_text("The quick brown fox jumps over the lazy dog",
             "d7a8fbb307d7809469ca9abcb0082e4f8d5651e46d3cdb762d02d0bf37c9e592");
-        let all: uint8[list] = [];
+        let all: uint8[list] = new;
         for (let b = 0; b < 256; b = b + 1) {
             all.append(b as uint8);
         }
@@ -125,9 +125,9 @@ let Sha256Tests = module (
 
     export let test_constructor_and_empty_updates = func() -> void {
         let digest = new sha256s.Sha256();
-        digest.update([]);
+        digest.update(new);
         digest.update(strings.to_bytes("ab"));
-        digest.update([]);
+        digest.update(new);
         digest.update(strings.to_bytes("c"));
         test.assert_equal_string("ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
             hex.encode(digest.finish()));
@@ -138,7 +138,7 @@ let Sha256Tests = module (
     // 100,000 bytes of 'a' in 1,000-byte updates (python3 hashlib). The
     // one-million-byte FIPS vector is the program programs/million-a.
     export let test_hundred_thousand_a = func() -> void {
-        let chunk: uint8[list] = [];
+        let chunk: uint8[list] = new;
         for (let i = 0; i < 1000; i = i + 1) {
             chunk.append(97);
         }

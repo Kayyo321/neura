@@ -11,12 +11,12 @@ let.promote _ = import:Std.Core.Result;
 /// @see [Std.Encoding.Hex](https://github.com/Kayyo321/neura/wiki/Stdlib-Encoding-Hex)
 export let ReferenceHex = module (
     /// @brief The value of each byte as a hex digit, or 255. Built by the first decode that needs it.
-    let digit_values: uint8[list] = [];
+    let digit_values: uint8[list] = new;
 
     /// @brief Returns the hexadecimal lookup table, creating it on first use.
     let ready_values = func -> uint8[list] {
         if (digit_values.length == 0) {
-            let values: uint8[list] = [];
+            let values: uint8[list] = new;
             for (let b = 0; b < 256; b++) {
                 values.append(255);
             }
@@ -34,7 +34,7 @@ export let ReferenceHex = module (
 
     /// @brief Two lowercase hex digits per byte, most significant first.
     export let encode = func(bytes: uint8[list]) -> string {
-        let digits: uint8[list] = [];
+        let digits: uint8[list] = new;
         for (let b in bytes) {
             // 0 through 9 become 48 through 57 and 10 through 15 become 97
             // through 102: (n + 6) >> 4 is 1 exactly when n is at least 10.
@@ -54,7 +54,7 @@ export let ReferenceHex = module (
     export let decode = func(text: string) -> Result<uint8[list]> {
         let values = ready_values();
         let count = text.byte_length;
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         let i = 0;
         while (i + 1 < count) {
             let high = values[text.byte_at(i) as int];

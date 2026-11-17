@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this range is not
+ --> $DIR/range.nra:2:24
+  |
+2 | let evens: int[list] = 0 .. 8 : 2;
+  |                        ^^^^^^^^^^ the expected type is int32[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+2 | let evens: int[list] = new(0 .. 8 : 2);
+  |                        ++++          +
+
+For more information about this error, try `neura explain E0450`.

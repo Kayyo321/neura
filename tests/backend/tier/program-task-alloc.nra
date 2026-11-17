@@ -13,7 +13,7 @@ let mix = func(value: int) -> int => (value * 31 + 7) % 1009;
 let deliver = func(out: channels.Sender<int>, value: int) -> int {
     let mixed = mix(value);
     let note = "v" + mixed.to_string();
-    let parts: int[list] = [];
+    let parts: int[list] = new;
     parts.append(mixed);
     parts.append(note.byte_length as int);
     out.send(mixed);

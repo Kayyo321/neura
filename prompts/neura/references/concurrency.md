@@ -346,7 +346,7 @@ let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let squares = parallel.map<int, int>([1, 2, 3, 4], square, parallel.limits(100000, 100000));
         console.println("{} {}", squares[3], squares.length);
-        let calls: (func() -> int)[list] = [one, two];
+        let calls: (func() -> int)[list] = new([one, two]);
         let results = tasks.all<int>(calls);                   // results in call order
         console.println("{}", results[0] + results[1]);
         return program.ExitCode.Ok;

@@ -1,0 +1,6 @@
+let join = func(a, b: int, items: ...string) -> int {
+    return a + b;
+};
+let items = func(a: int, items: ...string, b, c: int) -> int {
+    return a;
+};

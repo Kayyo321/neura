@@ -70,7 +70,7 @@ export let MethodHandle = module (
             if (args.length < named) {
                 trap_with_message("invalid argument: expected at least " + named.to_string() + " arguments");
             }
-            last promoted: Argument[list] = [];
+            last promoted: Argument[list] = new;
             for (let i = 0; i < args.length; i++) {
                 if (i < named) {
                     promoted.append(args[i]);
@@ -115,7 +115,7 @@ export let MethodHandle = module (
                                   args.length.to_string());
             }
             let temporary: Arena = nil;
-            last values: ForeignValue[list] = [];
+            last values: ForeignValue[list] = new;
             for (let i = 0; i < args.length; i++) {
                 match (args[i]) {
                     Argument.Text(text) => {
@@ -151,7 +151,7 @@ export let MethodHandle = module (
                 trap_with_message("invalid argument: expected " + layouts.length.to_string() + " arguments, got " +
                                   values.length.to_string());
             }
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             for (let i = 0; i < values.length; i++) {
                 codec.encode_value(bytes, values[i], layouts[i]);
             }
@@ -166,7 +166,7 @@ export let MethodHandle = module (
 
     /// @brief The arguments of an array as a list.
     let listed = func(args: Argument[]) -> Argument[list] {
-        last list: Argument[list] = [];
+        last list: Argument[list] = new;
         for (let arg in args) {
             list.append(arg);
         }

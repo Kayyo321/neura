@@ -77,7 +77,7 @@ results = json.loads(subprocess.run([node, os.path.join(here, 'js_ref.js'), f.na
 os.unlink(f.name)
 lines = []
 for (pattern, flags, s), (values, full) in zip(cases, results):
-    lines.append('        check(%s, %d, %s, %s, [%s]);' % (
+    lines.append('        check(%s, %d, %s, %s, %s);' % (
         neura_string(pattern), flags, neura_string(s), 'true' if full else 'false',
-        ', '.join(str(v) for v in values)))
+        ('new([%s])' % ', '.join(str(v) for v in values)) if values else 'new'))
 print('\n'.join(lines))

@@ -43,7 +43,7 @@ export let RegexCheck = module (
     };
 
     export let spans = func(r: regex.Regex, m: regex.RegexMatch) -> int[list] {
-        let values: int[list] = [];
+        let values: int[list] = new;
         let g = 0;
         while (g <= r.group_count()) {
             let start = m.group_start(g);
@@ -65,7 +65,7 @@ export let RegexCheck = module (
 
     export let check = func(pattern: string, flags: int, input: string, full: bool, expected: int[list]) -> void {
         let r = compile_flags(pattern, flags);
-        let actual: int[list] = [];
+        let actual: int[list] = new;
         let all = r.find_all(input);
         for (let m in all) {
             for (let value in spans(r, m)) {

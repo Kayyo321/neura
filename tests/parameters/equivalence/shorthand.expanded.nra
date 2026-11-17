@@ -1,0 +1,37 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Point = class (
+    export last x: int;
+    export last y: int;
+    export let norm1 = func() -> int {
+        return x + y;
+    };
+
+    export let init = func(x: int, y: int) {
+        instance.x = x;
+        instance.y = y;
+    };
+);
+let Base = class (
+    export let id: int = 7;
+);
+let Tagged = class : Base (
+    export last tag: string;
+    export let size: int = 1;
+
+    export let init = func(tag: string, size: int) {
+        super.init();
+        instance.tag = tag;
+        instance.size = size;
+    };
+);
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let p = new Point(3, 4);
+        let t = new Tagged("t", 9);
+        console.print_line(p.norm1().to_string());
+        console.print_line(t.tag + t.size.to_string() + t.id.to_string());
+        return program.ExitCode.Ok;
+    };
+);

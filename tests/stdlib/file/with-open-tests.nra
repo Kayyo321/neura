@@ -36,7 +36,7 @@ let WithOpenTests = module (
     };
 
     let bytes_of = func(text: string) -> uint8[list] {
-        let out: uint8[list] = [];
+        let out: uint8[list] = new;
         let i = 0;
         while (i < text.byte_length) {
             out.append(text.byte_at(i));
@@ -64,7 +64,7 @@ let WithOpenTests = module (
     export let test_ok_returns_the_body_value_and_closes = func() -> void {
         let dir = fresh("ok");
         let p = dir.join("a.txt");
-        let kept: file.File[list] = [];
+        let kept: file.File[list] = new;
         let outcome = file.with_open<int>(p, file.OpenMode.Write, func(f: file.File) -> result.Result<int> {
             kept.append(f);
             test.assert_ok<unit.Unit>(f.write(bytes_of("hello")));
@@ -98,7 +98,7 @@ let WithOpenTests = module (
 
     export let test_body_error_is_returned_and_the_file_closed = func() -> void {
         let dir = fresh("body-error");
-        let kept: file.File[list] = [];
+        let kept: file.File[list] = new;
         let outcome = file.with_open<int>(dir.join("b.txt"), file.OpenMode.Write,
             func(f: file.File) -> result.Result<int> {
                 kept.append(f);

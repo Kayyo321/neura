@@ -10,7 +10,7 @@ let sorting = import:Std.Collections.Sorting;
 export let SortBenchmark = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
-        let items: int32[list] = [];
+        let items: int32[list] = new;
         let seed: uint64 = 12345;
         for (let i = 0; i < n; i = i + 1) {
             seed = (seed * 1103515245 + 12345) & 2147483647;

@@ -1,0 +1,9 @@
+error[E0205]: expected a type annotation or an initializer
+ --> $DIR/field-group.nra:3:17
+  |
+3 |     export let x, y: int;
+  |                 ^ 'x' needs a type, a value, or both
+  |
+  = help: write ': T' after the name for its type, and '= value' for its value
+
+For more information about this error, try `neura explain E0205`.

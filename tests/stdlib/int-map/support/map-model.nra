@@ -16,8 +16,8 @@ export let MapModel = module (
                              trim: func() -> void, sorted: bool, seed: uint64, operations: int, small_domain: int,
                              large_domain: int) -> void {
         let generator = random.seeded(seed);
-        let ids: int[list] = [];
-        let values: int[list] = [];
+        let ids: int[list] = new;
+        let values: int[list] = new;
         let plus = func(a: int, b: int) -> int {
             return a + b;
         };
@@ -99,8 +99,8 @@ export let MapModel = module (
                     return v % divisor == 0;
                 });
                 test.assert_equal_int32(ids.length, calls.value);
-                let kept_ids: int[list] = [];
-                let kept_values: int[list] = [];
+                let kept_ids: int[list] = new;
+                let kept_values: int[list] = new;
                 let i = 0;
                 while (i < ids.length) {
                     if (values[i] % divisor != 0) {
@@ -138,8 +138,8 @@ export let MapModel = module (
             } else if (choice < 95) {
                 if (generator.next_int_below(3) == 0) {
                     map.clear();
-                    replace(ids, []);
-                    replace(values, []);
+                    replace(ids, new);
+                    replace(values, new);
                 }
             } else {
                 let seen = cell.of<int>(0);

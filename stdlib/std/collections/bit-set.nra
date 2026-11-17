@@ -58,7 +58,7 @@ export let BitSet = module (
     #NotThreadSafe
     export let BitSet = class implements MutableSet<int> (
         /// @brief Membership bits grouped into 32 consecutive integers per word.
-        let words: uint32[list] = [];
+        let words: uint32[list] = new;
         /// @brief The number of set bits across all stored words.
         let count: int = 0;
         /// @brief The structural modification count shared with iterators.
@@ -169,7 +169,7 @@ export let BitSet = module (
 
         /// @brief Removes all members and releases the stored words.
         export let clear = func {
-            last empty: uint32[list] = [];
+            last empty: uint32[list] = new;
             words = empty;
             count = 0;
             changed();
@@ -185,7 +185,7 @@ export let BitSet = module (
         /// @brief A new built-in list of the members in ascending order.
         #Pure
         export let to_list = func -> int[list] {
-            last result: int[list] = [];
+            last result: int[list] = new;
             let value = next_in(words, 0);
             while (value >= 0) {
                 result.append(value);

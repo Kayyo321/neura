@@ -44,7 +44,7 @@ export let TextSplit = module:program.Entry (
                 }
             }
             last parts = strings.split(line.to_string(), ",");
-            last fields: string[list] = [];
+            last fields: string[list] = new;
             for (let k = 0; k < parts.length; k = k + 1) {
                 last trimmed = strings.trim(parts[k]);
                 if (trimmed == "beta") {

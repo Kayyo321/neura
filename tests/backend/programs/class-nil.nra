@@ -43,7 +43,7 @@ let Classes = module:program.Entry (
         test.assert(node == node.next);
         node.next = nil;
         test.assert(nil == node.next);
-        let items: class[list] = [xyz, nil, marker];
+        let items: class[list] = new([xyz, nil, marker]);
         test.assert(items[1] == nil);
         let version = items.version;
         items[1] = xyz;
@@ -55,11 +55,11 @@ let Classes = module:program.Entry (
         let another: [int, bool] = [23, true];
         test.assert(pair.equals(another) && pair.hash_code() == 2905);
         test.assert(pair.to_string() == "[23, true]");
-        let names: string[list] = ["a", "b"];
-        let shorter: string[list] = ["a"];
+        let names: string[list] = new(["a", "b"]);
+        let shorter: string[list] = new(["a"]);
         test.assert(!names.equals(shorter) && names.to_string() == "[a, b]");
         test.assert(names.hash_code() == 4066);
-        let optional_nodes: Node[list] = [nil];
+        let optional_nodes: Node[list] = new([nil]);
         test.assert(optional_nodes.to_string() == "[nil]");
         test.assert(marker.to_string() == "Classes.Marker#1");
         test.assert(marker.hash_code() == 2654435761);

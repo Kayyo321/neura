@@ -32,15 +32,15 @@ let HexKernelOracle = module (
     // Every byte value, the empty list, and malformed texts: every byte as a
     // digit in the high and low position, and odd lengths.
     export let test_edge_corpus = func {
-        agree([]);
-        let all: uint8[list] = [];
+        agree(new);
+        let all: uint8[list] = new;
         for (let b = 0; b < 256; b++) {
-            agree([b as uint8]);
+            agree(new([b as uint8]));
             all.append(b as uint8);
         }
         agree(all);
         for (let b = 1; b < 128; b++) {
-            let digit = strings.from_scalars([b as uint32]);
+            let digit = strings.from_scalars(new([b as uint32]));
             agree_decode(digit);
             agree_decode(digit + "0");
             agree_decode("0" + digit);

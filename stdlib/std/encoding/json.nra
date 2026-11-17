@@ -155,7 +155,7 @@ export let Json = module (
     /// "invalid argument: number text".
     #[NoDiscard, Pure, ThreadSafe]
     export let write = func(value: JsonValue) -> string {
-        last out: uint8[list] = [];
+        last out: uint8[list] = new;
         write_value(out, value, -1, 0);
         return text_of(out);
     };
@@ -170,7 +170,7 @@ export let Json = module (
         if (indent < 0) {
             trap_with_message("invalid argument: negative indent");
         }
-        last out: uint8[list] = [];
+        last out: uint8[list] = new;
         write_value(out, value, indent, 0);
         return text_of(out);
     };
@@ -403,7 +403,7 @@ export let Json = module (
             if (depth > MaxDepth) {
                 return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
             }
-            last items: JsonValue[list] = [];
+            last items: JsonValue[list] = new;
             let p = skip_whitespace(text, count, start + 1);
             if (p < count && text.byte_at(p) == 93) {
                 value = JsonValue.Array(items);
@@ -442,11 +442,11 @@ export let Json = module (
             if (depth > MaxDepth) {
                 return fail(ParseErrorKind.OutOfRange, start, "nesting deeper than 512");
             }
-            last members: [string, JsonValue][list] = [];
+            last members: [string, JsonValue][list] = new;
             // The member names, read without unpacking the tuples, and the
             // member positions by name once the object is large enough
             // that scanning for a repeated name would cost more.
-            last names: string[list] = [];
+            last names: string[list] = new;
             let positions: StringMap<int> = nil;
             let p = skip_whitespace(text, count, start + 1);
             if (p < count && text.byte_at(p) == 125) {
@@ -544,7 +544,7 @@ export let Json = module (
                 text_value = text.slice(first, i);
                 return i + 1;
             }
-            last out: uint8[list] = [];
+            last out: uint8[list] = new;
             copy_bytes(out, text, first, i);
             while (i < count) {
                 last b = text.byte_at(i);
@@ -1026,7 +1026,7 @@ export let Json = module (
 
     /// @brief Combines distinct member-pair hashes without regard to member order.
     let object_hash = func(members: [string, JsonValue][list]) -> uint32 {
-        last pairs: uint32[list] = [];
+        last pairs: uint32[list] = new;
         for (let entry in members) {
             pairs.append(hashing.combine(entry[0].hash_code(), hash(entry[1])));
         }
@@ -1074,7 +1074,7 @@ export let Json = module (
         }
         // The significant digits, read through the integer part and then
         // the fraction.
-        last digits: uint8[list] = [];
+        last digits: uint8[list] = new;
         let started = false;
         for (let k = i; k < integer_end; k++) {
             last b = text.byte_at(k);
@@ -1147,7 +1147,7 @@ export let Json = module (
             delta = -adjustment;
         }
         // Ten leading zeros absorb any carry: the adjustment is below 10^10.
-        last bytes: uint8[list] = [48, 48, 48, 48, 48, 48, 48, 48, 48, 48];
+        last bytes: uint8[list] = new([48, 48, 48, 48, 48, 48, 48, 48, 48, 48]);
         for (let k = 0; k < length; k++) {
             bytes.append(digits.byte_at(k));
         }
@@ -1170,7 +1170,7 @@ export let Json = module (
         while (bytes[first] == 48) {
             first++;
         }
-        last kept: uint8[list] = [];
+        last kept: uint8[list] = new;
         if (negative) {
             kept.append(45);
         }

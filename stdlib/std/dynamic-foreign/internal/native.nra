@@ -51,7 +51,7 @@ export let Native = module (
     /// @brief The provider's target triple.
     let abi_triple: string = "";
     /// @brief The provider's layout bytes: size and alignment pairs, then char signedness and byte order.
-    let abi_layouts: uint8[list] = [];
+    let abi_layouts: uint8[list] = new;
 
     /// @brief Traps for a failed native operation, naming the capability when it was denied.
     #Pure
@@ -258,6 +258,6 @@ export let Native = module (
     /// @brief Traps through fail and satisfies a byte-list result.
     let failed_bytes = func(operation: string, code: uint32) -> uint8[list] {
         fail(operation, code);
-        return [];
+        return new;
     };
 );

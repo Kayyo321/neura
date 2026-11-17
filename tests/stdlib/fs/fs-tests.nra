@@ -42,7 +42,7 @@ let FsTests = module (
     };
 
     let numbers = func(count: int) -> uint8[list] {
-        let out: uint8[list] = [];
+        let out: uint8[list] = new;
         let i = 0;
         while (i < count) {
             out.append((i % 253) as uint8);
@@ -75,7 +75,7 @@ let FsTests = module (
         test.assert_ok<unit.Unit>(fs.write_bytes(b, data));
         let back = test.assert_ok<uint8[list]>(fs.read_bytes(b));
         test.assert(back.equals(data));
-        let empty: uint8[list] = [];
+        let empty: uint8[list] = new;
         test.assert_ok<unit.Unit>(fs.write_bytes(b, empty));
         test.assert_equal_int32(0, test.assert_ok<uint8[list]>(fs.read_bytes(b)).length);
         test.assert_equal_string("", test.assert_ok<string>(fs.read_text(b)));
@@ -87,7 +87,7 @@ let FsTests = module (
         expect_kind<uint8[list]>(fs.read_bytes(dir.join("missing")), error.IoErrorKind.NotFound);
         expect_kind<string>(fs.read_text(dir.join("missing")), error.IoErrorKind.NotFound);
         expect_kind<string>(fs.read_text(dir), error.IoErrorKind.IsADirectory);
-        let invalid: uint8[list] = [104, 105, 255];
+        let invalid: uint8[list] = new([104, 105, 255]);
         test.assert_ok<unit.Unit>(fs.write_bytes(dir.join("bad.txt"), invalid));
         let failure = test.assert_err<string>(fs.read_text(dir.join("bad.txt")));
         test.assert_equal_string("InvalidData: invalid UTF-8 (fs-work/read-errors/bad.txt)", error.message(failure));

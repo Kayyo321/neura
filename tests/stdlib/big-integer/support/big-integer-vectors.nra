@@ -4,7 +4,7 @@
 export let BigIntegerVectors = module (
     // [a, b, a + b, a - b, compare(a, b) + 1]
     export let add_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             2, 1, 2103718205, 2, 1, 2, 2, 1,
             2103718207, 2, 1, 2103718203, 0, 2, 1, 2117924574,
             1, 1, 2798407104, 1, 1, 680482530, 2, 2,
@@ -389,13 +389,13 @@ export let BigIntegerVectors = module (
             0, 0, 0, 0, 1024, 1, 9, 1658356269,
             428108789, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 1023,
             2
-        ];
+        ]);
         return cases;
     };
 
     // [a, b, a * b], schoolbook sizes
     export let multiply_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             1, 5, 0, 0, 0, 0, 33554432, 1,
             5, 2147483648, 0, 4294967294, 0, 4294967294, 1, 10,
             0, 0, 0, 0, 0, 16777216, 4227858432, 33554431,
@@ -670,13 +670,13 @@ export let BigIntegerVectors = module (
             1, 1, 1666598501, 2, 13, 299326954, 3136467965, 1790400911,
             1081106443, 340846623, 3772708210, 337764831, 1427564880, 3171857324, 3730530288, 4016684720,
             3877622491, 1622327694
-        ];
+        ]);
         return cases;
     };
 
     // [a, b, a * b], both operands of 48 limbs or more in most cases
     export let karatsuba_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             2, 48, 1144063784, 2938269386, 2774804914, 3267948194, 421165509, 2405734115,
             1026546353, 2423420535, 3628455737, 3516917110, 2307633199, 2679194487, 482968729, 3119654164,
             2175990079, 1607419982, 2492747607, 4116553288, 3499130680, 1931351535, 798405040, 365823161,
@@ -1417,13 +1417,13 @@ export let BigIntegerVectors = module (
             4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295,
             4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295,
             4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967294
-        ];
+        ]);
         return cases;
     };
 
     // [a, b, a / b truncated, remainder, floor_mod(a, b)]
     export let divide_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             2, 9, 335323352, 1392107800, 3370290205, 1509616155, 1113566287, 3896854621,
             640264816, 3852693945, 380129053, 2, 2, 2743669461, 2196773192, 1,
             7, 2108901683, 2590727555, 2360810947, 1072351175, 413554092, 789470406, 743200008,
@@ -2143,13 +2143,13 @@ export let BigIntegerVectors = module (
             2147483647, 4294967294, 2, 3, 4294967295, 2, 1, 1,
             2, 2147483661, 4294967291, 2, 2, 11, 4294967253, 2,
             2, 11, 4294967253
-        ];
+        ]);
         return cases;
     };
 
     // [a, n, a * 2^n, floor(a / 2^n)]
     export let shift_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             2, 1, 980090664, 5, 2, 2, 1298130176, 7,
             2, 1, 30627834, 1, 20, 4294967295, 4294967295, 4294967295,
             4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295, 4294967295,
@@ -2392,13 +2392,13 @@ export let BigIntegerVectors = module (
             1, 2, 3, 1302606364, 732475911, 2010170680, 65, 2,
             5, 0, 0, 2605212728, 1464951822, 4020341360, 2, 1,
             1005085341, 0, 0, 1, 0, 0, 0, 0
-        ];
+        ]);
         return cases;
     };
 
     // [a, e, a^e]
     export let pow_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             0, 0, 0, 1, 1, 1, 0, 0,
             5, 0, 0, 1, 1, 1, 1000, 1,
             1, 1, 2, 1, 1, 999, 2, 1,
@@ -2448,13 +2448,13 @@ export let BigIntegerVectors = module (
             65536, 1, 1, 4294967295, 11, 1, 11, 4294967295,
             10, 4294967241, 164, 4294966966, 461, 4294966834, 329, 4294967131,
             54, 4294967285
-        ];
+        ]);
         return cases;
     };
 
     // [a, b, gcd(a, b)]
     export let gcd_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             2, 5, 725640959, 22742190, 1424024725, 4272225105, 2145301611, 2,
             8, 2843685378, 2798200997, 1401433465, 41120309, 2151847721, 3932146815, 4283596200,
             1072650805, 1, 4, 666762501, 4181256345, 2136573467, 2, 1,
@@ -2548,13 +2548,13 @@ export let BigIntegerVectors = module (
             8, 2, 3, 3256948874, 4196733596, 3242155548, 1, 7,
             0, 1, 1, 2147483647, 1, 1, 1, 1,
             1, 2, 0, 0, 0, 0, 0, 0
-        ];
+        ]);
         return cases;
     };
 
     // [a, e, m, a^e mod m]
     export let mod_pow_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             1, 8, 0, 0, 0, 0, 0, 0,
             0, 134217728, 1, 2, 1769108704, 871223340, 1, 4,
             3750428580, 3215064863, 4162075297, 145624341, 1, 4, 3308909252, 1704478969,
@@ -2643,13 +2643,13 @@ export let BigIntegerVectors = module (
             1, 1, 2, 1, 1, 10, 1, 1,
             1024, 0, 0, 1, 1, 2, 1, 1,
             10, 1, 1, 1025, 1, 1, 1024
-        ];
+        ]);
         return cases;
     };
 
     // [a, m, 1 when an inverse exists, inverse]
     export let mod_inverse_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             1, 3, 1533892228, 2852692209, 4203350153, 1, 3, 0,
             4294959104, 8191, 0, 0, 0, 1, 3, 4253774665,
             2984089969, 1778612065, 1, 2, 2147483647, 4294967295, 1, 1,
@@ -2702,13 +2702,13 @@ export let BigIntegerVectors = module (
             1, 7, 0, 0, 0, 1, 1, 10,
             1, 1, 4, 0, 0, 0, 2, 1,
             1, 1, 1, 5, 1, 1, 1, 4
-        ];
+        ]);
         return cases;
     };
 
     // [a, float64 bits low, high, hash_code, bit_length, 1 when it fits int64, int64 bits low, high]
     export let conversion_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             0, 0, 0, 0, 0, 0, 1, 0,
             0, 1, 1, 1, 0, 1072693248, 1, 1,
             1, 1, 0, 2, 1, 1, 0, 3220176896,
@@ -2890,13 +2890,13 @@ export let BigIntegerVectors = module (
             0, 0, 0, 0, 0, 0, 0, 0,
             0, 0, 1, 0, 4193255424, 4283651169, 929, 0,
             0, 0
-        ];
+        ]);
         return cases;
     };
 
     // [a, n, bit n of |a|]
     export let bit_cases = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             1, 7, 4294967295, 2, 4294967295, 1, 1, 2147483647,
             2, 629, 0, 1, 1, 1065716059, 539, 0,
             1, 12, 1793487379, 463492343, 3305157716, 799339267, 959264683, 3536889381,
@@ -2946,13 +2946,13 @@ export let BigIntegerVectors = module (
             579, 0, 2, 4, 1, 2, 2, 4294967294,
             363, 0, 2, 1, 2480703272, 223, 0, 2,
             2, 2808068938, 1523917678, 48, 1
-        ];
+        ]);
         return cases;
     };
 
     // [a, radix] for text_strings
     export let text_values = func() -> uint32[list] {
-        let cases: uint32[list] = [
+        let cases: uint32[list] = new([
             0, 0, 10, 1, 1, 1, 10, 2,
             1, 1, 10, 1, 1, 999999999, 10, 1,
             1, 1000000000, 10, 2, 1, 1000000000, 10, 1,
@@ -3039,13 +3039,13 @@ export let BigIntegerVectors = module (
             0, 0, 0, 0, 0, 1048576, 36, 1,
             2, 0, 131072, 36, 1, 5, 2427110781, 2592919867,
             697317740, 222717340, 4210691218, 36, 1, 1, 4096, 36
-        ];
+        ]);
         return cases;
     };
 
     // The text of each text_values case in its radix.
     export let text_strings = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "0",
             "1",
             "-1",
@@ -3140,7 +3140,7 @@ export let BigIntegerVectors = module (
             "5jjrmzbvnk",
             "tbeokbxhv3szfazimgs3s8mbztmn2bh",
             "35s"
-        ];
+        ]);
         return cases;
     };
 );

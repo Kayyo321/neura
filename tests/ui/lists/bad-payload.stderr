@@ -1,0 +1,9 @@
+error[E0420]: 'new' for a list takes a list literal or a range
+ --> $DIR/bad-payload.nra:3:27
+  |
+3 | let copy: int[list] = new(source);
+  |                           ^^^^^^ this is neither
+  |
+  = help: write 'new([a, b, c])' or 'new(0 .. count)'
+
+For more information about this error, try `neura explain E0420`.

@@ -9,7 +9,7 @@ let BitSetModelTests = module (
     const Limit: int = 100;
 
     let empty_model = func() -> bool[list] {
-        let result: bool[list] = [];
+        let result: bool[list] = new;
         let i = 0;
         while (i < Limit) {
             result.append(false);
@@ -19,7 +19,7 @@ let BitSetModelTests = module (
     };
 
     let members = func(model: bool[list]) -> int[list] {
-        let result: int[list] = [];
+        let result: int[list] = new;
         let i = 0;
         while (i < Limit) {
             if (model[i]) {
@@ -91,7 +91,7 @@ let BitSetModelTests = module (
                 actual.clear();
                 model = empty_model();
             } else if (choice < 68) {
-                let extra: int[list] = [value, (value * 7) % Limit];
+                let extra: int[list] = new([value, (value * 7) % Limit]);
                 actual.add_all(extra);
                 model[value] = true;
                 model[(value * 7) % Limit] = true;
@@ -180,7 +180,7 @@ let BitSetModelTests = module (
                 let text = expected.to_string();
                 test.assert_equal_string("{" + text.slice(1, text.byte_length - 1) + "}", actual.to_string());
             } else {
-                let seen: int[list] = [];
+                let seen: int[list] = new;
                 actual.for_each(func(element: int) -> void {
                     seen.append(element);
                 });

@@ -1,0 +1,2 @@
+// A bare range where a list is expected.
+let evens: int[list] = new(0 .. 8 : 2);

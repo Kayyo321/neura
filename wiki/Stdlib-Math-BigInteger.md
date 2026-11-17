@@ -75,11 +75,11 @@ The following public declarations are taken from the module source; each links t
   Decimal, by repeated division by 10^9 and nine-digit groups. Tagged `#Pure`.
 - **BigInteger.BigInteger** · [`export let to_string_radix = func(radix: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L364)
   Lowercase digits. A radix outside 2 through 36 traps. Tagged `#Pure`.
-- **BigInteger** · [`export const Zero: BigInteger = new BigInteger(0, [])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L373)
+- **BigInteger** · [`export const Zero: BigInteger = new BigInteger(0, new)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L373)
   The methods above build their own zero and one instead of reading these constants: a constant object is module state, which a spawned task may not read (Concurrency.md section 5.2). The integer zero.
-- **BigInteger** · [`export const One: BigInteger = new BigInteger(1, [1])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L375)
+- **BigInteger** · [`export const One: BigInteger = new BigInteger(1, new([1]))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L375)
   The integer one.
-- **BigInteger** · [`export const Ten: BigInteger = new BigInteger(1, [10])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L377)
+- **BigInteger** · [`export const Ten: BigInteger = new BigInteger(1, new([10]))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L377)
   The integer ten.
 - **BigInteger** · [`export let of_int64 = func(value: int64) -> BigInteger`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/math/big-integer.nra#L381)
   Constructs a BigInteger from any int64, including the minimum signed value. Tagged `#Pure`, `#ThreadSafe`.

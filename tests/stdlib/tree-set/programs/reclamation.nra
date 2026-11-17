@@ -12,7 +12,7 @@ let tree_set = import:Std.Collections.TreeSet;
 export let Main = module:program.Entry (
     let Blob = class (
         export let rank: int;
-        export let data: int[list] = [];
+        export let data: int[list] = new;
         export let init = func(order: int, size: int) -> void {
             rank = order;
             let i = 0;

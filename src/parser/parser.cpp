@@ -371,6 +371,7 @@ private:
             }
         }
         expect(")");
+        expand_constructor_shorthands(*body);
         body->span = span_from(start);
         body->name_span = tokens_[start].span;
         TypeSyntax result{};
@@ -414,13 +415,30 @@ private:
         return result;
     }
 
+    // A parameter list is a sequence of groups: one or more names, then ':'
+    // and one type that every name of the group takes. The type is parsed
+    // once and copied into each parameter, so copies share an anonymous
+    // class declaration (docs/lang/CoreLanguage.md, Grouped parameters).
     std::vector<Parameter> parameters() {
         std::vector<Parameter> result;
         if (!match("(")) return result;
         if (!at(")")) {
-            do {
+            // Names read since the last type, still waiting for one.
+            std::vector<Parameter> group;
+            const auto untyped = [&](const Parameter& name) {
+                return Diagnostic(name.span, "parameter '" + name.name + "' has no type").with_code("E0214")
+                    .label("a parameter takes the type that follows its group of names")
+                    .help("write ': <type>' after the last name of the group, as in 'func(a, b: int)'");
+            };
+            while (true) {
                 auto parameter_tags = tag_list();
                 const auto& name = identifier();
+                group.push_back({name.span, name.text, {}, false, std::move(parameter_tags)});
+                if (match(",")) {
+                    if (at(")")) throw untyped(group.front());
+                    continue;
+                }
+                if (at(")")) throw untyped(group.front());
                 expect(":");
                 const bool variadic = match("...");
                 TypeSyntax parameter_type;
@@ -430,14 +448,76 @@ private:
                 } else {
                     parameter_type = type();
                 }
+                if (variadic && group.size() > 1)
+                    throw Diagnostic(group.front().span, "a variadic parameter is a group of one name")
+                        .with_code("E0207")
+                        .label("'" + group.front().name + "' would take the variadic type")
+                        .help("give '" + group.front().name + "' its own type, as in 'func(" +
+                              group.front().name + ": <type>, " + group.back().name + ": ...<type>)'");
                 if (variadic && at(","))
                     throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
-                result.push_back(
-                    {name.span, name.text, std::move(parameter_type), variadic, std::move(parameter_tags)});
-            } while (match(","));
+                for (auto& member : group) {
+                    member.type = parameter_type;
+                    member.variadic = variadic;
+                    result.push_back(std::move(member));
+                }
+                group.clear();
+                if (!match(",")) break;
+            }
         }
         expect(")");
         return result;
+    }
+
+    // A constructor written `init = func(x, y: int) => set;` is the
+    // constructor that stores each parameter in the field of its name. The
+    // expansion happens here, so every later stage sees the written-out
+    // form. `set` is contextual: only the whole expression body of an
+    // instance `init` is the shorthand.
+    static void expand_constructor_shorthand(Declaration& constructor, const Declaration& owner) {
+        if (owner.kind != Declaration::Kind::Class || constructor.kind != Declaration::Kind::Function ||
+            constructor.name != "init" || constructor.static_member || constructor.cast_target ||
+            !constructor.expression_body || constructor.body.size() != 1)
+            return;
+        const auto& only = constructor.body.front();
+        if (only.kind != Statement::Kind::Expression || only.expressions.size() != 1 ||
+            only.expressions.front().kind != Expr::Kind::Name || only.expressions.front().text != "set")
+            return;
+        const auto keyword = only.expressions.front().span;
+        constructor.set_shorthand = keyword;
+        std::vector<Statement> body;
+        if (owner.base) {
+            Statement call{};
+            call.kind = Statement::Kind::Expression;
+            call.span = keyword;
+            auto super_name = make_expression(Expr::Kind::Name, keyword, "super");
+            auto member = make_expression(Expr::Kind::Member, keyword, "init");
+            member.operands.push_back(std::move(super_name));
+            auto invocation = make_expression(Expr::Kind::Call, keyword);
+            invocation.open = keyword;
+            invocation.operands.push_back(std::move(member));
+            call.expressions.push_back(std::move(invocation));
+            body.push_back(std::move(call));
+        }
+        for (const auto& parameter : constructor.parameters) {
+            Statement store{};
+            store.kind = Statement::Kind::Assignment;
+            store.assignment_operator = "=";
+            store.span = parameter.span;
+            auto member = make_expression(Expr::Kind::Member, parameter.span, parameter.name);
+            member.operands.push_back(make_expression(Expr::Kind::Name, parameter.span, "$instance"));
+            store.expressions.push_back(std::move(member));
+            store.expressions.push_back(make_expression(Expr::Kind::Name, parameter.span, parameter.name));
+            body.push_back(std::move(store));
+        }
+        constructor.body = std::move(body);
+    }
+
+    static void expand_constructor_shorthands(Declaration& owner) {
+        for (auto& member : owner.members) {
+            expand_constructor_shorthand(member, owner);
+            for (auto& branch : member.overloads) expand_constructor_shorthand(branch, owner);
+        }
     }
 
     // Return true when an expression body still needs its terminating semicolon.
@@ -450,6 +530,7 @@ private:
             result.body = block();
             return false;
         }
+        result.expression_body = true;
         Statement statement{};
         statement.kind = result.type->name == "void" && result.type->collections.empty()
             ? Statement::Kind::Expression : Statement::Kind::Return;
@@ -854,6 +935,7 @@ private:
                     }
                 }
                 expect(")");
+                expand_constructor_shorthands(result);
             } else {
                 result.initializer = expression();
             }

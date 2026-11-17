@@ -19,7 +19,7 @@ export let StringBuilder = module (
     #[Final, Since("0.1.0"), NotThreadSafe]
     export let StringBuilder = class (
         /// @brief Stores the current UTF-8 bytes.
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         /// @brief Tracks the builder through a shared cell for bound operations that need its identity.
         last link: Cell<StringBuilder>;
 
@@ -136,7 +136,7 @@ export let StringBuilder = module (
 
         /// @brief Removes all accumulated bytes.
         export let clear = func {
-            bytes = [];
+            bytes = new;
         };
 
         /// @brief The current UTF-8 bytes determine equality and hashing.
@@ -165,7 +165,7 @@ export let StringBuilder = module (
 
         /// @brief Copies the requested prefix of the backing bytes.
         let copy_prefix = func(count: int) -> uint8[list] {
-            last kept: uint8[list] = [];
+            last kept: uint8[list] = new;
             for (let i = 0; i < count; i++) {
                 kept.append(bytes[i]);
             }

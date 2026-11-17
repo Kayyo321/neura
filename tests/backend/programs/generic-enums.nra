@@ -52,7 +52,7 @@ let GenericEnums = module:program.Entry (
         test.assert(unwrap_or<int>(container.item, 3) == 3);
         container.item = a;
         test.assert(unwrap_or<int>(container.item, 0) == 10);
-        let tree = Tree<string>.Branch { children: [Tree<string>.Empty, Tree<string>.Leaf("leaf")] };
+        let tree = Tree<string>.Branch { children: new([Tree<string>.Empty, Tree<string>.Leaf("leaf")]) };
         test.assert(size<string>(tree) == 1);
         let d = Direction<int>.Right;
         test.assert(d as int == 1 && d.to_string() == "Right");

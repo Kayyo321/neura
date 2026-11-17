@@ -144,7 +144,7 @@ export let MemorySegment = module (
 
         /// @brief Writes the UTF-8 bytes of `text` and a NUL at `offset`. Traps if `text` contains a NUL.
         export let set_utf8 = func(offset: int64, text: string) {
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             for (let i = 0; i < text.byte_length; i++) {
                 last b = text.byte_at(i);
                 if (b == 0) {
@@ -175,7 +175,7 @@ export let MemorySegment = module (
 
         /// @brief Sets every byte to `value`.
         export let fill = func(value: uint8) {
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             for (let i: int64 = 0; i < length; i++) {
                 bytes.append(value);
             }
@@ -222,7 +222,7 @@ export let MemorySegment = module (
         /// @brief Writes the low `size` bytes of `bits` at `offset`.
         let store = func(offset: int64, bits: uint64, size: int) {
             check(offset, size as int64);
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             native.put(bytes, bits, size);
             native.write(base + offset, bytes);
         };

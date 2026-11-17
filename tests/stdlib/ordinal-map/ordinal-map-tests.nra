@@ -68,7 +68,7 @@ let OrdinalMapTests = module (
     // unaffected.
     export let test_swap_removal = func() -> void {
         let items = ordinal_map.create<int>(10);
-        let keys: int[list] = [7, 2, 9, 0, 5];
+        let keys: int[list] = new([7, 2, 9, 0, 5]);
         for (let key in keys) {
             items.set(key, key * 10);
         }
@@ -112,7 +112,7 @@ let OrdinalMapTests = module (
         test.assert_none<int>(absent);
         items.set(4, 40);
         items.set(5, 50);
-        let seen: [int, int][list] = [];
+        let seen: [int, int][list] = new;
         items.for_each(func(key: int, value: int) -> void {
             seen.append([key, value]);
         });
@@ -135,7 +135,7 @@ let OrdinalMapTests = module (
         test.assert_equal_string("y", first[1]);
         test.assert_equal_int32(6, walk.next()[0]);
         test.assert(!walk.has_next());
-        let keys: int[list] = [];
+        let keys: int[list] = new;
         for (let entry in items) {
             keys.append(entry[0]);
             // Replacing the value of an existing key is not structural.

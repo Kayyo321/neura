@@ -19,10 +19,10 @@ let ConsoleTests = module (
     export let test_streams_as_sinks = func {
         let output = console.output();
         let error = console.error();
-        let line: uint8[list] = [115, 105, 110, 107, 10];
+        let line: uint8[list] = new([115, 105, 110, 107, 10]);
         test.assert_ok<unit.Unit>(output(line));
         test.assert_ok<unit.Unit>(error(line));
-        let empty: uint8[list] = [];
+        let empty: uint8[list] = new;
         test.assert_ok<unit.Unit>(output(empty));
     };
 );

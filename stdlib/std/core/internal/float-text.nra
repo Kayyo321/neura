@@ -243,7 +243,7 @@ export let FloatText = module (
             position = 1;
         }
         // value = digits * 10^scale, plus a nonzero tail when `sticky`.
-        last digits: uint8[list] = [];
+        last digits: uint8[list] = new;
         let scale: int64 = 0;
         let sticky = false;
         let seen_digit = false;

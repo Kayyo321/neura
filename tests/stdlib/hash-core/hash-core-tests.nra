@@ -9,7 +9,7 @@ let test = import:Std.Test;
 // live, and no more than max(size, 7) removed entries remain.
 let HashCoreTests = module (
     let ints = func(start: int, end: int) -> int[list] {
-        let result: int[list] = [];
+        let result: int[list] = new;
         let i = start;
         while (i < end) {
             result.append(i);
@@ -39,7 +39,7 @@ let HashCoreTests = module (
     // the order and drops the dead entries.
     export let test_compaction_without_growth = func() -> void {
         let set = hash_set.create<int>();
-        set.add_all([10, 11, 12, 13]);
+        set.add_all(new([10, 11, 12, 13]));
         test.assert(set.remove(11));
         test.assert(set.remove(12));
         set.validate();
@@ -92,7 +92,7 @@ let HashCoreTests = module (
     // index still keeps half its slots Empty, so absent lookups end.
     export let test_tombstones_from_trailing_release = func() -> void {
         let set = hash_set.create<int>();
-        set.add_all([-1, -2]);
+        set.add_all(new([-1, -2]));
         let i = 0;
         while (i < 2000) {
             test.assert(set.add(i));

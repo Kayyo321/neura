@@ -24,7 +24,7 @@ let Values = module:program.Entry (
         let product: int32 = left * right;
         note(product);
         let twice: int32 = left * right + product;
-        let items: int32[list] = [left, right];
+        let items: int32[list] = new([left, right]);
         let first: int32 = items[0] + right;
         items.append(first);
         let length: int32 = items.length;

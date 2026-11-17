@@ -1,0 +1,12 @@
+error[E0446]: 'init' may end without assigning 'last' field 'y'
+ --> $DIR/shorthand-last-field-unassigned.nra:5:16
+  |
+3 |     export last y: int;
+  |                 - declared here without a value
+4 |
+5 |     export let init = func(x: int) => set;
+  |                ^^^^ this constructor never assigns 'y'
+  |
+  = help: assign 'y' exactly once on every path through 'init'
+
+For more information about this error, try `neura explain E0446`.

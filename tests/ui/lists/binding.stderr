@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/binding.nra:2:27
+  |
+2 | let names: string[list] = ["Ada", "Lin"];
+  |                           ^^^^^^^^^^^^^^ the expected type is string[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+2 | let names: string[list] = new(["Ada", "Lin"]);
+  |                           ++++              +
+
+For more information about this error, try `neura explain E0450`.

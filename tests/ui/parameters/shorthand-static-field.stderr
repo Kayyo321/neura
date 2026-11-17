@@ -1,0 +1,13 @@
+error[E0537]: 'total' is not an instance field of class 'Counter'
+ --> $DIR/shorthand-static-field.nra:5:39
+  |
+2 |     export static let total: int = 0;
+  |                       ----- 'total' is declared here as a static member
+...
+5 |     export let init = func(step: int, total: int) => set;
+  |                                       ^^^^^
+  |                                                      --- '=> set' stores each parameter in the field of the same name
+  |
+  = help: name the parameter after an instance field of this class, or write the constructor with a block
+
+For more information about this error, try `neura explain E0537`.

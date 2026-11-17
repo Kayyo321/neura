@@ -15,12 +15,12 @@ export let ReferenceCrc32 = module (
     const AllOnes: uint32 = 4294967295;
 
     /// @brief The 256-entry byte table, computed by the first checksum that needs it.
-    let table: uint32[list] = [];
+    let table: uint32[list] = new;
 
     /// @brief Builds the reflected CRC lookup table on first use and returns it.
     let ready_table = func -> uint32[list] {
         if (table.length == 0) {
-            let entries: uint32[list] = [];
+            let entries: uint32[list] = new;
             for (let n: uint32 = 0; n < 256; n++) {
                 let c = n;
                 for (let k = 0; k < 8; k++) {

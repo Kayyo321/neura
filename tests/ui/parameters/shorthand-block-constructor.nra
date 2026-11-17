@@ -1,0 +1,8 @@
+// A constructor whose body is the name `set` is written as a block.
+let Point = class (
+    export let set: int = 0;
+
+    export let init = func() {
+        set;
+    };
+);

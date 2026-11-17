@@ -42,7 +42,7 @@ let Base64KernelOracle = module (
 
     // Bytes that differ from position to position: i * 31 + 7, modulo 256.
     let pattern = func(length: int) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         for (let i = 0; i < length; i++) {
             bytes.append(((i * 31 + 7) % 256) as uint8);
         }
@@ -57,8 +57,8 @@ let Base64KernelOracle = module (
             agree(pattern(length));
         }
         for (let b = 0; b < 256; b++) {
-            agree([b as uint8]);
-            agree([b as uint8, 255 - b as uint8]);
+            agree(new([b as uint8]));
+            agree(new([b as uint8, 255 - b as uint8]));
         }
         let texts = ["", "=", "==", "===", "====", "A", "AA", "AAA", "AAAA", "AA=", "AA==", "AAA=", "AB==", "AAB=",
             "AA=A", "A===", "AAAA=", "AAAA==", "AA==AAAA", "AAA=A", "+/+/", "-_-_", "+/==", "-_==", "AA AA",

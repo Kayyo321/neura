@@ -405,7 +405,7 @@ let Derived$k = class:Base$k (
 );
 
 let s${k}_run = func(size: int32, faults: int32) -> int64 {
-    let items: Base$k[list] = [];
+    let items: Base$k[list] = new;
     for (let i: int32 = 0; i < size % 5 + $b; i++) {
         if (i % 2 == 0) {
             items.append(new Base$k());
@@ -482,7 +482,7 @@ def section_interfaces(p, k):
 let s${k}_through = func(op: Op$k, value: int64) -> int64 => op.apply(value) + op.apply(value + 1);
 
 let s${k}_run = func(size: int32, faults: int32) -> int64 {
-    let ops: Op$k[list] = [];
+    let ops: Op$k[list] = new;
     $construct
     let check: int64 = 0;
     for (let round: int32 = 0; round < size * $m; round++) {
@@ -559,7 +559,7 @@ def section_collections(p, k):
         "check = mix(check, grid[1][items.length + 5] as int64);",
     ])
     p.declarations.append(fill("""let s${k}_run = func(size: int32, faults: int32) -> int64 {
-    let items: $E[list] = [];
+    let items: $E[list] = new;
     for (let i: int32 = 0; i < size * $m + 3; i++) {
         items.append($make);
     }
@@ -586,7 +586,7 @@ def section_collections(p, k):
     for (let flag in marks) {
         flags = flags * 2 + (flag ? 1 : 0);
     }
-    let words: string[list] = [];
+    let words: string[list] = new;
     for (let i: int32 = 0; i < size % 6 + 2; i++) {
         words.append("w" + i.to_string());
     }
@@ -628,7 +628,7 @@ def section_text(p, k):
     let text = builder.to_string();
     let parts = strings.split(text, "$sep");
     let check: int64 = 0;
-    let rebuilt: string[list] = [];
+    let rebuilt: string[list] = new;
     for (let part in parts) {
         last trimmed = strings.trim(part);
         rebuilt.append(trimmed);
@@ -658,7 +658,7 @@ def section_kernel(p, k):
     p.use("crc32", "sha256", "sorting", "strings")
     a, b = p.between(3, 31), p.between(1, 17)
     p.declarations.append(fill("""let s${k}_run = func(size: int32, faults: int32) -> int64 {
-    let data: uint8[list] = [];
+    let data: uint8[list] = new;
     for (let i: int32 = 0; i < size * $m + 5; i++) {
         data.append(((i * $a + $b) % 251) as uint8);
     }
@@ -667,7 +667,7 @@ def section_kernel(p, k):
     for (let byte in digest) {
         check = mix(check, byte as int64);
     }
-    let keys: int64[list] = [];
+    let keys: int64[list] = new;
     let seed: int64 = $a;
     for (let i: int32 = 0; i < size + 4; i++) {
         seed = (seed * 1103515245 + 12345) & 2147483647;
@@ -797,7 +797,7 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     }
     let fan: int64 = 0;
     scope {
-        let pending: tasks.Task<int64>[list] = [];
+        let pending: tasks.Task<int64>[list] = new;
         for (let id: int32 = 0; id < size % 4 + 2; id++) {
             pending.append(spawn s${k}_work(id, size + id));
         }

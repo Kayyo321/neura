@@ -40,6 +40,7 @@ Errors about the grammar.
 | [E0211](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0211.md) | malformed scope statement |
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
+| [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
 
 ## E03xx: Names
 
@@ -111,6 +112,7 @@ Errors about types, values, calls, and statements.
 | [E0446](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0446.md) | a constructor that does not assign a 'last' field |
 | [E0447](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0447.md) | a deferred 'last' binding that is not a local or an instance field |
 | [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) | a value type that contains itself |
+| [E0450](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0450.md) | a list literal without new |
 
 ## E05xx: Classes and lifecycle
 
@@ -148,6 +150,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0533](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0533.md) | new without the field initializers of an anonymous class |
 | [E0534](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0536.md) | destructuring declared with last |
+| [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
 
 ## E06xx: Concurrency
 

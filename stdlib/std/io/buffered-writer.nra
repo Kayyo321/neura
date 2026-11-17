@@ -23,7 +23,7 @@ export let BufferedWriter = module (
         /// @brief The configured maximum buffer size in bytes.
         last capacity: int;
         /// @brief Stores the buffered bytes.
-        let buffer: uint8[list] = [];
+        let buffer: uint8[list] = new;
 
         /// @brief The number of bytes waiting for flush. Read-only.
         #Since("0.2.0")
@@ -64,7 +64,7 @@ export let BufferedWriter = module (
                 return bytes.ok();
             }
             last full = buffer;
-            last empty: uint8[list] = [];
+            last empty: uint8[list] = new;
             buffer = empty;
             return sink(full);
         };

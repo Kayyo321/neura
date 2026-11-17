@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/result.nra:3:12
+  |
+3 |     return [1, 2, 3];
+  |            ^^^^^^^^^ the expected type is int32[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+3 |     return new([1, 2, 3]);
+  |            ++++         +
+
+For more information about this error, try `neura explain E0450`.

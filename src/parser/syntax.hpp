@@ -231,6 +231,14 @@ struct Declaration {
     // The tags written before the declaration, in source order. They apply
     // to every branch of an `or func` group.
     std::vector<TagSyntax> tags{};
+    // True when the function's body was written `=> expression`.
+    bool expression_body{};
+    // The `set` of a constructor written `init = func(...) => set`
+    // (ObjectLifecycle.md, Constructor shorthand). The parser has expanded
+    // it into `body`: an optional `super.init()` and one store to the
+    // field of each parameter, through the receiver `$instance`, a name no
+    // source can declare. Each store has the span of its parameter.
+    std::optional<Span> set_shorthand{};
 };
 
 struct ResolvedImport {

@@ -84,7 +84,7 @@ let MathKernelOracle = module (
     // ordinary results), each with a random sign.
     let inputs = func(seed: uint64, count: int) -> uint64[list] {
         let source = random.seeded(seed);
-        let bits: uint64[list] = [];
+        let bits: uint64[list] = new;
         for (let i = 0; i < count; i++) {
             bits.append(source.next_uint64());
             let mantissa = source.next_uint64() & 4503599627370495;

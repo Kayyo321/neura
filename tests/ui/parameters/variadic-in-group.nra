@@ -1,0 +1,4 @@
+// `a` would take the variadic type, so the variadic parameter stands alone.
+let join = func(a, items: ...string) -> string {
+    return a;
+};

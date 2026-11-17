@@ -1,0 +1,5 @@
+// Without a type for any name, even a lambda has no expected type yet.
+let apply = func(f: func(int, int) -> int) -> int {
+    return f(1, 2);
+};
+let total = apply(func(a, b) -> int { return a + b; });

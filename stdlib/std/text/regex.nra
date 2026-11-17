@@ -196,7 +196,7 @@ export let Regex = module (
         /// @brief Successive non-overlapping matches. After an empty match the search resumes one scalar value
         /// later.
         export let find_all = func(input: string) -> RegexMatch[list] {
-            last matches: RegexMatch[list] = [];
+            last matches: RegexMatch[list] = new;
             last length = input.byte_length;
             let pos = 0;
             while (pos <= length) {
@@ -227,7 +227,7 @@ export let Regex = module (
 
         /// @brief Replaces the first match, with the rules of replace_all.
         export let replace_first = func(input: string, replacement: string) -> string {
-            last matches: RegexMatch[list] = [];
+            last matches: RegexMatch[list] = new;
             last first = find(input);
             if (first != nil) {
                 matches.append(first);
@@ -238,7 +238,7 @@ export let Regex = module (
         /// @brief The pieces between the matches of find_all, with the rules of Strings.split: empty pieces are
         /// kept, and an input without a match gives one piece.
         export let split = func(input: string) -> string[list] {
-            last pieces: string[list] = [];
+            last pieces: string[list] = new;
             let start = 0;
             for (let found in find_all(input)) {
                 pieces.append(input.slice(start, found.start));
@@ -285,7 +285,7 @@ export let Regex = module (
             if (matches.length == 0) {
                 return input;
             }
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             let start = 0;
             for (let found in matches) {
                 append_bytes(bytes, input, start, found.start);
@@ -348,9 +348,9 @@ export let Regex = module (
 
     /// @brief The replacement as segments: literal text, then a group index or -1.
     let parse_replacement = func(replacement: string, names: string[list]) -> [string, int][list] {
-        last segments: [string, int][list] = [];
+        last segments: [string, int][list] = new;
         last length = replacement.byte_length;
-        let literal: uint8[list] = [];
+        let literal: uint8[list] = new;
         let i = 0;
         while (i < length) {
             last b = replacement.byte_at(i);
@@ -397,7 +397,7 @@ export let Regex = module (
                 trap_with_message("invalid argument: no such group");
             }
             segments.append([text_of(literal), index]);
-            literal = [];
+            literal = new;
         }
         segments.append([text_of(literal), -1]);
         return segments;

@@ -31,7 +31,7 @@ let NetTests = module (
     };
 
     let bytes_of = func(text: string) -> uint8[list] {
-        let out: uint8[list] = [];
+        let out: uint8[list] = new;
         let i = 0;
         while (i < text.byte_length) {
             out.append(text.byte_at(i));
@@ -108,7 +108,7 @@ let NetTests = module (
     export let test_streams_and_listeners_are_closeable = func() -> void {
         let listener = listen();
         let client = connect(listener.local_port);
-        let resources: closeable.Closeable[list] = [client, listener];
+        let resources: closeable.Closeable[list] = new([client, listener]);
         for (let resource in resources) {
             test.assert_ok<unit.Unit>(resource.close());
             test.assert_ok<unit.Unit>(resource.close());
@@ -139,7 +139,7 @@ let NetTests = module (
     export let test_open_socket_limit = func() -> void {
         let listener = listen();
         let port = listener.local_port;
-        let streams: tcp_stream.TcpStream[list] = [];
+        let streams: tcp_stream.TcpStream[list] = new;
         while (streams.length < 1022) {
             streams.append(connect(port));
             streams.append(test.assert_ok<tcp_stream.TcpStream>(listener.accept()));
@@ -157,7 +157,7 @@ let NetTests = module (
     export let test_open_sockets_are_released_after_a_run = func() -> void {
         let listener = listen();
         let port = listener.local_port;
-        let streams: tcp_stream.TcpStream[list] = [];
+        let streams: tcp_stream.TcpStream[list] = new;
         while (streams.length < 1022) {
             streams.append(connect(port));
             streams.append(test.assert_ok<tcp_stream.TcpStream>(listener.accept()));

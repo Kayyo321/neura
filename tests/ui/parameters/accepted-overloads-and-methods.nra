@@ -1,0 +1,12 @@
+let Shape = class (
+    export let area = func(w, h: int) -> int {
+        return w * h;
+    } or func(side: int) -> int {
+        return side * side;
+    };
+);
+let pair = func(a, b: int) -> int {
+    return a;
+} or func(a, b: string) -> string {
+    return a;
+};

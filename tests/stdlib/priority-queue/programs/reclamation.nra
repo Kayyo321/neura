@@ -9,7 +9,7 @@ let program = import:Std.Program;
 // above the limit.
 export let Main = module:program.Entry (
     let block = func(seed: int) -> int[list] {
-        let values: int[list] = [];
+        let values: int[list] = new;
         let i = 0;
         while (i < 100) {
             values.append(seed + i);

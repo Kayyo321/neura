@@ -11,7 +11,7 @@ let test = import:Std.Test;
 let Base64Tests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
     let seeded_bytes = func(length: int, seed: uint64) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
             x = (x * 1103515245 + 12345) & 2147483647;
@@ -87,7 +87,7 @@ let Base64Tests = module (
     };
 
     export let test_every_byte_value = func() -> void {
-        let all: uint8[list] = [];
+        let all: uint8[list] = new;
         for (let b = 0; b < 256; b = b + 1) {
             all.append(b as uint8);
         }
@@ -98,8 +98,8 @@ let Base64Tests = module (
 
     // The two alphabets differ only in values 62 and 63.
     export let test_alphabet_symbols = func() -> void {
-        check_all([251, 255, 191], "+/+/", "-_-_");
-        check_all([251, 239], "++8=", "--8=");
+        check_all(new([251, 255, 191]), "+/+/", "-_-_");
+        check_all(new([251, 239]), "++8=", "--8=");
         check_error(base64s.decode("-_-_"), 0, "invalid character");
         check_error(base64s.decode_unpadded("Zm_v"), 2, "invalid character");
         check_error(base64s.decode_url("+/+/"), 0, "invalid character");
@@ -149,9 +149,9 @@ let Base64Tests = module (
         check_error(base64s.decode_unpadded("Zh"), 1, "nonzero trailing bits");
         check_error(base64s.decode_url_unpadded("Zm9"), 2, "nonzero trailing bits");
         // The last character's other bits may take any value.
-        test.assert_equal<uint8[list]>([102], test.assert_ok<uint8[list]>(base64s.decode("Zg==")));
-        test.assert_equal<uint8[list]>([103], test.assert_ok<uint8[list]>(base64s.decode("Zw==")));
-        test.assert_equal<uint8[list]>([102, 111], test.assert_ok<uint8[list]>(base64s.decode("Zm8=")));
-        test.assert_equal<uint8[list]>([255, 255], test.assert_ok<uint8[list]>(base64s.decode_unpadded("//8")));
+        test.assert_equal<uint8[list]>(new([102]), test.assert_ok<uint8[list]>(base64s.decode("Zg==")));
+        test.assert_equal<uint8[list]>(new([103]), test.assert_ok<uint8[list]>(base64s.decode("Zw==")));
+        test.assert_equal<uint8[list]>(new([102, 111]), test.assert_ok<uint8[list]>(base64s.decode("Zm8=")));
+        test.assert_equal<uint8[list]>(new([255, 255]), test.assert_ok<uint8[list]>(base64s.decode_unpadded("//8")));
     };
 );

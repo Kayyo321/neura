@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/empty.nra:2:24
+  |
+2 | let empty: int[list] = [];
+  |                        ^^ the expected type is int32[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: write 'new' for an empty list
+  |
+2 | let empty: int[list] = new;
+  |                        ~~~
+
+For more information about this error, try `neura explain E0450`.

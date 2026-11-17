@@ -5,7 +5,7 @@
 export let BigDecimalVectors = module (
     // [a, b, a + b, a - b, a * b, compare(a, b) + 1, hash_code(a)]
     export let arithmetic_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "8.4493E-8",
             "-58460568302474049048.87787712198163713510",
             "-58460568302474049048.87787703748863713510",
@@ -888,13 +888,13 @@ export let BigDecimalVectors = module (
             "0.010000000000000000000000000001",
             "2",
             "16307"
-        ];
+        ]);
         return cases;
     };
 
     // [a, b, scale, mode ordinal, a / b rounded to scale]
     export let divide_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "-34911535846300698.24",
             "0.0000000000000000000000002",
             "14",
@@ -2080,13 +2080,13 @@ export let BigDecimalVectors = module (
             "-2",
             "6",
             "12300"
-        ];
+        ]);
         return cases;
     };
 
     // [a, scale, mode ordinal, set_scale(scale, mode)]
     export let set_scale_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "50.00",
             "0",
             "3",
@@ -2727,13 +2727,13 @@ export let BigDecimalVectors = module (
             "1",
             "6",
             "10.0"
-        ];
+        ]);
         return cases;
     };
 
     // [a, precision, mode ordinal, round(precision, mode)]
     export let round_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "-783485623012647152060.782934034437777488200",
             "3",
             "6",
@@ -3318,13 +3318,13 @@ export let BigDecimalVectors = module (
             "1",
             "6",
             "7"
-        ];
+        ]);
         return cases;
     };
 
     // [a, mode ordinal, to_big_integer(mode)]
     export let to_big_integer_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "-7E+3",
             "5",
             "-7000",
@@ -3475,13 +3475,13 @@ export let BigDecimalVectors = module (
             "-5.418752076033335413563449",
             "2",
             "-5"
-        ];
+        ]);
         return cases;
     };
 
     // [a, strip_trailing_zeros, n, pow(n), negate, abs]
     export let unary_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "61065052313818385892.46061",
             "61065052313818385892.46061",
             "2",
@@ -3842,13 +3842,13 @@ export let BigDecimalVectors = module (
             "-129878690591872306972493280048637611770921293972327303483000",
             "50642208137514274270",
             "50642208137514274270"
-        ];
+        ]);
         return cases;
     };
 
     // [a, float64 bits of the nearest value]
     export let to_float64_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "3699674212612.58466",
             "4794903336682267821",
             "35707951.7902507729893140833766302721678800",
@@ -4041,13 +4041,13 @@ export let BigDecimalVectors = module (
             "4845873199050653697",
             "123456789012345678901234567890.123456789",
             "5042042089369253694"
-        ];
+        ]);
         return cases;
     };
 
     // [float64 bits, exact value as text]
     export let of_float64_cases = func() -> string[list] {
-        let cases: string[list] = [
+        let cases: string[list] = new([
             "4591870180066957722",
             "0.1000000000000000055511151231257827021181583404541015625",
             "4602678819172646912",
@@ -4130,7 +4130,7 @@ export let BigDecimalVectors = module (
             "0.000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000077933552272518594723266472762357145025215725505996883104219334769567928988399353191446469024500124058815288152502435376853259700394112534348787414014614042097237930502118593895650131072621908027714755853909425350170784319332226415391213329329710932429484706009486967285950676719733421161797144219709755760008933264975741515904483852063301463833672158203003358553874236331127573998822417628631515512610595785352916103662034057897883547922719103899235830583173127834678849701507354492937326694057538290425411007388898898755954063584294959252464019892515261801746451197914211661554872989654541015625",
             "8599946779620174238",
             "810903759535066662601203714157225642128316503232162377646243233451437036302059300218054143383794666513830544794269322655883034614814969199917905347890366120214944862497128457682652000082932773721922822875806466188849380772329581145516713230379882360944831204771758080"
-        ];
+        ]);
         return cases;
     };
 );
