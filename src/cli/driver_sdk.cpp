@@ -91,6 +91,9 @@ int sdk_options_main(std::vector<std::string> arguments, OptionsCommand command)
         print.print(std::cerr, error);
         for (const auto& next : error.following()) print.print(std::cerr, next);
         print.finish(std::cerr);
+    } catch (const RuntimeError& error) {
+        std::cerr << "neura: runtime: " << error.what() << '\n';
+        return error.status();
     } catch (const std::exception& error) {
         std::cerr << "neura: error: " << error.what() << '\n';
     }

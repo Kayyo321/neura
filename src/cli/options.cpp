@@ -492,6 +492,32 @@ Options read_options(int argc, char** argv) {
             if (options.command != Command::Run) throw std::runtime_error("--each applies only to run");
             if (options.each) throw std::runtime_error("--each given more than once");
             options.each = fs::path(next());
+        } else if (arg == "--runtime" || arg.starts_with("--runtime=")) {
+            // Tests and debugging are direct in 0.3.0 (Service030.md).
+            if (options.command == Command::Test) {
+                throw RuntimeError("neura test runs directly; --runtime applies only to run", 1);
+            }
+            if (options.command != Command::Run) throw std::runtime_error("--runtime applies only to run");
+            const auto mode = arg == "--runtime" ? std::string_view() : arg.substr(10);
+            if (mode == "off") options.runtime = RuntimeMode::Off;
+            else if (mode == "auto") options.runtime = RuntimeMode::Auto;
+            else if (mode == "required") options.runtime = RuntimeMode::Required;
+            else throw RuntimeError("--runtime expects off, auto, or required", 1);
+        } else if (arg == "--detach" || arg.starts_with("--stdout=") || arg.starts_with("--stderr=") ||
+                   arg.starts_with("--stdin=") || arg.starts_with("--runtime-report=")) {
+            if (options.command != Command::Run) {
+                throw std::runtime_error(std::string(arg.substr(0, arg.find('='))) + " applies only to run");
+            }
+            const auto value = [&](std::string_view prefix) {
+                const auto path = arg.substr(prefix.size());
+                if (path.empty()) throw RuntimeError(std::string(prefix) + " expects a file", 1);
+                return fs::path(path);
+            };
+            if (arg == "--detach") options.detach = true;
+            else if (arg.starts_with("--stdout=")) options.detach_stdout = value("--stdout=");
+            else if (arg.starts_with("--stderr=")) options.detach_stderr = value("--stderr=");
+            else if (arg.starts_with("--stdin=")) options.detach_stdin = value("--stdin=");
+            else options.runtime_report = value("--runtime-report=");
         } else if (arg.starts_with('-')) {
             throw std::runtime_error("unknown option: " + std::string(arg));
         } else if (options.command == Command::Run && !options.files.empty()) {
@@ -543,6 +569,18 @@ Options read_options(int argc, char** argv) {
         if (options.replay) throw std::runtime_error("--each cannot be combined with --replay");
         if (options.limits.profile) throw std::runtime_error("--each cannot be combined with --profile");
         if (options.virtual_time) throw std::runtime_error("--each cannot be combined with --virtual-time");
+    }
+    if (options.detach && (!options.runtime || *options.runtime == RuntimeMode::Off)) {
+        throw RuntimeError("--detach needs --runtime=auto or --runtime=required", 1);
+    }
+    if (options.detach && (!options.detach_stdout || !options.detach_stderr)) {
+        throw RuntimeError("--detach needs --stdout and --stderr", 1);
+    }
+    if (!options.detach && (options.detach_stdout || options.detach_stderr || options.detach_stdin)) {
+        throw RuntimeError("--stdout, --stderr and --stdin apply only with --detach", 1);
+    }
+    if (options.runtime && *options.runtime != RuntimeMode::Off) {
+        throw RuntimeError("the service is not available in this build; run without --runtime", 5);
     }
     if (options.virtual_time && options.replay) {
         throw std::runtime_error("--virtual-time cannot be combined with --replay: a replay takes its clock from the trace");

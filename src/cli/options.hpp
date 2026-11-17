@@ -18,6 +18,7 @@
 #include <filesystem>
 #include <optional>
 #include <ostream>
+#include <stdexcept>
 #include <string>
 #include <vector>
 
@@ -33,6 +34,22 @@ enum class Command {
 };
 
 inline constexpr const char* commands = neura::tool::command_list;
+
+// How `run` reaches the runtime (docs/design/Service030.md): directly, the
+// default, or through the resident service.
+enum class RuntimeMode { Off, Auto, Required };
+
+// An error of the service options or of a service launch: printed after
+// `neura: runtime: `, with its own exit status (1 for a usage error, 5 when
+// the service ran nothing, 6 when the outcome is unknown).
+class RuntimeError : public std::runtime_error {
+public:
+    RuntimeError(const std::string& message, int status) : std::runtime_error(message), status_(status) {}
+    int status() const { return status_; }
+
+private:
+    int status_;
+};
 
 neura::nvm::Capabilities granted_capabilities();
 
@@ -92,6 +109,15 @@ struct Options {
     std::optional<fs::path> record;
     std::optional<fs::path> replay;
     std::optional<fs::path> each;
+    // run --runtime=MODE; unset is the default, a direct run.
+    std::optional<RuntimeMode> runtime;
+    // run --detach --stdout=FILE --stderr=FILE [--stdin=FILE].
+    bool detach = false;
+    std::optional<fs::path> detach_stdout;
+    std::optional<fs::path> detach_stderr;
+    std::optional<fs::path> detach_stdin;
+    // run --runtime-report=FILE: one JSON object about the launch.
+    std::optional<fs::path> runtime_report;
     neura::cli::GpuOptions gpu;
     // C imports: header search and definitions, the libclang library, and
     // the C compiler and extra arguments that link the native library.

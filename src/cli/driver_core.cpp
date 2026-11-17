@@ -27,6 +27,9 @@ int core_options_main(std::vector<std::string> arguments, OptionsCommand command
         const int status = command(options);
         if (status == 0 && shows_update_notice(options.command)) neura::lifecycle::update_notice(options.executable);
         return status;
+    } catch (const RuntimeError& error) {
+        std::cerr << "neura: runtime: " << error.what() << '\n';
+        return error.status();
     } catch (const std::exception& error) {
         std::cerr << "neura: error: " << error.what() << '\n';
     }

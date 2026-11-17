@@ -1206,6 +1206,12 @@ if(BUILD_TESTING AND NEURA_SDK)
     target_link_libraries(neura_service_protocol_tests PRIVATE neura_service_protocol)
     neura_target_defaults(neura_service_protocol_tests)
     add_test(NAME service-unit-protocol COMMAND neura_service_protocol_tests)
+    # The service end to end, one suite per test (tests/service/service.py).
+    foreach(suite IN ITEMS cli-options off-default)
+        add_test(NAME service-${suite} COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" ${suite} "$<TARGET_FILE_DIR:neura>")
+        set_tests_properties(service-${suite} PROPERTIES TIMEOUT 600)
+    endforeach()
 
     # The install lifecycle (docs/Install.md): version source, the data
     # formats, and the commands against an install made from a release
