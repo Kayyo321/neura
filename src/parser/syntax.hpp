@@ -145,6 +145,9 @@ struct Statement {
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};
+    // A Block written `static scope { ... }` (Modules.md, Startup blocks).
+    // `keyword` spans the two words `static scope`.
+    bool startup{};
 };
 
 struct MatchArm {
@@ -228,6 +231,9 @@ struct Declaration {
     std::optional<Span> name_span{};
     // Accessor clauses after the member's ';', in source order.
     std::vector<AccessorClause> accessors{};
+    // The startup blocks written among a module's members, in source order
+    // (Modules.md, Startup blocks). Each is a Block statement with `startup`.
+    std::vector<Statement> startup_blocks{};
     // The tags written before the declaration, in source order. They apply
     // to every branch of an `or func` group.
     std::vector<TagSyntax> tags{};

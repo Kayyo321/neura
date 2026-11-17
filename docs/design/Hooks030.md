@@ -214,19 +214,19 @@ startup-block = "static" "scope" block
 
 | Rule | Status |
 | --- | --- |
-| `static scope { ... }` is written among the top-level statements of a file or among the members of a module. It has no `export`, no tags and no `;` after its `}`. | proposed |
-| `scope` after `static` is read by context. `static let` and every other use of `static` and `scope` are unchanged. | proposed |
-| The block is an ordinary block: its bindings are local to it and it may shadow nothing an ordinary block could not. It is not a task scope and is not evaluated by the compiler. | proposed |
-| It runs once per execution, at its place in source order among its file's initializers and top-level statements, under [the existing order](../lang/Modules.md#initialization). A module's block runs where the module is written. A file may have several. | proposed |
-| A block runs whether or not anything in its file or module is used, and is never removed as unreachable. A module shared by several imports, from source or from `.nir`, runs its blocks once. A module that inherits another does not run the base's blocks again. | proposed |
-| It is an error in a function, a class, an interface, an enum, a nested block, or a generic declaration (`E0218`). | proposed |
-| `return` in the block is `E0470`. So is postfix `?` on a `Result`, once the absence milestone adds it. A fallible helper's result is handled in the block. | proposed |
-| The block is not inside a function: `scope { }`, `spawn` and `select` written in it are rejected as they are at file level today (`E0607`, `E0603`, `E0606`). Calling a function that uses them is legal where it is legal from a top-level statement. | proposed |
-| A trap in a block ends the run before `main`. Each test of `neura test` runs every block again in a fresh execution. `check`, `emit-ir`, the language server and test discovery run none. A library with startup blocks and no entry point is not runnable. | proposed |
-| Class statics keep first-active-use initialization. A block that uses a class initializes it there. | proposed |
-| Lowering adds the block to its file's body as an `IrOp::Block` with its own span, in `Lowering::run`. No NeuraIR or NVR version changes. | proposed |
-| A debugger launch sets its breakpoints before the first initializer runs, so a breakpoint in a startup block stops. | proposed |
-| The formatter writes `static scope {` on one line and the body as a block. The language server lists a startup block in the outline as `static scope` and folds it. | proposed |
+| `static scope { ... }` is written among the top-level statements of a file or among the members of a module. It has no `export`, no tags and no `;` after its `}`. | proposed; implemented |
+| `scope` after `static` is read by context. `static let` and every other use of `static` and `scope` are unchanged. | proposed; implemented |
+| The block is an ordinary block: its bindings are local to it and it may shadow nothing an ordinary block could not. It is not a task scope and is not evaluated by the compiler. | proposed; implemented |
+| It runs once per execution, at its place in source order among its file's initializers and top-level statements, under [the existing order](../lang/Modules.md#initialization). A module's block runs where the module is written. A file may have several. | proposed; implemented |
+| A block runs whether or not anything in its file or module is used, and is never removed as unreachable. A module shared by several imports, from source or from `.nir`, runs its blocks once. A module that inherits another does not run the base's blocks again. | proposed; implemented |
+| It is an error in a function, a class, an interface, an enum, a nested block, or a generic declaration (`E0218`). | proposed; implemented |
+| `return` in the block is `E0470`. So is postfix `?` on a `Result`, once the absence milestone adds it. A fallible helper's result is handled in the block. | proposed; implemented |
+| The block is not inside a function: `scope { }`, `spawn` and `select` written in it are rejected as they are at file level today (`E0607`, `E0603`, `E0606`). Calling a function that uses them is legal where it is legal from a top-level statement. | proposed; implemented |
+| A trap in a block ends the run before `main`. Each test of `neura test` runs every block again in a fresh execution. `check`, `emit-ir`, the language server and test discovery run none. A library with startup blocks and no entry point is not runnable. | proposed; implemented |
+| Class statics keep first-active-use initialization. A block that uses a class initializes it there. | proposed; implemented |
+| Lowering adds the block to its file's body as an `IrOp::Block` with its own span, in `Lowering::run`. No NeuraIR or NVR version changes. | proposed; implemented |
+| A debugger launch sets its breakpoints before the first initializer runs, so a breakpoint in a startup block stops. | proposed; implemented |
+| The formatter writes `static scope {` on one line and the body as a block. The language server lists a startup block in the outline as `static scope` and folds it. | proposed; implemented |
 
 ### Hook-bearing initializers
 

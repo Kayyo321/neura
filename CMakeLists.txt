@@ -549,7 +549,7 @@ if(BUILD_TESTING)
     )
     # Editor protocol contracts execute real compiler and runtime paths.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
+    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_hooks lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
             add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py" "$<TARGET_FILE:neura>")

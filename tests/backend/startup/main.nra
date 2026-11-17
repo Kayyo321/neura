@@ -1,0 +1,67 @@
+// Startup blocks (Modules.md, Startup blocks): each runs once, at its place
+// in source order among its file's initializers and top-level statements,
+// after the files its file imports. Registry is imported by this file and by
+// helper.nra and runs once; unused.nra runs although nothing in it is used;
+// cycle-a.nra and cycle-b.nra import each other and run in the given order.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let registry = import:Registry;
+let helper = import:Helper;
+let unused = import:Unused;
+let cycle = import:CycleA;
+
+let first: int32 = trace("main: first global", 1);
+
+static scope {
+    let local: int32 = first + registry.count;
+    console.print_line("main: first block, local " + local.to_string());
+}
+
+let second: int32 = trace("main: second global", 2);
+
+static scope {
+    // A class whose statics are first used here initializes here.
+    console.print_line("main: second block, scale " + Lazy.scale.to_string());
+    for (let i = 0; i < 2; i += 1) {
+        if (i == 1) {
+            break;
+        }
+        console.print_line("main: loop " + i.to_string());
+    }
+    let local = func() -> int32 {
+        return 7;
+    };
+    console.print_line("main: lambda " + local().to_string());
+}
+
+let Settings = module (
+    export let mode: string = describe("module member");
+
+    static scope {
+        console.print_line("main: module block after " + mode);
+    }
+
+    export let later: string = describe("module member after the block");
+);
+
+let Lazy = class (
+    export static let scale: int32 = trace("main: Lazy statics", 3);
+);
+
+let trace = func(text: string, value: int32) -> int32 {
+    console.print_line(text);
+    return value;
+};
+
+let describe = func(text: string) -> string {
+    console.print_line("main: " + text);
+    return text;
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("main: entry, " + second.to_string() + " " + helper.label() + " " +
+                           cycle.name);
+        return program.ExitCode.Ok;
+    };
+);

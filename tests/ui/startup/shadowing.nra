@@ -1,0 +1,10 @@
+// Case 67: a binding in the block follows the scoping of an ordinary block.
+let limit: int32 = 3;
+
+static scope {
+    let limit: int32 = 4;
+}
+
+{
+    let limit: int32 = 4;
+}

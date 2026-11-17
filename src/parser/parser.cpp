@@ -199,6 +199,19 @@ private:
         skipped_to_end_ = true;
     }
 
+    // Records an error that leaves the parse in a known state, so nothing
+    // needs to be skipped, up to error_limit() errors.
+    void record(const Diagnostic& error) {
+        if (stopped_) return;
+        errors_.push_back(error);
+        if (errors_.size() >= error_limit()) {
+            auto first = errors_.front();
+            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            stopped_ = true;
+            throw first;
+        }
+    }
+
     static bool statement_keyword(std::string_view text) {
         return text == "let" || text == "const" || text == "export" || text == "static" || text == "return" ||
                text == "if" || text == "while" || text == "for" || text == "do" || text == "break" ||
@@ -361,6 +374,7 @@ private:
             ~Restore() { depth = saved; }
         } restore{block_depth_, depth};
         while (!at_end() && !at(")")) {
+            if (startup_member(*body)) continue;
             auto member = tagged_declaration(Declaration::Kind::Class);
             if (member.cast_target) {
                 auto more_casts = std::exchange(member.overloads, {});
@@ -738,6 +752,10 @@ private:
         auto tags = tag_list();
         const auto documentation = tag_documentation(first);
         const auto tags_span = span_from(first);
+        if (at_startup_block())
+            throw Diagnostic(tags_span, "a startup block takes no tags (no 'export')").with_code("E0217")
+                .label("a startup block takes no tags")
+                .help("remove the tags; a startup block is 'static scope { ... }'");
         if (!at_declaration() || ((at("let") || at("const")) && next_is(1, "["))) {
             const bool destructure = at_declaration();
             auto error = Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
@@ -769,6 +787,13 @@ private:
         result.kind = Declaration::Kind::Binding;
         result.documentation = current().documentation;
         result.exported = match("export");
+        if (result.exported && at_startup_block())
+            throw Diagnostic(tokens_[cursor_ - 1].span, "a startup block takes no tags (no 'export')")
+                .with_code("E0217").label("a startup block is not exported")
+                .suggest("remove 'export'", Span{tokens_[cursor_ - 1].span.file, tokens_[cursor_ - 1].span.line,
+                         tokens_[cursor_ - 1].span.column, tokens_[cursor_ - 1].span.offset,
+                         current().span.offset - tokens_[cursor_ - 1].span.offset}, "",
+                         Applicability::MachineApplicable);
         result.static_member = match("static");
         result.constant = match("const");
         if (!result.constant && at_last_declaration()) {
@@ -855,6 +880,7 @@ private:
                 result.generics = generic_parameters();
                 expect("(");
                 while (!at(")")) {
+                    if (startup_member(result)) continue;
                     const auto tags_start = cursor_;
                     auto variant_tags = tag_list();
                     const auto variant_documentation = tag_documentation(tags_start);
@@ -918,6 +944,7 @@ private:
                 expect("(");
                 while (!at_end() && !at(")")) {
                     const auto member_start = cursor_;
+                    if (startup_member(result)) continue;
                     Declaration member;
                     try {
                         member = tagged_declaration(result.kind);
@@ -996,6 +1023,82 @@ private:
             .note("'last' is a contextual word: followed by '[' it is a binding named 'last' being indexed")
             .suggest("declare the names with 'const', which binds each of them once", word, "const",
                      Applicability::MachineApplicable);
+    }
+
+    // `static scope { ... }` (Modules.md, Startup blocks). `scope` after
+    // `static` is a contextual word; `static let` and every other use of
+    // either word keep their meaning.
+    bool at_startup_block() const {
+        return at("static") && cursor_ + 1 < tokens_.size() &&
+               tokens_[cursor_ + 1].kind == TokenKind::Identifier && tokens_[cursor_ + 1].text == "scope";
+    }
+
+    static Diagnostic misplaced_startup_block(const Span& keyword) {
+        return Diagnostic(keyword, "a startup block is written at file or module level").with_code("E0218")
+            .label("not at file or module level")
+            .help("move it to the top level of the file or into a module, or call a function from a file-level "
+                  "block");
+    }
+
+    // Skips one balanced group that starts at the current '(' or '{'.
+    void skip_group() {
+        std::size_t depth = 0;
+        while (!at_end()) {
+            const auto& text = current().text;
+            if (current().kind == TokenKind::Symbol && (text == "(" || text == "[" || text == "{")) ++depth;
+            else if (current().kind == TokenKind::Symbol && (text == ")" || text == "]" || text == "}")) --depth;
+            advance();
+            if (depth == 0) return;
+        }
+    }
+
+    // A Block with `startup` set. A malformed block is recorded as E0217,
+    // and the parse goes on after the group the block would have been:
+    // a parenthesized group and a braced body, or a ';'.
+    Statement startup_block() {
+        const auto start = cursor_;
+        Statement result{};
+        result.kind = Statement::Kind::Block;
+        result.startup = true;
+        advance();
+        advance();
+        result.keyword = span_from(start);
+        if (!at("{")) {
+            const auto& next = current();
+            const bool later_line = next.kind == TokenKind::End || next.span.line > tokens_[cursor_ - 1].span.line;
+            auto error = Diagnostic(later_line && !next_is(0, ";") ? after_previous() : next.span,
+                                    "expected '{' after 'static scope'").with_code("E0217")
+                .label(next.kind == TokenKind::End ? "expected '{' before the end of the file"
+                                                   : "expected '{', " + found_text(next))
+                .help("a startup block is 'static scope { ... }'");
+            if (at("(")) error.note("a startup block names no scope handle");
+            record(error);
+            if (at("(")) skip_group();
+            if (at("{")) skip_group();
+            else match(";");
+            result.span = span_from(start);
+            return result;
+        }
+        result.body = block();
+        result.span = span_from(start);
+        if (at(";")) {
+            const auto semicolon = current().span;
+            record(Diagnostic(semicolon, "a startup block has no ';' after its '}'").with_code("E0217")
+                       .label("remove this ';'")
+                       .suggest("remove the ';'", semicolon, "", Applicability::MachineApplicable));
+            advance();
+        }
+        return result;
+    }
+
+    // A startup block among the members of `owner`: kept for a module, and
+    // E0218 in a class, an interface or an enum. False when none is next.
+    bool startup_member(Declaration& owner) {
+        if (!at_startup_block()) return false;
+        auto block = startup_block();
+        if (owner.kind == Declaration::Kind::Module && block_depth_ == 0) owner.startup_blocks.push_back(std::move(block));
+        else record(misplaced_startup_block(block.keyword));
+        return true;
     }
 
     // Accessor clauses after a member's ';' (Types.md, Accessors). No member
@@ -1096,6 +1199,11 @@ private:
     Statement statement() {
         const auto start = cursor_;
         Statement result{};
+        if (at_startup_block()) {
+            result = startup_block();
+            if (block_depth_ > 0) record(misplaced_startup_block(result.keyword));
+            return result;
+        }
         if (at("#")) {
             result.kind = Statement::Kind::Binding;
             result.declaration = std::make_unique<Declaration>(tagged_declaration());

@@ -1,0 +1,3 @@
+// Case 61: a startup block takes no tags.
+#Deprecated
+static scope { }

@@ -181,6 +181,8 @@ struct Context {
     // found at or above it was declared inside that scope. Without a task
     // scope every local of the function body qualifies; parameters never do.
     std::size_t task_scope_base = 0;
+    // Inside a startup block (Modules.md, Startup blocks).
+    bool startup_block = false;
 };
 
 struct ClosureEnvironment {
@@ -446,6 +448,9 @@ private:
     IrNode read_place(IrNode place, Context& context);
     IrNode store_place(IrNode place, IrNode value, const Span& span);
     [[noreturn]] void accessor_reference(const IrNode& place, const IrType& type) const;
+    // Startup blocks (Modules.md, Startup blocks); lowering_startup.inc.
+    IrNode startup_block(const Statement& stmt, const Context& context);
+    static Diagnostic return_in_startup_block(const Statement& stmt);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -3968,6 +3973,8 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return store_place(std::move(destination), std::move(source), stmt.span);
     }
     case StmtKind::Block: {
+        if (stmt.startup && !context.startup_block)
+            throw Diagnostic(stmt.keyword, "a startup block is written at file or module level").with_code("E0218");
         auto result = node(IrOp::Block, stmt.span);
         result.body = body(stmt.body, context);
         return result;
@@ -3998,6 +4005,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
     case StmtKind::ForEach:
         return for_each(stmt, context);
     case StmtKind::Return: {
+        if (context.function == no_symbol && context.startup_block) throw return_in_startup_block(stmt);
         if (context.function == no_symbol) {
             throw Diagnostic(stmt.span, "return is only allowed inside a function").with_code("E0431");
         }
@@ -4728,6 +4736,10 @@ void Lowering::lower_declaration(SymbolId id) {
                 region.push_back(std::move(instruction));
             }
         }
+        for (const auto& block : declaration.startup_blocks) {
+            auto ctx = context(id);
+            initializers.push_back(startup_block(block, ctx));
+        }
         if (!initializers.empty()) program_.bodies.push_back({id, std::move(initializers)});
         if (!static_initializers.empty())
             program_.bodies.push_back({entries_[id].static_scope, std::move(static_initializers)});
@@ -4907,7 +4919,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             } else {
                 const auto accepted = neura::check_definite_assignment({}, std::span(&stmt, 1));
                 deferred_assignments_.insert(accepted.begin(), accepted.end());
-                instructions.push_back(statement(stmt, ctx));
+                instructions.push_back(stmt.startup ? startup_block(stmt, ctx) : statement(stmt, ctx));
             }
         }
         if (!instructions.empty()) program_.bodies.push_back({id, std::move(instructions)});
@@ -4944,6 +4956,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 }
 
 #include "lowering_accessors.inc"
+#include "lowering_startup.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

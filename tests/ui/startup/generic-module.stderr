@@ -1,0 +1,7 @@
+error[E0202]: expected '('
+ --> $DIR/generic-module.nra:3:21
+  |
+3 | let Generic = module<T> (
+  |                     ^ expected '(', found '<'
+
+For more information about this error, try `neura explain E0202`.

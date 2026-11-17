@@ -1,0 +1,9 @@
+error[E0470]: a startup block returns nothing and cannot be left early
+ --> $DIR/return.nra:5:9
+  |
+5 |         return;
+  |         ^^^^^^ 'return' in a startup block
+  |
+  = help: handle the result with 'match', or put the work in a function and call it from the block
+
+For more information about this error, try `neura explain E0470`.

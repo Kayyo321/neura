@@ -38,6 +38,8 @@ Errors about the grammar.
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
+| [E0217](E0217.md) | malformed startup block |
+| [E0218](E0218.md) | misplaced startup block |
 
 ## E03xx: Names
 
@@ -111,6 +113,7 @@ Errors about types, values, calls, and statements.
 | [E0448](E0448.md) | a value type that contains itself |
 | [E0449](E0449.md) | a value type larger than its inline limit |
 | [E0450](E0450.md) | a list literal without new |
+| [E0470](E0470.md) | return in a startup block |
 
 ## E05xx: Classes and lifecycle
 

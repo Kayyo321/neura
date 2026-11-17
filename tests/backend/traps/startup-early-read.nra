@@ -1,0 +1,22 @@
+// status: 139
+// stderr: trap: read of an uninitialized global: .*startup-early-read[.]nra:
+// Case 74: a startup block that reads, through a function, a global written
+// below it fails as an uninitialized read.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let read = func() -> string {
+    return current;
+};
+static scope {
+    console.print_line("reading");
+    console.print_line(read());
+}
+let current: string = compute();
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);
+let compute = func() -> string {
+    return "computed";
+};

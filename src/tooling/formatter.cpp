@@ -233,6 +233,7 @@ private:
             declaration(member, value.kind == Declaration::Kind::Enum);
         }
         for (const auto& body : value.body) statement(body);
+        for (const auto& block : value.startup_blocks) statement(block);
         for (const auto& overload : value.overloads) declaration(overload);
         for (const auto& accessor : value.accessors) {
             hints_.accessors.insert(accessor.span.offset);

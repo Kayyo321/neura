@@ -171,6 +171,48 @@ let App = module:program.Entry (
         self.assertIn('dap output\n', ''.join(outputs))
         self.assertFalse(self.capabilities['supportsStepBack'])
 
+    def test_breakpoint_in_a_startup_block_stops_before_main(self):
+        source = '''let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let first = 4;
+static scope {
+    let doubled = first * 2;
+    console.print_line("startup " + doubled.to_string());
+}
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("main");
+        return program.ExitCode.Ok;
+    };
+);
+'''
+        path = self.source('startup.nra', source)
+        self.launch(path)
+        result = self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 6}]})
+        self.assertTrue(result['breakpoints'][0]['verified'])
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        self.assertEqual(frame['line'], 6)
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'doubled'})['result'], '8')
+        outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
+        self.assertNotIn('main\n', ''.join(outputs))
+        # A line stops once at each of its statement positions; the block itself runs once.
+        while True:
+            self.client.request('continue')
+            message = self.client.next()
+            while message.get('event') not in ('stopped', 'exited'):
+                self.client.events.append(message)
+                message = self.client.next()
+            if message['event'] == 'exited':
+                break
+            self.assertEqual(self.frame()['line'], 6)
+        self.assertEqual(message['body']['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
+        self.assertEqual(''.join(outputs).count('startup 8\n'), 1)
+        self.assertIn('main\n', ''.join(outputs))
+
     def test_pending_breakpoint_keeps_id_and_condition_short_circuits(self):
         path = self.source('pending.nra', """let program = import:Std.Program;
 let App = module:program.Entry (

@@ -684,6 +684,8 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
             declaration(overload, parent, scope, false);
         for (const auto &s : d.body)
             statement(s, id, d.span);
+        for (const auto &s : d.startup_blocks)
+            statement(s, id, d.span);
         for (const auto &accessor : d.accessors) {
             if (accessor.setter)
                 add("value", accessor.keyword, accessor.span, accessor.span, id, 13, 6, 0,
@@ -1143,6 +1145,8 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
         for (const auto &child : d.overloads)
             declaration(child);
         for (const auto &s : d.body)
+            statement(s);
+        for (const auto &s : d.startup_blocks)
             statement(s);
         if (d.initializer)
             expression(*d.initializer);
@@ -1831,11 +1835,40 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
         while (parent != none && !visible(symbols[parent])) parent = symbols[parent].parent;
         children[parent].push_back(i);
     }
+    // Startup blocks (Modules.md, Startup blocks) have no symbol of their
+    // own: the outline lists each as `static scope`, under its module or at
+    // the top of the file, in source order with the declarations.
+    std::map<std::size_t, std::vector<const Statement *>> startup;
+    for (const auto &statement : doc.syntax.statements)
+        if (statement.startup)
+            startup[none].push_back(&statement);
+    for (std::size_t i = 0; i < symbols.size(); ++i)
+        if (symbols[i].file == doc.path && symbols[i].declaration)
+            for (const auto &block : symbols[i].declaration->startup_blocks)
+                startup[i].push_back(&block);
+    const auto startup_item = [&](const Statement &block) {
+        return Json{{"name", "static scope"},
+                    {"detail", ""},
+                    {"kind", 12},
+                    {"range", doc.range(block.span)},
+                    {"selectionRange", doc.range(block.keyword)}};
+    };
+    const auto with_startup = [&](std::size_t parent, std::vector<std::pair<std::size_t, Json>> entries) {
+        for (const auto *block : startup[parent])
+            entries.emplace_back(block->span.offset, startup_item(*block));
+        std::stable_sort(entries.begin(), entries.end(),
+                         [](const auto &a, const auto &b) { return a.first < b.first; });
+        Json::Array result;
+        for (auto &entry : entries)
+            result.push_back(std::move(entry.second));
+        return result;
+    };
     std::function<Json(std::size_t)> item = [&](std::size_t index) {
         const auto &s = symbols[index];
-        Json::Array nested;
+        std::vector<std::pair<std::size_t, Json>> entries;
         for (auto child : children[index])
-            nested.push_back(item(child));
+            entries.emplace_back(std::min(symbols[child].span.offset, symbols[child].selection.offset), item(child));
+        auto nested = with_startup(index, std::move(entries));
         auto full = s.span;
         const auto begin = std::min(full.offset, s.selection.offset);
         const auto end = std::max(full.offset + full.length, s.selection.offset + s.selection.length);
@@ -1852,10 +1885,10 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
             result["tags"] = Json::Array{1};
         return result;
     };
-    Json::Array result;
+    std::vector<std::pair<std::size_t, Json>> entries;
     for (auto index : children[none])
-        result.push_back(item(index));
-    return result;
+        entries.emplace_back(std::min(symbols[index].span.offset, symbols[index].selection.offset), item(index));
+    return with_startup(none, std::move(entries));
 }
 Json AnalysisSession::entries() const {
     Json::Array result;
@@ -2001,6 +2034,8 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
             for (const auto &child : item.overloads)
                 declaration(child);
             for (const auto &child : item.body)
+                statement(child);
+            for (const auto &child : item.startup_blocks)
                 statement(child);
             for (const auto &accessor : item.accessors) {
                 for (const auto &child : accessor.body)

@@ -41,6 +41,8 @@ Errors about the grammar.
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
+| [E0217](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0217.md) | malformed startup block |
+| [E0218](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0218.md) | misplaced startup block |
 
 ## E03xx: Names
 
@@ -114,6 +116,7 @@ Errors about types, values, calls, and statements.
 | [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) | a value type that contains itself |
 | [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md) | a value type larger than its inline limit |
 | [E0450](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0450.md) | a list literal without new |
+| [E0470](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0470.md) | return in a startup block |
 
 ## E05xx: Classes and lifecycle
 

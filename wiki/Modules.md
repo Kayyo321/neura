@@ -230,3 +230,45 @@ A startup trap ends the run before `main`. If a static initializer traps
 during an active use, execution ends before that use completes. Cyclic imports
 between files can run in the order above when every read finds an initialized
 global.
+
+### Startup blocks
+
+`static scope { ... }` is a startup block: work that runs once per execution, before `main`, with bindings of its own. It is written among the top-level statements of a file or among the members of a module, takes no `export` and no tags, and has no `;` after its `}`. `scope` after `static` is read by context, so `static let scope = 1;`, a local named `scope`, and the `scope { }` statement of a function keep their meaning.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let names: string[] = ["ada", "grace"];
+
+static scope {
+    let count = names.length;
+    console.print_line("loaded " + count.to_string() + " names");
+}
+
+let Registry = module (
+    export let size: int32 = 2;
+
+    static scope {
+        console.print_line("registry ready");
+    }
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("main");
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+loaded 2 names
+registry ready
+main
+```
+
+The block is an ordinary block. It runs at its place in source order among its file's initializers and top-level statements, in the order of the list above; a module's block runs where the module is written, and a file may have several. It runs whether or not anything in its file or module is used. A file or prebuilt module that several files import runs its blocks once, and a module that inherits another does not run the base's blocks again. A class whose statics are first used in a block initializes there.
+
+The block is not inside a function. `return` in it is `E0470`, and `scope { }`, `spawn` and `select` written in it are rejected as they are at file level (`E0607`, `E0603`, `E0606`); a function that uses them may still be called from the block. A block in a function, a class, an interface, an enum or a nested block is `E0218`, and a malformed block is `E0217`. A trap in a block ends the run before `main`, and each test under `neura test` runs every block again in its fresh execution. `neura check`, `neura emit-ir`, the language server and test discovery run none. A library with startup blocks and no entry point is checked but is not runnable.

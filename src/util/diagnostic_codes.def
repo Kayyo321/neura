@@ -40,6 +40,8 @@ NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
 NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
 NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
+NEURA_DIAGNOSTIC(E0217, "malformed startup block")
+NEURA_DIAGNOSTIC(E0218, "misplaced startup block")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
@@ -104,6 +106,7 @@ NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an ins
 NEURA_DIAGNOSTIC(E0448, "a value type that contains itself")
 NEURA_DIAGNOSTIC(E0449, "a value type larger than its inline limit")
 NEURA_DIAGNOSTIC(E0450, "a list literal without new")
+NEURA_DIAGNOSTIC(E0470, "return in a startup block")
 
 // Classes, lifecycle, and accessors
 NEURA_DIAGNOSTIC(E0501, "invalid static member")
