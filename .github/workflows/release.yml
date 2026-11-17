@@ -196,7 +196,9 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         run: |
           status=0
-          for file in stage/bin/* stage/lib/neura/*.so stage/lib/neura/launchers/*/*; do
+          # Every executable of the three archives: stage holds core and sdk,
+          # stage-service the service component.
+          for file in stage/bin/* stage/lib/neura/*.so stage/lib/neura/launchers/*/* $(find stage-service -type f 2> /dev/null); do
             # A static executable has no dynamic section: readelf prints
             # nothing for it and objdump fails. Both mean it needs nothing.
             needed=$(readelf -d "$file" 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ' || true)
@@ -223,7 +225,7 @@ jobs:
         if: ${{ runner.os == 'macOS' }}
         run: |
           status=0
-          for file in stage/bin/* stage/lib/neura/*.dylib; do
+          for file in stage/bin/* stage/lib/neura/*.dylib $(find stage-service -type f 2> /dev/null); do
             otool -L "$file"
             for library in $(otool -L "$file" | tail -n +2 | awk '{ print $1 }'); do
               case "$library" in
@@ -261,6 +263,19 @@ jobs:
           done
           ls -l dist
 
+      # The size report of the baseline: each executable's and library's
+      # stripped size, and each archive's size (the qualify job checks the
+      # archives against rc.3's).
+      - name: Report the sizes
+        run: |
+          mkdir sizes
+          for file in $(find stage-core stage-sdk stage-service -type f \( -perm -u+x -o -name '*.so' -o -name '*.dylib' \) | sort); do
+            cp "$file" sizes/item
+            strip sizes/item 2> /dev/null || true
+            printf '%s %s stripped %s\n' "$file" "$(wc -c < "$file" | tr -d ' ')" "$(wc -c < sizes/item | tr -d ' ')"
+          done | tee sizes.txt
+          ls -l dist | tee -a sizes.txt
+
       - name: Upload the archives
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         with:
@@ -275,6 +290,7 @@ jobs:
         with:
           name: evidence-build-${{ matrix.triple }}
           path: |
+            sizes.txt
             build/build.log
             build/ctest-junit.xml
             build/Testing/Temporary/LastTest.log
@@ -317,7 +333,9 @@ jobs:
           path: dist
 
       # A target that the previous release did not have has nothing to
-      # update from, and its upgrade check is reported as not run.
+      # update from, and its upgrade check is reported as not run. A 0.3
+      # release has three archives; the upgrade starts from its SDK archive,
+      # and from a 0.2 release's only archive.
       - name: Download the previous release's archive
         if: ${{ env.PREVIOUS != '' }}
         env:
@@ -325,21 +343,45 @@ jobs:
         run: |
           mkdir previous
           gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern SHA256SUMS
-          if grep -F -- "-$TRIPLE.tar.gz" previous/SHA256SUMS > previous/expected; then
-            gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous \
-              --pattern "neura-*-$TRIPLE.tar.gz"
-            (cd previous && shasum -a 256 --check expected)
-          else
-            echo "$PREVIOUS has no archive for $TRIPLE"
-          fi
+          version=${PREVIOUS#v}
+          for file in "neura-sdk-$version-$TRIPLE.tar.gz" "neura-$version-$TRIPLE.tar.gz"; do
+            if grep -F -- "  $file" previous/SHA256SUMS > previous/expected; then
+              gh release download "$PREVIOUS" --repo "$GITHUB_REPOSITORY" --dir previous --pattern "$file"
+              (cd previous && shasum -a 256 --check expected)
+              echo "$file" > previous/chosen
+              break
+            fi
+          done
+          [ -f previous/chosen ] || echo "$PREVIOUS has no archive for $TRIPLE"
+
+      # The 0.2 bridge (docs/design/Lifecycle030.md): the published 0.2
+      # clients update into this release with their own neura update, then
+      # migrate. rc.3 is also the size reference of the baseline.
+      - name: Download the 0.2 archives for the bridge
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir bridge
+          for tag in v0.2.1-rc.3 v0.2.0; do
+            file="neura-${tag#v}-$TRIPLE.tar.gz"
+            mkdir "bridge/$tag"
+            gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "bridge/$tag" --pattern SHA256SUMS --pattern "$file"
+            (cd "bridge/$tag" && grep -F -- "  $file" SHA256SUMS | shasum -a 256 --check)
+          done
 
       - name: Run the lifecycle checks
         run: |
-          set -- --archive "dist/neura-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" --examples examples \
-            --runtime-archive "dist/neura-runtime-$FULL-$TRIPLE.tar.gz"
-          previous=$(ls previous/neura-*-"$TRIPLE".tar.gz 2> /dev/null || true)
-          if [ -n "$previous" ]; then
-            set -- "$@" --previous "$previous" --require-previous
+          set -- --archive "dist/neura-$FULL-$TRIPLE.tar.gz" --sdk-archive "dist/neura-sdk-$FULL-$TRIPLE.tar.gz" \
+            --runtime-archive "dist/neura-runtime-$FULL-$TRIPLE.tar.gz" --version "$FULL" --triple "$TRIPLE" --examples examples \
+            --bridge "bridge/v0.2.1-rc.3/neura-0.2.1-rc.3-$TRIPLE.tar.gz" --bridge "bridge/v0.2.0/neura-0.2.0-$TRIPLE.tar.gz" \
+            --size-reference "bridge/v0.2.1-rc.3/neura-0.2.1-rc.3-$TRIPLE.tar.gz"
+          if [ -f previous/chosen ]; then
+            set -- "$@" --previous "previous/$(cat previous/chosen)" --require-previous
+          fi
+          # A trial builds a -dev version, which may sort before rc.3; a tag
+          # must update from both 0.2 clients.
+          if [ "$GITHUB_REF_TYPE" = tag ]; then
+            set -- "$@" --require-bridge
           fi
           sh packaging/qualify.sh "$@" | tee "qualify-$TRIPLE.txt"
 

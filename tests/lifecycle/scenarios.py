@@ -1268,6 +1268,8 @@ def suite_migrate(kit: Kit) -> None:
     result = run([home.bin / "neura-update", "update", "--source",
                   kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9"), version="9.9.9")], env=home.env())
     check(result.returncode == 0 and v in home.generations(), f"an update after the migration keeps {v}: {result.stderr}")
+    result = run([home.bin / "neura-update", "update", "--rollback"], env=home.env())
+    check(result.returncode == 0 and home.current() == v, f"--rollback returns to the generation a 0.2 updater placed: {result.stderr}")
 
     # Case 56: uninstall of an unmigrated installation, by the schema 1 rules.
     gone = Home(kit, "uninstall-unmigrated")

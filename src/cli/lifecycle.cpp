@@ -1019,10 +1019,10 @@ std::string previous_generation(const fs::path& root, const std::string& active,
     std::time_t best_time = 0;
     for (const auto& name : generations_on_disk(root)) {
         if (name == active) continue;
-        if (require_manifests && (parse_generation_name(name)->id.empty() ||
-                                  !is_directory_no_follow(root / "versions" / name / components_directory))) {
-            continue;
-        }
+        // A generation without manifests is a 0.2 one, which --rollback
+        // does not return to; one that a 0.2 updater placed from the legacy
+        // archive has them and keeps its name.
+        if (require_manifests && !is_directory_no_follow(root / "versions" / name / components_directory)) continue;
         const auto time = lease_time(root, name).value_or(0);
         if (best.empty() || time > best_time || (time == best_time && name > best)) {
             best = name;
