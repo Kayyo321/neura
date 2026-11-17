@@ -1686,6 +1686,10 @@ private:
             result.expressions.push_back(expression());
             if (at("=") || at("+=") || at("-=") || at("*=") || at("/=") || at("%=") ||
                 at("&=") || at("^=") || at("|=") || at("<<=") || at(">>=")) {
+                if (const auto* access = optional_access(result.expressions.front()))
+                    throw Diagnostic(*access->operator_span, "malformed optional access: '?.' is not an assignment target")
+                        .with_code("E0233").label("an optional access gives a value, not a place")
+                        .help("test the receiver for nil and assign through '.'");
                 result.kind = Statement::Kind::Assignment;
                 result.assignment_operator = advance().text;
                 result.expressions.push_back(expression());
@@ -1727,7 +1731,7 @@ private:
     }
 
     Expr expression_tail(std::size_t start, Expr left, int minimum_precedence, bool range_step = true,
-                         std::string_view branch_keyword = {}) {
+                         std::string_view branch_keyword = {}, bool binary_only = false) {
         while (precedence() >= minimum_precedence) {
             const auto priority = precedence();
             const bool shift = at_shift();
@@ -1746,6 +1750,8 @@ private:
             binary.operands.push_back(std::move(right));
             left = std::move(binary);
         }
+        if (binary_only) return left;
+        if (minimum_precedence == 1 && at("??")) left = coalesce(start, std::move(left), branch_keyword);
         if (minimum_precedence == 1 && match("..")) {
             auto range = make_expression(Expr::Kind::Range, left.span);
             range.operands.push_back(std::move(left));
@@ -1765,6 +1771,20 @@ private:
             return conditional;
         }
         return left;
+    }
+
+    // `left ?? right` (docs/design/Matching030.md): looser than '||',
+    // tighter than '..' and '? :', and right-associative.
+    Expr coalesce(std::size_t start, Expr left, std::string_view branch_keyword) {
+        const auto token = advance().span;
+        const auto right_start = cursor_;
+        auto right = expression_tail(right_start, cast(branch_keyword), 1, true, branch_keyword, true);
+        if (at("??")) right = coalesce(right_start, std::move(right), branch_keyword);
+        auto result = make_expression(Expr::Kind::Coalesce, span_from(start), "??");
+        result.operator_span = token;
+        result.operands.push_back(std::move(left));
+        result.operands.push_back(std::move(right));
+        return result;
     }
 
     bool at_comparison_connector(std::string_view branch_keyword) const {
@@ -1818,6 +1838,9 @@ private:
         if (at("++") || at("--")) {
             const auto op = advance().text;
             auto operand = unary(branch_keyword);
+            if (const auto* access = optional_access(operand))
+                throw Diagnostic(*access->operator_span, "malformed optional access: '?.' takes no '" + op + "'")
+                    .with_code("E0233").label("an optional access gives a value, not a place");
             auto result = make_expression(Expr::Kind::PrefixUpdate, span_from(start), op);
             result.operands.push_back(std::move(operand));
             return result;
@@ -1831,12 +1854,20 @@ private:
         }
         auto operand = postfix(branch_keyword);
         if (at("++") || at("--")) {
+            if (const auto* access = optional_access(operand))
+                throw Diagnostic(*access->operator_span, "malformed optional access: '?.' takes no '" + current().text + "'")
+                    .with_code("E0233").label("an optional access gives a value, not a place");
             const auto op = advance().text;
             auto result = make_expression(Expr::Kind::PostfixUpdate, span_from(start), op);
             result.operands.push_back(std::move(operand));
             return result;
         }
         return operand;
+    }
+
+    // The optional access that `expr` ends in, `a?.b`, if any.
+    static const Expr* optional_access(const Expr& expr) {
+        return expr.kind == Expr::Kind::OptionalMember ? &expr : nullptr;
     }
 
     std::vector<Expr> expression_list(std::string_view close) {
@@ -1906,6 +1937,21 @@ private:
 
     Expr postfix_tail(std::size_t start, Expr result) {
         while (true) {
+            if (at("?.")) {
+                // `receiver?.member` (docs/design/Matching030.md).
+                const auto token = advance().span;
+                if (current().kind != TokenKind::Identifier)
+                    throw Diagnostic(token, "malformed optional access: '?.' must be followed by a member name")
+                        .with_code("E0233").label(current().kind == TokenKind::End
+                                                      ? std::string("expected a member name before the end of the file")
+                                                      : "expected a member name, " + found_text(current()));
+                const auto name = advance().text;
+                auto member = make_expression(Expr::Kind::OptionalMember, span_from(start), name);
+                member.operator_span = token;
+                member.operands.push_back(std::move(result));
+                result = std::move(member);
+                continue;
+            }
             if (match(".")) {
                 const auto name = identifier().text;
                 auto member = make_expression(Expr::Kind::Member, span_from(start), name);

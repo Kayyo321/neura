@@ -1,0 +1,14 @@
+// Edge case 75: an optional access as an assignment target.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let update = func(pet: Pet, other: Owner) {
+    pet?.owner = other;
+};

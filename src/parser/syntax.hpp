@@ -97,6 +97,12 @@ struct Expr {
         // `nameof(path)`: operand 0, when written, is the path, which is
         // not evaluated.
         NameOf,
+        // docs/design/Matching030.md. `receiver?.member`: operand 0 is the
+        // receiver and `text` the member; a call `receiver?.m(arguments)`
+        // is a Call whose callee is an OptionalMember. `left ?? right` has
+        // its two operands. `operand?` is a Propagate. `operator_span` is
+        // the `?.`, `??` or `?` token.
+        OptionalMember, Coalesce, Propagate,
     };
 
     Kind kind;
@@ -125,6 +131,7 @@ struct Expr {
     std::vector<std::string> labels{};
     std::vector<Span> label_spans{};
     std::shared_ptr<const struct InterpolationSyntax> interpolation{};
+    std::optional<Span> operator_span{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the

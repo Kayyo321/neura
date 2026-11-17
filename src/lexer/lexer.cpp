@@ -32,6 +32,8 @@ constexpr auto keywords = std::to_array<std::string_view>({
 constexpr auto compound_symbols = std::to_array<std::string_view>({
     "===", "<<=", ">>=",
     "->", "=>", "==", "!=", "<=", ">=", "&&", "||",
+    // docs/design/Matching030.md: optional access and coalescing.
+    "?.", "??",
     "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
 });
 

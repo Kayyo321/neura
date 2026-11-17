@@ -1,0 +1,12 @@
+// Edge case 82: a fallback of another numeric type.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let pick = func(amount: Optional<int64>) -> int64 => amount ?? 0.5;

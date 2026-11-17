@@ -439,6 +439,19 @@ private:
                        std::vector<IrNode>& declarations, Context& context, SymbolId owner);
     bool is_covered(const IsCover& earlier, const IsCover& later, const IrType& subject) const;
     void is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered) const;
+    // Optional access, coalescing and propagation (lowering_optional.inc).
+    SymbolId library_enum(std::string_view path, std::string_view module, std::string_view name, const Span& span,
+                          const Context& context);
+    SymbolId library_variant(SymbolId enumeration, std::string_view name, const Span& span) const;
+    bool library_enum_type(const IrType& type, std::string_view path, std::string_view module) const;
+    IrType generic_enum(SymbolId enumeration, const IrType& argument) const;
+    IrNode variant_value(SymbolId variant, const IrType& type, std::optional<IrNode> payload, const Span& span);
+    IrNode tag_is(const IrNode& value, SymbolId variant, const Span& span);
+    SymbolId hidden_local(const std::string& name, const IrType& type, const Span& span, const Context& context);
+    IrNode optional_receiver(const Expr& access, Context& context);
+    IrNode optional_access(const Expr& access, const Expr* call, Context& context);
+    IrNode member_of_optional(const Expr& member, Context& context, bool for_call);
+    IrNode coalesce(const Expr& expr, Context& context);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
     IrNode do_loop(const Statement& stmt, Context& context);
@@ -2486,8 +2499,9 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
 }
 
 IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected) {
-    if (auto result = primitive_call(expr, context)) return std::move(*result);
     const auto& callee_expr = expr.operands.front();
+    if (callee_expr.kind == ExprKind::OptionalMember) return optional_access(callee_expr, &expr, context);
+    if (auto result = primitive_call(expr, context)) return std::move(*result);
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
     // say what the form requires (Concurrency.md section 4.4).
     if (callee_expr.kind == ExprKind::Name && callee_expr.text == "spawn" && expr.open &&
@@ -2495,7 +2509,9 @@ IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected
         throw Diagnostic(*expr.open, "a spawn operand begins with a name; bind the callee to a name first")
             .with_code("E0603");
     auto callee = callee_expr.kind == ExprKind::Member
-        ? select(callee_expr, context, true) : expression(callee_expr, context);
+        ? (callee_expr.operands.front().kind == ExprKind::OptionalMember ? member_of_optional(callee_expr, context, true)
+                                                                         : select(callee_expr, context, true))
+        : expression(callee_expr, context);
     if (callee.op == IrOp::Reference && callee.symbol != no_symbol &&
         symbol(callee.symbol).kind == SymbolKind::Variant) {
         return enum_construct(callee, expr, context);
@@ -3313,7 +3329,12 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::ComparisonChain:
         return comparison_chain(expr, context);
     case ExprKind::Member:
+        if (expr.operands.front().kind == ExprKind::OptionalMember) return member_of_optional(expr, context, false);
         return select(expr, context);
+    case ExprKind::OptionalMember:
+        return optional_access(expr, nullptr, context);
+    case ExprKind::Coalesce:
+        return coalesce(expr, context);
     case ExprKind::Call:
         return call(expr, context, expected);
     case ExprKind::Index: {
@@ -5117,6 +5138,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 #include "lowering_accessors.inc"
 #include "lowering_calls.inc"
 #include "lowering_matching.inc"
+#include "lowering_optional.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).
