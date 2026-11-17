@@ -1,0 +1,17 @@
+// status: 139
+// stderr: invalid reference handle
+let program = import:Std.Program;
+
+let Owner = class (
+    export let value: int = 7;
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let owner: Owner = new;
+        let alias: &int = owner.value;
+        destroy owner;
+        alias += 1;
+        return program.ExitCode.Ok;
+    };
+);

@@ -22,7 +22,7 @@ let SortingTests = module (
 
     // A comparator that counts its calls.
     let counting = func(calls: cell.Cell<int>) -> func(int, int) -> ordering.Ordering {
-        return func(a: int, b: int) -> ordering.Ordering {
+        return new func(a: int, b: int) -> ordering.Ordering {
             calls.value = calls.value + 1;
             return compare(a, b);
         };

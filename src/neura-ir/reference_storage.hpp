@@ -6,8 +6,9 @@ namespace neura {
 
 bool is_primitive_reference(const IrType& type);
 
-// Replace provisional address expressions with ordinary object operations.
-// The whole linked program must be present so each referent uses one layout.
+// Materialize checked addresses as reference-box operations. Local and
+// parameter boxes carry a region placement marker, and globals use static
+// storage. The whole linked program shares each primitive's box layout.
 void materialize_reference_storage(IrProgram& program);
 
 enum class ReferencePreparation { None, Parameter, Field, GlobalBox, GlobalValue };

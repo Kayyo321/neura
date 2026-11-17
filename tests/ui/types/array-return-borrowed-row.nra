@@ -1,0 +1,3 @@
+let borrowed_row = func(row: int[]) -> int[][] {
+    return [row, [9]];
+};

@@ -165,7 +165,7 @@ The final parameter `name: ...T` packs zero or more arguments into a new `T[]`. 
 <!-- example: check -->
 ```neura
 let make_adder = func(offset: int) -> func(int) -> int {
-    return func(value: int) -> int {
+    return new func(value: int) -> int {
         return value + offset;
     };
 };
