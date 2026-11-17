@@ -102,6 +102,14 @@ std::vector<Section> multi_result_sections(unsigned returned_words = 2);
 // Constants: 0 int32 0, 1 int64 1, 2 float64 2.5.
 std::vector<Section> aggregate_sections(unsigned minor = 7);
 
+// A small image that uses a storage region (NVR 1.7): the entry enters a region, releases it and
+// returns 0. `minor` is the version whose function record the bytes follow, as for
+// aggregate_sections: a header that declares 1.6 gets a well-formed 1.6 table in which only the
+// region operations need 1.7.
+//
+// Types: 0 void, 1 bool, 2 int32, 3 text, 4 text[], 5 uint64. Constants: 0 int32 0.
+std::vector<Section> region_sections(unsigned minor = 7);
+
 // Replaces the section with `tag`.
 void replace(std::vector<Section>& sections, std::string_view tag, Bytes data);
 

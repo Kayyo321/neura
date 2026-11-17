@@ -29,9 +29,9 @@ The process status names the trap's class with the shell convention for a proces
 | Trap | Status | `ExitCode` variant |
 | --- | --- | --- |
 | Integer overflow, a zero divisor, `MIN / -1`, an out-of-range conversion (reason 1) | 136 | `ArithmeticError` |
-| A negative index (reason 2), an index at or past the length, a read of an uninitialized slot, field, or global, an invalid handle, a nil class reference, or the frame depth limit | 139 | `SegmentationFault` |
+| A negative index (reason 2), an index at or past the length, a read of an uninitialized slot, field, or global, an invalid handle, a nil class reference, the frame depth limit, the stack limit of regions, or an access to storage a region released | 139 | `SegmentationFault` |
 | An explicit message trap or failed assertion (reason 3), a list modified during for-each (reason 5), or a failed class cast | 134 | `Abort` |
-| Invalid dispatch (reason 4), a malformed graph, text, or host completion, or an invalid task operation | 132 | `IllegalInstruction` |
+| Invalid dispatch (reason 4), a malformed graph, text, or host completion, an invalid task operation, or an invalid region operation | 132 | `IllegalInstruction` |
 | The heap or handle limit, or the task, queued-message, or pending-request limit | 137 | `OutOfMemory` |
 | The step limit | 152 | `CpuTimeExceeded` |
 | A deadlock: every task is parked and nothing can wake one | 134 | `Abort` |

@@ -1727,6 +1727,9 @@ private:
         a_.alu(Alu::cmp, S64, Mem::at(context, o3::fast_allocation), Imm32{0});
         a_.jcc(Cond::e, slow);
         cells_fit(1, live, slow);
+        // A region list (NVR 1.7) counts stack cells: the reference path appends.
+        a_.test(S8, Mem::at(e, static_cast<std::int32_t>(H::flags_offset())), Imm32{H::region_entry_flag()});
+        a_.jcc(Cond::ne, slow);
         a_.movzx(S32, storage, S8, Mem::at(e, static_cast<std::int32_t>(H::storage_width_offset())));
         if (step.checked) {
             // The value fits the storage: no bit above it.

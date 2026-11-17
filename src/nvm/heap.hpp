@@ -486,6 +486,13 @@ public:
 
     bool marked(Ref ref) const { return (ref.entry_->flags & marked_flag) != 0; }
 
+    // Region entries (NVR 1.7): an entry a storage region owns carries the
+    // flag, which native code reads (flags_offset) to send its appends to the
+    // reference path, where they count stack cells.
+    static constexpr std::uint8_t region_entry_flag() { return region_flag; }
+    void set_region(Ref ref) { ref.entry_->flags |= region_flag; }
+    bool in_region(Ref ref) const { return (ref.entry_->flags & region_flag) != 0; }
+
     // Calls `visit(bits)` for each field of an object at a position in
     // `positions` (ascending) that is initialized: the reference fields of
     // its layout, as the executor's trace plan lists them.
@@ -672,7 +679,7 @@ public:
                                      item->declared == ElementWidth::W4 || item->declared == ElementWidth::W8) &&
                                     (item->storage == item->declared || item->storage == ElementWidth::W8);
                 if (static_cast<unsigned>(item->kind) > static_cast<unsigned>(EntryKind::Bytes) || !widths ||
-                    (item->flags & ~(marked_flag | inline_flag)) != 0 || (item->flags & marked_flag) != 0) {
+                    (item->flags & ~(marked_flag | inline_flag | region_flag)) != 0 || (item->flags & marked_flag) != 0) {
                     return "the header of handle " + std::to_string(handle);
                 }
                 live_blocks.push_back(item);
@@ -936,6 +943,8 @@ public:
 private:
     static constexpr std::uint8_t marked_flag = 1;
     static constexpr std::uint8_t inline_flag = 2;
+    // NVR 1.7: the entry belongs to a storage region, not to the collector.
+    static constexpr std::uint8_t region_flag = 4;
 
     // The header every entry starts with (Published layout).
     struct Entry {

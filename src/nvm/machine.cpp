@@ -33,6 +33,7 @@
 #include <limits>
 #include <map>
 #include <optional>
+#include <set>
 #include <stdexcept>
 #include <string_view>
 #include <unordered_map>
@@ -66,6 +67,9 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::RequestLimit: return "pending request limit exceeded";
     case TrapKind::InvalidTaskOperation: return "invalid task operation";
     case TrapKind::Deadlock: return "deadlock";
+    case TrapKind::StackLimit: return "stack limit exceeded";
+    case TrapKind::ReleasedStorage: return "released storage accessed";
+    case TrapKind::InvalidRegion: return "invalid region operation";
     }
     return "trap";
 }
@@ -95,13 +99,16 @@ int exit_status(const Trap& trap) {
     case TrapKind::InvalidHandle:
     case TrapKind::NilReference:
     case TrapKind::IndexOutOfBounds:
-    case TrapKind::FrameLimit: return segmentation_fault;
+    case TrapKind::FrameLimit:
+    case TrapKind::StackLimit:
+    case TrapKind::ReleasedStorage: return segmentation_fault;
     case TrapKind::GraphOverflow:
     case TrapKind::NonBinaryLane:
     case TrapKind::InvalidSelector:
     case TrapKind::ReferenceType:
     case TrapKind::InvalidText:
     case TrapKind::InvalidCompletion:
+    case TrapKind::InvalidRegion:
     case TrapKind::InvalidTaskOperation: return illegal_instruction;
     case TrapKind::HeapLimit:
     case TrapKind::HandleLimit:
@@ -612,6 +619,8 @@ public:
     std::uint64_t steps() const { return steps_; }
     std::uint64_t live_heap_cells() const { return live_cells_; }
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
+    std::uint64_t live_stack_cells() const { return live_stack_cells_; }
+    std::uint64_t peak_stack_cells() const { return peak_stack_cells_; }
     std::vector<HeapEntryWidth> heap_entry_widths() const {
         std::vector<HeapEntryWidth> entries;
         heap_.for_each([&](std::uint64_t handle, Heap::Ref item) {
@@ -690,6 +699,16 @@ private:
         std::uint8_t* initialized;
     };
 
+    // A storage region of a task (NVR 1.7, docs/runtime/NVM.md, "Storage
+    // regions"): its token, the number of frames the task had when it entered
+    // it (the frame that owns it is the one at that depth), and the handles of
+    // the entries it owns, ascending, which is creation order.
+    struct StorageRegion {
+        std::uint64_t token = 0;
+        std::size_t depth = 0;
+        std::vector<std::uint64_t> handles;
+    };
+
     // The frames of one task, outermost first. Every frame's slots and
     // initialized flags live in two arenas, one frame after another, so a
     // call or return only moves the end of the arenas. The headers and the
@@ -705,6 +724,7 @@ private:
             slots_ = std::move(other.slots_);
             initialized_ = std::move(other.initialized_);
             record_ = std::exchange(other.record_, tier3::FrameRecord{});
+            regions = std::exchange(other.regions, {});
             return *this;
         }
         FrameStack(const FrameStack&) = delete;
@@ -753,6 +773,12 @@ private:
 
         // What native code reads and writes (tier3::FrameRecord).
         tier3::FrameRecord* record() { return &record_; }
+
+        // The task's open storage regions, outermost first (NVR 1.7). They
+        // live beside the frames, not in a frame's header, which native code
+        // indexes; they move with the stack when the task parks, and native
+        // code never touches them: a frame that owns one is never popped there.
+        std::vector<StorageRegion> regions;
 
     private:
         // Room for `frames` headers and `slots` slots, keeping what is there.
@@ -1113,6 +1139,9 @@ private:
     }
 
     void set_finished(Event event) {
+        // Whatever the run leaves open (a trap, or an image that did not
+        // release) is released with it, so no region cell outlives the run.
+        if (!limits_.keep_regions_at_end) release_all_regions();
         finished_ = std::move(event);
         stop_tracking_heap();
     }
@@ -1193,6 +1222,151 @@ private:
     // aggregate's layout, for the collection type `collection`.
     const std::vector<std::size_t>& component_plan(std::uint32_t collection, const std::vector<std::uint32_t>& fields) {
         return trace_plan(layout_traces_, type(type(collection).reference).reference, image_.layouts.size(), fields);
+    }
+
+    // --- Storage regions (NVR 1.7) ---------------------------------------
+
+    bool region_released(std::uint64_t handle) const {
+        if (released_handles_.empty()) return false;
+        auto at = released_handles_.upper_bound(handle);
+        if (at == released_handles_.begin()) return false;
+        --at;
+        return handle <= at->second;
+    }
+
+    void note_released(std::uint64_t handle) {
+        auto next = released_handles_.lower_bound(handle);
+        if (next != released_handles_.end() && next->first == handle + 1) {
+            const auto last = next->second;
+            next = released_handles_.erase(next);
+            next = released_handles_.emplace_hint(next, handle, last);
+        } else {
+            next = released_handles_.emplace_hint(next, handle, handle);
+        }
+        if (next != released_handles_.begin()) {
+            auto before = std::prev(next);
+            if (before->second + 1 == next->first) {
+                before->second = next->second;
+                released_handles_.erase(next);
+            }
+        }
+    }
+
+    void add_stack_cells(std::uint64_t cells, std::string_view action) {
+        if (cells > limits_.max_stack_cells || live_stack_cells_ > limits_.max_stack_cells - cells) {
+            fault(TrapKind::StackLimit, std::string(action) + std::to_string(cells) + " cells");
+        }
+        live_stack_cells_ += cells;
+        peak_stack_cells_ = std::max(peak_stack_cells_, live_stack_cells_);
+    }
+
+    void remove_stack_cells(std::uint64_t cells) { live_stack_cells_ -= cells; }
+
+    // Frees the entries of the region at `index` of `frames`, in creation
+    // order, and closes it. Handles are not reused: an access finds no entry.
+    void release_region(FrameStack& frames, std::size_t index) {
+        auto handles = std::move(frames.regions[index].handles);
+        frames.regions.erase(frames.regions.begin() + static_cast<std::ptrdiff_t>(index));
+        for (const auto handle : handles) {
+            const auto item = heap_.find(handle);
+            if (!item) continue;
+            remove_stack_cells(heap_.cells(item));
+            heap_.free(handle);
+            note_released(handle);
+        }
+    }
+
+    // Releases every region of `frames` entered at frame depth `depth` or
+    // deeper, the innermost first: what a frame's return, a trap or a task's
+    // end leaves open.
+    void release_regions_from(FrameStack& frames, std::size_t depth) {
+        while (!frames.regions.empty() && frames.regions.back().depth >= depth) {
+            release_region(frames, frames.regions.size() - 1);
+        }
+    }
+
+    void release_all_regions() {
+        release_regions_from(frames_, 0);
+        if (scheduler_) {
+            for (auto& [id, task] : scheduler_->tasks) release_regions_from(task.frames, 0);
+        }
+    }
+
+    std::size_t region_index(std::uint64_t token) {
+        const auto& regions = frames_.regions;
+        const auto at = std::lower_bound(regions.begin(), regions.end(), token,
+                                         [](const StorageRegion& r, std::uint64_t t) { return r.token < t; });
+        if (at == regions.end() || at->token != token) {
+            fault(TrapKind::InvalidRegion, "token " + std::to_string(token) + " is not a live region of this task");
+        }
+        return static_cast<std::size_t>(at - regions.begin());
+    }
+
+    // The region of the running task that owns `handle`, or its count.
+    std::size_t owning_region(std::uint64_t handle) const {
+        const auto& regions = frames_.regions;
+        for (std::size_t i = 0; i < regions.size(); ++i) {
+            if (std::ranges::binary_search(regions[i].handles, handle)) return i;
+        }
+        return regions.size();
+    }
+
+    // Makes the entry just created under `handle` an entry of region `index`.
+    void adopt(std::size_t index, std::uint64_t handle) {
+        heap_.set_region(heap_.find(handle));
+        frames_.regions[index].handles.push_back(handle);
+    }
+
+    // Calls `visit(handle)` for each reference an entry holds.
+    template <typename Visit>
+    void visit_references(Heap::Ref item, Visit&& visit) {
+        const auto kind = heap_.kind(item);
+        if (kind == EntryKind::Object) {
+            const auto layout = heap_.type(item);
+            const auto& fields = image_.layouts[layout].fields;
+            heap_.visit_fields(item, trace_plan(layout_traces_, layout, image_.layouts.size(), fields), visit);
+        } else if (kind == EntryKind::Array || kind == EntryKind::List) {
+            if (const auto* fields = components_of(heap_.type(item))) {
+                heap_.visit_components_reverse(item, fields->size(), component_plan(heap_.type(item), *fields), visit);
+            } else if (nvr::is_reference(type(type(heap_.type(item)).reference).kind)) {
+                heap_.visit_elements(item, visit);
+            }
+        }
+    }
+
+    // MoveToRegion: the entry and every entry reachable from it that the
+    // region that owns it also owns go to region `target`, an enclosing (or
+    // the same) region.
+    void move_to_region(std::uint64_t handle, std::uint64_t token) {
+        const auto source = owning_region(handle);
+        if (source == frames_.regions.size()) {
+            fault(TrapKind::InvalidRegion, "handle " + std::to_string(handle) + " is not owned by a live region");
+        }
+        const auto target = region_index(token);
+        if (target > source) {
+            fault(TrapKind::InvalidRegion, "region " + std::to_string(token) + " does not enclose the region of handle " +
+                                               std::to_string(handle));
+        }
+        if (target == source) return;
+        const auto& owned = frames_.regions[source].handles;
+        std::set<std::uint64_t> moved;
+        std::vector<std::uint64_t> work{handle};
+        while (!work.empty()) {
+            const auto next = work.back();
+            work.pop_back();
+            if (!moved.insert(next).second) continue;
+            visit_references(heap_.find(next), [&](std::uint64_t child) {
+                if (child != 0 && !moved.contains(child) && std::ranges::binary_search(owned, child)) {
+                    work.push_back(child);
+                }
+            });
+        }
+        auto& from = frames_.regions[source].handles;
+        std::erase_if(from, [&](std::uint64_t h) { return moved.contains(h); });
+        auto& to = frames_.regions[target].handles;
+        const auto old = to.size();
+        to.insert(to.end(), moved.begin(), moved.end());
+        std::inplace_merge(to.begin(), to.begin() + static_cast<std::ptrdiff_t>(old), to.end());
     }
 
     void add_live_cells(std::uint64_t cells) {
@@ -1325,12 +1499,20 @@ private:
             }
         }
         mark_frames(frames_);
+        // Regions are roots: the entries they own are never swept, and the
+        // references they hold keep their referents alive.
+        for (const auto& region : frames_.regions) {
+            for (const auto handle : region.handles) mark(handle);
+        }
         if (scheduler_) {
             const auto mark_typed = [&](std::uint64_t value, std::uint32_t value_type) {
                 if (value_type != nvr::absent && nvr::is_reference(type(value_type).kind)) mark(value);
             };
             for (const auto& [id, task] : scheduler_->tasks) {
                 mark_frames(task.frames);
+                for (const auto& region : task.frames.regions) {
+                    for (const auto handle : region.handles) mark(handle);
+                }
                 if (task.state == TaskState::Finished) mark_typed(task.result, task.result_type);
                 // Values in flight: a parked send's, a select's, and one
                 // received but not yet taken.
@@ -1432,6 +1614,7 @@ private:
     Heap::Ref entry(std::uint64_t handle) {
         const auto found = heap_.find(handle);
         if (!found) {
+            if (region_released(handle)) fault(TrapKind::ReleasedStorage, "handle " + std::to_string(handle));
             fault(TrapKind::InvalidHandle, "handle " + std::to_string(handle));
         }
         return found;
@@ -2261,6 +2444,7 @@ private:
         RunLimits limits;
         limits.max_steps = item.max_steps;
         limits.max_heap_cells = item.max_cells;
+        limits.max_stack_cells = parent.max_stack_cells;
         limits.max_frames = parent.max_frames;
         limits.max_handles = parent.max_handles;
         // Items share the starting run's lifted blocks. With a graph device
@@ -2839,6 +3023,8 @@ private:
         set_state(child, TaskState::Finished);
         emit(TaskEvent::Kind::Finish, id);
         // A finished task keeps only what a join needs.
+        release_regions_from(frames_, 0);
+        release_regions_from(child.frames, 0);
         child.frames = FrameStack{};
         std::vector<TaskScope>().swap(child.scopes);
         child.stashed = false;
@@ -3266,6 +3452,8 @@ private:
                 }
                 remove_live_cells(frame_cells(frame.function));
             }
+            // The regions the frame entered and did not release (NVR 1.7).
+            if (!frames_.regions.empty()) release_regions_from(frames_, frames_.size());
             frames_.pop_back();
             if (scheduler_ && frames_.empty() && scheduler_->current != 0) {
                 finish_task(result);
@@ -3578,8 +3766,71 @@ private:
             heap_.set_field(item, exit.immediate, args[1]);
             return 0;
         }
+        case nvr::StateOp::EnterRegion: {
+            const auto token = ++region_serial_;
+            frames_.regions.push_back({token, frames_.size(), {}});
+            return token;
+        }
+        case nvr::StateOp::ReleaseRegion: {
+            const auto index = region_index(args[0]);
+            if (frames_.regions[index].depth != frames_.size()) {
+                fault(TrapKind::InvalidRegion, "region " + std::to_string(args[0]) +
+                                                   " is released by the frame that entered it");
+            }
+            // Regions entered after it, in the same frame, end with it.
+            while (frames_.regions.size() > index) release_region(frames_, frames_.regions.size() - 1);
+            return 0;
+        }
+        case nvr::StateOp::RegionObject: {
+            const auto index = region_index(args[0]);
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            const auto fields = image_.layouts[exit.immediate].fields.size();
+            const auto cells = Heap::object_cells(fields);
+            add_stack_cells(cells, "region allocation of ");
+            const auto handle = heap_.create_object(exit.immediate, fields);
+            adopt(index, handle);
+            return handle;
+        }
+        case nvr::StateOp::RegionCollection:
+        case nvr::StateOp::RegionRepeat: {
+            const auto index = region_index(args[0]);
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            const auto kind = type(exit.immediate).kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
+            const auto width = collection_width(exit.immediate);
+            const auto* fields = components_of(exit.immediate);
+            const auto words = args.size() - 1;
+            std::uint64_t handle = 0;
+            std::uint64_t cells = 0;
+            if (exit.operation == nvr::StateOp::RegionRepeat) {
+                const auto count = args[1];
+                const auto stride = fields ? fields->size() : 1;
+                if (count > Heap::max_elements() / stride || count == std::numeric_limits<std::uint64_t>::max())
+                    fault(TrapKind::HeapLimit, "collection length exceeds storage limits");
+                cells = count * stride + 1;
+                add_stack_cells(cells, "region allocation of ");
+                handle = fields ? heap_.create_repeated(kind, exit.immediate, static_cast<std::size_t>(count),
+                                                        std::span<const std::uint64_t>(args).subspan(2, stride))
+                                : heap_.create_filled(kind, exit.immediate, width, static_cast<std::size_t>(count), args[2]);
+            } else {
+                cells = words + 1;
+                add_stack_cells(cells, "region allocation of ");
+                auto item = Heap::Builder::collection(kind, exit.immediate, width);
+                item.reserve(words);
+                for (std::size_t i = 1; i < args.size(); ++i) item.push(args[i]);
+                handle = heap_.create(std::move(item));
+            }
+            adopt(index, handle);
+            return handle;
+        }
+        case nvr::StateOp::MoveToRegion:
+            typed_entry(args[0], types[0].type);
+            move_to_region(args[0], args[1]);
+            return 0;
         case nvr::StateOp::FreeObject: {
             const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.in_region(item)) {
+                fault(TrapKind::InvalidRegion, "handle " + std::to_string(args[0]) + " belongs to a region and is freed by its release");
+            }
             if (scheduler_) release_scheduler_object(args[0]);
             remove_live_cells(heap_.cells(item));
             heap_.free(args[0]);
@@ -3660,6 +3911,16 @@ private:
             // The list is a root of any collection the growth starts, so
             // `item` stays valid across it.
             const auto item = typed_entry(args[0], types[0].type);
+            if (heap_.in_region(item)) {
+                // A region list grows in place, in its region: stack cells,
+                // and no collection.
+                const auto* fields = components_of(types[0].type);
+                const auto cells = fields ? fields->size() : 1;
+                add_stack_cells(cells, "growth by ");
+                if (fields) heap_.append_words(item, std::span<const std::uint64_t>(args).subspan(1));
+                else heap_.append(item, args[1]);
+                return 0;
+            }
             if (const auto* fields = components_of(types[0].type)) {
                 // The element's words are appended together: one structural
                 // change, and one cell per word.
@@ -3679,15 +3940,18 @@ private:
         }
         case nvr::StateOp::RemoveElement: {
             const auto item = typed_entry(args[0], types[0].type);
+            const bool in_region = heap_.in_region(item);
             if (const auto* fields = components_of(types[0].type)) {
                 const auto index = checked_aggregate_index(item, args[1], fields->size());
                 heap_.remove_words(item, index * fields->size(), fields->size());
-                remove_live_cells(fields->size());
+                if (in_region) remove_stack_cells(fields->size());
+                else remove_live_cells(fields->size());
                 return 0;
             }
             const auto index = checked_index(item, args[1]);
             heap_.remove(item, index);
-            remove_live_cells(1);
+            if (in_region) remove_stack_cells(1);
+            else remove_live_cells(1);
             return 0;
         }
         case nvr::StateOp::ReadVersion:
@@ -4094,6 +4358,15 @@ private:
     std::vector<Heap::Ref> mark_work_;
     std::vector<std::uint64_t> channel_work_;
     std::uint64_t live_cells_ = 0;
+    // Storage regions (NVR 1.7): the cells of region entries, which are stack
+    // cells and not heap cells; the largest live number; the token counter,
+    // never reused; and the handles of released region entries as ascending
+    // disjoint closed intervals (first -> last), so that an access to one is
+    // told from an access to a handle that never named an entry.
+    std::uint64_t live_stack_cells_ = 0;
+    std::uint64_t peak_stack_cells_ = 0;
+    std::uint64_t region_serial_ = 0;
+    std::map<std::uint64_t, std::uint64_t> released_handles_;
     FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.
     std::uint64_t peak_cells_ = 0;
@@ -4344,6 +4617,14 @@ DebugValue Execution::State::debug_value(std::uint32_t index, std::uint64_t bits
         value.text = "object @" + std::to_string(bits);
         value.children = heap_.field_count(entry);
         break;
+    }
+    // An entry of a storage region (NVR 1.7) shows as a heap entry does,
+    // marked with its region's token while its task is the running one.
+    if (heap_.in_region(entry)) {
+        const auto owner = owning_region(bits);
+        value.text += owner < frames_.regions.size()
+                          ? " [region " + std::to_string(frames_.regions[owner].token) + "]"
+                          : std::string(" [region]");
     }
     return value;
 }
@@ -4662,6 +4943,8 @@ std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::
 std::uint64_t Execution::steps() const { return state_->steps(); }
 std::uint64_t Execution::live_heap_cells() const { return state_->live_heap_cells(); }
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
+std::uint64_t Execution::live_stack_cells() const { return state_->live_stack_cells(); }
+std::uint64_t Execution::peak_stack_cells() const { return state_->peak_stack_cells(); }
 std::vector<Execution::HeapEntryWidth> Execution::heap_entry_widths() const { return state_->heap_entry_widths(); }
 const std::vector<std::uint64_t>& Execution::function_steps() const { return state_->function_steps(); }
 

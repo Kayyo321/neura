@@ -489,6 +489,10 @@ private:
 
     const Image& image_;
     std::unique_ptr<TypeSystem> system_;
+    // Per function, the slots a region token can be in (NVR 1.7): the result
+    // slots of EnterRegion and, by assignment, the slots they are copied to.
+    // Flow-insensitive; one byte per slot.
+    std::vector<std::vector<std::uint8_t>> token_slots_;
 };
 
 void Validator::run() {
@@ -1231,6 +1235,12 @@ void Validator::state(const Function& function, const Exit& exit,
             invalid(where + ": argument " + std::to_string(argument) + " must be an unsigned 64-bit index");
         }
     };
+    auto require_token = [&](std::size_t argument) {
+        // A region token is a uint64 (NVR 1.7); any other operand type is not one.
+        if (!is_unsigned(args[argument].type, 64)) {
+            invalid(where + ": argument " + std::to_string(argument) + " must be a uint64 region token");
+        }
+    };
     auto no_result = [&] {
         if (exit.result_slot != absent) {
             invalid(where + ": a void result requires an absent slot");
@@ -1276,6 +1286,66 @@ void Validator::state(const Function& function, const Exit& exit,
         }
         break;
     }
+    case StateOp::EnterRegion:
+        arity(0);
+        zero_immediate();
+        require_slot_type([&](std::uint32_t slot) { return is_unsigned(slot, 64); }, "uint64");
+        break;
+    case StateOp::ReleaseRegion:
+        arity(1);
+        zero_immediate();
+        require_token(0);
+        no_result();
+        break;
+    case StateOp::RegionObject:
+        arity(1);
+        require_token(0);
+        if (exit.immediate >= image_.layouts.size()) {
+            invalid(where + ": layout " + std::to_string(exit.immediate) + " is out of range");
+        }
+        require_slot_type([&](std::uint32_t slot) {
+            const auto& t = image_.types[slot];
+            return t.kind == TypeKind::Object && system_->derives(exit.immediate, t.reference);
+        }, "a reference to the allocated layout");
+        break;
+    case StateOp::RegionCollection:
+    case StateOp::RegionRepeat: {
+        if (args.empty()) invalid(where + ": expects a region token");
+        require_token(0);
+        if (exit.immediate >= image_.types.size()) {
+            invalid(where + ": type " + std::to_string(exit.immediate) + " is out of range");
+        }
+        const auto& collection = image_.types[exit.immediate];
+        if (collection.kind != TypeKind::Array && collection.kind != TypeKind::List) {
+            invalid(where + ": immediate must name an array or list type");
+        }
+        // The words follow the token, as the operands of the allocation that
+        // does not take one.
+        const auto* words = collection_components(image_, exit.immediate);
+        const std::size_t width = words ? words->size() : 1;
+        std::size_t first = 1;
+        if (exit.operation == StateOp::RegionRepeat) {
+            arity(2 + width);
+            require_index(1);
+            first = 2;
+        } else if ((args.size() - 1) % width != 0) {
+            invalid(where + ": " + std::to_string(args.size() - 1) + " words are not a whole number of " +
+                    std::to_string(width) + "-component elements");
+        }
+        for (std::size_t i = first; i < args.size(); ++i) {
+            const auto expected = words ? (*words)[(i - first) % width] : collection.reference;
+            assign(args[i].type, expected, where + " element " + std::to_string(i));
+        }
+        result_of(exit.immediate);
+        break;
+    }
+    case StateOp::MoveToRegion:
+        arity(2);
+        zero_immediate();
+        require_kind(0, {TypeKind::Object, TypeKind::Array, TypeKind::List});
+        require_token(1);
+        no_result();
+        break;
     case StateOp::Kernel: {
         if (exit.immediate >= image_.kernels.size()) {
             invalid(where + ": kernel " + std::to_string(exit.immediate) + " is out of range");
@@ -1524,6 +1594,7 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
     const auto& function = image_.functions[function_index];
     const auto& item = function.blocks[index];
     const auto where = "function " + std::to_string(function_index) + " block " + std::to_string(index);
+    const auto& tokens = token_slots_[function_index];
     if (item.graph >= image_.graphs.size()) {
         invalid(where + ": graph " + std::to_string(item.graph) + " is out of range");
     }
@@ -1572,6 +1643,16 @@ void Validator::block(std::uint32_t function_index, std::uint32_t index) {
         }
         for (std::size_t a = 0; a < exit.arguments.size(); ++a) {
             value(function, item, exit.arguments[a], exit_where + " argument " + std::to_string(a));
+        }
+        if (exit.kind == ExitKind::Scheduler) {
+            // A region token belongs to the task that entered the region: it
+            // is no task argument, channel value or select operand.
+            const auto token = [&](const Value& operand) {
+                return operand.kind == ValueKind::Slot && tokens[operand.index] != 0;
+            };
+            if (std::ranges::any_of(exit.arguments, token)) {
+                invalid(exit_where + ": a region token cannot be a task or channel operand");
+            }
         }
         switch (exit.kind) {
         case ExitKind::Continue:
@@ -1654,6 +1735,37 @@ void Validator::functions() {
         }
         if (function.blocks.empty()) {
             invalid(where + ": a function needs an entry block");
+        }
+    }
+    token_slots_.assign(image_.functions.size(), {});
+    for (std::size_t f = 0; f < image_.functions.size(); ++f) {
+        const auto& function = image_.functions[f];
+        auto& tokens = token_slots_[f];
+        tokens.assign(function.frame_types.size(), 0);
+        bool any = false;
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && exit.operation == StateOp::EnterRegion &&
+                    exit.result_slot < tokens.size()) {
+                    tokens[exit.result_slot] = 1;
+                    any = true;
+                }
+            }
+        }
+        for (bool changed = any; changed;) {
+            changed = false;
+            for (const auto& block : function.blocks) {
+                for (const auto& exit : block.exits) {
+                    for (const auto& assignment : exit.assignments) {
+                        if (assignment.value.kind == ValueKind::Slot && assignment.value.index < tokens.size() &&
+                            tokens[assignment.value.index] != 0 && assignment.slot < tokens.size() &&
+                            tokens[assignment.slot] == 0) {
+                            tokens[assignment.slot] = 1;
+                            changed = true;
+                        }
+                    }
+                }
+            }
         }
     }
     for (std::uint32_t f = 0; f < image_.functions.size(); ++f) {

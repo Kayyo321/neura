@@ -453,6 +453,8 @@
         auto& self = tier3_self(context);
         const auto depth = self.frames_.size();
         if (depth < 2 || self.frames_.header(depth - 1).boundary) return tier3::Status::Fault;
+        // A frame that still owns a storage region is popped by tier 1 (NVR 1.7).
+        if (!self.frames_.regions.empty() && self.frames_.regions.back().depth >= depth) return tier3::Status::Fault;
         context->C = blocks + 1;
         self.tier3_flush(*context);
         const auto header = self.frames_.header(depth - 1);

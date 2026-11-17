@@ -8,6 +8,8 @@
 
 #include "nvm/tier1.hpp"
 #include "nvm/tier2.hpp"
+#include "nvm/trace.hpp"
+#include "nvm/trace_file.hpp"
 
 #include <algorithm>
 #include <functional>
@@ -830,6 +832,235 @@ NEURA_TEST(tier, aggregate_collections_cost_one_cell_per_word_and_are_declined_b
         }
     }
     check_clean(image, "aggregate cells", {});
+}
+
+const char* const region_output = "2\n1\n300\n5\n77\n18\n150\n42\n43\n44\n100\n99\n8\n";
+
+// The options of one mode of the tier suite.
+nvm::TierOptions region_mode(nvm::TierOptions::Tier3 tier3, bool programs) {
+    auto options = eager_programs();
+    options.tier3 = tier3;
+    options.native_after = 1;
+    if (!programs) options.programs = nvm::TierOptions::Programs::Off;
+    return options;
+}
+
+std::string region_mode_label(nvm::TierOptions::Tier3 tier3, bool programs) {
+    using Tier3 = nvm::TierOptions::Tier3;
+    return std::string("tier3 ") + (tier3 == Tier3::Off ? "off" : tier3 == Tier3::Interp ? "interp" : "native") +
+           (programs ? " with programs" : " with regions");
+}
+
+NEURA_TEST(tier, storage_regions_run_on_the_reference_path_in_every_tier) {
+    // tests/backend/tier/region-storage.nvra (NVR 1.7): nested regions per block and per loop
+    // iteration, release on return and on break and continue paths, a fresh array and a holder
+    // moved to the caller's region on return, region lists that grow in place (the hot loop
+    // appends, which tier 3 inlines for a heap list), allocation through a token, and region
+    // entries that hold the only references to heap objects across collections. Tier 2 and
+    // tier 3 decline every region operation and the return of a function that enters a region
+    // (docs/design/Storage030.md, "Images and runtime"), so every mode must end with the
+    // reference run's output, steps, peak heap cells and peak stack cells.
+    const auto image = region_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the image runs at tier 0");
+    check_equal(reference.output, std::string{region_output}, "tier 0 output");
+    // The region of the loop is one iteration's 51 cells and the array of F17 grows to 40 * 4.
+    check_equal(reference.result.peak_stack_cells, std::uint64_t{160}, "peak stack cells");
+    check_equal(reference.result.live_stack_cells, std::uint64_t{0}, "no region cell outlives the run");
+    check(reference.result.peak_heap_cells < 400, "collections ran: peak " +
+                                                      std::to_string(reference.result.peak_heap_cells));
+    check_same(run_captured(image, limits_at(0)), reference, "a second tier 0 run");
+    using Tier3 = nvm::TierOptions::Tier3;
+    for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+        for (const bool programs : {false, true}) {
+            const auto label = region_mode_label(tier3, programs);
+            nvm::TierCache cache(image, region_mode(tier3, programs));
+            compare_with_tier_0(image, cache, label, {});
+            compare_with_tier_0(image, cache, label + " again", {});
+            if (programs && programs_run()) {
+                const auto counts = cache.statistics();
+                check(counts.lifted_by_hint > 0 && counts.programs > 0,
+                      label + ": the hinted blocks were lifted into programs");
+                check(counts.region_counts.exits > 0, label + ": the region operations were declined");
+                // Where tier 3 native code is unsupported (AArch64, macOS), NEURA_JIT=on compiles
+                // tier 2 code instead and these counters differ; the identical runs above are the
+                // evidence there.
+                if (jit::native::supported()) {
+                    check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
+                          label + ": calls and returns that own no region still run in programs");
+                    if (tier3 != Tier3::Off) {
+                        check(counts.native_programs > 0 && counts.native.steps > 0,
+                              label + ": tier 3 built and ran programs around the declined exits");
+                    }
+                }
+            }
+        }
+    }
+    nvm::TierCache tier_one(image, eager_programs());
+    check_same(run_captured(image, limits_at(1, &tier_one)), reference, "tier 1");
+    nvm::TierCache defaults(image, nvm::TierOptions{});
+    check_same(run_captured(image, limits_at(2, &defaults)), reference, "default thresholds");
+    for (const std::uint64_t steps : {1ULL, 7ULL, 40ULL, 333ULL, 1500ULL, 4000ULL}) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "step limit " + std::to_string(steps), {},
+                            [&](nvm::RunLimits& limits) { limits.max_steps = steps; });
+    }
+    for (std::uint64_t cells = 1; cells <= reference.result.peak_heap_cells + 1; cells += cells < 32 ? 1 : 9) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "heap limit " + std::to_string(cells), {},
+                            [&](nvm::RunLimits& limits) { limits.max_heap_cells = cells; });
+    }
+    // The stack limit: exactly the peak completes, one less traps where the peak is reached, and
+    // region cells do not count against the heap limit.
+    for (std::uint64_t cells = 1; cells <= 170; cells += cells < 20 ? 1 : 7) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "stack limit " + std::to_string(cells), {},
+                            [&](nvm::RunLimits& limits) { limits.max_stack_cells = cells; });
+    }
+    for (const std::uint64_t cells : {159ULL, 160ULL}) {
+        auto limits = limits_at(0);
+        limits.max_stack_cells = cells;
+        const auto run = run_captured(image, limits);
+        check_equal(run.result.completed, cells == 160, "a stack limit of " + std::to_string(cells));
+        if (cells == 159) {
+            check(run.result.trap.kind == nvm::TrapKind::StackLimit, "the trap is the stack limit");
+            check(run.result.trap.detail.find("region allocation of 4 cells") != std::string::npos,
+                  "the detail names the allocation: " + run.result.trap.detail);
+            check_equal(run.result.live_stack_cells, std::uint64_t{0}, "a trap releases every region");
+        }
+    }
+    {
+        // A heap limit below the heap peak does not touch the regions' arrays.
+        auto limits = limits_at(0);
+        limits.max_heap_cells = reference.result.peak_heap_cells;
+        const auto exact = run_captured(image, limits);
+        check(exact.result.completed && exact.output == region_output, "the run fits its own heap peak");
+    }
+    check_clean(image, "storage regions", {});
+}
+
+NEURA_TEST(tier, storage_region_traps_are_the_same_in_every_tier) {
+    const auto image = region_image(environment);
+    struct Case {
+        std::size_t arguments;
+        nvm::TrapKind kind;
+        std::string detail;
+        std::string extra_output;
+        std::string message;
+    };
+    using nvm::TrapKind;
+    const std::vector<Case> cases{
+        {1, TrapKind::ReleasedStorage, "handle ", "", "released storage accessed"},
+        // The hot loop of case 2 sums 300 ones before the release.
+        {2, TrapKind::ReleasedStorage, "handle ", "300\n", "released storage accessed"},
+        {3, TrapKind::StackLimit, "region allocation of 2147483649 cells", "", "stack limit exceeded"},
+        {4, TrapKind::InvalidRegion, "does not enclose", "", "invalid region operation"},
+        {5, TrapKind::InvalidRegion, "is not a live region of this task", "", "invalid region operation"},
+        {6, TrapKind::IndexOutOfBounds, "index 5 for length 2", "", "index out of bounds"},
+        {7, TrapKind::InvalidRegion, "freed by its release", "", "invalid region operation"},
+        {8, TrapKind::InvalidRegion, "token 999", "", "invalid region operation"},
+        {9, TrapKind::InvalidRegion, "is not owned by a live region", "", "invalid region operation"},
+    };
+    for (const auto& item : cases) {
+        const std::vector<std::string> arguments(item.arguments, "x");
+        const auto name = "case " + std::to_string(item.arguments);
+        const auto reference = run_captured(image, limits_at(0), std::nullopt, arguments);
+        check(!reference.result.completed, name + " traps");
+        check_equal(reference.output, std::string{region_output} + item.extra_output, name + " output");
+        check(reference.result.trap.kind == item.kind, name + " kind");
+        check(reference.result.trap.detail.find(item.detail) != std::string::npos,
+              name + " detail: " + reference.result.trap.detail);
+        check(nvm::describe(reference.result.trap, image).find(item.message) != std::string::npos,
+              name + " message: " + nvm::describe(reference.result.trap, image));
+        // Nothing a trap leaves open survives it.
+        check_equal(reference.result.live_stack_cells, std::uint64_t{0}, name + " live stack cells");
+        using Tier3 = nvm::TierOptions::Tier3;
+        for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+            for (const bool programs : {false, true}) {
+                nvm::TierCache cache(image, region_mode(tier3, programs));
+                const auto label = name + " " + region_mode_label(tier3, programs);
+                compare_with_tier_0(image, cache, label, arguments);
+                compare_with_tier_0(image, cache, label + " again", arguments);
+                if (item.arguments == 2 && programs && programs_run() && jit::native::supported()) {
+                    // The loop of F18 ran as a program, and as native code in tier 3, before the
+                    // second call found its array released.
+                    const auto counts = cache.statistics();
+                    check(counts.programs > 0, label + ": the hot loop was formed into a program");
+                    if (tier3 == Tier3::Native) {
+                        check(counts.native_programs > 0 && counts.native.steps > 0,
+                              label + ": the hot loop ran as native code");
+                    }
+                }
+            }
+        }
+        check_clean(image, name, arguments);
+        // Recorded and replayed, the trap is the same: its kind is in the trace file, and a
+        // replay reproduces it without the host.
+        {
+            CapturingConsole console;
+            nvm::HostRegistry registry;
+            registry.add(console);
+            const auto bindings = nvm::bind(image, registry);
+            const auto trace = nvm::record(image, bindings, arguments, limits_at(0));
+            check(!trace.outcome.completed && trace.outcome.trap == item.kind, name + " is recorded as a trap");
+            check_equal(trace.peak_stack_cells, reference.result.peak_stack_cells, name + " recorded peak stack cells");
+            const auto text = nvm::write_trace(trace);
+            const auto read = nvm::read_trace(text);
+            check(read.outcome == trace.outcome, name + " the trace file keeps the trap");
+            const auto replayed = nvm::replay(image, read, arguments, limits_at(0));
+            check(replayed.matches, name + " replays: " + replayed.difference);
+            check(replayed.trace.outcome.trap == item.kind, name + " the replay traps the same way");
+            check_equal(replayed.trace.peak_stack_cells, reference.result.peak_stack_cells, name + " replayed peak stack cells");
+        }
+    }
+    // A tenth argument selects no case.
+    const auto none = run_captured(image, limits_at(0), std::nullopt, std::vector<std::string>(10, "x"));
+    check(none.result.completed && none.result.status == 0 && none.output == region_output, "ten arguments run to the end");
+    // Handles are never reused: a released region's entry stays released, and a handle
+    // that was never assigned is still the invalid handle of 1.6.
+    check(describe_trap(run_captured(image, limits_at(0), std::nullopt, {"x"}).result, image)
+                  .find("invalid reference handle") == std::string::npos,
+          "a released entry is not an invalid handle");
+}
+
+NEURA_TEST(tier, storage_regions_of_tasks_are_their_own) {
+    // The root and two children each enter a region and park holding it; one child returns with
+    // its region open. The token variant has the second child use the root's token, read from a
+    // global: not one of its own regions, so it traps.
+    const auto image = region_tasks_image(environment);
+    const auto reference = run_captured(image, limits_at(0));
+    check(reference.result.completed, "the tasks run");
+    check_equal(reference.output, std::string{"11\n22\n5\n"}, "output");
+    check_equal(reference.result.peak_stack_cells, std::uint64_t{10}, "peak stack cells");
+    check_equal(reference.result.live_stack_cells, std::uint64_t{0}, "no region cell outlives the run");
+    using Tier3 = nvm::TierOptions::Tier3;
+    for (const auto tier3 : {Tier3::Off, Tier3::Interp, Tier3::Native}) {
+        for (const bool programs : {false, true}) {
+            nvm::TierCache cache(image, region_mode(tier3, programs));
+            const auto label = region_mode_label(tier3, programs);
+            compare_with_tier_0(image, cache, label, {});
+            compare_with_tier_0(image, cache, label + " again", {});
+        }
+    }
+    for (const std::uint64_t quantum : {1ULL, 2ULL, 5ULL}) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "quantum " + std::to_string(quantum), {},
+                            [&](nvm::RunLimits& limits) { limits.task_quantum = quantum; });
+    }
+    for (const std::uint64_t cells : {1ULL, 5ULL, 6ULL, 9ULL, 10ULL}) {
+        nvm::TierCache cache(image, eager_programs());
+        compare_with_tier_0(image, cache, "stack limit " + std::to_string(cells), {},
+                            [&](nvm::RunLimits& limits) { limits.max_stack_cells = cells; });
+    }
+    check_clean(image, "storage regions of tasks", {});
+    const auto stolen = region_tasks_image(environment, true);
+    const auto trapped = run_captured(stolen, limits_at(0));
+    check(!trapped.result.completed && trapped.result.trap.kind == nvm::TrapKind::InvalidRegion,
+          "a token of another task is no region here: " + describe_trap(trapped.result, stolen));
+    check_equal(trapped.result.live_stack_cells, std::uint64_t{0}, "the trap released every task's regions");
+    nvm::TierCache cache(stolen, eager_programs());
+    compare_with_tier_0(stolen, cache, "the token variant", {});
+    check_clean(stolen, "the token variant", {});
 }
 
 NEURA_TEST(tier, the_shadow_oracle_syncs_inside_a_long_loop_of_a_program_and_finds_a_planted_difference) {

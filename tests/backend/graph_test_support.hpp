@@ -31,6 +31,8 @@ inline void check_same_run(const nvm::RunResult& actual, const nvm::RunResult& e
     check_equal(actual.steps, expected.steps, label + " steps");
     check_equal(actual.host_requests, expected.host_requests, label + " host requests");
     check_equal(actual.peak_heap_cells, expected.peak_heap_cells, label + " peak heap cells");
+    check_equal(actual.peak_stack_cells, expected.peak_stack_cells, label + " peak stack cells");
+    check_equal(actual.live_stack_cells, expected.live_stack_cells, label + " live stack cells");
     check(actual.function_steps == expected.function_steps, label + " function steps");
 }
 

@@ -1,0 +1,93 @@
+; Storage regions in tasks (NVR 1.7). The root and two spawned tasks each enter a region of
+; their own and park at polls while they hold it; the first child returns with its region open,
+; the second releases its own. Prints 11 and 22, then the root's 5; the stack peak is 10 cells.
+; Variant: the second child allocates into the root's region through a token it read from a
+; global, which is not one of its own regions and traps (a token is not transferable).
+nvr 1.7 profile 1
+entry 0
+
+type 0 text
+type 1 array 0
+type 2 signed 32
+type 3 unsigned 32
+type 4 void
+type 5 unsigned 64
+type 6 signed 64
+type 7 array 6
+constant 0 type 6 bytes 0500000000000000
+constant 1 type 5 bytes 0300000000000000
+constant 2 type 5 bytes 0500000000000000
+constant 3 type 6 bytes 0b00000000000000
+constant 4 type 5 bytes 0400000000000000
+constant 5 type 6 bytes 1600000000000000
+constant 6 type 5 bytes 0200000000000000
+constant 7 type 5 bytes 0000000000000000
+constant 8 type 2 bytes 00000000
+transferable-layouts [ ]
+global 0 type 5 initializer -
+
+graph 0 inputs 0 outputs [ ]
+
+import 0 "neura.console.write_line" version 1 parameters [ 0 ] success 4 error 3
+
+function 0 parameters 1 result 2 frame [ 1 5 7 5 5 6 0 3 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit state enter-region immediate 0 arguments [  ] result 1 resume 1 assign [ ]
+  block 1 graph 0 selector 0 inputs [ ]
+    exit state write-global immediate 0 arguments [ slot:5:1 ] result - resume 2 assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit state region-repeat immediate 7 arguments [ slot:5:1 constant:5:1 constant:6:0 ] result 2 resume 3 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit scheduler scope-enter target 0 arguments [ ] result - resume 4 assign [ ]
+  block 4 graph 0 selector 0 inputs [ ]
+    exit scheduler spawn target 1 arguments [ ] result 3 resume 5 assign [ ]
+  block 5 graph 0 selector 0 inputs [ ]
+    exit scheduler spawn target 2 arguments [ ] result 4 resume 6 assign [ ]
+  block 6 graph 0 selector 0 inputs [ ]
+    exit scheduler scope-exit target 0 arguments [ ] result - resume 7 assign [ ]
+  block 7 graph 0 selector 0 inputs [ ]
+    exit state read-element immediate 0 arguments [ slot:7:2 constant:5:6 ] result 5 resume 8 assign [ ]
+  block 8 graph 0 selector 0 inputs [ ]
+    exit state scalar-text immediate 0 arguments [ slot:6:5 ] result 6 resume 9 assign [ ]
+  block 9 graph 0 selector 0 inputs [ ]
+    exit host import 0 arguments [ slot:0:6 ] result - resume 10 error 7 error-resume 12 assign [ ]
+  block 10 graph 0 selector 0 inputs [ ]
+    exit state release-region immediate 0 arguments [ slot:5:1 ] result - resume 11 assign [ ]
+  block 11 graph 0 selector 0 inputs [ ]
+    exit return arguments [ constant:2:8 ] assign [ ]
+  block 12 graph 0 selector 0 inputs [ ]
+    exit trap reason 3 assign [ ]
+  block 13 graph 0 selector 0 inputs [ ]
+    exit trap reason 3 assign [ ]
+
+function 1 parameters 0 result 4 frame [ 5 7 6 0 3 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit state enter-region immediate 0 arguments [  ] result 0 resume 1 assign [ ]
+  block 1 graph 0 selector 0 inputs [ ]
+    exit state region-repeat immediate 7 arguments [ slot:5:0 constant:5:2 constant:6:3 ] result 1 resume 2 assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit continue poll resume 3 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit state read-element immediate 0 arguments [ slot:7:1 constant:5:4 ] result 2 resume 4 assign [ ]
+  block 4 graph 0 selector 0 inputs [ ]
+    exit continue poll resume 5 assign [ ]
+  block 5 graph 0 selector 0 inputs [ ]
+    exit state scalar-text immediate 0 arguments [ slot:6:2 ] result 3 resume 6 assign [ ]
+  block 6 graph 0 selector 0 inputs [ ]
+    exit host import 0 arguments [ slot:0:3 ] result - resume 7 error 4 error-resume 8 assign [ ]
+  block 7 graph 0 selector 0 inputs [ ]
+    exit return arguments [  ] assign [ ]
+  block 8 graph 0 selector 0 inputs [ ]
+    exit trap reason 3 assign [ ]
+  block 9 graph 0 selector 0 inputs [ ]
+    exit trap reason 3 assign [ ]
+
+function 2 parameters 0 result 4 frame [ 5 7 6 0 5 ]
+  block 0 graph 0 selector 0 inputs [ ]
+    exit state enter-region immediate 0 arguments [  ] result 0 resume 1 assign [ ]
+  block 1 graph 0 selector 0 inputs [ ]
+    exit state read-global immediate 0 arguments [  ] result 4 resume 2 assign [ ]
+  block 2 graph 0 selector 0 inputs [ ]
+    exit state region-repeat immediate 7 arguments [ slot:5:4 constant:5:4 constant:6:5 ] result 1 resume 3 assign [ ]
+  block 3 graph 0 selector 0 inputs [ ]
+    exit return arguments [  ] assign [ ]

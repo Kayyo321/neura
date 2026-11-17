@@ -179,10 +179,24 @@ enum class StateOp : std::uint8_t {
     Kernel = 24,
     // NVR 1.7. A component of one element of an array or list of aggregates;
     // the immediate is the component index.
-    ReadComponent = 25, WriteComponent = 26
+    ReadComponent = 25, WriteComponent = 26,
+    // NVR 1.7. Storage regions (docs/design/Storage030.md, "Regions"):
+    // EnterRegion gives a uint64 region token; ReleaseRegion(token) frees what
+    // the region owns; RegionObject(token), RegionCollection(token, elements...)
+    // and RegionRepeat(token, length, words...) allocate as AllocateObject,
+    // AllocateCollection and RepeatCollection do, into the region;
+    // MoveToRegion(entry, token) moves an entry and what it reaches in the same
+    // region to an enclosing region.
+    EnterRegion = 27, ReleaseRegion = 28, RegionObject = 29, RegionCollection = 30, RegionRepeat = 31,
+    MoveToRegion = 32
 };
 
-inline constexpr std::uint8_t state_op_count = 27;
+inline constexpr std::uint8_t state_op_count = 33;
+
+// Whether `operation` is one of the NVR 1.7 region operations.
+inline constexpr bool is_region_operation(StateOp operation) {
+    return operation >= StateOp::EnterRegion && operation <= StateOp::MoveToRegion;
+}
 
 enum class TrapReason : std::uint32_t {
     Arithmetic = 1, Bounds = 2, ProgramFailure = 3, InvalidDispatch = 4,
@@ -337,6 +351,10 @@ std::uint16_t required_minor_version(const Image& image);
 
 // Whether the image has tasks: a TRNS table, a scheduler exit, or a poll.
 bool concurrent_image(const Image& image);
+
+// Whether any function of `image` uses a region operation (NVR 1.7). A run of
+// such an image reports its peak stack cells.
+bool uses_regions(const Image& image);
 
 // Number of graph lanes a value of `type` occupies at the graph boundary.
 unsigned lane_count(const Type& type);

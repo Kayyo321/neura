@@ -28,6 +28,8 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "text-slice",      "text-from-utf8",   "text-equal",    "class-hash",     "class-text",
     "class-is",        "class-cast",       "scalar-text", "repeat-collection", "kernel",
     "read-component",  "write-component",
+    "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
+    "move-to-region",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -725,6 +727,9 @@ nvr::Image assemble(std::string_view text) {
                 if ((exit.operation == nvr::StateOp::ReadComponent || exit.operation == nvr::StateOp::WriteComponent) &&
                     image.minor_version < 7) {
                     in.error("component operations require NVR 1.7");
+                }
+                if (nvr::is_region_operation(exit.operation) && image.minor_version < 7) {
+                    in.error("region operations require NVR 1.7");
                 }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");

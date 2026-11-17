@@ -318,6 +318,16 @@ nvr::Image aggregate_image(const Environment& environment) {
     return hinted_image(environment, "aggregates.nvra");
 }
 
+nvr::Image region_image(const Environment& environment) {
+    return hinted_image(environment, "region-storage.nvra");
+}
+
+nvr::Image region_tasks_image(const Environment& environment, bool token_variant) {
+    std::ifstream file(backend_dir(environment) / "tier" / (token_variant ? "region-tasks-token.nvra" : "region-tasks.nvra"));
+    const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+    return decompiler::assemble(text);
+}
+
 nvr::Image aggregate_cells_image(const Environment& environment) {
     std::ifstream file(backend_dir(environment) / "tier" / "aggregate-cells.nvra");
     const std::string text((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());

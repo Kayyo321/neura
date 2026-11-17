@@ -325,6 +325,16 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 
 } // namespace
 
+bool uses_regions(const Image& image) {
+    return std::ranges::any_of(image.functions, [](const Function& function) {
+        return std::ranges::any_of(function.blocks, [](const Block& block) {
+            return std::ranges::any_of(block.exits, [](const Exit& exit) {
+                return exit.kind == ExitKind::State && is_region_operation(exit.operation);
+            });
+        });
+    });
+}
+
 bool concurrent_image(const Image& image) {
     if (image.transferable_layouts) return true;
     for (const auto& function : image.functions) {
@@ -343,7 +353,8 @@ std::uint16_t required_minor_version(const Image& image) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
                 if (exit.kind == ExitKind::State &&
-                    (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent)) {
+                    (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent ||
+                     is_region_operation(exit.operation))) {
                     return 7;
                 }
             }

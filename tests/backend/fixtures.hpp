@@ -33,6 +33,13 @@ nvr::Image multi_result_image(const Environment& environment);
 // graphs: an NVR 1.7 image with arrays and lists of aggregate elements. The
 // entry's argument count selects a trap case (1 to 4).
 nvr::Image aggregate_image(const Environment& environment);
+// tests/backend/tier/region-storage.nvra, assembled and given the lift hints of its
+// graphs: an NVR 1.7 image with storage regions (the compiler does not emit them yet).
+// The entry's argument count selects a trap case (1 to 9).
+nvr::Image region_image(const Environment& environment);
+// tests/backend/tier/region-tasks.nvra and region-tasks-token.nvra, assembled: three tasks with
+// regions of their own, and the variant in which a child uses the root's token.
+nvr::Image region_tasks_image(const Environment& environment, bool token_variant = false);
 // tests/backend/tier/aggregate-cells.nvra, assembled: the cell accounting of
 // aggregate collections (peak 18 cells, 15 at the end).
 nvr::Image aggregate_cells_image(const Environment& environment);

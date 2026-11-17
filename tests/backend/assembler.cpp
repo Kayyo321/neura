@@ -189,4 +189,44 @@ std::vector<Section> aggregate_sections(unsigned minor) {
     };
 }
 
+std::vector<Section> region_sections(unsigned minor) {
+    constexpr std::uint32_t none = 0xffffffffU;
+    Out constants;
+    constants.u32(1);
+    constants.u32(2).u32(4).u32(0);                              // int32 0
+
+    Out functions;
+    functions.u32(1);
+    functions.u32(1).u32(2);                 // parameter count, result type int32
+    if (minor >= 7) functions.u32(0);        // no more result words
+    functions.u32(2).u32(4).u32(5);          // frame: text[], uint64
+    functions.u32(3);                        // blocks
+    // Block 0: enter a region, the token in slot 1.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(3).u32(0).u8(27).u32(0);
+    functions.u32(0);                        // no arguments
+    functions.u32(1).u32(1);                 // result slot 1, resume block 1
+    // Block 1: release it.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(3).u32(0).u8(28).u32(0);
+    functions.raw(vector_of({value(0, 5, 1)}));
+    functions.u32(none).u32(2);
+    // Block 2: return int32 0.
+    functions.u32(0).u32(0).u32(0).u32(1);
+    functions.u8(2).u32(0).raw(value(1, 2, 0));
+
+    Out graphs;
+    graphs.u32(1).u32(0).u32(0).u32(0);
+    Out empty;
+    empty.u32(0);
+    Out types;
+    types.u32(6);
+    types.u8(0).u8(1).u8(3).u8(32).u8(4).u8(7).u32(3).u8(2).u8(64);  // void bool int32 text text[] uint64
+    return {
+        {"CONS", 1, constants.bytes}, {"FUNC", 1, functions.bytes}, {"GLOB", 1, empty.bytes},
+        {"GRPH", 1, graphs.bytes},    {"IMPT", 1, empty.bytes},     {"LAYO", 1, empty.bytes},
+        {"META", 1, empty.bytes},     {"TYPE", 1, types.bytes},
+    };
+}
+
 } // namespace neura::testing::nvr_bytes

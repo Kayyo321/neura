@@ -639,11 +639,19 @@ void Adapter::execute() {
         nvm::RunLimits limits;
         limits.tier = 0;
         limits.jit = jit::Mode::Off;
+        // A trap shows the frames and the region entries they hold.
+        limits.keep_regions_at_end = true;
         limits.host_modes = &modes;
         if (launch_arguments_["maxSteps"].is_number()) {
             const auto value = launch_arguments_["maxSteps"].integer();
             if (value <= 0) throw std::runtime_error("maxSteps must be positive");
             limits.max_steps = static_cast<std::uint64_t>(value);
+        }
+        // The region cells of NVR 1.7 images; a run limit like maxSteps.
+        if (launch_arguments_["maxStackCells"].is_number()) {
+            const auto value = launch_arguments_["maxStackCells"].integer();
+            if (value <= 0) throw std::runtime_error("maxStackCells must be positive");
+            limits.max_stack_cells = static_cast<std::uint64_t>(value);
         }
         auto execution = std::make_unique<nvm::Execution>(*image_, array_strings(launch_arguments_["args"]), limits);
         { const std::lock_guard lock(mutex_); execution_ = std::move(execution); }

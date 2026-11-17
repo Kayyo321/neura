@@ -231,6 +231,7 @@ Trace record_tasks(const nvr::Image& image, const Bindings& bindings, std::span<
     trace.trap = last.trap;
     trace.steps = execution.steps();
     trace.peak_heap_cells = execution.peak_heap_cells();
+    trace.peak_stack_cells = execution.peak_stack_cells();
     return trace;
 }
 
@@ -250,6 +251,7 @@ Trace record(const nvr::Image& image, const Bindings& bindings, std::span<const 
             trace.trap = event.trap;
             trace.steps = execution.steps();
             trace.peak_heap_cells = execution.peak_heap_cells();
+    trace.peak_stack_cells = execution.peak_stack_cells();
             return trace;
         }
         auto entry = recorder.serve(image, event.request);
@@ -396,6 +398,7 @@ Replay replay_tasks(const nvr::Image& image, const Trace& expected, std::span<co
         result.trace.trap = event.trap;
         result.trace.steps = execution.steps();
         result.trace.peak_heap_cells = execution.peak_heap_cells();
+        result.trace.peak_stack_cells = execution.peak_stack_cells();
         break;
     }
     if (result.trace.entries.size() != expected.entries.size()) {
@@ -437,6 +440,7 @@ Replay replay(const nvr::Image& image, const Trace& expected, std::span<const st
             result.trace.trap = event.trap;
             result.trace.steps = execution.steps();
             result.trace.peak_heap_cells = execution.peak_heap_cells();
+        result.trace.peak_stack_cells = execution.peak_stack_cells();
             break;
         }
         const auto completion = replayer.answer(event.request, expected.entries, position, result.trace.entries, "");

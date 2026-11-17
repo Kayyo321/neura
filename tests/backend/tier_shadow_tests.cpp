@@ -282,6 +282,9 @@ NEURA_TEST(tier, a_difference_planted_in_the_run_is_reported_by_name) {
     }
     const auto cells = perturbed_item(regions, Perturb::LiveCells, 1000, "live cells");
     check(starts_with(cells, "live heap cells: "), "the live cells are named: " + cells);
+    // The region cells and the regions a task has open (NVR 1.7) are compared too.
+    const auto stack = perturbed_item(region_image(environment), Perturb::StackCells, 1000, "stack cells");
+    check(starts_with(stack, "live stack cells: "), "the live stack cells are named: " + stack);
     const auto steps = perturbed_item(regions, Perturb::Steps, 1000, "steps");
     check(starts_with(steps, "steps: "), "the step count is named: " + steps);
     // A channel holding values: producers fill a buffer of two.

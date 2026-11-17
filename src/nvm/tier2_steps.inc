@@ -746,6 +746,9 @@
                     const auto& scopes = current_task().scopes;
                     simple = scopes.empty() || scopes.back().frame_depth != depth;
                 }
+                // A frame that still owns a storage region is popped by tier 1,
+                // which releases it (NVR 1.7).
+                if (simple && !frames_.regions.empty() && frames_.regions.back().depth >= depth) simple = false;
                 if (!simple) return end(op.block, true, region_counts_.exits);
                 ++done;
                 ++blocks;

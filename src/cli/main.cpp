@@ -98,14 +98,14 @@ void usage(std::ostream& out) {
            "       neura build --native [policy] [--static] [--target <triple>] [--launcher <file>]\n"
            "                  <file.nra>... | <file.nir> | <file.nvr> -o <file>\n"
            "       neura inspect <file> [-o <file.nvr>]\n"
-           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--stats] [--profile] [--tier=0|1|2] "
+           "       neura run [--max-steps N] [--max-frames N] [--max-heap-cells N] [--max-stack-cells N] [--stats] [--profile] [--tier=0|1|2] "
            "[--jit=off|on|auto] [--tier-stats] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
            "                  [--list --format=json] [--filter <exact-id>] [--reporter=json]\n"
            "                  [--workspace-root <directory>]\n"
-           "                  [--max-heap-cells N] [--stats] [--tier=0|1|2] [--jit=off|on|auto]\n"
+           "                  [--max-heap-cells N] [--max-stack-cells N] [--stats] [--tier=0|1|2] [--jit=off|on|auto]\n"
            "                  [--tier-stats] [capabilities]\n"
            "                  [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
@@ -676,6 +676,10 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-lift-hints applies only to build");
             }
             options.lift_hints = false;
+        } else if (arg == "--max-stack-cells") {
+            // Not part of a native policy: the container records no stack limit.
+            if (!runs) throw std::runtime_error("--max-stack-cells applies only to run and test");
+            options.limits.max_stack_cells = parse_limit(arg, next());
         } else if (arg == "--tier=0" || arg == "--tier=1" || arg == "--tier=2") {
             if (!runs) throw std::runtime_error("--tier applies only to run and test");
             options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');
@@ -1292,6 +1296,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     MemberTotal steps;
     MemberTotal requests;
     std::uint64_t peak_heap_cells = 0;
+    std::uint64_t peak_stack_cells = 0;
     int first_status = 0;
     const auto finished = [&](std::size_t member, const neura::nvm::RunResult& result) {
         host.services.end_run();
@@ -1299,6 +1304,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
             steps.add(result.steps);
             requests.add(result.host_requests);
             peak_heap_cells = std::max(peak_heap_cells, result.peak_heap_cells);
+            peak_stack_cells = std::max(peak_stack_cells, result.peak_stack_cells);
         }
         const auto status = result.completed ? result.status : neura::nvm::exit_status(result.trap);
         if (!result.completed) {
@@ -1342,7 +1348,11 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     }
     if (options.stats) {
         std::cerr << "stats: members " << lists.size() << ", steps " << steps.text()
-                  << ", peak heap cells " << peak_heap_cells << ", host requests " << requests.text()
+                  << ", peak heap cells " << peak_heap_cells
+                  // Only an image that uses regions reports their cells (NVR 1.7).
+                  << (neura::nvr::uses_regions(image) ? ", peak stack cells " + std::to_string(peak_stack_cells)
+                                                      : std::string())
+                  << ", host requests " << requests.text()
                   << ", " << image_costs(image) << ", image bytes " << image_bytes << '\n';
     }
     report_tiers(options, tiers, times);
@@ -1566,6 +1576,7 @@ int run_tests(const Options& options) {
                 {"state", success ? "passed" : "failed"}, {"duration", duration},
                 {"steps", result.steps}, {"peakHeapCells", result.peak_heap_cells},
                 {"message", message}, {"note", note}};
+            if (neura::nvr::uses_regions(image)) event["peakStackCells"] = result.peak_stack_cells;
             if (!success && !result.completed) {
                 std::optional<neura::nvr::SourceLocation> place;
                 if (test_failure_message(result.trap, image, test_labels)) {
@@ -1599,7 +1610,10 @@ int run_tests(const Options& options) {
         std::cout << (success ? "PASS " : "FAIL ") << names[i] << note;
         if (!success) std::cout << ": " << message;
         else if (options.stats)
-            std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells << ")";
+            std::cout << " (steps " << result.steps << ", peak heap cells " << result.peak_heap_cells
+                      << (neura::nvr::uses_regions(image) ? ", peak stack cells " + std::to_string(result.peak_stack_cells)
+                                                          : std::string())
+                      << ")";
         std::cout << '\n';
     };
     neura::runner::TaskDumps dumps(options.task_dump);

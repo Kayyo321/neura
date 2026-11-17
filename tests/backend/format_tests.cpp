@@ -758,6 +758,191 @@ NEURA_TEST(format, aggregate_elements_are_validated) {
     // (Kernel signatures are checked against a table, in kernel_tests.cpp.)
 }
 
+NEURA_TEST(format, storage_regions_need_version_1_7) {
+    // tests/backend/tier/region-storage.nvra: enter-region (27), release-region (28), region-object
+    // (29), region-collection (30), region-repeat (31) and move-to-region (32).
+    check_equal(static_cast<unsigned>(nvr::StateOp::EnterRegion), 27U, "the enter-region number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::ReleaseRegion), 28U, "the release-region number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::RegionObject), 29U, "the region-object number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::RegionCollection), 30U, "the region-collection number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::RegionRepeat), 31U, "the region-repeat number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::MoveToRegion), 32U, "the move-to-region number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 33U, "the operation count");
+    const auto image = region_image(environment);
+    check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
+    check(nvr::uses_regions(image), "the image uses regions");
+    check_equal(nvr::required_minor_version(image), std::uint16_t{7}, "a region operation declares 1.7");
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{7}, "the writer emits 1.7");
+    const auto loaded = nvr::load(bytes);
+    check(loaded == image, "an image with regions round trips through the loader");
+    check(nvr::encode(loaded) == bytes, "and re-encodes to the same bytes");
+    auto declared_old = image;
+    declared_old.minor_version = 6;
+    check(nvr::encode(declared_old) == bytes, "a declared 1.6 image with regions is written as 1.7");
+    // Without a region operation the version and the bytes are what they were.
+    check(!nvr::uses_regions(hello_model()) && !nvr::uses_regions(aggregate_cells_image(environment)),
+          "an image without region operations does not use regions");
+    check_equal(nvr::required_minor_version(hello_model()), std::uint16_t{0}, "no region, no 1.7");
+    check(nvr::encode(logic_model()) == logic_bytes(), "an image that uses none keeps its bytes");
+    // Wire encoding, byte by byte: operation numbers 27 and 28.
+    Header seven;
+    seven.minor = 7;
+    const auto wire = nvr::load(assemble(region_sections(7), seven));
+    check(wire.functions[0].blocks[0].exits[0].operation == nvr::StateOp::EnterRegion, "the wire enter-region");
+    check(wire.functions[0].blocks[1].exits[0].operation == nvr::StateOp::ReleaseRegion, "the wire release-region");
+    check(nvr::encode(wire) == assemble(region_sections(7), seven), "the writer reproduces the bytes");
+    const auto run = run_captured(wire);
+    check(run.result.completed && run.result.status == 0, "the image runs");
+    check_equal(run.result.peak_stack_cells, std::uint64_t{0}, "an empty region costs no cell");
+    // The same function table under a 1.6 header is a well-formed 1.6 table; the operations are
+    // what needs 1.7.
+    Header six;
+    six.minor = 6;
+    expect_rejected(assemble(region_sections(6), six), Kind::Malformed, "uses NVR 1.7 features but declares 1.6");
+}
+
+NEURA_TEST(format, storage_region_operations_are_validated) {
+    const auto image = region_image(environment);
+    nvr::load(nvr::encode(image));
+    const auto mutated = [&](const std::function<void(nvr::Image&)>& change, std::string_view fragment,
+                             std::source_location where = std::source_location::current()) {
+        auto copy = image;
+        change(copy);
+        expect_invalid(copy, fragment, where);
+    };
+    // F6 (nested): 0 enter, 1 region-repeat, 2 enter, 3 region-collection, 8 release. F8 (make):
+    // 3 move-to-region. F9 (make_holder): 1 region-object. Slots of F6: 0, 1 uint64, 2, 3
+    // int64[], 4 int64.
+    const auto exit_of = [](nvr::Image& m, std::size_t function, std::size_t block) -> nvr::Exit& {
+        return m.functions[function].blocks[block].exits[0];
+    };
+    const nvr::Value token{nvr::ValueKind::Slot, 8, 0};
+    const nvr::Value not_a_token{nvr::ValueKind::Slot, 6, 4};
+    // enter-region: no operand, no immediate and a uint64 result.
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 0).arguments.push_back(token); }, "expects 0 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 0).result_slot = 4; }, "result slot must have type uint64");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 0).result_slot = nvr::absent; }, "result slot must have type uint64");
+    // release-region: a uint64 token, no result.
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 8).arguments[0] = not_a_token; },
+            "argument 0 must be a uint64 region token");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 8).arguments[0] = {nvr::ValueKind::Slot, 11, 3}; },
+            "argument 0 must be a uint64 region token");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 8).result_slot = 0; }, "a void result requires an absent slot");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 8).immediate = 1; }, "immediate must be zero");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 8).arguments.clear(); }, "expects 1 argument(s)");
+    // region-repeat and region-collection: the token first, then as the allocation without one.
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).arguments[0] = not_a_token; },
+            "argument 0 must be a uint64 region token");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).arguments.pop_back(); }, "expects 3 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).arguments[1] = not_a_token; },
+            "argument 1 must be an unsigned 64-bit index");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).arguments[2] = token; }, "is not assignable");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).immediate = 9; }, "immediate must name an array or list type");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).immediate = 99; }, "type 99 is out of range");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 1).result_slot = 4; }, "is not assignable");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 3).arguments.clear(); }, "expects a region token");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 3).arguments[1] = token; }, "is not assignable");
+    mutated([&](nvr::Image& m) { exit_of(m, 6, 3).arguments[0] = not_a_token; },
+            "argument 0 must be a uint64 region token");
+    // region-object: the token, an existing layout, a result of that layout.
+    mutated([&](nvr::Image& m) { exit_of(m, 9, 1).immediate = 7; }, "layout 7 is out of range");
+    mutated([&](nvr::Image& m) { exit_of(m, 9, 1).arguments.clear(); }, "expects 1 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 9, 1).arguments[0] = {nvr::ValueKind::Slot, 9, 3}; },
+            "argument 0 must be a uint64 region token");
+    mutated([&](nvr::Image& m) { exit_of(m, 9, 1).immediate = 1; }, "result slot must have type a reference to the allocated layout");
+    // move-to-region: a reference, then a token, and nothing back.
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).arguments[0] = {nvr::ValueKind::Slot, 8, 0}; },
+            "argument 0 has the wrong type");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).arguments[1] = {nvr::ValueKind::Slot, 11, 3}; },
+            "argument 1 must be a uint64 region token");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).arguments.pop_back(); }, "expects 2 argument(s)");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).result_slot = 0; }, "a void result requires an absent slot");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "immediate must be zero");
+}
+
+NEURA_TEST(format, a_region_token_is_not_a_task_or_channel_operand) {
+    // A token belongs to the task that entered the region. It is a uint64 and has no type of its
+    // own, so the loader follows the slots EnterRegion writes, and the slots they are assigned to,
+    // and refuses them as the operands of a scheduler exit; the runtime refuses a token from
+    // another task (tier.storage_regions_of_tasks_are_their_own).
+    const auto image = region_tasks_image(environment);
+    nvr::load(nvr::encode(image));
+    // F0 of the tasks image: slot 1 is the token, blocks 4 and 5 spawn the children.
+    const auto spawn_with = [&](const nvr::Value& argument, const std::vector<nvr::Assignment>& assignments) {
+        auto copy = image;
+        auto& block = copy.functions[0].blocks[4];
+        block.exits[0].arguments = {argument};
+        copy.functions[0].blocks[3].exits[0].assignments = assignments;
+        return copy;
+    };
+    expect_invalid(spawn_with({nvr::ValueKind::Slot, 5, 1}, {}), "a region token cannot be a task or channel operand");
+    // Through a copy: slot 3 receives the token on the way into the scope.
+    expect_invalid(spawn_with({nvr::ValueKind::Slot, 5, 3}, {{3, {nvr::ValueKind::Slot, 5, 1}}}),
+                   "a region token cannot be a task or channel operand");
+    // A uint64 that is no token is not refused for being one (the callee takes no argument).
+    expect_invalid(spawn_with({nvr::ValueKind::Constant, 5, 1}, {}), "expects 0 argument(s)");
+}
+
+NEURA_TEST(format, region_images_round_trip_through_the_assembler) {
+    for (const auto& image : {region_image(environment), region_tasks_image(environment),
+                              region_tasks_image(environment, true)}) {
+        const auto text = decompiler::disassemble(image);
+        const auto assembled = decompiler::assemble(text);
+        check(assembled == image, "the assembled model is the loaded one");
+        check(nvr::encode(assembled) == nvr::encode(image), "assembling the text keeps the bytes");
+        check_equal(decompiler::disassemble(assembled), text, "disassembly is stable");
+        check(text.find("enter-region") != std::string::npos && text.find("release-region") != std::string::npos,
+              "the operations are named");
+        const auto source = decompiler::decompile(image).text;
+        check(source.find("enter_region()") != std::string::npos, "the decompiler names enter_region");
+    }
+    const auto text = decompiler::disassemble(region_image(environment));
+    for (const auto* name : {"region-object", "region-collection", "region-repeat", "move-to-region"}) {
+        check(text.find(name) != std::string::npos, std::string("the text names ") + name);
+    }
+    const auto source = decompiler::decompile(region_image(environment)).text;
+    for (const auto* form : {"release_region(", " in ", "move "}) {
+        check(source.find(form) != std::string::npos, std::string("the decompiled text shows ") + form);
+    }
+    // A text that declares 1.6 and uses a region operation is refused by the assembler.
+    auto old = text;
+    old.replace(old.find("nvr 1.7"), 7, "nvr 1.6");
+    bool refused = false;
+    try {
+        decompiler::assemble(old);
+    } catch (const decompiler::AssemblyError& error) {
+        refused = std::string(error.what()).find("require NVR 1.7") != std::string::npos;
+    }
+    check(refused, "the assembler refuses region operations under a 1.6 header");
+}
+
+NEURA_TEST(format, region_entries_show_as_heap_entries_marked_with_their_region_in_the_debugger) {
+    // F0 calls F6: three blocks in (the call, enter-region, region-repeat) the array of three
+    // int64 words is in slot 2 of F6's frame, the innermost, an entry of the region whose token is in slot 0. The
+    // step limit stops the run; the debugger's launch keeps the regions of a trap in place.
+    const auto image = region_image(environment);
+    const auto frame_of = [&](bool keep) {
+        nvm::RunLimits limits;
+        limits.max_steps = 3;
+        limits.keep_regions_at_end = keep;
+        auto execution = std::make_unique<nvm::Execution>(image, std::span<const std::string>{}, limits);
+        const auto event = execution->advance();
+        check(event.kind == nvm::Event::Kind::Trapped, "the step limit stops the run");
+        const auto snapshot = execution->debug_snapshot();
+        check(!snapshot.threads.empty() && snapshot.threads[0].frames.size() == 2, "two frames");
+        return std::tuple{snapshot.threads[0].frames[0].slots, execution->live_stack_cells(), std::move(execution)};
+    };
+    const auto [kept, kept_cells, kept_run] = frame_of(true);
+    check_equal(kept[2].text, std::string{"array[3] [region " + std::to_string(kept[0].bits) + "]"},
+                "the entry shows its length and its region's token");
+    check_equal(kept[2].children, std::size_t{3}, "and its elements");
+    check_equal(kept_cells, std::uint64_t{4}, "the entry's cells are stack cells");
+    const auto [released, released_cells, released_run] = frame_of(false);
+    check_equal(released[2].text, std::string{"<released reference>"}, "a trap released the region");
+    check_equal(released_cells, std::uint64_t{0}, "no cell is left");
+}
+
 NEURA_TEST(format, an_aggregate_is_not_a_channel_element_type) {
     const auto image = aggregate_cells_image(environment);
     // channel-open takes its element type as a type index: an aggregate is not one.

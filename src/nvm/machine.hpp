@@ -55,6 +55,8 @@ struct TierShadowHooks {
         ListVersion,
         // The live heap cells: one more.
         LiveCells,
+        // The live stack cells (NVR 1.7): one more.
+        StackCells,
         // The step count: one more.
         Steps,
         // The first channel, by handle, holding a value: the lowest bit of
@@ -90,6 +92,14 @@ struct RunLimits {
     // Heap storage after reclaiming unreachable entries: one cell per entry
     // plus one per object field, collection element, and text or bytes byte.
     std::uint64_t max_heap_cells = std::uint64_t{1} << 26;
+    // Live cells of region entries (NVR 1.7, docs/runtime/NVM.md, "Storage
+    // regions"): one per entry plus one per field or element. They are stack
+    // cells: they do not count against max_heap_cells.
+    std::uint64_t max_stack_cells = std::uint64_t{1} << 24;
+    // Tooling only: a run that ends leaves the regions it had open in place
+    // for the debugger to inspect, and the execution's end frees them. The
+    // result's live stack cells are then those the run ended with.
+    bool keep_regions_at_end = false;
     // Reference handles assigned during the run. Handles are never reused.
     std::uint64_t max_handles = std::uint64_t{1} << 32;
     // Count the steps of each function, for `neura run --profile`. Counting
@@ -271,6 +281,12 @@ enum class TrapKind {
     Deadlock,
     MessageLimit,
     RequestLimit,
+    // NVR 1.7 storage regions: the region cells of the run passed
+    // RunLimits::max_stack_cells; an access to an entry its region released;
+    // a region operation on a token or entry that is not valid here.
+    StackLimit,
+    ReleasedStorage,
+    InvalidRegion,
 };
 
 struct Trap {
@@ -516,6 +532,10 @@ public:
     // The largest live heap size reached so far, in the cells of
     // RunLimits::max_heap_cells.
     std::uint64_t peak_heap_cells() const;
+    // The live and the largest number of region cells (NVR 1.7); zero for a
+    // run that never entered a region.
+    std::uint64_t live_stack_cells() const;
+    std::uint64_t peak_stack_cells() const;
     // A live heap entry as the allocator recorded it: its kind (0 object, 1
     // array, 2 list, 3 text, 4 bytes), its layout or type index, and its
     // declared element width in bytes. For tests of the allocator.
@@ -586,6 +606,11 @@ struct RunResult {
     // location resolved.
     std::vector<TaskSiteProfile> task_profile{};
     std::vector<std::string> task_profile_sites{};
+    // The most region cells live at once (NVR 1.7).
+    std::uint64_t peak_stack_cells = 0;
+    // The region cells still live when the run ended: zero, since a run
+    // releases every region it leaves open, on a trap too.
+    std::uint64_t live_stack_cells = 0;
 };
 
 // The monotonic clock a driver gives the scheduler's timers and deadlines

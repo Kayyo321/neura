@@ -267,6 +267,17 @@ public:
             case nvr::StateOp::ScalarText:
                 operation = "scalar_text(" + values(function, args, lifted, inputs) + ")";
                 break;
+            // Storage regions (NVR 1.7): the region is the token operand.
+            case nvr::StateOp::EnterRegion: operation = "enter_region()"; break;
+            case nvr::StateOp::ReleaseRegion: operation = "release_region(" + a(0) + ")"; break;
+            case nvr::StateOp::RegionObject: operation = "new L" + std::to_string(exit.immediate) + " in " + a(0); break;
+            case nvr::StateOp::RegionCollection:
+                operation = type_name(image_, exit.immediate) + " [" + words(1) + "] in " + a(0);
+                break;
+            case nvr::StateOp::RegionRepeat:
+                operation = type_name(image_, exit.immediate) + " repeat(" + a(1) + ", " + words(2) + ") in " + a(0);
+                break;
+            case nvr::StateOp::MoveToRegion: operation = "move " + a(0) + " to " + a(1); break;
             case nvr::StateOp::Kernel: {
                 // A built-in C kernel: named by its KERN entry and opaque, as
                 // its behaviour is not in the circuit (Decompiler.md).

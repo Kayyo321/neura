@@ -310,6 +310,7 @@ nvm::RunResult result_of(const nvm::Trace& trace) {
     result.steps = trace.steps;
     result.host_requests = trace.entries.size();
     result.peak_heap_cells = trace.peak_heap_cells;
+    result.peak_stack_cells = trace.peak_stack_cells;
     return result;
 }
 
@@ -419,6 +420,9 @@ int run(const nvr::Image& image, Host& host, std::span<const std::string> argume
     }
     if (options.stats) {
         std::cerr << "stats: steps " << result.steps << ", peak heap cells " << result.peak_heap_cells
+                  // Only an image that uses regions reports their cells (NVR 1.7).
+                  << (nvr::uses_regions(image) ? ", peak stack cells " + std::to_string(result.peak_stack_cells)
+                                               : std::string())
                   << ", host requests " << result.host_requests << ", " << image_costs(image)
                   << ", image bytes " << image_bytes;
         // Only an image with tasks reports them, so other output is unchanged.

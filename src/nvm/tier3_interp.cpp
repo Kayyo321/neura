@@ -172,6 +172,8 @@ bool append_inline(Context& context, std::uint64_t entry, std::uint64_t value, b
     const auto live = *context.live_cells;
     const auto next = *context.next_collection;
     if (live >= next) return false;
+    // A region list (NVR 1.7) counts stack cells: the reference path appends.
+    if ((load(entry + Heap::flags_offset(), 1) & Heap::region_entry_flag()) != 0) return false;
     const auto storage = static_cast<unsigned>(load(entry + Heap::storage_width_offset(), 1));
     if (storage < 8 && (value >> (8 * storage)) != 0) return false;
     const auto count = load(entry + Heap::count_offset(), 8);
