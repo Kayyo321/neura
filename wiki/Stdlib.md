@@ -67,6 +67,7 @@ Tasks, channels, cancellation, timers, and shared-state handles. The [concurrenc
 
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
+| [`Std.Core.Arithmetic`](Stdlib-Core-Arithmetic) | [Contracts](Stdlib-Core-Arithmetic#detailed-contracts) | [Declarations](Stdlib-Core-Arithmetic#exported-declarations) |
 | [`Std.Core.BFloat16`](Stdlib-Core-BFloat16) | [Contracts](Stdlib-Core-BFloat16#detailed-contracts) | [Declarations](Stdlib-Core-BFloat16#exported-declarations) |
 | [`Std.Core.Bool`](Stdlib-Core-Bool) | [Contracts](Stdlib-Core-Bool#detailed-contracts) | [Declarations](Stdlib-Core-Bool#exported-declarations) |
 | [`Std.Core.Cell`](Stdlib-Core-Cell) | [Contracts](Stdlib-Core-Cell#detailed-contracts) | [Declarations](Stdlib-Core-Cell#exported-declarations) |

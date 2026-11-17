@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// (N1); text conversion follows section 7.5.
 /// @see [Std.Core.Float16](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Float16)
 #Since("0.1.0")
-export let Float16 = module implements Parseable<float16> (
+export let Float16 = module implements Additive<float16>, Multiplicative<float16>, Parseable<float16> (
     /// @brief The largest finite value.
     export const Max: float16 = float16.from_bits(31743);
     /// @brief The smallest positive (subnormal) value.
@@ -199,4 +199,20 @@ export let Float16 = module implements Parseable<float16> (
     /// @brief Applies the requested rounding mode to the format's raw bit pattern.
     let round_with = func(v: float16, mode: int) -> float16 =>
         float16.from_bits(float_text.round_bits(v.to_bits() as uint64, 10, 5, mode) as uint16);
+
+    /// @brief The additive identity, 0.0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> float16 => 0.0;
+
+    /// @brief The sum `left + right`, rounded as the type's arithmetic specifies.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: float16, right: float16) -> float16 => left + right;
+
+    /// @brief The multiplicative identity, 1.0 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> float16 => 1.0;
+
+    /// @brief The product `left * right`, rounded as the type's arithmetic specifies.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: float16, right: float16) -> float16 => left * right;
 );

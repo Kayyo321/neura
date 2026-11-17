@@ -43,7 +43,7 @@ The following public declarations are taken from the module source; each links t
   Appends `value` and returns true.
 - **ArrayList.ArrayList** · [`export let add_at = func(index: int, value: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L84)
   Inserts before `index`, or appends when it equals the size. Other invalid indices cause a bounds trap.
-- **ArrayList.ArrayList** · [`export let add_all = func(values: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L104)
+- **ArrayList.ArrayList** · [`export let add_all = func(items: T[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L104)
   Appends each element in order. Reads by position up to the starting length, so adding the list's own items() doubles it.
 - **ArrayList.ArrayList** · [`export let remove_at = func(index: int) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L114)
   Removes and returns the element at zero-based `index`. An invalid index causes a bounds trap.

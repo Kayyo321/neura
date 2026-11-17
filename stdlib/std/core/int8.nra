@@ -12,7 +12,7 @@ let unsigned = import:Std.Core.UInt8;
 /// intermediate value leaves its type.
 /// @see [Std.Core.Int8](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Int8)
 #Since("0.1.0")
-export let Int8 = module implements Ordered<int8>, Parseable<int8> (
+export let Int8 = module implements Additive<int8>, Multiplicative<int8>, Ordered<int8>, Parseable<int8> (
     /// @brief The smallest value representable by this integer type.
     export const Min: int8 = -128;
     /// @brief The largest value representable by this integer type.
@@ -327,4 +327,20 @@ export let Int8 = module implements Ordered<int8>, Parseable<int8> (
         last product = (a as int64) * (b as int64);
         return product < (Min as int64) || product > (Max as int64);
     };
+
+    /// @brief The additive identity, 0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> int8 => 0;
+
+    /// @brief The sum `left + right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: int8, right: int8) -> int8 => left + right;
+
+    /// @brief The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> int8 => 1;
+
+    /// @brief The product `left * right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: int8, right: int8) -> int8 => left * right;
 );

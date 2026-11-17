@@ -1,0 +1,21 @@
+// Primitives through their companions (edge cases 100 to 102): every sized
+// integer and float is Additive and Multiplicative, integers and bool are
+// Ordered, and an inferred type argument conforms as a written one does.
+let.promote _ = import:Std.Core.Arithmetic;
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+let first = func<T: [Ordered<T>, Parseable<T>]>(a: T) -> T => a;
+let small: int8[] = [1, 2];
+let a = sum<int8>(small);
+let b = sum<int64>([1, 2]);
+let c = sum<uint64>([1, 2]);
+let d = sum<float64>([0.1, 0.2, 0.3]);
+let e = sum([1.5, 2.5]);
+let f = first(true);
+let g = first<uint16>(3);
+let h = 3.add(4);

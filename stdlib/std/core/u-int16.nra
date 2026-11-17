@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt16](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt16)
 #Since("0.1.0")
-export let UInt16 = module implements Ordered<uint16>, Parseable<uint16> (
+export let UInt16 = module implements Additive<uint16>, Multiplicative<uint16>, Ordered<uint16>, Parseable<uint16> (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint16 = 0;
     /// @brief The largest value representable by this integer type.
@@ -352,4 +352,20 @@ export let UInt16 = module implements Ordered<uint16>, Parseable<uint16> (
         }
         return count;
     };
+
+    /// @brief The additive identity, 0 (Std.Core.Arithmetic.Additive).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let zero = func() -> uint16 => 0;
+
+    /// @brief The sum `left + right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let add = func(left: uint16, right: uint16) -> uint16 => left + right;
+
+    /// @brief The multiplicative identity, 1 (Std.Core.Arithmetic.Multiplicative).
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let one = func() -> uint16 => 1;
+
+    /// @brief The product `left * right`, at the type's width; traps (reason 1) on overflow.
+    #[Pure, ThreadSafe, Since("0.3.0")]
+    export let multiply = func(left: uint16, right: uint16) -> uint16 => left * right;
 );

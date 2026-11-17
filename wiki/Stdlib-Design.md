@@ -467,6 +467,40 @@ Use `nil` for an internal absent reference when it cannot be confused with a rea
 
 Named types are kept where the name carries a contract a tuple cannot: `RegexMatch` (group lookup by name), `FileMetadata` (three fields of unrelated types that will grow), and the value classes of `Std.Time`.
 
+### 6.6 `Arithmetic`
+
+*Status: proposed in [the 0.3.0 records note](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md); implemented.*
+
+`Std.Core.Arithmetic` declares four static contracts ([Polymorphism](Polymorphism#static-interface-requirements)): interfaces of static requirements only, which a generic function calls through its type parameter, as `T.zero()`, and which each specialization calls directly.
+
+| Contract | Static requirements | Conforming primitives |
+| --- | --- | --- |
+| `Additive<T>` | `zero() -> T`, `add(left: T, right: T) -> T` | Every sized integer and float |
+| `Multiplicative<T>` | `one() -> T`, `multiply(left: T, right: T) -> T` | Every sized integer and float |
+| `Ordered<T>` | `compare(a: T, b: T) -> Ordering` | Every sized integer, `bool` |
+| `Parseable<T>` | `parse(text: string) -> Result<T>` | Every sized integer and float, `bool` |
+
+A primitive conforms only through its companion module, which declares `module implements` in the standard library; no type conforms by having functions of the right names, and only a trusted companion may declare a conformance ([E0578](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0578.md)). The companions' `zero`, `add`, `one` and `multiply` are the operators at the type's width: integer `add` and `multiply` trap on overflow (reason 1), and float ones round as float arithmetic does. `compare` and `parse` are the companions' existing functions. Floats do not conform to `Ordered`, since their companions have no total `compare`; `int` and `float` use the companions of the types they name. A class conforms by listing a contract after `implements` and declaring each requirement as an exported static function.
+
+<!-- example: check -->
+```neura
+let.promote _ = import:Std.Core.Arithmetic;
+
+let sum = func<T: Additive<T>>(items: T[]) -> T {
+    let total = T.zero();
+    for (let item in items) {
+        total = T.add(total, item);
+    }
+    return total;
+};
+
+let small: int8[] = [1, 2, 3];
+let total = sum(small);
+let precise = sum<float64>([0.1, 0.2, 0.3]);
+```
+
+A contract's name promises nothing beyond its signature: no pass reassociates or reorders calls because a requirement is named `add`, so `precise` is the left-to-right sum, bit for bit. A companion's conformance is checked, and `Std.Core.Arithmetic` loaded, only when a bound needs it, so a program that uses no contract builds the image it built before.
+
 ## 7. Primitive companion modules
 
 `Std.Core` has one module per primitive type: `Int8`, `Int16`, `Int32`, `Int64`, `UInt8`, `UInt16`, `UInt32`, `UInt64`, `Float16`, `BFloat16`, `Float32`, `Float64`, `Bool`, and [`String`](StandardLibrary#string). The integer modules have identical member lists, as do the float modules. Each is a separate hand-written source file.
@@ -495,6 +529,7 @@ Named types are kept where the name carries a contract a tuple cannot: `RegexMat
 | `to_string(v) → string` | Decimal. Built by concatenating one-character literals, most significant digit first; negative values are handled in the negative range so `Min` needs no negation. |
 | `to_string_radix(v, radix: int) → string` | Lowercase digits. The kernel `neura.integer.format_i64` or `format_u64` writes them (P2a). |
 | `format(v, radix: int, min_width: int, pad: string) → string` | As `to_string_radix`, then left-padded with copies of `pad` to `min_width` digits and sign. When `pad` is `0`, padding goes after the sign. |
+| `zero() → X`, `add(left, right) → X`, `one() → X`, `multiply(left, right) → X` | The operators at the type's width; `add` and `multiply` trap on overflow (reason 1). They implement `Additive<X>` and `Multiplicative<X>` of [section 6.6](#66-arithmetic), with `compare` and `parse` for `Ordered<X>` and `Parseable<X>`. |
 | `parse(text) → Result<X>`, `parse_radix(text, radix: int) → Result<X>` | **T1.** Grammar below. The kernel `neura.integer.parse_i64` or `parse_u64` parses the text as a 64-bit value, which a narrower type then checks against its range (P2a). |
 
 **Parsing grammar.** An optional `+` or `-`, then one or more digits of the radix, letters in either case. No whitespace, separators, or radix prefix. An empty input fails with kind `Empty`; a sign with no digits with `UnexpectedEnd`; any other byte with `InvalidCharacter` at its offset; a value outside the type with `OutOfRange` at offset 0. A `-` on an unsigned type is accepted only for zero. The parser accumulates in the negative range for signed types, so `Min` parses without overflow.
@@ -538,10 +573,11 @@ The float companions use N1 for bit-level operations. `is_nan` can also use ordi
 | `equals(a, b)`, `hash(v)` | [Section 5.2](#52-equality-hashing-and-text). |
 | `to_string(v)`, `to_fixed(v, digits: int)`, `to_exponential(v, digits: int)` | [Section 7.5](#75-float-text-conversion). `to_fixed` gives exactly `digits` fraction digits (0 through 100), correctly rounded, ties to even. |
 | `parse(text) → Result<X>` | Also T1. |
+| `zero() → X`, `add(left, right) → X`, `one() → X`, `multiply(left, right) → X` | The operators, rounded as float arithmetic is. They implement `Additive<X>` and `Multiplicative<X>` of [section 6.6](#66-arithmetic), with `parse` for `Parseable<X>`. |
 
 ### 7.4 `Bool`
 
-`to_int(v) → int` gives 1 or 0; `xor(a, b)`; `compare(a, b) → Ordering`; `hash(v)`; `to_string(v)`. `parse(text) → Result<bool>` accepts exactly `true` and `false` and needs T1.
+`to_int(v) → int` gives 1 or 0; `xor(a, b)`; `compare(a, b) → Ordering`; `hash(v)`; `to_string(v)`. `parse(text) → Result<bool>` accepts exactly `true` and `false` and needs T1. `bool` conforms to `Ordered<bool>` and `Parseable<bool>` of [section 6.6](#66-arithmetic).
 
 ### 7.5 Float text conversion
 
