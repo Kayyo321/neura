@@ -459,19 +459,29 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     newer[6] = 200;
     expect_nir_error(newer, "this reader accepts 1.0 through 1.12");
 
-    // An operation tag above the newest one, in a 1.9 file.
+    // An operation tag above the newest one. Operations after the 1.9 set
+    // are those of 1.12 (docs/design/Matching030.md).
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
-    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::SchedulerCall) + 1);
+    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::AnyUnpack) + 1);
     above.bodies.push_back({0, {tagged}});
     const auto above_bytes = write_nir(above);
-    check_equal(static_cast<int>(above_bytes[6]), 9, "an operation above the 1.7 set is written as 1.9");
+    check_equal(static_cast<int>(above_bytes[6]), static_cast<int>(nir_any_minor),
+                "an operation above the 1.9 set is written as 1.12");
     expect_nir_error(above_bytes, "invalid operation tag " + std::to_string(static_cast<int>(tagged.op)));
-    // The newest operation itself is accepted.
+    // The newest operation of 1.9 is accepted in 1.9, and the first of
+    // 1.12 is not.
     IrProgram newest = above;
     newest.bodies.front().instructions.front().op = IrOp::SchedulerCall;
-    check_equal(read_nir(write_nir(newest), "newest").bodies.size(), std::size_t{1}, "SchedulerCall reads");
+    const auto newest_bytes = write_nir(newest);
+    check_equal(static_cast<int>(newest_bytes[6]), 9, "SchedulerCall is written as 1.9");
+    check_equal(read_nir(newest_bytes, "newest").bodies.size(), std::size_t{1}, "SchedulerCall reads");
+    IrProgram packed = above;
+    packed.bodies.front().instructions.front().op = IrOp::AnyPack;
+    auto packed_bytes = write_nir(packed);
+    packed_bytes[6] = 9;
+    expect_nir_error(packed_bytes, "invalid operation tag " + std::to_string(static_cast<int>(IrOp::AnyPack)));
 
     // A file that claims an older minor cannot use the task operations: 1.8
     // has neither the tags nor the poll bit.
@@ -1168,6 +1178,60 @@ NEURA_TEST(nir, attribute_files_are_rejected_when_malformed) {
           "a deferred initialization reads back");
     deferred_bytes[6] = 9;
     expect_nir_error(deferred_bytes, "deferred initialization requires NeuraIR format 1.10");
+}
+
+
+namespace {
+
+// The first node of `op` in a region, depth first.
+IrNode* find_node(std::vector<IrNode>& region, IrOp op) {
+    for (auto& node : region) {
+        if (node.op == op) return &node;
+        for (auto* nested : {&node.operands, &node.body, &node.alternative})
+            if (auto* found = find_node(*nested, op)) return found;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+NEURA_TEST(nir, any_round_trips_as_version_1_12_and_its_unpack_needs_a_tag_test) {
+    // docs/design/Matching030.md, "Lowering and artifacts" and edge case 66.
+    auto program = lower_files({backend_dir(environment) / "nir-versions" / "any.nra"});
+    check(verify_ir(program).empty(), "the any fixture verifies");
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6] | (bytes[7] << 8)), static_cast<int>(nir_any_minor),
+                "a program with any is written as NeuraIR 1.12");
+    check(write_nir(read_nir(bytes, "any")) == bytes, "any round-trips through .nir");
+    auto older = bytes;
+    older[6] = 10;
+    older[7] = 0;
+    expect_nir_error(older, "invalid type kind tag " + std::to_string(static_cast<int>(TypeKind::Any)));
+
+    // An unpack outside the region its tag test selects.
+    auto outside = program;
+    auto& describe = body_of(outside, "Values.describe");
+    auto* unpack = find_node(describe, IrOp::AnyUnpack);
+    check(unpack != nullptr, "describe unpacks its subject");
+    auto copy = *unpack;
+    auto discard = IrNode{IrOp::Discard, {}, copy.span};
+    discard.operands.push_back(std::move(copy));
+    describe.insert(describe.begin() + 1, std::move(discard));
+    expect_issue(outside, "is not inside a region selected by a test of its tag");
+
+    // An unpack whose test names another tag.
+    auto wrong = program;
+    auto& tested = body_of(wrong, "Values.describe");
+    auto* found = find_node(tested, IrOp::AnyUnpack);
+    found->type = IrType{TypeKind::Float, "float64", no_symbol, {}};
+    expect_issue(wrong, "is not inside a region selected by a test of its tag 13");
+
+    // A pack of a value an any cannot hold.
+    auto packed = program;
+    auto* pack = find_node(body_of(packed, "Values.main"), IrOp::AnyPack);
+    check(pack != nullptr, "main packs a value");
+    pack->operands.front().type = IrType{TypeKind::Array, "", no_symbol, {IrType{TypeKind::Integer, "int32", no_symbol, {}}}};
+    expect_issue(packed, "any pack requires a value that an any can hold");
 }
 
 } // namespace neura::testing

@@ -329,7 +329,7 @@ Lowering::CoverPattern Lowering::element_pattern(const PatternSyntax& pattern, I
 // interface reference, `class`, `any`, or a scalar or string.
 void Lowering::is_subject(const IrNode& subject) const {
     const auto& type = subject.type;
-    if (class_reference(type) || type.kind == TypeKind::Bool || type.kind == TypeKind::Integer ||
+    if (class_reference(type) || type.kind == TypeKind::Any || type.kind == TypeKind::Bool || type.kind == TypeKind::Integer ||
         type.kind == TypeKind::Float || type.kind == TypeKind::String)
         return;
     auto error = Diagnostic(subject.span, "match.is cannot test a value of type " + describe(type)).with_code("E0411")
@@ -360,6 +360,7 @@ Lowering::IsCover Lowering::is_pattern(const PatternSyntax& pattern, const IrNod
             .with_code("E0490").label("the subject has type " + describe(subject));
     };
     if (pattern.kind == Kind::Wildcard) return {IsCover::Kind::Wildcard, {}};
+    if (subject.kind == TypeKind::Any) return any_pattern(pattern, value, steps, declarations, context, owner);
     if (pattern.kind == Kind::Nil) {
         if (!class_reference(subject)) throw never("nil");
         steps.push_back({equals(value, node(IrOp::Nil, pattern.span, subject), pattern.span), std::nullopt});
@@ -402,6 +403,55 @@ Lowering::IsCover Lowering::is_pattern(const PatternSyntax& pattern, const IrNod
         steps.push_back({std::nullopt, store_local(local, tested, std::move(bound), pattern.span)});
     }
     return {scalar_subject(subject) ? IsCover::Kind::Wildcard : IsCover::Kind::Type, tested};
+}
+
+// A `match.is` pattern on an `any` subject, whose snapshot is a constant
+// local: the tag test, and for a class pattern the ClassIs of the
+// unpacked reference; a binding is the unpacked value, or the ClassCast of
+// the unpacked reference.
+Lowering::IsCover Lowering::any_pattern(const PatternSyntax& pattern, const IrNode& value,
+                                        std::vector<PatternStep>& steps, std::vector<IrNode>& declarations,
+                                        Context& context, SymbolId owner) {
+    using Kind = PatternSyntax::Kind;
+    const auto local = value.symbol;
+    if (pattern.kind == Kind::Nil) {
+        steps.push_back({any_tag_is(local, any_reference_tag, pattern.span), std::nullopt});
+        const auto root = symbol(root_class()).type;
+        steps.push_back({equals(any_unpack(local, root, pattern.span), node(IrOp::Nil, pattern.span, root), pattern.span),
+                         std::nullopt});
+        return {IsCover::Kind::Nil, {}};
+    }
+    auto tested = type(*pattern.type, context);
+    const auto tag = any_tag(tested);
+    if (!tag)
+        throw Diagnostic(pattern.span, "a value of type any is never " + article(shown(tested))).with_code("E0490")
+            .label("an any never holds a value of type " + shown(tested));
+    steps.push_back({any_tag_is(local, *tag, pattern.span), std::nullopt});
+    const bool reference = tested.kind == TypeKind::Object;
+    if (reference) {
+        auto test = node(IrOp::ClassIs, pattern.span, bool_type);
+        test.type_arguments.push_back(tested);
+        test.operands.push_back(any_unpack(local, tested, pattern.span));
+        steps.push_back({std::move(test), std::nullopt});
+    }
+    if (pattern.kind == Kind::Binding) {
+        const auto bound_local = add(SymbolKind::Local, pattern.name, pattern.name_span, owner);
+        context.scopes.back().emplace(pattern.name, bound_local);
+        symbol(bound_local).type = tested;
+        symbol(bound_local).constant = true;
+        set_attribute(symbol(bound_local), AttributeId::BindingLast, attribute_bool(true));
+        auto declare = node(IrOp::Initialize, pattern.span);
+        declare.symbol = bound_local;
+        declarations.push_back(std::move(declare));
+        auto bound = any_unpack(local, tested, pattern.span);
+        if (reference) {
+            auto cast = node(IrOp::ClassCast, pattern.span, tested);
+            cast.operands.push_back(std::move(bound));
+            bound = std::move(cast);
+        }
+        steps.push_back({std::nullopt, store_local(bound_local, tested, std::move(bound), pattern.span)});
+    }
+    return {IsCover::Kind::Type, tested};
 }
 
 // Whether an unguarded arm `earlier` matches every value that `later` matches.

@@ -1,0 +1,29 @@
+// NeuraIR 1.12 fixture (docs/design/Matching030.md): `any` in a field, a
+// parameter and a local, packing, `is`, and `match.is` over an `any`. The
+// tests check the round trip and the verifier's rules for the operations.
+let program = import:Std.Program;
+
+let Values = module:program.Entry (
+    let Shape = class (
+        export let sides: int32 = 0;
+    );
+    let Holder = class (
+        export let value: any = nil;
+    );
+    let describe = func(value: any) -> int32 => match.is (value) {
+        count: int64 if count > 0 => 1,
+        int64 => 2,
+        text: string => 3,
+        shape: Shape => shape.sides,
+        nil => 5,
+        _ => 6,
+    };
+    let test = func(value: any) -> bool => value is Shape || value is float64;
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let holder = new Holder();
+        holder.value = 7 as int64;
+        let local: any = "seven";
+        let result = describe(holder.value) + describe(local);
+        return test(local) ? program.ExitCode.Ok : program.ExitCode.Ok;
+    };
+);

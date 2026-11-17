@@ -300,6 +300,8 @@ private:
         case IrOp::EnumProject:
         case IrOp::Convert:
         case IrOp::ClassCast:
+        case IrOp::AnyPack:
+        case IrOp::AnyUnpack:
             if (!node.operands.empty()) out = origins(node.operands.front(), scope);
             break;
         case IrOp::Tuple:

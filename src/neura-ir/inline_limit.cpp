@@ -45,6 +45,8 @@ void check_node(const IrProgram& program, const IrNode& node) {
 } // namespace
 
 std::size_t value_words(const IrType& type) {
+    // An `any` is four words (docs/design/Matching030.md, Representation).
+    if (type.kind == TypeKind::Any) return 4;
     if (type.kind != TypeKind::Tuple) return 1;
     std::size_t total = 0;
     for (const auto& element : type.arguments) {

@@ -1,0 +1,7 @@
+error[E0428]: a primitive reference needs a Boolean, numeric, or string type
+ --> $DIR/any-reference.nra:4:20
+  |
+4 | let read = func(v: &any) => 1;
+  |                    ^^^^
+
+For more information about this error, try `neura explain E0428`.

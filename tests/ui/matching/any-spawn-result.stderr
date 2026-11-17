@@ -1,0 +1,10 @@
+error[E0498]: an any cannot be the result of a spawned call
+ --> $DIR/any-spawn-result.nra:7:26
+  |
+7 |         let task = spawn work();
+  |                          ^^^^^^ this has type any
+  |
+  = note: the boundary would box the value; an any is four inline words
+  = help: match the value first and pass what it holds
+
+For more information about this error, try `neura explain E0498`.

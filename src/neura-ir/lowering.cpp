@@ -1,4 +1,5 @@
 #include "aggregate.hpp"
+#include "any.hpp"
 #include "attributes.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
@@ -56,6 +57,8 @@ std::optional<IrType> primitive(std::string_view name) {
     if (name == "void") return void_type;
     if (name == "bool") return bool_type;
     if (name == "string") return string_type;
+    // docs/design/Matching030.md: `any` is a type name wherever a type is read.
+    if (name == "any") return any_type;
     // `int` and `byte` are aliases of int32 and uint8 (Types.md). Lowering
     // spells every integer type by its sized name, so the aliases are
     // interchangeable with it everywhere.
@@ -438,6 +441,8 @@ private:
     IsCover is_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
                        std::vector<IrNode>& declarations, Context& context, SymbolId owner);
     bool is_covered(const IsCover& earlier, const IsCover& later, const IrType& subject) const;
+    IsCover any_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
+                        std::vector<IrNode>& declarations, Context& context, SymbolId owner);
     void is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered) const;
     // Optional access, coalescing and propagation (lowering_optional.inc).
     SymbolId library_enum(std::string_view path, std::string_view module, std::string_view name, const Span& span,
@@ -453,6 +458,20 @@ private:
     IrNode member_of_optional(const Expr& member, Context& context, bool for_call);
     IrNode coalesce(const Expr& expr, Context& context);
     IrNode propagate(const Expr& expr, Context& context);
+    // The type any and the scope-bound conversion rule (lowering_any.inc).
+    void reject_erasure(const IrType& actual, const IrType& target, const Span& span) const;
+    void reserve_any(const std::string& name, const Span& span, std::string_view what) const;
+    IrNode pack_any(IrNode inner, const Span& span);
+    IrNode pack_expression(const Expr& expr, Context& context, bool call_argument);
+    IrNode any_tag_of(SymbolId local, const Span& span);
+    IrNode any_tag_is(SymbolId local, std::uint32_t tag, const Span& span);
+    IrNode any_unpack(SymbolId local, const IrType& type, const Span& span);
+    IrNode any_type_test(IrNode source, const IrType& target, const Span& span, const Context& context);
+    Diagnostic any_operation(const Span& span, const std::string& what) const;
+    Diagnostic any_boundary(const Span& span, const std::string& what) const;
+    std::string shown(const IrType& type) const;
+    bool lowers_to_any(const Expr& expr, Context& context);
+    IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
     IrNode do_loop(const Statement& stmt, Context& context);
@@ -780,6 +799,9 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
     case DeclKind::Enum: kind = SymbolKind::Enum; break;
     case DeclKind::Binding: break;
     }
+    if (decl.kind == DeclKind::Class || decl.kind == DeclKind::Interface || decl.kind == DeclKind::Enum ||
+        decl.kind == DeclKind::Module || (decl.initializer && decl.initializer->kind == ExprKind::Import))
+        reserve_any(decl.name, decl.name_span.value_or(decl.span), "type, module or alias");
     if (decl.cast_target) {
         if (symbol(owner).kind != SymbolKind::Class || decl.static_member || decl.override_member ||
             !decl.has_body || !decl.generics.empty() || !decl.parameters.empty()) {
@@ -1576,6 +1598,7 @@ std::optional<IrNode> Lowering::static_qualifier(IrNode& callee) {
 
 void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& context) {
     for (const auto& parameter : decl.generics) {
+        reserve_any(parameter.name, parameter.span, "type parameter");
         auto generic = add(SymbolKind::TypeParameter, parameter.name, parameter.span, id);
         if (!entries_[id].names.emplace(parameter.name, generic).second)
             throw Diagnostic(parameter.span, "duplicate type parameter '" + parameter.name + "'").with_code("E0303");
@@ -2385,6 +2408,9 @@ IrNode Lowering::cast_call(SymbolId target, IrNode source, const IrType& type, c
 IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context& context) {
     auto input = value(expr, context);
     if (input.type == argument) return input;
+    if (input.type.kind == TypeKind::Any)
+        throw any_operation(expr.span, "formatting")
+            .note("an untyped variadic parameter formats its arguments; an any is not formatted");
     auto variant_name = "Text";
     const IrType* numeric_type = nullptr;
     if (auto integer = specified_integer_format(input.type)) {
@@ -2398,6 +2424,7 @@ IrNode Lowering::pack_argument(const Expr& expr, const IrType& argument, Context
     } else if (input.type.kind == TypeKind::Bool) {
         variant_name = "Boolean";
     } else if (class_reference(input.type)) {
+        reject_erasure(input.type, symbol(root_class()).type, expr.span);
         variant_name = "Object";
     } else if (input.type != string_type) {
         if (!supports_value_members(program_, input.type))
@@ -2837,7 +2864,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
             }
         }
     }
-    enum class Rank { Exact, Assignable, ReferenceBinding, Contextual, Cast };
+    // Packing into `any` ranks below every other match (docs/design/Matching030.md).
+    enum class Rank { Exact, Assignable, ReferenceBinding, Contextual, Cast, Packed };
     struct Match {
         SymbolId branch;
         std::vector<Rank> ranks;
@@ -2867,6 +2895,9 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                     rank = Rank::Assignable;
                 } else if ((conversion = cast_method(argument.type, expected, context, false)) != no_symbol) {
                     rank = Rank::Cast;
+                } else if (expected.kind == TypeKind::Any &&
+                           (any_holdable(argument.type) || argument.type.kind == TypeKind::TypeParameter)) {
+                    rank = Rank::Packed;
                 } else {
                     break;
                 }
@@ -2916,7 +2947,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                     if (rejected.code() == "E0450" && !missing_new) missing_new = rejected;
                     break;
                 }
-                rank = defaults[i] == expected ? Rank::Exact : Rank::Contextual;
+                rank = expected.kind == TypeKind::Any ? Rank::Packed
+                     : defaults[i] == expected ? Rank::Exact : Rank::Contextual;
             }
             match.ranks.push_back(rank);
             match.types.push_back(std::move(expected));
@@ -3224,7 +3256,7 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
 }
 
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
-    auto result = expression_node(expr, context, expected, call_argument);
+    auto result = any_guard(expr, context, [&] { return expression_node(expr, context, expected, call_argument); });
     if (is_primitive_reference(result.type) && (!expected || result.type != *expected))
         return read_reference(std::move(result));
     return result;
@@ -3401,12 +3433,25 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         if (is_primitive_reference(target))
             throw Diagnostic(expr.type->span, "a primitive reference must be bound to storage").with_code("E0428");
         auto source = value(expr.operands.front(), context);
+        if (target.kind == TypeKind::Any) {
+            if (expr.kind == ExprKind::TypeTest)
+                throw Diagnostic(expr.span, "is requires a type that a value can have, not any").with_code("E0490")
+                    .label("every value converts to any; test for the type it holds");
+            return pack_any(std::move(source), expr.span);
+        }
+        if (source.type.kind == TypeKind::Any) {
+            if (expr.kind == ExprKind::TypeTest) return any_type_test(std::move(source), target, expr.span, context);
+            throw Diagnostic(expr.span, "operation is not defined for any").with_code("E0493")
+                .label("'as' is not defined for any")
+                .help("match the value instead: a 'match.is' arm 'name: " + describe(target) + "'");
+        }
         if (expr.kind == ExprKind::Cast) {
             if (const auto method = cast_method(source.type, target, context); method != no_symbol)
                 return cast_call(method, std::move(source), target, expr.span);
         }
         if (class_reference(source.type) && class_reference(target)) {
             const auto test = expr.kind == ExprKind::TypeTest;
+            if (!test) reject_erasure(source.type, target, expr.span);
             auto result = node(test ? IrOp::ClassIs : IrOp::ClassCast, expr.span, test ? bool_type : target);
             if (test) result.type_arguments.push_back(target);
             result.operands.push_back(std::move(source));
@@ -3435,6 +3480,11 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
 
 IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     const auto origin = std::exchange(expected_origin_, std::nullopt);
+    // A value is packed where an `any` is expected; a conditional or a match
+    // packs each of its results (docs/design/Matching030.md).
+    if (expected && expected->kind == TypeKind::Any && expr.kind != ExprKind::Conditional &&
+        expr.kind != ExprKind::Match)
+        return pack_expression(expr, context, call_argument);
     if (expr.kind == ExprKind::New && origin) new_origin_.emplace(&expr, *origin);
     auto result = expression(expr, context, expected, call_argument);
     if (expected && is_primitive_reference(*expected))
@@ -3456,6 +3506,7 @@ IrNode Lowering::value(const Expr& expr, Context& context, const IrType* expecte
          (result.symbol == no_symbol || symbol(result.symbol).kind != SymbolKind::Variant))) {
         throw Diagnostic(expr.span, "expected a value").with_code("E0422");
     }
+    if (expected) reject_erasure(result.type, *expected, expr.span);
     if (expected && call_argument && !assignable(result.type, *expected)) {
         if (const auto method = cast_method(result.type, *expected, context); method != no_symbol)
             return cast_call(method, std::move(result), *expected, expr.span);
@@ -3939,6 +3990,7 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     if (invocation.op != IrOp::Call && invocation.op != IrOp::VirtualCall && invocation.op != IrOp::CallClosure)
         throw Diagnostic(operand.span, "spawn requires a call of a function, a method, or a function value")
             .with_code("E0603");
+    if (invocation.type.kind == TypeKind::Any) throw any_boundary(operand.span, "the result of a spawned call");
 
     ClosureEnvironment environment{closure_layout(expr.span, lexical_owner(context)), context, {}, {}};
     for (std::size_t i = 0; i < invocation.operands.size(); ++i) {
@@ -5142,6 +5194,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 #include "lowering_calls.inc"
 #include "lowering_matching.inc"
 #include "lowering_optional.inc"
+#include "lowering_any.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

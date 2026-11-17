@@ -1,0 +1,4 @@
+// Edge case 68: a parameter of type any takes no default.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let show = func(v: any = 1) => 1;

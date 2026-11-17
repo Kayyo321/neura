@@ -1,0 +1,4 @@
+// Edge case 64: a class named any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let any = class ( );

@@ -1,4 +1,5 @@
 #include "specialize.hpp"
+#include "any.hpp"
 
 #include "attributes.hpp"
 
@@ -56,6 +57,20 @@ struct Context {
     // found while copying continue the chain that created the instance.
     bool copying = false;
 };
+
+std::string type_text(const IrType& type) {
+    if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1)
+        return type_text(type.arguments.front()) + (type.kind == TypeKind::Array ? "[]" : "[list]");
+    if (type.kind == TypeKind::Tuple) {
+        std::string text = "[";
+        for (std::size_t i = 0; i < type.arguments.size(); ++i) text += (i ? ", " : "") + type_text(type.arguments[i]);
+        return text + "]";
+    }
+    if (type.arguments.empty()) return type.name;
+    std::string text = type.name + "<";
+    for (std::size_t i = 0; i < type.arguments.size(); ++i) text += (i ? ", " : "") + type_text(type.arguments[i]);
+    return text + ">";
+}
 
 bool concrete(const IrType& type) {
     if (type.kind == TypeKind::TypeParameter) {
@@ -585,6 +600,16 @@ private:
         result.type = type(node.type, context, node.span);
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
+        }
+        if (node.op == IrOp::AnyPack && !result.operands.empty() && !any_holdable(result.operands.front().type)) {
+            // What an `any` holds is checked on the specialized program
+            // (docs/design/Matching030.md, E0492).
+            auto error = Diagnostic(node.span, "a value of type " + type_text(result.operands.front().type) +
+                                                   " cannot be held in any")
+                .with_code("E0492").label("packed here in a generic body");
+            if (!context.origin.span.file.empty()) error.label(context.origin.span, "instantiated here");
+            error.help("hold it in a class and pack the reference");
+            throw error;
         }
         if (node.op == IrOp::CallClosure) {
             result.op = IrOp::VirtualCall;

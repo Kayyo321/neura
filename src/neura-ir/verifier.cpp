@@ -1,4 +1,5 @@
 #include "verifier.hpp"
+#include "any.hpp"
 
 #include "aggregate.hpp"
 #include "attributes.hpp"
@@ -34,6 +35,7 @@ std::string_view kind_name(TypeKind kind) {
     case TypeKind::Enum: return "enum";
     case TypeKind::Callable: return "callable";
     case TypeKind::Tuple: return "tuple";
+    case TypeKind::Any: return "any";
     }
     return "<invalid>";
 }
@@ -144,6 +146,29 @@ private:
         // Enclosing TaskScope statements of this body.
         unsigned task_scopes = 0;
     };
+
+    // The any tag tests that select the regions being checked: a constant
+    // local of type any and the tag its AnyTag equals (AnyUnpack).
+    std::vector<std::pair<SymbolId, std::uint32_t>> any_tags_;
+
+    // `AnyTag(load L) == k` or `k == AnyTag(load L)` for a constant local L.
+    std::optional<std::pair<SymbolId, std::uint32_t>> tag_fact(const IrNode& condition) const {
+        if (condition.op != IrOp::Binary || condition.text != "==" || condition.operands.size() != 2) return std::nullopt;
+        for (std::size_t i = 0; i < 2; ++i) {
+            const auto& tag = condition.operands[i];
+            const auto& constant = condition.operands[1 - i];
+            if (tag.op != IrOp::AnyTag || tag.operands.size() != 1 || constant.op != IrOp::Integer) continue;
+            const auto& load = tag.operands.front();
+            if (load.op != IrOp::Load || !load.operands.empty() || !valid(load.symbol) ||
+                symbol(load.symbol).kind != SymbolKind::Local || !symbol(load.symbol).constant)
+                continue;
+            std::uint32_t value = 0;
+            const auto [end, error] = std::from_chars(constant.text.data(), constant.text.data() + constant.text.size(), value);
+            if (error != std::errc{} || end != constant.text.data() + constant.text.size()) continue;
+            return std::pair{load.symbol, value};
+        }
+        return std::nullopt;
+    }
 
     const IrProgram& program_;
     std::vector<VerificationIssue> issues_;
@@ -643,14 +668,18 @@ private:
             }
             check_region(node.body, context);
             break;
-        case IrOp::Branch:
+        case IrOp::Branch: {
             if (expect_operands(node, 1, "branch")) {
                 check_value(node.operands.front(), context);
                 expect_type(node.operands.front(), TypeKind::Bool, "branch condition");
             }
+            const auto selected = node.operands.empty() ? std::nullopt : tag_fact(node.operands.front());
+            if (selected) any_tags_.push_back(*selected);
             check_region(node.body, context);
+            if (selected) any_tags_.pop_back();
             check_region(node.alternative, context);
             break;
+        }
         case IrOp::Loop:
             if (expect_operands(node, 1, "loop")) {
                 check_value(node.operands.front(), context);
@@ -968,6 +997,39 @@ private:
             expect_operands(node, 0, "nil");
             if (!class_reference(node.type)) report(node.span, "nil must have a class reference type");
             break;
+        case IrOp::AnyPack:
+            // A type parameter's value is checked on the specialized program.
+            if (expect_operands(node, 1, "any pack") && !any_holdable(node.operands.front().type) &&
+                node.operands.front().type.kind != TypeKind::TypeParameter)
+                report(node.span, "any pack requires a value that an any can hold, not " +
+                                  describe(node.operands.front().type));
+            if (node.type.kind != TypeKind::Any) report(node.span, "any pack must produce an any");
+            break;
+        case IrOp::AnyTag:
+            if (expect_operands(node, 1, "any tag") && node.operands.front().type.kind != TypeKind::Any)
+                report(node.span, "any tag requires an any");
+            if (node.type != IrType{TypeKind::Integer, "uint32", no_symbol, {}}) report(node.span, "any tag must produce uint32");
+            break;
+        case IrOp::AnyUnpack: {
+            if (!expect_operands(node, 1, "any unpack")) break;
+            const auto tag = any_tag(node.type);
+            if (!tag || (node.type.kind == TypeKind::Object && !class_reference(node.type))) {
+                report(node.span, "any unpack must produce a value that an any can hold");
+                break;
+            }
+            const auto& source = node.operands.front();
+            const bool local = source.op == IrOp::Load && source.operands.empty() && valid(source.symbol) &&
+                               symbol(source.symbol).kind == SymbolKind::Local && symbol(source.symbol).constant &&
+                               source.type.kind == TypeKind::Any;
+            if (!local) {
+                report(node.span, "any unpack must read a constant local of type any");
+                break;
+            }
+            if (std::ranges::find(any_tags_, std::pair{source.symbol, *tag}) == any_tags_.end())
+                report(node.span, "any unpack of " + name(source.symbol) + " as " + describe(node.type) +
+                                  " is not inside a region selected by a test of its tag " + std::to_string(*tag));
+            break;
+        }
         case IrOp::ClassHash:
         case IrOp::ClassText:
         case IrOp::ClassCast:
@@ -1446,12 +1508,16 @@ private:
     void check_select_value(const IrNode& node, Context& context) {
         if (expect_operands(node, 1, "select value"))
             expect_type(node.operands.front(), TypeKind::Bool, "selection condition");
+        const auto selected = node.operands.empty() ? std::nullopt : tag_fact(node.operands.front());
         for (const auto* region : {&node.body, &node.alternative}) {
             if (region->size() != 1) {
                 report(node.span, "each selection arm needs one result expression");
                 continue;
             }
+            const bool fact = selected && region == &node.body;
+            if (fact) any_tags_.push_back(*selected);
             check_value(region->front(), context);
+            if (fact) any_tags_.pop_back();
             require_assignable(region->front().type, node.type, node.span, "selection arm");
         }
     }

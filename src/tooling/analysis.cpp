@@ -58,6 +58,9 @@ std::string type_text(const IrType &type) {
         case TypeKind::Tuple:
             name = "tuple";
             break;
+        case TypeKind::Any:
+            name = "any";
+            break;
         default:
             name = "?";
         }

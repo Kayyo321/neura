@@ -523,6 +523,9 @@ private:
         case IrOp::Reference:
         case IrOp::Receiver:
         case IrOp::ReinterpretFloat:
+        case IrOp::AnyPack:
+        case IrOp::AnyTag:
+        case IrOp::AnyUnpack:
         case IrOp::ShortCircuit:
         case IrOp::ComparisonChain:
         case IrOp::ScopedValue:
@@ -706,7 +709,10 @@ public:
             }
             return typed(node.type, from);
         }
-        case IrOp::ClassCast: {
+        case IrOp::ClassCast:
+        // An `any` holds the reference it packs (docs/design/Matching030.md).
+        case IrOp::AnyPack:
+        case IrOp::AnyUnpack: {
             Roots value;
             for (const auto& child : node.operands) value.join(eval(child));
             return typed(node.type, value);

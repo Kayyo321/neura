@@ -139,10 +139,13 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | --- | --- |
 | [E0490](E0490.md) | pattern that cannot match |
 | [E0491](E0491.md) | unreachable match arm |
+| [E0492](E0492.md) | value cannot be held in any |
+| [E0493](E0493.md) | operation is not defined for any |
 | [E0494](E0494.md) | optional access on a receiver that is never absent |
 | [E0495](E0495.md) | invalid operands of ?? |
 | [E0496](E0496.md) | ? on a value that is not a Result |
 | [E0497](E0497.md) | ? outside a function that returns a Result |
+| [E0498](E0498.md) | any at a boundary that would box it |
 | [E0501](E0501.md) | invalid static member |
 | [E0502](E0502.md) | invalid override |
 | [E0503](E0503.md) | invalid inheritance |
