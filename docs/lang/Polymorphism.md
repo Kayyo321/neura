@@ -164,3 +164,28 @@ let label = func<T: Named>(value: T) -> string => value.name;
 ```
 
 A property requirement is a pair of hidden bodyless functions of the interface, `$get_name` and `$set_name`, marked `property.requirement` ([NeuraIR format](../NirFormat.md#symbol-attributes)). The read is a virtual call that reaches the getter of the receiver's class by the runtime's usual rule. For a field without clauses, lowering generates a hidden *adapter* that reads or stores the field, marked `accessor.of` and `generated`, in each class that implements the interface and has no method of that name; a class that implements no such interface gains no function.
+
+### Virtual accessors
+
+*Status: proposed in [the 0.3.0 records note](../design/Records030.md); implemented.*
+
+`| get.virtual: body;` and `| set.virtual: body;` are [accessor clauses](Types.md#accessors) that also establish a *slot*: the field keeps its storage and every rule of accessors, and outside access through a receiver of the declaring class or a subclass runs the most derived override of the clause. An unmarked clause keeps its static behaviour exactly. The two clauses of one field are independent.
+
+A subclass overrides with `export let.override name: T;` followed by `| get.override: body;`, `| set.override: body;` or both. The declaration names the inherited property, declares no field, takes no initializer and repeats the property's type exactly; a clause it does not replace is inherited. Each `.override` clause needs a slot of that kind in a base, virtual or already overridden, so a further subclass may override again. The words may be separated by spaces or comments; `neura fmt` writes them joined. Errors are [E0575](../diagnostics/E0575.md), and `.virtual` together with `.override`, or in an interface, is [E0574](../diagnostics/E0574.md).
+
+Inside an override clause of property `p`, the bare name `p` and `instance.p` call the accessor of the nearest base statically: a read calls its getter and a store its setter ([E0510](../diagnostics/E0510.md) or [E0515](../diagnostics/E0515.md) when the base has none). They never reach the storage, which stays private to the declaring class, and they never dispatch, so the override below does not call itself. In a setter override, `value` is the incoming value. Everywhere else in the subclass the inherited name dispatches, as an outside access does. A virtual accessor satisfies an [interface property](#interface-properties), and interface dispatch reaches the most derived override.
+
+<!-- example: check -->
+```neura
+let Shape = class (
+    export let label: string = "shape";
+        | get.virtual: label;
+);
+let Circle = class : Shape (
+    export let.override label: string;
+        | get.override: "circle of " + label;
+);
+let describe = func(shape: Shape) -> string => shape.label;
+```
+
+A slot's accessor is the field's hidden method with the attribute `accessor.virtual`; an override is a hidden method of the same name in the subclass, linked to the method it overrides and to the inherited field by `accessor.of`. No field is added to any layout. Since the runtime calls a method only by dispatch, each slot and override also has a hidden *twin* with the same body under a name that only its class declares, which is what an override clause calls for the base's accessor.

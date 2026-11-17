@@ -273,7 +273,8 @@ Expr copy_expression(std::size_t start) {
 bool accessor_clause_form(AccessorClause& clause, Declaration::Kind owner) {
     while (at(".")) {
         advance();
-        if (current().kind != TokenKind::Identifier || (current().text != "virtual" && current().text != "override")) {
+        // `override` is a keyword and `virtual` a contextual word.
+        if (!(current().kind == TokenKind::Identifier && current().text == "virtual") && !at("override")) {
             throw Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
                              "expected 'virtual' or 'override' after '.'").with_code("E0202")
                 .label(current().kind == TokenKind::End ? "expected 'virtual' or 'override' before the end of the file"

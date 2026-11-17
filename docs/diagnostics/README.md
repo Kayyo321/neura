@@ -171,6 +171,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0572](E0572.md) | copy construction of a value that is not a record |
 | [E0573](E0573.md) | invalid interface property |
 | [E0574](E0574.md) | invalid virtual accessor |
+| [E0575](E0575.md) | invalid accessor override |
 
 ## E06xx: Concurrency
 

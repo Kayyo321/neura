@@ -1,0 +1,11 @@
+error[E0575]: invalid accessor override
+ --> $DIR/override-ordinary-field.nra:8:15
+  |
+7 |     export let size: int = 0;
+  |                ---- 'size' declares a field
+8 |         | get.override: size;
+  |               ^^^^^^^^ '.override' needs 'let.override'
+  |
+  = help: override an inherited property with 'export let.override size: T;' followed by its '.override' clauses
+
+For more information about this error, try `neura explain E0575`.

@@ -172,6 +172,73 @@ class PropertyBoundaryTests(unittest.TestCase):
             self.assertEqual(outputs[0], outputs[1])
 
 
+VIRTUAL = '''
+export let Shapes = module (
+    export let Shape = class (
+        export let label: string = "shape";
+            | get.virtual: label;
+    );
+    export let Circle = class : Shape (
+        export let.override label: string;
+            | get.override: "circle of " + label;
+    );
+);
+'''
+
+VIRTUAL_APP = '''
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let shapes = import:{source};
+
+let Ring = class : shapes.Circle (
+    export let.override label: string;
+        | get.override: "ring, " + label;
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {{
+        let all: shapes.Shape[] = [new shapes.Shape(), new shapes.Circle(), new Ring()];
+        for (let shape in all) {{
+            console.print_line(shape.label);
+        }}
+        return program.ExitCode.Ok;
+    }};
+);
+'''
+
+
+class VirtualAccessorTests(unittest.TestCase):
+    def test_overrides_add_no_field_and_cross_the_boundary(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = pathlib.Path(scratch)
+            (directory / 'shapes.nra').write_text(VIRTUAL)
+            result = run('emit-ir', 'shapes.nra', '-o', 'shapes.nir', cwd=directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            listing = run('emit-ir', 'shapes.nir', cwd=directory).stdout.splitlines()
+            classes = {line.split('"')[1]: line.split()[0] for line in listing if ' class "' in line}
+            fields = [line for line in listing if ' field "' in line]
+            # Edge case 89: one field, in Shape; Circle declares none.
+            self.assertEqual(len(fields), 1, fields)
+            self.assertIn('owner=' + classes['Shape'], fields[0])
+            slot = next(line for line in listing if 'function "$get_label"' in line and 'owner=' + classes['Shape'] in line)
+            self.assertIn('@accessor.virtual(true)', slot)
+            override = next(line for line in listing
+                            if 'function "$get_label"' in line and 'owner=' + classes['Circle'] in line)
+            self.assertIn('overrides=' + slot.split()[0], override)
+            self.assertIn('@accessor.of(', override)
+            # Each slot and override has its twin, which only its class declares.
+            self.assertTrue(any('function "$get_label$1"' in line for line in listing))
+            self.assertTrue(any('function "$get_label$2"' in line for line in listing))
+            outputs = []
+            for source, files in (('"shapes.nir".Shapes', []), ('Shapes', ['shapes.nra'])):
+                (directory / 'app.nra').write_text(VIRTUAL_APP.format(source=source))
+                result = run('build', 'app.nra', *files, '-o', 'app.nvr', cwd=directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs.append(run('run', 'app.nvr', cwd=directory).stdout)
+            self.assertEqual(outputs[0], 'shape\ncircle of shape\nring, circle of shape\n')
+            self.assertEqual(outputs[0], outputs[1])
+
+
 if __name__ == '__main__':
     sys.argv = sys.argv[:1]
     unittest.main()

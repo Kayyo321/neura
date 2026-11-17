@@ -1,0 +1,9 @@
+error[E0575]: invalid accessor override
+ --> $DIR/not-exported.nra:7:18
+  |
+7 |     let.override label: string;
+  |                  ^^^^^ an accessor override is exported
+  |
+  = help: write 'export let.override label: T;'
+
+For more information about this error, try `neura explain E0575`.

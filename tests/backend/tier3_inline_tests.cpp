@@ -217,6 +217,41 @@ NEURA_TEST(tier3, a_dispatch_whose_receivers_change_after_compilation_misses_int
     }
 }
 
+NEURA_TEST(tier3, property_dispatch_through_adapters_accessors_and_overrides_is_inlined_like_a_method) {
+    // docs/design/Records030.md, Lowering and artifacts: an interface property
+    // read is a dispatch site of the hidden getter, a generated field adapter
+    // reads one field, and a virtual accessor dispatches to its override, so
+    // tier 3's guarded inlining applies under its existing limits. Every case
+    // matches tier 0, natively and on the tier 3 interpreter, at every step
+    // limit; a nil receiver traps where tier 0 traps.
+    if (!programs_run()) return;
+    const auto image = build_program({backend_dir(environment) / "tier3" / "properties.nra"});
+    const auto reference = run_captured(image, limits_at(0), std::nullopt, {"all", "30"});
+    check_equal(reference.output, std::string{"adapter 930\nmixed 495930\nvirtual 3870\n"}, "tier 0 output");
+    for (const bool interpreted : {false, true}) {
+        for (const char* kind : {"adapter", "mixed", "virtual", "nil", "all"}) {
+            auto options = inline_options();
+            if (interpreted) options.tier3 = nvm::TierOptions::Tier3::Interp;
+            nvm::TierCache cache(image, options);
+            const std::string label = std::string(kind) + (interpreted ? " on the interpreter" : "");
+            compare_with_tier_0(image, cache, label, {kind, "40"});
+            for (std::uint64_t limit = 1; limit <= 600; limit += 37) {
+                compare_with_tier_0(image, cache, label + " with " + std::to_string(limit) + " steps", {kind, "40"},
+                                    [&](nvm::RunLimits& limits) { limits.max_steps = limit; });
+            }
+        }
+    }
+    if (!thresholds_kept()) return;
+    nvm::TierCache cache(image, inline_options());
+    compare_with_tier_0(image, cache, "adapter", {"adapter", "40"});
+    const auto* ir = native_ir(cache, function_named(image, "measure"));
+    check(ir != nullptr, "measure is a native program");
+    if (ir != nullptr) {
+        check(inlines(*ir, function_named(image, "Box.$get_size")), "the generated getter adapter is inlined");
+        check(inlines(*ir, function_named(image, "Box.$set_size")), "the generated setter adapter is inlined");
+    }
+}
+
 NEURA_TEST(tier3, a_closure_call_and_a_single_implementation_are_inlined) {
     if (!programs_run()) return;
     const auto image = inline_image(environment);

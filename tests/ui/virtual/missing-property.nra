@@ -1,0 +1,9 @@
+// No inherited property of that name (edge case 84).
+let Shape = class (
+    export let label: string = "shape";
+        | get.virtual: label;
+);
+let Circle = class : Shape (
+    export let.override missing: string;
+        | get.override: "m";
+);

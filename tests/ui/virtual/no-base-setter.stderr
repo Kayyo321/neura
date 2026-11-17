@@ -1,0 +1,9 @@
+error[E0510]: 'label' has no setter in the base class
+  --> $DIR/no-base-setter.nra:10:13
+   |
+10 |             label = "x";
+   |             ^^^^^ inside an override, 'label' calls the base class's accessor
+   |
+   = help: assign it through a setter of the base class, or override only the getter
+
+For more information about this error, try `neura explain E0510`.

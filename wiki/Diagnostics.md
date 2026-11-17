@@ -174,6 +174,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0572](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0572.md) | copy construction of a value that is not a record |
 | [E0573](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0573.md) | invalid interface property |
 | [E0574](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0574.md) | invalid virtual accessor |
+| [E0575](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0575.md) | invalid accessor override |
 
 ## E06xx: Concurrency
 

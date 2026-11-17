@@ -1,0 +1,5 @@
+// Only 'virtual' and 'override' follow the clause's word (edge case 85).
+let Shape = class (
+    export let label: string = "shape";
+        | get.final: label;
+);

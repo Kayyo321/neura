@@ -1,0 +1,9 @@
+// The base clause has no slot (edge case 80).
+let Shape = class (
+    export let label: string = "shape";
+        | get: label;
+);
+let Circle = class : Shape (
+    export let.override label: string;
+        | get.override: "circle";
+);

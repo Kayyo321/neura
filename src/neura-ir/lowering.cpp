@@ -552,6 +552,41 @@ private:
     void type_requirement_accessors(SymbolId field);
     SymbolId hidden_method(SymbolId cls, const std::string& name) const;
     void check_property_requirements(SymbolId id);
+    // Virtual accessors and accessor overrides.
+    struct AccessorOverride {
+        const Declaration* decl;
+        SymbolId get;
+        SymbolId set;
+    };
+    struct OverrideClause {
+        SymbolId field;
+        SymbolId get;
+        SymbolId set;
+    };
+    std::map<SymbolId, std::vector<AccessorOverride>> accessor_overrides_;
+    std::optional<OverrideClause> override_clause_;
+    static bool accessor_override_syntax(const Declaration& decl);
+    std::size_t class_depth(SymbolId cls) const;
+    void check_dispatch_words(const Declaration& decl) const;
+    SymbolId declare_accessor_override(const Declaration& decl, SymbolId owner);
+    SymbolId own_hidden_method(SymbolId cls, const std::string& name) const;
+    SymbolId nearest_accessor(SymbolId start, const std::string& name, bool setter) const;
+    bool overridable_accessor(SymbolId function) const;
+    SymbolId static_accessor(SymbolId function);
+    void lower_clause_body(SymbolId function, const AccessorClause& clause, SymbolId field, const IrType& field_type);
+    struct PendingTwin {
+        SymbolId twin;
+        const AccessorClause* clause;
+        SymbolId field;
+        IrType field_type;
+        std::optional<OverrideClause> context;
+    };
+    std::vector<PendingTwin> pending_twins_;
+    std::map<SymbolId, OverrideClause> override_contexts_;
+    SymbolId ensure_twin(SymbolId function);
+    void lower_pending_twins();
+    void lower_accessor_overrides(SymbolId id);
+    IrNode override_access(IrNode field, const Expr& expr);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -748,6 +783,8 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
 }
 
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
+    if (accessor_override_syntax(decl) && symbol(owner).kind == SymbolKind::Class)
+        return declare_accessor_override(decl, owner);
     if (decl.record) check_record_syntax(decl);
     if (!decl.accessors.empty()) check_accessor_member(decl, owner);
     if (decl.name == "_" && kind != SymbolKind::Variant) {
@@ -4898,7 +4935,8 @@ void Lowering::lower_declaration(SymbolId id) {
         std::vector<IrNode> initializers;
         std::vector<IrNode> static_initializers;
         for (const auto& member : declaration.members) {
-            if (member.cast_target) continue;
+            if (member.cast_target || (symbol(id).kind == SymbolKind::Class && accessor_override_syntax(member)))
+                continue;
             if (member.name == "_") {
                 if (member.initializer->kind != ExprKind::Import) {
                     auto ctx = context(id);
@@ -4919,6 +4957,7 @@ void Lowering::lower_declaration(SymbolId id) {
             }
         }
         lower_record_members(id);
+        lower_accessor_overrides(id);
         if (!initializers.empty()) program_.bodies.push_back({id, std::move(initializers)});
         if (!static_initializers.empty())
             program_.bodies.push_back({entries_[id].static_scope, std::move(static_initializers)});
@@ -5106,6 +5145,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // Classes written in type positions, including those their own bodies
     // write.
     for (std::size_t i = 0; i < pending_anonymous_.size(); ++i) lower_declaration(pending_anonymous_[i]);
+    lower_pending_twins();
     finish_tags(program_, linked_symbols, warning_mark, [&](SymbolId id) -> std::optional<TagDeclarationSpans> {
         if (id >= entries_.size() || !entries_[id].declaration) return std::nullopt;
         const auto& decl = *entries_[id].declaration;

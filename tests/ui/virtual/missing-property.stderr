@@ -1,0 +1,9 @@
+error[E0575]: invalid accessor override
+ --> $DIR/missing-property.nra:7:25
+  |
+7 |     export let.override missing: string;
+  |                         ^^^^^^^ 'missing' overrides no property of 'Shape'
+  |
+  = help: an accessor override names an exported field of a base class
+
+For more information about this error, try `neura explain E0575`.

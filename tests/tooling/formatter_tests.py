@@ -258,6 +258,28 @@ let c = new with(user) {
 let with = 1;
 ''')
 
+    def test_virtual_accessor_words_are_joined(self):
+        # docs/design/Records030.md, Grammar: the words of a clause may be
+        # separated by spaces or comments; neura fmt writes them joined.
+        source = '''let Shape=class(
+export let label:string="s";
+| get . virtual : label;
+);
+let Named=interface(
+let name:string;
+| get;
+);
+'''
+        self.assertEqual(self.formatted(source), '''let Shape = class (
+    export let label: string = "s";
+        | get.virtual: label;
+);
+let Named = interface (
+    let name: string;
+        | get;
+);
+''')
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

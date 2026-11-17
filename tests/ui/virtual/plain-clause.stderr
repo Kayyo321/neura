@@ -1,0 +1,9 @@
+error[E0575]: invalid accessor override
+ --> $DIR/plain-clause.nra:8:11
+  |
+8 |         | get: "circle";
+  |           ^^^ an accessor override needs a '.override' clause
+  |
+  = help: write '| get.override:'
+
+For more information about this error, try `neura explain E0575`.

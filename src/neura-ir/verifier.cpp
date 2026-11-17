@@ -406,6 +406,14 @@ private:
                 // without clauses, its class's own or inherited, which does not
                 // name it, so outside access to the field stays direct.
                 const auto* made = find_attribute(entry, AttributeId::Generated);
+                // An accessor override serves the inherited field of the
+                // accessor it overrides.
+                if (valid(entry.overrides)) {
+                    if (accessor_of(entry.overrides) != accessor_of(id))
+                        report(entry.span, "accessor override " + name(id) + " serves " + name(field) +
+                                           ", which the accessor it overrides does not serve");
+                    break;
+                }
                 if (made && made->value.items[0].text == "property.adapter") {
                     if (symbol(field).kind != SymbolKind::Field || back || !entry.has_body)
                         report(entry.span, "adapter " + name(id) + " serves " + name(field) +
@@ -452,6 +460,10 @@ private:
                 break;
             case AttributeId::ClassRecord:
                 check_record(id, entry, attribute.value.symbol);
+                break;
+            case AttributeId::AccessorVirtual:
+                if (!find_attribute(entry, AttributeId::AccessorOf) || !entry.has_body)
+                    report(entry.span, "accessor.virtual marks an accessor with a body, not " + name(id));
                 break;
             case AttributeId::PropertyRequirement: {
                 const auto setter = attribute.value.items[1].integer == 1;
