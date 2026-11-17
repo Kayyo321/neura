@@ -1228,7 +1228,7 @@ def legacy_state(kit: Kit, home: Home, top: Path, version: str) -> None:
 
 def suite_migrate(kit: Kit) -> None:
     """The legacy archive, the unmigrated state and --migrate-install (step 6):
-    cases 15, 16 (schema 1), 49 to 56 and 58."""
+    cases 15, 16 (schema 1), 49 to 58."""
     v, t = kit.version, kit.triple
     release = kit.release(kit.work / "release")
     legacy_top = unpack(release / f"neura-{v}-{t}.tar.gz", kit.work / "unpacked/legacy")
@@ -1260,6 +1260,20 @@ def suite_migrate(kit: Kit) -> None:
     result = home.neura("uninstall", "--component", "sdk")
     check(result.returncode == 1 and instruction in result.stderr, f"case 55: uninstall --component: {result.stderr}")
     check(snapshot(home.root) == before, "case 55: nothing changed")
+    # Case 57, and the service note's case 60: service launches and service
+    # start are refused with the instruction, although the legacy archive
+    # holds no neurad; a plain run works and nothing is started.
+    service_instruction = 'finish the 0.3.0 install first: run "neura update --migrate-install"'
+    run_dir = Path(tempfile.mkdtemp(prefix="neura-run-", dir="/tmp"))
+    service_env = {"XDG_RUNTIME_DIR": str(run_dir), "NEURA_GPU": "off"}
+    for arguments in (["run", "--runtime=required", image], ["run", "--runtime=auto", image], ["runtime", "start"],
+                      ["runtime", "enable"]):
+        result = home.neura(*arguments, env=service_env)
+        check(result.returncode == 5 and service_instruction in result.stderr and result.stdout == "",
+              f"case 57: {arguments} is refused with status 5: {result.returncode} {result.stdout}{result.stderr}")
+    check(home.neura("run", "--runtime=off", image, env=service_env).stdout == "Hello, World!\n", "case 57: --runtime=off runs")
+    check(not any(run_dir.iterdir()) and snapshot(home.root) == before, "case 57: nothing was started or changed")
+    shutil.rmtree(run_dir, ignore_errors=True)
     # Case 54: a file of the generation was altered.
     altered = home.root / "versions" / v / "share/neura/stdlib/std/core/version.nra"
     original = altered.read_bytes()

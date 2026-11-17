@@ -124,6 +124,27 @@ bool present(const std::string& bin, std::string_view name) {
 #endif
 
 #ifndef _WIN32
+// Whether the generation of `bin` is one that a 0.2 updater placed and that
+// is not migrated: a schema 1 marker at the root and a core component
+// manifest in the generation (docs/Install.md, "From 0.2"), the lifecycle's
+// own test, read from the files alone. Every service start is refused there.
+bool unmigrated_generation(const std::string& bin) {
+    const auto parent = bin.substr(0, bin.rfind('/'));
+    const auto versions = parent.substr(0, parent.rfind('/'));
+    const auto root = versions.substr(0, versions.rfind('/'));
+    if (versions.size() < 9 || versions.compare(versions.size() - 9, 9, "/versions") != 0 ||
+        !regular_file(parent + "/share/neura/components/core.txt")) {
+        return false;
+    }
+    bool unmigrated = false;
+    if (std::FILE* marker = std::fopen((root + "/neura-install.txt").c_str(), "rb")) {
+        char line[32] = {};
+        unmigrated = std::fgets(line, sizeof line, marker) && std::string_view(line) == "neura-install 1\n";
+        std::fclose(marker);
+    }
+    return unmigrated;
+}
+
 // The component manifests of this generation (docs/design/Lifecycle030.md),
 // read only when a tool is missing, so that a run pays nothing for them.
 // Returns whether the generation has manifests; `declared` is set when one
@@ -186,20 +207,8 @@ int capabilities(const std::string& bin, int argc, char** argv) {
     std::string service = "{\"installed\":false,\"state\":\"missing\"}";
 #ifndef _WIN32
     if (present(bin, tool::service_executable)) {
-        const auto parent = bin.substr(0, bin.rfind('/'));
-        const auto versions = parent.substr(0, parent.rfind('/'));
-        const auto root = versions.substr(0, versions.rfind('/'));
-        bool unmigrated = false;
-        if (versions.size() >= 9 && versions.compare(versions.size() - 9, 9, "/versions") == 0 &&
-            regular_file(parent + "/share/neura/components/core.txt")) {
-            if (std::FILE* marker = std::fopen((root + "/neura-install.txt").c_str(), "rb")) {
-                char line[32] = {};
-                unmigrated = std::fgets(line, sizeof line, marker) && std::string_view(line) == "neura-install 1\n";
-                std::fclose(marker);
-            }
-        }
         service = std::string("{\"installed\":true,\"protocol\":\"1.0\",\"state\":\"") +
-                  (unmigrated ? "unmigrated" : "ready") + "\"}";
+                  (unmigrated_generation(bin) ? "unmigrated" : "ready") + "\"}";
     }
 #endif
     // The version holds only letters, digits, '.' and '-', which JSON needs
@@ -270,6 +279,17 @@ int main(int argc, char** argv) {
 #endif
     const auto where = bin.empty() ? std::string("the directory of neura (its path could not be determined)") : bin;
     if (command->component == tool::Component::Service && !present(bin, tool::service_executable)) {
+#ifndef _WIN32
+        // An installation that a 0.2 updater produced has no neurad (the
+        // legacy archive holds none), and every service start there is
+        // refused with the migration instruction first, as `run --runtime`
+        // refuses (Service030.md case 60, Lifecycle030.md).
+        if (argc > 2 && (std::string_view(argv[2]) == "start" || std::string_view(argv[2]) == "enable") &&
+            unmigrated_generation(bin)) {
+            print(stderr, "neura: runtime: finish the 0.3.0 install first: run \"neura update --migrate-install\"\n");
+            return 5;
+        }
+#endif
         return fail("'neura " + std::string(name) + "' needs the Neura-runtime service component (" +
                     std::string(tool::service_executable) + "), which is not in " + where +
                     ". 'neura run' runs images directly without it");
