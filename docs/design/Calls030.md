@@ -2,7 +2,7 @@
 
 This note fixes the design of the 0.3.0 calls milestone before it is implemented, as [the 0.3.0 baseline](Release030.md) requires: contextual inference of type arguments and lambda parameters, named arguments and constant defaults, explicit extension sets, interpolated strings, and `nameof`. It builds on [grouped parameters and the constructor shorthand](Parameters030.md) and on [storage and construction](Storage030.md), and it is a design note in their sense: rows move to [Core language](../lang/CoreLanguage.md), [Polymorphism](../lang/Polymorphism.md), [Modules](../lang/Modules.md) and [Types](../lang/Types.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation. Later changes to a row are made here, with the reason.
+Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch the same day, steps 2 to 11 of the [order of work](#order-of-work). The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; a row marked "implemented, proposed" is in the compiler and still awaits it. Step 12, the admission events of the class-hook milestone, is not implemented. Later changes to a row are made here, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation).
 
 No feature of this note adds a NeuraIR operation, an NVR record or a runtime primitive. Each lowers to operations NeuraIR 1.10 already has, and a program that uses none of them builds the image it builds today, byte for byte.
 
@@ -24,7 +24,7 @@ Checked against the code of the milestone branch on 2026-11-17.
 
 ## Named arguments
 
-<!-- example: fragment: a 0.3.0 design; the form does not compile yet -->
+<!-- example: check -->
 ```neura
 let schedule = func(job: string, retries: int = 3, urgent: bool = false) -> string {
     return job;
@@ -37,12 +37,12 @@ let third = schedule(urgent: true, job: "backup", retries: 0);
 
 | Rule | Status |
 | --- | --- |
-| An argument written `name: expression` is a named argument. It gives its value to the parameter of that name. Positional arguments come first and fill parameters from the left; every argument after the first named one is named. | proposed |
-| Every parameter receives exactly one value: a positional argument, a named argument, or its default. A parameter without a default must be supplied. | proposed |
-| Labels are resolved at compile time against the declaration the call names: a function, a method, a constructor (`new T(...)`, `super.init(...)`), an extension function, or the call of a `spawn`. The parameter names of an exported declaration are part of its interface: renaming one breaks callers that name it. | proposed |
-| A call through a function value is positional, because a function type carries neither names nor defaults. So is a call of an intrinsic member (`append`, `slice`, `equals` and the others), of a primitive conversion such as `int64(x)`, and of a positional enum constructor. A named function read as a value loses its labels and defaults. | proposed |
-| A call of a function with a variadic parameter is positional. | proposed |
-| The parameter names of an override equal those of the method it overrides, position by position, and the names of an implementation equal those of the interface method. | proposed |
+| An argument written `name: expression` is a named argument. It gives its value to the parameter of that name. Positional arguments come first and fill parameters from the left; every argument after the first named one is named. | implemented, proposed |
+| Every parameter receives exactly one value: a positional argument, a named argument, or its default. A parameter without a default must be supplied. | implemented, proposed |
+| Labels are resolved at compile time against the declaration the call names: a function, a method, a constructor (`new T(...)`, `super.init(...)`), an extension function, or the call of a `spawn`. The parameter names of an exported declaration are part of its interface: renaming one breaks callers that name it. | implemented, proposed |
+| A call through a function value is positional, because a function type carries neither names nor defaults. So is a call of an intrinsic member (`append`, `slice`, `equals` and the others), of a primitive conversion such as `int64(x)`, and of a positional enum constructor. A named function read as a value loses its labels and defaults. | implemented, proposed |
+| A call of a function with a variadic parameter is positional. | implemented, proposed |
+| The parameter names of an override equal those of the method it overrides, position by position, and the names of an implementation equal those of the interface method. | implemented, proposed |
 
 ### Order of evaluation
 
@@ -64,26 +64,26 @@ A positional call is unchanged by this table: its arguments are written in param
 
 | Rule | Status |
 | --- | --- |
-| A default is written `name: Type = constant` and belongs to one parameter. A group of several names takes no default: `func(x, y: int = 1)` is an error. | proposed |
-| A parameter with a default may be followed by one without. A caller reaches the later one by name, or supplies both by position. | proposed |
-| A default is a literal constant of the parameter's type: a Boolean, integer, float or string literal, a numeric literal with unary `-`, `nil` for a class or interface type, or a variant without payload written with its enum (`Light.Red`, `Optional<int>.None`). It contains no call, no `new`, no name of a binding, and no other parameter. | proposed |
-| A default is checked once, at the declaration, against the parameter's type with the rules of a literal initializer. | proposed |
-| These parameters take no default: a variadic parameter and every parameter of a function that has one; a primitive reference parameter (`&T`); a parameter whose type mentions a type parameter; a parameter of a lambda, of a function type, of an enum payload, or of a declaration without a body (a host, kernel, scheduler or callback binding). | proposed |
-| The default is inserted by the compiler in the caller. A caller built against an earlier default keeps it until it is rebuilt. | proposed |
-| The defaults of an override equal those of the method it overrides, parameter by parameter: the same parameters have one, with the same value. The same holds between an interface method and its implementations. A call therefore means the same whatever the static type of its receiver. | proposed |
+| A default is written `name: Type = constant` and belongs to one parameter. A group of several names takes no default: `func(x, y: int = 1)` is an error. | implemented, proposed |
+| A parameter with a default may be followed by one without. A caller reaches the later one by name, or supplies both by position. | implemented, proposed |
+| A default is a literal constant of the parameter's type: a Boolean, integer, float or string literal, a numeric literal with unary `-`, `nil` for a class or interface type, or a variant without payload written with its enum (`Light.Red`, `Optional<int>.None`). It contains no call, no `new`, no name of a binding, and no other parameter. | implemented, proposed |
+| A default is checked once, at the declaration, against the parameter's type with the rules of a literal initializer. | implemented, proposed |
+| These parameters take no default: a variadic parameter and every parameter of a function that has one; a primitive reference parameter (`&T`); a parameter whose type mentions a type parameter; a parameter of a lambda, of a function type, of an enum payload, or of a declaration without a body (a host, kernel, scheduler or callback binding). | implemented, proposed |
+| The default is inserted by the compiler in the caller. A caller built against an earlier default keeps it until it is rebuilt. | implemented, proposed |
+| The defaults of an override equal those of the method it overrides, parameter by parameter: the same parameters have one, with the same value. The same holds between an interface method and its implementations. A call therefore means the same whatever the static type of its receiver. | implemented, proposed |
 
 ### Overloads
 
 | Rule | Status |
 | --- | --- |
-| An alternative applies to a call when the call has no more positional arguments than the alternative has parameters, every label names a parameter the positional arguments did not fill, no parameter is named twice, and every parameter left without a value has a default. This replaces the filter on equal counts. | proposed |
-| Applicable alternatives are ranked as today, argument by argument, where an argument is compared at the parameter it fills in each alternative. A parameter filled by a default takes no part. | proposed |
-| No rule prefers the alternative with fewer defaults. If the ranking has no unique winner the call is ambiguous (`E0409`), and the error names the alternatives and the argument that would decide. | proposed |
-| Two alternatives are equal signatures when their parameter types are equal, as today. Defaults and names do not distinguish them. | proposed |
+| An alternative applies to a call when the call has no more positional arguments than the alternative has parameters, every label names a parameter the positional arguments did not fill, no parameter is named twice, and every parameter left without a value has a default. This replaces the filter on equal counts. | implemented, proposed |
+| Applicable alternatives are ranked as today, argument by argument, where an argument is compared at the parameter it fills in each alternative. A parameter filled by a default takes no part. | implemented, proposed |
+| No rule prefers the alternative with fewer defaults. If the ranking has no unique winner the call is ambiguous (`E0409`), and the error names the alternatives and the argument that would decide. | implemented, proposed |
+| Two alternatives are equal signatures when their parameter types are equal, as today. Defaults and names do not distinguish them. | implemented, proposed |
 
 ## Contextual inference
 
-<!-- example: fragment: a 0.3.0 design; the form does not compile yet -->
+<!-- example: check -->
 ```neura
 let transform = func<T, U>(items: T[list], convert: func(T) -> U) -> U[list] {
     let result: U[list] = new;
@@ -100,29 +100,29 @@ Here `T` is `string` from the first argument, the lambda's parameter is then `st
 
 | Rule | Status |
 | --- | --- |
-| A call of a generic function or method without written type arguments infers them. A call with written type arguments supplies all of them, as today. | proposed |
-| Inference has four steps, in this order and without going back. 1: the receiver and every argument that is not a lambda with untyped parameters give constraints. 2: each such lambda, in written order, takes its parameter types from its parameter's function type, which must by then mention no unsolved type parameter. 3: the result type of each lambda gives constraints. 4: a type parameter still unsolved is taken from the expected type of the call, when there is one. | proposed |
-| A constraint comes from matching a parameter's type against the argument's static type, structure by structure: `T` against `A` gives `T = A`; `T[]` against `A[]` gives `T = A`; a generic instance is matched argument by argument. | proposed |
-| Every constraint on one type parameter must give the same type. Two different types are an error, also when one is assignable to the other: no common base is computed. | proposed |
-| A numeric literal, `nil`, an empty collection literal and a target-typed `new` give no constraint. They are typed from the solution, with today's contextual rules. When literals are the only source for a type parameter, each gives its default type, `int32` or `float64`, and those must agree. | proposed |
-| Inference never chooses `any`, never widens a number, never inserts a constructor, a box, `new func` or `new bound`, and never uses the order of declarations. | proposed |
-| The solution is then checked like written type arguments: bounds, `void`, primitive references, scope-bound types, assignability of each argument, and the specialization limits. | proposed |
-| Overload groups stay free of function type parameters, so inference and overload selection never meet in one call. `new` and enum constructors keep written or target-typed arguments: `new Box<int>(1)`, `Optional<int>.Some(4)`. | proposed |
-| An inferred call lowers to the NeuraIR of the same call with the type arguments written. | proposed |
+| A call of a generic function or method without written type arguments infers them. A call with written type arguments supplies all of them, as today. | implemented, proposed |
+| Inference has four steps, in this order and without going back. 1: the receiver and every argument that is not a lambda with untyped parameters give constraints. 2: each such lambda, in written order, takes its parameter types from its parameter's function type, which must by then mention no unsolved type parameter. 3: the result type of each lambda gives constraints. 4: a type parameter still unsolved is taken from the expected type of the call, when there is one. | implemented, proposed |
+| A constraint comes from matching a parameter's type against the argument's static type, structure by structure: `T` against `A` gives `T = A`; `T[]` against `A[]` gives `T = A`; a generic instance is matched argument by argument. | implemented, proposed |
+| Every constraint on one type parameter must give the same type. Two different types are an error, also when one is assignable to the other: no common base is computed. | implemented, proposed |
+| A numeric literal, `nil`, an empty collection literal and a target-typed `new` give no constraint. They are typed from the solution, with today's contextual rules. When literals are the only source for a type parameter, each gives its default type, `int32` or `float64`, and those must agree. | implemented, proposed |
+| Inference never chooses `any`, never widens a number, never inserts a constructor, a box, `new func` or `new bound`, and never uses the order of declarations. | implemented, proposed |
+| The solution is then checked like written type arguments: bounds, `void`, primitive references, scope-bound types, assignability of each argument, and the specialization limits. | implemented, proposed |
+| Overload groups stay free of function type parameters, so inference and overload selection never meet in one call. `new` and enum constructors keep written or target-typed arguments: `new Box<int>(1)`, `Optional<int>.Some(4)`. | implemented, proposed |
+| An inferred call lowers to the NeuraIR of the same call with the type arguments written. | implemented, proposed |
 
 ### Lambdas with untyped parameters
 
 | Rule | Status |
 | --- | --- |
-| A function expression may leave every parameter untyped: `func(a, b) => a + b`. It needs an expected function type with the same number of parameters, which gives the parameter types. Its result type may be written; otherwise it is the expected one. | proposed |
-| The expected type comes from the parameter the lambda is passed to, the result type of the function it is returned from, the type of the place it is assigned to, or the element type of a typed collection. | proposed |
-| A list that mixes typed and untyped parameters stays `E0214`, and so does an untyped list in a named declaration `let f = func(a) ...;`, which has no expected type. | proposed |
-| With an overload group, an untyped lambda fits an alternative whose parameter is a function type with the same number of parameters. Its body is not used to choose. If more than one alternative remains, the call is ambiguous. | proposed |
-| An untyped lambda is an ordinary lambda once typed. A capturing one that is retained is written `new func(a, b) => ...`, by the rule of [storage and construction](Storage030.md#construction). | proposed |
+| A function expression may leave every parameter untyped: `func(a, b) => a + b`. It needs an expected function type with the same number of parameters, which gives the parameter types. Its result type may be written; otherwise it is the expected one. | implemented, proposed |
+| The expected type comes from the parameter the lambda is passed to, the result type of the function it is returned from, the type of the place it is assigned to, or the element type of a typed collection. | implemented, proposed |
+| A list that mixes typed and untyped parameters stays `E0214`, and so does an untyped list in a named declaration `let f = func(a) ...;`, which has no expected type. | implemented, proposed |
+| With an overload group, an untyped lambda fits an alternative whose parameter is a function type with the same number of parameters. Its body is not used to choose. If more than one alternative remains, the call is ambiguous. | implemented, proposed |
+| An untyped lambda is an ordinary lambda once typed. A capturing one that is retained is written `new func(a, b) => ...`, by the rule of [storage and construction](Storage030.md#construction). | implemented, proposed |
 
 ## Extension sets
 
-<!-- example: fragment: a 0.3.0 design; the form does not compile yet -->
+<!-- example: fragment: two files; the second imports the first as App.Words -->
 ```neura
 // In words.nra, the module App.Words:
 export let.extension shout = func(text: string, marks: int = 1) -> string {
@@ -138,20 +138,20 @@ let same = words.shout("ready", marks: 2);
 
 | Rule | Status |
 | --- | --- |
-| `let.extension name = func(receiver: T, ...) ...;` declares an extension function in a file or a module. It is an ordinary function, callable as one, that may also be called as a member of its first parameter's type. It has at least one parameter. | proposed |
-| `let.extensions alias = import:Module;` is an import that also enables the extension functions the module exports, in the file or module that contains the declaration. `alias` is an ordinary import alias. | proposed |
-| A plain `import` enables nothing. Enabling is not inherited by importers, not exported, and not available in a function body. The declaring file or module has its own extension functions enabled. | proposed |
-| The form does not combine with `let.promote`, a wildcard, `_` as the alias, a C header import, or `const`. | proposed |
-| `value.name(arguments)` is resolved in this order, on the static type of `value`: an accessible member of the type or its bases and an intrinsic member; a function of the primitive companion; then the enabled extension functions named `name` whose first parameter accepts the receiver (an equal type, a base class or interface of it, or a type inference solves). The first step that finds something wins. | proposed |
-| If more than one enabled extension function accepts the receiver, the call is an error, whatever the order of the imports and however the receiver types relate. The qualified call `alias.name(value, ...)` is the way out. Alternatives of one `or func` group are one function, chosen by the overload rules. | proposed |
-| The call is the ordinary call `name(value, arguments)`. The receiver is evaluated first and once, and is admitted as the first argument. A nil receiver is passed, not trapped. | proposed |
-| An extension function has the access of any function of its module: no private member of the receiver's class. It adds no storage, overrides nothing, and satisfies no interface requirement. | proposed |
-| To change a primitive receiver, the first parameter is `&T`, and the receiver obeys the borrow rules of a `&T` argument. | proposed |
-| `value.name` without a call is an error: an extension function is not a bound method. | proposed |
+| `let.extension name = func(receiver: T, ...) ...;` declares an extension function in a file or a module. It is an ordinary function, callable as one, that may also be called as a member of its first parameter's type. It has at least one parameter. | implemented, proposed |
+| `let.extensions alias = import:Module;` is an import that also enables the extension functions the module exports, in the file or module that contains the declaration. `alias` is an ordinary import alias. | implemented, proposed |
+| A plain `import` enables nothing. Enabling is not inherited by importers, not exported, and not available in a function body. The declaring file or module has its own extension functions enabled. | implemented, proposed |
+| The form does not combine with `let.promote`, a wildcard, `_` as the alias, a C header import, or `const`. | implemented, proposed |
+| `value.name(arguments)` is resolved in this order, on the static type of `value`: an accessible member of the type or its bases and an intrinsic member; a function of the primitive companion; then the enabled extension functions named `name` whose first parameter accepts the receiver (an equal type, a base class or interface of it, or a type inference solves). The first step that finds something wins. | implemented, proposed |
+| If more than one enabled extension function accepts the receiver, the call is an error, whatever the order of the imports and however the receiver types relate. The qualified call `alias.name(value, ...)` is the way out. Alternatives of one `or func` group are one function, chosen by the overload rules. | implemented, proposed |
+| The call is the ordinary call `name(value, arguments)`. The receiver is evaluated first and once, and is admitted as the first argument. A nil receiver is passed, not trapped. | implemented, proposed |
+| An extension function has the access of any function of its module: no private member of the receiver's class. It adds no storage, overrides nothing, and satisfies no interface requirement. | implemented, proposed |
+| To change a primitive receiver, the first parameter is `&T`, and the receiver obeys the borrow rules of a `&T` argument. | implemented, proposed |
+| `value.name` without a call is an error: an extension function is not a bound method. | implemented, proposed |
 
 ## Interpolated strings
 
-<!-- example: fragment: a 0.3.0 design; the form does not compile yet -->
+<!-- example: check -->
 ```neura
 let report = func(name: string, paid: float64, items: int) -> string {
     return $"{name}: {items:>4} items, {paid:.2f} paid, {{braces}}";
@@ -160,20 +160,20 @@ let report = func(name: string, paid: float64, items: int) -> string {
 
 | Rule | Status |
 | --- | --- |
-| `$"..."` is an interpolated string. Its type is `string`. Outside holes it has the escapes of a string literal, and `{{` and `}}` are single braces. | proposed |
-| A hole is `{expression}` or `{expression:specification}`. The specification is the text after the colon of a [format field](../lang/StandardLibrary.md#console-formatting): fill, alignment, sign, `#`, `0`, width, precision and presentation. | proposed |
-| A width or precision may be a nested hole, `{value:>{width}}`. It holds an expression of an integer type and no specification. | proposed |
-| In a hole, the first `:` outside parentheses, brackets and braces begins the specification. A conditional expression or a range with a step is written in parentheses. | proposed |
-| The whole literal is on one line: a line end before its closing `"`, in text or in a hole, is the unterminated string literal of today (`E0103`). A hole contains no comment. A `"` inside a hole begins an ordinary nested literal, and an interpolated string may be nested to a depth of eight. | proposed |
-| Every hole expression, nested ones included, is evaluated once, in the order written, and its value saved. Then the text is formatted from the saved values, in order. A saved object is a reference: its `to_string()` runs during formatting, after every hole is evaluated, and sees what earlier formatting did. A value with a built-in `to_string()` that is not a scalar, text or object is turned into text when it is evaluated, as `Console.format` does. | proposed |
-| The specification is checked at compile time against the hole's type, with the rules the library applies at run time. A valid interpolated string therefore cannot fail to format; it can trap only where a hole expression or a `to_string()` traps. | proposed |
-| The values are packed as the arguments of `Console.format` are. Packing runs no class hook; reading the expression and calling `to_string()` have their usual effects. | proposed |
-| An interpolated string without holes is a string literal. | proposed |
-| A format string that is computed at run time stays with `Console.format` and `vformat`. | proposed |
+| `$"..."` is an interpolated string. Its type is `string`. Outside holes it has the escapes of a string literal, and `{{` and `}}` are single braces. | implemented, proposed |
+| A hole is `{expression}` or `{expression:specification}`. The specification is the text after the colon of a [format field](../lang/StandardLibrary.md#console-formatting): fill, alignment, sign, `#`, `0`, width, precision and presentation. | implemented, proposed |
+| A width or precision may be a nested hole, `{value:>{width}}`. It holds an expression of an integer type and no specification. | implemented, proposed |
+| In a hole, the first `:` outside parentheses, brackets and braces begins the specification. A conditional expression or a range with a step is written in parentheses. | implemented, proposed |
+| The whole literal is on one line: a line end before its closing `"`, in text or in a hole, is the unterminated string literal of today (`E0103`). A hole contains no comment. A `"` inside a hole begins an ordinary nested literal, and an interpolated string may be nested to a depth of eight. | implemented, proposed |
+| Every hole expression, nested ones included, is evaluated once, in the order written, and its value saved. Then the text is formatted from the saved values, in order. A saved object is a reference: its `to_string()` runs during formatting, after every hole is evaluated, and sees what earlier formatting did. A value with a built-in `to_string()` that is not a scalar, text or object is turned into text when it is evaluated, as `Console.format` does. | implemented, proposed |
+| The specification is checked at compile time against the hole's type, with the rules the library applies at run time. A valid interpolated string therefore cannot fail to format; it can trap only where a hole expression or a `to_string()` traps. | implemented, proposed |
+| The values are packed as the arguments of `Console.format` are. Packing runs no class hook; reading the expression and calling `to_string()` have their usual effects. | implemented, proposed |
+| An interpolated string without holes is a string literal. | implemented, proposed |
+| A format string that is computed at run time stays with `Console.format` and `vformat`. | implemented, proposed |
 
 ## `nameof`
 
-<!-- example: fragment: a 0.3.0 design; the form does not compile yet -->
+<!-- example: check -->
 ```neura
 let Invoice = class (
     export let total: int64 = 0;
@@ -185,12 +185,12 @@ let kind = nameof(Invoice);          // "Invoice"
 
 | Rule | Status |
 | --- | --- |
-| `nameof(path)` is a string constant: the declared name of the declaration `path` resolves to, without qualification. | proposed |
-| `path` is a name or a dotted path, with type arguments where a generic type is applied. It may name a local, a parameter, a function or overload group, a field, a method, a class, an interface, an enum, a variant, a module, a type parameter, or an import alias (which gives the alias). A member is found on the static type of what precedes it. | proposed |
-| Nothing is evaluated: no receiver, getter, hook, initializer or allocation. A use in `nameof` is not a read for definite assignment or for the unused-binding warning. | proposed |
-| The operand must resolve to one accessible declaration. A built-in type name, a literal, a call, an index or any other expression is an error. | proposed |
-| The string is program data. It is in the image and stays when names and source maps are stripped. It changes when the declaration is renamed, so it is not a stable name for stored data. | proposed |
-| `nameof` is recognized where an expression can start and `(` follows. From 0.3.0 no declaration may be named `nameof`. | proposed |
+| `nameof(path)` is a string constant: the declared name of the declaration `path` resolves to, without qualification. | implemented, proposed |
+| `path` is a name or a dotted path, with type arguments where a generic type is applied. It may name a local, a parameter, a function or overload group, a field, a method, a class, an interface, an enum, a variant, a module, a type parameter, or an import alias (which gives the alias). A member is found on the static type of what precedes it. | implemented, proposed |
+| Nothing is evaluated: no receiver, getter, hook, initializer or allocation. A use in `nameof` is not a read for definite assignment or for the unused-binding warning. | implemented, proposed |
+| The operand must resolve to one accessible declaration. A built-in type name, a literal, a call, an index or any other expression is an error. | implemented, proposed |
+| The string is program data. It is in the image and stays when names and source maps are stripped. It changes when the declaration is renamed, so it is not a stable name for stored data. | implemented, proposed |
+| `nameof` is recognized where an expression can start and `(` follows. From 0.3.0 no declaration may be named `nameof`. | implemented, proposed |
 
 ## Grammar
 
@@ -214,32 +214,32 @@ nameof         := "nameof" "(" expression ")"
 
 | Rule | Status |
 | --- | --- |
-| An argument is named when it starts with an identifier directly followed by `:`. No expression starts that way today, so no existing call changes meaning. After the label the value is a whole expression, including a range with a step and a conditional. | proposed |
-| Labels are read wherever `expression_list(")")` reads call arguments: calls, `new`, `super.init`, and the call of a `spawn`. They are not read in a collection literal or an index. A trailing comma stays an error, as today. | proposed |
-| `=` in a parameter list begins a default only after a type. The default is read as an expression and checked in lowering. | proposed |
-| `extension` and `extensions` are contextual: they are words only directly after `let.`. `Path.extension()` and a binding named `extension` keep their meaning. | proposed |
-| `$` directly before `"` begins an interpolated string. `$` anywhere else stays `E0101`. | proposed |
-| The lexer produces one token for an interpolated string, with its parts as child tokens that carry their own spans: text, hole expression tokens, and the specification. It tracks nesting to find the end of a hole. | proposed |
-| `neura fmt` writes a label as `name: value`, a default as `name: Type = value`, and copies an interpolated string byte for byte. It never adds, removes or reorders labels. | proposed |
-| The language server offers parameter names as completions inside an argument list, marks the active parameter by label in signature help, shows defaults in hovers and signatures, renames a parameter together with its labels at call sites, lists extension functions among a receiver's members with their set, and resolves navigation and rename through `nameof` and through holes. | proposed |
+| An argument is named when it starts with an identifier directly followed by `:`. No expression starts that way today, so no existing call changes meaning. After the label the value is a whole expression, including a range with a step and a conditional. | implemented, proposed |
+| Labels are read wherever `expression_list(")")` reads call arguments: calls, `new`, `super.init`, and the call of a `spawn`. They are not read in a collection literal or an index. A trailing comma stays an error, as today. | implemented, proposed |
+| `=` in a parameter list begins a default only after a type. The default is read as an expression and checked in lowering. | implemented, proposed |
+| `extension` and `extensions` are contextual: they are words only directly after `let.`. `Path.extension()` and a binding named `extension` keep their meaning. | implemented, proposed |
+| `$` directly before `"` begins an interpolated string. `$` anywhere else stays `E0101`. | implemented, proposed |
+| The lexer produces one token for an interpolated string, with its parts as child tokens that carry their own spans: text, hole expression tokens, and the specification. It tracks nesting to find the end of a hole. | implemented, proposed |
+| `neura fmt` writes a label as `name: value`, a default as `name: Type = value`, and copies an interpolated string byte for byte. It never adds, removes or reorders labels. | implemented, proposed |
+| The language server offers parameter names as completions inside an argument list, marks the active parameter by label in signature help, shows defaults in hovers and signatures, renames a parameter together with its labels at call sites, lists extension functions among a receiver's members with their set, and resolves navigation and rename through `nameof` and through holes. | implemented, proposed |
 
 ## Lowering and artifacts
 
 | Rule | Status |
 | --- | --- |
-| The parser records labels in a vector parallel to a call's operands (`Expr`), a default on `Parameter`, and the two import and declaration forms on `Declaration`. `Lowering::arguments` maps arguments to parameters; `select_overload` uses the same mapping per alternative. | proposed |
-| A call whose written order is the parameter order, with defaults only after the last written argument or with no default that has an admission event, lowers to today's `Call`, `VirtualCall`, `ExternalCall`, `BaseInitialize` or `Allocate`, with the defaults as constant operands. | proposed |
-| Any other named call lowers to a `ScopedValue` that initializes one hidden constant local per written argument, in written order, with the admitted value, and then makes the call with loads of those locals in parameter order. | proposed |
-| A hidden local of a `&T` argument holds the bound reference. If the borrow rules of the storage milestone cannot express that, a named `&T` argument out of parameter order is rejected instead (`E0484`); it is never copied. | proposed |
-| A default is recorded in NeuraIR as a symbol attribute on its parameter, `parameter.default`, with the payload `[kind, literal]`: kind 0 Boolean, 1 signed integer, 2 unsigned integer, 3 float (the literal is the encoding of the value at the parameter's width, as an unsigned integer), 4 text, 5 nil (the literal is `false`). A variant default is the attribute `parameter.default.variant`, a symbol reference. The registry gains the symbol kind `on_parameter`. | proposed |
-| An extension function carries the attribute `function.extension`, so a prebuilt `.nir` module exports its set. | proposed |
-| The three attributes take the next free identifiers when the change lands (12, 13 and 14 on the milestone's base). Attributes need no NeuraIR version. The `.nir` of a program without defaults and extensions keeps its bytes. | proposed |
-| The verifier checks that a `parameter.default` literal fits its parameter's type, that no parameter of a variadic function has one, and that `function.extension` is on a function with a parameter. | proposed |
-| An interpolated string lowers to a call of `Std.Io.Internal.Formatting.try_vformat` through a compiler-resolved import, as primitive companions are resolved, with a constant pattern that uses explicit indexes and a `Collection` of packed arguments, and to the trap of `Console.vformat` on an error, which a checked literal never reaches. | proposed |
-| `nameof` lowers to `IrOp::String`. | proposed |
-| Nothing changes in the converter, NVR, NVM, the tiers, the collector or the ABI. | proposed |
-| A call with more than 255 argument words stays correct: tier 2 declines such an exit and the interpreter runs it. Named calls, defaults and holes add tests at 300 arguments, in parameter order and reversed. | proposed |
-| The effect summary of a call counts the defaults and admissions it inserts. The optimizer may not move a later written argument before an earlier one that can trap, nor a default's admission before a written argument. | proposed |
+| The parser records labels in a vector parallel to a call's operands (`Expr`), a default on `Parameter`, and the two import and declaration forms on `Declaration`. `Lowering::arguments` maps arguments to parameters; `select_overload` uses the same mapping per alternative. | implemented, proposed |
+| A call whose written order is the parameter order, with defaults only after the last written argument or with no default that has an admission event, lowers to today's `Call`, `VirtualCall`, `ExternalCall`, `BaseInitialize` or `Allocate`, with the defaults as constant operands. | implemented, proposed |
+| Any other named call lowers to a `ScopedValue` that initializes one hidden constant local per written argument, in written order, with the admitted value, and then makes the call with loads of those locals in parameter order. | implemented, proposed |
+| A hidden local of a `&T` argument holds the bound reference. If the borrow rules of the storage milestone cannot express that, a named `&T` argument out of parameter order is rejected instead (`E0484`); it is never copied. | implemented, proposed |
+| A default is recorded in NeuraIR as a symbol attribute on its parameter, `parameter.default`, with the payload `[kind, literal]`: kind 0 Boolean, 1 signed integer, 2 unsigned integer, 3 float (the literal is the encoding of the value at the parameter's width, as an unsigned integer), 4 text, 5 nil (the literal is `false`). A variant default is the attribute `parameter.default.variant`, a symbol reference. The registry gains the symbol kind `on_parameter`. | implemented, proposed |
+| An extension function carries the attribute `function.extension`, so a prebuilt `.nir` module exports its set. | implemented, proposed |
+| The three attributes take the next free identifiers when the change lands (12, 13 and 14 on the milestone's base). Attributes need no NeuraIR version. The `.nir` of a program without defaults and extensions keeps its bytes. | implemented, proposed |
+| The verifier checks that a `parameter.default` literal fits its parameter's type, that no parameter of a variadic function has one, and that `function.extension` is on a function with a parameter. | implemented, proposed |
+| An interpolated string lowers to a call of `Std.Io.Internal.Formatting.try_vformat` through a compiler-resolved import, as primitive companions are resolved, with a constant pattern that uses explicit indexes and a `Collection` of packed arguments, and to the trap of `Console.vformat` on an error, which a checked literal never reaches. | implemented, proposed |
+| `nameof` lowers to `IrOp::String`. | implemented, proposed |
+| Nothing changes in the converter, NVR, NVM, the tiers, the collector or the ABI. | implemented, proposed |
+| A call with more than 255 argument words stays correct: tier 2 declines such an exit and the interpreter runs it. Named calls, defaults and holes add tests at 300 arguments, in parameter order and reversed. | implemented, proposed |
+| The effect summary of a call counts the defaults and admissions it inserts. The optimizer may not move a later written argument before an earlier one that can trap, nor a default's admission before a written argument. | implemented, proposed |
 
 ## Diagnostics
 
@@ -301,7 +301,7 @@ Named arguments and defaults:
 23. `func(a: &int = 1)`: reject, `E0226`.
 24. `func<T>(a: T = 1)`: reject, `E0226`.
 25. `func(a: int = limit())`, `= other`, `= 1 + 2`, `= new T()`: reject, `E0485`.
-26. `func(a: int = -1)`, `= 0x10`, `(a: float32 = 1.5)`, `(a: string = "")`, `(a: Light = Light.Red)`, `(a: Shape = nil)`: accept.
+26. `func(a: int = -1)`, `= 0x10`, `(a: float32 = 1.5)`, `(a: string = "")`, `(a: Light = Light.Red)`, `(a: Shape = nil)`: accept. (Neura has no hexadecimal literal, so `0x10` is `E0105` wherever it is written; the test uses `16`.)
 27. `func(a: uint8 = 256)` and `(a: int = "x")`: reject, `E0424` and `E0403`.
 28. `func(a: int = 1, b: int)`: accept; `f(b: 2)` and `f(1, 2)` are valid, `f(2)` is `E0407`.
 29. A tag on a parameter with a default, `#Note("x") a: int = 1`: accept.
@@ -442,3 +442,22 @@ For the migration guide of the release:
 | `nameof` is a reserved declaration name, and a built-in type is not a `nameof` operand. | The operator is recognized without name lookup, and a built-in type has no declaration to rename. |
 | Reordered arguments use hidden locals, and an in-order call keeps today's NeuraIR. | Operands of a call are evaluated left to right, and programs that do not reorder keep their images. |
 | Defaults and extension marks are symbol attributes with the next free identifiers, not a NeuraIR revision. | The registry exists for facts of this kind; other milestones are allocating format revisions at the same time. |
+
+## Decisions taken in the implementation
+
+Choices the rows leave open, or where a row could not be implemented as written, made by the implementing agent without the owner. Each takes the stricter behavior where there was a choice.
+
+| Decision | Reason |
+| --- | --- |
+| A named `&T` argument out of parameter order is `E0484`; it is not saved in a hidden local. | The borrow rules of the storage milestone do not yet describe a hidden local that holds a bound reference, which the row allows as the alternative. |
+| `E0225` is reported in lowering, before `E0484`, and suggests the label of the parameter the argument would most likely fill. A call of a variadic function reports `E0484` first. | The fix needs the callee; which arguments are a variadic tail must not depend on labels. |
+| An interpolated string lowers to a call of `Std.Io.Console.vformat`, which is the call of `try_vformat` followed by `Console.vformat`'s trap. | One call, already in the library, with the same result and the same trap. |
+| The `c` presentation is `E0486` in an interpolated string. | The library checks it against the value when it runs, so a literal that uses it could fail to format, which the rows exclude. |
+| A nested width or precision hole whose value is negative, or larger than the library takes, traps as `Console.vformat` does. | The note accepts nested holes (edge case 73); their value is known only when the program runs. This is the one way a checked literal fails to format. |
+| A `"` in a specification is `E0227`. | In a hole a `"` begins a nested literal, and a specification is part of a hole. |
+| `E0409` names both alternatives, and the decisive argument, only for a call with labels, defaults or an untyped lambda. | Other calls keep their diagnostic text. |
+| A typed lambda passed to a generic function gives its type from its syntax and is lowered at its place among the arguments. | The inferred call then lowers to the NeuraIR of the written call, symbol for symbol. An argument written after an untyped lambda, whose own lowering declares a lambda, may still be numbered differently; the tests cover lambdas in every position the rows name. |
+| A lambda with untyped parameters infers its result type only from an expression body. A block body without a written result type is `E0419` when the call waits on its result. | The body is lowered once; a block's result would need its returns before its type is known. |
+| An extension function is called with the static qualifier of its module, as `alias.name(value, ...)` calls it. | It is the ordinary call the rows name. |
+| Argument labels and `nameof` operands are recorded for the editor in `IrProgram::name_uses`, which no later stage reads and a `.nir` file does not hold. | Neither leaves a node in NeuraIR, and navigation and rename need them. |
+

@@ -120,6 +120,8 @@ let decoded = string.decode_bytes(bytes, "UTF-16LE");
 
 ## Console formatting
 
+An [interpolated string](CoreLanguage#interpolated-strings), `$"{name}: {count:>4}"`, uses the same grammar with its holes in place of arguments, and the compiler checks its specifications. A pattern computed at run time stays with `Console.format` and `vformat`.
+
 `Console.format(pattern, args...)` and the static `Console.Formatter.format` return a UTF-8 string. `print` and `println` format to stdout, and `eprint` and `eprintln` format to stderr. The two newline forms append one LF. The module functions have `try_` counterparts that return a `Result` containing the string or `Unit`. For an existing `Std.Core.Variadic.Argument[]`, use `vformat` or `try_vformat`. Use `write`, `print_line`, or `error_line` for already-formatted text that may contain literal braces.
 
 <!-- example: check -->
