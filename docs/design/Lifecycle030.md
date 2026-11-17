@@ -354,7 +354,7 @@ For the migration guide and the pages named in the introduction:
 10. The bridge is qualified from both `v0.2.1-rc.3` and `v0.2.0` on every candidate, since both are in use and only the first is the workflow's "previous release".
 11. Removing the only product component is refused in favour of `neura uninstall`; an installation of `core` alone is not a state.
 12. No diagnostic code is used.
-13. The dispatcher reads the component manifests only when the tool of a command is missing, to name the product that has it, and otherwise forwards on the tool's presence as the earlier milestone did. Reading three manifests on every command would cost more than the launch budget leaves: `neura run` of a hello-world image measured 0.600 ms before this milestone and 0.606 ms after it, with two leases taken (the dispatcher's and the tool's), against a budget of 5% over rc.3's 0.660 ms. The earlier milestone's dispatcher reads no registry file, so step 0 had nothing to replace.
+13. The dispatcher reads the component manifests only when the tool of a command is missing, to name the product that has it, and otherwise forwards on the tool's presence as the earlier milestone did. Reading three manifests on every command would cost more than the launch budget leaves: `neura run` of a hello-world image measured 0.601 ms before this milestone and 0.611 ms after it, with two leases taken (the dispatcher's and the tool's), against a budget of 5% over rc.3's 0.660 ms. The earlier milestone's dispatcher reads no registry file, so step 0 had nothing to replace.
 14. A `.update-lock` that this tool creates holds `neura-lifecycle <pid>`. One found while the installation lock is held is left over from an interrupted command of this tool, not a running 0.2 update, and is removed; any other one is the 0.2 rule's.
 15. The previous generation is the most recently activated other one; a generation's lease file is touched at each activation, and its time orders them. The marker does not repeat it, as the marker rules say.
 16. `--rollback` returns to a previous generation that has manifests, whatever its name, so the generation a 0.2 updater placed from the legacy archive (named by its version alone) is a 0.3 generation for this rule. A generation without manifests is a 0.2 one and is refused.
@@ -374,15 +374,15 @@ Measured on x86-64 Linux, gcc 14, `NEURA_PORTABLE_RELEASE`, under a load average
 
 | Launch | Before (the earlier milestone, schema 1 install) | After (schema 2 install, leases) |
 | --- | ---: | ---: |
-| `neura run hello-world.nvr -- a b` | 0.600 ms | 0.606 ms (+1.0%) |
-| `neura-run hello-world.nvr -- a b` | 0.530 ms | 0.535 ms (+1.0%) |
-| `neura --version` | 0.080 ms | 0.080 ms |
+| `neura run hello-world.nvr -- a b` | 0.601 ms | 0.611 ms (+1.6%) |
+| `neura-run hello-world.nvr -- a b` | 0.532 ms | 0.540 ms (+1.5%) |
+| `neura --version` | 0.081 ms | 0.083 ms |
 
 | Archive, x86-64 Linux | Bytes | Against rc.3 (10,008,390) |
 | --- | ---: | ---: |
-| `neura-sdk-…tar.gz` | 11,662,536 | +16.5% |
-| `neura-…tar.gz` (legacy) | 11,662,687 | +16.5% |
-| `neura-runtime-…tar.gz` | 4,024,371 | −60% |
+| `neura-sdk-…tar.gz` | 11,663,386 | +16.5% |
+| `neura-…tar.gz` (legacy) | 11,663,456 | +16.5% |
+| `neura-runtime-…tar.gz` | 4,026,482 | −60% |
 
 `packaging/qualify.sh` on these archives, with the published `v0.2.1-rc.3` and `v0.2.0` archives as the previous release and the bridge, passed its 14 checks. The archives were built with the version line `0.2.1`, since `VERSION` holds 0.2.1 until the release step sets 0.3.0; the bridge needs only a version newer than the 0.2 client's. The aarch64 Linux and macOS archives are built only by the release workflow and were not measured here, and the edge cases ran on Linux only.
 
