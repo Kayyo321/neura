@@ -64,7 +64,7 @@ Arrays, primitive-reference storage and non-escaping closure environments that b
 | --- | --- |
 | The changes are NVR 1.7: multi-word results, aggregate element types and their component operations, region allocation and release, and the move of an array to the caller's region. The writer emits 1.7 only for an image that uses one of them, so an image that uses none keeps its bytes. | proposed |
 | An image of NVR 1.6 or earlier runs as it does in rc.3, with the accounting of rc.3. | proposed |
-| Tier 2 and tier 3 first decline a block that uses a new operation; it runs at tier 1. Native lowering follows in its own change, and the performance gate decides when it is required. | proposed |
+| Tier 2 and tier 3 first decline a block that uses a new operation; it runs at tier 1. Tiers 2 and 3 run an operation themselves before the converter emits it on common paths: multi-word calls and returns and aggregate elements before payload enums are inlined, and region operations before arrays move into regions. Amended 2026-11-16: inlining `Optional` and `Result` makes most calls multi-word, and regions enter most functions, so a decline there would hold the hot paths at tier 1. | proposed |
 | The decompiler and assembler read and write every new form. A region entry and a flattened aggregate are shown with their source names when the image carries names. | proposed |
 
 ## Order of work
@@ -77,10 +77,15 @@ Each step is one pull request.
 | 2 | Construction with `new`, `E0450`, and the migration of the repository's sources | no |
 | 3 | M2 step 5: storage, owner and transfer facts and the verifier rules that check them | no |
 | 4 | NVR 1.7 and the runtime: multi-word results, aggregate elements, region entries and release, stack accounting; assembler tests only | no |
-| 5 | Inline tuples and payload enums in the converter; `E0448` enforced; `E0449`; the recursive enums migrated | yes |
-| 6 | Arrays in regions, with the escape checks | yes |
-| 7 | Primitive references as checked borrows, and closures in regions | yes |
-| 8 | Native lowering of the new operations in tier 3, and the performance gate | yes |
+| 5 | Inline tuples in the converter; `E0449` | yes |
+| 6 | Tiers 2 and 3 run multi-word calls and returns and aggregate elements | no |
+| 7 | Inline payload enums; `E0448` enforced; the recursive enums migrated | yes |
+| 8 | Tiers 2 and 3 run region operations; native executables carry the stack limit | no |
+| 9 | Arrays in regions, with the escape checks | yes |
+| 10 | Primitive references as checked borrows, and closures in regions | yes |
+| 11 | The performance gate over the finished milestone | no |
+
+Amended 2026-11-16: steps 6 and 8 were part of the last step. They now come before the steps that make their operations common, for the reason given in the row on declining. Step 5 goes first because tuples are rare on hot paths; its gate measures that.
 
 ## Gate
 
