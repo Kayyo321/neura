@@ -66,6 +66,32 @@ Reuse reuse(const Envelope& envelope, const std::vector<std::string>& worker_env
 // `neurad --foreground --root ROOT [--started-by=client|command]`.
 int supervisor_main(const std::vector<std::string>& arguments, const fs::path& self);
 
+// --- Connecting ------------------------------------------------------------------------
+
+// Why the service did not run a launch or answer a command, before anything
+// was committed.
+struct NotRun {
+    std::string message;    // after `neura: runtime: `
+    bool fallback = false;  // whether `auto` may run directly
+    std::string reason;     // for the report
+};
+
+// A greeted connection to a supervisor.
+struct Session {
+    UniqueFd fd;
+    Message welcome;
+    std::uint64_t sequence = 0;
+};
+
+enum class StartMode { No, OnDemand, Resident };
+
+// Connects to the supervisor of `generation` of this installation and
+// greets it: the peer is this user, the supervisor serves this
+// installation. With a start mode and no supervisor answering, starts one
+// under the start lock and waits up to 2 seconds. Throws NotRun.
+Session connect_service(const Installation& installation, std::string_view generation, Purpose purpose,
+                        StartMode start);
+
 // --- The client ---------------------------------------------------------------------
 
 // `neura run --runtime=auto|required`, after the options are read.

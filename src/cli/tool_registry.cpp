@@ -14,7 +14,7 @@ namespace {
 
 
 constexpr std::array<std::string_view, 3> compiler_words{"build", "check", "emit-ir"};
-constexpr std::array<std::string_view, 1> run_words{"run"};
+constexpr std::array<std::string_view, 2> run_words{"run", "runtime"};
 constexpr std::array<std::string_view, 1> test_words{"test"};
 constexpr std::array<std::string_view, 2> inspect_words{"inspect", "inspect-image"};
 constexpr std::array<std::string_view, 1> doc_words{"docs"};
@@ -147,6 +147,11 @@ const char* usage_text() {
            "[--jit=off|on|auto] [--tier-stats] [capabilities] "
            "[--record <file> | --replay <file>] [--each <lists>] [--gpu=auto|always|off] [--no-gpu] "
            "[--require-gpu] [--gpu-software] [--gpu-verify] <file.nvr> [-- args...]\n"
+           "       neura run --runtime=off|auto|required [--detach --stdout=<file> --stderr=<file> [--stdin=<file>]]\n"
+           "                 [--runtime-report=<file>] [run options] <file.nvr> [-- args...]\n"
+           "       neura runtime start | status [--json] | ps [--json] [--all] | inspect <id> [--json]\n"
+           "                 | stop <id> [--grace=<seconds>] | shutdown [--terminate] [--timeout=<seconds>]\n"
+           "                 | enable | disable | cache clear\n"
            "       neura test [-I source-root] [--no-optimize] [--max-steps N] [--max-frames N]\n"
            "                  [--list --format=json] [--filter <exact-id>] [--reporter=json]\n"
            "                  [--workspace-root <directory>]\n"

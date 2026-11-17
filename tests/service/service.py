@@ -820,6 +820,17 @@ def assigned_workers(work: Work) -> list[int]:
     return found
 
 
+def kill_supervisors(work: Work, foreground_only: bool = False) -> None:
+    """Kills this suite's supervisors (and, unless foreground_only, its workers) with SIGKILL."""
+    for pid in supervisors(work):
+        try:
+            if foreground_only and b"--foreground" not in Path(f"/proc/{pid}/cmdline").read_bytes():
+                continue
+            os.kill(pid, signal.SIGKILL)
+        except (OSError, ProcessLookupError):
+            pass
+
+
 def wait_until(condition, timeout: float = 10) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -867,8 +878,7 @@ def run_suite(work: Work) -> None:
           "the service cannot start: auto runs directly")
     status, out, err = neura_run(["--runtime=required", hello], neura=broken / "neura")
     check(status == 5 and out == b"", "the service cannot start: required is status 5")
-    for pid in supervisors(work):
-        os.kill(pid, signal.SIGKILL)
+    kill_supervisors(work)
 
     # Case 8: two clients start the first launch at once.
     processes = [subprocess.Popen([str(work.neura), "run", "--runtime=required", hello], stdout=subprocess.PIPE,
@@ -1021,8 +1031,7 @@ def run_suite(work: Work) -> None:
 
     # Case 30: a soft limit above the supervisor's hard limit.
     import resource
-    for pid in supervisors(work):
-        os.kill(pid, signal.SIGKILL)
+    kill_supervisors(work)
     wait_until(lambda: not supervisors(work))
     service = pc.Service(work.bin, work.env)
     service.start(preexec_fn=lambda: resource.setrlimit(resource.RLIMIT_NOFILE, (256, 256)))
@@ -1043,8 +1052,7 @@ def run_suite(work: Work) -> None:
           f"case 29: a caller's LD_LIBRARY_PATH: the path is fresh ({status}, {out!r}, {path_taken()})")
 
     # Case 11: a supervisor of another build of the same generation.
-    for pid in supervisors(work):
-        os.kill(pid, signal.SIGKILL)
+    kill_supervisors(work)
     wait_until(lambda: not supervisors(work))
     service = pc.Service(work.bin, work.env)
     service.start(extra_env={"NEURA_TEST_SERVICE_TIMERS": "other-build=1"})
@@ -1069,13 +1077,240 @@ def run_suite(work: Work) -> None:
     process = subprocess.Popen([str(work.neura), "run", "--runtime=required", echo], stdin=subprocess.PIPE,
                                stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
     wait_until(lambda: assigned_workers(work))
-    for pid in supervisors(work):
-        if b"--foreground" in Path(f"/proc/{pid}/cmdline").read_bytes():
-            os.kill(pid, signal.SIGKILL)
+    kill_supervisors(work, foreground_only=True)
     time.sleep(0.5)
     out, err = process.communicate(b"", timeout=30)
     check(process.returncode == 6 and b"is unknown; it was not run again" in err and out == b"",
           f"({process.returncode}, {out!r}, {err!r}) case 19: the supervisor gone after the commit: status 6, not run again")
+
+
+# --------------------------------------------------------------------------
+# Step 8: the `neura runtime` commands.
+
+def fake_install(work: Work, root: Path, generations: list[str], current: str, unmigrated: bool = False) -> Path:
+    """An archive install of this build: <root>/versions/<g>/bin, current, a schema 1 marker."""
+    for generation in generations:
+        bin_dir = root / "versions" / generation / "bin"
+        bin_dir.mkdir(parents=True)
+        for name in ("neura", "neura-run", "neurad"):
+            shutil.copy2(work.bin / name, bin_dir / name)
+        shutil.copytree(work.bin / "lib", bin_dir / "lib")
+        if unmigrated:
+            components = root / "versions" / generation / "share/neura/components"
+            components.mkdir(parents=True)
+            (components / "core.txt").write_text("neura-component 1\nname core\n")
+    os.symlink(f"versions/{current}", root / "current")
+    (root / "neura-install.txt").write_text("neura-install 1\nmethod archive\nlink " + str(root / "link/neura") +
+                                            "\n" + "".join(f"version {g}\n" for g in generations))
+    return root / "versions" / current / "bin" / "neura"
+
+
+def runtime(work: Work, neura: Path, *arguments: str, env: dict | None = None, timeout: float = 120):
+    result = subprocess.run([str(neura), "runtime", *arguments], capture_output=True, env=env or work.env,
+                            cwd=work.root, timeout=timeout)
+    return result.returncode, result.stdout, result.stderr
+
+
+def control_suite(work: Work) -> None:
+    hello = str(work.image("hello", path=HELLO))
+    echo = program(work, "echo")
+    exit_status = program(work, "exit-status")
+    neura = work.neura
+
+    def neura_run(arguments, neura_path=None, env=None, stdin=b""):
+        result = subprocess.run([str(neura_path or neura), "run", *arguments], input=stdin, capture_output=True,
+                                env=env or work.env, cwd=work.root, timeout=60)
+        return result.returncode, result.stdout, result.stderr
+
+    # Case 52: status, ps, inspect and doctor with nothing running.
+    before = (work.files_under(work.run_dir), work.files_under(work.state), work.files_under(work.home))
+    status, out, _ = runtime(work, neura, "status")
+    check(status == 0 and b"generation dev: not running" in out, "case 52: status with nothing running")
+    status, out, _ = runtime(work, neura, "status", "--json")
+    data = json.loads(out)
+    check(status == 0 and data["schema"] == 1 and data["installed"] and data["supervisors"][0]["running"] is False,
+          "case 52: status --json with nothing running")
+    check(runtime(work, neura, "ps")[0] == 0 and runtime(work, neura, "ps", "--all", "--json")[0] == 0,
+          "case 52: ps with nothing running")
+    status, _, err = runtime(work, neura, "inspect", "dev.0123abcd.1")
+    check(status == 1 and b"is not an application of this installation" in err, "case 52: inspect with nothing running")
+    subprocess.run([str(neura), "doctor"], capture_output=True, env=work.env, cwd=work.root)
+    check((work.files_under(work.run_dir), work.files_under(work.state), work.files_under(work.home)) == before
+          and not supervisors(work), "case 52: no process, socket or file appears")
+
+    # Usage errors and IDs of another installation.
+    status, _, err = runtime(work, neura, "bogus")
+    check(status == 1 and b"unknown runtime command" in err, "an unknown runtime command is a usage error")
+    for bad in ("not-an-id", "other.deadbeef.1", "dev.DEADBEEF.1"):
+        status, _, err = runtime(work, neura, "inspect", bad)
+        check(status == 1 and err == f"neura: runtime: {bad} is not an application of this installation\n".encode(),
+              f"inspect {bad}: not an application of this installation")
+        status, _, err = runtime(work, neura, "stop", bad)
+        check(status == 1 and b"is not an application of this installation" in err, f"stop {bad}: status 1")
+
+    # start keeps a supervisor that does not exit when idle.
+    env = dict(work.env, NEURA_TEST_SERVICE_TIMERS="idle=300")
+    status, out, _ = runtime(work, neura, "start", env=env)
+    check(status == 0 and b"is running" in out, "neura runtime start starts the supervisor and waits for it")
+    time.sleep(1.0)
+    status, out, _ = runtime(work, neura, "status", "--json")
+    data = json.loads(out)["supervisors"][0]
+    check(data["running"] and data["state"] == "accepting" and data["readyWorkers"] == 1,
+          "a supervisor started by neura runtime start stays when idle, with one ready worker")
+    check(runtime(work, neura, "start")[0] == 0, "start of a running service is status 0")
+
+    # Cases 46 and 47: stop of an application that ended, and of an expired ID.
+    status, _, _ = neura_run(["--runtime=required", exit_status, "--", "3"])
+    status, out, _ = runtime(work, neura, "ps", "--all", "--json")
+    ended = [a for a in json.loads(out)["applications"] if a["state"] == "exited"]
+    check(len(ended) == 1 and ended[0]["status"] == 3, "ps --all lists the terminal record")
+    check(runtime(work, neura, "ps", "--json")[1] == b'{"applications":[],"schema":1}\n', "ps lists live applications only")
+    application = ended[0]["id"]
+    status, out, _ = runtime(work, neura, "stop", application)
+    check((status, out) == (0, f"{application}: exited\n".encode()), "case 46: stop of an ended application prints its state")
+    status, out, _ = runtime(work, neura, "inspect", application, "--json")
+    record = json.loads(out)
+    check(status == 0 and record["state"] == "exited" and record["status"] == 3 and record["arguments"] == 1,
+          "inspect --json gives the record")
+    status, out, _ = runtime(work, neura, "inspect", application)
+    check(status == 0 and b"state: exited" in out and b"status: 3" in out, "inspect prints the record")
+    # The record is removed: the number was issued, so the ID is expired.
+    for path in work.state.rglob(f"records/{application}"):
+        path.unlink()
+    service = pc.Service(work.bin, work.env)
+    kill_supervisors(work)
+    wait_until(lambda: not supervisors(work))
+    status, out, _ = runtime(work, neura, "stop", application)
+    check((status, out) == (1, f"{application}: expired\n".encode()), "case 47: stop of an expired ID is status 1")
+    status, out, _ = runtime(work, neura, "inspect", application)
+    check(status == 1 and out == f"{application}: expired\n".encode() and not supervisors(work),
+          "case 51: inspect of a gone supervisor's pruned record: expired, nothing started")
+
+    # Case 40: the supervisor killed while three applications run.
+    processes = [subprocess.Popen([str(neura), "run", "--runtime=required", echo], stdin=subprocess.PIPE,
+                                  stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+                 for _ in range(3)]
+    check(wait_until(lambda: len(assigned_workers(work)) == 3), "case 40: three applications run")
+    kill_supervisors(work, foreground_only=True)
+    check(wait_until(lambda: not assigned_workers(work)), "case 40: all three workers end with their supervisor")
+    results = [process.communicate(timeout=30) + (process.returncode,) for process in processes]
+    check(all(r[2] == 6 and b"is unknown; it was not run again" in r[1] and r[0] == b"" for r in results),
+          "case 40: their foreground clients exit 6 and nothing is replayed")
+    status, out, _ = runtime(work, neura, "ps", "--all", "--json")
+    states = sorted(a["state"] for a in json.loads(out)["applications"])
+    check(states.count("unknown") == 3 and not supervisors(work),
+          f"case 40: ps --all shows them unknown and starts nothing ({states})")
+
+    # Case 48: shutdown with a detached application that never ends.
+    fifo = work.root / "never.fifo"
+    os.mkfifo(fifo)
+    holder = os.open(fifo, os.O_RDWR)
+    status, out, _ = neura_run(["--runtime=required", "--detach", f"--stdout={work.root / 'n.out'}",
+                                f"--stderr={work.root / 'n.err'}", f"--stdin={fifo}", echo])
+    detached = out.decode().strip()
+    status, out, err = runtime(work, neura, "shutdown", "--timeout=1")
+    check(status == 1 and detached.encode() in out and b"still running" in err,
+          "case 48: shutdown times out with status 1 and lists the application")
+    status, out, _ = runtime(work, neura, "ps", "--json")
+    check(any(a["id"] == detached for a in json.loads(out)["applications"]), "case 48: the application runs on")
+    status, out, err = neura_run(["--runtime=required", hello])
+    check(status == 5 and b"(draining)" in err, "case 48: later launches get draining")
+    status, out, err = neura_run(["--runtime=auto", hello])
+    check(status == 0 and out == b"Hello, World!\n" and b"running directly:" in err and b"draining" in err,
+          "case 49: the draining supervisor refuses; auto runs directly")
+    status, out, _ = runtime(work, neura, "stop", detached, "--grace=1")
+    check((status, out) == (0, f"{detached}: stopped\n".encode()), "stop ends a detached application: stopped")
+    os.close(holder)
+    check(wait_until(lambda: not supervisors(work)), "case 49: the draining supervisor exits when it is empty")
+    status, out, err = neura_run(["--runtime=auto", f"--runtime-report={work.root / 'r.json'}", hello])
+    check(status == 0 and err == b"" and json.loads((work.root / "r.json").read_text())["path"].startswith("service"),
+          "case 49: after it exits, the next auto launch starts a new one")
+
+    # shutdown --terminate stops what runs; cache clear.
+    process = subprocess.Popen([str(neura), "run", "--runtime=required", echo], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+    wait_until(lambda: assigned_workers(work))
+    status, out, _ = runtime(work, neura, "cache", "clear")
+    check(status == 0 and b"cache bytes in use" in out and not out.startswith(b"generation dev: 0 "),
+          "cache clear keeps the image of a running application")
+    status, out, _ = runtime(work, neura, "shutdown", "--terminate", "--timeout=20")
+    process.wait(timeout=30)
+    check(status == 0 and process.returncode == 128 + signal.SIGTERM and not supervisors(work),
+          "shutdown --terminate stops the application and the supervisor exits")
+    process.communicate()
+
+    # The idle exit of a supervisor started on demand.
+    env = dict(work.env, NEURA_TEST_SERVICE_TIMERS="idle=400")
+    neura_run(["--runtime=required", hello], env=env)
+    check(supervisors(work) and wait_until(lambda: not supervisors(work), 10),
+          "a supervisor started on demand exits when idle")
+
+    # Case 55: two installations; case 56: a root through a symbolic link,
+    # with a space and a non-ASCII letter.
+    other = copy_build(work, "second build")
+    status, _, _ = neura_run(["--runtime=required", exit_status, "--", "1"], neura_path=other / "neura")
+    status, _, _ = neura_run(["--runtime=required", exit_status, "--", "2"])
+    first_ps = json.loads(runtime(work, neura, "ps", "--all", "--json")[1])["applications"]
+    second_ps = json.loads(runtime(work, other / "neura", "ps", "--all", "--json")[1])["applications"]
+    sockets = sorted(str(p.relative_to(work.run_dir)) for p in work.run_dir.rglob("s"))
+    second_ids = {a["id"] for a in second_ps}
+    check(len(sockets) == 2 and any(a.get("status") == 2 for a in first_ps)
+          and not second_ids & {a["id"] for a in first_ps} and [a["status"] for a in second_ps] == [1],
+          f"case 55: two installations, two sockets, separate ps ({sockets})")
+    odd = work.root / "a b é"
+    odd.mkdir()
+    real = copy_build(work, "real build")
+    target = odd / "build"
+    os.rename(real, target)
+    link = work.root / "link"
+    os.symlink(target, link)
+    for via in (link / "neura", target / "neura"):
+        status, out, _ = neura_run(["--runtime=required", hello], neura_path=via)
+        check(status == 0 and out == b"Hello, World!\n", f"case 56: launch through {via.parent.name}")
+    ids = {p.parent.parent.name for p in work.state.rglob("records") if "dev" in str(p)}
+    check(len(ids) == 3, f"case 56: one installation ID from the real path ({len(ids)} with the other two)")
+    runtime(work, other / "neura", "shutdown", "--terminate", "--timeout=10")
+    runtime(work, link / "neura", "shutdown", "--terminate", "--timeout=10")
+    runtime(work, neura, "shutdown", "--terminate", "--timeout=10")
+
+    # Case 50: an update activates another generation while an application runs.
+    root = work.root / "install"
+    old_neura = fake_install(work, root, ["0.3.0", "0.3.1"], "0.3.0")
+    new_neura = root / "versions/0.3.1/bin/neura"
+    process = subprocess.Popen([str(old_neura), "run", "--runtime=required", echo], stdin=subprocess.PIPE,
+                               stdout=subprocess.PIPE, stderr=subprocess.PIPE, env=work.env, cwd=work.root)
+    wait_until(lambda: assigned_workers(work))
+    os.unlink(root / "current")
+    os.symlink("versions/0.3.1", root / "current")
+    status, out, _ = runtime(work, old_neura, "status", "--json")
+    # The old supervisor notices at its next Prepare; a launch of the old
+    # generation retires it.
+    neura_run(["--runtime=required", hello], neura_path=old_neura)
+    old_status = [s for s in json.loads(runtime(work, new_neura, "status", "--json")[1])["supervisors"]
+                  if s["generation"] == "0.3.0"]
+    check(old_status and old_status[0]["running"] and old_status[0]["state"] == "retiring"
+          and old_status[0]["readyWorkers"] == 0, "case 50: the old supervisor retires and drops its ready worker")
+    listed = json.loads(runtime(work, new_neura, "ps", "--json")[1])["applications"]
+    check(len(listed) == 1 and listed[0]["id"].startswith("0.3.0."), "case 50: ps from the new generation lists it")
+    status, out, _ = runtime(work, new_neura, "stop", listed[0]["id"], "--grace=2")
+    check(status == 0 and out.endswith(b": stopped\n"), "case 50: stop from the new generation reaches it")
+    process.communicate(timeout=30)
+    check(wait_until(lambda: not [p for p in supervisors(work) if b"0.3.0" in Path(f"/proc/{p}/cmdline").read_bytes()]),
+          "case 50: the retired supervisor exits when it is empty")
+
+    # Case 63: a release candidate's generation under a TMPDIR of 49 bytes.
+    root = work.root / "rc"
+    rc_neura = fake_install(work, root, ["0.3.0-rc.1"], "0.3.0-rc.1")
+    tmp = work.root / ("t" * (49 - len(str(work.root)) - 1))
+    tmp.mkdir()
+    check(len(str(tmp)) == 49, "case 63: the TMPDIR is 49 bytes")
+    env = dict(work.env, TMPDIR=str(tmp))
+    env.pop("XDG_RUNTIME_DIR")
+    status, out, _ = neura_run(["--runtime=required", hello], neura_path=rc_neura, env=env)
+    sockets = [p for p in tmp.rglob("s")]
+    check(status == 0 and out == b"Hello, World!\n" and len(sockets) == 1 and len(str(sockets[0])) < 104,
+          f"case 63: the socket path is under 104 bytes ({len(str(sockets[0])) if sockets else 0}) and the service starts")
+    runtime(work, rc_neura, "shutdown", "--terminate", "--timeout=10", env=env)
 
 
 def parity_suite(work: Work) -> None:
@@ -1116,6 +1351,7 @@ SUITES = {
     "protocol": protocol_suite,
     "run": run_suite,
     "parity": parity_suite,
+    "control": control_suite,
 }
 
 
