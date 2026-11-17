@@ -428,6 +428,17 @@ private:
                                std::vector<IrNode>& declarations, Context& context, SymbolId owner);
     CoverPattern element_pattern(const PatternSyntax& pattern, IrNode projection, std::vector<PatternStep>& steps,
                                  std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    struct IsCover {
+        enum class Kind { Wildcard, Nil, Type };
+        Kind kind = Kind::Wildcard;
+        IrType type{};
+    };
+    void is_subject(const IrNode& subject) const;
+    bool scalar_subject(const IrType& type) const;
+    IsCover is_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
+                       std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    bool is_covered(const IsCover& earlier, const IsCover& later, const IrType& subject) const;
+    void is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered) const;
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
     IrNode do_loop(const Statement& stmt, Context& context);
@@ -4541,7 +4552,7 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
 
 IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produces_value,
                              const IrType* expected, bool call_argument) {
-    if (std::ranges::any_of(stmt.arms, &MatchArm::general))
+    if (stmt.match_is || std::ranges::any_of(stmt.arms, &MatchArm::general))
         return general_match(stmt, context, produces_value, expected, call_argument);
     auto subject = value(stmt.expressions.front(), context);
     const auto enum_type = subject.type;

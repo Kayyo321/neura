@@ -1,0 +1,7 @@
+error[E0411]: match.is requires at least one arm
+  --> $DIR/is-no-arm.nra:15:5
+   |
+15 |     match.is (value) { }
+   |     ^^^^^^^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0411`.

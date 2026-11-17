@@ -1,0 +1,7 @@
+error[E0204]: expected an expression
+  --> $DIR/is-empty-subject.nra:14:55
+   |
+14 | let classify = func(value: Shape) -> int => match.is () {
+   |                                                       ^ expected an expression, found ')'
+
+For more information about this error, try `neura explain E0204`.

@@ -42,6 +42,12 @@ IrNode store_local(SymbolId local, const IrType& type, IrNode value, const Span&
     return result;
 }
 
+// "a Shape", "an int64".
+std::string article(const std::string& text) {
+    const bool vowel = !text.empty() && std::string_view("aeioAEIO").find(text.front()) != std::string_view::npos;
+    return (vowel ? "an " : "a ") + text;
+}
+
 } // namespace
 
 // The steps of one arm's phase one, in written order: a statement, or a
@@ -319,6 +325,114 @@ Lowering::CoverPattern Lowering::element_pattern(const PatternSyntax& pattern, I
     return lower_pattern(pattern, load_local(saved, type, pattern.span), steps, declarations, context, owner);
 }
 
+// `match.is` (docs/design/Matching030.md). The subject is a class or
+// interface reference, `class`, `any`, or a scalar or string.
+void Lowering::is_subject(const IrNode& subject) const {
+    const auto& type = subject.type;
+    if (class_reference(type) || type.kind == TypeKind::Bool || type.kind == TypeKind::Integer ||
+        type.kind == TypeKind::Float || type.kind == TypeKind::String)
+        return;
+    auto error = Diagnostic(subject.span, "match.is cannot test a value of type " + describe(type)).with_code("E0411")
+        .label("the subject has type " + describe(type));
+    if (type.kind == TypeKind::TypeParameter)
+        error.help("convert it with 'as any' to test the type of its value");
+    else if (type.kind == TypeKind::Enum || type.kind == TypeKind::Tuple)
+        error.help("use 'match' for " + std::string(type.kind == TypeKind::Enum ? "an enum" : "a tuple"));
+    else
+        error.note("a match.is subject is a class or interface reference, 'class', 'any', a scalar or a string");
+    throw error;
+}
+
+bool Lowering::scalar_subject(const IrType& type) const {
+    return type.kind == TypeKind::Bool || type.kind == TypeKind::Integer || type.kind == TypeKind::Float ||
+           type.kind == TypeKind::String;
+}
+
+// One `match.is` pattern: the tests and the binding of its arm, and what it
+// covers. A pattern that cannot match the subject's type is E0490.
+Lowering::IsCover Lowering::is_pattern(const PatternSyntax& pattern, const IrNode& value,
+                                       std::vector<PatternStep>& steps, std::vector<IrNode>& declarations,
+                                       Context& context, SymbolId owner) {
+    using Kind = PatternSyntax::Kind;
+    const auto& subject = value.type;
+    const auto never = [&](const std::string& what) {
+        return Diagnostic(pattern.span, "a value of type " + describe(subject) + " is never " + what)
+            .with_code("E0490").label("the subject has type " + describe(subject));
+    };
+    if (pattern.kind == Kind::Wildcard) return {IsCover::Kind::Wildcard, {}};
+    if (pattern.kind == Kind::Nil) {
+        if (!class_reference(subject)) throw never("nil");
+        steps.push_back({equals(value, node(IrOp::Nil, pattern.span, subject), pattern.span), std::nullopt});
+        return {IsCover::Kind::Nil, {}};
+    }
+    auto tested = type(*pattern.type, context);
+    if (is_primitive_reference(tested))
+        throw Diagnostic(pattern.type->span, "a primitive reference is not a match.is pattern").with_code("E0490");
+    const bool reference = class_reference(tested) && tested.kind == TypeKind::Object;
+    if (scalar_subject(subject)) {
+        if (tested != subject) throw never(article(describe(tested)));
+    } else if (!reference) {
+        throw never(article(describe(tested)));
+    } else {
+        const auto subject_class = receiver_type(subject);
+        const bool related = assignable(tested, subject_class) || assignable(subject_class, tested) ||
+                             symbol(tested.symbol).kind == SymbolKind::Interface ||
+                             symbol(subject_class.symbol).kind == SymbolKind::Interface;
+        if (!related) throw never(article(describe(tested)));
+        auto test = node(IrOp::ClassIs, pattern.span, bool_type);
+        test.type_arguments.push_back(tested);
+        test.operands.push_back(value);
+        steps.push_back({std::move(test), std::nullopt});
+    }
+    if (pattern.kind == Kind::Binding) {
+        auto& names = context.scopes.back();
+        const auto local = add(SymbolKind::Local, pattern.name, pattern.name_span, owner);
+        names.emplace(pattern.name, local);
+        symbol(local).type = tested;
+        symbol(local).constant = true;
+        set_attribute(symbol(local), AttributeId::BindingLast, attribute_bool(true));
+        auto declare = node(IrOp::Initialize, pattern.span);
+        declare.symbol = local;
+        declarations.push_back(std::move(declare));
+        IrNode bound = value;
+        if (!scalar_subject(subject)) {
+            bound = node(IrOp::ClassCast, pattern.span, tested);
+            bound.operands.push_back(value);
+        }
+        steps.push_back({std::nullopt, store_local(local, tested, std::move(bound), pattern.span)});
+    }
+    return {scalar_subject(subject) ? IsCover::Kind::Wildcard : IsCover::Kind::Type, tested};
+}
+
+// Whether an unguarded arm `earlier` matches every value that `later` matches.
+bool Lowering::is_covered(const IsCover& earlier, const IsCover& later, const IrType&) const {
+    switch (earlier.kind) {
+    case IsCover::Kind::Wildcard:
+        return true;
+    case IsCover::Kind::Nil:
+        return later.kind == IsCover::Kind::Nil;
+    case IsCover::Kind::Type:
+        return later.kind == IsCover::Kind::Type && assignable(later.type, earlier.type);
+    }
+    return false;
+}
+
+// A class, interface, `class` or `any` subject needs a final unguarded `_`;
+// a scalar or string one an unguarded arm of its type, or `_`.
+void Lowering::is_exhaustive(const Statement& stmt, const IrType& subject, const std::vector<IsCover>& covered) const {
+    if (std::ranges::any_of(covered, [](const IsCover& item) { return item.kind == IsCover::Kind::Wildcard; }))
+        return;
+    auto error = Diagnostic(Span{stmt.span.file, stmt.span.line, stmt.span.column, stmt.span.offset, 5},
+                            "non-exhaustive match.is on a value of type " + describe(subject))
+        .with_code("E0410").label("a value may match no arm");
+    if (scalar_subject(subject))
+        error.help("add an arm for " + describe(subject) + ", or a final '_' arm");
+    else
+        error.note("type patterns never cover a class, an interface, 'class' or 'any', whatever its attributes")
+            .help("add a final '_' arm");
+    throw error;
+}
+
 IrNode Lowering::general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                                bool call_argument, std::optional<IrNode> lowered_subject) {
     // A collection literal matched by tuple patterns is a tuple, as it is
@@ -331,9 +445,12 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
     auto subject = lowered_subject ? std::move(*lowered_subject)
                  : tuple_literal ? tuple(written, context, nullptr) : value(written, context);
     const auto subject_type = subject.type;
-    if (subject_type.kind != TypeKind::Enum && subject_type.kind != TypeKind::Tuple)
+    if (stmt.match_is) is_subject(subject);
+    else if (subject_type.kind != TypeKind::Enum && subject_type.kind != TypeKind::Tuple)
         throw Diagnostic(subject.span, "match requires an enum or tuple value").with_code("E0411");
-    if (stmt.arms.empty()) throw Diagnostic(stmt.span, "match requires at least one arm").with_code("E0411");
+    if (stmt.arms.empty())
+        throw Diagnostic(stmt.span, stmt.match_is ? "match.is requires at least one arm" : "match requires at least one arm")
+            .with_code("E0411");
     auto owner = context.owner;
     if (symbol(owner).kind == SymbolKind::Global || symbol(owner).kind == SymbolKind::Field)
         owner = symbol(owner).owner;
@@ -359,6 +476,7 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
     std::vector<IrNode> tests;
     std::vector<Names> arm_scopes;
     std::vector<std::vector<CoverPattern>> covered;
+    std::vector<IsCover> covered_types;
     std::vector<std::size_t> covering_arms;
     const std::vector<IrType> column{subject_type};
     for (std::size_t index = 0; index < stmt.arms.size(); ++index) {
@@ -366,14 +484,25 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
         context.scopes.emplace_back();
         std::vector<PatternStep> steps;
         const auto subject_value = load_local(temporary, subject_type, arm.pattern->span);
-        auto cover = lower_pattern(*arm.pattern, subject_value, steps, declarations, context, owner);
-        std::vector<CoverPattern> witness;
-        if (!useful(covered, {cover}, column, witness)) {
+        CoverPattern cover{};
+        IsCover type_cover{};
+        bool reachable = true;
+        std::optional<std::size_t> by;
+        if (stmt.match_is) {
+            type_cover = is_pattern(*arm.pattern, subject_value, steps, declarations, context, owner);
+            for (std::size_t i = 0; i < covered_types.size() && !by; ++i)
+                if (is_covered(covered_types[i], type_cover, subject_type)) by = i;
+            reachable = !by;
+        } else {
+            cover = lower_pattern(*arm.pattern, subject_value, steps, declarations, context, owner);
+            std::vector<CoverPattern> witness;
+            reachable = useful(covered, {cover}, column, witness);
+            for (std::size_t i = 0; !reachable && i < covered.size() && !by; ++i)
+                if (std::vector<CoverPattern> unused; !useful({covered[i]}, {cover}, column, unused)) by = i;
+        }
+        if (!reachable) {
             auto error = Diagnostic(arm.pattern->span, "unreachable match arm").with_code("E0491")
                 .label("no value reaches this arm");
-            std::optional<std::size_t> by;
-            for (std::size_t i = 0; i < covered.size() && !by; ++i)
-                if (std::vector<CoverPattern> unused; !useful({covered[i]}, {cover}, column, unused)) by = i;
             if (by) error.label(stmt.arms[covering_arms[*by]].pattern->span, "this earlier arm covers every value it matches");
             else if (!covering_arms.empty())
                 error.label(stmt.arms[covering_arms.front()].pattern->span, "the arms from here on cover every value it matches");
@@ -388,7 +517,8 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
             branch.body.push_back(std::move(finish));
             finish = std::move(branch);
         } else {
-            covered.push_back({cover});
+            if (stmt.match_is) covered_types.push_back(type_cover);
+            else covered.push_back({cover});
             covering_arms.push_back(index);
         }
         std::vector<IrNode> region{std::move(finish)};
@@ -415,7 +545,9 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
         arm_scopes.push_back(std::move(context.scopes.back()));
         context.scopes.pop_back();
     }
-    if (std::vector<CoverPattern> witness; useful(covered, {CoverPattern{}}, column, witness)) {
+    if (stmt.match_is) {
+        is_exhaustive(stmt, subject_type, covered_types);
+    } else if (std::vector<CoverPattern> witness; useful(covered, {CoverPattern{}}, column, witness)) {
         const auto missing = cover_text(witness.front(), subject_type);
         auto error = Diagnostic(Span{stmt.span.file, stmt.span.line, stmt.span.column, stmt.span.offset, 5},
                                 "non-exhaustive match, '" + missing + "' is not covered")

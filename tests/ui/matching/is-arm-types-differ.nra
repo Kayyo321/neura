@@ -1,0 +1,19 @@
+// Edge case 18: expression arms of different types.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let classify = func(value: Shape) {
+    let result = match.is (value) {
+        Circle => 1,
+        _ => "other",
+    };
+};

@@ -1,0 +1,9 @@
+error[E0230]: malformed match.is: expected '(' before the subject
+  --> $DIR/is-no-parentheses.nra:14:54
+   |
+14 | let classify = func(value: Shape) -> int => match.is value {
+   |                                                      ^^^^^ expected '(', found 'value'
+   |
+   = help: write the subject in parentheses, as in 'match.is (value) { ... }'
+
+For more information about this error, try `neura explain E0230`.

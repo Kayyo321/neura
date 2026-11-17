@@ -1,0 +1,7 @@
+error[E0490]: a value of type Shape is never an Other
+  --> $DIR/is-unrelated-class.nra:15:5
+   |
+15 |     Other => 1,
+   |     ^^^^^ the subject has type Shape
+
+For more information about this error, try `neura explain E0490`.

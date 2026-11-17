@@ -1366,10 +1366,22 @@ private:
     Statement parse_match(bool produces_value, std::size_t start) {
         Statement result{};
         result.kind = Statement::Kind::Match;
+        // `match.is (subject)` (docs/design/Matching030.md): `match`
+        // directly followed by `.` and `is`.
+        if (at(".") && next_is_keyword(1, "is")) {
+            advance();
+            advance();
+            result.match_is = true;
+            if (!at("("))
+                throw Diagnostic(current().span, "malformed match.is: expected '(' before the subject")
+                    .with_code("E0230").label(current().kind == TokenKind::End ? std::string("expected '('")
+                                                                               : "expected '(', " + found_text(current()))
+                    .help("write the subject in parentheses, as in 'match.is (value) { ... }'");
+        }
         result.expressions.push_back(condition());
         expect("{");
         while (!at("}")) {
-            result.arms.push_back(match_arm(produces_value));
+            result.arms.push_back(result.match_is ? is_arm(produces_value) : match_arm(produces_value));
             if (!match(",")) break;
         }
         expect("}");
@@ -1392,6 +1404,60 @@ private:
         }
         result.span = span_from(start);
         return result;
+    }
+
+    // An arm of a `match.is`: `_`, `nil`, `name: Type` or a type, with an
+    // optional guard. An identifier directly followed by ':' is a binding;
+    // anything else is read by the type parser.
+    MatchArm is_arm(bool produces_value) {
+        const auto start = cursor_;
+        MatchArm result{};
+        auto pattern = std::make_shared<PatternSyntax>();
+        if (current().kind == TokenKind::Identifier && current().text == "_") {
+            pattern->span = advance().span;
+        } else if (at("nil")) {
+            pattern->kind = PatternSyntax::Kind::Nil;
+            pattern->span = advance().span;
+        } else {
+            if (current().kind == TokenKind::Identifier && next_is(1, ":")) {
+                const auto& name = declared_name();
+                advance();
+                pattern->kind = PatternSyntax::Kind::Binding;
+                pattern->name = name.text;
+                pattern->name_span = name.span;
+                result.bindings.push_back(name);
+            } else {
+                pattern->kind = PatternSyntax::Kind::Type;
+                if (current().kind != TokenKind::Identifier && !at("[") && !at("&") && !at("func") && !at("class"))
+                    throw Diagnostic(current().span, "malformed match.is pattern").with_code("E0230")
+                        .label("expected a type, 'name: Type', 'nil' or '_'")
+                        .help("a 'match.is' arm tests the type of the subject's value");
+            }
+            pattern->type = type();
+            pattern->span = span_from(start);
+            if (at("(") || at("{"))
+                throw Diagnostic(current().span, "a variant pattern is not a 'match.is' pattern").with_code("E0230")
+                    .label("'match.is' arms test types")
+                    .help("use 'match' for an enum");
+        }
+        if (match("if")) result.guard = expression();
+        result.general = true;
+        result.variant = pattern->kind == PatternSyntax::Kind::Wildcard ? "_" : "";
+        result.pattern = std::move(pattern);
+        expect("=>");
+        if (produces_value) {
+            result.value = expression();
+        } else {
+            result.body = block();
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    bool next_is_keyword(std::size_t offset, std::string_view word) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        return token.kind == TokenKind::Keyword && token.text == word;
     }
 
     // The whole pattern of a `match` arm (docs/design/Matching030.md): `_`,
