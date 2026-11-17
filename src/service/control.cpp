@@ -154,18 +154,6 @@ void no_more(const std::vector<std::string>& arguments, std::string_view command
     if (!arguments.empty()) usage_error("unexpected argument for neura runtime " + std::string(command) + ": " + arguments.front());
 }
 
-fs::path login_unit(const Installation& installation) {
-    const char* home = std::getenv("HOME");
-    const fs::path base = home && *home == '/' ? fs::path(home) : fs::path("/");
-#if defined(__APPLE__)
-    return base / "Library/LaunchAgents" / ("net.neura.neurad-" + installation.id + ".plist");
-#else
-    const char* config = std::getenv("XDG_CONFIG_HOME");
-    const fs::path root = config && *config == '/' ? fs::path(config) : base / ".config";
-    return root / "systemd/user" / ("neurad-" + installation.id + ".service");
-#endif
-}
-
 // --- Commands -----------------------------------------------------------------------------
 
 int start(const Installation& installation, std::vector<std::string> arguments) {
@@ -188,7 +176,7 @@ int status(const Installation& installation, std::vector<std::string> arguments)
     no_more(arguments, "status");
     std::error_code error;
     const bool installed = fs::exists(installation.bin / "neurad", error);
-    const bool login = fs::exists(login_unit(installation), error);
+    const bool login = fs::exists(login_unit_path(installation), error);
     Json::Array supervisors;
     for (const auto& generation : live_generations(installation)) {
         Json::Object entry{{"generation", Json(generation)}};
@@ -476,6 +464,8 @@ int runtime_command(const std::vector<std::string>& all, const fs::path& self) {
     if (command == "inspect") return inspect(installation, std::move(arguments));
     if (command == "stop") return stop(installation, std::move(arguments));
     if (command == "shutdown") return shutdown(installation, std::move(arguments));
+    if (command == "enable") return login_command(installation, true, arguments);
+    if (command == "disable") return login_command(installation, false, arguments);
     if (command == "cache" && !arguments.empty() && arguments.front() == "clear") {
         arguments.erase(arguments.begin());
         return cache_clear(installation, std::move(arguments));

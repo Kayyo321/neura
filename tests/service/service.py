@@ -1313,6 +1313,120 @@ def control_suite(work: Work) -> None:
     runtime(work, rc_neura, "shutdown", "--terminate", "--timeout=10", env=env)
 
 
+# --------------------------------------------------------------------------
+# Step 9: login start, the capability report, and service modes refused
+# where they do not apply.
+
+def login_suite(work: Work) -> None:
+    hello = str(work.image("hello", path=HELLO))
+    neura = work.neura
+    stand_in = work.root / "manager"
+    stand_in.mkdir()
+    calls = work.root / "manager.log"
+    (stand_in / "systemctl").write_text(
+        "#!/bin/sh\n"
+        f'echo "$*" >> "{calls}"\n'
+        'if [ "$2" = show-environment ]; then exit "${STAND_IN_ANSWERS:-0}"; fi\n'
+        "exit 0\n")
+    os.chmod(stand_in / "systemctl", 0o755)
+    env = dict(work.env, PATH=f"{stand_in}:/usr/bin:/bin")
+    service = pc.Service(work.bin, work.env)
+    unit = work.home / ".config/systemd/user" / f"neurad-{service.installation}.service"
+
+    # Case 53: no user service manager answers.
+    for label, manager_env in (("no systemctl", dict(work.env, PATH="/nonexistent")),
+                               ("systemctl without a user manager", dict(env, STAND_IN_ANSWERS="1"))):
+        status, out, err = runtime(work, neura, "enable", env=manager_env)
+        check(status == 1 and b"no user service manager answers here" in err and not unit.exists()
+              and not (work.home / ".config").exists(), f"case 53: enable with {label}: status 1, nothing written")
+    status, out, _ = subprocess.run([str(neura), "run", "--runtime=required", hello], capture_output=True,
+                                    env=dict(work.env, PATH="/nonexistent"), cwd=work.root).returncode, b"", b""
+    check(status == 0, "case 53: --runtime=required still works there")
+    runtime(work, neura, "shutdown", "--terminate", "--timeout=10")
+
+    # Case 54: enable twice, disable twice.
+    for attempt in (1, 2):
+        status, out, _ = runtime(work, neura, "enable", env=env)
+        check(status == 0 and unit.exists(), f"case 54: enable {attempt} succeeds")
+    units = list((work.home / ".config/systemd/user").iterdir())
+    text = unit.read_text()
+    check(len(units) == 1 and f'ExecStart="{work.bin}/neurad" --foreground --root "{work.bin}"' in text
+          and "Restart=no" in text, "case 54: one unit, which starts this installation's supervisor and never restarts it")
+    log = calls.read_text()
+    check(f"--user enable neurad-{service.installation}.service" in log, "enable asks systemctl --user to enable the unit")
+    status, out, _ = runtime(work, neura, "status", "--json")
+    check(json.loads(out)["loginStart"] is True, "status reports login start registered")
+    check(not supervisors(work), "enable starts nothing")
+    for attempt in (1, 2):
+        status, out, _ = runtime(work, neura, "disable", env=env)
+        check(status == 0 and not unit.exists(), f"case 54: disable {attempt} succeeds")
+    check(f"--user disable neurad-{service.installation}.service" in calls.read_text(), "disable asks systemctl to disable")
+
+    # Case 61: neura capabilities reads files only.
+    def capabilities(neura_path: Path) -> dict:
+        result = subprocess.run([str(neura_path), "capabilities", "--json"], capture_output=True, env=work.env)
+        return json.loads(result.stdout)
+    import socket as sockets
+    service.directory.mkdir(parents=True, exist_ok=True)
+    os.chmod(service.directory.parent, 0o700)
+    os.chmod(service.directory, 0o700)
+    listener = sockets.socket(sockets.AF_UNIX, sockets.SOCK_STREAM)
+    listener.bind(str(service.socket))
+    listener.listen(4)
+    listener.setblocking(False)
+    with_listener = capabilities(neura)
+    try:
+        listener.accept()
+        connected = True
+    except BlockingIOError:
+        connected = False
+    listener.close()
+    stale = capabilities(neura)
+    service.start()
+    running_answer = capabilities(neura)
+    bare = copy_build(work, "bare", neurad=None)
+    missing = capabilities(bare / "neura")
+    check(not connected and with_listener["service"] == stale["service"] == running_answer["service"] ==
+          {"installed": True, "protocol": "1.0", "state": "ready"},
+          "case 61: the same answer with a stale socket and with a supervisor running, and no connection")
+    check(missing["service"] == {"installed": False, "state": "missing"}, "case 61: a missing neurad is reported missing")
+    check(with_listener["features"] == missing["features"] | {"coverage": True, "debugger": True, "documentation": True,
+                                                                "formatter": True, "lsp": True, "testCoverage": True,
+                                                                "testDiscovery": True, "testFilter": True,
+                                                                "testReporter": True},
+          "capabilities keeps its 0.2 features")
+    service.process.kill()
+    service.process.wait()
+
+    # Case 60: an installation not yet migrated from a 0.2 update.
+    root = work.root / "unmigrated"
+    old = fake_install(work, root, ["0.3.0"], "0.3.0", unmigrated=True)
+    instruction = b'finish the 0.3.0 install first: run "neura update --migrate-install"'
+    for mode in ("required", "auto"):
+        result = subprocess.run([str(old), "run", f"--runtime={mode}", hello], capture_output=True, env=work.env)
+        check(result.returncode == 5 and instruction in result.stderr and result.stdout == b"",
+              f"case 60: --runtime={mode} is refused with the instruction")
+    for command in ("start", "enable"):
+        status, out, err = runtime(work, old, command, env=env)
+        check(status == 5 and instruction in err, f"case 60: neura runtime {command} is refused")
+    result = subprocess.run([str(old), "run", "--runtime=off", hello], capture_output=True, env=work.env)
+    check(result.returncode == 0 and result.stdout == b"Hello, World!\n", "case 60: --runtime=off runs")
+    check(runtime(work, old, "status")[0] == 0 and runtime(work, old, "ps")[0] == 0, "case 60: status and ps answer")
+    check(capabilities(old)["service"]["state"] == "unmigrated", "case 61: capabilities reports the state unmigrated")
+    check(not [p for p in supervisors(work)] and not list(root.rglob("*.service")),
+          "case 60: nothing was started or written")
+
+    # Case 59: a debug launch that asks for a service mode.
+    for value in ("required", "auto"):
+        ended, messages = debug_session(work, HELLO, {"runtime": value})
+        failed = [m for m in messages if m.get("type") == "response" and m.get("command") == "launch"]
+        check(failed and not failed[0]["success"] and "runtime" in failed[0].get("message", "") and not ended,
+              f"case 59: a debug launch with runtime {value} is refused before anything starts")
+    ended, _ = debug_session(work, HELLO, {"runtime": "off"})
+    check(ended, "a debug launch with runtime off runs")
+    check(not supervisors(work), "case 59: no supervisor was started")
+
+
 def parity_suite(work: Work) -> None:
     """The direct identity cases through --runtime=required (the note's parity gate)."""
     script = REPOSITORY / "scripts/runtime-identity.py"
@@ -1352,6 +1466,7 @@ SUITES = {
     "run": run_suite,
     "parity": parity_suite,
     "control": control_suite,
+    "login": login_suite,
 }
 
 

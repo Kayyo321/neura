@@ -25,7 +25,7 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | Executable | Component | Unified commands | Direct form | Loads |
 | --- | --- | --- | --- | --- |
 | `neura` | core | `--version`, `version`, `--help`, `help`, `capabilities --json` (built in); every other command is forwarded | | nothing: a static executable on Linux, holding the registry, the version line and the usage text |
-| `neura-run` | core | `run` | `neura-run [run] ...` | `libneura-core` |
+| `neura-run` | core | `run`, `runtime` | `neura-run [run] ...`, `neura-run runtime ...` | `libneura-core` |
 | `neura-inspect` | core | `inspect`, `inspect-image` | `neura-inspect [inspect] ...`, `neura-inspect inspect-image ...` | `libneura-core` |
 | `neura-doctor` | core | `doctor` | `neura-doctor [doctor]` | `libneura-core`; in an SDK build it also holds the C import stage's libclang probe, linked statically, and does not load `libneura-sdk` |
 | `neura-update` | core | `update` | `neura-update [update] ...` | `libneura-core` |
@@ -42,7 +42,7 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | `neura-debug` | sdk | `debug --stdio` | `neura-debug [debug] --stdio` | `libneura-sdk`, `libneura-core`; every debug session runs at tier 0 with the JIT off |
 | `neura-lsp` | sdk | `lsp --stdio` | `neura-lsp [lsp] --stdio` | `libneura-sdk`, `libneura-core` |
 | `neura-fmt` | sdk | `fmt ...` | `neura-fmt [fmt] ...` | `libneura-sdk`, `libneura-core` |
-| `neurad` | service | `runtime ...` (seam) | | not built in this milestone |
+| `neurad` | service | `runtime ...` is served by `neura-run` | `neurad --foreground --root ROOT`, and the private `neurad --worker` | `libneura-core`; built by the service milestone ([Service030.md](Service030.md)) and installed only with `--component service` |
 
 The bracketed word is optional. When the first argument of a tool is one of its own command names, it selects that command; otherwise the tool runs its first command. `neurac app.nra -o app.nvr` is therefore `neura build app.nra -o app.nvr`. A file whose name is exactly a command name is passed after the command, as in `neurac build check`. As its only argument, `--help` prints the tool's commands and `--version` prints the same line as `neura --version`; after a command word both keep their 0.2 meaning, which for most commands is an unknown option.
 
@@ -62,8 +62,8 @@ The commands `new`, `dev`, `contracts` and `package` of the application platform
 | The dispatch token is the argument `--neura-dispatch=<version line>`, where the version line is what `neura --version` prints. A tool that receives it compares it with its own version line before it reads any other argument, and stops with the mixed-version error below when they differ. The token is not passed to a program, so `run` and `test` see the same environment and arguments in both forms. | proposed |
 | A missing tool is reported before any work starts, with the component that supplies it. | proposed |
 | Without arguments, `neura` prints the usage to standard error and exits with status 1. An unknown command prints the 0.2 message, which lists the commands. Neither looks for a tool. | proposed |
-| `neura --version`, `neura help` and `neura capabilities --json` never start a tool, a service or the network. `capabilities --json` prints the 0.2 object, byte for byte, when every SDK tool is present; a feature whose tool is missing is reported as `false`. | proposed |
-| `neura runtime ...` belongs to the service component. Until `neurad` is installed next to `neura`, it reports the missing component; with it, it is forwarded to `neura-run runtime ...`. | proposed (seam) |
+| `neura --version`, `neura help` and `neura capabilities --json` never start a tool, a service or the network. `capabilities --json` prints the 0.2 object when every SDK tool is present, byte for byte except for one top-level member, `service`, that [the service milestone](Service030.md#editors) added and that a 0.2 reader ignores; a feature whose tool is missing is reported as `false`. | proposed |
+| `neura runtime ...` belongs to the service component. Until `neurad` is installed next to `neura`, it reports the missing component; with it, it is forwarded to `neura-run runtime ...`. | proposed; implemented by [the service milestone](Service030.md) |
 
 The rule that the tool is looked up only next to the real `neura` is stricter than looking next to `neura` first and on `PATH` second. A `PATH` fallback would let a `neura` from one installation run the compiler of another, which is the mixed state the version check exists to stop, so the stricter rule is chosen. A shell still finds a tool on `PATH` when the user types its name.
 

@@ -141,9 +141,34 @@ int capabilities(const std::string& bin, int argc, char** argv) {
             ",\"imageInspection\":" + flag(present(bin, "neura-inspect")) + ",\"lsp\":" + flag(present(bin, "neura-lsp")) +
             ",\"testCoverage\":" + flag(test) + ",\"testDiscovery\":" + flag(test) + ",\"testFilter\":" + flag(test) +
             ",\"testReporter\":" + flag(test);
+    // The runtime service component (docs/design/Service030.md, "Editors"),
+    // from the files of the installation only: nothing is connected to or
+    // started. An installation that a 0.2 updater produced and that is not
+    // migrated (a schema 1 marker and a core manifest) refuses every service
+    // start, so the component is reported as unmigrated there.
+    std::string service = "{\"installed\":false,\"state\":\"missing\"}";
+#ifndef _WIN32
+    if (present(bin, tool::service_executable)) {
+        const auto parent = bin.substr(0, bin.rfind('/'));
+        const auto versions = parent.substr(0, parent.rfind('/'));
+        const auto root = versions.substr(0, versions.rfind('/'));
+        bool unmigrated = false;
+        if (versions.size() >= 9 && versions.compare(versions.size() - 9, 9, "/versions") == 0 &&
+            regular_file(parent + "/share/neura/components/core.txt")) {
+            if (std::FILE* marker = std::fopen((root + "/neura-install.txt").c_str(), "rb")) {
+                char line[32] = {};
+                unmigrated = std::fgets(line, sizeof line, marker) && std::string_view(line) == "neura-install 1\n";
+                std::fclose(marker);
+            }
+        }
+        service = std::string("{\"installed\":true,\"protocol\":\"1.0\",\"state\":\"") +
+                  (unmigrated ? "unmigrated" : "ready") + "\"}";
+    }
+#endif
     // The version holds only letters, digits, '.' and '-', which JSON needs
     // no escapes for (CMakeLists.txt checks it).
-    text += std::string("},\"schemaVersion\":1,\"version\":\"") + neura::version::full + "\"}\n";
+    text += std::string("},\"schemaVersion\":1,\"service\":") + service + ",\"version\":\"" + neura::version::full +
+            "\"}\n";
     print(stdout, text);
     return 0;
 }

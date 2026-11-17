@@ -347,6 +347,14 @@ Json Adapter::variable(std::string name, const nvm::DebugValue& value) {
 
 void Adapter::launch(const Json& arguments) {
     if (launched_) throw std::runtime_error("a debug session can launch only once; start a new session to restart");
+    // Debugging is direct in 0.3.0 (docs/design/Service030.md): a launch
+    // that asks for the runtime service is refused before anything starts,
+    // not run directly in its place.
+    if (arguments.contains("runtime") &&
+        !(arguments["runtime"].is_string() && arguments["runtime"].string() == "off")) {
+        throw std::runtime_error("the launch setting \"runtime\" asks for the runtime service; debug sessions run "
+                                 "directly in this version, so remove the setting or set it to \"off\"");
+    }
     cwd_ = arguments["cwd"].string(fs::current_path().string());
     cwd_ = path_key(cwd_);
     if (!fs::is_directory(cwd_)) throw std::runtime_error("debug working directory does not exist");

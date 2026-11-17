@@ -454,6 +454,7 @@ if(NOT WIN32)
         src/service/connect.cpp
         src/service/control.cpp
         src/service/launch.cpp
+        src/service/login.cpp
         src/service/supervisor.cpp
         src/service/system.cpp
         src/service/worker.cpp
@@ -1249,7 +1250,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         set_tests_properties(service-worker PROPERTIES TIMEOUT 600)
     endif()
     # The service end to end, one suite per test (tests/service/service.py).
-    foreach(suite IN ITEMS cli-options off-default protocol run parity control)
+    foreach(suite IN ITEMS cli-options off-default protocol run parity control login)
         add_test(NAME service-${suite} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/service/service.py" ${suite} "$<TARGET_FILE_DIR:neura>")
         set_tests_properties(service-${suite} PROPERTIES TIMEOUT 600)
