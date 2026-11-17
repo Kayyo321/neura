@@ -1,0 +1,4 @@
+// The 'c' presentation is checked against the value only when it runs, so an
+// interpolated string does not use it.
+let a = 65;
+let text = $"{a:c}";

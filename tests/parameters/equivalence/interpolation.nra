@@ -1,0 +1,44 @@
+// Interpolated strings (docs/design/Calls030.md, Interpolated strings):
+// every hole is evaluated once, in written order, before any text is
+// formatted; an object's to_string runs while formatting, after every hole,
+// and sees what earlier formatting did.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let note = func(text: string, value: int) -> int {
+    console.print_line("evaluate " + text);
+    return value;
+};
+
+let Counter = class (
+    export let count: int = 0;
+    export let.override to_string = func -> string {
+        count += 1;
+        return "counter " + count.to_string();
+    };
+);
+
+let Watcher = class (
+    let watched: Counter;
+    export let init = func(watched: Counter) {
+        instance.watched = watched;
+    };
+    export let.override to_string = func -> string => "sees " + watched.count.to_string();
+);
+
+let Light = enum (Red, Green);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line($"{note("first", 1)} then {note("second", 2):>3}");
+        let counter = new Counter();
+        let watcher = new Watcher(counter);
+        console.print_line($"{counter}, {watcher}, {counter}");
+        let width = 7;
+        let ratio: float32 = 0.25;
+        console.print_line($"[{"left":<{width}}] [{42:^{width}}] [{ratio:+.3f}] [{255:#x}] [{true}] [{Light.Green}]");
+        console.print_line($"escapes \"quoted\" {{literal}} tab\tend");
+        console.print_line($"{$"inner {1 + 2}"} outer");
+        return program.ExitCode.Ok;
+    };
+);

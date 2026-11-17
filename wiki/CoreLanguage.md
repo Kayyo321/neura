@@ -528,6 +528,45 @@ Prefix and postfix increment and decrement require a mutable numeric binding, fi
 
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
 
+### Interpolated strings
+
+`$"..."` is an interpolated string, of type `string`. Its holes, `{expression}` or `{expression:specification}`, are formatted into the text with the rules of [console formatting](StandardLibrary#console-formatting).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let report = func(name: string, paid: float64, items: int) -> string {
+    return $"{name}: {items:>4} items, {paid:.2f} paid, {{braces}}";
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let width = 8;
+        console.print_line(report("order", 12.5, 3));
+        console.print_line($"[{"right":>{width}}] {$"nested {width}"}");
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+order:    3 items, 12.50 paid, {braces}
+[   right] nested 8
+```
+
+| Rule | Detail |
+| --- | --- |
+| Outside holes the literal has the escapes of a string literal. | `{{` and `}}` are single braces, and a single `}` is `E0227`. An interpolated string without holes is a string literal. |
+| A hole holds one expression, and an optional specification after the first `:` outside parentheses, brackets and braces. | The specification is the text after the colon of a format field: fill, alignment, sign, `#`, `0`, width, precision and presentation. A conditional or a range with a step at the top of a hole is written in parentheses, `{(ok ? 1 : 2)}`. A width or precision may be a nested hole, `{value:>{width}}`, which holds an expression of an integer type and no specification. |
+| The whole literal is on one line. | A line end before its closing `"`, in text or in a hole, is `E0103`. A hole contains no comment, a `"` inside a hole begins an ordinary nested literal, and interpolated strings nest to a depth of eight (`E0227`). |
+| Every hole is evaluated once, in written order, before any text is formatted. | Nested holes included. A saved object is a reference: its `to_string()` runs during formatting, after every hole is evaluated, and sees what earlier formatting did. A value with a built-in `to_string()` that is not a scalar, text or object is turned into text when it is evaluated, as `Console.format` does; a hole of type `void` is `E0416`, and one without a text form is the error of `Console.format`. |
+| The specification is checked when the program is compiled. | Against the hole's type, with the rules and the messages of the library (`E0486`). A checked interpolated string fails to format only when a nested width or precision is negative or larger than the library allows, which traps as `Console.vformat` does. The `c` presentation, which the library checks against the value, is not used. |
+| A format string computed at run time stays with `Console.format`. | An interpolated string is a literal: its text and its specifications are fixed. |
+
+`$` begins an interpolated string only directly before `"`; anywhere else it is `E0101`. An interpolated string lowers to a call of `Std.Io.Console.vformat` with a constant pattern that numbers the holes and an array of the packed values, so it adds no NeuraIR operation; a program that uses none builds as before.
+
 ### Comparison chains
 
 A comparison can use one subject and several alternatives. For example, `x == 0 or 1 or 2` tests whether `x` equals any of those values, and `x != 0 and 1` tests whether it differs from both. The subject is evaluated once. Each alternative is evaluated left to right and compared with the captured subject using the original operator. An `or` chain stops at the first true comparison. An `and` chain stops at the first false comparison.

@@ -1849,6 +1849,7 @@ private:
         if (token.kind == TokenKind::Identifier) return token_expression(Expr::Kind::Name);
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
+        if (token.kind == TokenKind::String && token.parts) return interpolated_string();
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
         throw Diagnostic(token.span, "expected an expression").with_code("E0204")
             .label(token.kind == TokenKind::End ? std::string("expected an expression before the end of the file")
@@ -1908,6 +1909,70 @@ private:
         result.open = open;
         result.labels = std::move(labels);
         result.label_spans = std::move(label_spans);
+        return result;
+    }
+
+    // `$"..."`: each hole's tokens are parsed as one expression. Without a
+    // hole the literal is the string literal of its text.
+    Expr interpolated_string() {
+        const auto& token = advance();
+        auto syntax = std::make_shared<InterpolationSyntax>();
+        auto result = make_expression(Expr::Kind::Interpolation, token.span, token.text);
+        const auto escape_braces = [](const std::string& text) {
+            std::string escaped;
+            for (const char c : text) {
+                escaped += c;
+                if (c == '{' || c == '}') escaped += c;
+            }
+            return escaped;
+        };
+        const auto hole_expression = [](const InterpolationPart& part) {
+            Parser nested(part.tokens);
+            auto value = nested.expression();
+            if (!nested.at_end())
+                throw Diagnostic(nested.current().span, "expected the end of the hole").with_code("E0202")
+                    .label("the hole's expression ends before this");
+            return value;
+        };
+        std::string text;
+        for (const auto& part : *token.parts) {
+            if (part.kind == InterpolationPart::Kind::Text) {
+                syntax->pattern += escape_braces(part.text);
+                text += part.text;
+                continue;
+            }
+            InterpolationHole hole{result.operands.size(), {}, {}, part.specification_span, true};
+            result.operands.push_back(hole_expression(part));
+            syntax->pattern += "{" + std::to_string(hole.operand);
+            if (part.specification_span) {
+                for (const auto& piece : part.specification) {
+                    if (piece.kind == InterpolationPart::Kind::Text) {
+                        hole.specification += piece.text;
+                        continue;
+                    }
+                    hole.plain_specification = false;
+                    hole.nested.push_back(result.operands.size());
+                    hole.specification += "{" + std::to_string(result.operands.size()) + "}";
+                    result.operands.push_back(hole_expression(piece));
+                }
+                syntax->pattern += ":" + hole.specification;
+            }
+            syntax->pattern += "}";
+            syntax->holes.push_back(std::move(hole));
+        }
+        if (syntax->holes.empty()) {
+            std::string literal = "\"";
+            for (const char c : text) {
+                if (c == '\n') literal += "\\n";
+                else if (c == '\r') literal += "\\r";
+                else if (c == '\t') literal += "\\t";
+                else if (c == '\\') literal += "\\\\";
+                else if (c == '"') literal += "\\\"";
+                else literal += c;
+            }
+            return make_expression(Expr::Kind::String, token.span, literal + "\"");
+        }
+        result.interpolation = std::move(syntax);
         return result;
     }
 

@@ -42,6 +42,7 @@ NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
 NEURA_DIAGNOSTIC(E0225, "positional argument after a named argument")
 NEURA_DIAGNOSTIC(E0226, "default value on a parameter that takes none")
+NEURA_DIAGNOSTIC(E0227, "malformed interpolated string")
 NEURA_DIAGNOSTIC(E0228, "malformed extension declaration or extension import")
 
 // Names
@@ -115,6 +116,7 @@ NEURA_DIAGNOSTIC(E0482, "unknown argument label")
 NEURA_DIAGNOSTIC(E0483, "argument supplied twice")
 NEURA_DIAGNOSTIC(E0484, "labels are not available for this call")
 NEURA_DIAGNOSTIC(E0485, "default value is not a constant")
+NEURA_DIAGNOSTIC(E0486, "invalid format specification in an interpolated string")
 NEURA_DIAGNOSTIC(E0488, "invalid extension function")
 
 // Classes, lifecycle, and accessors

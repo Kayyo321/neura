@@ -40,6 +40,7 @@ Errors about the grammar.
 | [E0214](E0214.md) | parameter without a type |
 | [E0225](E0225.md) | positional argument after a named argument |
 | [E0226](E0226.md) | default value on a parameter that takes none |
+| [E0227](E0227.md) | malformed interpolated string |
 | [E0228](E0228.md) | malformed extension declaration or extension import |
 
 ## E03xx: Names
@@ -122,6 +123,7 @@ Errors about types, values, calls, and statements.
 | [E0483](E0483.md) | argument supplied twice |
 | [E0484](E0484.md) | labels are not available for this call |
 | [E0485](E0485.md) | default value is not a constant |
+| [E0486](E0486.md) | invalid format specification in an interpolated string |
 | [E0488](E0488.md) | invalid extension function |
 
 ## E05xx: Classes and lifecycle

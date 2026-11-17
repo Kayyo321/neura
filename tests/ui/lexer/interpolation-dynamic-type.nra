@@ -1,0 +1,4 @@
+// A nested width hole holds an integer.
+let a = 1;
+let w = "4";
+let text = $"{a:{w}}";

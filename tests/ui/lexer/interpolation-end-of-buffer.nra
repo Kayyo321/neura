@@ -1,0 +1,3 @@
+// An interpolated string that the end of the buffer ends (edge case 85).
+let a = 1;
+let text = $"{a

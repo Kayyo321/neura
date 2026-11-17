@@ -1,0 +1,4 @@
+// A line break inside a hole (edge case 79).
+let a = 1;
+let text = $"{a +
+1}";

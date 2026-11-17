@@ -1,0 +1,13 @@
+error[E0227]: malformed interpolated string
+ --> $DIR/interpolation-conditional.nra:3:18
+  |
+3 | let text = $"{ok ? 1 : 2}";
+  |                  ^ a conditional at the top of a hole is written in parentheses
+  |
+  = note: the first ':' outside brackets begins the hole's specification
+help: parenthesize the conditional
+  |
+3 | let text = $"{(ok ? 1 : 2)}";
+  |               ~~~~~~~~~~~~
+
+For more information about this error, try `neura explain E0227`.

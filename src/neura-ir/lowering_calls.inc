@@ -1155,3 +1155,294 @@ IrNode Lowering::extension_call(const Expr& expr, IrNode callee, Context& contex
     inferred_.erase(&call);
     return finish_call(std::move(result));
 }
+
+// Interpolated strings (Calls030.md, Interpolated strings). Every hole is
+// evaluated once, in written order, and packed as Console.format packs its
+// arguments; the text is then formatted by Std.Io.Console.vformat with a
+// constant pattern that numbers the holes. Each specification is checked
+// here against its hole's type with the rules Std.Io.Internal.Formatting
+// applies at run time, and with its messages, so a checked literal reaches
+// the formatter's error only through a nested width or precision value
+// that is negative or too large.
+
+namespace {
+
+enum class FormatKind { Text, Signed, Unsigned, Float, Boolean };
+
+struct FormatProblem {
+    std::string message;
+    std::size_t offset;
+    std::string reason;
+};
+
+// The library's Cursor.read_spec and the checks of its render functions,
+// over `specification` followed by the field's closing brace. `nested`
+// tells whether the hole numbered by a dynamic width or precision is an
+// integer; `index` maps a dynamic field to its hole.
+std::optional<FormatProblem> check_specification(std::string_view specification, FormatKind kind,
+                                                 const std::function<bool(std::size_t)>& integer_hole) {
+    const std::string pattern = std::string(specification) + "}";
+    std::size_t position = 0;
+    const auto peek = [&]() -> unsigned char {
+        return position < pattern.size() ? static_cast<unsigned char>(pattern[position]) : 0;
+    };
+    const auto digit = [](unsigned char b) { return b >= '0' && b <= '9'; };
+    const auto align = [](unsigned char b) { return b == '<' || b == '>' || b == '^'; };
+    const auto integer_presentation = [](unsigned char b) {
+        return b == 'd' || b == 'b' || b == 'B' || b == 'o' || b == 'x' || b == 'X';
+    };
+    const auto presentation_byte = [&](unsigned char b) {
+        return integer_presentation(b) || b == '?' || b == 'c' || b == 's' || b == 'f' || b == 'F' || b == 'e' ||
+               b == 'E' || b == 'g' || b == 'G' || b == 'a' || b == 'A';
+    };
+    std::optional<FormatProblem> problem;
+    const auto fail_at = [&](std::size_t offset, std::string message, std::string reason) {
+        if (!problem) problem = FormatProblem{std::move(message), offset, std::move(reason)};
+    };
+    const auto read_number = [&]() -> long long {
+        long long number = 0;
+        while (digit(peek())) {
+            const long long d = peek() - '0';
+            if (number > (2147483647 - d) / 10) {
+                fail_at(position, "format number out of range", "the number is larger than 2147483647");
+                return 0;
+            }
+            number = number * 10 + d;
+            ++position;
+        }
+        return number;
+    };
+    // A nested hole is written {index}; its value is known only at run time.
+    bool dynamic_width = false;
+    bool dynamic_precision = false;
+    const auto read_dynamic = [&](bool& dynamic) {
+        ++position;
+        const auto start = position;
+        const auto index = static_cast<std::size_t>(read_number());
+        ++position;  // the nested field's closing brace
+        if (!integer_hole(index))
+            fail_at(start, "dynamic width or precision requires an integer",
+                    "this nested hole is not of an integer type");
+        dynamic = true;
+    };
+    std::string fill = " ";
+    unsigned char alignment = 0, sign = 0, presentation = 0;
+    bool alternate = false, zero = false;
+    long long precision = -1;
+    // read_spec
+    auto b = peek();
+    if (position < pattern.size() && b != '{' && b != '}') {
+        auto after_fill = position + 1;
+        while (after_fill < pattern.size() && (static_cast<unsigned char>(pattern[after_fill]) & 192) == 128)
+            ++after_fill;
+        if (after_fill < pattern.size() && align(static_cast<unsigned char>(pattern[after_fill]))) {
+            fill = pattern.substr(position, after_fill - position);
+            alignment = static_cast<unsigned char>(pattern[after_fill]);
+            position = after_fill + 1;
+        } else if (align(b)) {
+            alignment = b;
+            ++position;
+        }
+    }
+    b = peek();
+    if (b == '+' || b == '-' || b == ' ') {
+        sign = b;
+        ++position;
+    }
+    if (peek() == '#') {
+        alternate = true;
+        ++position;
+    }
+    if (peek() == '0') {
+        zero = true;
+        ++position;
+    }
+    if (digit(peek())) read_number();
+    else if (peek() == '{') read_dynamic(dynamic_width);
+    if (problem) return problem;
+    if (peek() == '.') {
+        ++position;
+        if (digit(peek())) precision = read_number();
+        else if (peek() == '{') {
+            read_dynamic(dynamic_precision);
+            precision = 0;
+        } else {
+            fail_at(position, "expected a precision", "a '.' is followed by digits or a nested hole");
+        }
+    }
+    b = peek();
+    if (!problem && b != '}' && position < pattern.size()) {
+        if (!presentation_byte(b)) {
+            fail_at(position, "unsupported format presentation",
+                    "the presentations are d, b, B, o, x, X, c, s, ?, f, F, e, E, g, G, a and A");
+            return problem;
+        }
+        presentation = b;
+        ++position;
+    }
+    if (problem) return problem;
+    if (peek() != '}') {
+        fail_at(position, "expected a closing brace", "the specification ends with its presentation");
+        return problem;
+    }
+    (void)fill;
+    (void)alignment;
+    // The render functions.
+    const std::string invalid = "format specification is invalid for the argument type";
+    const auto text_rules = [&](const std::string& what) {
+        if (sign != 0) return fail_at(0, invalid, "a sign is not allowed for " + what);
+        if (alternate) return fail_at(0, invalid, "'#' is not allowed for " + what);
+        if (zero) return fail_at(0, invalid, "'0' is not allowed for " + what);
+        if (presentation != 0 && presentation != 's' && presentation != '?')
+            return fail_at(0, invalid, "the presentation '" + std::string(1, static_cast<char>(presentation)) +
+                                           "' is not allowed for " + what);
+    };
+    const auto integer_rules = [&](const std::string& what) {
+        if (precision >= 0) return fail_at(0, invalid, "precision is not allowed for " + what);
+        if (presentation == 'c')
+            return fail_at(0, invalid, "the 'c' presentation is checked only when it runs, against the value; "
+                                       "an interpolated string does not use it");
+        if (presentation != 0 && !integer_presentation(presentation))
+            return fail_at(0, invalid, "the presentation '" + std::string(1, static_cast<char>(presentation)) +
+                                           "' is not allowed for " + what);
+    };
+    switch (kind) {
+    case FormatKind::Text:
+        text_rules("text");
+        break;
+    case FormatKind::Boolean:
+        if (integer_presentation(presentation)) integer_rules("an integer presentation of a bool");
+        else if (presentation != 0 && presentation != 's')
+            fail_at(0, invalid, "the presentation '" + std::string(1, static_cast<char>(presentation)) +
+                                    "' is not allowed for a bool");
+        else text_rules("a bool");
+        break;
+    case FormatKind::Signed:
+    case FormatKind::Unsigned:
+        integer_rules("an integer");
+        break;
+    case FormatKind::Float:
+        if (presentation != 0 && presentation != 'f' && presentation != 'F' && presentation != 'e' &&
+            presentation != 'E' && presentation != 'g' && presentation != 'G' && presentation != 'a' &&
+            presentation != 'A')
+            fail_at(0, invalid, "the presentation '" + std::string(1, static_cast<char>(presentation)) +
+                                    "' is not allowed for a float");
+        else if (!dynamic_precision && precision > 100)
+            fail_at(0, "floating-point precision exceeds 100", "a float takes at most 100 digits");
+        break;
+    }
+    (void)dynamic_width;
+    return problem;
+}
+
+} // namespace
+
+IrNode Lowering::interpolation(const Expr& expr, Context& context) {
+    const auto& syntax = *expr.interpolation;
+    const std::string missing = "interpolated strings require Std.Io.Console";
+    const auto variadic = library_module("std/core/variadic.nra", "Variadic", expr.span, context, missing);
+    const auto argument = own_member(variadic, "Argument");
+    if (argument == no_symbol || symbol(argument).kind != SymbolKind::Enum)
+        throw Diagnostic(expr.span, "Std.Core.Variadic must export its Argument enum").with_code("E0899");
+    resolve(argument);
+    const auto argument_type = symbol(argument).type;
+    const auto console = library_module("std/io/console.nra", "Console", expr.span, context, missing);
+    const auto vformat = member(console, "vformat", true);
+    if (vformat == no_symbol || symbol(vformat).kind != SymbolKind::Function)
+        throw Diagnostic(expr.span, "Std.Io.Console must export vformat").with_code("E0899");
+    resolve(vformat);
+
+    // Each hole in written order: lowered, packed, and its kind noted.
+    std::vector<IrNode> packed;
+    std::vector<std::optional<FormatKind>> kinds;
+    std::vector<IrType> types;
+    for (std::size_t i = 0; i < expr.operands.size(); ++i) {
+        const auto& hole = expr.operands[i];
+        auto input = expression(hole, context);
+        if (input.type.kind == TypeKind::Void)
+            throw Diagnostic(hole.span, "a hole of type void has no value to format").with_code("E0416");
+        if (input.op == IrOp::Reference && input.symbol != no_symbol &&
+            symbol(input.symbol).kind == SymbolKind::Variant) {
+            if (!symbol(input.symbol).payload_types.empty())
+                throw Diagnostic(hole.span, "enum variant '" + symbol(input.symbol).name + "' requires a payload")
+                    .with_code("E0427");
+            if (has_enum_payload(program_, symbol(input.symbol).owner)) input.op = IrOp::EnumConstruct;
+        } else if (input.op == IrOp::Reference && input.type.kind == TypeKind::Callable && input.symbol != no_symbol &&
+                   symbol(input.symbol).kind == SymbolKind::Function) {
+            input = bind_function(std::move(input), context);
+        } else if (input.op == IrOp::Reference || input.type.kind == TypeKind::Module ||
+                   (input.type.kind == TypeKind::Callable && !is_function_value(input.type))) {
+            throw Diagnostic(hole.span, "expected a value").with_code("E0422");
+        }
+        types.push_back(input.type);
+        std::string variant = "Text";
+        std::optional<FormatKind> kind = FormatKind::Text;
+        const IrType* widened = nullptr;
+        if (const auto integer = specified_integer_format(input.type)) {
+            variant = integer->is_signed ? "Signed" : "Unsigned";
+            kind = integer->is_signed ? FormatKind::Signed : FormatKind::Unsigned;
+            widened = integer->is_signed ? &int64_type : &uint64_type;
+        } else if (input.type.kind == TypeKind::Float) {
+            variant = input.type.name == "float16" ? "Floating16" : input.type.name == "bfloat16" ? "BFloating16"
+                      : input.type.name == "float32" ? "Floating32" : "Floating";
+            kind = FormatKind::Float;
+        } else if (input.type.kind == TypeKind::Bool) {
+            variant = "Boolean";
+            kind = FormatKind::Boolean;
+        } else if (class_reference(input.type)) {
+            variant = "Object";
+        } else if (input.type != string_type) {
+            if (!supports_value_members(program_, input.type))
+                throw Diagnostic(hole.span, "cannot pack " + describe(input.type) +
+                                                " as a variadic argument; pass its text representation explicitly")
+                    .with_code("E0403");
+            auto text = node(IrOp::ValueText, hole.span, string_type);
+            text.operands.push_back(std::move(input));
+            input = std::move(text);
+        }
+        if (widened && *widened != input.type) {
+            auto converted = node(IrOp::Convert, hole.span, *widened);
+            converted.operands.push_back(std::move(input));
+            input = std::move(converted);
+        }
+        auto value = node(IrOp::EnumConstruct, hole.span, argument_type);
+        value.symbol = own_member(argument, variant);
+        value.operands.push_back(std::move(input));
+        packed.push_back(std::move(value));
+        kinds.push_back(kind);
+    }
+    for (const auto& hole : syntax.holes) {
+        const auto integer_hole = [&](std::size_t index) {
+            return index < kinds.size() &&
+                   (kinds[index] == FormatKind::Signed || kinds[index] == FormatKind::Unsigned);
+        };
+        for (const auto nested : hole.nested) {
+            if (!integer_hole(nested))
+                throw Diagnostic(expr.operands[nested].span, "dynamic width or precision requires an integer")
+                    .with_code("E0486")
+                    .label("this nested hole is " + describe(types[nested]))
+                    .help("a width or precision hole holds an expression of an integer type");
+        }
+        if (!hole.specification_span) continue;
+        const auto problem = check_specification(hole.specification, *kinds[hole.operand], integer_hole);
+        if (!problem) continue;
+        auto at = *hole.specification_span;
+        if (hole.plain_specification && problem->offset > 0 && problem->offset < at.length) {
+            at = Span{at.file, at.line, at.column + problem->offset, at.offset + problem->offset, 1};
+        }
+        throw Diagnostic(at, problem->message).with_code("E0486")
+            .label(problem->reason)
+            .label(expr.operands[hole.operand].span,
+                   "this hole is " + describe(types[hole.operand]));
+    }
+    auto pattern = node(IrOp::String, expr.span, string_type);
+    pattern.text = syntax.pattern;
+    auto values = node(IrOp::Collection, expr.span, collection_type(TypeKind::Array, argument_type));
+    values.operands = std::move(packed);
+    auto result = node(IrOp::VirtualCall, expr.span, string_type);
+    result.symbol = vformat;
+    result.operands.push_back(reference(console, expr.span, context, false));
+    result.operands.push_back(std::move(pattern));
+    result.operands.push_back(std::move(values));
+    return result;
+}

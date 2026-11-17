@@ -90,6 +90,10 @@ struct Expr {
         // `spawn call` (Concurrency.md section 4.4): the call is operand 0.
         // The span starts at the contextual keyword, which is five bytes long.
         Spawn,
+        // `$"text {hole:spec}"` (docs/design/Calls030.md): the operands are
+        // the hole expressions in written order, nested width and precision
+        // holes included, and `interpolation` describes them.
+        Interpolation,
     };
 
     Kind kind;
@@ -117,6 +121,28 @@ struct Expr {
     // otherwise "" for the callee and for each positional argument.
     std::vector<std::string> labels{};
     std::vector<Span> label_spans{};
+    std::shared_ptr<const struct InterpolationSyntax> interpolation{};
+};
+
+// The pattern and holes of an interpolated string. The pattern is the
+// format string the holes are formatted with: its text with braces doubled,
+// and each hole as `{index}` or `{index:specification}`, where a nested hole
+// in the specification is `{index}` too.
+struct InterpolationHole {
+    // The operand of the value, and the operands of its nested holes.
+    std::size_t operand;
+    std::vector<std::size_t> nested;
+    // The specification as the pattern writes it, and where it is written.
+    std::string specification;
+    std::optional<Span> specification_span;
+    // Whether the specification is one piece of text, so that an offset in
+    // it is an offset in the source.
+    bool plain_specification = true;
+};
+
+struct InterpolationSyntax {
+    std::string pattern;
+    std::vector<InterpolationHole> holes;
 };
 
 struct Statement {

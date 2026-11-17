@@ -1,0 +1,4 @@
+// A hole of type void (edge case 81).
+let nothing = func {
+};
+let text = $"{nothing()}";

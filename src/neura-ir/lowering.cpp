@@ -24,6 +24,7 @@
 #include <array>
 #include <charconv>
 #include <cmath>
+#include <functional>
 #include <cstdint>
 #include <limits>
 #include <map>
@@ -506,6 +507,8 @@ private:
                           bool infer_result);
     static bool untyped_lambda_expr(const Expr& expr);
     std::string function_text(const IrType& type) const;
+    // Interpolated strings.
+    IrNode interpolation(const Expr& expr, Context& context);
     // Extension sets.
     std::map<std::string, std::vector<SymbolId>, std::less<>> extension_index_;
     std::size_t extensions_indexed_ = 0;
@@ -3193,6 +3196,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     }
     case ExprKind::Lambda:
         return lambda(*expr.lambda, context, expected);
+    case ExprKind::Interpolation:
+        return interpolation(expr, context);
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {
