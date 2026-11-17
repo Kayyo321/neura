@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <utility>
+#include <string_view>
 #include <vector>
 
 namespace neura {
@@ -165,6 +166,12 @@ enum class IrOp {
     // for the operation its text names; the scheduler defines each
     // operation's arguments and result.
     TaskScope, Spawn, SchedulerCall,
+    // Class hooks (docs/design/Hooks030.md). Present only after
+    // elaborate_class_hooks and never written to .nir. HookRead is one read
+    // event on its operand's value; HookAdmit is one admission of its
+    // operand to a destination of the node's type, whose previous value is
+    // what its parent writes over, or the field `symbol` names.
+    HookRead, HookAdmit,
     // NeuraIR 1.12 (docs/design/Matching030.md, any.hpp). AnyPack has one
     // operand of a type an `any` can hold and yields an `any`. AnyTag
     // yields the uint32 tag of its `any` operand. AnyUnpack yields the
@@ -174,6 +181,16 @@ enum class IrOp {
     // reference is unpacked as the root class.
     AnyPack, AnyTag, AnyUnpack
 };
+
+// A MakeClosure (or its specialized Allocate) carries the written
+// construction form in its text. The empty form is a bare lambda or named
+// function; a bare bound value records the receiver form for diagnostics.
+inline constexpr std::string_view bound_closure = "$bound";
+inline constexpr std::string_view owned_lambda = "$new_func";
+inline constexpr std::string_view owned_bound = "$new_bound";
+inline constexpr std::string_view task_closure = "$task_closure";
+inline constexpr std::string_view region_reference = "$region_reference";
+inline constexpr std::string_view static_reference = "$static_reference";
 
 struct IrNode {
     IrOp op;
@@ -201,6 +218,10 @@ struct IrNode {
     // optimizer inlined this node from, or 0 for a node that was not inlined.
     std::uint32_t inline_site = 0;
 };
+
+inline bool explicitly_owned_closure(const IrNode& node) {
+    return node.text == owned_lambda || node.text == owned_bound || node.text == task_closure;
+}
 
 // A call the optimizer replaced with a copy of the callee's body. `parent`
 // is the site of the call itself (one plus its index), or 0 when the call was
@@ -268,6 +289,9 @@ struct IrProgram {
     // information from lowering, for navigation and rename; not part of a
     // .nir file, and later stages leave it as lowering wrote it.
     std::vector<std::pair<Span, SymbolId>> name_uses{};
+    // Set by elaborate_class_hooks on a program whose events it derived; not
+    // part of a .nir file.
+    bool hooks_elaborated = false;
 };
 
 // The source loader can supply this trusted library file and retry lowering.

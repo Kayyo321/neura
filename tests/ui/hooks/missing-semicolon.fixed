@@ -1,0 +1,5 @@
+// Case 6: a clause ends with ';', reported at the next token.
+let Session = class (
+    | get: instance;
+    export let user: string = "";
+);

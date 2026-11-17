@@ -116,6 +116,8 @@ std::string_view spelling(IrOp op) {
     case IrOp::AnyPack: return "any_pack";
     case IrOp::AnyTag: return "any_tag";
     case IrOp::AnyUnpack: return "any_unpack";
+    case IrOp::HookRead: return "hook_read";
+    case IrOp::HookAdmit: return "hook_admit";
     }
     return "<invalid>";
 }

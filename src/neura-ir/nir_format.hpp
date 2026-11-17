@@ -21,8 +21,13 @@ inline constexpr std::uint16_t nir_minor_version = 12;
 // NeuraIR 1.12, the matching milestone (docs/design/Matching030.md): a
 // return inside a scoped value, which the postfix `?` lowers to, and the
 // type `any` with its operations. A file uses it only when its program
-// does. Minor 11 is another milestone's; the release fixes the numbers.
+// does.
 inline constexpr std::uint16_t nir_any_minor = 12;
+
+// The minor version that adds class hooks (docs/design/Hooks030.md): the
+// attributes hook.get, hook.set and hook.of. A module that declares a clause
+// is written with it, so that an older reader refuses the module.
+inline constexpr std::uint16_t nir_hooks_minor = 11;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 

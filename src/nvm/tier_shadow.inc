@@ -538,6 +538,10 @@
                       [] { return std::string("released handle intervals"); })) {
             return d.text;
         }
+        if (static_handles_ != other.static_handles_) {
+            d.note("static region handles", "one set", "another");
+            return d.text;
+        }
         if (released_handles_ != other.released_handles_) {
             d.note("released handles", "one set", "another");
             return d.text;
@@ -1106,8 +1110,13 @@
             const auto handle = x;
             x = heap_.next_live(x);
             y = other.heap_.next_live(y);
-            if (Heap::same(heap_, a, other.heap_, b)) continue;
             const auto item = [&] { return "heap handle " + std::to_string(handle); };
+            // Whether a storage region owns the entry (NVR 1.7), which
+            // Heap::same does not read.
+            if (d.differs(heap_.in_region(a), other.heap_.in_region(b), [&] { return item() + " region entry"; })) {
+                return true;
+            }
+            if (Heap::same(heap_, a, other.heap_, b)) continue;
             const auto a_kind = heap_.kind(a);
             const auto b_kind = other.heap_.kind(b);
             const auto cells = shadow_cell_count(a);
@@ -1224,6 +1233,15 @@
             break;
         case Perturb::StackCells:
             ++live_stack_cells_;
+            done = true;
+            break;
+        case Perturb::RegionDepth:
+            if (frames_.regions.empty()) break;
+            ++frames_.regions.back().depth;
+            done = true;
+            break;
+        case Perturb::ReleasedHandles:
+            note_released(heap_.last_handle() + 1);
             done = true;
             break;
         case Perturb::Steps:

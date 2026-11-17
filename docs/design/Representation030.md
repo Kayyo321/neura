@@ -45,9 +45,10 @@ Five enums in the repository close a cycle today:
 
 `JsonValue` and the `Tree` of `tests/backend/programs/generic-enums.nra` recurse only through lists, which are references, so they close none. Step 3 handles the two error types. The others migrate in the change that enforces the rule.
 
-Two corrections of fact, 2026-11-16, from step 2's analysis run over every program in `tests/` and `examples/`; both await the owner's confirmation:
+Two corrections of fact, 2026-11-16, from step 2's analysis run over every program in `tests/` and `examples/`, and one from step 7 of the storage milestone (2026-11-17); all await the owner's confirmation:
 
 - The list above first said six enums, with two `Tree` enums in `tests/backend/programs`. The analysis finds one there.
+- Step 7 of the storage milestone, which enforces the rule, found one more: the `Tree` example of the agent reference `prompts/neura/references/syntax.md`. It migrated with the other three that remained after step 3.
 - NeuraIR keeps payload types but not payload field names, and the analysis reads NeuraIR, so it can also check a program built from `.nir`. The path therefore names a payload by its position from zero: `Tree -> Tree.Branch.0: Tree` rather than the example's `Tree.Branch.left`. Field names in the path need NeuraIR to record them, which the change that enforces the rule can add if it is wanted.
 
 ## Error chains

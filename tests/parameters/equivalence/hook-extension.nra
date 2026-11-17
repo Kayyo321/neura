@@ -1,0 +1,11 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.extensions hooks = import:App.HookCalls;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let value = new hooks.Session("v");
+        value.greet(right: new hooks.Session("r"), left: new hooks.Session("l"));
+        console.print_line(hooks.events());
+        return program.ExitCode.Ok;
+    };
+);

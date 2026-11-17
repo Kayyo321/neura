@@ -2,7 +2,7 @@
 
 This note fixes the design of the 0.3.0 calls milestone before it is implemented, as [the 0.3.0 baseline](Release030.md) requires: contextual inference of type arguments and lambda parameters, named arguments and constant defaults, explicit extension sets, interpolated strings, and `nameof`. It builds on [grouped parameters and the constructor shorthand](Parameters030.md) and on [storage and construction](Storage030.md), and it is a design note in their sense: rows move to [Core language](../lang/CoreLanguage.md), [Polymorphism](../lang/Polymorphism.md), [Modules](../lang/Modules.md) and [Types](../lang/Types.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch the same day, steps 2 to 11 of the [order of work](#order-of-work). The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; a row marked "implemented, proposed" is in the compiler and still awaits it. Step 12, the admission events of the class-hook milestone, is not implemented. Later changes to a row are made here, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation).
+Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch the same day, steps 2 to 12 of the [order of work](#order-of-work). The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; a row marked "implemented, proposed" is in the compiler and still awaits it. Later changes to a row are made here, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation).
 
 No feature of this note adds a NeuraIR operation, an NVR record or a runtime primitive. Each lowers to operations NeuraIR 1.10 already has, and a program that uses none of them builds the image it builds today, byte for byte.
 
@@ -51,7 +51,7 @@ A named call is evaluated in the order it is written, not in parameter order.
 | Step | Event |
 | --- | --- |
 | 1 | The callee is evaluated: the receiver of a method call or of an extension call, the function value, or nothing for a named function. |
-| 2 | Each written argument, left to right: its expression is evaluated, then the value is admitted to its parameter. Admission is the conversion the parameter requires: a selected [object cast](../lang/Types.md#object-casts), the binding of a [primitive reference](../lang/Types.md#primitive-references), and the parameter's class admission hook once the class-hook milestone defines it. An argument is admitted before the next written argument is evaluated. |
+| 2 | Each written argument, left to right: its expression is evaluated, then the value is admitted to its parameter. Admission is the conversion the parameter requires: a selected [object cast](../lang/Types.md#object-casts), the binding of a [primitive reference](../lang/Types.md#primitive-references), and the parameter's linked class admission hook. An argument is admitted before the next written argument is evaluated. |
 | 3 | Each omitted parameter, in declaration order: its default is materialized and admitted. |
 | 4 | The admitted values are moved to their parameter positions. This is transport: it evaluates nothing and runs no hook. |
 | 5 | The call is made. |
@@ -464,4 +464,4 @@ Choices the rows leave open, or where a row could not be implemented as written,
 | A lambda with untyped parameters infers its result type only from an expression body. A block body without a written result type is `E0419` when the call waits on its result. | The body is lowered once; a block's result would need its returns before its type is known. |
 | An extension function is called with the static qualifier of its module, as `alias.name(value, ...)` calls it. | It is the ordinary call the rows name. |
 | Argument labels and `nameof` operands are recorded for the editor in `IrProgram::name_uses`, which no later stage reads and a `.nir` file does not hold. | Neither leaves a node in NeuraIR, and navigation and rename need them. |
-
+| A linked class admission runs when its written argument is evaluated. An omitted nil with a setter runs after all written arguments. A spawn admits in its parent and the task reads the saved parameters directly. | Reordering, constructor field initialization, virtual and extension dispatch, casts, traps and spawned calls have source and prebuilt IR traces. Existing calls without hooks retain their executable form. |

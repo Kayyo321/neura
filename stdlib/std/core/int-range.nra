@@ -39,7 +39,7 @@ export let IntRange = module (
         };
 
         /// @brief Progressions compare by their defining bounds and step.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is IntRange)) {
                 return false;

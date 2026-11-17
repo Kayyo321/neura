@@ -1,0 +1,27 @@
+// The parent admits task arguments. The child receives both saved values.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let log: string = "";
+#Immutable
+let Session = class (
+    | set: { log += "s"; return value; };
+
+    export let init = func(label: string) { log += label; };
+);
+let accept = func(first: Session = nil, second: Session) -> int => 7;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        scope {
+            let handle = spawn accept(second: new Session("2"), first: new Session("1"));
+            if (handle.join() != 7) { return program.ExitCode.Failure; }
+            log += "c";
+        }
+        scope {
+            let handle = spawn accept(second: new Session("2"));
+            if (handle.join() != 7) { return program.ExitCode.Failure; }
+            log += "c";
+        }
+        console.print_line(log);
+        return program.ExitCode.Ok;
+    };
+);

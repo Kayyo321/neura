@@ -4,7 +4,7 @@ under limit sweeps, so that a runtime change that alters anything observable
 shows up as a difference with a reproduction.
 
 The runtime contract (docs/runtime/NVM.md, "Execution tiers") is that one image
-and one input give the same exit status, trap, steps, peak heap cells, standard
+and one input give the same exit status, trap, steps, peak heap and stack cells, standard
 output, and profile at every tier and in every mode. Hand-written tests cover the
 shapes someone thought of. This tool covers shapes nobody did:
 
@@ -98,7 +98,7 @@ FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
     "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
-    "sqrt-special", "tuples",
+    "sqrt-special", "tuples", "enums", "class-hooks",
 ]
 
 
@@ -164,6 +164,7 @@ IMPORTS = {
     "lists": "Std.Collections.Lists",
     "float64s": "Std.Core.Float64",
     "float32s": "Std.Core.Float32",
+    "optional": "Std.Core.Optional",
 }
 
 
@@ -504,13 +505,13 @@ def section_closures(p, k):
     bit = p.fault("closure-division")
     a, b = p.between(2, 9), p.between(1, 30)
     p.declarations.append(fill("""let s${k}_make = func(offset: int64) -> func(int64) -> int64 {
-    return func(value: int64) -> int64 {
+    return new func(value: int64) -> int64 {
         return (value * $a + offset) & Mask;
     };
 };
 
 let s${k}_compose = func(first: func(int64) -> int64, second: func(int64) -> int64) -> func(int64) -> int64 {
-    return func(value: int64) -> int64 {
+    return new func(value: int64) -> int64 {
         return second(first(value));
     };
 };
@@ -522,7 +523,13 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     let bump = func(value: int64) -> int64 {
         return value + scale;
     };
-    let check: int64 = 0;
+    let state: int64 = scale;
+    last alias: &int64 = state;
+    last increment = func {
+        alias += 1;
+    };
+    increment();
+    let check: int64 = state;
     for (let i: int32 = 0; i < size * $m; i++) {
         check = mix(check, both(adders[i % 3](bump(check) & 255)));
     }
@@ -558,7 +565,15 @@ def section_collections(p, k):
         "items.remove_at(items.length);",
         "check = mix(check, grid[1][items.length + 5] as int64);",
     ])
-    p.declarations.append(fill("""let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    p.declarations.append(fill("""let s${k}_grid = func(size: int32) -> int32[][] {
+    last row = 0 .. size;
+    {
+        last middle = [size, $a];
+        return [row, middle, row];
+    }
+};
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
     let items: $E[list] = new;
     for (let i: int32 = 0; i < size * $m + 3; i++) {
         items.append($make);
@@ -574,13 +589,21 @@ def section_collections(p, k):
         }
     }
     items.append(items[0]);
-    let grid: int32[][] = [[1, 2, $b], [size, $a], [3]];
+    let grid = s${k}_grid(4);
+    grid[2][2] = $b;
     let marks: bool[] = [true, false, true, false];
     for (let i: int32 = 0; i < items.length; i++) {
         let swap = items[i];
         items[i] = items[items.length - 1 - i];
         items[items.length - 1 - i] = swap;
         marks[i % 4] = !marks[i % 4];
+    }
+    for (let i = 0; i < items.length; i++) {
+        last iteration = s${k}_grid(i % 4);
+        if (i % 2 == 0) {
+            continue;
+        }
+        check = mix(check, (iteration[0].length + iteration[2].length) as int64);
     }
     let flags: int64 = 0;
     for (let flag in marks) {
@@ -972,6 +995,162 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     p.calls.append(k)
 
 
+def section_enums(p, k):
+    """Payload enums stored inline: a random choice of variants whose payloads share pooled words, in locals,
+    parameters, results, class fields, a tuple field, a module global, a closure capture and the elements of lists
+    and arrays; each value is matched and folded into the checksum, and its text is printed."""
+    p.feature("enums", "classes", "lists", "arrays", "closures")
+    p.use("optional")
+    a, b, c = p.between(2, 9), p.between(3, 11), p.between(1, 6)
+    E = f"S{k}Shape"
+    pair = p.pick([("[int32, string]", "[i, \"p\" + i.to_string()]", "(x[0] + x[1].byte_length) as int64",
+                    "x[1]"),
+                   ("[int64, bool]", "[(i as int64) * $b, i % 2 == 0]", "x[0] + (x[1] ? 5 : 2)",
+                    "x[1].to_string()")])
+    variants = [
+        ("Dot", "Dot", f"{E}.Dot", "1", "\"dot\""),
+        ("Count", "Count(int32)", f"{E}.Count(i * $a)", "v as int64", "\"count \" + v.to_string()"),
+        ("Big", "Big(int64, int32)", f"{E}.Big((i as int64) * $b, i)", "big + (small as int64)",
+         "\"big \" + big.to_string()"),
+        ("Name", "Name(string, int32)", f"{E}.Name(\"n\" + i.to_string(), i + $a)",
+         "(text.byte_length + v) as int64", "\"name \" + text"),
+        ("Pair", f"Pair({pair[0]})", f"{E}.Pair({pair[1]})", pair[2], "\"pair \" + " + pair[3]),
+        ("Maybe", "Maybe(optional.Optional<int32>)",
+         f"{E}.Maybe(i % 2 == 0 ? optional.Optional<int32>.Some(i) : optional.Optional<int32>.None)",
+         "optional.value_or<int32>(o, 13) as int64", "\"maybe \" + optional.value_or<int32>(o, -1).to_string()"),
+        ("Rows", "Rows(int32[list])", f"{E}.Rows(new([i, i + 1, i * $c]))", "(rows.length + rows[0]) as int64",
+         "\"rows \" + rows.length.to_string()"),
+        ("Real", "Real(float64)", f"{E}.Real((i as float64) * 0.5)", "(r * 4.0) as int64",
+         "\"real \" + r.to_string()"),
+    ]
+    bindings = {"Dot": "", "Count": "(v)", "Big": "(big, small)", "Name": "(text, v)", "Pair": "(x)",
+                "Maybe": "(o)", "Rows": "(rows)", "Real": "(r)"}
+    chosen = p.random.sample(variants, p.between(3, len(variants)))
+    if not any(name == "Count" for name, *_ in chosen):
+        chosen.append(variants[1])
+    declaration = ", ".join(decl for _, decl, _, _, _ in chosen)
+    makes = "\n".join(f"    if (pick == {n}) {{ return {make}; }}" for n, (_, _, make, _, _) in enumerate(chosen[:-1]))
+    reads = "\n".join(f"        {E}.{name}{bindings[name]} => {read}," for name, _, _, read, _ in chosen)
+    texts = "\n".join(f"        {E}.{name}{bindings[name]} => {text}," for name, _, _, _, text in chosen)
+    p.declarations.append(fill("""let $E = enum ($D);
+
+let s${k}_global: $E = $first;
+
+let s${k}_make = func(i: int32) -> $E {
+    last pick = i % $n;
+$makes
+    return $last;
+};
+
+let s${k}_read = func(s: $E, acc: int64) -> int64 => mix(acc, match (s) {
+$reads
+});
+
+let s${k}_text = func(s: $E) -> string => match (s) {
+$texts
+};
+
+let S${k}Holder = class (
+    export let cursor: $E = $first;
+    export let marks: [int32, $E] = [0, $first];
+    export let rows: $E[list] = new;
+    export let put = func(next: $E, index: int32) {
+        marks = [index, cursor];
+        cursor = next;
+        rows.append(next);
+    };
+);
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let holder = new S${k}Holder();
+    let acc: int64 = 0;
+    for (let i: int32 = 0; i < size + 5; i++) {
+        holder.put(s${k}_make(i), i);
+        acc = s${k}_read(holder.cursor, acc);
+        acc = s${k}_read(holder.marks[1], mix(acc, holder.marks[0] as int64));
+        if (i % 3 == 0) {
+            holder.rows[i / 3] = s${k}_make(i * 2 + 1);
+        }
+    }
+    let table: $E[] = [s${k}_make(size), s${k}_make(size + 1), s${k}_make(size + 2)];
+    for (let s in table) {
+        acc = s${k}_read(s, acc);
+    }
+    for (let s in holder.rows) {
+        acc = s${k}_read(s, acc);
+    }
+    let captured = s${k}_make(size + $c);
+    let probe = func(x: int32) -> $E => match (captured) {
+        $E.Count(v) => $E.Count(v + x),
+        _ => s${k}_make(x),
+    };
+    s${k}_global = probe(size);
+    acc = s${k}_read(s${k}_global, acc);
+    console.println("s$k enums {} {} {} {}", holder.rows.length, s${k}_text(holder.cursor),
+                    s${k}_text(holder.rows[holder.rows.length - 1]), s${k}_text(s${k}_global));
+    return acc;
+};
+""", k=k, E=E, D=declaration, n=len(chosen), c=c,
+                                makes=makes.replace("$a", str(a)).replace("$b", str(b)).replace("$c", str(c)),
+                                last=chosen[-1][2].replace("$a", str(a)).replace("$b", str(b)).replace("$c", str(c)),
+                                first=re.sub(r"\bi\b", "(0)", chosen[0][2]).replace("$a", str(a)).replace("$b", str(b))
+                                .replace("$c", str(c)),
+                                reads=reads, texts=texts))
+    p.calls.append(k)
+
+
+def section_class_hooks(p, k):
+    """Carry live and nil policies through calls, inline values and collection elements."""
+    p.feature("class-hooks", "classes", "lists", "arrays", "tuples")
+    codes = p.random.sample(range(1, 24), 5)
+    p.declarations.append(fill("""let s${k}_trace: int64 = 0;
+
+let S${k}Item = class (
+    | get: {
+        s${k}_trace = mix(s${k}_trace, instance == nil ? $a : $b);
+        return instance;
+    };
+    | set: {
+        s${k}_trace = mix(s${k}_trace, instance == nil ? $c : $d);
+        return value;
+    };
+
+    export let code = func() -> int64 => $b;
+);
+
+let S${k}Alternate = class:S${k}Item (
+    | set.override: {
+        s${k}_trace = mix(s${k}_trace, $e);
+        return value;
+    };
+);
+
+let s${k}_pass = func(value: S${k}Item) -> S${k}Item => value;
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let previous: S${k}Item = nil;
+    last saved: S${k}Item[list] = new;
+    for (let i = 0; i < size; i++) {
+        last value: S${k}Item = i % 3 == 0 ? new S${k}Item() : new S${k}Alternate();
+        last row: S${k}Item[] = [value, previous];
+        previous = s${k}_pass(row[i % 2]);
+        last pair: [S${k}Item, int32] = [previous, i];
+        saved.append(pair[0]);
+        saved[i] = i % 2 == 0 ? (nil as S${k}Item) : row[0];
+    }
+    let total: int64 = 0;
+    for (let value in saved) {
+        if (value != nil) {
+            total = mix(total, value.code());
+        }
+    }
+    console.println("s$k class hooks {} {}", s${k}_trace, total);
+    return mix(s${k}_trace, total);
+};
+""", k=k, a=codes[0], b=codes[1], c=codes[2], d=codes[3], e=codes[4]))
+    p.calls.append(k)
+
+
 SECTIONS = [
     (section_integers, 100),
     (section_loops, 80),
@@ -987,7 +1166,7 @@ SECTIONS = [
 ]
 
 
-def build_program(seed):
+def build_program(seed, *, class_hooks=True):
     """The program for a seed: its source text and the argument list to run it with."""
     p = Program(seed)
     p.use("console", "program", "int32s", "result")
@@ -1027,6 +1206,22 @@ def build_program(seed):
         section_tuples(p, k)
         # Its declaration stays last, so the sections above keep their text; its call goes first, so that a
         # fault trap in an earlier section cannot end the run before the tuples have run.
+        p.calls.remove(k)
+        p.calls.insert(0, k)
+    # Payload enums come last, from a source of their own, and their call runs first, for the same reasons.
+    p.random = random.Random(f"enums {seed}")
+    if p.chance(75):
+        k = p.next_id
+        p.next_id += 1
+        section_enums(p, k)
+        p.calls.remove(k)
+        p.calls.insert(0, k)
+    # The old oracle can compare the common corpus by omitting this section.
+    p.random = random.Random(f"class hooks {seed}")
+    if class_hooks and p.chance(50):
+        k = p.next_id
+        p.next_id += 1
+        section_class_hooks(p, k)
         p.calls.remove(k)
         p.calls.insert(0, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)
@@ -1195,7 +1390,7 @@ class Runner:
         return Outcome(result.returncode, result.stdout, result.stderr)
 
 
-STATS = re.compile(rb"stats: steps (\d+), peak heap cells (\d+)")
+STATS = re.compile(rb"stats: steps (\d+), peak heap cells (\d+)(?:, peak stack cells (\d+))?")
 HEAP_ENTRY = re.compile(rb"heap limit exceeded: allocation of (\d+) cells before entry")
 
 
@@ -1224,6 +1419,8 @@ def limit_options(kind, value):
         return ["--max-steps", str(value)]
     if kind == "heap":
         return ["--max-heap-cells", str(value)]
+    if kind == "stack":
+        return ["--max-stack-cells", str(value)]
     if kind == "frames":
         return ["--max-frames", str(value)]
     if kind == "quantum":
@@ -1254,7 +1451,7 @@ class SeedResult:
 
 def check_seed(seed, coarse, runner, work, modes):
     """Builds a seed's program, runs it at tier 0 and in every mode, and sweeps the limits. Each mode's first
-    difference in each kind of run (no limit, steps, heap, frames, quantum) is a failure."""
+    difference in each kind of run (no limit, steps, heap, stack, frames, quantum) is a failure."""
     result = SeedResult(seed)
     started = time.monotonic()
     source, arguments, program = build_program(seed)
@@ -1328,6 +1525,13 @@ def check_seed(seed, coarse, runner, work, modes):
         heap_points = list(range(low, high + 1))
     for value in heap_points:
         compare("heap", value, limit_options("heap", value))
+
+    peak_stack = int(stats.group(3) or 0)
+    if peak_stack:
+        top = peak_stack + 2
+        stack_points = range(1, top + 1) if top <= 500 and coarse == 1 else spread(1, top, max(2, 200 // coarse))
+        for value in stack_points:
+            compare("stack", value, limit_options("stack", value))
 
     # The deepest call depth: the smallest frame limit under which the run does not trap on the limit.
     def trapped(limit):

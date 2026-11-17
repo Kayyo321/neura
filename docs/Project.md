@@ -29,6 +29,8 @@ When source imports prebuilt NeuraIR, the linker verifies each artifact and rema
 
 Primitive reference bindings name a mutable location in typed NeuraIR. After linkage and before specialization, the compiler moves address-taken storage into heap cells and rewrites ordinary accesses and aliases to use the same cell. Constructors prepare addressed fields and startup prepares addressed global storage. Calls and layout access use the existing object operations. The NVM traces the cell for as long as any alias can reach it.
 
+The compiler derives [class hook](lang/Types.md#class-hooks) events after specialization. The [task-safety](lang/Concurrency.md#52-task-safe-calls) check includes the calls introduced by those events before optimization or conversion.
+
 Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
 
 Class static fields lower to global slots in a class-owned scope. NeuraIR
@@ -115,12 +117,12 @@ The execution contract defines initial state, how and when state commits, how co
 | --- | --- |
 | Bindings and assignment | Immutable values can travel on edges. Mutable values use explicit state slots or memory operations where their lifetime requires it. |
 | Functions | A typed call interface passes arguments and returns values. Reusable function circuits can share topology and weights across calls, with independent locals for each active invocation. |
-| Closures | A function value uses an object handle whose layout describes its captured values. The signature supplies a common interface and the environment layout selects the function body using ordinary virtual dispatch. |
-| Tuples and enum payloads | A tuple is a run of value words, stored inline in frame slots, parameters, results, fields, globals and collection elements ([Backend](Backend.md#tuples-are-words)). A payload enum is a typed object layout that stores an enum discriminant and the payloads of its variants, a tuple payload as several fields. A match reads the discriminant and selects the region that can read the active payload. |
+| Closures | A function value uses an object handle whose layout describes its captures. The converter emits a static descriptor, a region object, or a heap object according to its construction form. Its signature and layout select the function body through virtual dispatch. |
+| Tuples and enum payloads | A tuple is a run of value words, stored inline in frame slots, parameters, results, fields, globals and collection elements. A payload enum is words too: a `uint32` discriminant, then its payloads' words pooled by type, each variant using the first words of each type ([Backend](Backend.md#tuples-and-enums-are-words)). A match reads the discriminant and selects the region that reads the active payload's words. Where the runtime carries one word, either is boxed. |
 | Loops and recursion | A transition circuit can update control state and revisit a region. Recursive calls require storage for active frames and return continuations, with a defined limit for finite targets. |
 | Classes and objects | Classes define layouts and method circuits. Each object has its own state, and method calls pass a receiver reference to shared circuits. The umbrella `class` type preserves identity and dynamic type. Nil uses the reserved zero reference. |
 | Dynamic dispatch | The runtime reads the receiver's layout tag. A generated circuit selects the implementation using class and interface subtype links. A checked cast preserves the handle and checks the target layout relationship. |
-| Collections and lifecycle | Indexing, allocation, initialization, and destruction require explicit bounds, lifetime rules, and failure behavior before their lowering is defined. |
+| Collections and lifecycle | An array belongs to a lexical region. The converter emits region allocation, owned result transfer, and releases at lexical exits. The runtime owns stack-cell accounting and storage teardown. Lists grow in heap storage. |
 
 ### Runtime boundary
 

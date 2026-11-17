@@ -1,0 +1,22 @@
+// Each test runs in a fresh execution, so each runs the startup blocks again
+// and sees the state they leave.
+let console = import:Std.Io.Console;
+let test = import:Std.Test;
+
+let runs: int32 = 0;
+
+static scope {
+    runs += 1;
+    console.print_line("startup block, run " + runs.to_string());
+}
+
+let StartupSuite = module (
+    export let test_one_run = func() -> void {
+        test.assert_equal_int32(1, runs);
+        runs += 10;
+    };
+
+    export let test_still_one_run = func() -> void {
+        test.assert_equal_int32(1, runs);
+    };
+);

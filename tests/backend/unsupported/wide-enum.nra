@@ -1,0 +1,18 @@
+// expect: 7:5 the enum Wide has 71 value words, more than the inline limit of 64
+// A payload enum's words are its tag and its payload words pooled by type: each type gets the most words any one
+// variant needs, here 40 int32 words and 30 int64 words. More than 64 is E0449.
+let program = import:Std.Program;
+
+let Wide = enum (
+    Narrow([int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int,
+            int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int, int]),
+    Long([int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64,
+          int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64, int64]),
+    Nothing
+);
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

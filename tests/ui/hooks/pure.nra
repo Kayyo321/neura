@@ -1,0 +1,17 @@
+// Case 52: a #Pure function whose read runs a getter that writes is not pure;
+// the report reaches into the clause.
+let Counter = module (
+    export let reads: int32 = 0;
+);
+
+let Session = class (
+    | get: {
+        Counter.reads += 1;
+        return instance;
+    };
+);
+
+#Pure
+let present = func(session: Session) -> bool {
+    return session != nil;
+};

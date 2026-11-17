@@ -1,0 +1,12 @@
+error[E0217]: a startup block has no ';' after its '}'
+ --> $DIR/semicolon.nra:4:2
+  |
+4 | };
+  |  ^ remove this ';'
+  |
+help: remove the ';'
+  |
+4 | };
+  |  -
+
+For more information about this error, try `neura explain E0217`.

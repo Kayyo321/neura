@@ -153,13 +153,16 @@ void Materialization::plan() {
         if (kind == SymbolKind::Parameter) {
             const auto initial = operation(IrOp::Load, span, symbol(id).type, id);
             auto value = allocate(box, span, {initial});
+            value.text = region_reference;
             storage.slot = temporary(owner, "$reference_" + symbol(id).name, value);
             preparations_[owner].push_back(initialize(storage.slot, std::move(value), parameter_preparation));
         } else {
             program_.symbols[id].type = box.type;
             if (kind == SymbolKind::Field || kind == SymbolKind::Global) {
                 const auto marker = kind == SymbolKind::Field ? field_preparation : global_preparation;
-                preparations_[owner].push_back(initialize(id, allocate(box, span), marker));
+                auto allocation = allocate(box, span);
+                if (kind == SymbolKind::Global) allocation.text = static_reference;
+                preparations_[owner].push_back(initialize(id, std::move(allocation), marker));
             }
         }
     }
@@ -194,6 +197,7 @@ void Materialization::rewrite_initializer(IrNode& node, const Storage& storage, 
     const auto kind = symbol(node.symbol).kind;
     if (kind == SymbolKind::Local) {
         auto allocation = allocate(*storage.box, node.span, std::move(node.operands));
+        allocation.text = region_reference;
         node.operands.clear();
         node.operands.push_back(std::move(allocation));
         return;
@@ -273,6 +277,18 @@ void Materialization::run() {
     for (const auto& body : program_.bodies)
         for (const auto& node : body.instructions) collect(node);
     if (storage_.empty()) return;
+    // Every borrow box describes its owner. A region or static box has
+    // a nil owner. A field's box retains the object that owns the field.
+    for (const auto& [layout, box] : boxes_) {
+        if (box.value == no_symbol) continue;
+        IrSymbol field{};
+        field.kind = SymbolKind::Field;
+        field.name = "$owner";
+        field.owner = layout;
+        field.span = symbol(layout).span;
+        field.type = symbol(symbol(layout).base).type;
+        program_.symbols.push_back(std::move(field));
+    }
     include_global_overrides();
     plan();
     for (auto& body : program_.bodies) {

@@ -54,7 +54,7 @@ export let MapModel = module (
                 test.assert_equal_int32(fallback, map.get_or(key, -1));
             } else if (choice < 70) {
                 let made = cell.of<int>(0);
-                let result = map.get_or_put(key, func() -> int {
+                let result = map.get_or_put(key, new func() -> int {
                     made.value = made.value + 1;
                     return value;
                 });
@@ -74,7 +74,7 @@ export let MapModel = module (
                 test.assert_equal_int32(expected, map.merge(key, value, plus));
                 store(ids, values, id, expected, at, sorted);
             } else if (choice < 82) {
-                let outcome = map.compute(key, func(ignored: K, current: optional.Optional<int>) -> optional.Optional<int> {
+                let outcome = map.compute(key, new func(ignored: K, current: optional.Optional<int>) -> optional.Optional<int> {
                     return adjusted(current, value);
                 });
                 let current = optional.Optional<int>.None;
@@ -94,7 +94,7 @@ export let MapModel = module (
             } else if (choice < 85) {
                 let divisor = 2 + generator.next_int_below(6);
                 let calls = cell.of<int>(0);
-                let removed = map.remove_if(func(ignored: K, v: int) -> bool {
+                let removed = map.remove_if(new func(ignored: K, v: int) -> bool {
                     calls.value = calls.value + 1;
                     return v % divisor == 0;
                 });
@@ -143,7 +143,7 @@ export let MapModel = module (
                 }
             } else {
                 let seen = cell.of<int>(0);
-                map.for_each(func(k: K, v: int) -> void {
+                map.for_each(new func(k: K, v: int) -> void {
                     let i = seen.value;
                     test.assert(k.equals(key_of(ids[i])));
                     test.assert_equal_int32(values[i], v);

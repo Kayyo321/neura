@@ -39,7 +39,7 @@ let quiet = func(value: int) { };
 export let Main = module : program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         let offset = 10;
-        let shift = func(x: int) -> int => x + offset;
+        let shift = new func(x: int) -> int => x + offset;
         scope {
             let box = spawn area(Shape.Box { width: 3, height: 4 });
             let circle = spawn area(Shape.Circle(2));

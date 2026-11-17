@@ -1,9 +1,11 @@
 #include "nir_format.hpp"
 #include "attributes.hpp"
+#include "hook_arguments.hpp"
 #include "host_binding.hpp"
 #include "integer.hpp"
 
 #include <algorithm>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <string_view>
@@ -25,12 +27,20 @@ constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollec
 constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
 constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
 constexpr std::uint8_t max_op_1_12 = static_cast<std::uint8_t>(IrOp::AnyUnpack);
+static_assert(static_cast<unsigned>(IrOp::HookRead) == 64 && static_cast<unsigned>(IrOp::HookAdmit) == 65);
+static_assert(static_cast<unsigned>(IrOp::AnyPack) == 66 && static_cast<unsigned>(IrOp::AnyTag) == 67 &&
+              max_op_1_12 == 68);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
 // NeuraIR 1.10 adds symbol attributes and deferred initialization.
 constexpr std::uint16_t attribute_minor = 10;
 constexpr std::uint16_t newest_node_minor = attribute_minor;
+
+bool hook_attribute(const IrSymbol& symbol) {
+    return has_attribute(symbol, AttributeId::HookGet) || has_attribute(symbol, AttributeId::HookSet) ||
+           has_attribute(symbol, AttributeId::HookOf);
+}
 
 bool may_poll(IrOp op) {
     return op == IrOp::Loop || op == IrOp::Call || op == IrOp::VirtualCall || op == IrOp::CallClosure;
@@ -168,6 +178,7 @@ public:
             if (is_static_scope(item)) version = std::max<std::uint16_t>(version, 4);
             if (host_callback(item)) version = std::max<std::uint16_t>(version, 8);
             if (!item.attributes.empty()) version = std::max(version, attribute_minor);
+            if (hook_attribute(item)) version = std::max(version, nir_hooks_minor);
             if (item.host_binding || !item.library_path.empty() || item.kind == SymbolKind::Interface ||
                 !item.interfaces.empty() || !item.additional_bounds.empty()) {
                 version = std::max<std::uint16_t>(version, 3);
@@ -377,6 +388,12 @@ private:
     }
 
     void node(const IrNode& value) {
+        // Events are derived on the linked program and never stored.
+        if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
+            throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
+        if (static_cast<std::uint8_t>(value.op) > max_op_1_12)
+            throw NirError("invalid operation tag " + std::to_string(static_cast<unsigned>(value.op)));
+        if (linked_argument_annotation(value)) throw NirError("argument transport is derived after linking");
         // Only bodies carry polls, and a body with one makes the file 1.9.
         u8(static_cast<std::uint8_t>(value.op) | (polls_ && value.poll ? poll_bit : 0));
         type(value.type);
@@ -665,6 +682,8 @@ private:
                 }
                 if (const auto problem = attribute_problem(value.kind, value.attributes))
                     fail("symbol '" + value.name + "': " + *problem);
+                if (hook_attribute(value) && minor_ < nir_hooks_minor)
+                    fail("class hooks require NeuraIR format 1." + std::to_string(nir_hooks_minor));
                 if (has_attribute(value, AttributeId::HostEffects) &&
                     (value.has_body || !value.external || !value.host_binding))
                     fail("symbol '" + value.name + "': a host-effects contract belongs to a host binding without a body");
@@ -715,7 +734,9 @@ private:
         if (minor_ >= 9) {
             const auto byte = u8();
             const auto operation = static_cast<std::uint8_t>(byte & ~poll_bit);
-            if (operation > max_op_) fail("invalid operation tag " + std::to_string(byte));
+            if (operation > max_op_ || operation == static_cast<unsigned>(IrOp::HookRead) ||
+                operation == static_cast<unsigned>(IrOp::HookAdmit))
+                fail("invalid operation tag " + std::to_string(byte));
             value.op = static_cast<IrOp>(operation);
             value.poll = (byte & poll_bit) != 0;
             if (value.poll && !may_poll(value.op)) fail("a poll marks only a loop or a call");
@@ -726,6 +747,7 @@ private:
         value.span = span();
         value.symbol = reference();
         value.text = text();
+        if (linked_argument_annotation(value)) fail("argument transport is derived after linking");
         if (!aggregates_ && new_operator(value)) fail("bitwise operations require NeuraIR format 1.2");
         value.operands = nodes(depth + 1);
         if (minor_ < attribute_minor && is_deferred_initialize(value))

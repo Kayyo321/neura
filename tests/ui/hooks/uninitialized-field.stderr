@@ -1,0 +1,16 @@
+error[E0545]: 'Guest' has a 'set' hook, so 'guest' needs an initializer
+ --> $DIR/uninitialized-field.nra:9:16
+  |
+3 |     | set: value;
+  |     ------------- the 'set' hook
+...
+9 |     export let guest: Guest;
+  |                ^^^^^ declared without an initializer
+  |
+  = note: a default nil would be an admission the source does not show
+help: initialize it with nil, which the 'set' hook then admits when the declaration runs
+  |
+9 |     export let guest: Guest = nil;
+  |                            ++++++
+
+For more information about this error, try `neura explain E0545`.

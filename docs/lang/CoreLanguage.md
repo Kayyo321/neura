@@ -232,7 +232,7 @@ restore 0 true
 | Some calls are positional only (`E0484`). | A call through a function value, whose type carries neither names nor defaults; a call of an intrinsic member such as `append` or `slice`; an enum constructor, whose named payload is written `Variant { name: value }`; a call of a function with a variadic parameter; and a call that would pass a [primitive reference](Types.md#primitive-references) argument out of parameter order. A named function read as a value loses its labels and defaults. |
 | An override keeps its base's parameter names. | The parameter names of an override equal those of the method it overrides, position by position, and the names of an implementation equal those of the interface method (`E0560`). A call therefore means the same whatever the static type of its receiver. |
 
-A named call is evaluated in the order it is written, not in parameter order. The receiver of a method call is evaluated first. Then each written argument is evaluated, left to right, and admitted to its parameter: a selected [object cast](Types.md#object-casts) runs, or a primitive reference is bound, before the next argument is evaluated. Then each omitted parameter receives its default, in declaration order, and the call is made. A trap in an argument ends the run there, so no later argument is evaluated. A call whose written order is the parameter order compiles to the positional call, and builds the same image apart from its source map.
+A named call is evaluated in the order it is written, not in parameter order. The receiver of a method call is evaluated first. Then each written argument is evaluated, left to right, and admitted to its parameter: a selected [object cast](Types.md#object-casts) runs, or a primitive reference is bound, before the next argument is evaluated. Then each omitted parameter receives its default, in declaration order, and the call is made. A parameter with a class setter runs that setter at admission. For a spawned call the parent admits the arguments before starting the task. [Class hooks](Types.md#class-hooks) A trap in an argument ends the run there, so no later argument is evaluated. A call whose written order is the parameter order compiles to the positional call, and builds the same image apart from its source map.
 
 ### Default values
 
@@ -279,7 +279,7 @@ A lambda is a function expression with parameters and a body. Its type lists the
 <!-- example: check -->
 ```neura
 let make_adder = func(offset: int) -> func(int) -> int {
-    return func(value: int) -> int {
+    return new func(value: int) -> int {
         return value + offset;
     };
 };
@@ -307,7 +307,9 @@ let add: func(int, int) -> int = func(a, b) => a + b;
 
 Functions with the same parameter and result types have the same function type. A function value can be assigned, passed as an argument, returned, and stored in a field or collection. Parenthesize the function type before a collection suffix to write an array of functions, such as `(func(int) -> int)[]`. A named non-generic function used as a value is callable through the same interface. Reading a class or interface method as a value binds its receiver and keeps normal virtual dispatch.
 
-A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs. Closures may outlive the scope that created them.
+A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs.
+
+A noncapturing function value uses a static descriptor. A capturing lambda or bound method that stays in its creating block uses that block's region. Returning it, storing it in a collection or heap field, or passing it to a parameter that retains it requires `new func` or `new bound(receiver.method)`. The receiver of `new bound` is evaluated once when the environment is created. An owned environment cannot capture a frame array or a borrow of a frame binding. [E0453](../diagnostics/E0453.md) reports a capturing callable that escapes without explicit construction.
 
 Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. A generic function is called with its type arguments written or [inferred](Polymorphism.md#type-argument-inference). Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
 

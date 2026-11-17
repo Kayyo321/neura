@@ -1,0 +1,9 @@
+error[E0542]: a 'set' hook of 'Session' yields a 'Session', found 'Other'
+ --> $DIR/wrong-return.nra:7:20
+  |
+7 |             return new Other();
+  |                    ^^^^^^^^^^^ a hook's result is a 'Session' or nil
+  |
+  = help: return 'instance', 'value', 'nil' or another 'Session'
+
+For more information about this error, try `neura explain E0542`.

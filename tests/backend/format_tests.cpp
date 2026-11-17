@@ -67,7 +67,7 @@ NEURA_TEST(format, version_1_1_features) {
     check(nvr::load(nvr::encode(recorded)).minor_version == 1, "the loader records the minor version");
 
     expect_rejected(version_bytes(0), Kind::Malformed, "uses NVR 1.1 features but declares 1.0");
-    expect_rejected(version_bytes(8), Kind::Unsupported, "format version 1.8 is not supported");
+    expect_rejected(version_bytes(nvr::minor_version + 1), Kind::Unsupported, "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported");
     auto reason_only = version_model();
     reason_only.functions[0].blocks[1] = reason_only.functions[0].blocks[2];
     reason_only.minor_version = 0;
@@ -387,6 +387,20 @@ NEURA_TEST(format, assembled_fixtures_decode_to_their_models) {
     check(nvr::load(logic) == logic_model(), "the logic fixture decodes to its model");
 }
 
+NEURA_TEST(format, static_object_constants_require_version_1_7_and_a_fieldless_layout) {
+    auto image = logic_model();
+    const auto layout = static_cast<std::uint32_t>(image.layouts.size());
+    const auto type = static_cast<std::uint32_t>(image.types.size());
+    image.layouts.push_back({nvr::absent, {}});
+    image.types.push_back({nvr::TypeKind::Object, 0, layout});
+    image.constants.push_back({type, {1}});
+    const auto bytes = nvr::encode(image);
+    check_equal(bytes[6], std::uint8_t{7}, "a static object constant requires NVR 1.7");
+    check(nvr::load(bytes).constants.back() == image.constants.back(), "the descriptor round trips");
+    image.layouts[layout].fields = {1};
+    expect_invalid(image, "a static object constant requires a fieldless layout");
+}
+
 NEURA_TEST(format, nil_and_interface_layouts_require_version_1_2) {
     auto image = logic_model();
     image.constants.push_back({5, {}});
@@ -457,8 +471,8 @@ NEURA_TEST(format, multi_word_results_need_version_1_7) {
     }
     check(rejected, "a 1.7 function table under a 1.6 header is rejected as malformed or invalid");
     auto future = bytes;
-    future[6] = 8;
-    expect_rejected(future, Kind::Unsupported, "format version 1.8 is not supported");
+    future[6] = static_cast<std::uint8_t>(nvr::minor_version + 1);
+    expect_rejected(future, Kind::Unsupported, "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported");
 
     // Writer checks: a return carries one value per word, and no word is void.
     auto short_return = image;
@@ -643,8 +657,8 @@ NEURA_TEST(format, aggregate_elements_need_version_1_7) {
     six.minor = 6;
     expect_rejected(assemble(aggregate_sections(6), six), Kind::Malformed, "uses NVR 1.7 features but declares 1.6");
     auto future = assemble(aggregate_sections(7), seven);
-    future[6] = 8;
-    expect_rejected(future, Kind::Unsupported, "format version 1.8 is not supported");
+    future[6] = static_cast<std::uint8_t>(nvr::minor_version + 1);
+    expect_rejected(future, Kind::Unsupported, "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported");
 }
 
 NEURA_TEST(format, aggregate_elements_are_validated) {
@@ -767,7 +781,9 @@ NEURA_TEST(format, storage_regions_need_version_1_7) {
     check_equal(static_cast<unsigned>(nvr::StateOp::RegionCollection), 30U, "the region-collection number");
     check_equal(static_cast<unsigned>(nvr::StateOp::RegionRepeat), 31U, "the region-repeat number");
     check_equal(static_cast<unsigned>(nvr::StateOp::MoveToRegion), 32U, "the move-to-region number");
-    check_equal(static_cast<unsigned>(nvr::state_op_count), 33U, "the operation count");
+    check_equal(static_cast<unsigned>(nvr::StateOp::HookEnter), 33U, "the hook-enter number");
+    check_equal(static_cast<unsigned>(nvr::StateOp::HookLeave), 34U, "the hook-leave number");
+    check_equal(static_cast<unsigned>(nvr::state_op_count), 35U, "the operation count");
     const auto image = region_image(environment);
     check_equal(image.minor_version, std::uint16_t{7}, "the assembly text declares 1.7");
     check(nvr::uses_regions(image), "the image uses regions");
@@ -858,7 +874,7 @@ NEURA_TEST(format, storage_region_operations_are_validated) {
             "argument 1 must be a uint64 region token");
     mutated([&](nvr::Image& m) { exit_of(m, 8, 3).arguments.pop_back(); }, "expects 2 argument(s)");
     mutated([&](nvr::Image& m) { exit_of(m, 8, 3).result_slot = 0; }, "a void result requires an absent slot");
-    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "immediate must be zero");
+    mutated([&](nvr::Image& m) { exit_of(m, 8, 3).immediate = 2; }, "unknown move-to-region mode");
 }
 
 NEURA_TEST(format, a_region_token_is_not_a_task_or_channel_operand) {
@@ -1117,9 +1133,9 @@ NEURA_TEST(format, header_errors) {
     bad_magic.magic = "NEUX";
     expect_rejected(assemble(sections, bad_magic), Kind::Malformed, "not an NVR image");
     Header newer_minor;
-    newer_minor.minor = 8;
+    newer_minor.minor = nvr::minor_version + 1;
     expect_rejected(assemble(sections, newer_minor), Kind::Unsupported,
-                    "format version 1.8 is not supported; this loader accepts 1.0 through 1.7");
+                    "format version 1." + std::to_string(nvr::minor_version + 1) + " is not supported" + "; this loader accepts 1.0 through 1." + std::to_string(nvr::minor_version));
     Header newer_major;
     newer_major.major = 2;
     expect_rejected(assemble(sections, newer_major), Kind::Unsupported, "format version 2.0");
@@ -1304,7 +1320,15 @@ NEURA_TEST(format, constant_and_global_validation) {
     mutate_logic([](nvr::Image& i) { i.constants[0].payload = {2}; }, "Boolean payload");
     mutate_logic([](nvr::Image& i) { i.constants[1].payload = {7, 0}; }, "integer payload has 4 bytes");
     mutate_logic([](nvr::Image& i) { i.constants.push_back({3, {0xc3, 0x28}}); }, "not valid UTF-8");
-    mutate_logic([](nvr::Image& i) { i.constants.push_back({4, {}}); }, "constants cannot have this type");
+    mutate_logic([](nvr::Image& i) { i.constants.push_back({0, {}}); }, "constants cannot have this type");
+    // NVR 1.7: an array or list constant is the nil collection, with no payload.
+    mutate_logic([](nvr::Image& i) { i.constants.push_back({4, {1}}); }, "a nil collection constant has no payload");
+    auto nil_collection = logic_model();
+    nil_collection.constants.push_back({4, {}});
+    const auto bytes = nvr::encode(nil_collection);
+    check_equal(bytes[6], std::uint8_t{7}, "a nil collection constant makes the writer emit 1.7");
+    check(nvr::load(bytes) == [&] { auto loaded = nil_collection; loaded.minor_version = 7; return loaded; }(),
+          "a nil collection constant round-trips");
     mutate_logic([](nvr::Image& i) { i.globals[0].initializer = 0; }, "initializer type does not match");
     mutate_logic([](nvr::Image& i) { i.globals[0].initializer = 5; }, "initializer 5 is out of range");
     mutate_logic([](nvr::Image& i) { i.globals[0].type = 0; }, "void is not a value type");

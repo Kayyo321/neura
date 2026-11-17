@@ -1,0 +1,11 @@
+export let HookCalls = module (
+    let log: string = "";
+    export let events = func -> string => log;
+    export let Session = class (
+        | get: { log += "g"; return instance; };
+        | set: { log += "s"; return value; };
+
+        export let init = func(label: string) { log += label; };
+    );
+    export let.extension greet = func(receiver: Session, left, right: Session) { log += "c"; };
+);

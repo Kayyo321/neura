@@ -1,5 +1,7 @@
 // An array that crosses to a task, and one sent on a channel.
 let channels = import:Std.Concurrent.Channel;
+let _ = import:Std.Concurrent.Scope;
+let _ = import:Std.Concurrent.Task;
 
 let Tasks = module (
     let work = func(values: int[]) -> int {

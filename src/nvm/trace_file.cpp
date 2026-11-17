@@ -9,7 +9,7 @@
 namespace neura::nvm {
 namespace {
 
-constexpr std::array<std::pair<TrapKind, std::string_view>, 26> trap_kinds{{
+constexpr std::array<std::pair<TrapKind, std::string_view>, 29> trap_kinds{{
     {TrapKind::Program, "program"},
     {TrapKind::GraphOverflow, "graph-overflow"},
     {TrapKind::NonBinaryLane, "non-binary-lane"},
@@ -36,6 +36,9 @@ constexpr std::array<std::pair<TrapKind, std::string_view>, 26> trap_kinds{{
     {TrapKind::StackLimit, "stack-limit"},
     {TrapKind::ReleasedStorage, "released-storage"},
     {TrapKind::InvalidRegion, "invalid-region"},
+    {TrapKind::HookRecursion, "hook-recursion"},
+    {TrapKind::HookLimit, "hook-limit"},
+    {TrapKind::InvalidHook, "invalid-hook"},
 }};
 
 constexpr char hex_digits[] = "0123456789abcdef";

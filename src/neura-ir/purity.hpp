@@ -44,6 +44,7 @@
 #include <cstdint>
 #include <functional>
 #include <map>
+#include <memory>
 #include <optional>
 #include <set>
 #include <string>
@@ -57,6 +58,8 @@ namespace neura {
 // A type parameter counts as immutable here; each specialization is checked
 // with its concrete type.
 bool immutable_type(const IrProgram& program, const IrType& type);
+
+class HookIndex;
 
 class PurityAnalysis {
 public:
@@ -147,7 +150,8 @@ public:
         std::optional<Cause> host;
         std::optional<Cause> scheduler;
         std::optional<Cause> class_init;
-        // Reserved for the class-hook milestone; nothing sets it.
+        // A class hook clause that is not identity may run: the event, or
+        // the call that reaches one (docs/design/Hooks030.md, Summaries).
         std::optional<Cause> hooks;
         OptimizerFlags optimizer;
         // What the call stores where no slot names it (a global, a place of
@@ -203,10 +207,15 @@ private:
 
     void finish(SymbolId function, Summary& summary) const;
 
+    // The clause functions a HookRead or HookAdmit may run (class_hooks.hpp).
+    std::vector<SymbolId> hook_targets(const IrNode& node) const;
+
     const IrProgram& program_;
     std::function<bool(SymbolId)> opaque_;
     DispatchTargets dispatch_;
     ModuleDispatch modules_;
+    // Built only for a program whose class hook events are elaborated.
+    std::shared_ptr<const HookIndex> hooks_;
     std::map<SymbolId, std::vector<const IrBody*>> bodies_;
     std::map<SymbolId, Summary> summaries_;
     mutable std::map<std::string, bool> immutable_;

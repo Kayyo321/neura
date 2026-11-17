@@ -1,0 +1,33 @@
+// Payload enums as value words (tests/backend/conversion_tests.cpp): each function here takes or returns an enum,
+// and none of them allocates.
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let error = import:Std.Core.Error;
+
+export let Words = module (
+    export let Token = enum (Empty, Count(int), Name(string), Items(int[list]));
+
+    export let some = func(value: int) -> optional.Optional<int> => optional.Optional<int>.Some(value);
+
+    export let unwrap = func(o: optional.Optional<int>) -> int => match (o) {
+        optional.Optional.Some(value) => value,
+        optional.Optional.None => 0,
+    };
+
+    export let ok = func(value: int) -> result.Result<int> => result.Result<int>.Ok(value);
+
+    export let count = func(value: int) -> Token => Token.Count(value);
+
+    export let tag = func(token: Token) -> int => match (token) {
+        Token.Empty => 0,
+        Token.Count(value) => value,
+        Token.Name(_) => 2,
+        Token.Items(_) => 3,
+    };
+);
+
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode => program.ExitCode.Ok;
+);

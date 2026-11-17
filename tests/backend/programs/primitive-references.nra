@@ -14,7 +14,15 @@ let increment = func(value: &int) {
     ++value;
 };
 
-let retained = func(value: int) -> &int => value;
+let Cell = class (
+    export let value: int;
+    export let init = func(value: int) => set;
+);
+
+let retained = func(value: int) -> &int {
+    last cell: Cell = new(value);
+    return cell.value;
+};
 
 let choose = func(value: int) -> string => "value"
     or func(value: &int) -> string => "reference";
@@ -37,7 +45,7 @@ let Counter = class (
 );
 
 let Derived = class:Counter (
-    export let init = func(seed: int) {
+    export let init = func(seed: &int) {
         super.init(seed, true);
         seed += 2;
     };
@@ -67,12 +75,13 @@ let App = module:program.Entry (
         console.print_line(choose(local));
         console.print_line(choose(alias));
 
-        let first = new Counter(local, true);
-        let second = new Counter(local, false);
+        last storage: Cell = new(local);
+        let first = new Counter(storage.value, true);
+        let second = new Counter(storage.value, false);
         first.alias += 1;
         second.alias += 2;
         second.inline_alias += 3;
-        console.print_line(local.to_string());
+        console.print_line(storage.value.to_string());
         console.print_line(second.read().to_string());
         console.print_line(first.read().to_string());
 
@@ -83,7 +92,8 @@ let App = module:program.Entry (
         closure();
         console.print_line(survivor.to_string());
 
-        let derived = new Derived(40);
+        last seed: Cell = new(40);
+        let derived = new Derived(seed.value);
         increment(derived.alias);
         console.print_line(derived.alias.to_string());
         let offset: &int = Counter.offset;
@@ -95,11 +105,11 @@ let App = module:program.Entry (
         text_alias = "new";
         console.print_line(text);
 
-        let owner = new Counter(local, false);
-        let detached: &int = owner.inline_alias;
+        let owner = new Counter(storage.value, false);
+        let borrowed: &int = owner.inline_alias;
+        borrowed += 1;
+        console.print_line(borrowed.to_string());
         destroy owner;
-        detached += 1;
-        console.print_line(detached.to_string());
 
         let private_alias: &int = HiddenStorage.borrow();
         private_alias += 1;

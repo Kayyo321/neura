@@ -1,0 +1,103 @@
+// Class hook clauses that are accepted (cases 1 to 5, 15, 16, 18, 20, 21,
+// 23 to 25, 27 to 31): either order, comments and blank lines, spaces and
+// line breaks, `.override` with and without spaces, a generic class, a class
+// with no members, the contextual words as names elsewhere, a setter written
+// as an expression, a singleton, and clauses that read other references.
+let Counter = class (
+    | get: instance;
+
+    export let x: int32 = 0;
+    export let value: int32 = 0;
+    export let set: int32 = 0;
+);
+
+let Session = class (
+    | set: {
+        if (value == nil) {
+            trap_with_message("a Session reference is never nil");
+        }
+        return value;
+    };
+    // a comment between the clauses
+
+    | // the word comes next
+    get: instance;
+
+    export last user: string;
+    export let init = func(user: string) => set;
+
+    export let rename = func(get: string, set: string) -> string {
+        let value = get + set;
+        return value;
+    };
+);
+
+let Admin = class:Session (
+    | get.override : instance ;
+    | set . override :
+        value;
+
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+
+let Guest = class:Session (
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+
+let Box = class<T> (
+    | get: instance;
+
+    export let item: T;
+    export let init = func(item: T) => set;
+);
+
+let Empty = class (
+    | get: instance;
+);
+
+let Shared = class (
+    | get: {
+        if (instance == nil) {
+            return fallback;
+        }
+        return instance;
+    };
+
+    export static let fallback: Shared = nil;
+);
+
+let Linked = class (
+    | set: {
+        let other: Counter = new Counter();
+        let seen = other.x;
+        return value;
+    };
+);
+
+#Final
+let Token = class (
+    | get: new Token();
+);
+
+let One = singleton (
+    | get: instance;
+
+    export let value: int32 = 1;
+);
+
+let current: Session = nil;
+let anything: class = nil;
+let Holder = class (
+    export last owner: Session;
+    export let init = func(owner: Session) => set;
+);
+
+let assign = func() -> Session {
+    last later: Session;
+    later = current;
+    return later;
+};

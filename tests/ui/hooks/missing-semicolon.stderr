@@ -1,0 +1,13 @@
+error[E0215]: a class hook clause ends with ';'
+ --> $DIR/missing-semicolon.nra:4:5
+  |
+4 |     export let user: string = "";
+  |     ^^^^^^ expected ';', found 'export'
+  |
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+help: add the missing ';'
+  |
+3 |     | get: instance;
+  |                    +
+
+For more information about this error, try `neura explain E0215`.

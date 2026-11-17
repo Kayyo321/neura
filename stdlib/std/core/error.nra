@@ -54,7 +54,7 @@ export let Error = module (
         export let.override message = func -> string => message_text;
 
         /// @brief Two simple details are equal when their code and message are.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is SimpleDetail)) {
                 return false;

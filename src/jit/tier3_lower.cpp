@@ -234,7 +234,7 @@ private:
             if (operand != t3::none) f(operand);
         }
         if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call || in.op == Op::Select ||
-            in.op == Op::AllocObject || in.op == Op::Append) {
+            in.op == Op::AllocObject || in.op == Op::Append || in.op == Op::Return) {
             for (std::uint32_t i = 0; i < in.count; ++i) f(f_.extras[in.extra + i]);
         } else if (in.op == Op::Gather) {
             for (std::uint32_t i = 0; i < in.count; i += 2) f(f_.extras[in.extra + i]);
@@ -923,6 +923,7 @@ private:
         case Op::LoadElement:
         case Op::LoadGlobal:
         case Op::Select:
+        case Op::ResultWord:
         case Op::AllocObject: return mir::RegClass::Gpr;
         default: return mir::RegClass::Xmm;
         }
@@ -1379,10 +1380,16 @@ private:
             step.inst = id;
             step.reason = static_cast<std::uint8_t>(t3::Reason::Exits);
             step.b_constant = in.operands[1] != t3::none;  // whether a value is returned
+            // index: the words after the first (NVR 1.7), whose uses follow the
+            // value's, before K's.
+            step.index = in.count;
             const auto value =
                 in.operands[1] != t3::none ? use_as(in.operands[1], mir::RegClass::Gpr) : mir::VReg{};
+            std::vector<mir::VReg> rest;
+            for (std::uint32_t i = 0; i < in.count; ++i) rest.push_back(use_as(f_.extras[in.extra + i], mir::RegClass::Gpr));
             auto& inst = emit(std::move(step));
             if (in.operands[1] != t3::none) inst.uses.push_back(fixed(value, rsi));
+            for (const auto word : rest) inst.uses.push_back(any(word));
             if (in.operands[2] != t3::none) inst.uses.push_back(any(vreg(in.operands[2])));
             inst.clobbers_gpr = caller_saved_gpr;
             inst.clobbers_xmm = allocatable_xmm;
@@ -1587,6 +1594,12 @@ private:
         }
         case Op::LoadGlobal: {
             step.kind = Kind::LoadGlobal;
+            def(emit(std::move(step)));
+            return;
+        }
+        case Op::ResultWord: {
+            step.kind = Kind::ResultWord;
+            step.imm = in.imm;
             def(emit(std::move(step)));
             return;
         }
@@ -1899,8 +1912,11 @@ private:
                         });
                     }
                     if (step.kind == Kind::Call && has(after, v)) {
+                        // The slots a multi-word result fills (NVR 1.7).
                         const auto result = f_.exits[step.index]->result_slot;
-                        forbid(v, [&](std::uint32_t r) { return r == result; });
+                        const auto found = f_.call_results.find(static_cast<std::uint32_t>(f_.insts[step.inst].imm));
+                        const std::uint32_t words = found == f_.call_results.end() ? 1 : found->second;
+                        forbid(v, [&](std::uint32_t r) { return r >= result && r - result < words; });
                     }
                 };
                 for (std::size_t w = 0; w < words; ++w) {

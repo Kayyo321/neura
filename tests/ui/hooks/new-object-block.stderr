@@ -1,0 +1,10 @@
+error[E0543]: a subclass of 'Session' would inherit this hook and receive a 'Session'
+ --> $DIR/new-object-block.nra:5:20
+  |
+5 |             return new Session();
+  |                    ^^^^^^^^^^^^^ a new 'Session' for every subclass's references
+  |
+  = note: a hook's result must be nil or an object of exactly the class of the reference it handles
+  = help: mark the class #Final, or return 'instance', 'value', 'nil' or an existing object of the same class
+
+For more information about this error, try `neura explain E0543`.

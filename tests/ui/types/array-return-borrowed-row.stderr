@@ -1,0 +1,11 @@
+error[E0451]: array returned but not created
+ --> $DIR/array-return-borrowed-row.nra:2:5
+  |
+1 | let borrowed_row = func(row: int[]) -> int[][] {
+  |                         --- array storage originates here
+2 |     return [row, [9]];
+  |     ^^^^^^^^^^^^^^^^^^
+  |
+  = help: keep the array within its owner's lifetime, or use an explicitly constructed list
+
+For more information about this error, try `neura explain E0451`.

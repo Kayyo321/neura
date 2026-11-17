@@ -23,7 +23,7 @@ let Interfaces = module:program.Entry (
         let has_next = func() -> bool;
         let next = func() -> T;
         let reader = func() -> func() -> T {
-            return func() -> T {
+            return new func() -> T {
                 return next();
             };
         };

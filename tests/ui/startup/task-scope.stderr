@@ -1,0 +1,7 @@
+error[E0607]: a scope block is only allowed inside a function body
+ --> $DIR/task-scope.nra:3:5
+  |
+3 |     scope {
+  |     ^^^^^
+
+For more information about this error, try `neura explain E0607`.

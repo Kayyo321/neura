@@ -1,0 +1,9 @@
+error[E0215]: expected 'get' or 'set' after '|'
+ --> $DIR/word.nra:3:7
+  |
+3 |     | got: instance;
+  |       ^^^ expected 'get' or 'set', found 'got'
+  |
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+
+For more information about this error, try `neura explain E0215`.

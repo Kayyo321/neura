@@ -163,6 +163,8 @@ std::optional<Shape> Inliner::inlinable(const IrBody& body, std::string* why) co
                                         IrOp::SchedulerCall, IrOp::MakeClosure})) {
         return refuse("it starts tasks, makes closures, or initializes a base object");
     }
+    if (has_attribute(function, AttributeId::HookOf) || contains_op(body.instructions, {IrOp::HookRead, IrOp::HookAdmit}))
+        return refuse("it is a class hook or contains a class hook event");
     // A module's receiver can be replaced by a reference to the module the
     // call runs on; an object's receiver cannot.
     bool object_receiver = false;
