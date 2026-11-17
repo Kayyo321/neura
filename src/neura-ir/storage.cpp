@@ -3,6 +3,7 @@
 #include "reference_storage.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
+#include "util/source_map.hpp"
 
 #include <algorithm>
 #include <cstdlib>
@@ -219,7 +220,7 @@ private:
 
     const IrNode* slot_operand(const IrNode& call, std::size_t slot) const {
         std::size_t index = slot;
-        if (call.op != IrOp::VirtualCall) {
+        if (call.op != IrOp::VirtualCall && call.op != IrOp::BaseInitialize) {
             if (slot == 0) return nullptr;
             index = slot - 1;
         }
@@ -273,6 +274,8 @@ private:
 
     Origin field_origin(const IrNode& field) const {
         if (static_field(program_, field.symbol)) return make(Origin::Kind::Global, field.symbol);
+        if (is_primitive_reference(field.type) && known(field.symbol) && symbol(field.symbol).name.starts_with("$capture"))
+            return make(Origin::Kind::Local, field.symbol);
         return make(Origin::Kind::Field, field.symbol, owner_slot(field));
     }
 
@@ -358,6 +361,8 @@ private:
         case IrOp::CallClosure:
         case IrOp::SchedulerCall:
             if (facts_.holds_array(node.type)) out.insert(owned(node, scope));
+            else if (node.op == IrOp::CallClosure && is_primitive_reference(node.type))
+                out.insert(make(Origin::Kind::Static));
             break;
         default: break;
         }
@@ -376,11 +381,21 @@ private:
         if (targets.empty()) {
             // All legal implementations of an array-returning Neura
             // signature return an owned result, including function values.
-            return facts_.holds_array(call.type) ? OriginSet{owned(call, scope)} : unknown();
+            if (facts_.holds_array(call.type)) return {owned(call, scope)};
+            if (is_primitive_reference(call.type) && call.op == IrOp::VirtualCall)
+                return {make(Origin::Kind::Static)};
+            return unknown();
         }
         OriginSet out;
         for (const auto target : targets) {
             const auto* summary = known(target) ? purity_.summary(target) : nullptr;
+            if (is_primitive_reference(call.type) && call.op != IrOp::ExternalCall && known(target) &&
+                symbol(target).has_body) {
+                // The callee is checked independently. Its returned borrow
+                // must have a global or retained object owner.
+                out.insert(make(Origin::Kind::Static, target));
+                continue;
+            }
             if (!summary) {
                 if (facts_.holds_array(call.type) && call.op != IrOp::ExternalCall && known(target) &&
                     symbol(target).has_body) out.insert(owned(call, scope));
@@ -486,7 +501,8 @@ private:
         if (call.op == IrOp::CallClosure || scoped_virtual(call)) return closure && index != 0;
         if (call.op == IrOp::ExternalCall && known(call.symbol) && kernel_bound(symbol(call.symbol))) return false;
         const auto targets = call.op == IrOp::VirtualCall ? purity_.targets(call) : std::vector{call.symbol};
-        const std::size_t slot = index + (call.op == IrOp::VirtualCall ? 0 : 1);
+        const bool has_receiver = call.op == IrOp::VirtualCall || call.op == IrOp::BaseInitialize;
+        const std::size_t slot = index + (has_receiver ? 0 : 1);
         if (targets.empty()) return closure && index != 0;
         return std::ranges::any_of(targets, [&](SymbolId id) {
             const auto* summary = known(id) ? purity_.summary(id) : nullptr;
@@ -505,7 +521,7 @@ private:
     void flow(const IrNode& node, const StorageOwner& scope) {
         const bool closure = node.op == IrOp::MakeClosure || closure_allocation(program_, node);
         if (closure) {
-            if (escaping_.contains(&node)) {
+            if (escaping_.contains(&node) || explicitly_owned_closure(node)) {
                 for (const auto& value : node.operands) escape_closures(value);
             }
             return;
@@ -545,6 +561,7 @@ private:
             for (const auto& value : node.operands) escape_closures(value);
             break;
         case IrOp::Allocate:
+        case IrOp::BaseInitialize:
         case IrOp::Call:
         case IrOp::VirtualCall:
         case IrOp::CallClosure:
@@ -671,7 +688,12 @@ private:
     }
 
     void captured(const IrNode& closure, bool task, const StorageOwner& scope) {
-        if (!task && !escaping_.contains(&closure)) return;
+        const bool explicit_owner = explicitly_owned_closure(closure);
+        if (!task && !explicit_owner && !escaping_.contains(&closure)) return;
+        if (!task && !explicit_owner && !closure.operands.empty()) {
+            report(closure.text == bound_closure ? EscapeKind::BoundNeedsOwnership : EscapeKind::ClosureNeedsOwnership,
+                   closure, closure, owned(closure, scope));
+        }
         for (const auto& value : closure.operands) {
             arrays_into(task ? EscapeKind::ArrayInTaskArgument : EscapeKind::ArrayCapturedByClosure, closure, value, scope);
             references_into(EscapeKind::ReferenceCapturedByClosure, closure, value, scope);
@@ -680,23 +702,11 @@ private:
 
     void retained(const IrNode& call, const StorageOwner& scope) {
         for (std::size_t i = 0; i < call.operands.size(); ++i) {
-            if (facts_.holds_array(call.operands[i].type) && may_retain(call, i, false))
-                arrays_into(EscapeKind::ArrayRetainedByCall, call, call.operands[i], scope, call.symbol);
-        }
-        std::vector<SymbolId> targets;
-        if (call.op == IrOp::VirtualCall) {
-            targets = purity_.targets(call);
-        } else {
-            targets.push_back(call.symbol);
-        }
-        for (const auto target : targets) {
-            const auto* summary = known(target) ? purity_.summary(target) : nullptr;
-            if (!summary) continue;
-            for (std::size_t slot = 0; slot < summary->retention.size(); ++slot) {
-                if (summary->retention[slot] != PurityAnalysis::Retention::Elsewhere) continue;
-                const auto* argument = slot_operand(call, slot);
-                if (argument) references_into(EscapeKind::ReferenceRetainedByCall, call, *argument, scope, target);
-            }
+            const auto& argument = call.operands[i];
+            if (facts_.holds_array(argument.type) && may_retain(call, i, false))
+                arrays_into(EscapeKind::ArrayRetainedByCall, call, argument, scope, call.symbol);
+            if (is_primitive_reference(argument.type) && may_retain(call, i, true))
+                references_into(EscapeKind::ReferenceRetainedByCall, call, argument, scope, call.symbol);
         }
     }
 
@@ -715,6 +725,8 @@ private:
             }
             break;
         }
+        case IrOp::CallClosure:
+        case IrOp::BaseInitialize:
         case IrOp::Call:
         case IrOp::VirtualCall:
         case IrOp::ExternalCall: {
@@ -739,6 +751,9 @@ private:
                 !(initializer() && static_field(program_, node.symbol)) && facts_.tracked(node.operands.front().type)) {
                 const auto kind = static_field(program_, node.symbol) ? EscapeKind::ArrayInGlobal : EscapeKind::ArrayInField;
                 arrays_into(kind, node, node.operands.front(), scope, node.symbol);
+                references_into(EscapeKind::ReferenceInField, node, node.operands.front(), scope, node.symbol);
+            } else if (known(node.symbol) && symbol(node.symbol).kind == SymbolKind::Global && !node.operands.empty()) {
+                references_into(EscapeKind::ReferenceInField, node, node.operands.front(), scope, node.symbol);
             }
             break;
         case IrOp::Store:
@@ -806,9 +821,11 @@ private:
         for (const auto& origin : set) {
             const bool borrowed = origin.kind == Origin::Kind::Parameter || origin.kind == Origin::Kind::Global ||
                                   origin.kind == Origin::Kind::Field || origin.kind == Origin::Kind::Static;
-            if (origin.kind == Origin::Kind::Local) {
-                if (is_primitive_reference(value.type)) report(EscapeKind::ReferenceReturned, node, value, origin);
-            } else if ((borrowed || origin.kind == Origin::Kind::Unknown) && !is_primitive_reference(value.type)) {
+            if (is_primitive_reference(value.type)) {
+                if (origin.kind == Origin::Kind::Local || origin.kind == Origin::Kind::Parameter ||
+                    origin.kind == Origin::Kind::Unknown)
+                    report(EscapeKind::ReferenceReturned, node, value, origin);
+            } else if (borrowed || origin.kind == Origin::Kind::Unknown) {
                 report(EscapeKind::ArrayReturnedBorrowed, node, value, origin);
             }
         }
@@ -1103,12 +1120,14 @@ std::string_view describe_escape_kind(EscapeKind kind) {
     case EscapeKind::ArrayCapturedByClosure: return "array captured by an escaping closure";
     case EscapeKind::ArrayAssignedToOuterBinding: return "array assigned to a binding of an outer block";
     case EscapeKind::ArrayReturnedBorrowed: return "array returned but not created";
-    case EscapeKind::ReferenceReturned: return "reference to a local returned";
+    case EscapeKind::ReferenceReturned: return "primitive borrow returned without a long-lived owner";
     case EscapeKind::ReferenceInField: return "reference to a local stored in a field or global";
     case EscapeKind::ReferenceCapturedByClosure: return "reference to a local captured by a closure";
     case EscapeKind::ReferenceRetainedByCall: return "reference to a local retained by a call";
     case EscapeKind::ArrayInLongerLivedElement: return "array stored in an element that can outlive it";
     case EscapeKind::ArrayRetainedByCall: return "array passed to a call that may retain it";
+    case EscapeKind::ClosureNeedsOwnership: return "escaping closure requires new func";
+    case EscapeKind::BoundNeedsOwnership: return "escaping bound method requires new bound";
     }
     return "";
 }
@@ -1130,20 +1149,57 @@ std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, Storag
     return find_storage_escapes(program, PurityAnalysis(program), stage);
 }
 
-void check_array_storage(const IrProgram& program, StorageStage stage) {
-    for (const auto& escape : find_storage_escapes(program, stage)) {
+void check_storage(const IrProgram& program, StorageStage stage) {
+    const auto escapes = find_storage_escapes(program, stage);
+    for (const auto& escape : escapes) {
+        const auto message = std::string(describe_escape_kind(escape.kind));
+        const auto with_rebuild_hint = [&](Diagnostic result) {
+            if (!escape.operation.file.empty() && !escape.operation.file.starts_with('<') &&
+                !SourceMap::global().find(escape.operation.file))
+                result.note("regenerate prebuilt NeuraIR from its source with the current SDK");
+            return result;
+        };
         switch (escape.kind) {
         case EscapeKind::ReferenceReturned:
         case EscapeKind::ReferenceInField:
         case EscapeKind::ReferenceCapturedByClosure:
-        case EscapeKind::ReferenceRetainedByCall:
-            continue;
-        default: break;
+        case EscapeKind::ReferenceRetainedByCall: {
+            auto diagnostic = with_rebuild_hint(Diagnostic(escape.operation, message).with_code("E0452"));
+            if (!escape.storage.file.empty()) diagnostic.label(escape.storage, "borrow starts here");
+            throw diagnostic.help("keep the borrow within the binding's lifetime or use a field of a long-lived owner");
         }
-        auto diagnostic = Diagnostic(escape.operation, std::string(describe_escape_kind(escape.kind))).with_code("E0451");
-        if (!escape.storage.file.empty()) diagnostic.label(escape.storage, "array storage originates here");
-        diagnostic.help("keep the array within its owner's lifetime, or use an explicitly constructed list");
-        throw diagnostic;
+        case EscapeKind::ClosureNeedsOwnership:
+        case EscapeKind::BoundNeedsOwnership:
+            // Prefer a specific illegal capture over a missing 'new' on the same value.
+            if (std::ranges::any_of(escapes, [&](const auto& other) {
+                return other.operation.file == escape.operation.file && other.operation.offset == escape.operation.offset &&
+                       (other.kind == EscapeKind::ArrayCapturedByClosure || other.kind == EscapeKind::ReferenceCapturedByClosure);
+            })) continue;
+            {
+                auto diagnostic = with_rebuild_hint(Diagnostic(escape.operation, message).with_code("E0453"));
+                auto start = escape.operation;
+                start.length = 0;
+                if (escape.kind == EscapeKind::ClosureNeedsOwnership) {
+                    diagnostic.suggest("construct an owned closure", start, "new ", Applicability::MachineApplicable);
+                } else {
+                    auto end = start;
+                    end.offset += escape.operation.length;
+                    if (const auto file = SourceMap::global().find(end.file)) {
+                        const auto line = file->line_of(end.offset);
+                        end.line = line + 1;
+                        end.column = end.offset - file->line_start(line) + 1;
+                    }
+                    diagnostic.suggest("construct an owned bound method", {{start, "new bound("}, {end, ")"}},
+                                       Applicability::MachineApplicable);
+                }
+                throw diagnostic;
+            }
+        default: {
+            auto diagnostic = with_rebuild_hint(Diagnostic(escape.operation, message).with_code("E0451"));
+            if (!escape.storage.file.empty()) diagnostic.label(escape.storage, "array storage originates here");
+            throw diagnostic.help("keep the array within its owner's lifetime, or use an explicitly constructed list");
+        }
+        }
     }
 }
 

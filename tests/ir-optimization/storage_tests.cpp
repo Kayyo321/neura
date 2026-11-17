@@ -361,7 +361,9 @@ NEURA_TEST(structure, escape_of_an_array_captured_by_a_closure_or_a_task) {
     const Lines at{storage_dir(environment) / "escapes.nra"};
     using E = EscapeKind;
     expect_escapes(environment, "escapes.nra", "Escapes.captured",
-                   {{E::ArrayCapturedByClosure, line_after(at.file, "export let captured", "let read = func"),
+                   {{E::ClosureNeedsOwnership, line_after(at.file, "export let captured", "let read = func"),
+                     line_after(at.file, "export let captured", "let read = func")},
+                    {E::ArrayCapturedByClosure, line_after(at.file, "export let captured", "let read = func"),
                     at.of("export let captured")}});
 }
 
@@ -457,7 +459,9 @@ NEURA_TEST(structure, escape_of_a_reference_to_a_local_or_parameter) {
     expect_escapes(environment, "escapes.nra", "Escapes.View.init",
                    {{E::ReferenceInField, at.of("instance.total = local"), at.of("let local: int = 1")}});
     expect_escapes(environment, "escapes.nra", "Escapes.captures_reference",
-                   {{E::ReferenceCapturedByClosure, line_after(at.file, "export let captures_reference", "let read = func"),
+                   {{E::ClosureNeedsOwnership, line_after(at.file, "export let captures_reference", "let read = func"),
+                     line_after(at.file, "export let captures_reference", "let read = func")},
+                    {E::ReferenceCapturedByClosure, line_after(at.file, "export let captures_reference", "let read = func"),
                     at.of("let alias: &int = cell")}});
     // The reference is passed to a constructor that keeps it in a field.
     expect_escapes(environment, "escapes.nra", "Escapes.retained_reference",
@@ -523,7 +527,7 @@ NEURA_TEST(structure, escape_findings_say_where_they_are_and_leave_the_program_a
         check(escape.operation.file.ends_with("escapes.nra") && escape.storage.file.ends_with("escapes.nra"),
               "the spans name this file");
     }
-    check_equal(own, std::size_t{16}, "the findings of escapes.nra");
+    check_equal(own, std::size_t{18}, "the findings of escapes.nra");
 }
 
 // ---- the repository's programs ---------------------------------------------------
@@ -545,18 +549,7 @@ std::string where(const fs::path& root, const Span& span) {
 NEURA_TEST(structure, storage_escapes_of_the_backend_programs) {
     // Every program in tests/backend/programs, each lowered on its own with
     // the library it uses, checked on lowering and on the specialized program.
-    // The only remaining findings here belong to primitive references.
-    // The reference migration updates this expectation in the following step.
-    const std::vector<std::string> expected{
-        "lowered primitive-references.nra:17 reference to a local returned",
-        "lowered primitive-references.nra:70 reference to a local retained by a call",
-        "lowered primitive-references.nra:71 reference to a local retained by a call",
-        "lowered primitive-references.nra:98 reference to a local retained by a call",
-        "specialized primitive-references.nra:17 reference to a local returned",
-        "specialized primitive-references.nra:70 reference to a local retained by a call",
-        "specialized primitive-references.nra:71 reference to a local retained by a call",
-        "specialized primitive-references.nra:98 reference to a local retained by a call",
-    };
+    // The backend fixtures use the same checked ownership rules as libraries.
     std::set<std::string> found;
     const auto collect = [&](const IrProgram& program, StorageStage stage, std::string_view label, const fs::path& file) {
         for (const auto& escape : find_storage_escapes(program, stage)) {
@@ -573,8 +566,7 @@ NEURA_TEST(structure, storage_escapes_of_the_backend_programs) {
         specialize(program);
         collect(program, StorageStage::Specialized, "specialized", file);
     }
-    check_equal(joined_lines(found), joined_lines({expected.begin(), expected.end()}),
-                "escapes of the backend programs");
+    check_equal(joined_lines(found), std::string{}, "escapes of the backend programs");
 }
 
 NEURA_TEST(structure, result_transfers_agree_with_summaries_in_the_backend_programs) {

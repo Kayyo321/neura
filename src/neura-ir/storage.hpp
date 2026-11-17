@@ -182,6 +182,8 @@ enum class EscapeKind : std::uint8_t {
     ReferenceRetainedByCall,     // such a reference, passed to a call that retains it
     ArrayInLongerLivedElement,   // stored in an array element with a longer or unknown lifetime
     ArrayRetainedByCall,         // passed to a callee that may retain the value elsewhere
+    ClosureNeedsOwnership,      // a capturing function value escapes its activation
+    BoundNeedsOwnership,        // a bound receiver escapes its activation
 };
 
 std::string_view describe_escape_kind(EscapeKind kind);
@@ -215,7 +217,7 @@ std::vector<StorageEscape> find_storage_escapes(const IrProgram& program,
 std::vector<StorageEscape> find_storage_escapes(const IrProgram& program, const PurityAnalysis& purity,
                                                 StorageStage stage = StorageStage::Lowered);
 
-// Enforce the array lifetime part of the storage contract.
-void check_array_storage(const IrProgram& program, StorageStage stage);
+// Enforce ownership and borrow lifetimes on unmaterialized IR.
+void check_storage(const IrProgram& program, StorageStage stage);
 
 } // namespace neura

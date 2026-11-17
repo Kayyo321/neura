@@ -496,6 +496,9 @@ foreach(quantum IN ITEMS 1 64 1024)
 endforeach()
 
 # Target-typed new, typed destructuring, and an anonymous class.
+build_image("${TEST_DIR}/primitive-reference-example.nvr" "${SOURCE_DIR}/examples/types/primitive-references.nra")
+expect_run("primitive references example" "${TEST_DIR}/primitive-reference-example.nvr" "Hello, World!\n" 0 "")
+
 build_image("${TEST_DIR}/construction.nvr" "${SOURCE_DIR}/examples/types/construction.nra")
 expect_run("construction example" "${TEST_DIR}/construction.nvr"
     "Ada has 250\nGrace has 10\n4 accounts, 260 in total\n" 0 "")

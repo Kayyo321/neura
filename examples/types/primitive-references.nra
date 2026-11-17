@@ -1,7 +1,15 @@
+let.promote _ = import:Std.Program;
+let term = import:Std.Io.Console;
+
 let PrimitiveReferences = module (
     export let add = func(value: &int, amount: int) {
         value += amount;
     };
+
+    let CountStorage = class (
+        export let value: int;
+        export let init = func(value: int) => set;
+    );
 
     export let CounterView = class (
         export let total: &int;
@@ -12,9 +20,16 @@ let PrimitiveReferences = module (
     );
 
     export let example = func(initial: int, amount: int) -> int {
-        let count: int = initial;
-        last view: CounterView = new(count);
+        last count: CountStorage = new(initial);
+        last view: CounterView = new(count.value);
         add(view.total, amount);
-        return count;
+        return count.value;
+    };
+);
+
+let App = module:Entry (
+    export let.override main = func(args: string[]) -> ExitCode {
+        term.println("Hello, World!");
+        return ExitCode.Ok;
     };
 );

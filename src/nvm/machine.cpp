@@ -1735,6 +1735,11 @@ private:
                 const_values_[i] = allocate_text(
                     kind == nvr::TypeKind::Text ? EntryKind::Text : EntryKind::Bytes, constant.type,
                     std::string_view(reinterpret_cast<const char*>(constant.payload.data()), constant.payload.size()));
+            } else if (nvr::is_static_object_constant(type(constant.type), constant)) {
+                if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+                add_stack_cells(Heap::object_cells(0), "static object constant of ");
+                const_values_[i] = heap_.create_object(type(constant.type).reference, 0);
+                adopt(static_handles_, const_values_[i]);
             } else {
                 std::uint64_t bits = 0;
                 for (std::size_t b = 0; b < constant.payload.size(); ++b) {

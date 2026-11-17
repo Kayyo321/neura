@@ -1203,16 +1203,18 @@ private:
 
     // The register of constant `index` masked to `width` bits. A scalar
     // constant's value is its payload, little-endian, as the executor
-    // reads it (Execution::State::start): it becomes an immediate. A text
-    // or bytes constant is a handle the run assigns: it is loaded from the
-    // run's constants at entry.
+    // reads it (Execution::State::start): it becomes an immediate. Text,
+    // bytes and static objects use handles the run assigns and load the
+    // materialized value from the run's constants at entry.
     std::uint32_t constant_register(std::uint32_t index, unsigned width) {
         const auto key = std::make_pair(index, std::min(width, 64U));
         if (const auto it = constant_registers_.find(key); it != constant_registers_.end()) return it->second;
         const auto reg = temporary();
         const auto& constant = image_.constants[index];
-        const auto kind = image_.types[constant.type].kind;
-        if (kind != nvr::TypeKind::Text && kind != nvr::TypeKind::Bytes && constant.payload.size() <= 8) {
+        const auto& type = image_.types[constant.type];
+        const bool materialized = type.kind == nvr::TypeKind::Text || type.kind == nvr::TypeKind::Bytes ||
+                                  nvr::is_static_object_constant(type, constant);
+        if (!materialized && constant.payload.size() <= 8) {
             std::uint64_t bits = 0;
             for (std::size_t b = 0; b < constant.payload.size(); ++b) {
                 bits |= std::uint64_t{constant.payload[b]} << (8 * b);

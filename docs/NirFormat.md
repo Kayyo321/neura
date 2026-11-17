@@ -4,6 +4,10 @@ A `.nir` file holds a NeuraIR program as lowered, before optimization. `neura em
 
 The file records every field of the in-memory program: symbols with their kinds, names, owners, inheritance and override links, types, parameters, generics, bounds, flags, and attributes, plus every body with its regions, operands, symbol references, literal text, type arguments, and source spans. A file that is written and then read yields a program equal to the original in every field. As a result, a build from `.nir` produces the same image bytes as a build from source. The human-readable listing printed by `neura emit-ir` without `-o` is a separate interface.
 
+Regenerate prebuilt NeuraIR with the current SDK when moving to the ownership rules in 0.3.0. An earlier artifact may embed application or standard library bodies that retain an activation array, return a frame borrow, or construct an escaping environment implicitly. The current compiler checks those bodies during linkage and specialization. Executable NVR images retain their versioned runtime semantics.
+
+The `MakeClosure` operation's existing text field records explicit construction. An empty string denotes a bare lambda or named function value. `$bound` denotes a bare bound method, `$new_func` and `$new_bound` denote explicit ownership, and `$task_closure` denotes the compiler's task wrapper. Specialized storage analysis uses the same form as lowering and derives lexical lifetimes from the body.
+
 ## Encoding
 
 All minor versions use the conventions of [NVR](runtime/NVR.md#encoding-and-compatibility). Integers are fixed-width and little-endian. Records have no padding, and a `vector<T>` is a `u32` count followed by its elements. `text` is a byte vector. A symbol reference is a `u32` index into the symbol table, and `0xffffffff` marks an absent reference where the field is optional.

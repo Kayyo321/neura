@@ -681,7 +681,7 @@ IrProgram lower_sources(const std::vector<fs::path>& files, const std::vector<fs
         SpeculativeDiagnostics attempt;
         try {
             auto program = lower_once(inputs, roots, trusted);
-            check_array_storage(program, StorageStage::Lowered);
+            check_storage(program, StorageStage::Lowered);
             attempt.commit();
             return program;
         } catch (const MissingPrimitiveWrapper& missing) {

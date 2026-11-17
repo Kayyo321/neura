@@ -402,9 +402,9 @@ void Adapter::launch(const Json& arguments) {
             if (test == tests.end()) throw std::runtime_error("selected test no longer exists: " + test_filter);
             const auto symbol = test->symbol;
             require_valid_ir(program, "before debug specialization");
-            materialize_reference_storage(program);
             specialize(program);
-            check_array_storage(program, StorageStage::Specialized);
+            check_storage(program, StorageStage::Specialized);
+            materialize_reference_storage(program);
             check_containment(program);
             check_inline_limit(program);
             require_valid_ir(program, "before debug conversion");

@@ -7,14 +7,14 @@ let GenericClosures = module:program.Entry (
     };
 
     let remember = func<T>(value: T) -> func() -> T {
-        return func() -> T {
+        return new func() -> T {
             return value;
         };
     };
 
     let remember_nested = func<T>(value: T) -> func() -> func() -> T {
-        return func() -> func() -> T {
-            return func() -> T {
+        return new func() -> func() -> T {
+            return new func() -> T {
                 return value;
             };
         };
@@ -25,7 +25,7 @@ let GenericClosures = module:program.Entry (
     };
 
     let read_later = func<T>(value: T) -> func() -> int {
-        return func() -> int {
+        return new func() -> int {
             let copied: T = unchanged<T>(value);
             return 5;
         };
@@ -57,7 +57,7 @@ let GenericClosures = module:program.Entry (
             return transform(value);
         };
         export let bind = func<U>(suffix: U) -> func(T) -> [T, U] {
-            return func(value: T) -> [T, U] {
+            return new func(value: T) -> [T, U] {
                 return [transform(value), suffix];
             };
         };
@@ -68,7 +68,7 @@ let GenericClosures = module:program.Entry (
     };
 
     let bound_read = func<T>(callback: Callback<T>) -> func(T) -> T {
-        return callback.read;
+        return new bound(callback.read);
     };
 
     let Holder = class<T> (

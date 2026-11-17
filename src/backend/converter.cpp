@@ -245,6 +245,10 @@ private:
     Values bound_host_call(const IrNode& node);
     Values kernel_call(const IrNode& node);
     Operand allocate(const IrNode& node);
+    bool local_object(const IrNode& node) const;
+    bool closure_object(const IrNode& node) const;
+    void check_borrow_owner(const IrNode& field, const Operand& box);
+    void set_borrow_owner(SymbolId box, Operand handle, std::optional<Operand> owner, const Span& span);
     // The words of an enum value: the variant's tag, then its payload words at
     // their pooled positions, and zero or nil in every word it does not use.
     Values aggregate_value(const IrType& type, SymbolId variant, std::vector<Values> fields,
@@ -2267,6 +2271,7 @@ bool FunctionCompiler::owns_result(const FunctionOrigin& origin, const std::vect
 }
 
 bool FunctionCompiler::needs_region(const IrNode& node) {
+    if (node.op == IrOp::Allocate && local_object(node)) return true;
     if (node.op == IrOp::Block || node.op == IrOp::TaskScope || node.op == IrOp::Loop) return false;
     if ((node.type.kind == TypeKind::Array || node.type.kind == TypeKind::Tuple || node.type.kind == TypeKind::Enum) &&
         (node.op == IrOp::Collection || node.op == IrOp::RepeatCollection || node.op == IrOp::Call ||
@@ -2455,8 +2460,14 @@ void FunctionCompiler::store(const IrNode& node) {
     }
     case IrOp::Field: {
         auto parts = groups_of({&destination.operands.front(), &source});
+        auto& object = parts[0].front();
+        if (is_primitive_reference(destination.operands.front().type) && c_.symbol(destination.symbol).name == "$value") {
+            spill(object);
+            for (auto& word : parts[1]) spill(word);
+            check_borrow_owner(destination, object);
+        }
         write_words(nvr::StateOp::WriteField, c_.field_index(destination.symbol, destination.span),
-                    {parts[0].front()}, std::move(parts[1]), node.span);
+                    {resolve(object)}, std::move(parts[1]), node.span);
         return;
     }
     case IrOp::Index: {
@@ -2812,7 +2823,11 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return load(node);
     case IrOp::Field: {
         auto object = expression(node.operands.front());
-        return state(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {object},
+        if (is_primitive_reference(node.operands.front().type) && c_.symbol(node.symbol).name == "$value") {
+            spill(object);
+            check_borrow_owner(node, object);
+        }
+        return state(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {resolve(object)},
                      c_.type_of(node.type, node.span), node.span);
     }
     case IrOp::Reference: {
@@ -3742,15 +3757,58 @@ Operand FunctionCompiler::zero_word(std::uint32_t type, const Span& span) {
     return immediate(type, 0);
 }
 
+bool FunctionCompiler::closure_object(const IrNode& node) const {
+    return node.symbol != no_symbol && c_.symbol(c_.symbol(node.symbol).owner).name.starts_with("$closure");
+}
+
+bool FunctionCompiler::local_object(const IrNode& node) const {
+    return (node.text == region_reference && is_primitive_reference(node.type)) ||
+           (closure_object(node) && !node.operands.empty() && !explicitly_owned_closure(node));
+}
+
+void FunctionCompiler::set_borrow_owner(SymbolId box, Operand handle, std::optional<Operand> owner, const Span& span) {
+    const auto field = c_.member(box, "$owner");
+    if (field == no_symbol) return;
+    const auto type = c_.type_of(c_.symbol(field).type, span);
+    state(nvr::StateOp::WriteField, c_.field_index(field, span),
+          {handle, owner ? *owner : zero_word(type, span)}, c_.scalar(nvr::TypeKind::Void), span);
+}
+
+void FunctionCompiler::check_borrow_owner(const IrNode& field, const Operand& box) {
+    const auto owner_field = c_.member(field.operands.front().type.symbol, "$owner");
+    if (owner_field == no_symbol) return;
+    const auto type = c_.type_of(c_.symbol(owner_field).type, field.span);
+    const auto owner = state(nvr::StateOp::ReadField, c_.field_index(owner_field, field.span),
+                             {resolve(box)}, type, field.span);
+    // ClassIs accepts a nil owner and checks the liveness of any real
+    // owner. The result is immaterial since the field's owner derives from class.
+    state(nvr::StateOp::ClassIs, c_.type_at(type).reference, {owner}, c_.scalar(nvr::TypeKind::Bool), field.span);
+}
+
 Operand FunctionCompiler::allocate(const IrNode& node) {
     const auto cls = node.symbol == no_symbol ? node.type.symbol : c_.symbol(node.symbol).owner;
     const auto type = c_.type_of(c_.symbol(cls).type, node.span);
-    auto arguments = sequence(node.operands);
-    for (auto& argument : arguments) {
-        spill(argument);
-    }
     c_.instantiate(cls);
-    auto handle = state(nvr::StateOp::AllocateObject, c_.layout(cls, node.span), {}, type, node.span);
+    const auto layout = c_.layout(cls, node.span);
+    if (closure_object(node) && node.operands.empty() && !explicitly_owned_closure(node)) {
+        Operand descriptor;
+        descriptor.kind = Operand::Kind::Constant;
+        descriptor.type = type;
+        descriptor.index = c_.constant(type, {1});
+        return descriptor;
+    }
+    auto arguments = sequence(node.operands);
+    for (auto& argument : arguments) spill(argument);
+    const bool static_box = node.text == static_reference && is_primitive_reference(node.type);
+    const bool region = local_object(node) || static_box;
+    Values destination;
+    if (static_box)
+        destination.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 64), nvr::static_region_token));
+    else if (region)
+        destination.push_back(region_token());
+    auto handle = state(region ? nvr::StateOp::RegionObject : nvr::StateOp::AllocateObject,
+                        layout, std::move(destination), type, node.span);
+    if (is_primitive_reference(node.type)) set_borrow_owner(cls, handle, std::nullopt, node.span);
     const auto nothing = c_.scalar(nvr::TypeKind::Void);
     if (c_.has_reference_fields()) {
         std::vector<SymbolId> lineage;
@@ -3758,7 +3816,9 @@ Operand FunctionCompiler::allocate(const IrNode& node) {
             lineage.push_back(scope);
         for (auto scope = lineage.rbegin(); scope != lineage.rend(); ++scope) {
             for (const auto* preparation : c_.reference_fields(*scope)) {
-                auto value = expression(preparation->operands.front());
+                const auto& box = preparation->operands.front();
+                auto value = expression(box);
+                set_borrow_owner(box.type.symbol, value, resolve(handle), preparation->span);
                 state(nvr::StateOp::WriteField, c_.field_index(preparation->symbol, preparation->span),
                       {resolve(handle), value}, nothing, preparation->span);
             }
@@ -4370,9 +4430,9 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     // Specialization needs verified IR, and the result is verified again:
     // by the optimizer, or directly when optimization is off.
     require_valid_ir(program, "before specialization");
-    materialize_reference_storage(program);
     specialize(program);
-    check_array_storage(program, StorageStage::Specialized);
+    check_storage(program, StorageStage::Specialized);
+    materialize_reference_storage(program);
     // Tuples and payload enums are stored inline: a value type may not
     // contain itself (E0448), and its shape has a limit (E0449).
     check_containment(program);

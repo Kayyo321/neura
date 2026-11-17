@@ -345,8 +345,8 @@ private:
         }
     }
     void leak_arguments(const std::vector<Roots>& slots, const std::string& what, const Span& at,
-                        SymbolId callee = no_symbol) {
-        for (const auto& value : slots) leak(value, what, at, callee);
+                        SymbolId callee = no_symbol, std::size_t first = 0) {
+        for (std::size_t i = first; i < slots.size(); ++i) leak(slots[i], what, at, callee);
     }
 
     Roots receiver(const IrNode& node) const {
@@ -758,7 +758,7 @@ public:
             const auto slots = operands(node, 0);
             if (a_.function_value_call(node)) {
                 precise_unknown("calls a function value", node.span);
-                leak_arguments(slots, "passes it to a function value", node.span);
+                leak_arguments(slots, "passes it to a function value", node.span, no_symbol, 1);
                 impure(Reason{"calls a function value", node.span});
                 return typed(node.type, unknown());
             }
@@ -837,7 +837,7 @@ public:
             return typed(node.type, unknown());
         }
         case IrOp::CallClosure:
-            leak_arguments(operands(node, 0), "passes it to a function value", node.span);
+            leak_arguments(operands(node, 0), "passes it to a function value", node.span, no_symbol, 1);
             for (const auto& child : node.body) eval(child);
             for (const auto& child : node.alternative) eval(child);
             impure(Reason{"calls a function value", node.span});

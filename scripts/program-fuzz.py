@@ -505,13 +505,13 @@ def section_closures(p, k):
     bit = p.fault("closure-division")
     a, b = p.between(2, 9), p.between(1, 30)
     p.declarations.append(fill("""let s${k}_make = func(offset: int64) -> func(int64) -> int64 {
-    return func(value: int64) -> int64 {
+    return new func(value: int64) -> int64 {
         return (value * $a + offset) & Mask;
     };
 };
 
 let s${k}_compose = func(first: func(int64) -> int64, second: func(int64) -> int64) -> func(int64) -> int64 {
-    return func(value: int64) -> int64 {
+    return new func(value: int64) -> int64 {
         return second(first(value));
     };
 };
@@ -523,7 +523,13 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     let bump = func(value: int64) -> int64 {
         return value + scale;
     };
-    let check: int64 = 0;
+    let state: int64 = scale;
+    last alias: &int64 = state;
+    last increment = func {
+        alias += 1;
+    };
+    increment();
+    let check: int64 = state;
     for (let i: int32 = 0; i < size * $m; i++) {
         check = mix(check, both(adders[i % 3](bump(check) & 255)));
     }

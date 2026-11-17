@@ -28,7 +28,7 @@ let TasksTests = module (
 
     // A call that spins for `rounds` rounds, records its id, and returns it.
     let counting = func(order: channels.Sender<int>, id: int, rounds: int) -> func() -> int {
-        return func() -> int {
+        return new func() -> int {
             spin(rounds);
             order.send(id);
             return id;
@@ -38,7 +38,7 @@ let TasksTests = module (
     // A call that spins, records its id, and returns Ok(id) or an Err whose code names the id.
     let outcome_after = func(order: channels.Sender<int>, id: int, rounds: int, ok: bool)
             -> func() -> result.Result<int> {
-        return func() -> result.Result<int> {
+        return new func() -> result.Result<int> {
             spin(rounds);
             order.send(id);
             if (ok) {
@@ -50,7 +50,7 @@ let TasksTests = module (
 
     // A call that runs until it sees the cancellation, tells the channel it saw it, and returns an Err.
     let until_cancelled = func(report: channels.Sender<int>, id: int) -> func() -> result.Result<int> {
-        return func() -> result.Result<int> {
+        return new func() -> result.Result<int> {
             wait_for_cancellation();
             report.send(id);
             return result.Result<int>.Err(error.custom("test.cancelled", "call " + id.to_string() + " was cancelled"));
@@ -61,7 +61,7 @@ let TasksTests = module (
     // It tells `started` just before it parks.
     let parked = func(never: channels.Receiver<int>, started: channels.Sender<int>, report: channels.Sender<int>,
             id: int) -> func() -> result.Result<int> {
-        return func() -> result.Result<int> {
+        return new func() -> result.Result<int> {
             started.send(id);
             match (never.receive()) {
                 channels.Received.Cancelled => { report.send(id); },

@@ -30,7 +30,7 @@ let TreeMapModelTests = module (
             keys.append(text);
             text = text + "x";
         }
-        map_model.run<string>(map, func(id: int) -> string {
+        map_model.run<string>(map, new func(id: int) -> string {
             return keys[id];
         }, map.validate, nothing, true, 42, 3000, 16, 60);
     };

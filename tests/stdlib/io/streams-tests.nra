@@ -35,7 +35,7 @@ let StreamsTests = module (
     // counts its calls.
     let pieces = func(data: uint8[list], piece: int, calls: cell.Cell<int>) -> func(int) -> result.Result<uint8[list]> {
         let position = cell.of<int>(0);
-        return func(max: int) -> result.Result<uint8[list]> {
+        return new func(max: int) -> result.Result<uint8[list]> {
             calls.value = calls.value + 1;
             test.assert(max >= 1);
             let end = data.length;
@@ -161,7 +161,7 @@ let StreamsTests = module (
 
     export let test_buffered_writer_collects_until_full = func() -> void {
         let target = byte_buffer.create();
-        let writer = buffered_writer.with_capacity(target.write, 16);
+        let writer = buffered_writer.with_capacity(new bound(target.write), 16);
         test.assert_ok<unit.Unit>(writer.write(bytes_of("0123456789")));
         test.assert_equal_int32(0, target.size);
         test.assert_equal_int32(10, writer.buffered);
@@ -184,7 +184,7 @@ let StreamsTests = module (
 
     export let test_buffered_writer_default_capacity_and_errors = func() -> void {
         let target = byte_buffer.create();
-        let writer = buffered_writer.create(target.write);
+        let writer = buffered_writer.create(new bound(target.write));
         test.assert_ok<unit.Unit>(writer.write(numbers(8192)));
         test.assert_equal_int32(8192, target.size);
         let failing = buffered_writer.with_capacity(func(data: uint8[list]) -> result.Result<unit.Unit> {
@@ -271,7 +271,7 @@ let StreamsTests = module (
 
     export let test_utf8_writer = func() -> void {
         let target = byte_buffer.create();
-        let writer = utf8_writer.create(target.write);
+        let writer = utf8_writer.create(new bound(target.write));
         let sink = writer.write;
         test.assert_ok<unit.Unit>(sink("né"));
         test.assert_ok<unit.Unit>(writer.write_line("🙂"));
@@ -286,15 +286,15 @@ let StreamsTests = module (
     // A reader and a writer compose through bound methods.
     export let test_streams_compose = func() -> void {
         let target = byte_buffer.create();
-        let writer = buffered_writer.with_capacity(target.write, 32);
-        let text = utf8_writer.create(writer.write);
+        let writer = buffered_writer.with_capacity(new bound(target.write), 32);
+        let text = utf8_writer.create(new bound(writer.write));
         let i = 0;
         while (i < 50) {
             test.assert_ok<unit.Unit>(text.write_line("line " + i.to_string()));
             i = i + 1;
         }
         test.assert_ok<unit.Unit>(writer.flush());
-        let reader = utf8_reader.create(buffered_reader.with_capacity(target.reader(), 16).read);
+        let reader = utf8_reader.create(new bound(buffered_reader.with_capacity(target.reader(), 16).read));
         let count = 0;
         while (true) {
             match (test.assert_ok<optional.Optional<string>>(reader.read_line())) {

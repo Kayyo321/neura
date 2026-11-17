@@ -728,7 +728,13 @@ void Validator::constants() {
         case TypeKind::Bytes:
             break;
         case TypeKind::Object:
-            if (size != 0) invalid(where + ": a nil object constant has no payload");
+            if (is_static_object_constant(t, constant)) {
+                if (image_.minor_version < 7) invalid(where + ": static object constants require NVR 1.7");
+                if (!image_.layouts[t.reference].fields.empty())
+                    invalid(where + ": a static object constant requires a fieldless layout");
+            } else if (size != 0) {
+                invalid(where + ": a nil object constant has no payload");
+            }
             break;
         case TypeKind::Array:
         case TypeKind::List:

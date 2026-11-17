@@ -1000,9 +1000,9 @@ int emit_ir(const Options& options) {
     // default listing is what conversion receives: specialized and optimized.
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
         neura::specialize(program);
-        neura::check_array_storage(program, neura::StorageStage::Specialized);
+        neura::check_storage(program, neura::StorageStage::Specialized);
+        neura::materialize_reference_storage(program);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
@@ -1478,9 +1478,9 @@ int run_tests(const Options& options) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
                                  "test_* in a module of the listed files");
     }
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
-    neura::check_array_storage(program, neura::StorageStage::Specialized);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     neura::check_containment(program);
     neura::check_inline_limit(program);
     if (options.optimize) {
@@ -1830,9 +1830,9 @@ namespace {
 
 int check_program(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
-    neura::check_array_storage(program, neura::StorageStage::Specialized);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     return 0;
 }
 
