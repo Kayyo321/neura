@@ -759,6 +759,10 @@ class Session:
     def __init__(self, home: Home, tool: str):
         self.process = subprocess.Popen([str(home.bin / tool), "--stdio"], env=home.env(), stdin=subprocess.PIPE,
                                         stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        # A tool takes its lease as it starts, which takes a while on a loaded
+        # machine; the checks that follow need it held.
+        if (home.root / "leases" / home.current()).exists():
+            check(wait_for(lambda: lease_held(home, home.current())), f"{tool} holds its generation's lease")
 
     def request(self, message: str) -> bytes:
         data = message.encode()
