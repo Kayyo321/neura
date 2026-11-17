@@ -35,6 +35,15 @@ enum class Variant : std::uint8_t;
 // between threads lifting the same block) affect timing and the statistics
 // alone.
 struct TierOptions {
+    // The browser uses the portable function programs without tier 3.
+    // The browser runtime itself reads no tier settings from the environment.
+    static TierOptions browser() {
+        TierOptions options;
+        options.programs = Programs::On;
+        options.tier3 = Tier3::Off;
+        return options;
+    }
+
     // Executions of a block with a LIFT hint before the hint is proven, and
     // of a block without one before its form is searched for, counted over
     // every run that shares the cache (the tests of `neura test`, the
@@ -442,6 +451,7 @@ private:
     std::uint32_t next_program_id_ = 0;
     // Regions replaced by a refresh, which runs may still hold.
     std::vector<std::shared_ptr<const tier2::Region>> retired_regions_;
+#ifndef NEURA_WASM_RUNTIME
     // Native code by region; null where compilation failed.
     std::map<const tier2::Region*, std::unique_ptr<jit::Program>> native_;
     // Tier 3, by program number: arrivals at its checkpoints, and its state:
@@ -464,6 +474,7 @@ private:
     std::unique_ptr<std::atomic<tier3::DispatchRecord*>[]> dispatch_records_;
     std::vector<std::unique_ptr<tier3::DispatchRecord[]>> dispatch_owned_;
     void make_dispatch_records(const tier2::Region& program);
+#endif
     bool machine_code_ = false;
     std::string machine_code_off_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> region_counts_;
