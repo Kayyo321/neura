@@ -1,0 +1,306 @@
+# Neura 0.3.0: state, components and contracts
+
+This note fixes the library and generation contracts that sit on [HTML factories](Html030.md): `Std.Ui` roots, state, components, events, commands and routing; `Std.Collections.Frozen.FrozenList<T>`; and typed contracts with their generated HTTP clients, server adapters and desktop bridges. It is one of the notes of [the application platform](Apps030.md), which owns the limits and code ranges referred to here. Rows move to `docs/apps/Components.md` and `docs/apps/Contracts.md` in the change that implements them.
+
+Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+
+This note adds no syntax. It depends, by name, on records and `new with`, derived JSON codecs, named arguments, `using` and `?` on a `Result`, each fixed by the note of its own milestone.
+
+<!-- example: fragment: Std.Ui and records are not implemented until A3 -->
+```neura
+let ui = import:Std.Ui;
+
+let Stock = record(name: string, count: int32);
+
+let make_stock = func(name: string) -> ui.Component {
+    last state = new ui.State<Stock>(new Stock(name, 0));
+    last restock = new func(event: ui.ClickEvent) {
+        state.update(func(stock) => new with(stock) { count: stock.count + 12 });
+    };
+    return ui.component(
+        state: state,
+        styles: PartStyles,
+        render: new func(snapshot) => part_row(
+            name: snapshot.name,
+            count: snapshot.count,
+            on_restock: restock,
+        ),
+    );
+};
+```
+
+`update` calls its argument at once and does not keep it, so that function needs no `new`. The component keeps `render` and the view keeps `restock`, so both are `new func`.
+
+## State and components
+
+| Rule | Status |
+| --- | --- |
+| `ui.State<T>` holds one value of a deeply immutable `T`: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class (a record of immutable fields is one), or a `FrozenList` of them. Any other `T` is `E0580` at the type argument. | proposed |
+| `get()` returns the current value. `set(value)` and `update(change: func(T) -> T)` replace it; `update` calls `change` once, synchronously, and does not retain it. | proposed |
+| Each accepted `set` or `update` notifies every subscriber once, in subscription order, with the new value, even when the new value is the old one. A state built with `equal: func(T, T) -> bool` skips the notification when `equal(old, new)` is true; there is no default equality. | proposed |
+| An update made by a subscriber during a notification is queued and applied when the round ends. More than 100 rounds in one turn is the trap `state update loop`. | proposed |
+| `subscribe(new func(T))` returns a `ui.Subscription` whose `close()` is idempotent. A class's `get` and `set` clauses and hooks are never observed: only `ui.State` is. | proposed |
+| A state, a subscription, a component, a root and a view belong to one task (`E0602` when given to another). | proposed |
+| `ui.component(state:, styles:, render:)` returns a `ui.Component`. `render` is retained and render-compatible (`E1010`): it receives a snapshot and returns a view. `styles` keeps the stylesheet reachable; it registers nothing at run time. | proposed |
+| A component is embedded in another's view with `{ ui.slot(child) }`. The child renders by itself when its state changes; the parent's render is not run again for it. Children and named slots are ordinary `ui.View` parameters of a factory. | proposed |
+| `web.mount(selector, component, tasks)` and `desktop.mount(window, component, tasks)` return `Result<ui.Root>`. `tasks` is the handle of the enclosing `scope`, so every task the root starts is lexically inside it. A second root on one element, or more than `U-9` roots, is `Err`. | proposed |
+| `root.run()` is the event loop. One *turn* is: take the next event; call its handler; apply queued updates and notify; render each component whose state changed, once, parents before children; commit. It returns when the root is closed or its scope is cancelled. | proposed |
+| An `Invalid` or `Err` commit is delivered to the root's `on_render_failure` callback (default: log it and keep the previous view) and the loop continues, except that a faulted root stops taking events until `reset`. | proposed |
+| Unmounting a component removes its listeners, closes its subscriptions, cancels its commands and raises its generation. | proposed |
+
+## Events
+
+The adapter copies the fields below when the event arrives and queues an immutable record to the root's task. No browser object reaches Neura.
+
+| Event | Record | Fields | `prevent_default` | Coalesced |
+| --- | --- | --- | --- | --- |
+| `click`, `dblclick` | `ClickEvent` | `button: uint8`, `x`, `y: float64` (relative to the element), `modifiers: ui.Modifiers`, `detail: int32` | yes | no |
+| `input` | `InputEvent` | `value: string`, `checked: bool`, `composing: bool` | no | no |
+| `change` | `ChangeEvent` | `value: string`, `checked: bool` | no | no |
+| `submit` | `SubmitEvent` | `submitter: string` | yes | no |
+| `keydown`, `keyup` | `KeyEvent` | `key`, `code: string`, `modifiers`, `repeat: bool` | yes | no |
+| `focus`, `blur` | `FocusEvent` | none | no | no |
+| `pointerdown`, `pointerup` | `PointerEvent` | `x`, `y`, `button`, `kind: ui.PointerKind`, `modifiers` | `pointerdown` only | no |
+| `pointermove` | `PointerEvent` | as above | no | the latest per listener |
+| `scroll` | `ScrollEvent` | `top`, `left: float64` | no | the latest per listener |
+| `toggle` | `ToggleEvent` | `open: bool` | no | no |
+| `close` | `CloseEvent` | `return_value: string` | no | no |
+
+| Rule | Status |
+| --- | --- |
+| `stop_propagation` is valid on every event of the table except `focus`, `blur`, `scroll`, `toggle` and `close`. Both modifiers are applied by the adapter when the event arrives, before any Neura code runs. | proposed |
+| Events are delivered in arrival order. A coalesced event replaces the queued one of the same listener and keeps its place. | proposed |
+| When `U-7` events are queued, the root is *overloaded*: an arriving event that cannot be coalesced is not queued, its modifiers still apply, and it is counted. The adapter sets `data-neura-overloaded` on the root's element. Before the next event it accepts, it delivers `RootEvent.InputOverflow(dropped: uint32)` to `on_overflow`, followed by one `input` record for each controlled element whose value changed meanwhile, so no text edit is lost without the application being told. | proposed |
+| The order of events and the values of their fields are recorded in the trace, and a replay delivers them without a browser. Replay reproduces the Neura execution, not the screen. | proposed |
+| An action that the browser allows only during a user gesture (a file picker, a clipboard write, a download) is a `web.GestureAction` prepared in advance (`web.copy_action(text)`, `web.download_action(name, bytes)`, `web.pick_file_action(accept)`) and bound with `on:click={ web.with_gesture(action, then) }`. The adapter performs it inside the browser event and queues a `web.GestureResult` to `then`. No asynchronous completion is promised a gesture. | proposed |
+
+## Commands and lifetime
+
+| Rule | Status |
+| --- | --- |
+| A handler should finish within a turn. Work that waits belongs to a `ui.Command<I, O>`, built from `work: func(I, cancellation.Token) -> O` with `I` and `O` transferable and immutable (`E0602`, `E0580`). | proposed |
+| `command.run(input)` starts `work` as a task in the root's scope, at most `U-10` at once; over the limit it returns `Rejected` and starts nothing. `command.state` is a `ui.State<ui.CommandState<O>>`: `Idle`, `Running`, `Succeeded(O)`, `Failed(error.PortableError)` or `Cancelled`. | proposed |
+| Each `run` and each unmount raises the command's generation. A completion that carries an older generation is discarded: it updates nothing. | proposed |
+| `command.cancel()` and unmount request cancellation; the task ends at its next cancellation point and is joined by the enclosing scope. Nothing is detached, and no `Scope` is stored in a field. | proposed |
+| A `Result<T>` is not sent between tasks, because `Error.Custom` can hold any object. A command's failure is a `PortableError`. | proposed |
+| There is no `async` or `await`. A provider call parks its task, as host I/O does today ([Concurrency](../lang/Concurrency.md#104-host-io)). | proposed |
+
+## Forms, routing and controls
+
+| Rule | Status |
+| --- | --- |
+| The library ships, as components over real elements: text input, checkbox, select, button, form with validation, list, table and dialog. Each uses the platform's element, so focus, keyboard and accessibility come from the browser. | proposed |
+| `ui.Field<T>` pairs a draft `string` with `parse: func(string) -> Result<T>`; `ui.Form` collects fields, reports the first invalid one, and moves focus to it on submit. Validation shared with a server is an ordinary function of a shared package; it never replaces the server's own. | proposed |
+| `ui.Router` maps path patterns (`/parts/{id}`, segments only, no wildcards) to components. `ui.route(path)` returns a `ui.Url` for `href`. A click on such a link is handled by the adapter without a page load. | proposed |
+| A web target chooses `routing = "hash"` (the default: works on any static host) or `"history"` (the host must serve `index.html` for unknown paths; the build writes a `404.html` copy and says so). | proposed |
+| Loading, empty and failed states are explicit values of the application's state; the library provides no implicit suspense. | proposed |
+
+## FrozenList
+
+`Std.Collections.Frozen.FrozenList<T>` is a list that nobody can change, with storage nobody else holds.
+
+| Rule | Status |
+| --- | --- |
+| `T` is deeply immutable, as defined for `ui.State` (`E0580`). | proposed |
+| `frozen.copy_of(source)` takes an array or a list and copies its elements into new private storage. `frozen.empty<T>()` and `frozen.of(items: ...T)` complete the constructors. Nothing freezes a list in place. | proposed |
+| `length`, `get(index)` (an index out of range traps, as for a list), `first_or_none()`, `last_or_none()`, `contains`, `index_of`, for-each, `slice`, `to_list()` (a fresh copy). | proposed |
+| `appended(value)`, `replaced(index, value)`, `removed(index)` and `concat(other)` return a new list. The first implementation copies; structural sharing may replace it only with alias and accounting tests. | proposed |
+| `equals` and `hash_code` compare elements by value and exist only where `T` has value equality and hashing; `==` stays identity. | proposed |
+| A `FrozenList<T>` is an `#Immutable` class, so tasks may share it and it may be a message, when `T` is transferable. | proposed |
+| The class is written in Neura. Its storage is a private `last` field of list type carrying the tag `#Frozen`, which only `Std.Collections.Frozen` may use. The compiler checks that the field is assigned once, from a list the constructor created, and that no method stores into it, passes it to a retaining parameter, or returns it (`E0581`); with that, the `#Immutable` check accepts the field. | proposed |
+| The existing `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning: read-only views. They are not deeply immutable and are not accepted where this note requires it. | proposed |
+| Derived JSON codecs accept `FrozenList<T>` as an ordered array when `T` has a codec, bounded by `C-3` and `C-4`. A nested `FrozenList` is allowed within those bounds. An `Optional` element is rejected (`E0584`) until a tagged absence encoding exists. | proposed |
+
+## Contracts
+
+A contract is an ordinary interface whose operations cross a process boundary by generated code.
+
+<!-- example: fragment: contracts are not implemented until A3 -->
+```neura
+let Restocked = record(name: string, count: int32);
+let Refusal = record(code: string, message: string);
+let RestockReply = enum (Accepted(Restocked), Rejected(Refusal));
+
+export let PartsApi = interface (
+    let restock = func(part_id: int64, amount: int32) -> result.Result<RestockReply>;
+);
+```
+
+| Rule | Status |
+| --- | --- |
+| A contract interface has no type parameters, properties, static members or base interfaces, and no two operations of one name (`E0582`). | proposed |
+| An operation is `func(parameters) -> Result<Reply>`. Every parameter type and `Reply` has a wire schema: `bool`, a fixed-width integer, `float64`, `string`, a record, an enum, a named `Optional` field of a record, or a `FrozenList`, acyclic and within `C-4` (`E0583` for the signature, `E0584` for a type). `Error`, `any`, a class that is not a record, a handle and a function are never on the wire. | proposed |
+| The outer `Result` is local: `Err` means transport, deadline, decode or version failure. An expected refusal is a variant of `Reply`. | proposed |
+| `contracts.toml` maps each operation: its id, method, path, placements and statuses come from there and from nowhere else. Field and variant wire names are those of each type's derived codec, pinned or defaulted by that codec's own rules, and body member names are parameter names; `contracts.lock` records all of them, so a rename that changes one is caught as a breaking change. | proposed |
+
+```toml
+schema = 1
+
+[[contract]]
+interface = "Stock.Contracts.PartsApi"
+id = "parts"
+version = 1
+base_path = "/api/parts"
+
+[[contract.operation]]
+name = "restock"
+id = "parts.restock"
+method = "POST"
+path = "/{part_id}/restock"
+auth = "required"
+max_request_bytes = 4096
+max_response_bytes = 65536
+
+[contract.operation.input]
+part_id = "path"
+amount = "body"
+
+[contract.operation.status]
+Accepted = 200
+Rejected = 422
+```
+
+| Rule | Status |
+| --- | --- |
+| Every operation of the interface is mapped, and every mapping names an operation (`E1041`). `id` is unique in the project; `method` is `GET`, `POST`, `PUT`, `PATCH` or `DELETE`; no two operations share a method and path pattern. | proposed |
+| An input is placed in `path`, `query` or `body`. A path or query input is a `bool`, an integer or a `string`. A `GET` or `DELETE` has no body input. Body inputs form one JSON object with one member per parameter, by parameter name. | proposed |
+| The reply is the JSON of `Reply` by its derived codec, with the status its variant maps to; every variant has a status. A `Reply` that is not an enum has one status, under the key `ok`. | proposed |
+| A failure of the framework, not the service, is `{"error":{"code":...,"message":...,"request_id":...}}` with status 400, 401, 403, 404, 409, 413, 500, 503 or 504. It carries no detail of the server. A client turns it into `Err`. | proposed |
+| Integers are JSON numbers written in full. Neura code parses and writes them, in the browser too, so a 64-bit value never passes through a floating-point number. | proposed |
+| A request carries `Neura-Contract: id/version`. A server that serves another version answers 409 before any service code runs. | proposed |
+| `neura contracts` reads the interfaces through the compiler, runs no project code, and writes into `generated/contracts/` of the contract's package: an HTTP client class that implements the interface, a server adapter that builds routes from an implementation, a bridge client and a bridge dispatcher, a fake that records calls and returns scripted replies, `openapi.json`, `registry.json`, and `contracts.lock`. The output is a function of the sources and the manifest. | proposed |
+| The generated files are committed. A build never regenerates them: it checks their header digest and reports `E1043` when they are stale. `neura contracts --check` does the same without writing. | proposed |
+| `contracts.lock` pins each operation's wire schema. Adding an operation, or a named `Optional` field to a record, is compatible. Removing, renaming or retyping a field, adding a required field, adding or removing an enum variant, or changing an id, method, path, placement or status is breaking: `E1042` unless `version` is raised in the same change. | proposed |
+| A generated client is constructed explicitly, with a base URL or a bridge, a deadline (default 30 s) and a credentials policy. Calling it looks like calling the interface and may fail like a network. Nothing retries. A lost reply is `Err(OutcomeUnknown)`, never a claim that nothing happened. | proposed |
+
+### HTTP clients
+
+`Std.Net.Http`'s client uses one host service, `neura.http.fetch` version 1: method text, URL text, headers as name and value pairs, body bytes, a deadline in nanoseconds and a credentials mode (`uint32`: omit, same origin, include); it answers status, headers and body bytes within `W-3`, or an error code. The browser adapter implements it with the browser's `fetch`, so origin and credential rules are the browser's. The server and desktop hosts implement it over their own sockets and TLS. It is overlapping and cancellable, and its exchanges are recorded for replay.
+
+### Desktop bridges
+
+The bridge client sends the same JSON bytes in a frame instead of an HTTP request ([Desktop](Desktop030.md#bridge)). Only operations listed in the desktop target's `bridge.operations` have a dispatcher entry; a bridge client for any other is `E1045`. There is no operation that takes a name and arguments of unknown type.
+
+## Lowering and artifacts
+
+Nothing here adds a NeuraIR operation, an NVR section or a tier change. `#Frozen` is one new tag and `E0580` one new check on type arguments, both in the frontend; the generated adapters are ordinary source. A `FrozenList` is a heap object holding one list; it is counted as today's objects are.
+
+## Diagnostics
+
+| Code | Title | Span | Fix |
+| --- | --- | --- | --- |
+| `E0580` | type is not deeply immutable | The type argument, with a label at the mutable field or part | Make the class `#Immutable` or a record; replace a list with a `FrozenList` |
+| `E0581` | frozen storage is exposed or changed | The store, return or argument that leaks the `#Frozen` field; the tag outside its module | Copy instead |
+| `E0582` | interface cannot be a contract | The offending member or clause | Remove it, or split the interface |
+| `E0583` | operation cannot be a contract operation | The parameter or result type: not `Result<...>`, a variadic, a default, a function type | The shape required |
+| `E0584` | type has no wire schema | The type, with the path to the offending part | A record, enum or `FrozenList` |
+| `E1040` | malformed contract manifest | The key or value in `contracts.toml` | The schema's form |
+| `E1041` | invalid operation mapping | The mapping: unmapped, unknown, duplicate id, conflicting route, invalid placement, over `C-1` | The message names the other mapping |
+| `E1042` | contract change is not compatible | The changed member, with the pinned form | Raise `version`, or restore the member |
+| `E1043` | generated contract code is out of date | The generated file's header | `neura contracts` |
+| `E1045` | operation is not a bridge operation | The construction of the bridge client | Add the id to `bridge.operations`, or use the HTTP client |
+
+`E1044` is assigned in [Backend](Backend030.md#diagnostics).
+
+## Edge cases
+
+Accepted:
+
+1. `new ui.State<int32>(0)`, `new ui.State<Stock>(...)` with a record, and with a tuple of two strings.
+2. `ui.State<frozen.FrozenList<Stock>>`.
+3. `update` with a capturing plain `func`: not retained.
+4. `set` with a value equal to the current one: one notification.
+5. A state with `equal:` given: no notification when equal.
+6. A subscriber that calls `set` on the same state: queued, applied after the round.
+7. `close()` of a subscription twice.
+8. Two components sharing one state: both render in one turn, in mount order.
+9. A child embedded with `ui.slot`, updated alone: the parent's render is not called.
+10. A handler that makes three updates: one render, one commit.
+11. An event for a listener removed by an earlier event of the same batch: discarded.
+12. `pointermove` arriving faster than turns: the handler sees the latest.
+13. A command run twice quickly: the first completion is discarded.
+14. A command completing after its component unmounted: discarded; after remount: still discarded.
+15. `command.cancel()` when idle: nothing.
+16. `frozen.copy_of` of an empty array; of a list; `frozen.of("a", "b")`.
+17. A `FrozenList<FrozenList<int64>>`.
+18. `appended` on a shared list: the original is unchanged.
+19. A `FrozenList<Stock>` sent on a channel and returned from a command.
+20. A contract operation with no parameters, and one whose `Reply` is a record rather than an enum (one status, under the key `ok`).
+21. A `uint64` field of 18,446,744,073,709,551,615 round-tripped through the browser client and the bridge.
+22. A record with a named `Optional<string>` field absent from the JSON: `None`.
+23. A reply with an unknown extra member: ignored, by the codec's rule.
+24. A compatible change (a new operation) with `contracts.lock` updated and `version` unchanged.
+
+Rejected at compile time:
+
+25. `ui.State<int32[list]>`, `ui.State<HashMap<string, int>>`, a class with a `let` field: `E0580`.
+26. `frozen.FrozenList<StringBuilder>`: `E0580`.
+27. A `render` that calls `state.set`: `E1010`.
+28. `ui.component(render: func(snapshot) => ...)` with a capturing function and no `new`: the existing retention rejection.
+29. A state passed to `spawn`: `E0602`.
+30. A command whose `work` captures the state: `E0602` at the capture.
+31. `#Frozen` in a user module; a method of `FrozenList` that returns its storage: `E0581`.
+32. A contract interface with a type parameter, a property, or two `get` operations: `E0582`.
+33. An operation returning `Stock` without `Result`; one taking a `func`; one with a variadic: `E0583`.
+34. An operation taking an `Error`, a `HashMap`, an `any`, or a `FrozenList<Optional<int32>>`: `E0584`.
+35. A recursive record reached through an `Optional` field: `E0584`.
+36. `contracts.toml` with an unknown key, or `method = "TRACE"`: `E1040`.
+37. Two operations with `POST /{id}/restock` and `POST /{part}/restock`: `E1041`.
+38. A body input on a `GET`; a record placed in `path`: `E1041`.
+39. An enum variant without a status: `E1041`.
+40. A field removed from `Restocked` with `version` unchanged: `E1042`.
+41. An interface edited without running `neura contracts`: `E1043`.
+42. A bridge client for an operation the desktop target does not list: `E1045`.
+
+At run time:
+
+43. `get(length)` on a `FrozenList`: the trap of a list index.
+44. 101 notification rounds in a turn: the trap `state update loop`.
+45. A server that serves version 2 to a version 1 client: `Err` with the code `contract_version`, and no service call.
+46. A response of `C-2` plus one byte: `Err(TooLarge)`; the body is not decoded.
+47. A deadline passing during a `POST`: `Err(OutcomeUnknown)`; nothing is retried.
+48. The 1,025th queued click: counted, `InputOverflow` delivered, the root keeps working.
+
+## Order of work
+
+Each step is one commit with its targeted tests. None changes the image of a program that does not use the feature.
+
+| Step | Content | Tests |
+| --- | --- | --- |
+| 1 | This note | Document checks |
+| 2 | `#Frozen`, `E0580`, `E0581`, `FrozenList` | Model-based collection tests against a list; alias tests; cases 16 to 19, 25, 26, 31, 43 |
+| 3 | `ui.State`, subscriptions, `ui.component`, roots and turns on the model host | Order traces of notifications and renders; cases 1 to 11, 27 to 29, 44 |
+| 4 | Event records, queueing, coalescing and overflow; gesture actions | Scripted event files; cases 12, 48; real events in headless Chromium |
+| 5 | Commands and generations | Cases 13 to 15, 30; a slow command across unmount and remount |
+| 6 | Controls, forms and the router | Focus, selection and composition journeys in headless browsers |
+| 7 | Codec extension to `FrozenList` | Bounds, exact integers, cases 21 to 23 |
+| 8 | `contracts.toml`, eligibility, `neura contracts` and its outputs | Golden generated files; cases 20, 32 to 42 |
+| 9 | `neura.http.fetch` natively and the generated client against the fake | Cases 45 to 47 |
+
+## Gate and acceptance
+
+- No mutation of a source array or list is visible through a `FrozenList` copied from it, under a model-based test.
+- Every eligibility rule has an accepted and a rejected fixture: immutability, transfer, value equality, wire schema.
+- Notification, render and commit order equal the hand-derived trace for nested components.
+- A stale completion changes nothing, and unmount leaves no listener, subscription or task (budget B-W9).
+- Controlled inputs keep focus, selection and composition in headless Chromium and Firefox, by injected events; input methods and screen readers are qualified by a person.
+- Generated clients, servers and bridges round-trip every contract fixture, including 64-bit boundary values, and reject a version mismatch before the implementation runs.
+- `neura contracts` twice gives identical bytes, and runs no project code (checked with a project whose startup traps).
+
+## Migration
+
+A program that passed an `ImmutableList` to another task or stored one as shared state copies it with `frozen.copy_of`. A program that modelled reactive values with accessor clauses moves the value into a `ui.State`; the accessors keep their ordinary meaning. Hand-written HTTP calls to a known service become a contract and a generated client.
+
+## Decisions taken without the owner
+
+1. There is no default equality for state: every accepted update notifies, and suppression is opt-in with an explicit function.
+2. A render happens once per turn, after all of the turn's updates.
+3. Input overflow is reported and resynchronized, not queued without bound and not silent.
+4. Gesture-bound actions are prepared values, bound in the template; nothing asynchronous claims a gesture.
+5. `FrozenList` is a library class checked through one internal tag, rather than a built-in type.
+6. A `FrozenList` index out of range traps, as a list's does.
+7. Wire identity lives only in `contracts.toml`; generated code is committed and checked, never regenerated by a build.
+8. A reply's variants map to statuses; framework failures use one fixed envelope.
+9. 64-bit integers are JSON numbers, with no string form.
+10. One contract version is served at a time; any breaking change needs a new `version`.
+11. `routing = "hash"` is the default for web targets.
