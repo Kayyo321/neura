@@ -1213,20 +1213,9 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/version.cmake"
     )
-    foreach(suite IN ITEMS install update uninstall bootstrap)
-        add_test(NAME lifecycle-${suite} COMMAND ${CMAKE_COMMAND}
-            "-DNEURA=$<TARGET_FILE:neura>"
-            "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
-            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/lifecycle-${suite}-tests"
-            "-DCONFIG=$<CONFIG>"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/${suite}.cmake"
-        )
-        set_tests_properties(lifecycle-${suite} PROPERTIES TIMEOUT 600)
-    endforeach()
     # The scenario suites of the 0.3 lifecycle (docs/design/Lifecycle030.md).
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    foreach(suite IN ITEMS archives)
+    foreach(suite IN ITEMS archives install bootstrap)
         add_test(NAME lifecycle-${suite} COMMAND "${Python3_EXECUTABLE}"
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/scenarios.py" ${suite}
             "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/lifecycle-${suite}-tests" "${CMAKE_COMMAND}")

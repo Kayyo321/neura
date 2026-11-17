@@ -15,6 +15,8 @@ namespace fs = std::filesystem;
 
 namespace {
 
+int lease = -1;
+
 void tool_help(const Tool& tool, std::ostream& out) {
     out << tool.name << ": the direct form of";
     bool first = true;
@@ -110,6 +112,8 @@ Start start(const Tool& tool, int argc, char** argv) {
     for (int i = first; i < argc; ++i) result.arguments.emplace_back(argv[i]);
     return result;
 }
+
+int lease_descriptor() { return lease; }
 
 std::vector<char*> argv_of(std::vector<std::string>& arguments) {
     std::vector<char*> pointers;

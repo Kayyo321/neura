@@ -80,6 +80,10 @@ struct Start {
 };
 Start start(const Tool& tool, int argc, char** argv);
 
+// The descriptor of the shared lease this process holds on its installed
+// generation (docs/design/Lifecycle030.md, "Generations in use"), or -1.
+int lease_descriptor();
+
 // Pointers into `arguments` for code that takes argc and argv.
 std::vector<char*> argv_of(std::vector<std::string>& arguments);
 

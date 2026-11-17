@@ -24,6 +24,7 @@
 #include <process.h>
 #else
 #include <climits>
+#include <dirent.h>
 #include <sys/stat.h>
 #include <unistd.h>
 #endif
@@ -118,6 +119,38 @@ bool present(const std::string& bin, std::string_view name) {
 }
 #endif
 
+#ifndef _WIN32
+// The component manifests of this generation (docs/design/Lifecycle030.md),
+// read only when a tool is missing, so that a run pays nothing for them.
+// Returns whether the generation has manifests; `declared` is set when one
+// of them has the line `tool <name>`.
+bool manifests_declare(const std::string& bin, std::string_view name, bool& declared) {
+    declared = false;
+    const auto slash = bin.rfind('/');
+    if (slash == std::string::npos) return false;
+    const std::string directory = bin.substr(0, slash) + "/share/neura/components";
+    DIR* listing = ::opendir(directory.c_str());
+    if (listing == nullptr) return false;
+    const std::string wanted = "tool " + std::string(name) + "\n";
+    bool any = false;
+    while (const dirent* entry = ::readdir(listing)) {
+        const std::string_view file = entry->d_name;
+        if (file.size() < 5 || !file.ends_with(".txt")) continue;
+        std::FILE* stream = std::fopen((directory + "/" + std::string(file)).c_str(), "rb");
+        if (stream == nullptr) continue;
+        any = true;
+        std::string text;
+        char buffer[4096];
+        std::size_t count;
+        while ((count = std::fread(buffer, 1, sizeof buffer, stream)) > 0 && text.size() < (std::size_t{4} << 20)) text.append(buffer, count);
+        std::fclose(stream);
+        if (text.find(wanted) != std::string::npos) declared = true;
+    }
+    ::closedir(listing);
+    return any;
+}
+#endif
+
 std::string join(const std::string& bin, std::string_view name) {
 #ifdef _WIN32
     return (std::filesystem::path(bin) / tool::executable_file(name)).string();
@@ -201,6 +234,16 @@ int main(int argc, char** argv) {
                     ". 'neura run' runs images directly without it");
     }
     if (!present(bin, command->tool)) {
+#ifndef _WIN32
+        // In an installed generation the manifests say which components are
+        // there: a tool that none declares belongs to a product that is not
+        // installed here.
+        bool declared = false;
+        if (manifests_declare(bin, command->tool, declared) && !declared && command->component == tool::Component::Sdk) {
+            print(stderr, "neura: \"" + std::string(name) + "\" needs Neura-sdk, which is not installed here\n");
+            return 1;
+        }
+#endif
         const auto* entry = tool::find_tool(command->tool);
         const bool core = entry && entry->component == tool::Component::Core;
         return fail("'neura " + std::string(name) + "' needs " + std::string(command->tool) + ", which is not in " + where +

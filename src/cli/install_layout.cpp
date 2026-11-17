@@ -506,7 +506,9 @@ std::optional<Journal> parse_journal(std::string_view text, std::string& error) 
     if (lines[4] == "placed yes") journal.placed = true;
     else if (lines[4] != "placed no") return fail(4, "expected \"placed yes\" or \"placed no\"");
     for (std::size_t i = 5; i < lines.size(); ++i) {
-        if (auto path = rest_value(lines[i], "remove"); path && path->starts_with('/')) {
+        if (auto aside = rest_value(lines[i], "aside"); aside && aside->starts_with('/') && journal.aside.empty()) {
+            journal.aside = *aside;
+        } else if (auto path = rest_value(lines[i], "remove"); path && path->starts_with('/')) {
             journal.remove.push_back(*path);
         } else if (auto added = rest_value(lines[i], "add"); added && added->starts_with('/')) {
             journal.add.push_back(*added);
@@ -526,6 +528,7 @@ std::string format_journal(const Journal& journal) {
     std::string text = "neura-journal 1\noperation " + journal.operation + "\nold " +
                        (journal.old_generation.empty() ? std::string("-") : journal.old_generation) + "\nnew " + journal.new_generation +
                        "\nplaced " + (journal.placed ? "yes" : "no") + "\n";
+    if (!journal.aside.empty()) text += "aside " + journal.aside + "\n";
     for (const auto& path : journal.remove) text += "remove " + path + "\n";
     for (const auto& path : journal.add) text += "add " + path + "\n";
     const auto lines = [&](std::string_view marker, std::string_view key) {

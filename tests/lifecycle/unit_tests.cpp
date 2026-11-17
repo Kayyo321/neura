@@ -487,6 +487,7 @@ int journal_suite() {
     journal.old_generation = "0.2.1-rc.3";
     journal.new_generation = "0.3.0+0123456789ab";
     journal.placed = true;
+    journal.aside = "/home/u/.local/share/neura/.damaged-0.3.0+0123456789ab-17";
     journal.remove = {"/home/u/my bin/neura-old"};
     journal.add = {"/home/u/my bin/neurac", "/home/u/my bin/neura-test"};
     journal.old_marker = "neura-install 1\nmethod archive\nlink /home/u/my bin/neura\nversion 0.2.1-rc.3\n";
@@ -496,7 +497,8 @@ int journal_suite() {
     CHECK(parsed.has_value());
     if (parsed) {
         CHECK(parsed->operation == journal.operation && parsed->old_generation == journal.old_generation &&
-              parsed->new_generation == journal.new_generation && parsed->placed && parsed->remove == journal.remove &&
+              parsed->new_generation == journal.new_generation && parsed->placed && parsed->aside == journal.aside &&
+              parsed->remove == journal.remove &&
               parsed->add == journal.add && parsed->old_marker == journal.old_marker && parsed->new_marker == journal.new_marker);
         CHECK(format_journal(*parsed) == text);
     }

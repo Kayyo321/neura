@@ -1,13 +1,7 @@
-# Shared helpers of the lifecycle-* tests. Include it from a `cmake -P`
-# script after setting BINARY_DIR, SOURCE_DIR, TEST_DIR, NEURA, and CONFIG.
+# Helpers of the CMake-script lifecycle tests (version.cmake). The scenario
+# suites of the install lifecycle are in scenarios.py.
 #
-# These tests need no network, no root, and no terminal: every child process
-# reads its standard input from /dev/null, and updates use `--source <dir>`.
-
-find_program(LC_SH sh REQUIRED)
-# The tests pack archives with GNU tar options (--transform). On macOS tar is
-# bsdtar, which has none; Homebrew's gnu-tar installs as gtar.
-find_program(LC_TAR NAMES gtar tar REQUIRED)
+# Every child process reads its standard input from /dev/null.
 
 # lc_exec(<prefix> [ENV NAME=value...] [WORKING_DIRECTORY dir] COMMAND args...)
 # Runs the command and sets <prefix>_STATUS, <prefix>_OUT, and <prefix>_ERR.
@@ -46,116 +40,5 @@ endfunction()
 function(lc_expect_equal what actual expected)
     if(NOT "${actual}" STREQUAL "${expected}")
         message(FATAL_ERROR "${what}: expected\n[${expected}]\nbut got\n[${actual}]")
-    endif()
-endfunction()
-
-# The tool built in the build tree reports its version, triple, and commit.
-function(lc_tool_version)
-    lc_exec(version COMMAND "${NEURA}" --version)
-    lc_expect_status("neura --version" version 0)
-    if(NOT version_OUT MATCHES "^neura ([^ ]+) \\(([^,]+), commit ([^)]+)\\)\n$")
-        message(FATAL_ERROR "unexpected neura --version output: [${version_OUT}]")
-    endif()
-    set(LC_VERSION "${CMAKE_MATCH_1}" PARENT_SCOPE)
-    set(LC_TRIPLE "${CMAKE_MATCH_2}" PARENT_SCOPE)
-    set(LC_VERSION_LINE "${version_OUT}" PARENT_SCOPE)
-endfunction()
-
-# lc_snapshot(<var> <root>): every path below <root> with the SHA-256 of each
-# file and the target of each symbolic link, so two snapshots are equal only
-# when nothing changed, hidden files included.
-function(lc_snapshot var root)
-    file(GLOB_RECURSE entries LIST_DIRECTORIES true RELATIVE "${root}" "${root}/*")
-    list(SORT entries)
-    set(text "")
-    foreach(entry IN LISTS entries)
-        if(IS_SYMLINK "${root}/${entry}")
-            file(READ_SYMLINK "${root}/${entry}" target)
-            string(APPEND text "${entry} -> ${target}\n")
-        elseif(IS_DIRECTORY "${root}/${entry}")
-            string(APPEND text "${entry}/\n")
-        else()
-            file(SHA256 "${root}/${entry}" digest)
-            string(APPEND text "${entry} ${digest}\n")
-        endif()
-    endforeach()
-    set(${var} "${text}" PARENT_SCOPE)
-endfunction()
-
-# lc_install_components(<prefixes>): installs the build's core, sdk and
-# service components into <prefixes>/<component>.
-function(lc_install_components prefixes)
-    set(config_args)
-    if(DEFINED CONFIG AND NOT CONFIG STREQUAL "")
-        set(config_args --config "${CONFIG}")
-    endif()
-    foreach(component IN ITEMS core sdk service)
-        lc_exec(install COMMAND "${CMAKE_COMMAND}" --install "${BINARY_DIR}" --component ${component}
-            --prefix "${prefixes}/${component}" ${config_args})
-        lc_expect_status("cmake --install --component ${component}" install 0)
-        file(MAKE_DIRECTORY "${prefixes}/${component}")
-    endforeach()
-endfunction()
-
-# lc_pack(<prefixes> <output dir> <version> <triple> [BUILD <commit>]): packs
-# the three archives of a release from component prefixes.
-function(lc_pack prefixes output version triple)
-    cmake_parse_arguments(ARG "" "BUILD" "" ${ARGN})
-    set(build_args)
-    if(ARG_BUILD)
-        set(build_args --build "${ARG_BUILD}")
-    endif()
-    foreach(product IN ITEMS sdk runtime legacy)
-        if(product STREQUAL "runtime")
-            set(parts --service "${prefixes}/service")
-        else()
-            set(parts --sdk "${prefixes}/sdk")
-        endif()
-        lc_exec(archive COMMAND "${LC_SH}" "${SOURCE_DIR}/packaging/make-archive.sh" --product ${product}
-            --core "${prefixes}/core" ${parts} ${build_args} "${output}" "${version}" "${triple}")
-        lc_expect_status("make-archive.sh --product ${product}" archive 0)
-    endforeach()
-endfunction()
-
-# lc_make_install(<dir>): installs the build's components into
-# <dir>/prefixes, packs them with packaging/make-archive.sh, unpacks the
-# legacy archive, and runs its install.sh with HOME, NEURA_INSTALL_ROOT, and
-# NEURA_BIN_DIR below <dir>. Sets LC_PREFIX (the directory of the component
-# prefixes), LC_ARCHIVES, LC_UNPACKED, LC_ROOT, LC_BIN_DIR, LC_HOME, LC_LINK
-# (the `neura` in the bin directory), LC_VERSION, and LC_TRIPLE.
-function(lc_make_install dir)
-    file(REMOVE_RECURSE "${dir}")
-    file(MAKE_DIRECTORY "${dir}/home")
-    lc_install_components("${dir}/prefixes")
-    lc_tool_version()
-    lc_pack("${dir}/prefixes" "${dir}/archives" "${LC_VERSION}" "${LC_TRIPLE}")
-    file(MAKE_DIRECTORY "${dir}/unpacked")
-    lc_exec(unpack COMMAND "${LC_TAR}" -xzf "${dir}/archives/neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz" -C "${dir}/unpacked")
-    lc_expect_status("unpacking the archive" unpack 0)
-    set(unpacked "${dir}/unpacked/neura-${LC_VERSION}-${LC_TRIPLE}")
-    lc_exec(setup ENV "HOME=${dir}/home" "NEURA_INSTALL_ROOT=${dir}/root" "NEURA_BIN_DIR=${dir}/bin"
-        WORKING_DIRECTORY "${unpacked}" COMMAND "${LC_SH}" ./install.sh)
-    lc_expect_status("install.sh" setup 0)
-    file(REAL_PATH "${dir}/root" root)
-    file(REAL_PATH "${dir}/bin" bin_dir)
-    set(LC_PREFIX "${dir}/prefixes" PARENT_SCOPE)
-    set(LC_ARCHIVES "${dir}/archives" PARENT_SCOPE)
-    set(LC_UNPACKED "${unpacked}" PARENT_SCOPE)
-    set(LC_ROOT "${root}" PARENT_SCOPE)
-    set(LC_BIN_DIR "${bin_dir}" PARENT_SCOPE)
-    set(LC_HOME "${dir}/home" PARENT_SCOPE)
-    set(LC_LINK "${bin_dir}/neura" PARENT_SCOPE)
-    set(LC_VERSION "${LC_VERSION}" PARENT_SCOPE)
-    set(LC_TRIPLE "${LC_TRIPLE}" PARENT_SCOPE)
-    set(LC_VERSION_LINE "${LC_VERSION_LINE}" PARENT_SCOPE)
-endfunction()
-
-# lc_expect_no_leftovers(<what> <root>): fails if an operation left temporary
-# files in the install root.
-function(lc_expect_no_leftovers what root)
-    file(GLOB found LIST_DIRECTORIES true "${root}/.staging-*" "${root}/.update-lock" "${root}/.meta-*"
-        "${root}/.marker-*" "${root}/.current-*" "${root}/.install-*")
-    if(found)
-        message(FATAL_ERROR "${what} left temporary files behind: ${found}")
     endif()
 endfunction()

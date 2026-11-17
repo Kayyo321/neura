@@ -143,6 +143,26 @@ void read_lifecycle_options(Options& options, int argc, char** argv) {
             options.update.nightly = true;
         } else if (options.command == Command::Update && arg == "--source") {
             options.update.source = value();
+            options.update.source_given = true;
+        } else if (options.command == Command::Update && arg == "--install-from") {
+            options.update.install_from = value();
+        } else if (options.command == Command::Update && arg == "--add") {
+            options.update.add = value();
+        } else if (options.command == Command::Update && arg == "--force") {
+            options.update.force = true;
+        } else if (options.command == Command::Update && arg == "--components") {
+            options.update.components = value();
+        } else if (options.command == Command::Update && arg == "--migrate-install") {
+            options.update.migrate = true;
+        } else if (options.command == Command::Update && arg == "--rollback") {
+            options.update.rollback = true;
+        } else if (options.command == Command::Update && arg == "--repair") {
+            options.update.repair = true;
+        } else if ((options.command == Command::Update || options.command == Command::Uninstall) && arg == "--terminate") {
+            options.update.terminate = true;
+            options.uninstall.terminate = true;
+        } else if (options.command == Command::Uninstall && arg == "--component") {
+            options.uninstall.component = value();
         } else if (options.command == Command::Update && arg == "--require-attestation") {
             options.update.require_attestation = true;
         } else if (options.command == Command::Uninstall && arg == "--dry-run") {

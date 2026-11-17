@@ -7,7 +7,9 @@
 #include "c-import/c_import.hpp"
 
 #include <filesystem>
+#include <cstddef>
 #include <functional>
+#include <optional>
 #include <string>
 
 namespace neura::lifecycle {
@@ -38,13 +40,48 @@ struct UpdateOptions {
     bool check = false;
     bool nightly = false;
     std::string source = default_release_source;
+    // Whether --source was given; adding a component reads the installed
+    // version's own release otherwise.
+    bool source_given = false;
     bool require_attestation = false;
+    // --install-from <dir>, which install.sh runs, and --add <dir>.
+    std::string install_from;
+    std::string add;
+    bool force = false;
+    // --components sdk|runtime|sdk,service.
+    std::string components;
+    bool migrate = false;
+    bool rollback = false;
+    bool repair = false;
+    bool terminate = false;
 };
 
 struct UninstallOptions {
     bool dry_run = false;
     bool yes = false;
+    // --component sdk|service: remove one component, by a new generation.
+    std::string component;
+    bool terminate = false;
 };
+
+// The service's part in a change (docs/design/Lifecycle030.md, "A change,
+// step by step", and docs/design/Service030.md). The service milestone
+// supplies its control client through these hooks; without one, the
+// lifecycle finds supervisors by the lock they hold, removes the login
+// registration and state by their paths, and asks the installation's own
+// `neura runtime shutdown --terminate` to stop applications.
+struct ServiceHooks {
+    // The applications of the installation at `root` that are not terminal,
+    // or nothing when that cannot be told without a control client.
+    std::function<std::optional<std::size_t>(const std::filesystem::path& root)> applications;
+    // Stops every application and supervisor of the installation. Returns an
+    // empty string on success, else the reason.
+    std::function<std::string(const std::filesystem::path& root)> terminate;
+    // Tells the supervisor of `generation`, if one runs, that it is retired,
+    // waiting at most 250 ms.
+    std::function<void(const std::filesystem::path& root, const std::string& generation)> retire;
+};
+void set_service_hooks(ServiceHooks hooks);
 
 // `executable` is the real path of the running executable.
 int doctor(const std::filesystem::path& executable, const DoctorOptions& options);

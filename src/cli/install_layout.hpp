@@ -143,6 +143,9 @@ struct Journal {
     // Whether this change put the new generation's directory in place, so
     // that undoing the change removes it.
     bool placed = false;
+    // Where a damaged generation of the same name was set aside before the
+    // new one was placed; empty when none was.
+    std::string aside;
     // Absolute paths of links this change removes and adds.
     std::vector<std::string> remove;
     std::vector<std::string> add;
