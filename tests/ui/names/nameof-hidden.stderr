@@ -1,0 +1,15 @@
+error[E0305]: unknown or inaccessible member 'hidden' of Invoice
+ --> $DIR/nameof-hidden.nra:5:19
+  |
+3 |     let hidden: int = 0;
+  |         ------ 'hidden' is declared here without 'export'
+4 | );
+5 | let text = nameof(Invoice.hidden);
+  |                   ^^^^^^^^^^^^^^ 'hidden' is not exported
+  |
+help: consider exporting it
+  |
+3 |     export let hidden: int = 0;
+  |     +++++++
+
+For more information about this error, try `neura explain E0305`.

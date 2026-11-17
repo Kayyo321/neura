@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-set-not-import.nra:2:5
+  |
+2 | let.extensions words = 1;
+  |     ^^^^^^^^^^ 'let.extensions' imports a module, as in 'let.extensions alias = import:Module'
+
+For more information about this error, try `neura explain E0228`.

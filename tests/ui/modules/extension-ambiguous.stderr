@@ -1,0 +1,17 @@
+error[E0315]: ambiguous extension function 'shout'
+ --> $DIR/extension-ambiguous.nra:5:12
+  |
+5 | let loud = "ready".shout();
+  |            ^^^^^^^^^^^^^ 2 enabled extension functions accept string
+ ::: $DIR/app/words.nra:2:26
+  |
+2 |     export let.extension shout = func(text: string, marks: int = 1) -> string => text + "!";
+  |                          ----- 'shout' enabled by the set 'words'
+ ::: $DIR/app/other.nra:2:26
+  |
+2 |     export let.extension shout = func(text: string) -> string => text + "?";
+  |                          ----- 'shout' enabled by the set 'other'
+  |
+  = help: call one through its set's alias, as in 'words.shout(receiver, ...)'
+
+For more information about this error, try `neura explain E0315`.

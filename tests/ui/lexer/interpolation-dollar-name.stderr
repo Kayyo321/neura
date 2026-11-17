@@ -1,0 +1,7 @@
+error[E0101]: invalid character '$'
+ --> $DIR/interpolation-dollar-name.nra:3:12
+  |
+3 | let text = $x;
+  |            ^ not a token of the language
+
+For more information about this error, try `neura explain E0101`.

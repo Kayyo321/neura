@@ -1,0 +1,14 @@
+error[E0103]: unterminated string literal
+ --> $DIR/interpolation-nested-quote.nra:3:16
+  |
+3 | let text = $"{a";
+  |                ^ this string is not closed
+  |                  - the line ends here
+  |
+  = note: a string literal ends on the line where it starts
+help: close the string
+  |
+3 | let text = $"{a"";
+  |                 +
+
+For more information about this error, try `neura explain E0103`.

@@ -1,0 +1,9 @@
+error[E0487]: nameof takes the name of a declaration
+ --> $DIR/nameof-empty.nra:2:12
+  |
+2 | let text = nameof();
+  |            ^^^^^^^^ nameof needs a name
+  |
+  = help: write a name or a dotted path, such as 'nameof(Invoice.total)'
+
+For more information about this error, try `neura explain E0487`.

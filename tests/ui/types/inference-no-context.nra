@@ -1,0 +1,5 @@
+// Nothing gives the type parameter (edge case 44).
+let empty = func<T>() -> T[list] => new;
+let use = func {
+    let xs = empty();
+};

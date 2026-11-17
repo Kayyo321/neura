@@ -1,0 +1,9 @@
+error[E0488]: invalid extension function
+ --> $DIR/extension-receiver-function.nra:2:27
+  |
+2 | let.extension call = func(f: func(int) -> int) -> int => f(1);
+  |                           ^ the receiver cannot have a function type
+  |
+  = help: an extension function extends one type, named by its first parameter
+
+For more information about this error, try `neura explain E0488`.

@@ -1,0 +1,8 @@
+error[E0203]: expected ')'
+ --> $DIR/number-label.nra:3:17
+  |
+3 | let size = one(1: 2);
+  |                 ^ expected ')', found ':'
+  |               - unclosed '(' opened here
+
+For more information about this error, try `neura explain E0203`.

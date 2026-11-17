@@ -11,6 +11,7 @@
 #include "reference_storage.hpp"
 
 #include <algorithm>
+#include <charconv>
 #include <cstddef>
 #include <set>
 #include <utility>
@@ -430,10 +431,80 @@ private:
                      symbol(source_file(program_, id)).library_path.empty()))
                     report(entry.span, "invalid standard library kernel binding of " + name(id));
                 break;
+            case AttributeId::ParameterDefault:
+            case AttributeId::ParameterDefaultVariant:
+                check_parameter_default(id, entry, attribute);
+                break;
+            case AttributeId::FunctionExtension:
+                if (entry.parameters.empty())
+                    report(entry.span, "an extension function needs a receiver parameter, and " + name(id) +
+                                           " has none");
+                break;
             default:
                 break;
             }
         }
+    }
+
+    // A default (docs/design/Calls030.md) belongs to a parameter of a
+    // function without a variadic parameter, and its literal is a value of
+    // the parameter's type.
+    void check_parameter_default(SymbolId id, const IrSymbol& entry, const IrAttribute& attribute) {
+        if (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Function ||
+            symbol(entry.owner).variadic != VariadicKind::None) {
+            report(entry.span, "a default of " + name(id) + " belongs to a parameter of a function without a variadic "
+                                                             "parameter");
+            return;
+        }
+        const auto& type = entry.type;
+        if (attribute.id == AttributeId::ParameterDefaultVariant) {
+            const auto& variant = symbol(attribute.value.symbol);
+            if (variant.kind != SymbolKind::Variant || !variant.payload_types.empty() || type.kind != TypeKind::Enum ||
+                type.symbol != variant.owner)
+                report(entry.span, "the default of " + name(id) + " is not a variant without payload of its type");
+            return;
+        }
+        const auto kind = attribute.value.items[0].integer;
+        const auto& literal = attribute.value.items[1];
+        const auto width = [&]() -> unsigned {
+            unsigned bits = 0;
+            const auto digits = std::string_view(type.name).substr(type.name.starts_with("int") ? 3 : 4);
+            std::from_chars(digits.data(), digits.data() + digits.size(), bits);
+            return bits;
+        };
+        bool fits = false;
+        switch (kind) {
+        case 0:
+            fits = type.kind == TypeKind::Bool && literal.kind == AttributeValueKind::Bool;
+            break;
+        case 1:
+            if (type.kind == TypeKind::Integer && type.name.starts_with("int") &&
+                literal.kind == AttributeValueKind::Signed) {
+                const auto bits = width();
+                const auto value = attribute_signed_value(literal);
+                fits = bits == 64 || (value >= -(std::int64_t{1} << (bits - 1)) &&
+                                      value < (std::int64_t{1} << (bits - 1)));
+            }
+            break;
+        case 2:
+            if (type.kind == TypeKind::Integer && type.name.starts_with("uint") &&
+                literal.kind == AttributeValueKind::Unsigned) {
+                const auto bits = width();
+                fits = bits == 64 || literal.integer < (std::uint64_t{1} << bits);
+            }
+            break;
+        case 3:
+            if (const auto format = float_format(type); format && literal.kind == AttributeValueKind::Unsigned)
+                fits = format->width() == 64 || literal.integer < (std::uint64_t{1} << format->width());
+            break;
+        case 4:
+            fits = type.kind == TypeKind::String && literal.kind == AttributeValueKind::Text;
+            break;
+        default:
+            fits = class_reference(type) && literal.kind == AttributeValueKind::Bool && literal.integer == 0;
+            break;
+        }
+        if (!fits) report(entry.span, "the default of " + name(id) + " is not a value of " + type.name);
     }
 
     void check_static_constants() {

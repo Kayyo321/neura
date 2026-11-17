@@ -81,6 +81,9 @@ struct Hints {
     std::set<std::size_t> before;
     std::set<std::size_t> blank_before;
     std::map<std::size_t, std::size_t> accessor_ends;
+    // The ':' of a conditional or of a range's step, which is spaced on
+    // both sides, unlike a label's or an annotation's.
+    std::set<std::size_t> spaced_colons;
 };
 
 class SyntaxHints {
@@ -169,6 +172,15 @@ private:
                 }
             }
         }
+        if ((value.kind == Expr::Kind::Conditional || value.kind == Expr::Kind::Range) && value.operands.size() == 3) {
+            const auto start = value.operands[1].span.offset + value.operands[1].span.length;
+            const auto end = value.operands[2].span.offset;
+            if (end > start) {
+                in_span({{}, 1, 1, start, end - start}, [&](const Token& token) {
+                    if (token.text == ":") hints_.spaced_colons.insert(token.span.offset);
+                });
+            }
+        }
         if (value.lambda) declaration(*value.lambda);
         if (value.match) statement(*value.match);
         for (const auto& operand : value.operands) expression(operand);
@@ -197,7 +209,10 @@ private:
         types(value.interfaces);
         if (value.initializer) expression(*value.initializer);
         for (const auto& generic : value.generics) types(generic.bounds);
-        for (const auto& parameter : value.parameters) type(parameter.type);
+        for (const auto& parameter : value.parameters) {
+            type(parameter.type);
+            if (parameter.default_value) expression(*parameter.default_value);
+        }
 
         // Generic declaration delimiters and the enclosing member-list
         // parenthesis are identified from parsed declarations, not capitalization.
@@ -387,7 +402,9 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
         else if (item.lines_before && in_inline() && text != ")" && text != "]" && text != "}") out.line();
 
         bool space = previous && !previous->comment;
-        if (text == ")" || text == "]" || text == "," || text == ";" || text == "." || text == ":") space = false;
+        if (text == ")" || text == "]" || text == "," || text == ";" || text == "." ||
+            (text == ":" && !hints.spaced_colons.contains(item.offset)))
+            space = false;
         if (before == "(" || before == "[" || before == "." || before == "#") space = false;
         if (hints.angles.contains(item.offset) || (previous && hints.angles.contains(previous->offset) && before == "<")) space = false;
         if (hints.glued.contains(item.offset) || hints.postfix.contains(item.offset) ||

@@ -1,0 +1,3 @@
+// An unsupported presentation (edge case 78).
+let a = 1.5;
+let text = $"{a:.2q}";

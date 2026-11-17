@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-set-const.nra:2:7
+  |
+2 | const.extensions words = import:App.Words;
+  |       ^^^^^^^^^^ 'let.extensions' is written with 'let', not 'const'
+
+For more information about this error, try `neura explain E0228`.

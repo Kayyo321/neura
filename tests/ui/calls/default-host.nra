@@ -1,0 +1,5 @@
+// A host binding has no body and takes no default. The default is rejected
+// before the binding's own checks.
+let Clock = module (
+    export let now = func(zone: int = 0) -> int host("neura.clock", 1);
+);

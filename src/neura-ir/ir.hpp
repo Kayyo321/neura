@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace neura {
@@ -251,6 +252,11 @@ struct IrProgram {
     // Calls inlined by the optimizer; empty before optimization and not part
     // of a .nir file, which holds IR as lowered.
     std::vector<IrInlineSite> inline_sites{};
+    // Source spans that name a declaration without evaluating it: argument
+    // labels and nameof operands (docs/design/Calls030.md). Editor
+    // information from lowering, for navigation and rename; not part of a
+    // .nir file, and later stages leave it as lowering wrote it.
+    std::vector<std::pair<Span, SymbolId>> name_uses{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

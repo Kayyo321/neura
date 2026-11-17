@@ -1,0 +1,2 @@
+// An empty hole (edge case 75).
+let text = $"{}";

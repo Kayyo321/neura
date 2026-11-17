@@ -31,7 +31,7 @@ let churn = func(rounds: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let [out, incoming, closer] = channels.open<string>(0);
         let [stock, stocked, stock_closer] = channels.open<string>(Buffered);
         for (let id: int = 1000; id < 1000 + Buffered; id++) {

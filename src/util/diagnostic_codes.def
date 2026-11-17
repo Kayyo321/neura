@@ -40,6 +40,10 @@ NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
 NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
 NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
+NEURA_DIAGNOSTIC(E0225, "positional argument after a named argument")
+NEURA_DIAGNOSTIC(E0226, "default value on a parameter that takes none")
+NEURA_DIAGNOSTIC(E0227, "malformed interpolated string")
+NEURA_DIAGNOSTIC(E0228, "malformed extension declaration or extension import")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
@@ -53,6 +57,8 @@ NEURA_DIAGNOSTIC(E0308, "not a namespace")
 NEURA_DIAGNOSTIC(E0309, "cyclic declaration")
 NEURA_DIAGNOSTIC(E0310, "misuse of the discard name '_'")
 NEURA_DIAGNOSTIC(E0311, "reserved name")
+NEURA_DIAGNOSTIC(E0315, "ambiguous extension function")
+NEURA_DIAGNOSTIC(E0316, "extension function used without a call")
 
 // Types and bindings
 NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
@@ -104,6 +110,15 @@ NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an ins
 NEURA_DIAGNOSTIC(E0448, "a value type that contains itself")
 NEURA_DIAGNOSTIC(E0449, "a value type larger than its inline limit")
 NEURA_DIAGNOSTIC(E0450, "a list literal without new")
+NEURA_DIAGNOSTIC(E0480, "conflicting inferred type arguments")
+NEURA_DIAGNOSTIC(E0481, "lambda does not fit its callable context")
+NEURA_DIAGNOSTIC(E0482, "unknown argument label")
+NEURA_DIAGNOSTIC(E0483, "argument supplied twice")
+NEURA_DIAGNOSTIC(E0484, "labels are not available for this call")
+NEURA_DIAGNOSTIC(E0485, "default value is not a constant")
+NEURA_DIAGNOSTIC(E0486, "invalid format specification in an interpolated string")
+NEURA_DIAGNOSTIC(E0487, "invalid nameof operand")
+NEURA_DIAGNOSTIC(E0488, "invalid extension function")
 
 // Classes, lifecycle, and accessors
 NEURA_DIAGNOSTIC(E0501, "invalid static member")
@@ -137,6 +152,8 @@ NEURA_DIAGNOSTIC(E0533, "new without the field initializers of an anonymous clas
 NEURA_DIAGNOSTIC(E0534, "untyped field in a fields-only anonymous class")
 NEURA_DIAGNOSTIC(E0536, "destructuring declared with last")
 NEURA_DIAGNOSTIC(E0537, "constructor shorthand names no instance field")
+NEURA_DIAGNOSTIC(E0560, "parameter names differ from the overridden method")
+NEURA_DIAGNOSTIC(E0561, "defaults differ from the overridden method")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

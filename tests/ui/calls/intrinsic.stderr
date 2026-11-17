@@ -1,0 +1,9 @@
+error[E0484]: labels are not available for a call of an intrinsic member
+ --> $DIR/intrinsic.nra:3:18
+  |
+3 |     items.append(element: x);
+  |                  ^^^^^^^ named arguments need the parameter names of a declaration
+  |
+  = help: remove the labels and pass the arguments in parameter order
+
+For more information about this error, try `neura explain E0484`.

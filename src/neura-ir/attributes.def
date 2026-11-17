@@ -57,3 +57,15 @@ NEURA_ATTRIBUTE(ClassShareable, 10, "class.shareable", on_class, false, "b")
 // call is a host request by definition. Without it every fact is unknown
 // (docs/design/Representation030.md, "Effect and retention summaries").
 NEURA_ATTRIBUTE(HostEffects, 11, "host.effects", on_function, false, "[b b b b]")
+// A constant default of a parameter (docs/design/Calls030.md, Constant
+// defaults): [kind, literal]. Kind 0 Boolean, 1 signed integer, 2 unsigned
+// integer, 3 float (the literal is the value's encoding at the parameter's
+// width, as an unsigned integer), 4 text, 5 nil (the literal is false). A
+// caller that leaves the parameter out passes this value.
+NEURA_ATTRIBUTE(ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]")
+// A default that is an enum variant without payload.
+NEURA_ATTRIBUTE(ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s")
+// An extension function (docs/design/Calls030.md, Extension sets): a
+// function that a module enabled with `let.extensions` may call as a member
+// of its first parameter's type. The value is true.
+NEURA_ATTRIBUTE(FunctionExtension, 14, "function.extension", on_function, false, "b")

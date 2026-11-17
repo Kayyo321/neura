@@ -1,0 +1,4 @@
+// An interpolated string needs no import of Std.Io.Console, also in a
+// file-level initializer: the compiler resolves the formatter itself.
+let count = 3;
+let banner = $"count {count:>3} done";

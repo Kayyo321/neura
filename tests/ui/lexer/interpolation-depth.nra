@@ -1,0 +1,3 @@
+// Interpolated strings nest to a depth of eight.
+let a = 1;
+let text = $"{$"{$"{$"{$"{$"{$"{$"{$"{a}"}"}"}"}"}"}"}"}";

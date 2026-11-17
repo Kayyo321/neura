@@ -1,0 +1,6 @@
+// An inferred type argument that fails its bound, reported at the argument (edge case 46).
+let Renderable = interface (
+    let render = func -> string;
+);
+let render = func<T: Renderable>(item: T) -> string => item.render();
+let shown = render(3);

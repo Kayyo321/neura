@@ -1,0 +1,4 @@
+// A module that exports no extension function (edge case 68).
+let Plain = module (
+    export let value = 1;
+);

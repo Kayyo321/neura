@@ -1,0 +1,9 @@
+error[E0484]: labels are not available for a call of a function with a variadic parameter
+ --> $DIR/variadic.nra:5:9
+  |
+5 |     log(level: 2, "a", "b");
+  |         ^^^^^ named arguments need the parameter names of a declaration
+  |
+  = help: remove the labels and pass the arguments in parameter order
+
+For more information about this error, try `neura explain E0484`.

@@ -1,0 +1,3 @@
+// A hole contains no comment (edge case 75).
+let a = 1;
+let text = $"{a // note}";

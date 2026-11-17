@@ -1,0 +1,22 @@
+// An inferred call that exceeds a specialization limit keeps the existing
+// diagnostic (edge case 55).
+let Box = class<T> (
+    export let value: T;
+    export let init = func(value: T) {
+        instance.value = value;
+    };
+);
+let wrap = func<T>(value: T, depth: int) -> int {
+    if (depth == 0) {
+        return 0;
+    }
+    return wrap(new Box<T>(value), depth - 1);
+};
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        wrap(1, 3);
+        return program.ExitCode.Ok;
+    };
+);

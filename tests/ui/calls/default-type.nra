@@ -1,0 +1,2 @@
+// A default of the wrong type (edge case 27).
+let f = func(a: int = "x") -> int => a;

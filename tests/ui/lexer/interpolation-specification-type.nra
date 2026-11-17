@@ -1,0 +1,3 @@
+// A presentation that is invalid for the hole's type (edge case 78).
+let a = "text";
+let text = $"{a:d}";

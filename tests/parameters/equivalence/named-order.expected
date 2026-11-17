@@ -1,0 +1,35 @@
+evaluate a
+evaluate c
+evaluate b
+call 1 2 3
+evaluate c
+evaluate b
+evaluate a
+call 1 2 3
+evaluate a
+evaluate b
+evaluate c
+call 1 2 3
+cast R
+cast L
+call join
+LR
+evaluate y
+evaluate x
+init 1 2
+point 1 2
+evaluate y
+evaluate x
+init 1 7
+derived 1 7
+receiver m
+evaluate y
+evaluate x
+init 1 5
+evaluate dy
+evaluate dx
+derived shift 3 4
+result -1
+evaluate job
+evaluate limit
+joined 32

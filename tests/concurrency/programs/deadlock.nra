@@ -18,7 +18,7 @@ let wait_for = func(name: string, incoming: channels.Receiver<int>, reply: chann
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let [first_out, first, first_closer] = channels.open<int>(0);
         let [second_out, second, second_closer] = channels.open<int>(0);
         console.print_line("before the deadlock");

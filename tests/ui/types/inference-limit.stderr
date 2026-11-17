@@ -1,0 +1,12 @@
+error[E0808]: generic specialization does not terminate: the type arguments of 'Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<int32>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>' nest deeper than 32 levels
+  --> $DIR/inference-limit.nra:13:17
+   |
+13 |     return wrap(new Box<T>(value), depth - 1);
+   |                 ^^^^^^^^^^^^^^^^^ instantiates 'Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<Box<int32>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>>'
+...
+19 |         wrap(1, 3);
+   |         ---------- in this instantiation of 'wrap<int32>'
+   |
+   = note: each instantiation here instantiates a deeper one, so specialization would never finish
+
+For more information about this error, try `neura explain E0808`.

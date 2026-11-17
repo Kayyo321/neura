@@ -76,7 +76,7 @@ let show = func(label: string, outcome: result.Result<int>) {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         match (listeners.bind("127.0.0.1", 0)) {
             result.Result.Err(problem) => {
                 console.print_line("bind failed: " + describe(problem));

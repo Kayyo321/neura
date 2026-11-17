@@ -1,0 +1,9 @@
+error[E0226]: a group of several names takes no default
+ --> $DIR/default-group.nra:5:38
+  |
+5 |     export let init = func(x, y: int = 0) => set;
+  |                                      ^^^ this default would belong to 2 parameters
+  |
+  = help: split the group so that the default belongs to one parameter, as in 'x: int, y: int = ...'
+
+For more information about this error, try `neura explain E0226`.

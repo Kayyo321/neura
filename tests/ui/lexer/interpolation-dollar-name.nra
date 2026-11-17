@@ -1,0 +1,3 @@
+// '$' before a name is not a token (edge case 80).
+let x = 1;
+let text = $x;

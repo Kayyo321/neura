@@ -1,0 +1,9 @@
+error[E0316]: an extension function is not a bound method
+ --> $DIR/extension-value.nra:3:9
+  |
+3 | let m = "a".shout;
+  |         ^^^^^^^^^ 'shout' is an extension function
+  |
+  = help: call it, or pass 'words.shout'
+
+For more information about this error, try `neura explain E0316`.

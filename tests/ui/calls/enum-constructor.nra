@@ -1,0 +1,3 @@
+// A positional enum payload takes no labels (edge case 16).
+let Shape = enum (Circle(int), Square(int));
+let round = Shape.Circle(radius: 2);

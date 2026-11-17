@@ -264,6 +264,9 @@ private:
         if (!flow.reachable) return;
         if (const auto index = tracked(expr)) use(*index, expr.span, flow);
         switch (expr.kind) {
+        case ExprKind::NameOf:
+            // Its operand names a declaration and is not evaluated.
+            return;
         case ExprKind::Lambda:
             capture(*expr.lambda, expr.span, flow);
             return;

@@ -1,0 +1,3 @@
+// An index is not a name (edge case 88).
+let a: int[] = [1];
+let text = nameof(a[0]);

@@ -31,7 +31,7 @@ let received = func(incoming: channels.Receiver<string>) -> string => match (inc
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let clock = clocks.create();
         let before = nanos(clock.monotonic());
         clock.sleep(durations.of_hours(2));
