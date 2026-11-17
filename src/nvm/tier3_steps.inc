@@ -449,7 +449,8 @@
     // commit_exit's Return for a frame that is neither the last nor a
     // callback's (anything else is tier 1's: a Fault here). `blocks` is the
     // count before the return block's step.
-    static tier3::Status tier3_return(tier3::Context* context, std::uint64_t value, bool, std::uint64_t blocks) {
+    static tier3::Status tier3_return(tier3::Context* context, std::uint64_t value, bool, std::uint64_t blocks,
+                                      std::uint32_t words) {
         auto& self = tier3_self(context);
         const auto depth = self.frames_.size();
         if (depth < 2 || self.frames_.header(depth - 1).boundary) return tier3::Status::Fault;
@@ -463,6 +464,12 @@
         if (header.return_slot != nvr::absent) {
             caller.slots[header.return_slot] = value;
             caller.initialized[header.return_slot] = 1;
+            // The words after the first of a multi-word function (NVR 1.7),
+            // which the Return left in the context.
+            for (std::uint32_t word = 0; word < words; ++word) {
+                caller.slots[header.return_slot + 1 + word] = context->result_words[word];
+                caller.initialized[header.return_slot + 1 + word] = 1;
+            }
         }
         caller.block = header.return_block;
         context->next_block = header.return_block;
@@ -622,10 +629,11 @@
         cell.entry = code.machine->address() + code.entry_code.at(0);
     }
 
-    static std::uint64_t tier3_native_return(tier3::Context* context, std::uint64_t value, std::uint64_t blocks) {
+    static std::uint64_t tier3_native_return(tier3::Context* context, std::uint64_t value, std::uint64_t blocks,
+                                             std::uint32_t words) {
         try {
             context->region = context->program->ir.region;
-            tier3_native_status(context, tier3_native_of(tier3_return(context, value, true, blocks)));
+            tier3_native_status(context, tier3_native_of(tier3_return(context, value, true, blocks, words)));
         } catch (...) {
             tier3_native_exception(context);
         }

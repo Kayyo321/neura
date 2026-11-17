@@ -99,7 +99,7 @@ std::uint64_t fake_evaluate(t3::Context* context, std::uint32_t inst, std::uint6
 std::uint64_t fake_state(t3::Context*, std::uint32_t, const std::uint64_t*, std::uint32_t) { unexpected(); }
 std::uint64_t fake_check_reference(t3::Context*, std::uint32_t, std::uint64_t) { unexpected(); }
 std::uint64_t fake_call(t3::Context*, std::uint32_t, std::uint32_t, const std::uint64_t*, std::uint32_t) { unexpected(); }
-std::uint64_t fake_return(t3::Context*, std::uint64_t, std::uint64_t) { unexpected(); }
+std::uint64_t fake_return(t3::Context*, std::uint64_t, std::uint64_t, std::uint32_t) { unexpected(); }
 // An R3 helper: it records the frame and the counter it is called with, and
 // returns 1000 + its argument.
 std::uint64_t fake_helper(t3::Context* context, std::uint32_t, const std::uint64_t* arguments, std::uint32_t count) {

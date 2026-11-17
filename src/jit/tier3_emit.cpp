@@ -822,10 +822,27 @@ private:
             // b_constant: whether a value is returned (uses[0], in rsi);
             // K after it.
             if (!step.b_constant) a_.alu(Alu::xor_, S32, x64::rsi, x64::rsi);
-            store_kernel_steps(ia, step.b_constant ? 1 : 0);
-            if (f_.variant == t3::Variant::Standard) inline_pop();
+            // The words after the first (step.index of them) go to the
+            // context, where the helper and the caller's ResultWords read
+            // them; the helper writes them to the caller's frame.
+            const std::size_t first_word = step.b_constant ? 1 : 0;
+            for (std::size_t i = 0; i < step.index; ++i) {
+                const auto& location = ia.uses[first_word + i];
+                const auto to = Mem::at(context, off::result_words + static_cast<std::int32_t>(8 * i));
+                if (in_register(location)) {
+                    a_.mov(S64, to, gpr(location));
+                } else {
+                    a_.mov(S64, scratch, memory(location));
+                    a_.mov(S64, to, scratch);
+                }
+            }
+            store_kernel_steps(ia, first_word + step.index);
+            // A function with several result words returns through the
+            // helper: popping the frame in place writes one result slot.
+            if (f_.variant == t3::Variant::Standard && step.index == 0) inline_pop();
             a_.mov(S64, x64::rdx, counter);
             a_.mov(S64, x64::rdi, context);
+            a_.mov(S32, x64::rcx, imm32(step.index));
             call_helper(off::ret);
             check_status(stub(inst, ia), true);
             // The value comes back in rax; C counts the return block.
@@ -1577,6 +1594,9 @@ private:
             a_.bind(done);
             return;
         }
+        case Kind::ResultWord:
+            a_.mov(S64, gpr(ia.defs[0]), Mem::at(context, off::result_words + static_cast<std::int32_t>(8 * (step.imm - 1))));
+            return;
         case Kind::LoadGlobal:
             a_.mov(S64, scratch, Mem::at(context, o3::globals));
             a_.mov(S64, gpr(ia.defs[0]), Mem::at(scratch, displacement(8 * step.imm)));
@@ -2580,8 +2600,8 @@ Generated generate_units(const nvm::tier3::Function& function, const std::vector
                     "CheckKind", "CheckInit", "CheckIndex", "CheckGlobalInit", "TestKind", "LoadTag", "LoadField",
                     "LoadLength", "LoadData", "LoadStorage", "LoadElement", "LoadVersion", "LoadGlobal", "Select",
                     "StoreField", "StoreElement", "StoreGlobal", "Widen", "AllocObject", "Append", "Convert",
-                    "KernelLoad", "KernelAdd", "Canon", "Sqrt", "Abs"};
-                static_assert(std::size(kind_names) == static_cast<std::size_t>(Kind::Abs) + 1,
+                    "KernelLoad", "KernelAdd", "Canon", "Sqrt", "Abs", "ResultWord"};
+                static_assert(std::size(kind_names) == static_cast<std::size_t>(Kind::ResultWord) + 1,
                               "one name for every step kind");
                 const auto text = mir::describe(lowered.function, allocation, [&](std::uint32_t op) {
                     const auto& step = lowered.steps[op];

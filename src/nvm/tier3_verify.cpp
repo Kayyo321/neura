@@ -36,6 +36,7 @@ bool has_value(Op op) {
     case Op::LoadVersion:
     case Op::LoadGlobal:
     case Op::Select:
+    case Op::ResultWord:
     case Op::AllocObject: return true;
     default: return false;
     }
@@ -131,8 +132,9 @@ const char* name_of(Op op) {
                                   "checknotnil", "lookup", "checkkind", "checkinit", "checkindex", "checkglobalinit",
                                   "testkind",  "loadtag",  "loadfield", "loadlength", "loaddata",   "loadstorage",
                                   "loadelement", "loadversion", "loadglobal", "select", "storefield", "storeelement",
-                                  "storeglobal", "widen", "allocobject", "append", "canon",     "sqrt"};
-    static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Op::Sqrt) + 1);
+                                  "storeglobal", "widen", "allocobject", "append", "canon",     "sqrt",
+                                  "resultword"};
+    static_assert(sizeof(names) / sizeof(names[0]) == static_cast<std::size_t>(Op::ResultWord) + 1);
     return names[static_cast<int>(op)];
 }
 
@@ -187,7 +189,7 @@ private:
         if (in.op == Op::Gather) {
             for (std::uint32_t i = 0; i < in.count; i += 2) list.push_back(f_.extras[in.extra + i]);
         } else if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call || fast_path(in.op) ||
-                   in.op == Op::Select) {
+                   in.op == Op::Select || in.op == Op::Return) {
             for (std::uint32_t i = 0; i < in.count; ++i) list.push_back(f_.extras[in.extra + i]);
         }
         return list;
@@ -474,6 +476,18 @@ private:
             case Op::Gather:
                 for (std::uint32_t i = 0; i < in.count; i += 2) operand_bits(f_.extras[in.extra + i], "a lane source");
                 break;
+            case Op::Return:
+                for (std::uint32_t j = 0; j < in.count; ++j) operand_bits(f_.extras[in.extra + j], "a result word");
+                if (in.count + 1 > Context::max_result_words) fail("V2", at(id) + " returns too many words");
+                break;
+            case Op::ResultWord:
+                // Word `imm` of the call it follows: the Call is its operand.
+                if (in.operands[0] >= f_.insts.size() || f_.insts[in.operands[0]].op != Op::Call) {
+                    fail("V2", at(id) + " is not the word of a call");
+                } else if (in.imm == 0 || in.imm >= Context::max_result_words) {
+                    fail("V2", at(id) + " names word " + std::to_string(in.imm));
+                }
+                break;
             case Op::Branch:
             case Op::Switch:
             case Op::Dispatch:
@@ -593,6 +607,11 @@ private:
         } else if (in.op == Op::Call && in.aux < f_.exits.size()) {
             const auto slot = f_.exits[in.aux]->result_slot;
             if (slot != none && slot < count) written[slot] = written[count + slot] = 1;
+            // The words after the first of a multi-word callee (NVR 1.7).
+            const auto words = in.imm < image_.functions.size() ? image_.functions[in.imm].more_results.size() : 0;
+            for (std::size_t word = 1; slot != none && word <= words && slot + word < count; ++word) {
+                written[slot + word] = written[count + slot + word] = 1;
+            }
         }
     }
 
