@@ -5,6 +5,7 @@
 #include "fixtures.hpp"
 
 #include "backend/converter.hpp"
+#include "cli/source_loader.hpp"
 #include "ir-optimization/evaluator.hpp"
 #include "lift/hints.hpp"
 #include "lift/proof.hpp"
@@ -13,9 +14,14 @@
 #include "nvr/names.hpp"
 #include "neura-ir/integer.hpp"
 
+#include <filesystem>
 #include <fstream>
 #include <map>
 #include <sstream>
+
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace neura::testing {
 namespace {
@@ -445,7 +451,7 @@ NEURA_TEST(conversion, identical_operations_share_one_graph) {
 }
 
 // Jump threading: no exit resumes at a block that evaluates nothing and only
-// continues elsewhere, except inside a cycle of such blocks (an empty endless
+// continues elsewhere (a poll is an effect, so a block that only polls stays), except inside a cycle of such blocks (an empty endless
 // loop, kept so that it still runs) or the entry block.
 NEURA_TEST(conversion, exits_skip_jump_only_blocks) {
     std::size_t checked = 0;
@@ -456,7 +462,8 @@ NEURA_TEST(conversion, exits_skip_jump_only_blocks) {
             const auto jump_only = [&](std::uint32_t index) {
                 const auto& block = function.blocks.at(index);
                 return block.inputs.empty() && image.graphs[block.graph].nodes.empty() && block.exits.size() == 1 &&
-                       block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty();
+                       block.exits.front().kind == nvr::ExitKind::Continue && block.exits.front().assignments.empty() &&
+                       !block.exits.front().poll;
             };
             for (const auto& block : function.blocks) {
                 for (const auto& exit : block.exits) {
@@ -549,5 +556,75 @@ NEURA_TEST(conversion, source_map_is_optional) {
     }
     check(program_label, "the program's own blocks are labeled computation.nra");
 }
+
+#ifndef _WIN32
+
+// A tuple crosses a host call, and a host callback, as one word in its heap layout. The program's tuples are
+// words inline: the call boxes its argument, unboxes the payload of its result, and the callback is a boundary
+// function that unboxes its parameter and boxes its result.
+NEURA_TEST(conversion, tuples_cross_host_calls_and_callbacks_boxed) {
+    using Kind = nvr::TypeKind;
+    const auto fixtures = backend_dir(environment) / "fixtures" / "tuple-host";
+    // The trusted library tree: the standard library with one more module.
+    const auto library = fs::temp_directory_path() / ("neura-tuple-host-" + std::to_string(::getpid()));
+    fs::remove_all(library);
+    // A copy, not links: the loader trusts a file by its real path below the root.
+    fs::create_directories(library);
+    fs::copy(library_root() / "std", library / "std", fs::copy_options::recursive);
+    fs::copy(fixtures / "probe", library / "std" / "probe", fs::copy_options::recursive);
+    const auto main = fs::canonical(fixtures / "main.nra");
+    auto program = lower_sources({main}, {main.parent_path()}, library);
+    const auto converted = backend::build(std::move(program));
+    fs::remove_all(library);
+    const auto image = nvr::load(nvr::encode(converted.image));
+
+    // The callback and the import carry boxed tuples; no function of either has result words.
+    check_equal(image.callbacks.size(), std::size_t{1}, "one callback");
+    const auto& callback = image.functions[image.callbacks.front().function];
+    check_equal(callback.parameter_count, std::uint32_t{1}, "the callback takes one word");
+    check(callback.more_results.empty() && image.types[callback.result_type].kind == Kind::Object,
+          "the callback returns one boxed tuple");
+    check(image.types[callback.frame_types[0]].kind == Kind::Object, "the callback takes a boxed tuple");
+    check_equal(image.imports.size() >= 1, true, "the host call is imported");
+
+    const nvm::HostType word{Kind::Signed, 32};
+    const nvm::HostType flag{Kind::Bool};
+    const nvm::HostType text{Kind::Text};
+    const nvm::HostType inner(Kind::Object, std::vector<nvm::HostType>{text, flag});
+    const nvm::HostType pair(Kind::Object, std::vector<nvm::HostType>{word, inner});
+    const nvm::HostType visited(Kind::Object, std::vector<nvm::HostType>{word, text});
+
+    class Echo final : public nvm::HostService {
+    public:
+        explicit Echo(nvm::HostSignature signature) : signature_(std::move(signature)) {}
+        const nvm::HostSignature& signature() const override { return signature_; }
+        nvm::HostCompletion invoke(const nvm::HostRequest& request) override {
+            arguments = request.arguments;
+            const nvm::HostValue sent{0, {}, {{7, {}, {}}, {0, "seven", {}}}};
+            if (request.callbacks != nullptr) visited = request.callbacks->call("neura.test.visit", 1, {sent});
+            return nvm::HostCompletion::ok(request.arguments.front());
+        }
+        std::vector<nvm::HostValue> arguments;
+        std::optional<nvm::HostValue> visited;
+
+    private:
+        nvm::HostSignature signature_;
+    };
+    Echo echo({"neura.test.echo", 1, {pair}, pair, {Kind::Unsigned, 32}});
+    CapturingConsole console;
+    nvm::HostRegistry registry;
+    registry.add(console);
+    registry.add(echo);
+    const auto run = nvm::run(image, nvm::bind(image, registry), std::vector<std::string>{});
+    check(run.completed, describe_trap(run, image));
+    check_equal(console.output(), std::string("seven7true\n"), "the program sees the tuple the host returned");
+    const nvm::HostValue expected{0, {}, {{7, {}, {}}, {0, {}, {{0, "seven", {}}, {1, {}, {}}}}}};
+    check(echo.arguments == std::vector{expected}, "the host receives the argument as one tuple");
+    const nvm::HostValue visit_result{0, {}, {{8, {}, {}}, {0, "seven?", {}}}};
+    check(echo.visited.has_value() && *echo.visited == visit_result, "the callback takes and gives one tuple");
+}
+
+#endif
+
 
 } // namespace neura::testing

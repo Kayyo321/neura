@@ -900,6 +900,31 @@ NEURA_TEST(nir, deferred_bindings_trap_when_read_before_their_store) {
     }
 }
 
+NEURA_TEST(nir, deferred_tuple_locals_trap_on_every_word_read_before_their_store) {
+    // A tuple local is one slot for each word, and a deferred declaration only creates them. Reading one word, the
+    // other, or the whole tuple before the first store traps, as the one slot of a scalar did.
+    const std::array<std::string, 3> functions{"first", "second", "whole"};
+    for (std::size_t which = 0; which < functions.size(); ++which) {
+        for (const bool optimize : {true, false}) {
+            auto program = lower_files({backend_dir(environment) / "nir-versions" / "tuple-deferred.nra"});
+            const auto owner = find_symbol(program, "Deferred." + functions[which]);
+            const auto pair = find_local(program, owner, "pair");
+            set_attribute(program.symbols[pair], AttributeId::BindingLast, attribute_bool(true));
+            program.symbols[pair].constant = true;
+            check(defer_in(program, body_of(program, "Deferred." + functions[which]), pair), "pair is declared");
+            check(remove_store(body_of(program, "Deferred." + functions[which]), pair), "pair has a store");
+            check(verify_ir(program).empty(), "the verifier does not track definite assignment");
+            backend::BuildOptions options;
+            options.optimize = optimize;
+            const auto image = nvr::load(nvr::encode(backend::build(std::move(program), options).image));
+            const auto run = run_captured(image, {}, std::nullopt, std::vector<std::string>(which, "x"));
+            check(!run.result.completed && run.result.trap.kind == nvm::TrapKind::UninitializedSlot,
+                  functions[which] + ": expected an uninitialized slot trap, got: " + run.output);
+            check_equal(run.output, std::string("start\n"), functions[which] + ": output before the trap");
+        }
+    }
+}
+
 NEURA_TEST(nir, verifier_checks_attributes_and_deferred_initialization) {
     const auto base = attributed_fixture(environment);
     check(verify_ir(base.program).empty(), "the fixture verifies");

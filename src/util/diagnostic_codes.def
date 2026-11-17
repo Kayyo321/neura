@@ -102,6 +102,7 @@ NEURA_DIAGNOSTIC(E0445, "a 'last' field assigned outside 'init'")
 NEURA_DIAGNOSTIC(E0446, "a constructor that does not assign a 'last' field")
 NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an instance field")
 NEURA_DIAGNOSTIC(E0448, "a value type that contains itself")
+NEURA_DIAGNOSTIC(E0449, "a value type larger than its inline limit")
 NEURA_DIAGNOSTIC(E0450, "a list literal without new")
 
 // Classes, lifecycle, and accessors

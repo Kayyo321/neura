@@ -55,6 +55,16 @@ struct FunctionOrigin {
         // Program start: runs top-level statements and module initializers
         // that are not literals, then calls the entry function `symbol`.
         Start,
+        // A function whose parameters and result cross a one-word runtime
+        // boundary (a spawned task, a parallel item, a host callback) when
+        // the function `symbol` takes or returns a tuple. The tuple is boxed
+        // into its heap layout on the way out and unboxed on the way in;
+        // `receiver` is the module the target is specialized for.
+        Boundary,
+        // Copies a collection that the runtime built from boxed tuples into
+        // the inline aggregate elements the program uses: `symbol` indexes
+        // the collection type that Converter records.
+        UnboxCollection,
     };
 
     Role role = Role::Function;

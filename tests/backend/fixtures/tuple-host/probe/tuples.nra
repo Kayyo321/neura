@@ -1,0 +1,15 @@
+// A test service in a trusted library tree: a host call that takes and gives a tuple, and a callback that takes
+// and gives one. The host sees one word for each value, a tuple in its heap layout.
+export let Tuples = module (
+    export let Reply = enum (Ok([int, [string, bool]]), Error(uint32));
+
+    /// The host returns its argument after calling `visit` on a pair.
+    export let echo = func(pair: [int, [string, bool]]) -> Reply host("neura.test.echo", 1);
+
+    // Reaching a function of the module is what brings its callback into the image.
+    export let send = func(pair: [int, [string, bool]]) -> Reply => echo(pair);
+
+    let visit = func(pair: [int, string]) -> [int, string] {
+        return [pair[0] + 1, pair[1] + "?"];
+    } callback("neura.test.visit", 1);
+);

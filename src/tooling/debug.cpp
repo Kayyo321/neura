@@ -5,6 +5,7 @@
 #include "test_protocol.hpp"
 #include "backend/converter.hpp"
 #include "cli/source_loader.hpp"
+#include "neura-ir/inline_limit.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
 #include "neura-ir/verifier.hpp"
@@ -401,6 +402,7 @@ void Adapter::launch(const Json& arguments) {
             require_valid_ir(program, "before debug specialization");
             materialize_reference_storage(program);
             specialize(program);
+            check_inline_limit(program);
             require_valid_ir(program, "before debug conversion");
             backend::ConversionOptions conversion;
             conversion.entries = {symbol};

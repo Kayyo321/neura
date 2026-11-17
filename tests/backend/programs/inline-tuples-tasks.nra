@@ -1,0 +1,94 @@
+// A tuple is a run of value words in the program, and a box in its heap layout wherever the runtime carries one
+// word: the result of a spawned task and its join, a channel message, a guard's state, the result and the input
+// of a parallel item, the pair that string.from_utf8 builds, and the outcome of a kernel. Each boundary here
+// boxes before and unboxes after, and every value comes out as it went in.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let guarded = import:Std.Concurrent.Guarded;
+let parallel = import:Std.Concurrent.Parallel;
+let strings = import:Std.Text.Strings;
+let result = import:Std.Core.Result;
+
+let weigh = func(item: [int, string]) -> [int, [string, bool]] => [item[0] * 2, [item[1] + "!", item[0] > 2]];
+
+let carry = func(base: [int, [string, bool]]) -> [string, int] => [base[1][0], base[0]];
+
+let checked = func(bytes: uint8[list]) -> [bool, string] {
+    let [valid, text] = string.from_utf8(bytes);
+    return [valid, text];
+};
+
+let decoded = func(bytes: uint8[list]) -> string => match (strings.from_bytes(bytes)) {
+    result.Result.Ok(text) => "ok " + text,
+    result.Result.Err(_) => "invalid",
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // A task that returns a tuple, and a task that captures one.
+        let seed: [int, [string, bool]] = [4, ["seed", true]];
+        scope {
+            let task = spawn weigh([seed[0], seed[1][0]]);
+            let from_capture = spawn carry(seed);
+            let result = task.join();
+            console.print_line(result[0].to_string() + result[1][0] + result[1][1].to_string());
+            let captured = from_capture.join();
+            console.print_line(captured[0] + captured[1].to_string());
+        }
+
+        // Channel messages of a tuple, a nested tuple and a tuple of several words.
+        let [out, inbox, closer] = channels.open<[int, [string, bool]]>(4);
+        out.send([1, ["one", true]]);
+        out.send([2, ["two", false]]);
+        console.print_line(out.try_send([3, ["three", true]]).to_string());
+        for (let i: int = 0; i < 3; i++) {
+            match (inbox.receive()) {
+                channels.Received.Value(message) => {
+                    console.print_line(message[0].to_string() + message[1][0] + message[1][1].to_string());
+                },
+                channels.Received.Closed => { console.print_line("closed"); },
+                channels.Received.Cancelled => { console.print_line("cancelled"); },
+            }
+        }
+        match (inbox.try_receive()) {
+            channels.TryReceived.Value(message) => { console.print_line("value " + message[1][0]); },
+            channels.TryReceived.Empty => { console.print_line("empty"); },
+            channels.TryReceived.Closed => { console.print_line("closed"); },
+        }
+        out.send([9, ["nine", true]]);
+        select {
+            let message = inbox.receive() => {
+                console.print_line(selected(message));
+            },
+        }
+        closer.close();
+
+        // A guard whose state is a tuple.
+        let guard = guarded.create<[int, [string, int]]>(func() -> [int, [string, int]] => [1, ["guard", 2]]);
+        let summary = guard.with<string>(func(state: [int, [string, int]]) -> string => state[1][0] + state[0].to_string());
+        console.print_line(summary);
+
+        // Parallel items: the argument is a function value, the result a tuple.
+        let items: [int, string][] = [[1, "a"], [2, "b"], [3, "c"]];
+        let weighed = parallel.map<[int, string], [int, [string, bool]]>(items, weigh, parallel.limits(100000, 100000));
+        for (let item: [int, [string, bool]] in weighed) {
+            console.print_line(item[0].to_string() + item[1][0] + item[1][1].to_string());
+        }
+        let nothing: [int, string][] = [];
+        console.print_line(parallel.map<[int, string], [int, [string, bool]]>(nothing, weigh, parallel.limits(1000, 1000)).length.to_string());
+
+        // string.from_utf8 and a kernel outcome are tuples that the runtime builds.
+        let good = checked(new([72, 105]));
+        let bad = checked(new([255, 254]));
+        console.print_line(good[0].to_string() + good[1] + bad[0].to_string() + bad[1]);
+        console.print_line(decoded(new([72, 105])) + " " + decoded(new([255, 254])));
+        return program.ExitCode.Ok;
+    };
+
+    let selected = func(message: channels.Received<[int, [string, bool]]>) -> string => match (message) {
+        channels.Received.Value(value) => "selected " + value[1][0] + value[0].to_string(),
+        channels.Received.Closed => "closed",
+        channels.Received.Cancelled => "cancelled",
+    };
+);
