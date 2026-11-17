@@ -57,7 +57,13 @@ let total_of = func(first: int, rest: ...[int, string]) -> int {
     return total;
 };
 
-let packed = func(items: ...) -> variadic.Argument[] => items;
+let packed = func(items: ...) -> string {
+    let text = "";
+    for (let argument in items) {
+        text = text + match (argument) { variadic.Argument.Text(value) => value, _ => "other" } + "|";
+    }
+    return text;
+};
 
 let Main = module:program.Entry (
     // A tuple in module storage: several globals.
@@ -195,10 +201,7 @@ let Main = module:program.Entry (
         console.print_line(rows.to_string() + " " + nested.hash_code().to_string());
         // A tuple in a variadic argument keeps its text.
         console.print_line(total_of(1, [2, "ab"], [3, "c"]).to_string());
-        let arguments = packed(left, [1, 2]);
-        for (let argument in arguments) {
-            console.print_line(match (argument) { variadic.Argument.Text(text) => text, _ => "other" });
-        }
+        console.print_line(packed(left, [1, 2]));
         return program.ExitCode.Ok;
     };
 );
