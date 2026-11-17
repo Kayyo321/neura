@@ -1,0 +1,6 @@
+// A class is not a record (edge case 50).
+let Shape = class (
+    export let label: string = "shape";
+);
+let shape = new Shape();
+let copy = new with(shape) { };

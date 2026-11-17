@@ -1,0 +1,56 @@
+// Copy construction (docs/design/Records030.md, edge cases 41, 42, 51 to
+// 54): one allocation sharing the source's children, the order of events,
+// and the trap of a nil source before any replacement runs.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Team = record (name: string);
+let User = record (id: int64, name: string, active: bool, team: Team);
+let Node = record (value: int, next: Node);
+
+let trace = func(text: string) {
+    console.print_line(text);
+};
+let make = func() -> User {
+    trace("make");
+    return new User(7, "Ada", true, new Team("core"));
+};
+let g = func() -> string {
+    trace("g");
+    return "Grace";
+};
+let h = func() -> int64 {
+    trace("h");
+    return 8;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let user = make();
+        // Case 41: the children are shared.
+        let renamed = new with(user) { name: "Grace" };
+        console.print_line(renamed.to_string());
+        console.print_line((renamed != user).to_string() + " " + (renamed.team == user.team).to_string());
+        // Case 42.
+        let same = new with(user) { };
+        console.print_line((same === user).to_string() + " " + (same == user).to_string());
+        // Case 52: make once, then g, then h; the constructor receives h's,
+        // g's and the read values in declaration order.
+        let ordered = new with(make()) { name: g(), id: h() };
+        console.print_line(ordered.to_string());
+        // Case 53.
+        let twice = new with(new with(user) { id: 1 }) { name: "x" };
+        console.print_line(twice.to_string());
+        // Case 54.
+        let node = new Node(1, nil);
+        let linked = new with(node) { next: new with(node) { } };
+        console.print_line(linked.to_string());
+        // Case 51: the trap comes before `h` runs, also when every field is
+        // replaced.
+        let nobody: User = nil;
+        trace("before the nil copy");
+        let trapped = new with(nobody) { id: h(), name: g(), active: false, team: nil };
+        trace("never printed");
+        return program.ExitCode.Ok;
+    };
+);

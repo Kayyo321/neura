@@ -1,0 +1,9 @@
+error[E0305]: unknown or inaccessible member 'nick' of User
+ --> $DIR/unknown-field.nra:4:29
+  |
+4 | let copy = new with(user) { nick: "x" };
+  |                             ^^^^ 'User' has no field 'nick'
+  |
+  = note: the fields of 'User' are 'id', 'name', 'active'
+
+For more information about this error, try `neura explain E0305`.

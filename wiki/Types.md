@@ -502,7 +502,7 @@ The body has accessors, so it is a class of its own: `code` and `non_zero` take 
 
 ### Records
 
-*Status: proposed in [the 0.3.0 records note](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md); implemented except that a record cannot yet hold a payload enum.*
+*Status: proposed in [the 0.3.0 records note](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md); implemented, with copy construction, except that a record cannot yet hold a payload enum.*
 
 A record is a nominal class that is final and deeply immutable, with a generated constructor and generated value members. It is declared by its components, written where `class` is: `let User = record (id: int64, name: string);`.
 
@@ -542,6 +542,20 @@ let text = a.to_string();
 ```
 
 `same` is true and `identical` false. See [records.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/records.nra).
+
+#### Copy construction
+
+`new with(source) { field: value, ... }` copies a record with some fields replaced. Its type is the type of `source`, which must be a record type ([E0572](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0572.md)); the form is never target-typed. Each replacement names a field of that record once ([E0305](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0305.md), [E0303](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0303.md)) with a value assignable to it ([E0403](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0403.md)). The braces are required and may be empty: `new with(user) { }` is a record `===` to `user` and not `==` to it. `new with` always begins a copy, and `with` is an ordinary name everywhere else.
+
+The source is evaluated once. A nil source traps as a field read through nil does, before any replacement runs, even when every field is replaced. The replacements are then evaluated in written order, the fields without a replacement are read from the source, and the generated constructor receives the values in declaration order. The copy is exactly one allocation, made by the constructor; nothing is cloned, so the copy shares every child with its source.
+
+<!-- example: check -->
+```neura
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let renamed = new with(user) { name: "Grace" };
+let unchanged = new with(user) { };
+```
 
 ## Enums
 

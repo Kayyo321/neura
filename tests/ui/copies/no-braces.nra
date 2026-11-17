@@ -1,0 +1,4 @@
+// The braces are required (edge case 44).
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let copy = new with(user);

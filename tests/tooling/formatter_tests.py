@@ -237,6 +237,27 @@ let Q = record (
 let total = record(first);
 ''')
 
+    def test_copies(self):
+        # docs/design/Records030.md, Formatter: a copy written on one line stays
+        # on one line; written over several, it has one replacement per line
+        # and a trailing comma.
+        source = '''let a=new with(user){name:"x",id:3};
+let b=new with(user){};
+let c=new with(user){
+name:"G",
+id:3
+};
+let with=1;
+'''
+        self.assertEqual(self.formatted(source), '''let a = new with(user) { name: "x", id: 3 };
+let b = new with(user) {};
+let c = new with(user) {
+    name: "G",
+    id: 3,
+};
+let with = 1;
+''')
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

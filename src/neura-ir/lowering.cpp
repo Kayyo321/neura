@@ -540,6 +540,7 @@ private:
     void check_record(SymbolId id);
     void reject_record_destroy(const IrNode& object) const;
     static void record_call_help(const Expr& initializer, Diagnostic& error);
+    IrNode copy(const Expr& expr, Context& context);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -3357,6 +3358,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return range(expr, context, expected);
     case ExprKind::New:
         return construct(expr, context, expected);
+    case ExprKind::Copy:
+        return copy(expr, context);
     case ExprKind::NamedVariant: {
         const auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||

@@ -140,6 +140,7 @@ private:
     }
 
     void expression(const Expr& value) {
+        if (value.kind == Expr::Kind::Copy && !value.operands.empty()) copy(value);
         if (value.type) type(*value.type);
         types(value.type_arguments);
         if (!value.type_arguments.empty() && !value.operands.empty()) {
@@ -188,6 +189,33 @@ private:
         if (value.lambda) declaration(*value.lambda);
         if (value.match) statement(*value.match);
         for (const auto& operand : value.operands) expression(operand);
+    }
+
+    // `new with(source) { a: x }` stays on one line when it is written on one
+    // line; written over several, it has one replacement per line and a
+    // trailing comma (docs/design/Records030.md, Formatter).
+    void copy(const Expr& value) {
+        const auto& source = value.operands.front();
+        const auto after_source = source.span.offset + source.span.length;
+        const Token* open = nullptr;
+        const Token* last = nullptr;
+        const Token* close = nullptr;
+        in_span(value.span, [&](const Token& token) {
+            if (token.span.offset < after_source) return;
+            if (!open && token.text == "{") open = &token;
+            if (token.text == "}") close = &token;
+        });
+        if (!open || !close) return;
+        for (const auto& token : tokens_) {
+            if (token.span.offset >= close->span.offset) break;
+            last = &token;
+        }
+        const auto text = source_.substr(open->span.offset, close->span.offset - open->span.offset);
+        if (text.find_first_of("\r\n") == std::string_view::npos) {
+            hints_.inline_braces.insert(open->span.offset);
+        } else if (last && last != open && last->text != ",") {
+            hints_.trailing_commas.insert(close->span.offset);
+        }
     }
 
     std::size_t first_offset(const Declaration& value) const {

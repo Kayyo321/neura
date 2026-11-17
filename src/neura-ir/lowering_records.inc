@@ -388,3 +388,98 @@ void Lowering::record_call_help(const Expr& initializer, Diagnostic& error) {
     else if (std::ranges::any_of(initializer.labels, [](const std::string& label) { return !label.empty(); }))
         error.help("a record's components are not grouped: write 'a: T, b: T'");
 }
+
+// `new with(source) { f: e, ... }` (Records030.md, Copy construction). The
+// copy is a scoped value: the source in a temporary; the read of its first
+// field, which traps as a field read through nil does before any
+// replacement runs and is the first field's value when it is not replaced;
+// the replacements in written order; the other fields that have no
+// replacement, read from the source in declaration order; and the generated
+// constructor with the values in declaration order. Nothing else allocates,
+// so the copy is one allocation, and it shares every child with its source.
+IrNode Lowering::copy(const Expr& expr, Context& context) {
+    const auto& source_expr = expr.operands.front();
+    auto source = value(source_expr, context);
+    const auto type = source.type;
+    if (type.kind != TypeKind::Object || !record_class(type.symbol)) {
+        std::string what = describe(type);
+        if (source.op == IrOp::Nil || source_expr.kind == ExprKind::Nil) what = "nil";
+        else if (type.kind == TypeKind::TypeParameter) what = "the type parameter '" + describe(type) + "'";
+        else if (type.kind == TypeKind::Object && type.symbol == root_class_) what = "'class'";
+        else if (type.kind == TypeKind::Object && symbol(type.symbol).kind == SymbolKind::Interface)
+            what = "the interface '" + describe(type) + "'";
+        else what = "'" + describe(type) + "'";
+        auto error = Diagnostic(source_expr.span, "'new with' copies a record, and this is " + what)
+            .with_code("E0572")
+            .label("not a value of a record type");
+        if (type.kind == TypeKind::Object && type.symbol < program_.symbols.size() &&
+            symbol(type.symbol).kind == SymbolKind::Class && type.symbol != root_class_)
+            error.help("construct the class with 'new', or declare it as a record");
+        else
+            error.help("copy a value whose static type is a record");
+        throw error;
+    }
+    const auto record = type.symbol;
+    std::vector<SymbolId> fields;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        if (symbol(id).kind == SymbolKind::Field && symbol(id).owner == record) fields.push_back(id);
+    }
+    for (const auto field : fields) resolve(field);
+    // Replacements: each names a field, once.
+    std::map<std::string, std::size_t> replaced;
+    for (std::size_t i = 1; i < expr.operands.size(); ++i) {
+        const auto& name = expr.labels[i];
+        const auto& at = expr.label_spans[i];
+        const auto field = std::ranges::find_if(fields, [&](SymbolId id) { return symbol(id).name == name; });
+        if (field == fields.end()) {
+            auto error = Diagnostic(at, "unknown or inaccessible member '" + name + "' of " + describe(type))
+                .with_code("E0305")
+                .label("'" + describe(type) + "' has no field '" + name + "'");
+            std::vector<std::string> names;
+            for (const auto id : fields) names.push_back(symbol(id).name);
+            suggest_name(error, at, name, names, "a field");
+            std::string listed;
+            for (const auto& item : names) listed += (listed.empty() ? "'" : ", '") + item + "'";
+            error.note("the fields of '" + describe(type) + "' are " + listed);
+            throw error;
+        }
+        if (const auto [earlier, added] = replaced.emplace(name, i); !added)
+            throw Diagnostic(at, "duplicate replacement of '" + name + "'").with_code("E0303")
+                .label("'" + name + "' is replaced again here")
+                .label(expr.label_spans[earlier->second], "'" + name + "' is first replaced here")
+                .help("replace each field once");
+    }
+    const auto constructor = own_member(record, "init");
+    resolve(constructor);
+    auto result = node(IrOp::ScopedValue, expr.span, type);
+    auto& body = result.body;
+    auto held = save_temporary(std::move(source), body, context, "$copy.source", true);
+    const auto read = [&](SymbolId field) {
+        auto place = node(IrOp::Field, expr.span, symbol(field).type);
+        place.symbol = field;
+        place.operands.push_back(held);
+        return place;
+    };
+    std::vector<std::optional<IrNode>> values(fields.size());
+    // The read of the first field is the nil check.
+    auto first = save_temporary(read(fields.front()), body, context, "$copy.check", true);
+    if (!replaced.contains(symbol(fields.front()).name)) values.front() = std::move(first);
+    for (std::size_t i = 1; i < expr.operands.size(); ++i) {
+        const auto index = static_cast<std::size_t>(
+            std::ranges::find_if(fields, [&](SymbolId id) { return symbol(id).name == expr.labels[i]; }) -
+            fields.begin());
+        const auto& field_type = symbol(fields[index]).type;
+        expected_origin_ = ExpectedOrigin{name_span(fields[index]), "field '" + symbol(fields[index]).name +
+                                                                        "' is declared here"};
+        auto replacement = value(expr.operands[i], context, &field_type, true);
+        require_type(replacement.type, field_type, expr.operands[i].span);
+        values[index] = save_temporary(std::move(replacement), body, context, "$copy." + expr.labels[i], true);
+    }
+    auto allocation = node(IrOp::Allocate, expr.span, type);
+    allocation.symbol = constructor;
+    for (std::size_t i = 0; i < fields.size(); ++i) {
+        allocation.operands.push_back(values[i] ? std::move(*values[i]) : read(fields[i]));
+    }
+    body.push_back(std::move(allocation));
+    return result;
+}

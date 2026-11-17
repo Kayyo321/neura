@@ -1,0 +1,9 @@
+error[E0572]: 'new with' copies a record, and this is nil
+ --> $DIR/nil-source.nra:2:21
+  |
+2 | let copy = new with(nil) { };
+  |                     ^^^ not a value of a record type
+  |
+  = help: copy a value whose static type is a record
+
+For more information about this error, try `neura explain E0572`.

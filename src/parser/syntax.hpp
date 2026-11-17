@@ -97,6 +97,11 @@ struct Expr {
         // `nameof(path)`: operand 0, when written, is the path, which is
         // not evaluated.
         NameOf,
+        // `new with(source) { name: value, ... }` (docs/design/Records030.md,
+        // Copy construction): operand 0 is the source and each later operand
+        // a replacement, whose field name is in `labels` and `label_spans`
+        // ("" for the source). The span starts at `new`.
+        Copy,
     };
 
     Kind kind;

@@ -1,0 +1,9 @@
+error[E0202]: expected the record to copy
+ --> $DIR/no-source.nra:4:21
+  |
+4 | let copy = new with() { };
+  |                     ^ expected an expression, found ')'
+  |
+  = help: write the record to copy in the parentheses: 'new with(source) { }'
+
+For more information about this error, try `neura explain E0202`.

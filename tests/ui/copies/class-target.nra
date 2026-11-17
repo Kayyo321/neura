@@ -1,0 +1,5 @@
+// The copy has the source's type and is never target-typed (edge case 55).
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let Shape = class ();
+let s: Shape = new with(user) { };

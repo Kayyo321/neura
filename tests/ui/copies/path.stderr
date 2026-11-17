@@ -1,0 +1,9 @@
+error[E0202]: expected ':' after the field name
+ --> $DIR/path.nra:4:34
+  |
+4 | let copy = new with(user) { owner.name: "x" };
+  |                                  ^ expected ':', found '.'
+  |
+  = help: a replacement is written 'field: value', and names a field of the record itself
+
+For more information about this error, try `neura explain E0202`.

@@ -168,6 +168,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0561](E0561.md) | defaults differ from the overridden method |
 | [E0570](E0570.md) | invalid record declaration |
 | [E0571](E0571.md) | record field of a type a record cannot hold |
+| [E0572](E0572.md) | copy construction of a value that is not a record |
 
 ## E06xx: Concurrency
 

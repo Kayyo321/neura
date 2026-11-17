@@ -1,0 +1,7 @@
+// An interface value is not a record (edge case 50).
+let Named = interface (
+    export let name = func() -> string => "n";
+);
+let Tag = record implements Named (text: string);
+let named: Named = new Tag("t");
+let copy = new with(named) { };

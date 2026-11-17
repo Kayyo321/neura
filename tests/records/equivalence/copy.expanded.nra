@@ -1,0 +1,31 @@
+// The copies of copy.record.nra, written out: the source once, the read of
+// its first field as the nil check, the replacements in written order, the
+// other fields, and the constructor.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let User = record (id: int64, name: string, active: bool);
+
+let rename = func(user: User, name: string) -> User {
+    const source = user;
+    const check = source.id;
+    const replacement = name;
+    return new User(check, replacement, source.active);
+};
+
+let reorder = func(user: User, id: int64, active: bool) -> User {
+    const source = user;
+    const check = source.id;
+    const first = active;
+    const second = id;
+    return new User(second, source.name, first);
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let user = new User(7, "Ada", true);
+        console.print_line(rename(user, "Grace").to_string());
+        console.print_line(reorder(user, 8, false).to_string());
+        return program.ExitCode.Ok;
+    };
+);

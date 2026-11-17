@@ -1,0 +1,5 @@
+// `new with` always begins a copy (edge case 58).
+let with = class (
+    export let init = func(value: int) { };
+);
+let w = new with(3);

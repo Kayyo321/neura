@@ -1,0 +1,9 @@
+error[E0572]: 'new with' copies a record, and this is 'Shape'
+ --> $DIR/class-source.nra:6:21
+  |
+6 | let copy = new with(shape) { };
+  |                     ^^^^^ not a value of a record type
+  |
+  = help: construct the class with 'new', or declare it as a record
+
+For more information about this error, try `neura explain E0572`.

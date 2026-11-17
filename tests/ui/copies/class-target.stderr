@@ -1,0 +1,8 @@
+error[E0403]: expected Shape, got User
+ --> $DIR/class-target.nra:5:16
+  |
+5 | let s: Shape = new with(user) { };
+  |                ^^^^^^^^^^^^^^^^^^ expected Shape, found User
+  |        ----- expected because of this type
+
+For more information about this error, try `neura explain E0403`.

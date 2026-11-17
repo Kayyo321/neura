@@ -36,13 +36,16 @@ export let Main = module : program.Entry (
         console.print_line(segment.to_string());
         console.print_line(segment.hash_code().to_string());
         console.print_line((segment === same).to_string() + " " + (segment == same).to_string());
+        let moved = new with(segment) {{ label: "t", start: new shapes.Point(0, 0) }};
+        console.print_line(moved.to_string() + " " + (moved.end == segment.end).to_string());
         return program.ExitCode.Ok;
     }};
 );
 '''
 
 EXPECTED = ('Shapes.Segment(start: Shapes.Point(x: 1, y: 2), end: Shapes.Point(x: 3, y: 4), label: s)\n'
-            '{hash}\ntrue false\n')
+            '{hash}\ntrue false\n'
+            'Shapes.Segment(start: Shapes.Point(x: 0, y: 0), end: Shapes.Point(x: 3, y: 4), label: t) true\n')
 
 
 def run(*arguments, cwd=None):

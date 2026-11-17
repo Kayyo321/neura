@@ -1,0 +1,25 @@
+// Copies that compile (docs/design/Records030.md, edge cases 41, 42, 43, 53,
+// 54, 55 and 56).
+let User = record (id: int64, name: string, active: bool);
+let user = new User(7, "Ada", true);
+let Node = record (value: int, next: Node);
+let node = new Node(1, nil);
+
+// Cases 41 and 42.
+let renamed = new with(user) { name: "Grace" };
+let same = new with(user) { };
+let empty = new with(user) {};
+// Case 43: a trailing comma.
+let trailing = new with(user) { name: "G", };
+// Case 53: a copy of a copy.
+let twice = new with(new with(user) { id: 1 }) { name: "x" };
+// Case 54: a replacement that is itself a copy.
+let linked = new with(node) { next: new with(node) { } };
+// Case 55: the copy has the source's type.
+let typed: User = new with(user) { };
+// Case 56: a comment between `new` and `with`, and a line break before `{`.
+let spaced = new // copy
+    with(user)
+{
+    active: false,
+};

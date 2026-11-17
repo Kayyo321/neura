@@ -208,3 +208,60 @@ void record_declaration(Declaration& result) {
     expand_constructor_shorthands(result);
     result.record = std::move(syntax);
 }
+
+// `new with(source) { name: value, ... }` (Records030.md, Copy construction).
+// `new with` always begins a copy. The source is one expression in
+// parentheses; the braces are required and may be empty.
+Expr copy_expression(std::size_t start) {
+    advance(); // with
+    expect("(");
+    if (at(")"))
+        throw Diagnostic(current().span, "expected the record to copy").with_code("E0202")
+            .label("expected an expression, found ')'")
+            .help("write the record to copy in the parentheses: 'new with(source) { }'");
+    auto source = expression();
+    if (!at(")"))
+        throw Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
+                         "expected ')' after the record to copy").with_code("E0202")
+            .label(current().kind == TokenKind::End ? "expected ')' before the end of the file"
+                                                    : "expected ')', " + found_text(current()))
+            .help("a copy has one source: 'new with(source) { field: value }'");
+    advance();
+    if (!at("{")) {
+        throw Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
+                         "expected '{' after 'new with(...)'")
+            .with_code("E0202")
+            .label(current().kind == TokenKind::End ? "expected '{' before the end of the file"
+                                                    : "expected '{', " + found_text(current()))
+            .help("a copy lists its replacements in braces, which may be empty: 'new with(source) { }'");
+    }
+    advance();
+    auto result = make_expression(Expr::Kind::Copy, tokens_[start].span);
+    result.operands.push_back(std::move(source));
+    result.labels.emplace_back();
+    result.label_spans.push_back(tokens_[start].span);
+    while (!at("}")) {
+        if (current().kind != TokenKind::Identifier) {
+            if (current().kind == TokenKind::End) expected("'}'", "}");
+            throw Diagnostic(current().span, "expected a field name").with_code("E0202")
+                .label("expected a field name, " + found_text(current()))
+                .help("a replacement is written 'field: value'");
+        }
+        const auto& name = advance();
+        if (!at(":")) {
+            throw Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
+                             "expected ':' after the field name").with_code("E0202")
+                .label(current().kind == TokenKind::End ? "expected ':' before the end of the file"
+                                                        : "expected ':', " + found_text(current()))
+                .help("a replacement is written 'field: value', and names a field of the record itself");
+        }
+        advance();
+        result.labels.push_back(name.text);
+        result.label_spans.push_back(name.span);
+        result.operands.push_back(expression());
+        if (!match(",")) break;
+    }
+    expect("}");
+    result.span = span_from(start);
+    return result;
+}

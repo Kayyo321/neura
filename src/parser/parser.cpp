@@ -1891,6 +1891,7 @@ private:
     //                        `;`, `,`, `)`, `]`, or `}`
     // A target-typed `new` has no type; lowering takes the expected type.
     Expr new_expression(std::size_t start) {
+        if (at_contextual("with")) return copy_expression(start);
         const bool type_start = current().kind == TokenKind::Identifier || at("&") || at("[") ||
                                 at("func") || at("class");
         if (!at("(") && !type_start) return make_expression(Expr::Kind::New, span_from(start));

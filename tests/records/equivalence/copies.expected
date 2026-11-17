@@ -1,0 +1,11 @@
+make
+User(id: 7, name: Grace, active: true, team: Team(name: core))
+true true
+true false
+make
+g
+h
+User(id: 8, name: Grace, active: true, team: Team(name: core))
+User(id: 1, name: x, active: true, team: Team(name: core))
+Node(value: 1, next: Node(value: 1, next: nil))
+before the nil copy
