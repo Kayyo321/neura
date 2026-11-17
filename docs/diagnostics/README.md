@@ -38,6 +38,10 @@ Errors about the grammar.
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
+| [E0225](E0225.md) | positional argument after a named argument |
+| [E0226](E0226.md) | default value on a parameter that takes none |
+| [E0227](E0227.md) | malformed interpolated string |
+| [E0228](E0228.md) | malformed extension declaration or extension import |
 
 ## E03xx: Names
 
@@ -45,6 +49,10 @@ Errors about declarations, scopes, and name resolution.
 
 | Code | Error |
 | --- | --- |
+| [E0230](E0230.md) | malformed match.is |
+| [E0231](E0231.md) | pattern form that is not supported |
+| [E0232](E0232.md) | postfix ? that needs parentheses |
+| [E0233](E0233.md) | malformed optional access |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |
@@ -56,6 +64,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0309](E0309.md) | cyclic declaration |
 | [E0310](E0310.md) | misuse of the discard name '_' |
 | [E0311](E0311.md) | reserved name |
+| [E0315](E0315.md) | ambiguous extension function |
+| [E0316](E0316.md) | extension function used without a call |
 
 ## E04xx: Types and bindings
 
@@ -111,6 +121,15 @@ Errors about types, values, calls, and statements.
 | [E0448](E0448.md) | a value type that contains itself |
 | [E0449](E0449.md) | a value type larger than its inline limit |
 | [E0450](E0450.md) | a list literal without new |
+| [E0480](E0480.md) | conflicting inferred type arguments |
+| [E0481](E0481.md) | lambda does not fit its callable context |
+| [E0482](E0482.md) | unknown argument label |
+| [E0483](E0483.md) | argument supplied twice |
+| [E0484](E0484.md) | labels are not available for this call |
+| [E0485](E0485.md) | default value is not a constant |
+| [E0486](E0486.md) | invalid format specification in an interpolated string |
+| [E0487](E0487.md) | invalid nameof operand |
+| [E0488](E0488.md) | invalid extension function |
 
 ## E05xx: Classes and lifecycle
 
@@ -118,6 +137,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 
 | Code | Error |
 | --- | --- |
+| [E0490](E0490.md) | pattern that cannot match |
+| [E0491](E0491.md) | unreachable match arm |
+| [E0492](E0492.md) | value cannot be held in any |
+| [E0493](E0493.md) | operation is not defined for any |
+| [E0494](E0494.md) | optional access on a receiver that is never absent |
+| [E0495](E0495.md) | invalid operands of ?? |
+| [E0496](E0496.md) | ? on a value that is not a Result |
+| [E0497](E0497.md) | ? outside a function that returns a Result |
+| [E0498](E0498.md) | any at a boundary that would box it |
 | [E0501](E0501.md) | invalid static member |
 | [E0502](E0502.md) | invalid override |
 | [E0503](E0503.md) | invalid inheritance |
@@ -149,6 +177,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](E0536.md) | destructuring declared with last |
 | [E0537](E0537.md) | constructor shorthand names no instance field |
+| [E0560](E0560.md) | parameter names differ from the overridden method |
+| [E0561](E0561.md) | defaults differ from the overridden method |
 
 ## E06xx: Concurrency
 

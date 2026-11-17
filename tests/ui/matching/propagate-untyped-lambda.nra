@@ -1,0 +1,10 @@
+// Edge case 92: '?' in a lambda whose result would be inferred.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let apply = func<T>(f: func(string) -> T) -> T => f("1");
+let read = func() -> Result<int> {
+    let value = apply(func(text) => parse(text)?);
+    return Result<int>.Ok(value);
+};

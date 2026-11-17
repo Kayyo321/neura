@@ -264,6 +264,9 @@ private:
         if (!flow.reachable) return;
         if (const auto index = tracked(expr)) use(*index, expr.span, flow);
         switch (expr.kind) {
+        case ExprKind::NameOf:
+            // Its operand names a declaration and is not evaluated.
+            return;
         case ExprKind::Lambda:
             capture(*expr.lambda, expr.span, flow);
             return;
@@ -296,6 +299,7 @@ private:
             read(expr.match->expressions.front(), flow);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
+                if (arm.guard) read(*arm.guard, flow);
                 read(*arm.value, flow);
                 scopes_.pop_back();
             }
@@ -347,6 +351,7 @@ private:
             scan(expr.match->expressions.front(), visit);
             for (const auto& arm : expr.match->arms) {
                 begin_arm(arm);
+                if (arm.guard) scan(*arm.guard, visit);
                 scan(*arm.value, visit);
                 scopes_.pop_back();
             }
@@ -375,6 +380,7 @@ private:
         case StmtKind::Match:
             for (const auto& arm : stmt.arms) {
                 begin_arm(arm);
+                if (arm.guard) scan(*arm.guard, visit);
                 scan_body(arm.body, visit);
                 scopes_.pop_back();
             }
@@ -438,6 +444,7 @@ private:
         for (const auto& arm : stmt.arms) {
             auto selected = fork(before);
             begin_arm(arm);
+            if (arm.guard) read(*arm.guard, selected);
             for (const auto& child : arm.body) check_statement(child, selected);
             scopes_.pop_back();
             merge(flow, std::move(selected), Skip{head(arm.span, arm.variant.size()), "not assigned in this arm"});

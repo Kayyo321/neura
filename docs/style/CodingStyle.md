@@ -168,6 +168,12 @@ let format_log = func(log_message: string, log_level: int) -> string {
   export let prefix: string = "stdout";
   ```
 - Leave a blank line between members of a module or class that span more than one line.
+- Write a label as `name: value`, with no space before the colon, like an annotation. Name the arguments of a call that passes several arguments of one type, or a Boolean or a number whose meaning the call does not show, and keep them in parameter order:
+  <!-- example: fragment: formatting illustration: a call of a function declared elsewhere -->
+  ```neura
+  let copy = copy_range(source: input, target: output, overwrite: false);
+  ```
+- Prefer an interpolated string to concatenation or `Console.format` with a literal pattern: `$"{name}: {count:>4}"`.
 
 ### Delimiters and Semicolons
 - Use parentheses for module, class, and interface bodies, with the opening parenthesis on the same line and the closing parenthesis on a new line. Function bodies use braces in K&R / 1TBS style.
@@ -480,4 +486,6 @@ Checks run: 1
 | `export last year: int;` | `export let year = func -> int => year_value;` | A stored value is a field, read as `date.year`. |
 | `export let size: int;` with `\| get: size;` | `export let size = func -> int => count;` | A value the class changes and callers read is a get-only field. |
 | `#NoDiscard` above a function that returns a `Result` | A `Result` that callers may drop silently | Dropping the result warns. |
+| `schedule(job, urgent: true)` | `schedule(job, 3, true)` | A label says what a literal argument means. |
+| `func(job: string, retries: int = 3)` | An overload that only fills in a constant | A constant default is the short form of the long call. |
 | `let _ = file.write(bytes);` | `-Wno-unused-result` | Discard a result on purpose where you mean to. |

@@ -13,7 +13,7 @@ let tick = func(label: string) {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         scope {
             let fine = spawn divide(8, 2);
             spawn tick("sibling");

@@ -1,0 +1,17 @@
+// nil never matches a scalar.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let width = func(x: int32) -> int32 => match.is (x) {
+    nil => 0,
+    _ => 1,
+};

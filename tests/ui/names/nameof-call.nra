@@ -1,0 +1,3 @@
+// A call is not a name (edge case 88).
+let f = func -> int => 1;
+let text = nameof(f());

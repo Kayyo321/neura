@@ -19,6 +19,23 @@ let check = func(words: string[], limit: int) -> Parse {
 };
 ```
 
+### Propagation with `?`
+
+Propagation is explicit, and never implicit ([design](../design/Matching030.md), implemented, proposed). `operand?` takes a `Std.Core.Result<T>`, evaluated once: `Ok(v)` gives `v`, and `Err(e)` returns `Err(e)`, the same error value, from the innermost enclosing function or lambda, as an ordinary `return`: task scopes are joined and regions released first. That function's result type is a `Result`, written or given by a lambda's expected type, and never inferred from a body that contains `?` ([E0497](../diagnostics/E0497.md)). `?` applies only to a `Result` ([E0496](../diagnostics/E0496.md)); convert an `Optional` with `to_result(error)` first. A trap stays a trap.
+
+A `?` is decided by the token after it: one that can begin an expression makes it the conditional operator's, so every conditional keeps its meaning, `.` is [E0232](../diagnostics/E0232.md), and anything else makes it propagation. `r?.name` is [optional access](CoreLanguage.md#optional-access-and-coalescing); read a member of the success value with `(r?).name`, and subtract with `(r?) - 1`.
+
+<!-- example: check -->
+```neura
+let.promote _ = import:Std.Core.Result;
+
+let parse_pair = func(left: string, right: string) -> Result<int> {
+    let a = int32.parse(left)?;
+    let b = int32.parse(right)?;
+    return Result<int>.Ok(a + b);
+};
+```
+
 **Runtime failures trap.** Integer overflow, a zero divisor, an out-of-range conversion ([Numbers](Numbers.md)), a negative index, a list modified during for-each, a failed console write, and a failed test assertion are program traps with documented reason codes. An index at or past a collection's length, a read of an uninitialized field or global, use of a destroyed object, and exhausted run limits are faults that NVM detects. Both end the run immediately with a diagnostic that names the source location when the image has a source map ([NVM](../runtime/NVM.md)). A trap cannot be caught, and no cleanup runs after it.
 
 The process status names the trap's class with the shell convention for a process that a signal ended, 128 plus the Linux signal number, and the matching [`Std.Program.ExitCode`](Modules.md#program-entry) variant:

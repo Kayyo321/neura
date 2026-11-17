@@ -1,0 +1,9 @@
+error[E0497]: '?' outside a function that returns a Result
+ --> $DIR/propagate-field.nra:7:39
+  |
+7 |     export let value: int = parse("1")?;
+  |                                       ^ this context has no result to return an error through
+  |
+  = help: handle the result with 'match'
+
+For more information about this error, try `neura explain E0497`.

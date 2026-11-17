@@ -37,6 +37,45 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(self.formatted("let count=1;"), "let count = 1;\n")
         self.assertEqual(self.formatted(""), "")
 
+    def test_matching_operators_patterns_and_match_is(self):
+        # docs/design/Matching030.md, Grammar: `a?.b` and `r?` without
+        # spaces, `a ?? b` with spaces, single spaces around a guard, and
+        # `match.is (x) {` written as `match (x) {` is.
+        source = '''let read=func(pet:Pet)->string=>pet  ?.  owner?.name??"x";
+let run=func(text:string)->Result<int>{
+let x=parse(text) ? ;
+let y=ready?1:2;
+return Result<int>.Ok(x+y);
+};
+let area=func(shape:Shape)->int=>match(shape){
+Shape.Line(n)  if  n>0=>n,
+Shape.Box{size:[w,h],label}=>w*h,
+_=>0,
+};
+let kind=func(v:class)->int=>match . is(v){
+shape:Shape if shape.sides>4=>1,
+_=>0,
+};
+'''
+        expected = '''let read = func(pet: Pet) -> string => pet?.owner?.name ?? "x";
+let run = func(text: string) -> Result<int> {
+    let x = parse(text)?;
+    let y = ready ? 1 : 2;
+    return Result<int>.Ok(x + y);
+};
+let area = func(shape: Shape) -> int => match (shape) {
+    Shape.Line(n) if n > 0 => n,
+    Shape.Box { size: [w, h], label } => w * h,
+    _ => 0,
+};
+let kind = func(v: class) -> int => match.is (v) {
+    shape: Shape if shape.sides > 4 => 1,
+    _ => 0,
+};
+'''
+        self.assertEqual(self.formatted(source), expected)
+        self.assertEqual(self.formatted(expected), expected)
+
     def test_comments_and_documentation_attachment(self):
         source = '''// ordinary comment: https://example.test/a//b
 /// Documentation has @param [in] name and \\return text.
@@ -191,6 +230,27 @@ a,   b: float64, // after a group
         self.assertIn("// the corners", formatted)
         self.assertIn("// after a group", formatted)
         self.assertIn("a, b: float64,", formatted)
+
+    def test_labels_defaults_interpolation_and_nameof(self):
+        # docs/design/Calls030.md, Grammar: a label is written 'name: value',
+        # a default 'name: Type = value', and an interpolated string is
+        # copied byte for byte. Labels are never added, removed or reordered.
+        source = '''let schedule=func(job:string,retries:int=-3,urgent:bool=false,ratio:float64=-0.5)->string=>job;
+let first=schedule(urgent : true,job:"backup");
+let second=schedule("x",retries:ok?1:2);
+let text=$"{ job }:{retries:>4}  {{x}} {$"{a}"}";
+let name=nameof( schedule );
+let lengths=transform(names,func(word)=>word.byte_length);
+let r=f(new(0..10:2));
+'''
+        formatted = self.formatted(source)
+        self.assertIn("func(job: string, retries: int = -3, urgent: bool = false, ratio: float64 = -0.5) -> string", formatted)
+        self.assertIn('schedule(urgent: true, job: "backup")', formatted)
+        self.assertIn('schedule("x", retries: ok ? 1 : 2)', formatted)
+        self.assertIn('$"{ job }:{retries:>4}  {{x}} {$"{a}"}"', formatted)
+        self.assertIn("nameof(schedule)", formatted)
+        self.assertIn("transform(names, func(word) => word.byte_length)", formatted)
+        self.assertIn("new(0 .. 10 : 2)", formatted)
 
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]

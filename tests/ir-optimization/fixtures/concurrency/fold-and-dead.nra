@@ -63,7 +63,7 @@ let spin_limit = func(limit: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("folded " + folded().to_string());
         console.print_line("after " + after_return(1).to_string());
         console.print_line("after " + after_return(0).to_string());

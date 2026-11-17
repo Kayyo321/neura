@@ -1,0 +1,18 @@
+// A variant pattern in a match.is.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let Light = enum (Red, Green);
+let classify = func(value: Shape) -> int => match.is (value) {
+    Light.Red(x) => 1,
+    _ => 2,
+};

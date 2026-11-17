@@ -1,0 +1,56 @@
+// Constant defaults inserted by the caller (docs/design/Calls030.md,
+// Constant defaults): every kind of literal, a default before a required
+// parameter, a default between written arguments, and a method called
+// through a base reference.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Light = enum (Red, Yellow, Green);
+let Choice = enum (None, Some(int));
+
+let Shape = class (
+    export let area = func(scale: int = 3) -> int => scale;
+);
+
+let Square = class : Shape (
+    export let.override area = func(scale: int = 3) -> int => scale * 4;
+);
+
+let note = func(text: string, value: int) -> int {
+    console.print_line("evaluate " + text);
+    return value;
+};
+
+let show = func(a: int, b: int = 20, c: int = 30) -> string {
+    return a.to_string() + " " + b.to_string() + " " + c.to_string();
+};
+
+let kinds = func(flag: bool = true, small: int8 = -128, large: uint64 = 18446744073709551615,
+                 half: float16 = 0.1, single: float32 = 1.1, double: float64 = -2.5e-3,
+                 brain: bfloat16 = 3.0, text: string = "tab\there", light: Light = Light.Yellow,
+                 choice: Choice = Choice.None, shape: Shape = nil) -> string {
+    let described = match (choice) {
+        Choice.None => "none",
+        Choice.Some(value) => value.to_string(),
+    };
+    return flag.to_string() + " " + small.to_string() + " " + large.to_string() + " " + half.to_string() + " " +
+        single.to_string() + " " + double.to_string() + " " + brain.to_string() + " " + text + " " +
+        (light as int).to_string() + " " + described + " " + (shape == nil).to_string();
+};
+
+let later = func(a: int = 1, b: int) -> int => a * 10 + b;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(show(1));
+        console.print_line(show(1, 2));
+        console.print_line(show(1, c: 3));
+        console.print_line(show(c: note("c", 3), a: note("a", 1)));
+        console.print_line(kinds());
+        console.print_line(kinds(flag: false, text: "x"));
+        console.print_line(later(b: 2).to_string() + " " + later(5, 6).to_string());
+        let shape: Shape = new Square();
+        console.print_line(shape.area().to_string() + " " + new Shape().area().to_string());
+        return program.ExitCode.Ok;
+    };
+);

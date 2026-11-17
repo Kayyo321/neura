@@ -1,0 +1,7 @@
+error[E0204]: expected an expression
+ --> $DIR/guard-missing.nra:7:18
+  |
+7 |     Shape.Dot if => 0,
+  |                  ^^ expected an expression, found '=>'
+
+For more information about this error, try `neura explain E0204`.

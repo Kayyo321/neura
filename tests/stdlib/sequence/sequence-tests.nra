@@ -46,9 +46,9 @@ let SequenceTests = module (
     };
 
     export let test_map_filter_flat_map = func() -> void {
-        let squares = list(new([1, 2, 3, 4])).map<int>(func(v: int) -> int {
-            return v * v;
-        }).to_list();
+        // Untyped lambdas take their types from the parameter they are
+        // passed to, and map's result type from the lambda (Calls030.md).
+        let squares = list(new([1, 2, 3, 4])).map(func(v) => v * v).to_list();
         test.assert_equal_string("[1, 4, 9, 16]", squares.to_string());
         test.assert_equal_string("[2, 4, 6]", sequence.range(1, 7).filter(even).to_list().to_string());
         test.assert_equal_string("[]", list(new([1, 3])).filter(even).to_list().to_string());
@@ -73,7 +73,7 @@ let SequenceTests = module (
         test.assert_equal_string("[0, 1]", sequence.range(0, 2).skip(0).to_list().to_string());
         // take stops pulling after the n-th element.
         let pulled = cell.of<int>(0);
-        let firsts = sequence.range(0, 100).peek(func(v: int) -> void {
+        let firsts = sequence.range(0, 100).peek(func(v) {
             pulled.value = pulled.value + 1;
         }).take(3).to_list();
         test.assert_equal_string("[0, 1, 2]", firsts.to_string());
@@ -153,14 +153,12 @@ let SequenceTests = module (
         let parts = sequence.range(0, 7).partition(even);
         test.assert_equal_string("[0, 2, 4, 6]", parts[0].to_string());
         test.assert_equal_string("[1, 3, 5]", parts[1].to_string());
-        let text = list(new([1, 2, 3])).fold<string>("x", func(acc: string, v: int) -> string {
-            return acc + v.to_string();
-        });
+        let text = list(new([1, 2, 3])).fold("x", func(acc, v) => acc + v.to_string());
         test.assert_equal_string("x123", text);
         test.assert_equal_int32(4, sequence.range(0, 4).count());
         test.assert_equal_int32(0, sequence.empty<int>().count());
         let total = cell.of<int>(0);
-        list(new([4, 5])).for_each(func(v: int) -> void {
+        list(new([4, 5])).for_each(func(v) {
             total.value = total.value + v;
         });
         test.assert_equal_int32(9, total.value);

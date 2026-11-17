@@ -1,0 +1,4 @@
+// No rule prefers the alternative with fewer defaults (edge case 31).
+let f = func(a: int) -> int => a
+    or func(a: int, b: int = 1) -> int => a + b;
+let one = f(1);

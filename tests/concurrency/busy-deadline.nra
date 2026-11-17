@@ -14,7 +14,7 @@ let spin_until_cancelled = func -> bool {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         scope (request) {
             match (request.cancel_after(durations.of_millis(5))) {
                 result.Result.Ok(_) => { },

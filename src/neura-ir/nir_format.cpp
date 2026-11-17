@@ -24,6 +24,7 @@ constexpr std::uint8_t max_op_1_3 = static_cast<std::uint8_t>(IrOp::ValueText);
 constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollection);
 constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
 constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
+constexpr std::uint8_t max_op_1_12 = static_cast<std::uint8_t>(IrOp::AnyUnpack);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
@@ -36,6 +37,7 @@ bool may_poll(IrOp op) {
 }
 
 std::uint16_t type_minor(const IrType& type) {
+    if (type.kind == TypeKind::Any) return nir_any_minor;
     if (type.kind == TypeKind::Object && type.name.starts_with('&')) return 7;
     if (is_function_value(type) || (type.kind == TypeKind::Enum && !type.arguments.empty())) return 3;
     return type.kind == TypeKind::Tuple ? 2 : 0;
@@ -58,6 +60,34 @@ bool scoped_statements(const IrNode& node) {
     return node.op == IrOp::ScopedValue && !node.body.empty() &&
         std::any_of(node.body.begin(), node.body.end() - 1,
                     [](const IrNode& prefix) { return prefix.op != IrOp::Initialize; });
+}
+
+// A return anywhere inside a scoped value (NeuraIR 1.12).
+bool contains_return(const IrNode& node) {
+    if (node.op == IrOp::Return) return true;
+    for (const auto* region : {&node.operands, &node.body, &node.alternative})
+        for (const auto& child : *region)
+            if (contains_return(child)) return true;
+    return false;
+}
+
+bool scoped_return(const IrNode& node) {
+    return node.op == IrOp::ScopedValue && contains_return(node);
+}
+
+bool mentions_any(const IrType& type) {
+    return type.kind == TypeKind::Any || std::ranges::any_of(type.arguments, mentions_any);
+}
+
+bool needs_any_minor(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (scoped_return(node) || static_cast<std::uint8_t>(node.op) > max_op_1_9 || mentions_any(node.type) ||
+            std::ranges::any_of(node.type_arguments, mentions_any))
+            return true;
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            if (needs_any_minor(*region)) return true;
+    }
+    return false;
 }
 
 bool class_qualified_load(const IrNode& node) {
@@ -153,6 +183,12 @@ public:
             if (version >= newest_node_minor) break;
             version = std::max(version, required_minor(body.instructions));
         }
+        if (std::ranges::any_of(program.bodies, [](const IrBody& body) { return needs_any_minor(body.instructions); }) ||
+            std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+                return mentions_any(item.type) || std::ranges::any_of(item.payload_types, mentions_any) ||
+                       (item.bound && mentions_any(*item.bound));
+            }))
+            version = std::max(version, nir_any_minor);
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -376,7 +412,8 @@ public:
         }
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12};
+        static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
         aggregates_ = minor_ >= 2;
@@ -523,7 +560,7 @@ private:
     IrType type(std::size_t depth) {
         enter(depth);
         IrType value;
-        const auto max_kind = aggregates_ ? TypeKind::Tuple : TypeKind::Callable;
+        const auto max_kind = minor_ >= nir_any_minor ? TypeKind::Any : aggregates_ ? TypeKind::Tuple : TypeKind::Callable;
         value.kind = static_cast<TypeKind>(tag(static_cast<std::uint8_t>(max_kind), "type kind"));
         value.name = text();
         value.symbol = reference();
@@ -699,6 +736,8 @@ private:
         value.alternative = nodes(depth + 1);
         if (minor_ < 4 && scoped_statements(value))
             fail("statements in a scoped value require NeuraIR format 1.4");
+        if (minor_ < nir_any_minor && scoped_return(value))
+            fail("a return inside a scoped value requires NeuraIR format 1." + std::to_string(nir_any_minor));
         if (value.op == IrOp::Loop && !value.alternative.empty() && !latches_) {
             fail("a loop latch requires NeuraIR format 1.1");
         }

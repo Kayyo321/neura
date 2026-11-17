@@ -1,0 +1,2 @@
+// The receiver cannot be a bare type parameter without a bound (E0488).
+let.extension show = func<T>(value: T) -> T => value;

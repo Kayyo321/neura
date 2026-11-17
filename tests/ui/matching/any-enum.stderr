@@ -1,0 +1,10 @@
+error[E0492]: a value of type Light cannot be held in any
+ --> $DIR/any-enum.nra:5:14
+  |
+5 | let v: any = Light.Red;
+  |              ^^^^^^^^^ this has type Light
+  |
+  = note: an any holds a bool, a sized integer, a float, a string, a class or interface reference, or nil
+  = help: hold it in a class and pack the reference
+
+For more information about this error, try `neura explain E0492`.

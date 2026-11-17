@@ -1,0 +1,2 @@
+// A call through a function value is positional (edge case 13).
+let apply = func(g: func(int) -> int) -> int => g(v: 1);

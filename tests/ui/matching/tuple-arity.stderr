@@ -1,0 +1,7 @@
+error[E0426]: a tuple pattern must have one sub-pattern per element
+ --> $DIR/tuple-arity.nra:7:5
+  |
+7 |     [Light.Red, _, _] => 1,
+  |     ^^^^^^^^^^^^^^^^^ expected 2 elements, found 3
+
+For more information about this error, try `neura explain E0426`.

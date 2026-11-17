@@ -1,0 +1,9 @@
+error[E0419]: cannot infer type parameter 'T'
+ --> $DIR/inference-no-context.nra:4:14
+  |
+4 |     let xs = empty();
+  |              ^^^^^^^ no argument or expected type gives 'T'
+  |
+  = help: write the type arguments, as in 'empty<T>(...)'
+
+For more information about this error, try `neura explain E0419`.

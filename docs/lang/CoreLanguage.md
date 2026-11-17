@@ -97,7 +97,7 @@ The filter represents modules as namespaces and uses named placeholders for Neur
 
 ## Functions and control flow
 
-Function parameters use `name: Type`. Arguments are evaluated left to right. A function with no parameters may omit `()`, and a `void` function may omit `-> void`. A block body uses `return` to exit the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through.
+Function parameters use `name: Type`. Arguments are evaluated left to right, in the order they are written. A function with no parameters may omit `()`, and a `void` function may omit `-> void`. A block body uses `return` to exit the function. A non-`void` function must return a value on every reachable path. A `void` function may fall through.
 
 A [primitive reference parameter](Types.md#primitive-references) such as `value: &int` receives an alias to the caller's storage. Its argument uses the ordinary expression spelling, such as `increment(count)`.
 
@@ -141,7 +141,7 @@ let write = func(text: string) {
 
 An overload group is one declaration, so it ends with `;` after its final alternative.
 
-The compiler first filters by argument count. With several candidates of the same arity, it ranks each argument's match in this order.
+The compiler first keeps the alternatives a call applies to: those whose parameters its positional arguments, [labels](#named-arguments), and [defaults](#default-values) fill exactly once, which without labels or defaults means an equal count. With several candidates, it ranks each argument's match at the parameter it fills, in this order. A parameter filled by its default takes no part, and no rule prefers the alternative with fewer defaults.
 
 1. An exact type match. Numeric literals prefer their default width when the value fits. An existing primitive reference is an exact match for its reference type.
 2. An assignable type, such as a class upcast. A more specific parameter type wins between assignable alternatives.
@@ -190,11 +190,73 @@ let apply = func(f, g: func(int, int) -> int, pair: [int, string][]) -> int => f
 | Each parameter keeps its own name and tags. | A [tag](Tags.md) before a name applies to that name only. Diagnostics name the parameter, and the group's type keeps its own span. |
 | Grouping applies to every parameter list. | Functions, methods, constructors, function values and lambdas, and each alternative of an [overload group](#function-overloads). |
 | A variadic parameter is a group of one name, and it is last. | `func(a, b: int, items: ...string)` is valid. `func(a, items: ...string)` is `E0207`, because `a` would take the variadic type. |
-| A list may not end in names without a type. | The error `E0214` is at the first untyped name, also in a list that mixes typed groups with trailing untyped names. Until contextual typing of lambdas is defined, an untyped parameter is always an error. |
+| A list may not end in names without a type. | The error `E0214` is at the first untyped name, also in a list that mixes typed groups with trailing untyped names. Only a lambda may leave every parameter untyped, where a function type is expected ([below](#function-values-and-closures)). |
 | Duplicates are found after expansion. | A repeated name is `E0303`, and overload alternatives with equal signatures are `E0433`: `func(a, b: int)` and `func(a: int32, b: int32)` are equal because `int` aliases `int32`. |
 | Locals, fields, and enum payloads are not grouped. | `let a, b: int;` and `Point(x, y: int)` stay errors. |
 
 Tooling follows the expansion: signature help, hovers, and the documentation index count and name each parameter. `neura fmt` keeps the grouping and comments as written; it neither groups nor ungroups a list. A grouped list lowers to the NeuraIR of the written-out list. The two build the same image, apart from a source map, which records where each is written.
+
+### Named arguments
+
+An argument written `name: value` is a named argument: it gives its value to the parameter of that name. Positional arguments come first and fill parameters from the left; every argument after the first named one is named. Every parameter receives exactly one value, from a positional argument, a named argument, or its [default](#default-values).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let schedule = func(job: string, retries: int = 3, urgent: bool = false) -> string {
+    return job + " " + retries.to_string() + " " + urgent.to_string();
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(schedule("backup"));
+        console.print_line(schedule("backup", urgent: true));
+        console.print_line(schedule(urgent: true, job: "restore", retries: 0));
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+backup 3 false
+backup 3 true
+restore 0 true
+```
+
+| Rule | Detail |
+| --- | --- |
+| An argument is named when it starts with an identifier directly followed by `:`. | No expression starts that way, so no other call changes meaning. After the label the value is a whole expression, including a conditional or a range with a step. A label is not a use of a binding: `f(count: count)` names the parameter `count` and passes the local `count`. |
+| Labels are resolved at compile time against the declaration the call names. | A function, a method, a constructor (`new T(...)`, `super.init(...)`), or the call of a `spawn`. The parameter names of an exported declaration are part of its interface: renaming one breaks callers that name it. An unknown label is `E0482`, a parameter given two values `E0483`, a positional argument after a named one `E0225`, and a parameter without a value `E0407`. |
+| Some calls are positional only (`E0484`). | A call through a function value, whose type carries neither names nor defaults; a call of an intrinsic member such as `append` or `slice`; an enum constructor, whose named payload is written `Variant { name: value }`; a call of a function with a variadic parameter; and a call that would pass a [primitive reference](Types.md#primitive-references) argument out of parameter order. A named function read as a value loses its labels and defaults. |
+| An override keeps its base's parameter names. | The parameter names of an override equal those of the method it overrides, position by position, and the names of an implementation equal those of the interface method (`E0560`). A call therefore means the same whatever the static type of its receiver. |
+
+A named call is evaluated in the order it is written, not in parameter order. The receiver of a method call is evaluated first. Then each written argument is evaluated, left to right, and admitted to its parameter: a selected [object cast](Types.md#object-casts) runs, or a primitive reference is bound, before the next argument is evaluated. Then each omitted parameter receives its default, in declaration order, and the call is made. A trap in an argument ends the run there, so no later argument is evaluated. A call whose written order is the parameter order compiles to the positional call, and builds the same image apart from its source map.
+
+### Default values
+
+A parameter may give a default, `name: Type = constant`, which a caller that leaves the parameter out passes. A parameter with a default may be followed by one without: a caller reaches the later one by name, or supplies both by position.
+
+<!-- example: check -->
+```neura
+let Light = enum (Red, Yellow, Green);
+
+let paint = func(color: Light = Light.Red, width: int = 1, label: string = "") -> int => width;
+let later = func(first: int = 1, second: int) -> int => first + second;
+
+let narrow = paint();
+let wide = paint(width: 3);
+let both = later(second: 2) + later(5, 6);
+```
+
+| Rule | Detail |
+| --- | --- |
+| A default is a literal constant of the parameter's type. | A Boolean, integer, float or string literal, a numeric literal with unary `-`, `nil` for a class or interface type, or a variant without payload written with its enum (`Light.Red`, `Optional<int>.None`). It contains no call, no `new`, no name of a binding, and no other parameter (`E0485`). It is checked once, at the declaration, with the rules of a literal initializer. |
+| A default belongs to one parameter of a named function, method or constructor. | A group of several names takes none: `func(x, y: int = 1)` is `E0226`; write `x: int, y: int = 1`. Neither does a variadic parameter, any parameter of a function that has one, a primitive reference parameter, a parameter whose type mentions a type parameter, a parameter of a lambda or of a function type, an enum payload field, or a parameter of a host, kernel, scheduler or callback binding. |
+| The caller inserts the default. | A caller built against an earlier default keeps it until it is rebuilt. A `.nir` module records each default on its parameter, so a program built against the module inserts it too ([NeuraIR format](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization)). |
+| An override keeps its base's defaults. | The same parameters have a default, with the same value, in an override and the method it overrides, and in an implementation and its interface method (`E0561`). A call through a base reference passes the shared default. |
+| Overload alternatives are not told apart by defaults. | An alternative applies when every parameter the call leaves without a value has a default. Two alternatives that a call cannot rank are ambiguous (`E0409`), also when one of them needs fewer defaults. |
 
 ### Variadic parameters
 
@@ -212,7 +274,7 @@ A bare `items: ...` packs mixed types into an array of `Std.Core.Variadic.Argume
 
 ### Function values and closures
 
-A lambda is a function expression with typed parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
+A lambda is a function expression with parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
 
 <!-- example: check -->
 ```neura
@@ -226,11 +288,28 @@ let add_two = make_adder(2);
 let result = add_two(40);
 ```
 
+A lambda may leave all of its parameters untyped, `func(a, b) => a + b`, where a function type is expected: as the argument of a parameter of function type, as the result of a function whose result is a function type, as the value of a binding, field or element with a function type. The expected type gives the parameter types, and the result type unless the lambda writes one, which must then be the expected one. A lambda that takes a different number of parameters, or writes another result type, is `E0481`; one without an expected function type, a list that mixes typed and untyped parameters, and an untyped list in a named declaration are `E0214`. Passed to a [generic function](Polymorphism.md#type-argument-inference), an untyped lambda takes its parameter types once the earlier arguments solve them, and its expression body then gives its result type. Passed to an [overload group](#function-overloads), it fits each alternative whose parameter is a function type with as many parameters; its body is not used to choose, so two such alternatives are ambiguous. Once typed, it is an ordinary lambda, and builds the image of the lambda with its types written.
+
+<!-- example: check -->
+```neura
+let transform = func<T, U>(items: T[list], convert: func(T) -> U) -> U[list] {
+    let result: U[list] = new;
+    for (let item: T in items) {
+        result.append(convert(item));
+    }
+    return result;
+};
+
+let words: string[list] = new(["a", "bc"]);
+let lengths = transform(words, func(word) => word.byte_length);   // int32[list]
+let add: func(int, int) -> int = func(a, b) => a + b;
+```
+
 Functions with the same parameter and result types have the same function type. A function value can be assigned, passed as an argument, returned, and stored in a field or collection. Parenthesize the function type before a collection suffix to write an array of functions, such as `(func(int) -> int)[]`. A named non-generic function used as a value is callable through the same interface. Reading a class or interface method as a value binds its receiver and keeps normal virtual dispatch.
 
 A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs. Closures may outlive the scope that created them.
 
-Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. Call a generic function with explicit type arguments. Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
+Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. A generic function is called with its type arguments written or [inferred](Polymorphism.md#type-argument-inference). Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
 
 ## Loops
 
@@ -421,7 +500,7 @@ The compiler rejects, at the span of the offending expression, a `spawn` outside
 
 Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are
 
-1. member access, indexing, and calls
+1. member access, optional access `?.`, indexing, calls, and the postfix `?`
 2. postfix `++` and `--`
 3. prefix `++`, `--`, `!`, `-`, and `~`
 4. `as` and `is`
@@ -435,8 +514,9 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 12. `==`, `!=`, `===`
 13. `&&`
 14. `||`
-15. `..` and its optional step in [range expressions](Collections.md#ranges)
-16. `? :`
+15. `??`, which associates to the right
+16. `..` and its optional step in [range expressions](Collections.md#ranges)
+17. `? :`
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 
@@ -445,6 +525,81 @@ Prefix and postfix increment and decrement require a mutable numeric binding, fi
 `a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
 
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
+
+### Optional access and coalescing
+
+`receiver?.member` and `receiver?.method(arguments)` evaluate the receiver once ([design](../design/Matching030.md), implemented, proposed). When it is nil, the result is `Optional.None` and neither the member nor the arguments are evaluated; otherwise the result is `Optional.Some` of the member or of the call's result, or `Some(Unit.Value)` after a call that returns nothing. The type is always `Optional<M>`, so `Some(nil)` and `None` stay different. The receiver is a class or interface reference or an `Optional` of one: `None` skips, and `Some(r)` skips when `r` is nil, which is how `pet?.owner?.name` has the type `Optional<string>`. A chain needs `?.` at each step: `pet?.owner.name` applies `.name` to an `Optional` ([E0305](../diagnostics/E0305.md)). A receiver that is never absent is [E0494](../diagnostics/E0494.md), and `?.` is not an assignment target and takes no `++` or `--` ([E0233](../diagnostics/E0233.md)).
+
+`left ?? right` evaluates `left` once. A nil reference or `None` gives `right`, which is evaluated only then; a live reference gives itself, and `Some(v)` gives `v`, so `Some(nil) ?? x` is nil. `left` is a reference or an `Optional<T>`, the expression has the reference's type or `T`, and `right` is typed with it and must be assignable to it, with no numeric conversion ([E0495](../diagnostics/E0495.md)). The library's `Optional`, `Unit` and `Result` are found by path, so neither operator needs an import.
+
+<!-- example: check -->
+```neura
+let Owner = class ( export let name: string = ""; );
+let Pet = class ( export let owner: Owner = nil; );
+
+let owner_name = func(pet: Pet) -> string => pet?.owner?.name ?? "nobody";
+```
+
+### Interpolated strings
+
+`$"..."` is an interpolated string, of type `string`. Its holes, `{expression}` or `{expression:specification}`, are formatted into the text with the rules of [console formatting](StandardLibrary.md#console-formatting).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let report = func(name: string, paid: float64, items: int) -> string {
+    return $"{name}: {items:>4} items, {paid:.2f} paid, {{braces}}";
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let width = 8;
+        console.print_line(report("order", 12.5, 3));
+        console.print_line($"[{"right":>{width}}] {$"nested {width}"}");
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+order:    3 items, 12.50 paid, {braces}
+[   right] nested 8
+```
+
+| Rule | Detail |
+| --- | --- |
+| Outside holes the literal has the escapes of a string literal. | `{{` and `}}` are single braces, and a single `}` is `E0227`. An interpolated string without holes is a string literal. |
+| A hole holds one expression, and an optional specification after the first `:` outside parentheses, brackets and braces. | The specification is the text after the colon of a format field: fill, alignment, sign, `#`, `0`, width, precision and presentation. A conditional or a range with a step at the top of a hole is written in parentheses, `{(ok ? 1 : 2)}`. A width or precision may be a nested hole, `{value:>{width}}`, which holds an expression of an integer type and no specification. |
+| The whole literal is on one line. | A line end before its closing `"`, in text or in a hole, is `E0103`. A hole contains no comment, a `"` inside a hole begins an ordinary nested literal, and interpolated strings nest to a depth of eight (`E0227`). |
+| Every hole is evaluated once, in written order, before any text is formatted. | Nested holes included. A saved object is a reference: its `to_string()` runs during formatting, after every hole is evaluated, and sees what earlier formatting did. A value with a built-in `to_string()` that is not a scalar, text or object is turned into text when it is evaluated, as `Console.format` does; a hole of type `void` is `E0416`, and one without a text form is the error of `Console.format`. |
+| The specification is checked when the program is compiled. | Against the hole's type, with the rules and the messages of the library (`E0486`). A checked interpolated string fails to format only when a nested width or precision is negative or larger than the library allows, which traps as `Console.vformat` does. The `c` presentation, which the library checks against the value, is not used. |
+| A format string computed at run time stays with `Console.format`. | An interpolated string is a literal: its text and its specifications are fixed. |
+
+`$` begins an interpolated string only directly before `"`; anywhere else it is `E0101`. An interpolated string lowers to a call of `Std.Io.Console.vformat` with a constant pattern that numbers the holes and an array of the packed values, so it adds no NeuraIR operation; a program that uses none builds as before.
+
+### nameof
+
+`nameof(path)` is a string constant: the declared name of the declaration `path` resolves to, without qualification.
+
+<!-- example: check -->
+```neura
+let Invoice = class (
+    export let total: int64 = 0;
+);
+
+let field = nameof(Invoice.total);   // "total"
+let kind = nameof(Invoice);          // "Invoice"
+```
+
+| Rule | Detail |
+| --- | --- |
+| `path` is a name or a dotted path, with type arguments where a generic type is applied. | It may name a local, a parameter, a function or overload group, a field, a method, a class, an interface, an enum, a variant, a module, a type parameter, or an import alias, which gives the alias. A member is found on the static type of what precedes it. |
+| Nothing is evaluated. | No receiver, getter, hook, initializer or allocation. A use in `nameof` is not a read for definite assignment or for the unused-binding warning. |
+| The operand resolves to one accessible declaration. | An unknown name is `E0304`, an unknown or inaccessible member `E0305`, and a built-in type, a literal, a call, an index or any other expression `E0487`. |
+| The string is program data. | It is in the image and stays when names and source maps are stripped. It changes when the declaration is renamed, so it is not a stable name for stored data. |
+| `nameof` is an operator where an expression starts and `(` follows. | No declaration may be named `nameof` (`E0311`). |
 
 ### Comparison chains
 

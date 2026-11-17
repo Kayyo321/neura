@@ -1,0 +1,7 @@
+error[E0602]: a value of type any is not transferable, so it cannot be given to a spawned task
+ --> $DIR/any-spawn-argument.nra:7:31
+  |
+7 |         let task = spawn work(v);
+  |                               ^ not transferable
+
+For more information about this error, try `neura explain E0602`.

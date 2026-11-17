@@ -157,8 +157,8 @@ let with_connection_cases = func {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
-        let which = arguments[0];
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let which = args[0];
         if (which == "order") {
             scope {
                 spawn waiter(1);

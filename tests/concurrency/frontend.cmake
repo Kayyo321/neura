@@ -15,7 +15,7 @@ let program = import:Std.Program;
 ]=])
 set(entry_open [=[
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
 ]=])
 set(entry_close [=[
         return program.ExitCode.Ok;
@@ -451,7 +451,7 @@ let regex = import:Std.Text.Regex;
 let random = import:Std.Random.Random;
 let json = import:Std.Encoding.Json;
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let table = maps.create<string, int>();
         table.set(\"a\", 1);
         console.print_line(table.to_string());

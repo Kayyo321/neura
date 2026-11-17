@@ -1,0 +1,21 @@
+// Edge case 21: a let.as conversion takes no part.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let Meter = class (
+    export let count: int64 = 0;
+    export let.as int64 = func -> int64 => count;
+);
+let classify = func(value: Meter) -> int => match.is (value) {
+    int64 => 1,
+    _ => 2,
+};

@@ -1,0 +1,9 @@
+error[E0230]: a variant pattern is not a 'match.is' pattern
+  --> $DIR/is-variant-pattern.nra:16:14
+   |
+16 |     Light.Red(x) => 1,
+   |              ^ 'match.is' arms test types
+   |
+   = help: use 'match' for an enum
+
+For more information about this error, try `neura explain E0230`.

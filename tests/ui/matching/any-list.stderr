@@ -1,0 +1,10 @@
+error[E0492]: a value of type int32[list] cannot be held in any
+ --> $DIR/any-list.nra:4:14
+  |
+4 | let v: any = new int[list]([1, 2]);
+  |              ^^^^^^^^^^^^^^^^^^^^^ this has type int32[list]
+  |
+  = note: an any holds a bool, a sized integer, a float, a string, a class or interface reference, or nil
+  = help: hold it in a class and pack the reference
+
+For more information about this error, try `neura explain E0492`.

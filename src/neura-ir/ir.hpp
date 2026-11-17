@@ -7,6 +7,7 @@
 #include <iosfwd>
 #include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace neura {
@@ -19,7 +20,10 @@ inline constexpr SymbolId no_symbol = static_cast<SymbolId>(-1);
 
 enum class TypeKind {
     Void, Bool, String, Integer, Float, Array, List, Object, TypeParameter, Module, Enum, Callable,
-    Tuple
+    Tuple,
+    // NeuraIR 1.12 (docs/design/Matching030.md): one value of a fixed set
+    // of types together with which type it is (any.hpp).
+    Any
 };
 
 struct IrType {
@@ -160,7 +164,15 @@ enum class IrOp {
     // yields the uint64 task identity. SchedulerCall asks the NVM scheduler
     // for the operation its text names; the scheduler defines each
     // operation's arguments and result.
-    TaskScope, Spawn, SchedulerCall
+    TaskScope, Spawn, SchedulerCall,
+    // NeuraIR 1.12 (docs/design/Matching030.md, any.hpp). AnyPack has one
+    // operand of a type an `any` can hold and yields an `any`. AnyTag
+    // yields the uint32 tag of its `any` operand. AnyUnpack yields the
+    // value of the node's type from its `any` operand, which is the load of
+    // a constant local inside the region that a Branch or SelectValue
+    // selects when that local's AnyTag equals the tag of the node's type; a
+    // reference is unpacked as the root class.
+    AnyPack, AnyTag, AnyUnpack
 };
 
 struct IrNode {
@@ -251,6 +263,11 @@ struct IrProgram {
     // Calls inlined by the optimizer; empty before optimization and not part
     // of a .nir file, which holds IR as lowered.
     std::vector<IrInlineSite> inline_sites{};
+    // Source spans that name a declaration without evaluating it: argument
+    // labels and nameof operands (docs/design/Calls030.md). Editor
+    // information from lowering, for navigation and rename; not part of a
+    // .nir file, and later stages leave it as lowering wrote it.
+    std::vector<std::pair<Span, SymbolId>> name_uses{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

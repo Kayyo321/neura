@@ -1,0 +1,5 @@
+// Edge case 48: a fieldless enum value cannot be held in any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let Light = enum (Red, Green);
+let v: any = Light.Red;

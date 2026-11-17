@@ -1,0 +1,12 @@
+// Edge case 86: '?' in main.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let program = import:Std.Program;
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let value = parse("1")?;
+        return program.ExitCode.Ok;
+    };
+);

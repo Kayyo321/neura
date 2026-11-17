@@ -1,0 +1,9 @@
+// An arm after an unguarded '_' in a general match.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+    _ => 1,
+    [Light.Red, _] => 2,
+};

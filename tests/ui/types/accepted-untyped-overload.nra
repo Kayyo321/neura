@@ -1,0 +1,4 @@
+// An untyped lambda fits the alternative whose function type has as many parameters.
+let run = func(f: func(int) -> int) -> int => f(1)
+    or func(f: func(int, int) -> int) -> int => f(1, 2);
+let three = run(func(a, b) => a + b);

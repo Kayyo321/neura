@@ -1,0 +1,9 @@
+error[E0488]: invalid extension function
+ --> $DIR/extension-receiver-variadic.nra:2:28
+  |
+2 | let.extension count = func(items: ...int) -> int => items.length;
+  |                            ^^^^^ the receiver cannot be a variadic parameter
+  |
+  = help: an extension function extends one type, named by its first parameter
+
+For more information about this error, try `neura explain E0488`.

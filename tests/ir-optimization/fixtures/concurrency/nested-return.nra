@@ -47,7 +47,7 @@ let escape = func -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("find " + find(6).to_string());
         console.print_line("find " + find(2).to_string());
         console.print_line("escape " + escape().to_string());

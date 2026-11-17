@@ -1,0 +1,4 @@
+// A set enabled in a file is not enabled in a file that imports it (edge
+// case 58): app/relay.nra enables App.Words, this file imports App.Relay.
+let relay = import:App.Relay;
+let loud = relay.prefix + "ready".shout();

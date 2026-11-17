@@ -3,9 +3,14 @@
 #include "cli/source_loader.hpp"
 #include "cli/module_path.hpp"
 #include "neura-ir/attributes.hpp"
+#include "neura-ir/float.hpp"
+#include "neura-ir/nominal.hpp"
 #include "neura-ir/tags.hpp"
 
 #include <algorithm>
+#include <array>
+#include <charconv>
+#include <cmath>
 #include <cctype>
 #include <fstream>
 #include <functional>
@@ -52,6 +57,9 @@ std::string type_text(const IrType &type) {
             break;
         case TypeKind::Tuple:
             name = "tuple";
+            break;
+        case TypeKind::Any:
+            name = "any";
             break;
         default:
             name = "?";
@@ -257,6 +265,92 @@ int symbol_token(SymbolKind kind) {
         return 7;
     }
 }
+// The tokens of a document with the tokens of the holes of its interpolated
+// strings (docs/design/Calls030.md), in source order. A hole's expression is
+// ordinary code: navigation, rename and highlighting reach into it.
+void append_hole_tokens(const std::vector<InterpolationPart> &parts, std::vector<Token> &out) {
+    for (const auto &part : parts) {
+        if (part.kind != InterpolationPart::Kind::Hole)
+            continue;
+        for (const auto &token : part.tokens) {
+            if (token.kind == TokenKind::End)
+                continue;
+            out.push_back(token);
+            if (token.parts)
+                append_hole_tokens(*token.parts, out);
+        }
+        append_hole_tokens(part.specification, out);
+    }
+}
+
+std::vector<Token> with_hole_tokens(const std::vector<Token> &tokens) {
+    std::vector<Token> result;
+    for (const auto &token : tokens) {
+        result.push_back(token);
+        if (token.parts)
+            append_hole_tokens(*token.parts, result);
+    }
+    std::stable_sort(result.begin(), result.end(),
+                     [](const Token &a, const Token &b) { return a.span.offset < b.span.offset; });
+    return result;
+}
+
+// The text of a parameter's default as a caller sees it, from its attribute.
+std::string default_text(const IrProgram &program, const IrSymbol &parameter) {
+    if (const auto *variant = find_attribute(parameter, AttributeId::ParameterDefaultVariant)) {
+        const auto &item = program.symbols[variant->value.symbol];
+        return (item.owner != no_symbol ? program.symbols[item.owner].name + "." : std::string{}) + item.name;
+    }
+    const auto *recorded = find_attribute(parameter, AttributeId::ParameterDefault);
+    if (!recorded || recorded->value.items.size() != 2)
+        return {};
+    const auto &literal = recorded->value.items[1];
+    switch (recorded->value.items[0].integer) {
+    case 0:
+        return literal.integer ? "true" : "false";
+    case 1:
+        return std::to_string(attribute_signed_value(literal));
+    case 2:
+        return std::to_string(literal.integer);
+    case 3: {
+        // The literal is the value's encoding at the parameter's width.
+        const auto format = float_format(parameter.type);
+        if (!format)
+            return {};
+        const auto bits = literal.integer;
+        const auto fraction = bits & ((std::uint64_t{1} << format->fraction_bits) - 1);
+        const auto exponent = (bits >> format->fraction_bits) & ((std::uint64_t{1} << format->exponent_bits) - 1);
+        const auto bias = static_cast<int>(format->bias());
+        const auto width = static_cast<int>(format->fraction_bits);
+        double value = exponent == 0
+            ? std::ldexp(static_cast<double>(fraction), 1 - bias - width)
+            : std::ldexp(static_cast<double>(fraction | (std::uint64_t{1} << format->fraction_bits)),
+                         static_cast<int>(exponent) - bias - width);
+        if ((bits >> (format->width() - 1)) & 1)
+            value = -value;
+        std::array<char, 64> buffer{};
+        const auto [end, error] = std::to_chars(buffer.data(), buffer.data() + buffer.size(), value);
+        std::string text(buffer.data(), error == std::errc{} ? end : buffer.data());
+        if (text.find_first_of(".e") == std::string::npos)
+            text += ".0";
+        return text;
+    }
+    case 4: {
+        std::string text = "\"";
+        for (const char c : literal.text) {
+            if (c == '\n') text += "\\n";
+            else if (c == '\t') text += "\\t";
+            else if (c == '\r') text += "\\r";
+            else if (c == '"' || c == '\\') { text += '\\'; text += c; }
+            else text += c;
+        }
+        return text + "\"";
+    }
+    default:
+        return "nil";
+    }
+}
+
 } // namespace
 
 std::string path_uri(std::string_view path) {
@@ -603,6 +697,8 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
         for (const auto &arm : s.arms) {
             for (const auto &token : arm.bindings)
                 add(token.text, token.span, token.span, arm.span, parent, 13, 7, modifier("readonly"));
+            if (arm.guard)
+                expression(*arm.guard, parent, arm.span);
             for (const auto &child : arm.body)
                 statement(child, parent, arm.span);
             if (arm.value)
@@ -804,6 +900,8 @@ void AnalysisSession::index_compiler() {
                     detail += ", ";
                 const auto &param = program->symbols[original.parameters[p]];
                 detail += param.name + ": " + type_text(param.type);
+                if (const auto value = default_text(*program, param); !value.empty())
+                    detail += " = " + value;
             }
             s.detail = detail + ") -> " + type_text(original.type);
         } else if (s.detail.empty() || original.kind == SymbolKind::Local || original.kind == SymbolKind::Parameter)
@@ -868,6 +966,7 @@ void AnalysisSession::index_compiler() {
                 }
         }
     }
+    std::map<std::string, std::vector<Token>, std::less<>> flat_tokens;
     const auto reference = [&](const IrNode &node, bool write) {
         SymbolId symbol = node.symbol;
         int type = -1;
@@ -887,9 +986,13 @@ void AnalysisSession::index_compiler() {
             return;
         bool hit = false;
         Span selection;
-        const auto first = std::lower_bound(doc->second.tokens.begin(), doc->second.tokens.end(), node.span.offset,
+        auto cached = flat_tokens.find(doc->first);
+        if (cached == flat_tokens.end())
+            cached = flat_tokens.emplace(doc->first, with_hole_tokens(doc->second.tokens)).first;
+        const auto &tokens = cached->second;
+        const auto first = std::lower_bound(tokens.begin(), tokens.end(), node.span.offset,
             [](const Token &token, std::size_t at) { return token.span.offset < at; });
-        for (auto it = first; it != doc->second.tokens.end(); ++it) {
+        for (auto it = first; it != tokens.end(); ++it) {
             const auto &token = *it;
             if (token.span.offset + token.span.length > node.span.offset + node.span.length)
                 break;
@@ -928,6 +1031,11 @@ void AnalysisSession::index_compiler() {
     for (const auto &body : program->bodies)
         for (const auto &node : body.instructions)
             visit(node, false);
+    // Argument labels and nameof operands name a declaration without a node.
+    for (const auto &[span, symbol] : program->name_uses) {
+        IrNode use{IrOp::Reference, {}, span, symbol, {}, {}, {}, {}, {}};
+        reference(use, false);
+    }
     std::sort(references.begin(), references.end(), [](const auto &a, const auto &b) {
         return std::tie(a.span.file, a.span.offset, a.symbol) < std::tie(b.span.file, b.span.offset, b.symbol);
     });
@@ -1011,7 +1119,44 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
         if (old == marks.end() || old->second.priority <= priority)
             marks.insert_or_assign(span.offset, Mark{std::move(span), type, mods, priority});
     };
+    // An interpolated string is marked piece by piece: its quotes and text as
+    // a string, and the tokens of its holes as code.
+    std::function<void(const Token &)> classify;
+    std::function<void(const std::vector<InterpolationPart> &)> holes;
+    holes = [&](const std::vector<InterpolationPart> &parts) {
+        for (const auto &part : parts) {
+            if (part.kind == InterpolationPart::Kind::Text) {
+                put(part.span, 17, 0, 0);
+                continue;
+            }
+            for (const auto &token : part.tokens)
+                if (token.kind != TokenKind::End)
+                    classify(token);
+            holes(part.specification);
+        }
+    };
+    const auto interpolated = [&](const Token &t) {
+        put(Span{t.span.file, t.span.line, t.span.column, t.span.offset, 2}, 17, 0, 0);
+        put(Span{t.span.file, t.span.line, t.span.column, t.span.offset + t.span.length - 1, 1}, 17, 0, 0);
+        holes(*t.parts);
+    };
+    classify = [&](const Token &t) {
+        if (t.parts) {
+            interpolated(t);
+            return;
+        }
+        int type = -1;
+        if (t.kind == TokenKind::Keyword) type = 14;
+        else if (t.kind == TokenKind::Integer || t.kind == TokenKind::Float) type = 18;
+        else if (t.kind == TokenKind::String) type = 17;
+        if (type >= 0)
+            put(t.span, type, 0, 0);
+    };
     for (const auto &t : doc.tokens) {
+        if (t.parts) {
+            interpolated(t);
+            continue;
+        }
         int type = -1;
         switch (t.kind) {
         case TokenKind::Keyword:
@@ -1101,6 +1246,8 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
             for (const auto &child : *body)
                 statement(child);
         for (const auto &arm : s.arms) {
+            if (arm.guard)
+                expression(*arm.guard);
             for (const auto &child : arm.body)
                 statement(child);
             if (arm.value)
@@ -1575,9 +1722,106 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         return Json{{"isIncomplete", false}, {"items", items}};
     }
     const bool member = before != std::string::npos && doc.source[before] == '.';
+    // After `?.` (docs/design/Matching030.md) the receiver ends before the '?'.
+    const auto receiver_end = [&](std::size_t dot) {
+        if (dot && doc.source[dot - 1] == '?') --dot;
+        while (dot && std::isspace(static_cast<unsigned char>(doc.source[dot - 1]))) --dot;
+        return dot;
+    };
+    // The extension functions this file enables whose receiver parameter
+    // takes the value's type, with the set that enables them
+    // (docs/design/Calls030.md, Extension sets).
+    const auto add_extensions = [&] {
+        if (!member || !program) return;
+        std::size_t begin = receiver_end(before);
+        while (begin && identifier(doc.source[begin - 1])) --begin;
+        const auto *receiver = symbol_at(doc, begin);
+        const auto value_kind = receiver && receiver->compiler_id != no_symbol
+            ? program->symbols[receiver->compiler_id].kind : SymbolKind::File;
+        if (value_kind == SymbolKind::Local || value_kind == SymbolKind::Parameter || value_kind == SymbolKind::Field ||
+            value_kind == SymbolKind::Global) {
+            const auto &type = program->symbols[receiver->compiler_id].type;
+            std::map<SymbolId, std::string> sets;
+            for (const auto &item : symbols)
+                if (item.file == doc.path && item.declaration && item.declaration->extension_set &&
+                    item.compiler_id != no_symbol)
+                    sets.emplace(program->symbols[item.compiler_id].type.symbol, "set '" + item.name + "'");
+            for (SymbolId id = 0; id < program->symbols.size(); ++id) {
+                const auto &function = program->symbols[id];
+                if (function.kind != SymbolKind::Function || function.parameters.empty() ||
+                    !has_attribute(function, AttributeId::FunctionExtension))
+                    continue;
+                auto set = sets.find(function.owner);
+                const bool own = function.span.file == doc.path;
+                if (set == sets.end() && !own)
+                    continue;
+                if (!own && !function.exported)
+                    continue;
+                auto first = program->symbols[function.parameters.front()].type;
+                const bool accepts = first == type || (first.kind == TypeKind::Object && type.kind == TypeKind::Object &&
+                    std::ranges::any_of(nominal_views(*program, type),
+                                        [&](const IrType &view) { return view.symbol == first.symbol; })) ||
+                    (first.kind == type.kind && first.symbol == type.symbol && !first.arguments.empty());
+                if (!accepts)
+                    continue;
+                std::string detail = function.name + "(";
+                for (std::size_t p = 1; p < function.parameters.size(); ++p) {
+                    const auto &parameter = program->symbols[function.parameters[p]];
+                    detail += (p > 1 ? ", " : "") + parameter.name + ": " + type_text(parameter.type);
+                }
+                add(function.name, 2, detail + ") -> " + type_text(function.type) + " — extension, " +
+                                          (own ? std::string("declared in this file") : set->second));
+            }
+        }
+    };
+    // At the start of an argument, the parameters a label may name, before
+    // the values (docs/design/Calls030.md, Named arguments).
+    if (!member && before != std::string::npos && (doc.source[before] == '(' || doc.source[before] == ',')) {
+        int depth = 0;
+        std::optional<std::size_t> open;
+        std::set<std::string> named;
+        for (std::size_t i = doc.tokens.size(); i > 0;) {
+            --i;
+            const auto &t = doc.tokens[i];
+            if (t.span.offset >= start)
+                continue;
+            if (t.text == ")" || t.text == "]" || t.text == "}")
+                ++depth;
+            else if (t.text == "(" || t.text == "[" || t.text == "{") {
+                if (depth) {
+                    --depth;
+                    continue;
+                }
+                if (t.text == "(")
+                    open = i;
+                break;
+            } else if (!depth && t.text == ":" && i > 0 && doc.tokens[i - 1].kind == TokenKind::Identifier &&
+                       (i < 2 || doc.tokens[i - 2].text == "," || doc.tokens[i - 2].text == "(")) {
+                named.insert(doc.tokens[i - 1].text);
+            }
+        }
+        if (open && *open > 0 && doc.tokens[*open - 1].kind == TokenKind::Identifier) {
+            if (const auto *callee = symbol_at(doc, doc.tokens[*open - 1].span.offset);
+                callee && callee->declaration && callee->declaration->kind == Declaration::Kind::Function &&
+                std::none_of(callee->declaration->parameters.begin(), callee->declaration->parameters.end(),
+                             [](const Parameter &p) { return p.variadic; })) {
+                for (const auto &parameter : callee->declaration->parameters) {
+                    if (named.contains(parameter.name) || !parameter.name.starts_with(prefix))
+                        continue;
+                    const auto label = parameter.name + ":";
+                    if (!seen.insert(label).second)
+                        continue;
+                    items.emplace_back(Json{{"label", label}, {"kind", 5},
+                                            {"detail", parameter.name + ": " + syntax_type(parameter.type)},
+                                            {"sortText", "0" + parameter.name},
+                                            {"textEdit", Json{{"range", replacement_range},
+                                                              {"newText", parameter.name + ": "}}}});
+                }
+            }
+        }
+    }
     if (member) {
-        std::size_t end = before;
-        while (end && std::isspace(static_cast<unsigned char>(doc.source[end - 1]))) --end;
+        std::size_t end = receiver_end(before);
         std::size_t begin = end;
         while (begin && (identifier(doc.source[begin - 1]) || doc.source[begin - 1] == '.')) --begin;
         const auto receiver_name = std::string_view(doc.source).substr(begin, end - begin);
@@ -1706,6 +1950,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                             ? documentation_markdown(method.documentation->text) : "");
                     }
                 }
+                add_extensions();
                 return Json{{"isIncomplete", false}, {"items", items}};
             }
         }
@@ -1734,8 +1979,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
     }
     std::optional<SymbolId> owner;
     if (member && program) {
-        std::size_t begin = before;
-        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1]))) --begin;
+        std::size_t begin = receiver_end(before);
         while (begin && identifier(doc.source[begin - 1])) --begin;
         if (const auto *receiver = symbol_at(doc, begin); receiver && receiver->compiler_id != no_symbol) {
             const auto &target = program->symbols[receiver->compiler_id];
@@ -1762,6 +2006,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         if (!items.empty() && items.back()["label"].string() == symbol.name &&
             (symbol.modifiers & modifier("deprecated"))) items.back()["tags"] = Json::Array{1};
     }
+    add_extensions();
     if (!member) {
         // Promoted imports contribute unqualified names. Local declarations win;
         // ambiguous exports from two modules do not form usable suggestions.
@@ -1983,6 +2228,8 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 for (const auto &child : *body)
                     statement(child);
             for (const auto &arm : item.arms) {
+                if (arm.guard)
+                    expression(*arm.guard);
                 for (const auto &child : arm.body)
                     statement(child);
                 if (arm.value)
@@ -2034,10 +2281,23 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 continue;
             const auto &function = program->symbols[callee->compiler_id];
             const auto count = call->operands.size() - 1;
-            const auto skip = function.parameters.size() > count ? function.parameters.size() - count : 0;
+            // A receiver passed as the first argument (a primitive companion or
+            // an extension call) fills a parameter that the call does not
+            // write. With defaults or labels the count does not tell, so only
+            // an extension call skips it (docs/design/Calls030.md).
+            const bool defaults = std::any_of(function.parameters.begin(), function.parameters.end(), [&](SymbolId p) {
+                return has_attribute(program->symbols[p], AttributeId::ParameterDefault) ||
+                       has_attribute(program->symbols[p], AttributeId::ParameterDefaultVariant);
+            });
+            const auto skip = defaults || !call->labels.empty()
+                ? (has_attribute(function, AttributeId::FunctionExtension) &&
+                   call->operands.front().kind == Expr::Kind::Member ? 1U : 0U)
+                : function.parameters.size() > count ? function.parameters.size() - count : 0;
             for (std::size_t i = 0; i < count && i + skip < function.parameters.size(); ++i) {
                 const auto &argument = call->operands[i + 1];
                 const auto &parameter = program->symbols[function.parameters[i + skip]];
+                if (!call->labels.empty() && !call->labels[i + 1].empty())
+                    break;
                 if (argument.span.offset < begin || argument.span.offset > end || parameter.name.empty() ||
                     parameter.name.starts_with('$') ||
                     (argument.kind == Expr::Kind::Name && argument.text == parameter.name))
@@ -2092,6 +2352,8 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
 Json AnalysisSession::signature_help(const EditorDocument &doc, std::size_t offset) const {
     int depth = 0, argument = 0;
     std::optional<std::size_t> open;
+    // The token that begins the argument at the cursor, after its comma.
+    std::optional<std::size_t> argument_start;
     for (std::size_t i = doc.tokens.size(); i > 0;) {
         --i;
         const auto &t = doc.tokens[i];
@@ -2107,11 +2369,21 @@ Json AnalysisSession::signature_help(const EditorDocument &doc, std::size_t offs
                 break;
             } else
                 return Json{};
-        } else if (t.text == "," && !depth)
+        } else if (t.text == "," && !depth) {
             ++argument;
+            if (!argument_start)
+                argument_start = i + 1;
+        }
     }
     if (!open || !*open)
         return Json{};
+    // A named argument, `label: value`, marks the parameter of its label
+    // (docs/design/Calls030.md); one being written marks it too.
+    std::optional<std::string> label;
+    if (const auto start = argument_start.value_or(*open + 1);
+        start + 1 < doc.tokens.size() && doc.tokens[start].kind == TokenKind::Identifier &&
+        doc.tokens[start + 1].text == ":" && doc.tokens[start + 1].span.offset < offset)
+        label = doc.tokens[start].text;
     std::size_t callee = *open - 1;
     if (doc.tokens[callee].text == ">") {
         int generic = 1;
@@ -2134,17 +2406,31 @@ Json AnalysisSession::signature_help(const EditorDocument &doc, std::size_t offs
             s.declaration->kind != Declaration::Kind::Function)
             continue;
         Json::Array params;
-        for (const auto &p : s.declaration->parameters)
-            params.emplace_back(Json{{"label", p.name + ": " + syntax_type(p.type)}});
+        int active = std::min(argument, static_cast<int>(s.declaration->parameters.size()
+                                                             ? s.declaration->parameters.size() - 1 : 0));
+        const IrSymbol *compiled = program && s.compiler_id != no_symbol && s.compiler_id < program->symbols.size()
+            ? &program->symbols[s.compiler_id] : nullptr;
+        for (std::size_t i = 0; i < s.declaration->parameters.size(); ++i) {
+            const auto &p = s.declaration->parameters[i];
+            auto text = p.name + ": " + syntax_type(p.type);
+            if (compiled && i < compiled->parameters.size())
+                if (const auto value = default_text(*program, program->symbols[compiled->parameters[i]]); !value.empty())
+                    text += " = " + value;
+            params.emplace_back(Json{{"label", text}});
+            if (label && p.name == *label)
+                active = static_cast<int>(i);
+        }
         signatures.emplace_back(
             Json{{"label", s.detail},
                  {"documentation", Json{{"kind", "markdown"}, {"value", s.documentation}}},
                  {"parameters", params},
-                 {"activeParameter", std::min(argument, static_cast<int>(params.size() ? params.size() - 1 : 0))}});
+                 {"activeParameter", active}});
     }
     if (signatures.empty())
         return Json{};
-    return Json{{"signatures", signatures}, {"activeSignature", 0}, {"activeParameter", argument}};
+    const int active = signatures.front()["activeParameter"].is_null() ? argument
+        : static_cast<int>(signatures.front()["activeParameter"].number());
+    return Json{{"signatures", signatures}, {"activeSignature", 0}, {"activeParameter", active}};
 }
 Json AnalysisSession::workspace_edit(const std::vector<DiagnosticEdit> &edits) const {
     std::map<std::string, Json::Array> by_file;

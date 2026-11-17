@@ -1,0 +1,10 @@
+error[E0492]: a value of type func<int32, int32> cannot be held in any
+ --> $DIR/any-function.nra:4:14
+  |
+4 | let v: any = func(x: int) -> int => x;
+  |              ^^^^^^^^^^^^^^^^^^^^^^^^ this has type func<int32, int32>
+  |
+  = note: an any holds a bool, a sized integer, a float, a string, a class or interface reference, or nil
+  = help: hold it in a class and pack the reference
+
+For more information about this error, try `neura explain E0492`.

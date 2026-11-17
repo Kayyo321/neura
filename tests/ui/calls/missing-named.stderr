@@ -1,0 +1,11 @@
+error[E0407]: missing an argument for parameter 'a'
+ --> $DIR/missing-named.nra:3:12
+  |
+2 | let area = func(a: int, b: int) -> int => a * b;
+  |                 - 'a' is declared here
+3 | let size = area(b: 2);
+  |            ^^^^^^^^^^ 'a' has no default and is not given a value
+  |
+  = help: pass it by position or as 'a: value'
+
+For more information about this error, try `neura explain E0407`.

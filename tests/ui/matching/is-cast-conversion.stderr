@@ -1,0 +1,7 @@
+error[E0490]: a value of type Meter is never an int64
+  --> $DIR/is-cast-conversion.nra:19:5
+   |
+19 |     int64 => 1,
+   |     ^^^^^ the subject has type Meter
+
+For more information about this error, try `neura explain E0490`.

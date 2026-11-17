@@ -1,0 +1,9 @@
+error[E0493]: operation is not defined for any
+ --> $DIR/any-cast.nra:4:37
+  |
+4 | let read = func(v: any) -> int64 => v as int64;
+  |                                     ^^^^^^^^^^ 'as' is not defined for any
+  |
+  = help: match the value instead: a 'match.is' arm 'name: int64'
+
+For more information about this error, try `neura explain E0493`.

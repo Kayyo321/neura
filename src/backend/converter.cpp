@@ -27,6 +27,7 @@
 #include <array>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -4190,7 +4191,34 @@ void FunctionCompiler::compile() {
 
 } // namespace
 
+namespace {
+
+// The value words of `any` (docs/design/Matching030.md, step 7) are not in
+// this converter yet: a program that uses `any` is declined here.
+void reject_any(const IrProgram& program) {
+    const std::function<bool(const IrType&)> mentions = [&](const IrType& type) {
+        return type.kind == TypeKind::Any || std::ranges::any_of(type.arguments, mentions);
+    };
+    const std::function<const IrNode*(const std::vector<IrNode>&)> find = [&](const std::vector<IrNode>& nodes) -> const IrNode* {
+        for (const auto& node : nodes) {
+            if (mentions(node.type) || std::ranges::any_of(node.type_arguments, mentions)) return &node;
+            for (const auto* region : {&node.operands, &node.body, &node.alternative})
+                if (const auto* found = find(*region)) return found;
+        }
+        return nullptr;
+    };
+    for (const auto& body : program.bodies)
+        if (const auto* node = find(body.instructions))
+            throw Diagnostic(node->span, "the type any is not supported by IRtoNeuronConversion yet").with_code("E0801");
+    for (const auto& item : program.symbols)
+        if (mentions(item.type))
+            throw Diagnostic(item.span, "the type any is not supported by IRtoNeuronConversion yet").with_code("E0801");
+}
+
+} // namespace
+
 Conversion convert(const IrProgram& program, const ConversionOptions& options) {
+    reject_any(program);
     return Converter(program, options).run();
 }
 

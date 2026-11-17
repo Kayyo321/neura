@@ -592,6 +592,20 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence")
     set_tests_properties(parameters-equivalence PROPERTIES TIMEOUT 180)
+    # Programs of the matching milestone (docs/design/Matching030.md), each
+    # run in every build route at the default tier and at tier 0.
+    add_test(NAME matching-programs COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")
+    set_tests_properties(matching-programs PROPERTIES TIMEOUT 180)
+    add_test(NAME matching-nir COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/nir_versions.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/matching/programs")
+    # The compile-time check of interpolated strings agrees with the
+    # formatting library on a corpus of specifications (docs/design/Calls030.md).
+    add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/calls/format_corpus.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(calls-format-corpus PROPERTIES TIMEOUT 300)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

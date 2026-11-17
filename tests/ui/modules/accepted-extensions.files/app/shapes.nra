@@ -1,0 +1,27 @@
+let Shapes = module (
+    export let Sized = interface (
+        let size = func -> int;
+    );
+    export let Shape = class implements Sized (
+        export let size = func -> int => 2;
+    );
+    export let Square = class : Shape ();
+    export let Box = class (
+        export let label = func -> string => "member";
+        let secret = func -> string => "private";
+    );
+    export let.extension area = func(shape: Sized) -> int => shape.size() * shape.size();
+    export let.extension doubled = func(shape: Shape) -> int => shape.size() * 2;
+    // A member of the same name is called instead (edge case 60).
+    export let.extension label = func(box: Box) -> string => "extension";
+    // A private member is not accessible from outside, so this is called.
+    export let.extension secret = func(box: Box) -> string => "extension";
+    // The string companion's concat is called instead (edge case 61).
+    export let.extension concat = func(text: string, other: string) -> string => "extension";
+    export let.extension count = func<T>(items: T[list]) -> int => items.length;
+    // An enum, a tuple and a bool value take extension functions too.
+    export let Light = enum (Red, Green);
+    export let.extension next = func(light: Light) -> Light => light == Light.Red ? Light.Green : Light.Red;
+    export let.extension first = func(pair: [int, string]) -> int => pair[0];
+    export let.extension flipped = func(flag: bool) -> bool => !flag;
+);

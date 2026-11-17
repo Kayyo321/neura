@@ -1,0 +1,2 @@
+// A default is checked like a literal initializer (edge case 27).
+let f = func(a: uint8 = 256) -> uint8 => a;

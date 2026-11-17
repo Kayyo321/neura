@@ -1,0 +1,6 @@
+// A group of several names takes no default (edge case 19).
+let Point = class (
+    export let x: int;
+    export let y: int;
+    export let init = func(x, y: int = 0) => set;
+);

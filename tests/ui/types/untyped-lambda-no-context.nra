@@ -1,0 +1,4 @@
+// A lambda with untyped parameters needs an expected function type.
+let use = func {
+    let f = func(x) => x;
+};

@@ -161,7 +161,7 @@ let Facts = module (
     };
 
     export let Main = module:program.Entry (
-        export let.override main = func(arguments: string[]) -> program.ExitCode {
+        export let.override main = func(args: string[]) -> program.ExitCode {
             let box = new Square();
             let blob = new Blob();
             console.print_line(area_of(box).to_string());

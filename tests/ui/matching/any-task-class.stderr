@@ -1,0 +1,10 @@
+error[E0605]: a value of type Task<int32> cannot leave its scope: it cannot be converted to class
+ --> $DIR/any-task-class.nra:8:24
+  |
+8 |         let c: class = task;
+  |                        ^^^^ this value is bound to its task scope
+  |
+  = note: converted to 'class', it would no longer be known to be scope-bound
+  = help: compare task handles with '==' rather than passing them as 'class'
+
+For more information about this error, try `neura explain E0605`.

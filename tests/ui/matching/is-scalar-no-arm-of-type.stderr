@@ -1,0 +1,13 @@
+error[E0410]: non-exhaustive match.is on a value of type int32
+  --> $DIR/is-scalar-no-arm-of-type.nra:14:40
+   |
+14 | let width = func(x: int32) -> int32 => match.is (x) {
+   |                                        ^^^^^ a value may match no arm
+   |
+   = help: add an arm for int32, or a final '_' arm
+help: insert the '_' arm before the closing brace
+   |
+16 |     _ => <value>,
+   |     +++++++++++++
+
+For more information about this error, try `neura explain E0410`.

@@ -1,0 +1,39 @@
+// Calls with inferred type arguments: the same image as the calls with
+// written type arguments of inferred.expanded.nra (docs/design/Calls030.md).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let identity = func<T>(value: T) -> T => value;
+let pair = func<A, B>(a: A, b: B) -> B => b;
+let same = func<T>(a: T, b: T) -> T => b;
+let empty = func<T>() -> T[list] => new;
+let count = func<T>(items: ...T) -> int => items.length;
+let first = func<T>(items: T[]) -> T => items[0];
+
+let Box = class<T> (
+    export let value: T;
+    export let init = func(value: T) {
+        instance.value = value;
+    };
+    export let pair = func<U>(other: U) -> U => other;
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let big: int64 = 5;
+        console.print_line(identity(7).to_string());
+        console.print_line(pair(1, "a"));
+        console.print_line(same(1, big).to_string());
+        console.print_line(same(1.0, 2.5).to_string());
+        let xs: int[list] = empty();
+        console.print_line(xs.length.to_string());
+        console.print_line(count(1, 2, 3).to_string());
+        console.print_line(first(["x", "y"]));
+        let box = new Box<int>(3);
+        console.print_line(box.pair("x"));
+        console.print_line(same(a: "early", b: "late"));
+        console.print_line(identity(identity("nested")));
+        console.print_line(identity(func(x: int) -> int => x + 1)(4).to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,6 @@
+// Edge case 58: a conditional does not become any because its arms differ.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let choose = func(ready: bool) {
+    let pick = ready ? 1 : "x";
+};

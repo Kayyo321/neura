@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-not-function.nra:2:5
+  |
+2 | let.extension twice = 2;
+  |     ^^^^^^^^^ 'let.extension' declares a function, as in 'let.extension name = func(receiver: T)'
+
+For more information about this error, try `neura explain E0228`.

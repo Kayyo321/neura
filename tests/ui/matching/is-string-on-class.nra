@@ -1,0 +1,17 @@
+// Edge case 7: a string pattern on a class subject.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let classify = func(value: Shape) -> int => match.is (value) {
+    string => 1,
+    _ => 2,
+};

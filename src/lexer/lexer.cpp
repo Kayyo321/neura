@@ -32,6 +32,8 @@ constexpr auto keywords = std::to_array<std::string_view>({
 constexpr auto compound_symbols = std::to_array<std::string_view>({
     "===", "<<=", ">>=",
     "->", "=>", "==", "!=", "<=", ">=", "&&", "||",
+    // docs/design/Matching030.md: optional access and coalescing.
+    "?.", "??",
     "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
 });
 
@@ -64,6 +66,7 @@ public:
                 kind = scan(start);
             } catch (const Skipped&) {
                 documentation_.reset();
+                parts_.reset();
                 continue;
             }
             const auto width = offset_ - start.offset;
@@ -74,7 +77,7 @@ public:
             documentation_.reset();
             tokens.push_back({kind, std::string(source_.substr(start.offset, width)),
                               {file_, start.line, start.column, start.offset, width},
-                              std::move(documentation)});
+                              std::move(documentation), std::exchange(parts_, nullptr)});
         }
         if (!errors_.empty()) {
             if (!diagnostics) throw combined();
@@ -207,6 +210,9 @@ private:
         }
         if (peek() == '"') {
             return string(start);
+        }
+        if (peek() == '$' && peek(1) == '"') {
+            return interpolated(start);
         }
         if (peek() == '.' && peek(1) == '.') {
             advance();
@@ -363,6 +369,272 @@ private:
             .suggest("close the string", close, "\"", Applicability::MaybeIncorrect));
         throw Skipped{};
     }
+
+    // Interpolated strings (docs/design/Calls030.md, Interpolated strings).
+    // The literal is one line. Outside holes it has the escapes of a string
+    // literal, and `{{` and `}}` are braces. A hole is lexed with this
+    // lexer, token by token, so a nested literal is one token of it; the
+    // first ':' outside brackets begins the specification.
+    static constexpr std::size_t interpolation_limit = 8;
+
+    bool line_end() const { return offset_ >= source_.size() || peek() == '\n' || peek() == '\r'; }
+
+    [[noreturn]] void unterminated(Span start) {
+        Span end = location();
+        start.length = 2;
+        report(Diagnostic(start, "unterminated string literal").with_code("E0103")
+            .label("this interpolated string is not closed")
+            .label(end, "the line ends here")
+            .note("an interpolated string, its holes included, ends on the line where it starts"));
+        throw Skipped{};
+    }
+
+    void malformed(Span at, const std::string& message, const std::string& label) {
+        report(Diagnostic(std::move(at), message).with_code("E0227").label(label));
+    }
+
+    [[noreturn]] void malformed_and_skip(Span at, const std::string& message, const std::string& label) {
+        malformed(std::move(at), message, label);
+        while (!line_end()) advance_text();
+        throw Skipped{};
+    }
+
+    // Decodes one escape of the literal's text into `text`.
+    void escape(std::string& text) {
+        auto at = location();
+        advance();
+        constexpr std::string_view escapes = "nrt\\\"";
+        const char c = peek();
+        if (escapes.find(c) == std::string_view::npos || line_end()) {
+            at.length = line_end() ? 1 : 2;
+            report(Diagnostic(at, "invalid string escape").with_code("E0104")
+                .label("unknown escape")
+                .note("the escapes are \\n, \\r, \\t, \\\\, and \\\""));
+            if (line_end()) return;
+            advance_text();
+            return;
+        }
+        text += c == 'n' ? '\n' : c == 'r' ? '\r' : c == 't' ? '\t' : c;
+        advance();
+    }
+
+    TokenKind interpolated(Span start) {
+        if (++interpolation_depth_ > interpolation_limit) {
+            auto at = start;
+            at.length = 2;
+            --interpolation_depth_;
+            malformed_and_skip(at, "interpolated strings nest deeper than eight",
+                               "this literal is the ninth level of nesting");
+        }
+        struct Depth {
+            std::size_t& depth;
+            ~Depth() { --depth; }
+        } depth{interpolation_depth_};
+        advance();
+        advance();
+        auto parts = std::make_shared<std::vector<InterpolationPart>>();
+        std::string text;
+        Span text_start = location();
+        const auto flush = [&] {
+            if (location().offset == text_start.offset) return;
+            auto span = text_start;
+            span.length = offset_ - text_start.offset;
+            parts->push_back({InterpolationPart::Kind::Text, span, std::exchange(text, {}), {}, {}, std::nullopt});
+        };
+        while (!line_end()) {
+            const char c = peek();
+            if (c == '"') {
+                flush();
+                advance();
+                parts_ = std::move(parts);
+                return TokenKind::String;
+            }
+            if (c == '\\') {
+                escape(text);
+                continue;
+            }
+            if (c == '{' && peek(1) == '{') {
+                text += '{';
+                advance();
+                advance();
+                continue;
+            }
+            if (c == '}' && peek(1) == '}') {
+                text += '}';
+                advance();
+                advance();
+                continue;
+            }
+            if (c == '{') {
+                flush();
+                parts->push_back(hole(start, false));
+                text_start = location();
+                continue;
+            }
+            if (c == '}') {
+                auto at = location();
+                at.length = 1;
+                report(Diagnostic(at, "malformed interpolated string").with_code("E0227")
+                    .label("a single '}' closes no hole")
+                    .suggest("double it to write a brace", at, "}}", Applicability::MaybeIncorrect));
+                text += '}';
+                advance();
+                continue;
+            }
+            if (c == '\0') {
+                auto invalid = location();
+                invalid.length = 1;
+                report(Diagnostic(std::move(invalid), "null byte in string literal").with_code("E0104")
+                    .label("a string cannot contain a null byte"));
+                advance();
+                continue;
+            }
+            const auto before = offset_;
+            advance_text();
+            text += source_.substr(before, offset_ - before);
+        }
+        unterminated(start);
+    }
+
+    static bool begins_expression(const Token& token) {
+        switch (token.kind) {
+        case TokenKind::Identifier:
+        case TokenKind::Integer:
+        case TokenKind::Float:
+        case TokenKind::String:
+            return true;
+        case TokenKind::Keyword:
+            return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
+                   token.text == "true" || token.text == "false" || token.text == "nil";
+        case TokenKind::Symbol:
+            return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
+                   token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";
+        default:
+            return false;
+        }
+    }
+
+    // A hole from its '{' through its '}'. A nested hole, in a
+    // specification, has no specification of its own.
+    InterpolationPart hole(Span literal, bool nested) {
+        InterpolationPart part{InterpolationPart::Kind::Hole, location(), {}, {}, {}, std::nullopt};
+        advance();
+        std::vector<char> brackets;
+        std::optional<Span> conditional;
+        std::optional<Span> question;
+        while (true) {
+            while (peek() == ' ' || peek() == '\t') advance();
+            if (line_end()) unterminated(literal);
+            if (peek() == '/' && (peek(1) == '/' || peek(1) == '*')) {
+                auto at = location();
+                at.length = 2;
+                malformed_and_skip(at, "malformed interpolated string", "a hole contains no comment");
+            }
+            if (brackets.empty() && (peek() == '}' || peek() == ':')) break;
+            const auto start = location();
+            const auto kind = scan(start);
+            const auto width = offset_ - start.offset;
+            Token token{kind, std::string(source_.substr(start.offset, width)),
+                        {file_, start.line, start.column, start.offset, width}, nullptr,
+                        std::exchange(parts_, nullptr)};
+            // A top-level '?' is a conditional's when the next token can
+            // begin an expression, and otherwise a postfix propagation,
+            // which ends no hole (docs/design/Matching030.md).
+            if (question && !conditional && begins_expression(token)) conditional = question;
+            question.reset();
+            if (kind == TokenKind::Symbol && token.text == "?" && brackets.empty()) {
+                question = token.span;
+            } else if (kind == TokenKind::Symbol && token.text.size() == 1) {
+                const char c = token.text.front();
+                if (c == '(' || c == '[' || c == '{') {
+                    brackets.push_back(c);
+                } else if (c == ')' || c == ']' || c == '}') {
+                    const char open = c == ')' ? '(' : c == ']' ? '[' : '{';
+                    if (brackets.empty() || brackets.back() != open)
+                        malformed_and_skip(token.span, "malformed interpolated string",
+                                           brackets.empty() ? "this bracket closes nothing in the hole"
+                                                            : "this bracket does not close the '" +
+                                                                  std::string(1, brackets.back()) + "' before it");
+                    brackets.pop_back();
+                }
+            }
+            part.tokens.push_back(std::move(token));
+        }
+        const auto close = location();
+        if (part.tokens.empty()) {
+            auto at = part.span;
+            at.length = offset_ - at.offset + 1;
+            malformed_and_skip(at, "malformed interpolated string", "an empty hole");
+        }
+        if (conditional) {
+            // The conditional runs to the hole's '}', past the ':' that ended
+            // its expression.
+            const auto& first = part.tokens.front().span;
+            auto end = source_.find('}', offset_);
+            const auto line = source_.find_first_of("\r\n", offset_);
+            if (end == std::string_view::npos || (line != std::string_view::npos && line < end)) end = offset_;
+            while (end > first.offset && (source_[end - 1] == ' ' || source_[end - 1] == '\t')) --end;
+            Span expression{first.file, first.line, first.column, first.offset, end - first.offset};
+            auto error = Diagnostic(*conditional, "malformed interpolated string").with_code("E0227")
+                .label("a conditional at the top of a hole is written in parentheses")
+                .note("the first ':' outside brackets begins the hole's specification");
+            error.suggest("parenthesize the conditional", expression,
+                          "(" + std::string(source_.substr(first.offset, expression.length)) + ")",
+                          Applicability::MaybeIncorrect);
+            report(std::move(error));
+            while (!line_end()) advance_text();
+            throw Skipped{};
+        }
+        part.tokens.push_back({TokenKind::End, {}, close});
+        if (peek() == ':') {
+            if (nested) {
+                auto at = location();
+                at.length = 1;
+                malformed_and_skip(at, "malformed interpolated string",
+                                   "a nested width or precision hole has no specification");
+            }
+            advance();
+            const auto specification = location();
+            std::string text;
+            Span text_start = specification;
+            const auto flush = [&] {
+                if (location().offset == text_start.offset) return;
+                auto span = text_start;
+                span.length = offset_ - text_start.offset;
+                part.specification.push_back(
+                    {InterpolationPart::Kind::Text, span, std::exchange(text, {}), {}, {}, std::nullopt});
+            };
+            while (true) {
+                if (line_end()) unterminated(literal);
+                const char c = peek();
+                if (c == '}') break;
+                if (c == '"') {
+                    auto at = location();
+                    at.length = 1;
+                    malformed_and_skip(at, "malformed interpolated string", "a specification holds no string");
+                }
+                if (c == '{') {
+                    flush();
+                    part.specification.push_back(hole(literal, true));
+                    text_start = location();
+                    continue;
+                }
+                const auto before = offset_;
+                advance_text();
+                text += source_.substr(before, offset_ - before);
+            }
+            flush();
+            auto span = specification;
+            span.length = offset_ - specification.offset;
+            part.specification_span = span;
+        }
+        advance();
+        part.span.length = offset_ - part.span.offset;
+        return part;
+    }
+
+    std::shared_ptr<const std::vector<InterpolationPart>> parts_;
+    std::size_t interpolation_depth_{};
 
     std::string_view source_;
     const std::string& file_;

@@ -1,0 +1,3 @@
+// Nothing gives T before the lambda (edge case 48).
+let apply = func<T>(f: func(T) -> T) -> int => 0;
+let zero = apply(func(x) => x);

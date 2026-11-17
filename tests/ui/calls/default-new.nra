@@ -1,0 +1,3 @@
+// A default is a constant, not an allocation (edge case 25).
+let Box = class ();
+let f = func(a: Box = new Box()) -> Box => a;

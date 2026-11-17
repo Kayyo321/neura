@@ -42,6 +42,7 @@ std::string_view spelling(TypeKind kind) {
     case TypeKind::Enum: return "enum";
     case TypeKind::Callable: return "callable";
     case TypeKind::Tuple: return "tuple";
+    case TypeKind::Any: return "any";
     }
     return "<invalid>";
 }
@@ -112,6 +113,9 @@ std::string_view spelling(IrOp op) {
     case IrOp::TaskScope: return "task_scope";
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
+    case IrOp::AnyPack: return "any_pack";
+    case IrOp::AnyTag: return "any_tag";
+    case IrOp::AnyUnpack: return "any_unpack";
     }
     return "<invalid>";
 }

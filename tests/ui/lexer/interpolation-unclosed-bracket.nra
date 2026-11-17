@@ -1,0 +1,3 @@
+// A bracket in a hole that is not closed before the hole's '}' (edge case 75).
+let a = 1;
+let text = $"{(a}";

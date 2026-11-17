@@ -1,0 +1,67 @@
+// The postfix `?` where it returns from inside an expression: as a statement, in an
+// expression-bodied function that may be inlined, in a loop condition, on the
+// right of `&&` and in a for loop's step; and a lambda in an arm that captures a
+// binding of a nested pattern (docs/design/Matching030.md).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let failure = errors.custom("E1", "bad");
+let calls = 0;
+let parse = func(t: string) -> Result<int> => t == "bad" ? Result<int>.Err(failure) : Result<int>.Ok(1);
+let next = func() -> Result<bool> {
+    calls += 1;
+    return calls < 3 ? Result<bool>.Ok(true) : calls == 3 ? Result<bool>.Ok(false) : Result<bool>.Err(failure);
+};
+let step = func(i: int) -> Result<int> => i < 4 ? Result<int>.Ok(1) : Result<int>.Err(failure);
+let bare = func(r: Result<int>) -> Result<int> {
+    r?;
+    let unused = r?;
+    return Result<int>.Ok(7);
+};
+let line = func(t: string) -> Result<int> => Result<int>.Ok(parse(t)?);
+let caller = func(t: string) -> int {
+    let r = line(t);
+    console.print_line("after " + t);
+    return match (r) { Result.Ok(v) => v, Result.Err(_) => -1, };
+};
+let loop_condition = func() -> Result<int> {
+    let n = 0;
+    while (next()?) {
+        n += 1;
+    }
+    return Result<int>.Ok(n);
+};
+let short = func(ok: bool, t: string) -> Result<bool> => Result<bool>.Ok(ok && parse(t)? == 1);
+let latch = func() -> Result<int> {
+    let total = 0;
+    for (let i = 0; i < 10; i += step(i)?) {
+        total += 1;
+    }
+    return Result<int>.Ok(total);
+};
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let captured = func(tree: Tree) -> int {
+    let add: func(int) -> int = func(x: int) -> int => x;
+    match (tree) {
+        Tree.Node(Tree.Leaf(value), _) if value > 0 => {
+            add = func(x: int) -> int => x + value;
+        },
+        _ => {},
+    }
+    return add(1);
+};
+let show = func(r: Result<int>) -> string => match (r) { Result.Ok(v) => "Ok(" + v.to_string() + ")", Result.Err(_) => "Err", };
+let showb = func(r: Result<bool>) -> string => match (r) { Result.Ok(v) => v ? "Ok(true)" : "Ok(false)", Result.Err(_) => "Err", };
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(show(bare(Result<int>.Ok(1))) + " " + show(bare(Result<int>.Err(failure))));
+        console.println("{} {}", caller("one"), caller("bad"));
+        console.print_line(show(loop_condition()));
+        calls = 0;
+        console.print_line(showb(short(false, "bad")) + " " + showb(short(true, "bad")) + " " + showb(short(true, "one")));
+        console.print_line(show(latch()));
+        console.println("{} {}", captured(Tree.Node(Tree.Leaf(5), Tree.Leaf(1))), captured(Tree.Leaf(3)));
+        return program.ExitCode.Ok;
+    };
+);

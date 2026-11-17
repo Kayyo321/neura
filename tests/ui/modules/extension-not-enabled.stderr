@@ -1,0 +1,9 @@
+error[E0305]: unknown or inaccessible member 'shout' of string
+ --> $DIR/extension-not-enabled.nra:4:12
+  |
+4 | let loud = "ready".shout();
+  |            ^^^^^^^^^^^^^ string has no member 'shout'
+  |
+  = help: 'shout' is an extension function of App.Words; enable its set in this file or module with 'let.extensions <alias> = import:App.Words;'
+
+For more information about this error, try `neura explain E0305`.

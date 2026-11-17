@@ -30,7 +30,7 @@ let now = func -> int64 {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let woke = channels.open<int>(3);
         let one_second: int64 = 1000000000;
         let limit: int64 = 2500000000;

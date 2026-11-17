@@ -1,0 +1,8 @@
+error[E0486]: unsupported format presentation
+ --> $DIR/interpolation-presentation.nra:3:19
+  |
+3 | let text = $"{a:.2q}";
+  |                   ^ the presentations are d, b, B, o, x, X, c, s, ?, f, F, e, E, g, G, a and A
+  |               - this hole is float64
+
+For more information about this error, try `neura explain E0486`.

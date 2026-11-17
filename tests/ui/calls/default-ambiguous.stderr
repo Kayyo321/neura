@@ -1,0 +1,13 @@
+error[E0409]: ambiguous overload of 'f'
+ --> $DIR/default-ambiguous.nra:4:11
+  |
+2 | let f = func(a: int) -> int => a
+  |     - this alternative takes (a: int32)
+3 |     or func(a: int, b: int = 1) -> int => a + b;
+  |        ---- this alternative takes (a: int32, b: int32)
+4 | let one = f(1);
+  |           ^^^^
+  |
+  = help: name or add an argument that only one alternative accepts; a default does not decide
+
+For more information about this error, try `neura explain E0409`.

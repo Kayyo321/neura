@@ -1,0 +1,94 @@
+// match.is over classes, interfaces, `class`, scalars and strings
+// (docs/design/Matching030.md, edge cases 1, 5, 15, 19, 20 and 22).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape implements Named (
+    export let.override name = func -> string => "circle";
+);
+let Square = class : Shape (
+    export let init = func() {
+        super.init();
+        sides = 4;
+    };
+);
+let Hexagon = class : Shape (
+    export let init = func() {
+        super.init();
+        sides = 6;
+    };
+);
+
+let Label = class implements Named (
+    export let.override name = func -> string => "label";
+);
+let Other = class (
+    export let value: int = 0;
+);
+
+let describe = func(value: class) -> string => match.is (value) {
+    Circle => "a circle",
+    shape: Shape if shape.sides > 4 => "a large shape with " + shape.sides.to_string() + " sides",
+    shape: Shape => "a shape with " + shape.sides.to_string() + " sides",
+    named: Named => "something named " + named.name(),
+    nil => "nothing",
+    _ => "something else",
+};
+
+let bounded = func<T: Shape>(value: T) -> int => match.is (value) {
+    circle: Circle => 1,
+    square: Square => square.sides,
+    _ => 0,
+};
+
+let calls = 0;
+let next = func(value: class) -> class {
+    calls += 1;
+    return value;
+};
+
+let width = func(value: int32) -> int32 => match.is (value) {
+    v: int32 if v > 100 => 100,
+    v: int32 => v,
+};
+
+let text = func(value: string) -> string => match.is (value) {
+    s: string => s + s,
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let none: Shape = nil;
+        console.print_line(describe(new Circle()));
+        console.print_line(describe(new Square()));
+        console.print_line(describe(new Hexagon()));
+        console.print_line(describe(new Shape()));
+        console.print_line(describe(none));
+        console.print_line(describe(new Other()));
+        console.print_line(describe(new Label()));
+        let result = match.is (next(new Square())) {
+            Circle => 1,
+            Square => 2,
+            Shape => 3,
+            _ => 4,
+        };
+        console.println("{} {}", result, calls);
+        console.println("{} {} {}", bounded(new Circle()), bounded(new Square()), bounded(new Hexagon()));
+        console.println("{} {} {}", width(7), width(1000), text("four"));
+        match.is (none) {
+            Circle => {
+                console.print_line("circle");
+            },
+            _ => {
+                console.print_line("statement arm");
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

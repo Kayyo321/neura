@@ -60,12 +60,18 @@ struct TagSyntax {
     std::vector<TagArgumentSyntax> arguments;
 };
 
+struct Expr;
+
 struct Parameter {
     Span span;
     std::string name;
     TypeSyntax type;
     bool variadic{};
     std::vector<TagSyntax> tags{};
+    // A constant default, `name: Type = value` (docs/design/Calls030.md),
+    // and the span from the '=' through the value. Lowering checks it.
+    std::shared_ptr<Expr> default_value{};
+    std::optional<Span> default_span{};
 };
 
 struct Declaration;
@@ -84,6 +90,19 @@ struct Expr {
         // `spawn call` (Concurrency.md section 4.4): the call is operand 0.
         // The span starts at the contextual keyword, which is five bytes long.
         Spawn,
+        // `$"text {hole:spec}"` (docs/design/Calls030.md): the operands are
+        // the hole expressions in written order, nested width and precision
+        // holes included, and `interpolation` describes them.
+        Interpolation,
+        // `nameof(path)`: operand 0, when written, is the path, which is
+        // not evaluated.
+        NameOf,
+        // docs/design/Matching030.md. `receiver?.member`: operand 0 is the
+        // receiver and `text` the member; a call `receiver?.m(arguments)`
+        // is a Call whose callee is an OptionalMember. `left ?? right` has
+        // its two operands. `operand?` is a Propagate. `operator_span` is
+        // the `?.`, `??` or `?` token.
+        OptionalMember, Coalesce, Propagate,
     };
 
     Kind kind;
@@ -106,6 +125,34 @@ struct Expr {
     std::vector<std::string> c_import{};
     // The opening parenthesis of a Call's argument list.
     std::optional<Span> open{};
+    // The labels of named arguments (docs/design/Calls030.md), parallel to
+    // `operands` of a Call or a New: empty when no argument is named, and
+    // otherwise "" for the callee and for each positional argument.
+    std::vector<std::string> labels{};
+    std::vector<Span> label_spans{};
+    std::shared_ptr<const struct InterpolationSyntax> interpolation{};
+    std::optional<Span> operator_span{};
+};
+
+// The pattern and holes of an interpolated string. The pattern is the
+// format string the holes are formatted with: its text with braces doubled,
+// and each hole as `{index}` or `{index:specification}`, where a nested hole
+// in the specification is `{index}` too.
+struct InterpolationHole {
+    // The operand of the value, and the operands of its nested holes.
+    std::size_t operand;
+    std::vector<std::size_t> nested;
+    // The specification as the pattern writes it, and where it is written.
+    std::string specification;
+    std::optional<Span> specification_span;
+    // Whether the specification is one piece of text, so that an offset in
+    // it is an offset in the source.
+    bool plain_specification = true;
+};
+
+struct InterpolationSyntax {
+    std::string pattern;
+    std::vector<InterpolationHole> holes;
 };
 
 struct Statement {
@@ -142,19 +189,58 @@ struct Statement {
     std::string assignment_operator{};
     // Documentation shared by all bindings in a destructuring declaration.
     std::shared_ptr<const DocComment> documentation{};
+    // `match.is (subject) { arms }` (docs/design/Matching030.md).
+    bool match_is{};
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};
 };
 
+// The pattern of a match arm (docs/design/Matching030.md). In a `match`,
+// a whole pattern is `_`, a variant pattern or a tuple pattern, and a
+// payload or element position holds a sub-pattern: `_`, a binding, a
+// variant pattern or a tuple pattern. In a `match.is`, a pattern is `_`,
+// `nil`, a type, or a binding with a type.
+struct PatternSyntax {
+    enum class Kind { Wildcard, Binding, Variant, Tuple, Type, Nil };
+
+    Kind kind = Kind::Wildcard;
+    Span span;
+    // A binding's name, or a variant pattern's qualified name.
+    std::string name;
+    // A binding's name as written.
+    Span name_span{};
+    // A variant pattern's payload, or a tuple pattern's elements.
+    std::vector<PatternSyntax> elements{};
+    // Whether a variant pattern has a payload list, and whether it is the
+    // braced form, where `fields` names each element's field.
+    bool payload{};
+    bool named{};
+    std::vector<std::string> fields{};
+    std::vector<Span> field_spans{};
+    // The type of a Type pattern, or of a binding `name: Type` in a `match.is`.
+    std::optional<TypeSyntax> type{};
+};
+
 struct MatchArm {
     Span span;
+    // An arm in the form of 0.2 (one level of bindings, no guard) also
+    // keeps that form here: the variant's qualified name or "_", one token
+    // per payload position, and the field names of the braced form. Other
+    // arms set `general`; their `variant` is the whole pattern's variant
+    // name, "_", or empty, and `bindings` lists every name they bind, in
+    // written order, so that walkers that only scope names stay correct.
     std::string variant;
     std::vector<Token> bindings;
     std::vector<std::string> fields;
     bool named{};
     std::vector<Statement> body;
     std::optional<Expr> value;
+    // The whole pattern, set for every arm.
+    std::shared_ptr<const PatternSyntax> pattern{};
+    // `pattern if guard => result`.
+    std::optional<Expr> guard{};
+    bool general{};
 };
 
 // One arm of a select statement: `[let name =] operation => { body }`, or
@@ -239,6 +325,19 @@ struct Declaration {
     // field of each parameter, through the receiver `$instance`, a name no
     // source can declare. Each store has the span of its parameter.
     std::optional<Span> set_shorthand{};
+    // A lambda whose parameters are all written without types, such as
+    // `func(a, b) => a + b`: each parameter's type is "[untyped]" and comes
+    // from the expected function type (docs/design/Calls030.md).
+    bool untyped_parameters{};
+    // Whether the result type was written with `->`.
+    bool result_written{};
+    // `let.extension name = func(receiver: T, ...)` declares an extension
+    // function, and `let.extensions alias = import:Module;` is an import
+    // that enables a module's extension functions (docs/design/Calls030.md).
+    // `extension_word` is the word after `let.`.
+    bool extension{};
+    bool extension_set{};
+    std::optional<Span> extension_word{};
 };
 
 struct ResolvedImport {

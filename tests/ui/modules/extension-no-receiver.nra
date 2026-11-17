@@ -1,0 +1,2 @@
+// An extension function takes its receiver as its first parameter.
+let.extension nothing = func -> int => 1;

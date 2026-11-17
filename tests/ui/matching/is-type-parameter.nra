@@ -1,0 +1,16 @@
+// Edge case 11: a subject of a type parameter's type.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let classify = func<T>(value: T) -> int => match.is (value) {
+    _ => 1,
+};

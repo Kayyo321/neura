@@ -1,0 +1,11 @@
+// Edge case 86: '?' in a constructor.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let Holder = class (
+    export let value: int = 0;
+    export let init = func(text: string) {
+        value = parse(text)?;
+    };
+);

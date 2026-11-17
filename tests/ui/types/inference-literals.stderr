@@ -1,0 +1,10 @@
+error[E0480]: type parameter 'T' is float64 from this argument and int32 from that one
+ --> $DIR/inference-literals.nra:3:21
+  |
+3 | let mixed = same(1, 2.5);
+  |                     ^^^ a literal of default type float64
+  |                  - a literal of default type int32
+  |
+  = help: write the type arguments, or give the literals one type
+
+For more information about this error, try `neura explain E0480`.

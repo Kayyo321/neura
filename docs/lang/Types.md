@@ -374,6 +374,24 @@ let implicit = accept(reading);
 
 Function arguments can use one visible conversion when their type is otherwise incompatible with the parameter. Assignments and returns require ordinary assignability or an explicit `as`. A conversion from `Reading` to `int64` therefore cannot satisfy an `int32` parameter. An unexported cast is only available within its declaring class.
 
+### match.is
+
+`match.is (subject) { arms }` selects an arm by the type of the subject's value ([design](../design/Matching030.md), implemented, proposed). An arm's pattern is a type, `name: Type`, `nil`, or `_`, with an optional guard; `name: Type` binds a constant of that type, made by the checked refinement of the subject, never by a source `as`. The subject is evaluated once, and the arms are tried in written order. The subject is a class or interface reference, `class`, [`any`](#the-type-any), a scalar or a string; a bare type parameter is [E0411](../diagnostics/E0411.md), and `as any` states the intent. A class or interface pattern matches a live reference of that type or a type derived from it, and is a passive test that runs no initializer. A scalar or string pattern matches a value of exactly that resolved type: `int32` never matches an `int64`, and no conversion takes part. `nil` matches an absent reference, and a type pattern never does. A pattern the subject's type can never have is [E0490](../diagnostics/E0490.md), and an arm an earlier unguarded arm covers is [E0491](../diagnostics/E0491.md). A class, interface, `class` or `any` subject ends with an unguarded `_`; a scalar or string subject needs an unguarded arm of its type, or `_` ([E0410](../diagnostics/E0410.md)). A malformed `match.is` is [E0230](../diagnostics/E0230.md).
+
+<!-- example: check -->
+```neura
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+
+let describe = func(value: class) -> string => match.is (value) {
+    Circle => "a circle",
+    shape: Shape if shape.sides > 4 => "a large shape",
+    Shape => "a shape",
+    nil => "nothing",
+    _ => "something else",
+};
+```
+
 ### Accessors
 
 An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.
@@ -553,10 +571,52 @@ visible only in their arm. A match expression uses expression arms with a
 common type. When no surrounding type is available, the first arm establishes
 the result type. A match statement uses a statement block in each arm.
 
-Patterns match one variant level. A pattern inside a pattern is a syntax
-error (`expected ')'`), and a guard written as `pattern if condition =>` is a
-syntax error (`expected '=>'`). To test a nested value, bind it and `match`
-again.
+An arm is `pattern if condition => result` ([design](../design/Matching030.md), implemented, proposed). The guard is a `bool` expression that sees the arm's bindings; it runs after the whole pattern has matched, and when it is false the next arm is tried, with its effects kept. A payload position, or an element of a tuple pattern `[p, q]`, holds a sub-pattern: `_`, a name, a variant pattern written with its enum, or a tuple pattern. A single name is always a binding, and a whole pattern that is a name must name a variant ([E0412](../diagnostics/E0412.md)). The subject of a `match` may be a tuple, `match ([a, b])`, whose arms are tuple patterns or `_`. Within an arm, payloads are projected, tested and bound in written order, and each arm projects for itself. A name is bound at most once in a pattern ([E0301](../diagnostics/E0301.md)). Literal, range, rest and type patterns are not patterns of 0.3.0 ([E0231](../diagnostics/E0231.md)); bind the value and test it in a guard.
+
+Coverage is computed over variants and tuples. A guarded arm covers nothing, so a match without `_` needs an unguarded arm for every value, and the error shows one value that no arm covers as a pattern ([E0410](../diagnostics/E0410.md)). An arm that the unguarded arms before it already cover is [E0491](../diagnostics/E0491.md). A match whose arms all have one level of bindings and no guard keeps the lowering and the errors of 0.2.
+
+<!-- example: check -->
+```neura
+let Light = enum (Red, Yellow, Green);
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+
+let leftmost = func(tree: Tree) -> int => match (tree) {
+    Tree.Leaf(value) => value,
+    Tree.Node(Tree.Leaf(value), _) if value >= 0 => value,
+    Tree.Node(left, _) => leftmost(left),
+};
+
+let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+    [Light.Red, _] => 1,
+    [_, Light.Red] => 2,
+    _ => 3,
+};
+```
+
+## The type any
+
+`any` is a built-in value type that holds one value of a fixed set of types together with which type it is ([design](../design/Matching030.md), implemented in the frontend and NeuraIR, proposed). It holds a `bool`, each sized integer, `float16`, `bfloat16`, `float32` and `float64`, a `string`, a class or interface reference including `class`, and nil. It does not hold an array, a list, a tuple, an enum (`Optional` and `Result` included), a function value, a primitive reference or a [scope-bound](#scope-bound-types) value ([E0492](../diagnostics/E0492.md)); a class that wraps such a value can be held as a reference.
+
+A value is packed where an `any` is expected: a binding, field or parameter of type `any`, an assignment to one, a `return` from a function that returns `any`, an element of a collection of `any`, each argument of a variadic `...any`, and each result of a conditional or `match` whose expected type is `any`. `value as any` packs anywhere. Nothing else produces an `any`: inference never solves a type parameter to `any` unless an argument is one, and packing ranks below every other match in overload selection. Packing an `any` gives the same `any`, and packing keeps a scalar's bits, width and signedness, a string's text and a reference's identity.
+
+The only operations on an `any` are to copy, pass, return and store it, `is`, and [`match.is`](#matchis). Arithmetic, `==`, member access, `as`, `equals`, `hash_code`, `to_string` and formatting are [E0493](../diagnostics/E0493.md): match first. An `any` is not [transferable](#transferable-types), and it is not the result of a spawned call ([E0498](../diagnostics/E0498.md)). A parameter of type `any` takes no default. No type, module, alias or type parameter is named `any` ([E0311](../diagnostics/E0311.md)); a function, field, parameter or local named `any` keeps its meaning.
+
+<!-- example: check -->
+```neura
+let count_integers = func(values: ...any) -> int {
+    let integers = 0;
+    for (let value: any in values) {
+        if (value is int64) {
+            integers += 1;
+        }
+    }
+    return integers;
+};
+
+let count = count_integers(7 as int64, "seven", 7.0, nil);
+```
+
+An `any` is four value words: a `uint32` tag, a `uint64` with a scalar's bits, a text, and a reference. Programs that use `any` are checked and written to `.nir` modules (NeuraIR 1.12); building them waits for the converter step of the milestone, and until then `neura build` declines them with [E0801](../diagnostics/E0801.md).
 
 ## Scope-bound and transferable types
 
@@ -573,6 +633,7 @@ again.
 | Be an element of an array, list, or tuple held in such a local | Be captured by a lambda |
 | | Be passed to `spawn`, or sent on a channel |
 | | Be a type argument, as in `Optional<Task<int>>` or a channel of tasks |
+| | Be converted to `class`, to an interface or to [`any`](#the-type-any), by assignment, an argument, `as`, or an argument of an untyped variadic parameter: the result would no longer be known to be scope-bound. From 0.3.0 ([design](../design/Matching030.md)); compare task handles with `==` |
 | | Be assigned to a binding declared outside the innermost enclosing scope. A parameter is not a local of the scope, so a function cannot `append` a task it received to a list it received. |
 
 Each violation is reported with the form `a value of type Task<int32> cannot leave its scope: it cannot be returned from a function`, naming the rule that applies.
@@ -652,7 +713,7 @@ Under the last rule a program cannot both use tasks and use `Std.DynamicForeign`
 
 ## Inference, conversions, equality, and absence
 
-An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. The compiler does not infer the type arguments of a generic call; `id(7)` is rejected with `expected 1 type argument(s)`, and `id<int>(7)` is accepted ([Polymorphism](Polymorphism.md)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections.md).
+An initialized binding without an annotation takes the initializer's type: `let total = 5;` has type `int32`. A call of a generic function infers the type arguments it does not write: `id(7)` is `id<int32>(7)` ([Polymorphism](Polymorphism.md#type-argument-inference)). Public APIs should use explicit parameter and return types. Empty collection literals require an expected type as described in [Collections](Collections.md).
 
 There are no implicit numeric conversions: operands of an operation have the same type, and `expression as Type` converts explicitly with the checked rules of [Numbers](Numbers.md#conversions). Floating-point equality follows IEEE 754. String equality compares bytes. `==` and `!=` on class and interface references compare identity; `equals` is a separate method ([Umbrella class and nil](#umbrella-class-and-nil)). A fieldless enum supports `==`; an enum with payloads has no built-in equality. Basic scalar comparisons are illustrated in [core.nra](../../examples/guide/core.nra).
 

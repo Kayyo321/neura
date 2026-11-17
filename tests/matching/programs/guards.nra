@@ -1,0 +1,66 @@
+// Guards, nested and tuple patterns in match (docs/design/Matching030.md).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Optional;
+
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+
+let area = func(shape: Shape) -> int {
+    return match (shape) {
+        Shape.Dot => 0,
+        Shape.Line(length) if length < 0 => 0,
+        Shape.Line(length) => length,
+        Shape.Box { size: [width, height], label: Optional.Some(_) } => width * height,
+        Shape.Box { size: [width, _], label: Optional.None } => width,
+    };
+};
+
+let trace = func(text: string, result: bool) -> bool {
+    console.print_line(text);
+    return result;
+};
+
+let leftmost = func(tree: Tree) -> int {
+    return match (tree) {
+        Tree.Leaf(value) => value,
+        Tree.Node(Tree.Leaf(a), _) => a,
+        Tree.Node(Tree.Node(inner, _), _) => leftmost(inner),
+    };
+};
+
+let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+    [Light.Red, _] => 1,
+    [_, Light.Red] => 2,
+    _ => 3,
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.println("{}", area(Shape.Dot));
+        console.println("{}", area(Shape.Line(-4)));
+        console.println("{}", area(Shape.Line(7)));
+        console.println("{}", area(Shape.Box { size: [3, 4], label: Optional<string>.Some("box") }));
+        console.println("{}", area(Shape.Box { size: [3, 4], label: Optional<string>.None }));
+        console.println("{}", leftmost(Tree.Node(Tree.Node(Tree.Leaf(5), Tree.Leaf(6)), Tree.Leaf(7))));
+        console.println("{} {} {}", pair(Light.Red, Light.Green), pair(Light.Green, Light.Red), pair(Light.Green, Light.Yellow));
+        // Guards run in order after their pattern; a false guard's effect stays.
+        let total = 0;
+        for (let i = 0; i < 3; i += 1) {
+            match (Shape.Line(i)) {
+                Shape.Line(n) if trace("guard one", n == 2) => {
+                    total += 100;
+                },
+                Shape.Line(n) if trace("guard two", n == 1) => {
+                    total += 10;
+                },
+                _ => {
+                    total += 1;
+                },
+            }
+        }
+        console.println("{}", total);
+        return program.ExitCode.Ok;
+    };
+);

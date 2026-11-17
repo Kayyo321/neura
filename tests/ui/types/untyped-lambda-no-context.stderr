@@ -1,0 +1,9 @@
+error[E0214]: parameter 'x' has no type
+ --> $DIR/untyped-lambda-no-context.nra:3:18
+  |
+3 |     let f = func(x) => x;
+  |                  ^ a lambda with untyped parameters takes its types from the function type expected here
+  |
+  = help: write the parameter types, or pass the lambda where a function type is expected
+
+For more information about this error, try `neura explain E0214`.

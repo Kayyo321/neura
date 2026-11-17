@@ -1,0 +1,12 @@
+error[E0561]: parameter 'scale' changes the default of the method it overrides
+ --> $DIR/default-override-changed.nra:6:37
+  |
+3 |     export let area = func(scale: int = 1) -> int => scale;
+  |                            ----- the base default is given here
+...
+6 |     export let.override area = func(scale: int = 2) -> int => scale * 4;
+  |                                     ^^^^^ a call through the base would pass a different value
+  |
+  = help: copy the base default
+
+For more information about this error, try `neura explain E0561`.

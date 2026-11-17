@@ -1,0 +1,7 @@
+// An override keeps the base method's parameter names (edge case 33).
+let Shape = class (
+    export let scale = func(factor: int) -> int => factor;
+);
+let Square = class : Shape (
+    export let.override scale = func(by: int) -> int => by * 2;
+);

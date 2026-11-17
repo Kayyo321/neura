@@ -1,0 +1,7 @@
+error[E0403]: cannot pack func<int32, int32> as a variadic argument; pass its text representation explicitly
+ --> $DIR/interpolation-no-text-form.nra:3:15
+  |
+3 | let text = $"{f}";
+  |               ^
+
+For more information about this error, try `neura explain E0403`.

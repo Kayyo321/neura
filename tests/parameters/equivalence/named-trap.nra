@@ -1,0 +1,27 @@
+// A trap in the second written argument of a reordered named call: the
+// first argument has been evaluated, the third is not, and no call happens
+// (docs/design/Calls030.md, Order of evaluation).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let note = func(text: string, value: int) -> int {
+    console.print_line("evaluate " + text);
+    return value;
+};
+
+let fail = func(items: int[]) -> int {
+    console.print_line("evaluate b");
+    return items[3];
+};
+
+let three = func(a: int, b: int, c: int) -> int {
+    console.print_line("call");
+    return a + b + c;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        three(c: note("c", 3), b: fail([1, 2]), a: note("a", 1));
+        return program.ExitCode.Ok;
+    };
+);

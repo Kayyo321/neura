@@ -38,9 +38,9 @@ let serve = func(jobs: channels.Receiver<int>, results: channels.Sender<int>) {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let total: int64 = 0;
-        if (arguments.length > 0 && arguments[0] == "sequential") {
+        if (args.length > 0 && args[0] == "sequential") {
             for (let i: int = 0; i < messages; i++) {
                 total = total + (work(i) as int64);
             }
