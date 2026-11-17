@@ -1,0 +1,16 @@
+error[E0601]: the spawned call is not task-safe: it reaches '$class_get', which uses the reassignable binding 'count'
+  --> $DIR/any-selected-hook-task.nra:11:39
+   |
+ 4 |     | get: { count += 1; return instance; };
+   |              ----- uses the reassignable binding 'count' here
+...
+ 9 |     return match.is (erased) { item: Session => true, _ => false, };
+   |                                ------------- calls '$class_get'
+10 | };
+11 | let run = func() { scope { let work = spawn child(); work.join(); } };
+   |                                       ^^^^^^^^^^^^^ this call must be task-safe
+   |                                             ------- calls 'child'
+   |
+   = note: `neura check --task-safety` reports for every function whether it is task-safe, and why not
+
+For more information about this error, try `neura explain E0601`.

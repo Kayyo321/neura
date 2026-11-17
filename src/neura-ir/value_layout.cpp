@@ -173,7 +173,7 @@ ValueLayout ValueLayouts::build(const IrType& type, const Span& where) {
         result.form = ValueLayout::Form::Any;
         result.words = {tag_type, IrType{TypeKind::Integer, "uint64", no_symbol, {}},
                         IrType{TypeKind::String, "string", no_symbol, {}}, any_reference_};
-        result.suffixes = {".tag", ".bits", ".text", ".reference"};
+        result.suffixes = {".$any.tag", ".bits", ".text", ".reference"};
         result.carries_policy = hooks_.carrying(any_reference_);
         if (result.carries_policy) {
             result.words.push_back(tag_type);

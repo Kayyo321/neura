@@ -175,6 +175,10 @@ private:
         case IrOp::EnumProject:
         case IrOp::RemoveAt:
             return true;
+        case IrOp::ClassCast:
+            // A match.is binding refines the selected reference from an any
+            // snapshot. The ClassIs and nil checks inspect that snapshot raw.
+            return node.operands.size() == 1 && node.operands.front().op == IrOp::AnyUnpack;
         case IrOp::Call:
         case IrOp::VirtualCall:
             return accessor_of(node, 0) != no_symbol;

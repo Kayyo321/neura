@@ -659,6 +659,8 @@ let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
 
 A value is packed where an `any` is expected: a binding, field or parameter of type `any`, an assignment to one, a `return` from a function that returns `any`, an element of a collection of `any`, each argument of a variadic `...any`, and each result of a conditional or `match` whose expected type is `any`. `value as any` packs anywhere. Nothing else produces an `any`: inference never solves a type parameter to `any` unless an argument is one, and packing ranks below every other match in overload selection. Packing an `any` gives the same `any`, and packing keeps a scalar's bits, width and signedness, a string's text and a reference's identity.
 
+A class type test inspects the saved reference without calling its getter. A binding such as `item: Session` in `match.is` reads the reference and admits it to `item` before the guard runs. If a hook produces nil, the pattern has already matched. Using `item` in the guard or result performs its own ordinary read.
+
 The only operations on an `any` are to copy, pass, return and store it, `is`, and [`match.is`](#matchis). Arithmetic, `==`, member access, `as`, `equals`, `hash_code`, `to_string` and formatting are [E0493](../diagnostics/E0493.md): match first. An `any` is not [transferable](#transferable-types), and it is not the result of a spawned call ([E0498](../diagnostics/E0498.md)). A parameter of type `any` takes no default. No type, module, alias or type parameter is named `any` ([E0311](../diagnostics/E0311.md)); a function, field, parameter or local named `any` keeps its meaning.
 
 <!-- example: check -->

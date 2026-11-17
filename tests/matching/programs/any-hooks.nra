@@ -1,0 +1,76 @@
+let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let.promote _ = import:Std.Core.Optional;
+let trace = "";
+let discard_next = false;
+let hide_next = false;
+let View = interface (let number = func(i: int) -> int;);
+let Session = class implements View (
+    | get: { trace += "g"; return hide_next ? nil : instance; };
+    | set: { trace += "s"; return discard_next ? nil : value; };
+    export let number = func(i: int) -> int => i;
+);
+let Other = class ();
+let Mark = enum (First, Last);
+let Pair = enum (Save(Session, Mark));
+let argument = func() -> int { trace += "a"; return 7; };
+let emit = func(label: string) {
+    console.print_line(label + trace);
+    trace = "";
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let fresh: any = new Session();
+        let copied: any = fresh;
+        if (!(copied is Session) || copied is Other) { return program.ExitCode.Failure; }
+        let bare = match.is (copied) { other: Other => 1, Session => 2, _ => 3, };
+        if (bare != 2) { return program.ExitCode.Failure; }
+        emit("bare=");
+        let ordinary: Session = new;
+        let boxed: any = ordinary;
+        emit("pack=");
+        let chosen = match.is (boxed) {
+            no: Other => 0,
+            x: Session if false => 1,
+            y: Session => y != nil ? 2 : 3,
+            _ => 4,
+        };
+        if (chosen != 2) { return program.ExitCode.Failure; }
+        emit("guard=");
+        let interface_match = match.is (boxed) { view: View => true, _ => false, };
+        if (!interface_match) { return program.ExitCode.Failure; }
+        emit("interface=");
+        let nominal = match.is (ordinary) { x: Session => true, _ => false, };
+        if (!nominal) { return program.ExitCode.Failure; }
+        emit("nominal=");
+        let pair = Pair.Save(ordinary, Mark.Last);
+        emit("enum=");
+        let nested = match (pair) {
+            Pair.Save(x, Mark.First) => 1,
+            Pair.Save(y, Mark.Last) => 2,
+        };
+        if (nested != 2) { return program.ExitCode.Failure; }
+        emit("nested=");
+        let optional = Optional<Session>.Some(ordinary);
+        emit("optional=");
+        let normal = optional?.number(argument()) ?? 0;
+        if (normal != 7) { return program.ExitCode.Failure; }
+        emit("present=");
+        hide_next = true;
+        let hidden = optional?.number(argument()) ?? 0;
+        if (hidden != 0) { return program.ExitCode.Failure; }
+        emit("hidden=");
+        hide_next = false;
+        discard_next = true;
+        let selected = match.is (boxed) { x: Session => x == nil, _ => false, };
+        if (!selected) { return program.ExitCode.Failure; }
+        emit("substitution=");
+        let absent: Session = nil;
+        let erased: any = absent;
+        emit("nil pack=");
+        let is_absent = match.is (erased) { x: Session => false, nil => true, _ => false, };
+        if (!is_absent || erased is Session) { return program.ExitCode.Failure; }
+        emit("nil test=");
+        return program.ExitCode.Ok;
+    };
+);

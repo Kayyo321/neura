@@ -1,0 +1,11 @@
+// A spawned function cannot indirectly mutate a shared module binding.
+let count = 0;
+let Session = class (
+    | get: { count += 1; return instance; };
+);
+
+let child = func() -> bool {
+    let erased: any = new Session();
+    return match.is (erased) { item: Session => true, _ => false, };
+};
+let run = func() { scope { let work = spawn child(); work.join(); } };

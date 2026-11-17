@@ -391,6 +391,27 @@ NEURA_TEST(conversion, initialization_order_matches_the_evaluator) {
     check_equal(captured.output, recorded, "stdout matches main.out");
 }
 
+NEURA_TEST(conversion, any_preserves_a_typed_nil_policy_through_collections_and_calls) {
+    const auto image = build_program({backend_dir(environment) / "any" / "nil-policy.nra"});
+    const auto names = nvr::decode_names(image).value();
+    nvm::Execution execution(image, {});
+    const auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::HostRequest, "the program reached its inspection point");
+    const auto globals = execution.debug_snapshot().globals;
+    const auto word = [&](const std::string& name) {
+        const auto found = std::ranges::find(names.globals, name);
+        check(found != names.globals.end(), "missing any storage word: " + name);
+        return globals[found - names.globals.begin()].bits;
+    };
+    const auto layout = std::ranges::find(names.layouts, "Session");
+    check(layout != names.layouts.end(), "the admitted class has a layout");
+    const auto policy = static_cast<std::uint64_t>(layout - names.layouts.begin()) + 1;
+    check_equal(word("result.$any.tag"), std::uint64_t{0}, "the typed nil has the reference tag");
+    check_equal(word("result.reference"), std::uint64_t{0}, "the admitted object became nil");
+    check_equal(word("result.reference.policy"), policy, "the selected class policy survived transport");
+    check_equal(word("raw.reference.policy"), std::uint64_t{0}, "a bare nil has no policy");
+}
+
 NEURA_TEST(conversion, any_keeps_the_same_mebibyte_text_handle) {
     const auto path = environment.source_dir / "tests" / "matching" / "programs" / "any-storage.nra";
     const auto image = build_program({path});
