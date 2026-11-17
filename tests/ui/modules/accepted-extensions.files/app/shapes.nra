@@ -19,4 +19,9 @@ let Shapes = module (
     // The string companion's concat is called instead (edge case 61).
     export let.extension concat = func(text: string, other: string) -> string => "extension";
     export let.extension count = func<T>(items: T[list]) -> int => items.length;
+    // An enum, a tuple and a bool value take extension functions too.
+    export let Light = enum (Red, Green);
+    export let.extension next = func(light: Light) -> Light => light == Light.Red ? Light.Green : Light.Red;
+    export let.extension first = func(pair: [int, string]) -> int => pair[0];
+    export let.extension flipped = func(flag: bool) -> bool => !flag;
 );

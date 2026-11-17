@@ -31,6 +31,8 @@ export let Main = module : program.Entry (
         console.print_line(count.to_string());
         let items: string[list] = new(["x", "y"]);
         console.print_line(items.count().to_string());
+        let light = texts.Light.Red;
+        console.print_line(light.next().to_string() + " " + false.flipped().to_string());
         return program.ExitCode.Ok;
     };
 );

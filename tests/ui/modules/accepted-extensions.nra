@@ -23,4 +23,10 @@ let use = func(square: shapes.Square, sized: shapes.Sized, box: shapes.Box, item
     let counted = items.count();
     let extension = 1;
     let suffix = file.extension();
+    let light = shapes.Light.Red;
+    let next = light.next();
+    let variant = shapes.Light.Green.next();
+    let pair: [int, string] = [1, "a"];
+    let head = pair.first();
+    let flipped = true.flipped();
 };

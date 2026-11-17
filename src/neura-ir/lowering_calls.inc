@@ -66,7 +66,7 @@ void Lowering::reject_labels(const Expr& expr, std::size_t first, std::string_vi
 
 std::optional<Lowering::ArgumentMap> Lowering::map_arguments(SymbolId target, const Expr& expr, std::size_t first,
                                                             std::size_t leading, bool diagnose) {
-    const auto& params = symbol(target).parameters;
+    const auto params = symbol(target).parameters;
     const auto total = params.size() - leading;
     const auto count = expr.operands.size() - first;
     const auto parameter_name = [&](std::size_t p) -> const std::string& { return symbol(params[p + leading]).name; };
@@ -170,7 +170,8 @@ void Lowering::named_arguments(IrNode& call, const Expr& expr, std::size_t first
 void Lowering::assemble_arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
                                   const ArgumentMap& map, std::vector<IrNode> admitted,
                                   const Substitution& replacements, Context& context, std::size_t leading) {
-    const auto& params = symbol(target).parameters;
+    // A copy: hidden locals and defaults add symbols.
+    const auto params = symbol(target).parameters;
     std::vector<std::optional<IrNode>> slots(map.source.size());
     for (std::size_t i = 0; i < map.parameter.size() && !expr.labels.empty(); ++i)
         if (!expr.labels[first + i].empty())
@@ -307,7 +308,8 @@ void Lowering::record_defaults(SymbolId function, const Declaration& decl, Conte
         const auto& parameter = decl.parameters[i];
         if (!parameter.default_value) continue;
         const auto& span = *parameter.default_span;
-        const auto& type = symbol(params[i]).type;
+        // A copy: lowering the default can add symbols.
+        const auto type = symbol(params[i]).type;
         const auto reject = [&](const std::string& reason) {
             throw Diagnostic(span, "parameter '" + parameter.name + "' takes no default").with_code("E0226")
                 .label(reason);
@@ -590,7 +592,8 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
                                             const Substitution& replacements, Context& context,
                                             const IrType* expected) {
     const auto generics = symbol(target).generics;
-    const auto& params = symbol(target).parameters;
+    // A copy: lowering the arguments adds symbols.
+    const auto params = symbol(target).parameters;
     const auto count = expr.operands.size() - first;
     // The parameter each written argument fills; the tail of a variadic
     // function fills the element type of its last parameter.
@@ -979,7 +982,9 @@ bool Lowering::finds_member(const IrNode& receiver, std::string_view name, const
         const bool exported = !inside(lexical_owner(context), nominal.symbol);
         return value_member(receiver.type, name, exported) != no_symbol;
     }
-    if (nominal.kind == TypeKind::Module || nominal.kind == TypeKind::Enum) return true;
+    // A module has members; an enum value has the intrinsic members above
+    // and nothing else, so extensions may extend it.
+    if (nominal.kind == TypeKind::Module) return true;
     if (const auto wrapper = primitive_wrapper(nominal)) {
         const auto file = library_files_.find(wrapper->path);
         if (file == library_files_.end()) {
@@ -1032,7 +1037,8 @@ bool Lowering::accepts_receiver(SymbolId function, const IrType& type) {
 
 std::optional<IrNode> Lowering::extension_member(const Expr& expr, const IrNode& receiver, Context& context,
                                                  bool for_call) {
-    const auto& named = extension_functions(expr.text);
+    // A copy: resolving a candidate can index more extension functions.
+    const auto named = extension_functions(expr.text);
     if (named.empty()) return std::nullopt;
     // Only a value has extension members, not a module, a type or an alias.
     if (receiver.op == IrOp::Reference && receiver.symbol != no_symbol &&

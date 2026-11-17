@@ -22,4 +22,7 @@ let Texts = module (
         value += by;
     };
     export let.extension count = func<T>(items: T[list]) -> int => items.length;
+    export let Light = enum (Red, Green);
+    export let.extension next = func(light: Light) -> Light => light == Light.Red ? Light.Green : Light.Red;
+    export let.extension flipped = func(flag: bool) -> bool => !flag;
 );
