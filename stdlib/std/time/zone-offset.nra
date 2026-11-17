@@ -33,7 +33,7 @@ export let ZoneOffset = module (
         };
 
         /// @brief Tests equality of offsets in seconds.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             return other is ZoneOffset && total_seconds == (other as ZoneOffset).total_seconds;
         };

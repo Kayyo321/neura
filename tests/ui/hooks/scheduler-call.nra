@@ -1,0 +1,12 @@
+// Case 32: nor can a function a hook calls.
+let wait = func() -> void {
+    scope {
+    }
+};
+
+let Session = class (
+    | get: {
+        wait();
+        return instance;
+    };
+);

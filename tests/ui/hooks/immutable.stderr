@@ -1,0 +1,9 @@
+error[E0401]: cannot assign to const 'value'
+ --> $DIR/immutable.nra:4:9
+  |
+3 |     | set: {
+  |       --- declared constant here
+4 |         value = instance;
+  |         ^^^^^ cannot assign to a constant binding
+
+For more information about this error, try `neura explain E0401`.

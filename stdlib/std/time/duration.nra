@@ -93,7 +93,7 @@ export let Duration = module (
         };
 
         /// @brief Tests equality of signed nanosecond counts.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             return other is Duration && total == (other as Duration).total;
         };

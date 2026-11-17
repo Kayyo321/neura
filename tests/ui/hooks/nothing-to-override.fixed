@@ -1,0 +1,4 @@
+// Case 26: `.override` with nothing to override.
+let Session = class (
+    | get: instance;
+);

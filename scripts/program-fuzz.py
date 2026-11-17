@@ -98,7 +98,7 @@ FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
     "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
-    "sqrt-special", "tuples", "enums",
+    "sqrt-special", "tuples", "enums", "class-hooks",
 ]
 
 
@@ -1099,6 +1099,58 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     p.calls.append(k)
 
 
+def section_class_hooks(p, k):
+    """Carry live and nil policies through calls, inline values and collection elements."""
+    p.feature("class-hooks", "classes", "lists", "arrays", "tuples")
+    codes = p.random.sample(range(1, 24), 5)
+    p.declarations.append(fill("""let s${k}_trace: int64 = 0;
+
+let S${k}Item = class (
+    | get: {
+        s${k}_trace = mix(s${k}_trace, instance == nil ? $a : $b);
+        return instance;
+    };
+    | set: {
+        s${k}_trace = mix(s${k}_trace, instance == nil ? $c : $d);
+        return value;
+    };
+
+    export let code = func() -> int64 => $b;
+);
+
+let S${k}Alternate = class:S${k}Item (
+    | set.override: {
+        s${k}_trace = mix(s${k}_trace, $e);
+        return value;
+    };
+);
+
+let s${k}_pass = func(value: S${k}Item) -> S${k}Item => value;
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let previous: S${k}Item = nil;
+    last saved: S${k}Item[list] = new;
+    for (let i = 0; i < size; i++) {
+        last value: S${k}Item = i % 3 == 0 ? new S${k}Item() : new S${k}Alternate();
+        last row: S${k}Item[] = [value, previous];
+        previous = s${k}_pass(row[i % 2]);
+        last pair: [S${k}Item, int32] = [previous, i];
+        saved.append(pair[0]);
+        saved[i] = i % 2 == 0 ? (nil as S${k}Item) : row[0];
+    }
+    let total: int64 = 0;
+    for (let value in saved) {
+        if (value != nil) {
+            total = mix(total, value.code());
+        }
+    }
+    console.println("s$k class hooks {} {}", s${k}_trace, total);
+    return mix(s${k}_trace, total);
+};
+""", k=k, a=codes[0], b=codes[1], c=codes[2], d=codes[3], e=codes[4]))
+    p.calls.append(k)
+
+
 SECTIONS = [
     (section_integers, 100),
     (section_loops, 80),
@@ -1114,7 +1166,7 @@ SECTIONS = [
 ]
 
 
-def build_program(seed):
+def build_program(seed, *, class_hooks=True):
     """The program for a seed: its source text and the argument list to run it with."""
     p = Program(seed)
     p.use("console", "program", "int32s", "result")
@@ -1162,6 +1214,14 @@ def build_program(seed):
         k = p.next_id
         p.next_id += 1
         section_enums(p, k)
+        p.calls.remove(k)
+        p.calls.insert(0, k)
+    # The old oracle can compare the common corpus by omitting this section.
+    p.random = random.Random(f"class hooks {seed}")
+    if class_hooks and p.chance(50):
+        k = p.next_id
+        p.next_id += 1
+        section_class_hooks(p, k)
         p.calls.remove(k)
         p.calls.insert(0, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)

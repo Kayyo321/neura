@@ -1,0 +1,7 @@
+error[E0603]: spawn requires an enclosing scope block in the same function body
+ --> $DIR/spawn.nra:5:5
+  |
+5 |     spawn work();
+  |     ^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0603`.

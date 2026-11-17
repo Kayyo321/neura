@@ -113,7 +113,7 @@ export let Instant = module (
         };
 
         /// @brief Tests equality of epoch seconds and nanosecond adjustments.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Instant)) {
                 return false;

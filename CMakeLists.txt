@@ -338,6 +338,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/specialize.cpp
     src/neura-ir/containment.cpp
     src/neura-ir/inline_limit.cpp
+    src/neura-ir/class_hooks.cpp
     src/neura-ir/value_layout.cpp
     src/neura-ir/storage.cpp
     src/neura-ir/static_initialization.cpp
@@ -785,7 +786,7 @@ if(BUILD_TESTING AND NEURA_SDK)
     )
     # Editor protocol contracts execute real compiler and runtime paths.
     find_package(Python3 REQUIRED COMPONENTS Interpreter)
-    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
+    foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_hooks lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")
             add_test(NAME tooling-${suite} COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py" "$<TARGET_FILE:neura>")
@@ -849,6 +850,15 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence")
     set_tests_properties(parameters-equivalence PROPERTIES TIMEOUT 180)
 
+    # The NVR class hook operations in every execution mode, the loader's
+    # rejections, and the assembler and decompiler (docs/design/Hooks030.md).
+    add_test(NAME hook-operations COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/hooks/operations.py" "$<TARGET_FILE:neura>"
+        "${CMAKE_CURRENT_SOURCE_DIR}")
+    add_test(NAME hook-references COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/backend/hooks/references.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(hook-operations hook-references PROPERTIES TIMEOUT 300)
+
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.
     add_executable(neura_diagnostic_tests tests/diagnostics/unit_tests.cpp)
@@ -875,6 +885,7 @@ if(BUILD_TESTING AND NEURA_SDK)
         tests/ir-optimization/summaries_tests.cpp
         tests/ir-optimization/evaluator.cpp
         tests/ir-optimization/float_reference.cpp
+        tests/ir-optimization/hooks_tests.cpp
         tests/ir-optimization/main.cpp
         tests/ir-optimization/pass_tests.cpp
         tests/ir-optimization/structure_tests.cpp
@@ -887,7 +898,7 @@ if(BUILD_TESTING AND NEURA_SDK)
 
     # Each suite is a separate test, so a failure names the kind of evidence
     # that broke.
-    foreach(suite IN ITEMS structure verifier behavior concurrency)
+    foreach(suite IN ITEMS structure verifier behavior concurrency hooks)
         add_test(NAME ir-optimization-${suite}
             COMMAND neura_ir_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()

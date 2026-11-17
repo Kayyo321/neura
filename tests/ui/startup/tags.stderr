@@ -1,0 +1,9 @@
+error[E0217]: a startup block takes no tags (no 'export')
+ --> $DIR/tags.nra:2:1
+  |
+2 | #Deprecated
+  | ^^^^^^^^^^^ a startup block takes no tags
+  |
+  = help: remove the tags; a startup block is 'static scope { ... }'
+
+For more information about this error, try `neura explain E0217`.

@@ -1,0 +1,7 @@
+error[E0431]: loop control is only allowed inside a loop
+ --> $DIR/loop-control.nra:3:5
+  |
+3 |     break;
+  |     ^^^^^^
+
+For more information about this error, try `neura explain E0431`.

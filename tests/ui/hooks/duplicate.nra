@@ -1,0 +1,6 @@
+// Case 11: at most one clause of each kind.
+let Session = class (
+    | get: instance;
+    | set: value;
+    | get: instance;
+);

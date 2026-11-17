@@ -1,0 +1,14 @@
+// Case 33: nor can a class whose base has one, and a class that inherits a
+// hook cannot add one.
+let Account = class (
+    let balance: int32 = 0;
+
+    #Synchronized
+    export let deposit = func(amount: int32) {
+        balance += amount;
+    };
+);
+
+let Savings = class:Account (
+    | get: instance;
+);

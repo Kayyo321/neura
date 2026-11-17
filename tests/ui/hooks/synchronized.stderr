@@ -1,0 +1,12 @@
+error[E0541]: a hook would read a 'Account' outside its guard
+ --> $DIR/synchronized.nra:3:5
+  |
+3 |     | get: instance;
+  |     ^^^^^^^^^^^^^^^^ a class hook on a class with synchronized methods
+...
+8 |     export let deposit = func(amount: int32) {
+  |                ------- this method is #Synchronized
+  |
+  = help: validate in the synchronized methods instead of a class hook
+
+For more information about this error, try `neura explain E0541`.

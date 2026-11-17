@@ -1,0 +1,16 @@
+error[E0917]: #Pure function 'present' is not pure: it reaches '$class_get', which assigns the binding 'reads'
+  --> $DIR/pure.nra:14:1
+   |
+ 9 |         Counter.reads += 1;
+   |         ------------- assigns the binding 'reads' here
+...
+14 | #Pure
+   | ^^^^^ the function is marked #Pure here
+15 | let present = func(session: Session) -> bool {
+16 |     return session != nil;
+   |            ------- calls '$class_get'
+   |
+   = note: a #Pure function may allocate and trap, but it writes only objects it allocates, reads no reassignable state, and calls only pure functions
+   = help: remove #Pure, or move the effect to the caller
+
+For more information about this error, try `neura explain E0917`.

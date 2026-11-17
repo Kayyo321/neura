@@ -171,6 +171,169 @@ let App = module:program.Entry (
         self.assertIn('dap output\n', ''.join(outputs))
         self.assertFalse(self.capabilities['supportsStepBack'])
 
+    def test_hooked_nil_inspection_uses_raw_storage(self):
+        source = '''let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let log: string = "";
+let Session = class (
+    | get: { log += "g"; return instance; };
+    | set: { log += "s"; return value; };
+);
+let Plain = class ();
+let Box = class (
+    export let item: Session = nil;
+    export let ordinary: Plain = nil;
+);
+let global: Session = nil;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let item: Session = nil;
+        let box: Box = new;
+        let items: Session[list] = new([item]);
+        console.print_line(log);
+        return program.ExitCode.Ok;
+    };
+);
+'''
+        path = self.source('hooks.nra', source)
+        self.launch(path)
+        points = self.client.request('setBreakpoints', {'source': {'path': str(path)},
+                                     'breakpoints': [{'line': source.splitlines().index('        console.print_line(log);') + 1}]})
+        self.assertTrue(points['breakpoints'][0]['verified'])
+        self.client.request('configurationDone')
+        self.client.event('stopped')
+        frame = self.frame()
+        def evaluate(expression):
+            return self.client.request('evaluate', {'frameId': frame['id'], 'expression': expression})['result']
+        before = evaluate('log')
+        self.assertEqual(evaluate('item'), 'nil (policy Session)')
+        self.assertEqual(evaluate('global'), 'nil (policy Session)')
+        self.assertEqual(evaluate('box.item'), 'nil (policy Session)')
+        self.assertEqual(evaluate('items[0]'), 'nil (policy Session)')
+        scopes = self.client.request('scopes', {'frameId': frame['id']})['scopes']
+        locals_ = self.client.request('variables', {'variablesReference': scopes[0]['variablesReference']})['variables']
+        item = next(value for value in locals_ if value['name'] == 'item')
+        self.assertEqual(item['value'], 'nil (policy Session)')
+        self.assertFalse(any(value['name'].endswith('.policy') for value in locals_))
+        items = next(value for value in locals_ if value['name'] == 'items')
+        elements = self.client.request('variables', {'variablesReference': items['variablesReference']})['variables']
+        self.assertEqual([element['value'] for element in elements], ['nil (policy Session)'])
+        box = next(value for value in locals_ if value['name'] == 'box')
+        fields = self.client.request('variables', {'variablesReference': box['variablesReference']})['variables']
+        self.assertEqual(next(value for value in fields if value['name'] == 'item')['value'], 'nil (policy Session)')
+        self.assertFalse(any(value['name'].endswith('.policy') for value in fields))
+        self.assertEqual(next(value for value in fields if value['name'] == 'ordinary')['value'], 'nil')
+        paged = [self.client.request('variables', {'variablesReference': box['variablesReference'],
+                                                   'start': i, 'count': 1})['variables'] for i in range(len(fields))]
+        self.assertEqual([page[0]['name'] for page in paged], [value['name'] for value in fields])
+        globals_ = self.client.request('variables', {'variablesReference': scopes[1]['variablesReference']})['variables']
+        self.assertEqual(next(value for value in globals_ if value['name'].endswith('global'))['value'],
+                         'nil (policy Session)')
+        self.assertEqual(evaluate('log'), before)
+        self.client.request('continue', {'threadId': 0})
+        self.client.event('terminated')
+        output = ''.join(event.get('body', {}).get('output', '') for event in self.client.events
+                         if event.get('event') == 'output')
+        self.assertIn(before.strip('"') + '\n', output)
+
+    def test_hook_step_and_trapping_admission_preserve_previous_field(self):
+        source = '''let program = import:Std.Program;
+let failure = import:Std.Core.Failure;
+let Session = class (
+    | get: instance;
+    | set: value;
+);
+let Accepted = class:Session ();
+let Rejected = class:Session (
+    | set.override: {
+        failure.trap("rejected");
+        return value;
+    };
+);
+let Box = class (
+    export let item: Session = nil;
+);
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let box: Box = new;
+        let first: Accepted = nil;
+        box.item = first;
+        let copy = first;
+        box.item = new Rejected();
+        return program.ExitCode.Ok;
+    };
+);
+'''
+        path = self.source('hook-trap.nra', source)
+        self.launch(path)
+        self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 22}]})
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': []})
+        thread = self.client.request('threads')['threads'][0]['id']
+        for _ in range(8):
+            self.client.request('stepIn', {'threadId': thread})
+            self.assertEqual(self.client.event('stopped')['reason'], 'step')
+            if '$class_get' in self.frame()['name']:
+                break
+        self.assertIn('$class_get', self.frame()['name'])
+        self.client.request('stepOut', {'threadId': thread})
+        self.assertEqual(self.client.event('stopped')['reason'], 'step')
+        self.assertIn('main', self.frame()['name'])
+        self.client.request('continue')
+        self.assertEqual(self.client.event('stopped')['reason'], 'exception')
+        self.assertIn('rejected', self.client.request('exceptionInfo', {'threadId': thread})['description'])
+        stack = self.client.request('stackTrace', {'threadId': thread})['stackFrames']
+        main = next(frame for frame in stack if 'main' in frame['name'])
+        for _ in range(2):
+            self.assertEqual(self.client.request('evaluate', {'frameId': main['id'],
+                                                             'expression': 'box.item'})['result'],
+                             'nil (policy Accepted)')
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 134)
+
+    def test_breakpoint_in_a_startup_block_stops_before_main(self):
+        source = '''let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let first = 4;
+static scope {
+    let doubled = first * 2;
+    console.print_line("startup " + doubled.to_string());
+}
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("main");
+        return program.ExitCode.Ok;
+    };
+);
+'''
+        path = self.source('startup.nra', source)
+        self.launch(path)
+        result = self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 6}]})
+        self.assertTrue(result['breakpoints'][0]['verified'])
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        self.assertEqual(frame['line'], 6)
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'doubled'})['result'], '8')
+        outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
+        self.assertNotIn('main\n', ''.join(outputs))
+        # A line stops once at each of its statement positions; the block itself runs once.
+        while True:
+            self.client.request('continue')
+            message = self.client.next()
+            while message.get('event') not in ('stopped', 'exited'):
+                self.client.events.append(message)
+                message = self.client.next()
+            if message['event'] == 'exited':
+                break
+            self.assertEqual(self.frame()['line'], 6)
+        self.assertEqual(message['body']['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
+        self.assertEqual(''.join(outputs).count('startup 8\n'), 1)
+        self.assertIn('main\n', ''.join(outputs))
+
     def test_pending_breakpoint_keeps_id_and_condition_short_circuits(self):
         path = self.source('pending.nra', """let program = import:Std.Program;
 let App = module:program.Entry (

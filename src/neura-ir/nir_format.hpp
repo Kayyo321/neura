@@ -17,7 +17,12 @@ inline constexpr std::uint16_t nir_major_version = 1;
 // The highest minor version this code reads and writes. The writer emits the
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
-inline constexpr std::uint16_t nir_minor_version = 10;
+inline constexpr std::uint16_t nir_minor_version = 11;
+// The minor version that adds class hooks (docs/design/Hooks030.md): the
+// attributes hook.get, hook.set and hook.of. A module that declares a clause
+// is written with it, so that an older reader refuses the module. The lead
+// may renumber it when milestones merge.
+inline constexpr std::uint16_t nir_hooks_minor = 11;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 

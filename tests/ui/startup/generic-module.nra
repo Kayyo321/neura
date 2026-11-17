@@ -1,0 +1,5 @@
+// Case 62: a module takes no type parameters, so `module<T>` is already a
+// syntax error before its members are read.
+let Generic = module<T> (
+    static scope { }
+);

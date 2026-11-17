@@ -70,6 +70,9 @@ std::string_view describe(TrapKind kind) {
     case TrapKind::StackLimit: return "stack limit exceeded";
     case TrapKind::ReleasedStorage: return "released storage accessed";
     case TrapKind::InvalidRegion: return "invalid region operation";
+    case TrapKind::HookRecursion: return "class hook recursion";
+    case TrapKind::HookLimit: return "class hook nesting limit exceeded";
+    case TrapKind::InvalidHook: return "invalid class hook operation";
     }
     return "trap";
 }
@@ -92,7 +95,10 @@ int exit_status(const Trap& trap) {
         default: return illegal_instruction;
         }
     case TrapKind::InvalidCast:
+    case TrapKind::HookRecursion:
     case TrapKind::Deadlock: return abort;
+    case TrapKind::HookLimit: return segmentation_fault;
+    case TrapKind::InvalidHook: return illegal_instruction;
     case TrapKind::UninitializedSlot:
     case TrapKind::UninitializedField:
     case TrapKind::UninitializedGlobal:
@@ -709,6 +715,16 @@ private:
         std::vector<std::uint64_t> handles;
     };
 
+    // One open class hook event: its kind, policy word and reference, and the
+    // depth of the frame that opened it.
+    struct HookEvent {
+        std::uint32_t kind = 0;
+        std::uint32_t policy = 0;
+        std::uint64_t handle = 0;
+        std::size_t depth = 0;
+        bool operator==(const HookEvent&) const = default;
+    };
+
     // The frames of one task, outermost first. Every frame's slots and
     // initialized flags live in two arenas, one frame after another, so a
     // call or return only moves the end of the arenas. The headers and the
@@ -769,6 +785,7 @@ private:
         void clear() {
             record_.size = 0;
             record_.slot_size = 0;
+            hooks.clear();
         }
 
         // What native code reads and writes (tier3::FrameRecord).
@@ -782,6 +799,10 @@ private:
         // every other return goes through the return helper, which releases
         // them as commit_exit does.
         std::vector<StorageRegion> regions;
+        // The task's open class hook events, oldest first
+        // (docs/design/Hooks030.md, Recursion). Native code never touches
+        // them: a block that opens or closes one runs at tier 1.
+        std::vector<HookEvent> hooks;
 
     private:
         // Room for `frames` headers and `slots` slots, keeping what is there.
@@ -1290,6 +1311,9 @@ private:
         while (!frames.regions.empty() && frames.regions.back().depth >= depth) {
             release_region(frames, frames.regions.size() - 1);
         }
+        // A trap or the end of a run also ends the class hook events it had
+        // open; a frame's return checks its own after this.
+        if (depth == 0) frames.hooks.clear();
     }
 
     void release_all_regions() {
@@ -2769,7 +2793,27 @@ private:
         }
     }
 
+    // The class name of a policy word, from the image's names when it has
+    // them: the word is the layout identifier plus 1.
+    const std::vector<std::string>& layout_names() const {
+        if (!policy_names_) {
+            policy_names_.emplace();
+            if (const auto names = nvr::decode_names(image_)) *policy_names_ = names->layouts;
+        }
+        return *policy_names_;
+    }
+
+    std::string policy_name(std::uint32_t policy) const {
+        const auto layout = policy == 0 ? nvr::absent : policy - 1;
+        const auto& names = layout_names();
+        if (layout < names.size() && !names[layout].empty()) return names[layout];
+        return policy == 0 ? std::string("no policy") : "layout " + std::to_string(layout);
+    }
+
     void scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments) {
+        // A hook cannot use the scheduler (E0544): an event never spans a
+        // suspension.
+        if (!frames_.hooks.empty()) fault(TrapKind::InvalidHook, "a scheduler operation with a class hook event open");
         using Op = nvr::SchedulerOp;
         using Outcome = nvr::SchedulerOutcome;
         const auto self = scheduler_->current;
@@ -3534,6 +3578,9 @@ private:
             }
             // The regions the frame entered and did not release (NVR 1.7).
             if (!frames_.regions.empty()) release_regions_from(frames_, frames_.size());
+            // A hook function closes the event it opened before it returns.
+            if (!frames_.hooks.empty() && frames_.hooks.back().depth >= frames_.size())
+                fault(TrapKind::InvalidHook, "a frame returns with a class hook event open");
             frames_.pop_back();
             if (scheduler_ && frames_.empty() && scheduler_->current != 0) {
                 finish_task(result);
@@ -3790,11 +3837,11 @@ private:
             const auto width = components_of(types[0].type)->size();
             const auto word = checked_aggregate_index(item, args[1], width) * width + exit.immediate;
             if (exit.operation == nvr::StateOp::ReadComponent) return heap_.element(item, word);
-            if (heap_log_) {
-                heap_log_->push_back({false, false, args[0], static_cast<std::uint32_t>(word), heap_.element(item, word), 0,
-                                      args[2]});
+            for (std::size_t i = 2; i < args.size(); ++i) {
+                const auto at = static_cast<std::uint32_t>(word + i - 2);
+                if (heap_log_) heap_log_->push_back({false, false, args[0], at, heap_.element(item, at), 0, args[i]});
+                heap_.set_element(item, at, args[i]);
             }
-            heap_.set_element(item, word, args[2]);
             return 0;
         }
         case nvr::StateOp::ClassHash:
@@ -3811,7 +3858,12 @@ private:
         case nvr::StateOp::ClassIs:
         case nvr::StateOp::ClassCast: {
             const bool test = exit.operation == nvr::StateOp::ClassIs;
-            if (args[0] == 0) return 0;
+            if (args[0] == 0) {
+                if (args.size() == 2 && args[1] != 0 &&
+                    (args[1] > image_.layouts.size() || !types_.derives(args[1] - 1, exit.immediate)))
+                    fault(TrapKind::InvalidCast, {});
+                return 0;
+            }
             const bool matches = types_.derives(heap_.type(typed_entry(args[0], types[0].type)), exit.immediate);
             if (test) return matches;
             if (!matches) fault(TrapKind::InvalidCast, {});
@@ -3833,17 +3885,40 @@ private:
         case nvr::StateOp::ReadField: {
             const auto item = typed_entry(args[0], types[0].type);
             if (!heap_.initialized(item, exit.immediate)) {
+                if (args.size() == 2) return args[1];
                 fault(TrapKind::UninitializedField, "field " + std::to_string(exit.immediate));
             }
             return heap_.field(item, exit.immediate);
         }
         case nvr::StateOp::WriteField: {
             const auto item = typed_entry(args[0], types[0].type);
-            if (heap_log_) {
-                heap_log_->push_back({false, true, args[0], exit.immediate, heap_.field(item, exit.immediate),
-                                      heap_.initialized(item, exit.immediate), args[1]});
+            for (std::size_t i = 1; i < args.size(); ++i) {
+                const auto at = exit.immediate + static_cast<std::uint32_t>(i - 1);
+                if (heap_log_) heap_log_->push_back({false, true, args[0], at, heap_.field(item, at),
+                                                     heap_.initialized(item, at), args[i]});
+                heap_.set_field(item, at, args[i]);
             }
-            heap_.set_field(item, exit.immediate, args[1]);
+            return 0;
+        }
+        case nvr::StateOp::HookEnter: {
+            auto& events = frames_.hooks;
+            const HookEvent event{exit.immediate, static_cast<std::uint32_t>(args[0]), args[1], frames_.size()};
+            for (const auto& open : events) {
+                if (open.kind == event.kind && open.policy == event.policy && open.handle == event.handle)
+                    fault(TrapKind::HookRecursion, std::string(event.kind == 0 ? "get" : "set") + " of " +
+                                                       (args.size() == 3 ? std::string(heap_.text(typed_entry(args[2], types[2].type))) :
+                                                                           policy_name(event.policy)));
+            }
+            if (events.size() >= nvr::max_hook_events)
+                fault(TrapKind::HookLimit, std::to_string(nvr::max_hook_events) + " events are open");
+            events.push_back(event);
+            return 0;
+        }
+        case nvr::StateOp::HookLeave: {
+            auto& events = frames_.hooks;
+            if (events.empty() || events.back().depth != frames_.size())
+                fault(TrapKind::InvalidHook, "no event of this frame is open");
+            events.pop_back();
             return 0;
         }
         case nvr::StateOp::EnterRegion: {
@@ -3923,16 +3998,17 @@ private:
         }
         case nvr::StateOp::ReadGlobal:
             if (!global_initialized_[exit.immediate]) {
+                if (!args.empty()) return args[0];
                 fault(TrapKind::UninitializedGlobal, "global " + std::to_string(exit.immediate));
             }
             return globals_[exit.immediate];
         case nvr::StateOp::WriteGlobal:
-            if (heap_log_) {
-                heap_log_->push_back({true, false, 0, exit.immediate, globals_[exit.immediate],
-                                      global_initialized_[exit.immediate], args[0]});
+            for (std::size_t i = 0; i < args.size(); ++i) {
+                const auto at = exit.immediate + static_cast<std::uint32_t>(i);
+                if (heap_log_) heap_log_->push_back({true, false, 0, at, globals_[at], global_initialized_[at], args[i]});
+                globals_[at] = args[i];
+                global_initialized_[at] = 1;
             }
-            globals_[exit.immediate] = args[0];
-            global_initialized_[exit.immediate] = 1;
             return 0;
         case nvr::StateOp::RepeatCollection:
         case nvr::StateOp::AllocateCollection: {
@@ -4452,6 +4528,7 @@ private:
     std::uint64_t peak_stack_cells_ = 0;
     std::uint64_t region_serial_ = 0;
     std::vector<std::uint64_t> static_handles_;
+    mutable std::optional<std::vector<std::string>> policy_names_;
     std::map<std::uint64_t, std::uint64_t> released_handles_;
     FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.
@@ -4732,7 +4809,20 @@ std::vector<DebugValue> Execution::State::debug_children(std::uint32_t index, st
             // Each element is one group of its components, shown as text.
             const auto elements = heap_.length(entry) / fields->size();
             const auto last = start + std::min(count, elements - std::min(start, elements));
+            const auto layout = image_.types[element].reference;
+            const auto& names = layout_names();
+            const bool reference = layout < names.size() && names[layout] == "$reference" && fields->size() == 2 &&
+                                   image_.types[fields->front()].kind == nvr::TypeKind::Object &&
+                                   image_.types[fields->back()].kind == nvr::TypeKind::Unsigned &&
+                                   image_.types[fields->back()].width == 32;
             for (auto i = start; i < last; ++i) {
+                if (reference) {
+                    auto value = debug_value(fields->front(), heap_.element(entry, 2 * i), true);
+                    const auto policy = static_cast<std::uint32_t>(heap_.element(entry, 2 * i + 1));
+                    if (value.bits == 0 && policy != 0) value.text += " (policy " + policy_name(policy) + ")";
+                    values.push_back(std::move(value));
+                    continue;
+                }
                 std::string text = "(";
                 for (std::size_t c = 0; c < fields->size(); ++c) {
                     text += (c == 0 ? "" : ", ") +

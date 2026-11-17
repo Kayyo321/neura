@@ -1,0 +1,9 @@
+// Case 27: the same in a block clause.
+let Session = class (
+    | set: {
+        if (value == nil) {
+            return new Session();
+        }
+        return value;
+    };
+);

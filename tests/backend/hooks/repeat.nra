@@ -1,0 +1,16 @@
+let program = import:Std.Program;
+let reads: int = 0;
+let admissions: int = 0;
+let Session = class(
+    | get: { reads++; return instance; };
+    | set: { admissions++; return value; };
+);
+
+let Main = module:program.Entry(
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let item: Session = nil;
+        admissions = 0;
+        let batch: Session[] = [item];
+        return program.ExitCode.Status(reads + 10 * admissions);
+    };
+);

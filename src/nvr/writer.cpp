@@ -351,6 +351,14 @@ bool concurrent_image(const Image& image) {
 }
 
 std::uint16_t required_minor_version(const Image& image) {
+    for (const auto& function : image.functions) {
+        for (const auto& block : function.blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::State && (is_hook_operation(exit.operation) || extended_reference_state(exit)))
+                    return hooks_minor_version;
+            }
+        }
+    }
     if (std::ranges::any_of(image.types, [](const Type& type) { return type.kind == TypeKind::Aggregate; })) return 7;
     // Nil collection and static object constants (NVR 1.7).
     if (std::ranges::any_of(image.constants, [&](const Constant& value) {
