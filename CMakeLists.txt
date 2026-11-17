@@ -382,7 +382,9 @@ endforeach()
 file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pages.inc"
     CONTENT "${neura_diagnostic_pages_inc}" @ONLY)
 
-add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
+add_executable(neura src/cli/main.cpp src/cli/options.cpp src/cli/commands_run.cpp src/cli/commands_inspect.cpp
+    src/cli/commands_compile.cpp src/cli/commands_test.cpp src/cli/commands_artifact.cpp src/cli/commands_info.cpp
+    src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
     src/launcher/descriptor.cpp src/tooling/debug.cpp src/tooling/inspect.cpp)
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
