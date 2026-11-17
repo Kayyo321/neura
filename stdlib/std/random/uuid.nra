@@ -46,7 +46,7 @@ export let Uuid = module (
         };
 
         /// @brief Tests whether another UUID has the same two halves.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is Uuid)) {
                 return false;

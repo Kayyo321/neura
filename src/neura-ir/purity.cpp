@@ -1,4 +1,5 @@
 #include "purity.hpp"
+#include "class_hooks.hpp"
 
 #include "host_binding.hpp"
 #include "integer.hpp"
@@ -619,6 +620,14 @@ private:
         case IrOp::CallClosure:
             unknown_operation(node, "calls a function value");
             break;
+        case IrOp::HookRead:
+        case IrOp::HookAdmit:
+            // An event calls each clause it may run; its facts join in eval.
+            if (const auto targets = a_.hook_targets(node); !targets.empty()) {
+                trap(node, "runs a class hook, which may reach the frame-depth limit");
+                for (const auto target : targets) merge_optimizer(target);
+            }
+            break;
         case IrOp::ExternalCall:
             if (a_.valid(node.symbol) && kernel_bound(a_.symbol(node.symbol))) {
                 out_.optimizer.allocates = out_.optimizer.traps = true;
@@ -805,6 +814,24 @@ public:
                 impure(Reason{"makes a host request", node.span});
             }
             return typed(node.type, unknown());
+        case IrOp::HookRead:
+        case IrOp::HookAdmit: {
+            const auto value = node.operands.empty() ? Roots{} : eval(node.operands.front());
+            const auto targets = a_.hook_targets(node);
+            if (targets.empty()) return value;
+            const auto& clause = a_.symbol(targets.front());
+            const auto owner = hook_owner(clause);
+            may(out_.hooks, std::string("runs the '") + (node.op == IrOp::HookRead ? "get" : "set") +
+                                "' hook of '" + (a_.valid(owner) ? a_.symbol(owner).name : clause.name) + "'",
+                node.span);
+            // Slot 1 is the operand (`instance` of a getter, `value` of a
+            // setter); a setter's `instance` is what the destination held.
+            std::vector<Roots> slots{Roots{}, value, unknown(), Roots{}};
+            auto result = typed(node.type, apply(targets, slots, node.span));
+            for (const auto target : targets) merge_facts(target, node.span);
+            result.join(value);
+            return result;
+        }
         case IrOp::ValueEquals:
         case IrOp::ValueHash:
         case IrOp::ValueText: {
@@ -894,8 +921,13 @@ public:
     }
 };
 
+std::vector<SymbolId> PurityAnalysis::hook_targets(const IrNode& node) const {
+    return hooks_ ? hooks_->targets(node) : std::vector<SymbolId>{};
+}
+
 PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(SymbolId)> opaque)
-    : program_(program), opaque_(std::move(opaque)), dispatch_(program), modules_(program) {
+    : program_(program), opaque_(std::move(opaque)), dispatch_(program), modules_(program),
+      hooks_(program.hooks_elaborated ? std::make_shared<const HookIndex>(program) : nullptr) {
     for (const auto& body : program.bodies) bodies_[body.owner].push_back(&body);
     const auto is_opaque = [&](SymbolId id) {
         return opaque_ && valid(id) && symbol(id).kind == SymbolKind::Function && opaque_(id);
@@ -1196,6 +1228,10 @@ void PurityAnalysis::callees(const IrNode& node, std::vector<SymbolId>& out) con
         break;
     case IrOp::VirtualCall:
         for (const auto id : targets(node)) out.push_back(id);
+        break;
+    case IrOp::HookRead:
+    case IrOp::HookAdmit:
+        for (const auto id : hook_targets(node)) out.push_back(id);
         break;
     case IrOp::BaseInitialize:
         for (const auto id : construction(!node.operands.empty() && node.operands.front().type.kind == TypeKind::Object

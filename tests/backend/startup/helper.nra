@@ -1,0 +1,12 @@
+let console = import:Std.Io.Console;
+let registry = import:Registry;
+
+static scope {
+    console.print_line("helper: block sees count " + registry.count.to_string());
+}
+
+export let Helper = module (
+    export let label = func() -> string {
+        return "helper";
+    };
+);

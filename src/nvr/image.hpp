@@ -19,7 +19,10 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 7;
+inline constexpr std::uint16_t minor_version = 8;
+// The minor version that adds the class hook operations HookEnter and
+// HookLeave (docs/design/Hooks030.md). The lead may renumber it at merge.
+inline constexpr std::uint16_t hooks_minor_version = 8;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -193,10 +196,23 @@ enum class StateOp : std::uint8_t {
     // MoveToRegion(entry, token) moves an entry and what it reaches in the same
     // region to an enclosing region.
     EnterRegion = 27, ReleaseRegion = 28, RegionObject = 29, RegionCollection = 30, RegionRepeat = 31,
-    MoveToRegion = 32
+    MoveToRegion = 32,
+    // Class hooks (hooks_minor_version; docs/design/Hooks030.md, Recursion):
+    // HookEnter(policy, handle) opens an event of kind `immediate` (0 get,
+    // 1 set) on the task's stack of active events; HookLeave closes the
+    // newest one, which the same frame opened. A hidden hook function runs
+    // them first and last.
+    HookEnter = 33, HookLeave = 34
 };
 
-inline constexpr std::uint8_t state_op_count = 33;
+inline constexpr std::uint8_t state_op_count = 35;
+
+// The most events a task can have open at once.
+inline constexpr std::size_t max_hook_events = 64;
+
+inline constexpr bool is_hook_operation(StateOp operation) {
+    return operation == StateOp::HookEnter || operation == StateOp::HookLeave;
+}
 
 // Reserved token of execution-lifetime static storage (NVR 1.7).
 inline constexpr std::uint64_t static_region_token = UINT64_MAX;
@@ -239,6 +255,19 @@ struct Exit {
 
     bool operator==(const Exit&) const = default;
 };
+
+// NVR 1.8 can read an unwritten field/global with a typed fallback, commit
+// a consecutive run of words in one transition, or check a nil cast's policy.
+inline bool extended_reference_state(const Exit& exit) {
+    switch (exit.operation) {
+    case StateOp::ReadField: case StateOp::ClassCast: return exit.arguments.size() > 1;
+    case StateOp::ReadGlobal: return !exit.arguments.empty();
+    case StateOp::WriteField: return exit.arguments.size() > 2;
+    case StateOp::WriteGlobal: return exit.arguments.size() > 1;
+    case StateOp::WriteComponent: return exit.arguments.size() > 3;
+    default: return false;
+    }
+}
 
 struct Block {
     std::uint32_t graph = 0;

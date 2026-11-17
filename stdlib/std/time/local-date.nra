@@ -95,7 +95,7 @@ export let LocalDate = module (
         };
 
         /// @brief Tests whether the year, month, and day all agree.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is LocalDate)) {
                 return false;

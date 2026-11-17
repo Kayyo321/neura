@@ -1,0 +1,26 @@
+error[E0217]: expected '{' after 'static scope'
+ --> $DIR/malformed.nra:3:14
+  |
+3 | static scope (handle) { }
+  |              ^ expected '{', found '('
+  |
+  = note: a startup block names no scope handle
+  = help: a startup block is 'static scope { ... }'
+
+error[E0217]: expected '{' after 'static scope'
+ --> $DIR/malformed.nra:5:13
+  |
+5 | static scope;
+  |             ^ expected '{', found ';'
+  |
+  = help: a startup block is 'static scope { ... }'
+
+error[E0217]: expected '{' after 'static scope'
+ --> $DIR/malformed.nra:9:13
+  |
+9 | static scope
+  |             ^ expected '{' before the end of the file
+  |
+  = help: a startup block is 'static scope { ... }'
+
+For more information about this error, try `neura explain E0217`.

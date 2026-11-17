@@ -57,3 +57,11 @@ NEURA_ATTRIBUTE(ClassShareable, 10, "class.shareable", on_class, false, "b")
 // call is a host request by definition. Without it every fact is unknown
 // (docs/design/Representation030.md, "Effect and retention summaries").
 NEURA_ATTRIBUTE(HostEffects, 11, "host.effects", on_function, false, "[b b b b]")
+// Class hooks (docs/design/Hooks030.md). Ids 12 to 14 are claimed by the
+// calls milestone; the lead may renumber these three at merge.
+// On a class that declares a class hook clause: its hidden hook function.
+NEURA_ATTRIBUTE(HookGet, 15, "hook.get", on_class, false, "s")
+NEURA_ATTRIBUTE(HookSet, 16, "hook.set", on_class, false, "s")
+// On a hidden hook function: [the class that declares the clause, 0 for a
+// getter or 1 for a setter].
+NEURA_ATTRIBUTE(HookOf, 17, "hook.of", on_function, false, "[s u1]")

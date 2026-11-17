@@ -16,6 +16,10 @@
 // it is an error (E0510, E0515). A read-modify-write evaluates the receiver
 // once, then calls the getter, computes, and calls the setter.
 
+constexpr const char* misplaced_hook_note =
+    "a '|' clause after a member is an accessor clause of that member; class hooks are written after the "
+    "class's '(', before its first member";
+
 namespace accessor_text {
 
 inline std::string kind_word(bool setter) { return setter ? "set" : "get"; }
@@ -59,6 +63,7 @@ void Lowering::check_accessor_member(const Declaration& decl, SymbolId owner) co
                                          accessor_text::member_kind(decl)).with_code("E0518")
             .label("accessor clause on " + accessor_text::member_kind(decl))
             .label(name, "'" + decl.name + "' is declared here")
+            .note(misplaced_hook_note)
             .help("remove the clause; only an exported instance field can have 'get' and 'set' accessors");
     if (decl.static_member)
         throw Diagnostic(first.span, "a static field cannot have accessors").with_code("E0517")
@@ -180,7 +185,15 @@ void Lowering::lower_accessors(SymbolId field) {
             expected_origin_ = ExpectedOrigin{name_span(field), "'" + name + "' has type " + describe(field_type) +
                                                                     ", which its getter returns"};
             auto result = node(IrOp::Return, clause.expression->span);
-            result.operands.push_back(value(*clause.expression, ctx, &field_type));
+            try {
+                result.operands.push_back(value(*clause.expression, ctx, &field_type));
+            } catch (Diagnostic& error) {
+                // `| get: instance;` after a member reads as a class hook
+                // written in the wrong place.
+                if (clause.expression->kind == ExprKind::Name && clause.expression->text == "instance")
+                    error.note(misplaced_hook_note);
+                throw;
+            }
             instructions.push_back(std::move(result));
         } else {
             const auto* declaration = entries_[field].declaration;

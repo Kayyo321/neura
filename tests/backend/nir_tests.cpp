@@ -452,18 +452,21 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // Minor 11 is newer than this reader.
+    // The minor version after the newest is newer than this reader.
     auto newer = bytes;
-    newer[6] = 11;
-    expect_nir_error(newer, "NeuraIR format 1.11 is not supported; this reader accepts 1.0 through 1.10");
+    const auto newest_minor = std::to_string(nir_minor_version);
+    newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
+    expect_nir_error(newer, "NeuraIR format 1." + std::to_string(nir_minor_version + 1) +
+                                " is not supported; this reader accepts 1.0 through 1." + newest_minor);
     newer[6] = 200;
-    expect_nir_error(newer, "this reader accepts 1.0 through 1.10");
+    expect_nir_error(newer, "this reader accepts 1.0 through 1." + newest_minor);
 
     // An operation tag above the newest one, in a 1.9 file.
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
-    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::SchedulerCall) + 1);
+    // Past the last operation; HookRead and HookAdmit are never written.
+    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::HookAdmit) + 1);
     above.bodies.push_back({0, {tagged}});
     const auto above_bytes = write_nir(above);
     check_equal(static_cast<int>(above_bytes[6]), 9, "an operation above the 1.7 set is written as 1.9");
@@ -784,6 +787,9 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::Synchronized, 9, "synchronized", on_function, false, "b"},
         {AttributeId::ClassShareable, 10, "class.shareable", on_class, false, "b"},
         {AttributeId::HostEffects, 11, "host.effects", on_function, false, "[b b b b]"},
+        {AttributeId::HookGet, 15, "hook.get", on_class, false, "s"},
+        {AttributeId::HookSet, 16, "hook.set", on_class, false, "s"},
+        {AttributeId::HookOf, 17, "hook.of", on_function, false, "[s u1]"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -819,8 +825,11 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
     const auto& program = fixture.program;
     const auto issues = verify_ir(program);
     check(issues.empty(), issues.empty() ? "" : issues.front().message);
-    // Every pre-registered attribute is exercised.
+    // Every pre-registered attribute of 1.10 is exercised. The class hook
+    // attributes need a later minor version and have a test of their own.
     for (const auto& info : attribute_registry()) {
+        if (info.id == AttributeId::HookGet || info.id == AttributeId::HookSet || info.id == AttributeId::HookOf)
+            continue;
         check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, info.id); }),
               std::string(info.name) + " is not attached by the fixture");
     }
@@ -1119,6 +1128,32 @@ NEURA_TEST(nir, attribute_files_are_rejected_when_malformed) {
           "a deferred initialization reads back");
     deferred_bytes[6] = 9;
     expect_nir_error(deferred_bytes, "deferred initialization requires NeuraIR format 1.10");
+}
+
+// ---- Class hooks (docs/design/Hooks030.md) --------------------------------
+//
+// A module that declares a class hook clause is written with the hooks minor
+// version and reads back equal; a reader of an older minor version refuses
+// it, and a hook-free program keeps its version.
+NEURA_TEST(nir, class_hooks_are_written_with_their_minor_version) {
+    const auto program = lower_files({backend_dir(environment) / "nir-versions" / "hooks.nra"});
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6]), static_cast<int>(nir_hooks_minor), "a class hook needs its minor version");
+    const auto read = read_nir(bytes, "hooks.nir");
+    check(write_nir(read) == bytes, "a module with class hooks round-trips");
+    std::size_t hooks = 0;
+    for (const auto& item : read.symbols) {
+        if (has_attribute(item, AttributeId::HookOf)) ++hooks;
+    }
+    check_equal(hooks, std::size_t{3}, "hook functions that read back");
+    auto older = bytes;
+    older[6] = static_cast<std::uint8_t>(nir_hooks_minor - 1);
+    expect_nir_error(older, "class hooks require NeuraIR format 1." + std::to_string(nir_hooks_minor));
+    auto newer = bytes;
+    newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
+    expect_nir_error(newer, "is not supported");
+    const auto plain = write_nir(lower_files({backend_dir(environment) / "nir-versions" / "attributes.nra"}));
+    check(static_cast<int>(plain[6]) < static_cast<int>(nir_hooks_minor), "a program without hooks keeps its version");
 }
 
 } // namespace neura::testing

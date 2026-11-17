@@ -1,0 +1,100 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let log: string = "";
+
+let Session = class(
+    | get: {
+        log += "g";
+        return instance;
+    };
+    | set: {
+        if (instance == nil) { log += "s"; } else { log += "S"; }
+        return value;
+    };
+
+    export let id = func -> int => 1;
+);
+
+let Guest = class:Session(
+    | set.override: {
+        log += "G";
+        return value;
+    };
+);
+
+let Box = class(
+    export let item: Session = nil;
+);
+
+let Adapter = class(
+    export let item: Session = nil;
+        | get: { log += "r"; return item; };
+        | set: { log += "w"; item = value; };
+);
+
+let actuals = func(items: ...Session) { items[0].id(); };
+let Stored = enum(None, Some(Session));
+let global: Session = nil;
+let forward = func(session: Session) -> Session => session;
+let replace_before_store = func -> Session {
+    global = new;
+    return nil;
+};
+let print_log = func {
+    console.print_line(log);
+    log = "";
+};
+
+let References = module:program.Entry(
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        print_log();
+        let item: Session = new;
+        last copy = forward(item);
+        print_log();
+
+        let box: Box = new;
+        box.item = copy;
+        box.item = nil;
+        global = item;
+        global = nil;
+        print_log();
+
+        global = replace_before_store();
+        print_log();
+
+        let list: Session[list] = new([item, copy]);
+        list.append(item);
+        list[0] = nil;
+        list[1].id();
+        print_log();
+
+        let pair: [Session, int] = [item, 3];
+        let selected = pair[0];
+        let stored = Stored.Some(item);
+        match (stored) {
+            Stored.None => {},
+            Stored.Some(found) => { found.id(); },
+        }
+        print_log();
+
+        let adapter: Adapter = new;
+        adapter.item = item;
+        adapter.item = nil;
+        let adapted = adapter.item;
+        print_log();
+
+        let delayed = new func -> int => item.id();
+        delayed();
+        actuals(item, copy);
+        print_log();
+
+        let view: class = nil;
+        view = new Guest();
+        view = nil;
+        let still_nil = view == nil;
+        if (!still_nil || view is Session) { return program.ExitCode.Failure; }
+        print_log();
+        return program.ExitCode.Ok;
+    };
+);

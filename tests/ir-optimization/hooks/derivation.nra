@@ -1,0 +1,146 @@
+// One function per row of the class hook derivation table
+// (docs/design/Hooks030.md, Derivation). hooks_tests.cpp counts the read
+// events and the admissions each function has after elaboration.
+let Session = class (
+    | get: instance;
+    | set: value;
+
+    export let user: string = "";
+    export let init = func(user: string) => set;
+    export let touch = func(other: Session) -> int32 => 1;
+);
+
+let Holder = class (
+    export let held: Session = nil;
+    export let init = func(held: Session) => set;
+    export let keep = func(session: Session) {
+        held = session;
+    };
+);
+
+let Owner = class (
+    export let owner: Session = nil;
+        | get: owner;
+        | set: owner = value;
+);
+
+let Derived = class:Holder (
+    export let init = func(session: Session) {
+        super.init(session);
+    };
+);
+
+let Maybe = enum (
+    Some(Session),
+    None,
+);
+
+let Rows = module (
+    export let global: Session = nil;
+
+    export let take = func(a: Session, b: Session) -> int32 => 0;
+
+    export let load_local = func(s: Session) -> int32 {
+        let t = s;
+        return 0;
+    };
+
+    export let load_global = func() -> Session {
+        return global;
+    };
+
+    export let field = func(h: Holder) -> Session {
+        return h.held;
+    };
+
+    export let accessor_read = func(o: Owner) -> Session {
+        return o.owner;
+    };
+
+    export let accessor_write = func(o: Owner, s: Session) {
+        o.owner = s;
+    };
+
+    export let index = func(items: Session[]) -> Session {
+        return items[0];
+    };
+
+    export let project = func(pair: [Session, int32]) -> Session {
+        return pair[0];
+    };
+
+    export let enum_project = func(m: Maybe) -> int32 {
+        match (m) {
+            Maybe.Some(found) => {
+                return 1;
+            },
+            Maybe.None => {
+                return 0;
+            },
+        }
+    };
+
+    export let remove_at = func(items: Session[list]) {
+        items.remove_at(0);
+    };
+
+    export let store = func(h: Holder, s: Session) {
+        h.held = s;
+    };
+
+    export let append = func(items: Session[list], s: Session) {
+        items.append(s);
+    };
+
+    export let collection = func(a: Session, b: Session) -> int32 {
+        let items: Session[] = [a, b];
+        return 0;
+    };
+
+    export let closure = func(s: Session) -> int32 {
+        let f = func() -> Session {
+            return s;
+        };
+        return 0;
+    };
+
+    export let call = func(s: Session) -> int32 {
+        return take(s, s);
+    };
+
+    export let receiver = func(s: Session) -> int32 {
+        return s.touch(s);
+    };
+
+    export let closure_call = func(f: func(Session) -> int32, s: Session) -> int32 {
+        return f(s);
+    };
+
+    export let allocate = func(s: Session) -> Holder {
+        return new Holder(s);
+    };
+
+    export let tuple = func(s: Session) -> [Session, int32] {
+        return [s, 1];
+    };
+
+    export let equality = func(a: Session, b: Session) -> bool {
+        return a == b;
+    };
+
+    export let for_each = func(items: Session[]) -> int32 {
+        for (let x: Session in items) {
+            let y = 1;
+        }
+        return 0;
+    };
+
+    export let discard = func(s: Session) {
+        s;
+    };
+
+    export let plain = func(h: Holder) -> Holder {
+        let other = h;
+        return other;
+    };
+);

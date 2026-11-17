@@ -74,7 +74,8 @@ NEURA_TEST(lossless, edited_images_round_trip) {
 
 NEURA_TEST(lossless, assembly_errors_name_their_line) {
     expect_assembly_error("type 0 void\n", "must start with an 'nvr' header", 1);
-    expect_assembly_error("nvr 1.8 profile 1\n", "NVR 1.8 is not supported", 1);
+    expect_assembly_error("nvr 1." + std::to_string(nvr::minor_version + 1) + " profile 1\n",
+                          "NVR 1." + std::to_string(nvr::minor_version + 1) + " is not supported", 1);
     expect_assembly_error("nvr 1.0 profile 2\n", "only graph profile 1", 1);
     expect_assembly_error("nvr 1.0 profile 1\nentry 0\ntype 1 void\n", "type 1 appears where type 0 belongs", 3);
     expect_assembly_error("nvr 1.0 profile 1\nentry 0\ntype 0 complex\n", "unknown type kind 'complex'", 3);

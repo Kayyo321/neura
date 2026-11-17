@@ -391,6 +391,80 @@ NEURA_TEST(conversion, initialization_order_matches_the_evaluator) {
     check_equal(captured.output, recorded, "stdout matches main.out");
 }
 
+NEURA_TEST(conversion, inspection_preserves_hook_execution) {
+    const auto image = build_program({backend_dir(environment) / "hooks" / "references.nra"});
+    const auto oracle = run_captured(image);
+    check(oracle.result.completed, describe_trap(oracle.result, image));
+    nvm::Execution execution(image, std::span<const std::string>{});
+    CapturingConsole console;
+    std::vector<std::int64_t> scratch, outputs;
+    auto inspected = std::size_t{0};
+    const auto inspect = [&](const std::vector<nvm::DebugValue>& values) {
+        for (const auto& value : values) {
+            if (value.children > 0) inspected += execution.debug_children(value.type, value.bits).size();
+        }
+    };
+    for (;;) {
+        nvm::Execution::GraphStep step;
+        auto event = execution.begin_step(step);
+        if (!event) {
+            const auto snapshot = execution.debug_snapshot();
+            inspect(snapshot.globals);
+            for (const auto& thread : snapshot.threads) {
+                for (const auto& frame : thread.frames) inspect(frame.slots);
+            }
+            outputs.resize(step.output_count);
+            const auto overflow = nvm::evaluate_outputs(image.graphs[step.graph], step.inputs, scratch, outputs);
+            check(!overflow, "the fixture graphs evaluate successfully");
+            event = execution.finish_step(outputs);
+        }
+        if (!event) continue;
+        if (event->kind == nvm::Event::Kind::HostRequest) {
+            execution.complete(console.invoke(event->request));
+            continue;
+        }
+        check(event->kind == nvm::Event::Kind::Completed, "the inspected hook program completes");
+        check_equal(event->status, oracle.result.status, "status");
+        break;
+    }
+    check(inspected > 0, "inspected object or collection children");
+    check_equal(console.output(), oracle.output, "hook trace while inspecting every block");
+    check_equal(console.requests.size(), oracle.requests.size(), "host requests");
+    check_equal(execution.steps(), oracle.result.steps, "steps");
+    check_equal(execution.peak_heap_cells(), oracle.result.peak_heap_cells, "peak heap cells");
+    check_equal(execution.peak_stack_cells(), oracle.result.peak_stack_cells, "peak stack cells");
+}
+
+// The source range producer only repeats numbers. NeuraIR also permits a
+// class reference as a repeat fill. Evaluate its getter once even for length
+// zero, then admit the saved value once for each element.
+NEURA_TEST(conversion, repeated_class_reference_admission) {
+    for (const auto length : {0, 3}) {
+        auto program = lower_files({backend_dir(environment) / "hooks" / "repeat.nra"});
+        bool replaced = false;
+        for (auto& body : program.bodies) {
+            for (auto& node : body.instructions) {
+                if (node.op != IrOp::Initialize || program.symbols[node.symbol].name != "batch") continue;
+                auto& collection = node.operands.front();
+                check(collection.op == IrOp::Collection && collection.operands.size() == 1, "the single fill");
+                IrNode count{};
+                count.op = IrOp::Integer;
+                count.span = collection.span;
+                count.type = {TypeKind::Integer, "uint64", no_symbol, {}};
+                count.text = std::to_string(length);
+                collection.op = IrOp::RepeatCollection;
+                collection.operands.insert(collection.operands.begin(), std::move(count));
+                replaced = true;
+            }
+        }
+        check(replaced, "the fixture includes the batch initializer");
+        const auto image = nvr::load(nvr::encode(backend::build(std::move(program)).image));
+        const auto run = run_captured(image);
+        check(run.result.completed, describe_trap(run.result, image));
+        check_equal(run.result.status, 1 + length * 10, "a getter once and a setter per repeated element");
+    }
+}
+
 NEURA_TEST(conversion, optimized_and_unoptimized_images_agree) {
     for (const auto& entry : fs::directory_iterator(backend_dir(environment) / "programs")) {
         if (entry.path().extension() != ".nra") {

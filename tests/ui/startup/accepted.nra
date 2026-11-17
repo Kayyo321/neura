@@ -1,0 +1,46 @@
+// Startup blocks that are accepted (cases 56, 57, 59, 63, 64, 65, 72): empty
+// blocks at file level and in a module, a block after a line break or a
+// comment, a lambda's return, loop control inside a loop, the unchanged uses
+// of `static` and `scope`, and a library with no entry point.
+let console = import:Std.Io.Console;
+
+static scope { }
+
+let total: int32 = 1;
+
+static scope
+{
+    total += 1;
+}
+
+static scope // the comment stays
+{
+    let twice = func(value: int32) -> int32 {
+        return value * 2;
+    };
+    total = twice(total);
+    while (total < 100) {
+        total += 10;
+        if (total > 50) {
+            break;
+        }
+        continue;
+    }
+}
+
+let Registry = module (
+    static scope { }
+
+    export let size: int32 = 0;
+);
+
+let Holder = class (
+    export static let scope: int32 = 1;
+);
+
+let tasks = func() -> void {
+    let scope: int32 = Holder.scope;
+    scope {
+        console.print_line(scope.to_string());
+    }
+};

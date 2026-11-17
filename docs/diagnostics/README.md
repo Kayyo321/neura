@@ -38,6 +38,10 @@ Errors about the grammar.
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
+| [E0215](E0215.md) | malformed class hook clause |
+| [E0216](E0216.md) | class hook outside a declared class |
+| [E0217](E0217.md) | malformed startup block |
+| [E0218](E0218.md) | misplaced startup block |
 
 ## E03xx: Names
 
@@ -114,6 +118,7 @@ Errors about types, values, calls, and statements.
 | [E0451](E0451.md) | an array escapes its owner |
 | [E0452](E0452.md) | a primitive borrow escapes its owner |
 | [E0453](E0453.md) | an escaping closure requires explicit construction |
+| [E0470](E0470.md) | return in a startup block |
 
 ## E05xx: Classes and lifecycle
 
@@ -152,6 +157,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](E0536.md) | destructuring declared with last |
 | [E0537](E0537.md) | constructor shorthand names no instance field |
+| [E0538](E0538.md) | duplicate class hook clause |
+| [E0539](E0539.md) | class hook replaces an inherited one without `.override` |
+| [E0540](E0540.md) | `.override` on a class hook that overrides nothing |
+| [E0541](E0541.md) | class hook on a class with synchronized methods |
+| [E0542](E0542.md) | class hook that does not yield its class |
+| [E0543](E0543.md) | class hook that returns a new object |
+| [E0544](E0544.md) | class hook that may suspend |
+| [E0545](E0545.md) | hooked class storage without an initializer |
+| [E0546](E0546.md) | hooked class reference at a bodyless function |
 
 ## E06xx: Concurrency
 

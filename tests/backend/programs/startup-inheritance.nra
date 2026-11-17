@@ -1,0 +1,19 @@
+// A module that inherits another does not run the base's startup blocks again
+// (Modules.md, Startup blocks).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let Base = module (
+    export let value: int32 = 1;
+    static scope {
+        console.print_line("base block");
+    }
+);
+let Derived = module:Base (
+    export let more: int32 = 2;
+);
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line((Derived.value + Derived.more).to_string());
+        return program.ExitCode.Ok;
+    };
+);

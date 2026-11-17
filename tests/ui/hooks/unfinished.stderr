@@ -1,0 +1,17 @@
+error[E0215]: expected 'get' or 'set' after '|'
+ --> $DIR/unfinished.nra:3:23
+  |
+3 | let Empty = class ( | );
+  |                       ^ expected 'get' or 'set', found ')'
+  |
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+
+error[E0215]: a class hook clause needs an expression or a block after ':'
+ --> $DIR/unfinished.nra:7:5
+  |
+7 |     export let skipped: int32 = 0;
+  |     ^^^^^^ expected an expression, found 'export'
+  |
+  = help: a class hook clause is '| get: <expression>;' or '| set: { ... };'
+
+For more information about this error, try `neura explain E0215`.

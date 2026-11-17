@@ -61,7 +61,7 @@ export let LocalDateTime = module (
         };
 
         /// @brief Tests whether both date and time components are equal.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is LocalDateTime)) {
                 return false;

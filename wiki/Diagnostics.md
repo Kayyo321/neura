@@ -41,6 +41,10 @@ Errors about the grammar.
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
+| [E0215](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0215.md) | malformed class hook clause |
+| [E0216](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0216.md) | class hook outside a declared class |
+| [E0217](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0217.md) | malformed startup block |
+| [E0218](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0218.md) | misplaced startup block |
 
 ## E03xx: Names
 
@@ -117,6 +121,7 @@ Errors about types, values, calls, and statements.
 | [E0451](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0451.md) | an array escapes its owner |
 | [E0452](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0452.md) | a primitive borrow escapes its owner |
 | [E0453](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0453.md) | an escaping closure requires explicit construction |
+| [E0470](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0470.md) | return in a startup block |
 
 ## E05xx: Classes and lifecycle
 
@@ -155,6 +160,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0536.md) | destructuring declared with last |
 | [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
+| [E0538](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0538.md) | duplicate class hook clause |
+| [E0539](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0539.md) | class hook replaces an inherited one without `.override` |
+| [E0540](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0540.md) | `.override` on a class hook that overrides nothing |
+| [E0541](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0541.md) | class hook on a class with synchronized methods |
+| [E0542](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0542.md) | class hook that does not yield its class |
+| [E0543](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0543.md) | class hook that returns a new object |
+| [E0544](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0544.md) | class hook that may suspend |
+| [E0545](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0545.md) | hooked class storage without an initializer |
+| [E0546](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0546.md) | hooked class reference at a bodyless function |
 
 ## E06xx: Concurrency
 

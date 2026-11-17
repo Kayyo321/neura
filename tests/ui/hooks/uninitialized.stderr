@@ -1,0 +1,16 @@
+error[E0545]: 'Session' has a 'set' hook, so 'current' needs an initializer
+ --> $DIR/uninitialized.nra:6:23
+  |
+4 |     | set: value;
+  |     ------------- the 'set' hook
+5 |
+6 |     export static let current: Session;
+  |                       ^^^^^^^ declared without an initializer
+  |
+  = note: a default nil would be an admission the source does not show
+help: initialize it with nil, which the 'set' hook then admits when the declaration runs
+  |
+6 |     export static let current: Session = nil;
+  |                                       ++++++
+
+For more information about this error, try `neura explain E0545`.

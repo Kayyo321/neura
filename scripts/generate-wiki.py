@@ -93,6 +93,7 @@ REPOSITORY_ONLY = (
     "docs/design/Storage030.md",
     "docs/design/Lifecycle030.md",
     "docs/design/Service030.md",
+    "docs/design/Hooks030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )

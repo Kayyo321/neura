@@ -1,0 +1,4 @@
+// Case 65: loop control outside a loop is today's error.
+static scope {
+    break;
+}

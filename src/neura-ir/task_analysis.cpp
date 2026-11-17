@@ -84,6 +84,7 @@ void insert_polls(IrProgram& program) {
 }
 
 TaskAnalysis::TaskAnalysis(const IrProgram& program) : program_(program), dispatch_(program) {
+    if (program.hooks_elaborated) hooks_.emplace(program);
     for (const auto& body : program.bodies) bodies_.emplace(body.owner, &body);
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
@@ -442,6 +443,12 @@ void TaskAnalysis::callees(const IrNode& node, std::vector<std::pair<SymbolId, S
     switch (node.op) {
     case IrOp::Call:
         add(node.symbol);
+        break;
+    case IrOp::HookRead:
+    case IrOp::HookAdmit:
+        if (hooks_) {
+            for (const auto id : hooks_->targets(node)) add(id);
+        }
         break;
     case IrOp::VirtualCall: {
         // The union over every implementation the call can reach: every
@@ -846,6 +853,17 @@ void TaskAnalysis::check_tags() const {
             }
         }
     }
+}
+
+void check_task_safety(const IrProgram& program) {
+    const bool tasks = uses_tasks(program);
+    if (!tasks && std::ranges::none_of(program.symbols, [](const IrSymbol& item) {
+            return has_tag(item, TagId::ThreadSafe);
+        })) return;
+
+    const TaskAnalysis analysis(program);
+    analysis.check_tags();
+    if (tasks) analysis.check();
 }
 
 } // namespace neura

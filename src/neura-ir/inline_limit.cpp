@@ -88,6 +88,8 @@ Diagnostic inline_limit_diagnostic(const IrProgram& program, const IrType& type,
                                       " value words, more than the inline limit of " + std::to_string(max_inline_words))
                      .with_code("E0449");
     error.label("this type is stored inline");
+    if (HookIndex(program).contains_reference(program, type))
+        error.note("each policy-carrying reference contributes a handle and a uint32 policy word");
     if (type.kind == TypeKind::Enum)
         error.help("hold the payloads of the largest variants in a class, which is a reference");
     else
