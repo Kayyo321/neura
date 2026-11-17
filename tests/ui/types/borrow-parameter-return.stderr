@@ -1,0 +1,11 @@
+error[E0452]: primitive borrow returned without a long-lived owner
+ --> $DIR/borrow-parameter-return.nra:2:5
+  |
+1 | let escape = func(value: &int) -> &int {
+  |                   ----- borrow starts here
+2 |     return value;
+  |     ^^^^^^^^^^^^^
+  |
+  = help: keep the borrow within the binding's lifetime or use a field of a long-lived owner
+
+For more information about this error, try `neura explain E0452`.

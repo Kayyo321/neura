@@ -1,0 +1,3 @@
+let adder = func(offset: int) -> func(int) -> int {
+    return func(value: int) -> int => value + offset;
+};

@@ -1270,6 +1270,10 @@ private:
     void release_region(FrameStack& frames, std::size_t index) {
         auto handles = std::move(frames.regions[index].handles);
         frames.regions.erase(frames.regions.begin() + static_cast<std::ptrdiff_t>(index));
+        release_region_entries(handles);
+    }
+
+    void release_region_entries(const std::vector<std::uint64_t>& handles) {
         for (const auto handle : handles) {
             const auto item = heap_.find(handle);
             if (!item) continue;
@@ -1293,6 +1297,8 @@ private:
         if (scheduler_) {
             for (auto& [id, task] : scheduler_->tasks) release_regions_from(task.frames, 0);
         }
+        release_region_entries(static_handles_);
+        static_handles_.clear();
     }
 
     std::size_t region_index(std::uint64_t token) {
@@ -1315,9 +1321,13 @@ private:
     }
 
     // Makes the entry just created under `handle` an entry of region `index`.
-    void adopt(std::size_t index, std::uint64_t handle) {
+    std::vector<std::uint64_t>& region_handles(std::uint64_t token) {
+        return token == nvr::static_region_token ? static_handles_ : frames_.regions[region_index(token)].handles;
+    }
+
+    void adopt(std::vector<std::uint64_t>& handles, std::uint64_t handle) {
         heap_.set_region(heap_.find(handle));
-        frames_.regions[index].handles.push_back(handle);
+        handles.push_back(handle);
     }
 
     // Calls `visit(handle)` for each reference an entry holds.
@@ -1370,6 +1380,59 @@ private:
         const auto old = to.size();
         to.insert(to.end(), moved.begin(), moved.end());
         std::inplace_merge(to.begin(), to.begin() + static_cast<std::ptrdiff_t>(old), to.end());
+    }
+
+    // An owned return transfers all array entries reached through array
+    // components. They can be owned by different blocks of this frame.
+    void move_return_array(std::uint64_t handle, std::uint64_t token) {
+        auto& destination = region_handles(token);
+        const auto depth = frames_.size();
+        if (token != nvr::static_region_token && frames_.regions[region_index(token)].depth >= depth) {
+            fault(TrapKind::InvalidRegion, "a result region must belong to a caller");
+        }
+        const auto in_destination = [&](std::uint64_t item) { return std::ranges::binary_search(destination, item); };
+        const auto returning_region = [&](std::uint64_t item) {
+            const auto source = owning_region(item);
+            if (source == frames_.regions.size() || frames_.regions[source].depth != depth)
+                fault(TrapKind::InvalidRegion, "returned array is not owned by the returning frame");
+            return source;
+        };
+        const auto contains_arrays = [&](Heap::Ref item) {
+            const auto array = heap_.type(item);
+            const auto is_array = [&](std::uint32_t type_id) { return type(type_id).kind == nvr::TypeKind::Array; };
+            if (const auto* fields = components_of(array)) return std::ranges::any_of(*fields, is_array);
+            return is_array(type(array).reference);
+        };
+        if (in_destination(handle)) return;
+        if (!contains_arrays(entry(handle))) {
+            auto& source = frames_.regions[returning_region(handle)].handles;
+            source.erase(std::ranges::lower_bound(source, handle));
+            destination.insert(std::ranges::lower_bound(destination, handle), handle);
+            return;
+        }
+        std::map<std::size_t, std::set<std::uint64_t>> by_region;
+        std::set<std::uint64_t> moved;
+        std::vector<std::uint64_t> work{handle};
+        while (!work.empty()) {
+            const auto next = work.back();
+            work.pop_back();
+            if (moved.contains(next) || in_destination(next)) continue;
+            moved.insert(next);
+            by_region[returning_region(next)].insert(next);
+            const auto array = entry(next);
+            if (contains_arrays(array)) {
+                visit_references(array, [&](std::uint64_t child) {
+                    const auto item = heap_.find(child);
+                    if (item && heap_.kind(item) == EntryKind::Array) work.push_back(child);
+                });
+            }
+        }
+        for (const auto& [source, handles] : by_region) {
+            std::erase_if(frames_.regions[source].handles, [&](std::uint64_t item) { return handles.contains(item); });
+        }
+        const auto old = destination.size();
+        destination.insert(destination.end(), moved.begin(), moved.end());
+        std::inplace_merge(destination.begin(), destination.begin() + static_cast<std::ptrdiff_t>(old), destination.end());
     }
 
     void add_live_cells(std::uint64_t cells) {
@@ -1507,6 +1570,7 @@ private:
         for (const auto& region : frames_.regions) {
             for (const auto handle : region.handles) mark(handle);
         }
+        for (const auto handle : static_handles_) mark(handle);
         if (scheduler_) {
             const auto mark_typed = [&](std::uint64_t value, std::uint32_t value_type) {
                 if (value_type != nvr::absent && nvr::is_reference(type(value_type).kind)) mark(value);
@@ -1671,6 +1735,11 @@ private:
                 const_values_[i] = allocate_text(
                     kind == nvr::TypeKind::Text ? EntryKind::Text : EntryKind::Bytes, constant.type,
                     std::string_view(reinterpret_cast<const char*>(constant.payload.data()), constant.payload.size()));
+            } else if (nvr::is_static_object_constant(type(constant.type), constant)) {
+                if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+                add_stack_cells(Heap::object_cells(0), "static object constant of ");
+                const_values_[i] = heap_.create_object(type(constant.type).reference, 0);
+                adopt(static_handles_, const_values_[i]);
             } else {
                 std::uint64_t bits = 0;
                 for (std::size_t b = 0; b < constant.payload.size(); ++b) {
@@ -2602,7 +2671,8 @@ private:
     }
 
     // Finishes every item `list` names, in order, into a new array.
-    std::uint64_t finish_parallel_items(std::uint64_t list, std::uint32_t list_type, std::uint32_t array_type) {
+    std::uint64_t finish_parallel_items(std::uint64_t list, std::uint32_t list_type, std::uint32_t array_type,
+                                        std::optional<std::uint64_t> region_token) {
         const auto source = typed_entry(list, list_type);
         std::vector<std::uint64_t> ids(heap_.length(source));
         heap_.copy_out(source, ids.data(), ElementWidth::W8);
@@ -2616,7 +2686,13 @@ private:
             results.push(value);
             if (references) roots.push_back(value);
         }
-        return allocate(std::move(results), roots);
+        if (!region_token) return allocate(std::move(results), roots);
+        auto& handles = region_handles(*region_token);
+        if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+        add_stack_cells(ids.size() + 1, "region allocation of ");
+        const auto handle = heap_.create(std::move(results));
+        adopt(handles, handle);
+        return handle;
     }
 
     void check_scheduler_exit(const nvr::Exit& exit, const std::vector<std::uint64_t>& arguments,
@@ -2923,7 +2999,8 @@ private:
             break;
         case Op::ParallelFinish: {
             const auto slot_type = image_.functions[frame.function].frame_types[exit.result_slot];
-            const auto value = finish_parallel_items(arguments[0], exit.arguments[0].type, slot_type);
+            const auto token = arguments.size() == 2 ? std::optional{arguments[1]} : std::nullopt;
+            const auto value = finish_parallel_items(arguments[0], exit.arguments[0].type, slot_type, token);
             write_result(frames_.back(), exit.result_slot, value);
             break;
         }
@@ -3770,6 +3847,8 @@ private:
             return 0;
         }
         case nvr::StateOp::EnterRegion: {
+            if (region_serial_ == nvr::static_region_token - 1)
+                fault(TrapKind::InvalidRegion, "region token limit exceeded");
             const auto token = ++region_serial_;
             frames_.regions.push_back({token, frames_.size(), {}});
             return token;
@@ -3785,18 +3864,18 @@ private:
             return 0;
         }
         case nvr::StateOp::RegionObject: {
-            const auto index = region_index(args[0]);
+            auto& handles = region_handles(args[0]);
             if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
             const auto fields = image_.layouts[exit.immediate].fields.size();
             const auto cells = Heap::object_cells(fields);
             add_stack_cells(cells, "region allocation of ");
             const auto handle = heap_.create_object(exit.immediate, fields);
-            adopt(index, handle);
+            adopt(handles, handle);
             return handle;
         }
         case nvr::StateOp::RegionCollection:
         case nvr::StateOp::RegionRepeat: {
-            const auto index = region_index(args[0]);
+            auto& handles = region_handles(args[0]);
             if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
             const auto kind = type(exit.immediate).kind == nvr::TypeKind::Array ? EntryKind::Array : EntryKind::List;
             const auto width = collection_width(exit.immediate);
@@ -3822,12 +3901,15 @@ private:
                 for (std::size_t i = 1; i < args.size(); ++i) item.push(args[i]);
                 handle = heap_.create(std::move(item));
             }
-            adopt(index, handle);
+            adopt(handles, handle);
             return handle;
         }
         case nvr::StateOp::MoveToRegion:
+            // A pooled enum word can be the nil collection when inactive.
+            if (exit.immediate == 1 && args[0] == 0) return 0;
             typed_entry(args[0], types[0].type);
-            move_to_region(args[0], args[1]);
+            if (exit.immediate == 1) move_return_array(args[0], args[1]);
+            else move_to_region(args[0], args[1]);
             return 0;
         case nvr::StateOp::FreeObject: {
             const auto item = typed_entry(args[0], types[0].type);
@@ -4369,6 +4451,7 @@ private:
     std::uint64_t live_stack_cells_ = 0;
     std::uint64_t peak_stack_cells_ = 0;
     std::uint64_t region_serial_ = 0;
+    std::vector<std::uint64_t> static_handles_;
     std::map<std::uint64_t, std::uint64_t> released_handles_;
     FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.

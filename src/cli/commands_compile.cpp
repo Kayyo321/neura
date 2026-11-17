@@ -11,6 +11,7 @@
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/tags.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
@@ -204,8 +205,9 @@ int emit_ir(const Options& options) {
     // default listing is what conversion receives: specialized and optimized.
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
         neura::specialize(program);
+        neura::check_storage(program, neura::StorageStage::Specialized);
+        neura::materialize_reference_storage(program);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
@@ -353,8 +355,9 @@ namespace {
 // listed once for each specialization the program uses.
 int task_safety_report(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     const neura::TaskAnalysis analysis(program);
     const auto file_of = [&](neura::SymbolId id) {
         for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
@@ -418,17 +421,10 @@ int task_safety_report(neura::IrProgram program) {
 }
 
 int check_program(neura::IrProgram program) {
-    const bool thread_safe_tags = std::any_of(program.symbols.begin(), program.symbols.end(), [](const auto& item) {
-        return neura::has_tag(item, neura::TagId::ThreadSafe);
-    });
-    if (neura::uses_tasks(program) || thread_safe_tags) {
-        // The isolation rules of a spawn, and the #ThreadSafe check, need
-        // concrete types, which exist after specialization (Concurrency.md
-        // section 5).
-        neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
-        neura::specialize(program);
-    }
+    neura::require_valid_ir(program, "before specialization");
+    neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     return 0;
 }
 

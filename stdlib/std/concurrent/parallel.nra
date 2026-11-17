@@ -39,7 +39,7 @@ export let Parallel = module (
     export let map = func<T, U>(items: T[], worker: func(T) -> U, limits: ItemLimits) -> U[] {
         last started: uint64[list] = new;
         for (let item: T in items) {
-            started.append(start<U>(func -> U => worker(item), limits.max_steps, limits.max_heap_cells));
+            started.append(start<U>(new func -> U => worker(item), limits.max_steps, limits.max_heap_cells));
         }
         return finish<U>(started);
     };

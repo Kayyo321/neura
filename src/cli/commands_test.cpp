@@ -9,6 +9,7 @@
 #include "neura-ir/ir.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/fleet.hpp"
 #include "nvm/host.hpp"
@@ -138,8 +139,9 @@ int run_tests(const Options& options) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
                                  "test_* in a module of the listed files");
     }
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
     neura::check_containment(program);
     neura::check_inline_limit(program);
     if (options.optimize) {

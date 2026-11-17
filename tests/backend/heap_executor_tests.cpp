@@ -290,12 +290,14 @@ export let Main = module : program.Entry (
         let bytes: uint8[list] = new([1, 2, 3]);
         let flags: bool[] = [true, false];
         let reals: float64[list] = new([1.5]);
+        let numbers: int[list] = new([1, 2, 3]);
         let words: string[] = ["a", "b"];
         let digest = sha256s.of(bytes);
         let doubled = parallel.map<int, int>([1, 2, 3], twice, parallel.limits(100000, 100000));
         let echoed = parallel.map<string, string>(words, echo, parallel.limits(100000, 100000));
         console.print_line(digest.length.to_string() + " " + doubled[2].to_string() + " " + echoed[1] + " " +
-                           arguments[0] + " " + flags.length.to_string() + " " + reals.length.to_string());
+                           arguments[0] + " " + flags.length.to_string() + " " + reals.length.to_string() + " " +
+                           numbers.length.to_string());
         return program.ExitCode.Ok;
     };
 );
