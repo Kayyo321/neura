@@ -1,0 +1,7 @@
+error[E0403]: expected int32, got string
+ --> $DIR/generator-yield-type.nra:3:11
+  |
+3 |     yield "text";
+  |           ^^^^^^ expected int32, found string
+
+For more information about this error, try `neura explain E0403`.

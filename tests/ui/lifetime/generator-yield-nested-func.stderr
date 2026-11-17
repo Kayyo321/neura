@@ -1,0 +1,11 @@
+error[E0222]: 'yield' is only a statement in the body of an 'iterator'
+ --> $DIR/generator-yield-nested-func.nra:5:9
+  |
+4 |     let inner = func(value: int) -> void {
+  |                 ---- this function is not a generator
+5 |         yield value;
+  |         ^^^^^
+  |
+  = help: declare a generator with 'iterator(...) -> T { ... }' and yield in its body
+
+For more information about this error, try `neura explain E0222`.

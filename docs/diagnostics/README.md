@@ -40,6 +40,8 @@ Errors about the grammar.
 | [E0214](E0214.md) | parameter without a type |
 | [E0219](E0219.md) | malformed defer statement |
 | [E0220](E0220.md) | malformed using statement |
+| [E0221](E0221.md) | malformed generator or yield |
+| [E0222](E0222.md) | yield outside a generator |
 | [E0225](E0225.md) | positional argument after a named argument |
 | [E0226](E0226.md) | default value on a parameter that takes none |
 | [E0227](E0227.md) | malformed interpolated string |
@@ -128,6 +130,9 @@ Errors about types, values, calls, and statements.
 | [E0473](E0473.md) | using in a function that cannot return a close error |
 | [E0474](E0474.md) | using resource that cannot be closed |
 | [E0475](E0475.md) | scoped resource leaves its using block |
+| [E0476](E0476.md) | yield with cleanup pending |
+| [E0477](E0477.md) | storage that cannot outlive a suspension |
+| [E0478](E0478.md) | return with a value in a generator |
 | [E0480](E0480.md) | conflicting inferred type arguments |
 | [E0481](E0481.md) | lambda does not fit its callable context |
 | [E0482](E0482.md) | unknown argument label |

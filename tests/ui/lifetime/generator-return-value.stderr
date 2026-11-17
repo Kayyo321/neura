@@ -1,0 +1,12 @@
+error[E0478]: a generator's values come from 'yield'; 'return' only ends it
+ --> $DIR/generator-return-value.nra:4:12
+  |
+4 |     return 1;
+  |            ^
+  |
+help: yield the value, then end the generator
+  |
+4 |     yield 1; return;
+  |     ~~~~~~~~~~~~~~~~
+
+For more information about this error, try `neura explain E0478`.

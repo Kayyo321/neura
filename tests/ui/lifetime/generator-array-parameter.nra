@@ -1,0 +1,4 @@
+// Edge case 74: a generator's parameter cannot be an array.
+let numbers = iterator(items: int[]) -> int {
+    yield items[0];
+};

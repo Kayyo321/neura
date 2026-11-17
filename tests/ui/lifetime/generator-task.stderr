@@ -1,0 +1,13 @@
+error[E0602]: a value of type Sequence<int32> is not transferable, so it cannot be given to a spawned task
+  --> $DIR/generator-task.nra:9:23
+   |
+ 9 |         spawn consume(numbers());
+   |                       ^^^^^^^^^ not transferable
+  ::: /home/dev/neura-m8-int/stdlib/std/collections/sequence.nra:19:25
+   |
+19 |     #[Final, NoDiscard, NotThreadSafe]
+   |                         ------------- 'Sequence<int32>' is marked #NotThreadSafe here
+   |
+   = note: the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that holds them
+
+For more information about this error, try `neura explain E0602`.

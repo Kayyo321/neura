@@ -1,0 +1,9 @@
+error[E0221]: 'yield' takes one value
+ --> $DIR/generator-yield-nothing.nra:3:10
+  |
+3 |     yield;
+  |          ^ expected the value to yield
+  |
+  = help: a generator ends with 'return;' or at the end of its body
+
+For more information about this error, try `neura explain E0221`.

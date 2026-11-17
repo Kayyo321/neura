@@ -1,0 +1,6 @@
+// Edge case 72: a yield after a deferred call in an enclosing block.
+let cleanup = func() -> void {};
+let numbers = iterator() -> int {
+    defer cleanup();
+    yield 1;
+};

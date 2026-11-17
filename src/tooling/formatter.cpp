@@ -87,6 +87,8 @@ struct Hints {
     // The '(' of a `using` statement, spaced like the one after `scope`;
     // `using` is a contextual word, so its calls keep no space.
     std::set<std::size_t> control_parens;
+    // The '(' that begins the value of a `yield`, which keeps its space.
+    std::set<std::size_t> keyword_operands;
 };
 
 class SyntaxHints {
@@ -227,7 +229,8 @@ private:
         bool found_body = false;
         in_span(value.span, [&](const Token& token) {
             if (!head && (token.text == "class" || token.text == "module" || token.text == "interface" ||
-                          token.text == "enum" || token.text == "singleton" || token.text == "func")) head = true;
+                          token.text == "enum" || token.text == "singleton" || token.text == "func" ||
+                          (value.generator && token.text == "iterator"))) head = true;
             else if (head && !found_body) {
                 if (token.text == "<" || token.text == ">") hints_.angles.insert(token.span.offset);
                 if (token.text == "(") {
@@ -287,6 +290,8 @@ private:
     }
 
     void statement(const Statement& value) {
+        if (value.kind == Statement::Kind::Yield && !value.expressions.empty())
+            hints_.keyword_operands.insert(value.expressions.front().span.offset);
         if (value.kind == Statement::Kind::Using) {
             in_span(value.span, [&, done = false](const Token& token) mutable {
                 if (!done && token.text == "(") hints_.control_parens.insert(token.span.offset);
@@ -455,7 +460,8 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             const bool control = before == "if" || before == "while" || before == "for" || before == "match" ||
                                  before == "scope" || match_is || hints.control_parens.contains(item.offset);
             const bool body = hints.bodies.contains(item.offset);
-            space = control || body || before == "module" || before == "class" || before == "interface" || before == "enum" || before == "singleton";
+            space = control || body || before == "module" || before == "class" || before == "interface" || before == "enum" || before == "singleton" ||
+                    hints.keyword_operands.contains(item.offset);
             out.text(text, indent(), space);
             const bool multiline = body && next != ")";
             delimiters.push_back({text, multiline, control});

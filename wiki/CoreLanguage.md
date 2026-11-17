@@ -366,6 +366,33 @@ let first_bytes = func(path: paths.Path) -> Result<int> {
 };
 ```
 
+### Generators
+
+`iterator(parameters) -> T { body }` is a generator: a function value of type `func(parameters) -> Sequence<T>`, with `Sequence` the class of `Std.Collections.Sequence` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Lifetime030.md), implemented, proposed). It is written wherever `func` is: as a binding's initializer, as a member of a class or module, where it may read `instance`, or as an argument; a named one may have type parameters. The element type is required ([E0221](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0221.md)), and the parameters follow the grouped-parameter rules. Calling a generator evaluates its arguments, allocates its state and returns a sequence; it runs none of the body. In the body, `yield value;` gives the next element, checked against `T`; `return;` and the end of the body finish the generator, and `return value;` is [E0478](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0478.md). `yield` is a statement only directly in a generator's body ([E0222](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0222.md)); there a binding named `yield` is [E0311](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0311.md).
+
+The sequence is lazy. The first `has_next()` with nothing buffered runs the body to its next `yield` or its end; further calls while a value is buffered run nothing. `next()` returns the buffered value, after running the body as `has_next()` does when nothing is buffered, and never runs past the `yield` it consumes. After the body ends, `has_next()` is false and `next()` traps with `no such element`. Advancing a generator from inside its own body traps with `invalid state: generator already running`, and separate calls give independent generators. The sequence is used once, as every `Sequence` is, and abandoning it, for example with `break` in the loop that consumes it, runs nothing more.
+
+A generator suspends at each `yield`, so the bindings in scope there live in its state. A `yield` is not inside a `scope` block and does not follow a `defer` in a block that encloses it ([E0476](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0476.md)), and no array, primitive reference, or tuple or enum that holds one is in scope at a `yield`, nor is a parameter of such a type ([E0477](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0477.md)); a list is the owned alternative, and an array in a block that ends before the next `yield` is accepted. A generator's body holds no `using`, since it returns no `Result` ([E0473](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0473.md)); a lambda inside it may.
+
+`iterator` begins a generator only when it is followed by an optional `<...>`, a balanced `(...)`, and `->` or `{`, so `collection.iterator()`, `let iterator = ...` and a call `iterator(x)` keep their meaning.
+
+<!-- example: check -->
+```neura
+let squares = iterator(count: int) -> int {
+    for (let index = 0; index < count; index++) {
+        yield index * index;
+    }
+};
+
+let small = func() -> int {
+    let total = 0;
+    for (let square: int in squares(10).filter(func(value: int) -> bool => value < 30)) {
+        total = total + square;
+    }
+    return total;
+};
+```
+
 ## Loops
 
 Neura supports pre-test, post-test, infinite, three-part, and for-each loops. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.

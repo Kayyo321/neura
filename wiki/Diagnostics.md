@@ -43,6 +43,8 @@ Errors about the grammar.
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
 | [E0219](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0219.md) | malformed defer statement |
 | [E0220](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0220.md) | malformed using statement |
+| [E0221](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0221.md) | malformed generator or yield |
+| [E0222](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0222.md) | yield outside a generator |
 | [E0225](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0225.md) | positional argument after a named argument |
 | [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
 | [E0227](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0227.md) | malformed interpolated string |
@@ -131,6 +133,9 @@ Errors about types, values, calls, and statements.
 | [E0473](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0473.md) | using in a function that cannot return a close error |
 | [E0474](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0474.md) | using resource that cannot be closed |
 | [E0475](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0475.md) | scoped resource leaves its using block |
+| [E0476](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0476.md) | yield with cleanup pending |
+| [E0477](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0477.md) | storage that cannot outlive a suspension |
+| [E0478](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0478.md) | return with a value in a generator |
 | [E0480](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0480.md) | conflicting inferred type arguments |
 | [E0481](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0481.md) | lambda does not fit its callable context |
 | [E0482](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0482.md) | unknown argument label |

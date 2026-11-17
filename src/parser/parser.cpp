@@ -52,6 +52,15 @@ private:
     bool stopped_ = false;
     unsigned block_depth_ = 0;
     std::optional<Span> untyped_variadic_;
+    // The function bodies being parsed, innermost last, and whether each is
+    // a generator's (docs/design/Lifetime030.md): `yield` is a statement
+    // only directly in a generator's body. `keyword` is the `func` or
+    // `iterator` that begins it.
+    struct BodyKind {
+        bool generator;
+        Span keyword;
+    };
+    std::vector<BodyKind> bodies_;
 
     const Token& current() const { return tokens_[cursor_]; }
     bool at_end() const { return current().kind == TokenKind::End; }
@@ -235,6 +244,10 @@ private:
     // The name a declaration introduces. `nameof` is an operator from
     // 0.3.0, recognized without name lookup, so nothing is named so.
     const Token& declared_name() {
+        if (at_contextual("yield") && in_generator_body())
+            throw Diagnostic(current().span, "'yield' is a reserved name in a generator body").with_code("E0311")
+                .label("'yield' gives the generator's next value here")
+                .help("choose another name");
         if (at_contextual("nameof"))
             throw Diagnostic(current().span, "'nameof' is a reserved name").with_code("E0311")
                 .label("'nameof' is an operator, so no declaration takes its name")
@@ -571,6 +584,7 @@ private:
 
     // Return true when an expression body still needs its terminating semicolon.
     bool function_body(Declaration& result, std::string_view branch_keyword = {}, bool lambda = false) {
+        const BodyScope scope(*this, false);
         result.parameters = parameters(lambda ? &result.untyped_parameters : nullptr);
         result.result_written = at("->");
         result.type = match("->") ? type() : TypeSyntax{current().span, "void", {}, {}};
@@ -924,6 +938,9 @@ private:
                     auto cast = cast_tail(function_start, std::move(postfix));
                     result.initializer = expression_tail(function_start, std::move(cast), 1);
                 }
+            } else if (!result.cast_target && !result.type && block_depth_ == 0 && at_generator()) {
+                named_generator(result);
+                result.span = span_from(start);
             } else if (match("enum")) {
                 definition_has_no_annotation(result);
                 result.kind = Declaration::Kind::Enum;
@@ -1271,6 +1288,10 @@ private:
             result = defer_statement();
         } else if (at_using_statement()) {
             result = using_statement();
+        } else if (at_contextual("yield") && in_generator_body()) {
+            result = yield_statement();
+        } else if (at_yield_outside_generator()) {
+            throw yield_outside_generator();
         } else if (at_contextual("select") && next_is(1, "{")) {
             result.kind = Statement::Kind::Select;
             result.keyword = advance().span;
@@ -2100,6 +2121,11 @@ private:
             result.match = std::make_shared<Statement>(std::move(statement));
             return result;
         }
+        if (at_generator()) return generator_expression(start);
+        if (at_contextual("yield") && in_generator_body())
+            throw Diagnostic(current().span, "'yield' is a statement").with_code("E0221")
+                .label("'yield' gives the generator's next value; it is not an expression")
+                .help("write 'yield value;' on its own line");
         if (match("func")) {
             auto lambda = std::make_shared<Declaration>();
             lambda->kind = Declaration::Kind::Function;

@@ -1,5 +1,6 @@
 #include "scoped_resources.hpp"
 
+#include "dispatch.hpp"
 #include "purity.hpp"
 
 #include <algorithm>
@@ -23,12 +24,8 @@ bool is_token(const IrProgram& program, const IrNode& node) {
 
 class ScopeCheck {
 public:
-    ScopeCheck(const IrProgram& program, const PurityAnalysis& purity) : program_(program), purity_(purity) {
-        for (SymbolId id = 0; id < program.symbols.size(); ++id) {
-            const auto overridden = program.symbols[id].overrides;
-            if (overridden != no_symbol) overriders_[overridden].push_back(id);
-        }
-    }
+    ScopeCheck(const IrProgram& program, const PurityAnalysis& purity)
+        : program_(program), purity_(purity), dispatch_(program) {}
 
     // Finds the `using` blocks of a statement list and of the statement
     // regions nested in it.
@@ -47,7 +44,7 @@ public:
 private:
     const IrProgram& program_;
     const PurityAnalysis& purity_;
-    std::map<SymbolId, std::vector<SymbolId>> overriders_;
+    DispatchTargets dispatch_;
     // The block being checked: its binding's name and `using` keyword, the
     // locals that may hold the resource or a value retaining it, the locals
     // declared inside the block, and the task scopes entered inside it.
@@ -144,25 +141,14 @@ private:
         }
     }
 
-    // The functions a call may run: the callee and every method that
-    // overrides it.
-    std::vector<SymbolId> targets(SymbolId callee) const {
-        std::vector<SymbolId> result{callee};
-        for (std::size_t i = 0; i < result.size(); ++i) {
-            if (const auto found = overriders_.find(result[i]); found != overriders_.end())
-                for (const auto overrider : found->second)
-                    if (std::ranges::find(result, overrider) == result.end()) result.push_back(overrider);
-        }
-        return result;
-    }
-
     // The worst retention of `slot` over the functions the call may run. A
     // declaration without code (an interface's or abstract method) runs
     // nothing itself; a call with no code to run at all is unknown.
-    Retention retention(SymbolId callee, std::size_t slot, bool dispatched) const {
+    Retention retention(const IrNode& call, std::size_t slot, bool dispatched) const {
+        const auto callee = call.symbol;
         auto worst = Retention::NotRetained;
         bool code = false;
-        for (const auto target : dispatched ? targets(callee) : std::vector<SymbolId>{callee}) {
+        for (const auto target : dispatched ? dispatch_.of(call) : std::vector<SymbolId>{callee}) {
             if (target >= program_.symbols.size()) return Retention::Unknown;
             const auto& item = symbol(target);
             if (dispatched && !item.has_body && !item.external) continue;
@@ -178,7 +164,9 @@ private:
     // object, which is the result: a parameter that only becomes reachable
     // from it is retained by the result.
     Retention constructed(SymbolId init, std::size_t slot) const {
-        const auto kind = retention(init, slot, false);
+        IrNode call;
+        call.symbol = init;
+        const auto kind = retention(call, slot, false);
         if (kind != Retention::Elsewhere) return kind;
         const auto* summary = purity_.summary(init);
         const auto has = [&](const PurityAnalysis::Roots& roots) {
@@ -199,7 +187,7 @@ private:
             const auto& operand = node.operands[i];
             if (!expression(operand)) continue;
             const auto kind = node.op == IrOp::Allocate ? constructed(node.symbol, first_slot + i)
-                                                        : retention(node.symbol, first_slot + i, dispatched);
+                                                        : retention(node, first_slot + i, dispatched);
             if (kind == Retention::NotRetained) continue;
             if (kind == Retention::ByResult) {
                 result = true;

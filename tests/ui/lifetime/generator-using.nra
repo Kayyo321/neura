@@ -1,0 +1,12 @@
+// Edge case 48: a generator's body holds no `using` of its own.
+let closeable = import:Std.Io.Closeable;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let Resource = class implements closeable.Closeable (
+    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
+);
+let numbers = iterator() -> int {
+    using (source = new Resource()) {
+        yield 1;
+    }
+};

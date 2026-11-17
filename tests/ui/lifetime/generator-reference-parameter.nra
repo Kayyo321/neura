@@ -1,0 +1,4 @@
+// Edge case 74: a generator's parameter cannot be a primitive reference.
+let numbers = iterator(count: &int) -> int {
+    yield count;
+};
