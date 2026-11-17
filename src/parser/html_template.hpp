@@ -1,6 +1,7 @@
 #pragma once
 
 #include "syntax.hpp"
+#include "css_stylesheet.hpp"
 
 #include <variant>
 
@@ -81,6 +82,7 @@ struct StylesheetSyntax {
     bool module;
     // CssIsland for inline CSS, String for a path read by the source loader.
     Token source;
+    std::optional<StylesheetBody> body{};
 };
 
 TemplateSyntax parse_template(std::string_view body, Span origin);

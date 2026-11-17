@@ -311,6 +311,7 @@ add_library(neura_compiler STATIC
     src/cli/source_docs.cpp
     src/lexer/island.cpp
     src/lexer/lexer.cpp
+    src/parser/css_stylesheet.cpp
     src/parser/html_template.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
@@ -608,6 +609,12 @@ if(BUILD_TESTING)
     target_link_libraries(neura_html_template_tests PRIVATE neura_compiler)
     neura_target_defaults(neura_html_template_tests)
     add_test(NAME parser-html-templates COMMAND neura_html_template_tests)
+
+    add_executable(neura_css_stylesheet_tests tests/parser/css_stylesheet_tests.cpp)
+    target_link_libraries(neura_css_stylesheet_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_css_stylesheet_tests)
+    add_test(NAME parser-css-stylesheets COMMAND neura_css_stylesheet_tests)
+
     add_test(NAME app-html-typed COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/html/typed.py" "$<TARGET_FILE:neura>")
     set_tests_properties(app-html-typed PROPERTIES TIMEOUT 180)

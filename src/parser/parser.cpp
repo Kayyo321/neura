@@ -1770,15 +1770,23 @@ private:
             .label(std::move(reason)).help("write 'css { ... }' or 'css.module { ... }'");
     }
 
-    Expr stylesheet(std::size_t start) {
+    Expr stylesheet(std::size_t start, bool validate_body = true) {
         advance(); // css
         const bool module = match(".");
         if (module && !match("module")) throw malformed_stylesheet(start, "only '.module' can follow 'css'");
         if (current().kind != TokenKind::CssIsland && !at_contextual("from"))
             throw malformed_stylesheet(start, "expected a body or 'from'");
         auto source = at_contextual("from") ? form_path() : advance();
+        std::optional<StylesheetBody> body;
+        if (validate_body && source.kind == TokenKind::CssIsland) {
+            auto contents = source.span;
+            ++contents.column;
+            ++contents.offset;
+            contents.length = source.text.size();
+            body = parse_stylesheet(source.text, std::move(contents), module);
+        }
         auto result = make_expression(Expr::Kind::Stylesheet, span_from(start));
-        result.stylesheet = std::make_shared<StylesheetSyntax>(StylesheetSyntax{module, std::move(source)});
+        result.stylesheet = std::make_shared<StylesheetSyntax>(StylesheetSyntax{module, std::move(source), std::move(body)});
         return result;
     }
 
@@ -1819,13 +1827,13 @@ private:
         if (match("new")) {
             if (at_html_factory()) return html_factory(start, true);
             if (at_stylesheet()) {
-                (void)stylesheet(cursor_);
+                (void)stylesheet(cursor_, false);
                 throw misplaced_stylesheet(span_from(start));
             }
             return new_expression(start, branch_keyword);
         }
         if (at_html_factory()) return html_factory(start, false);
-        if (at_stylesheet()) throw misplaced_stylesheet(stylesheet(start).span);
+        if (at_stylesheet()) throw misplaced_stylesheet(stylesheet(start, false).span);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&

@@ -53,8 +53,10 @@ NEURA_DIAGNOSTIC(E0249, "malformed control block")
 NEURA_DIAGNOSTIC(E0250, "malformed binding directive")
 NEURA_DIAGNOSTIC(E0251, "not allowed in a template")
 NEURA_DIAGNOSTIC(E0252, "malformed css declaration")
+NEURA_DIAGNOSTIC(E0253, "malformed stylesheet")
 NEURA_DIAGNOSTIC(E0254, "malformed from clause")
 NEURA_DIAGNOSTIC(E0255, "html or css form not allowed here")
+NEURA_DIAGNOSTIC(E0256, "malformed CSS module construct")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")

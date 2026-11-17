@@ -54,8 +54,10 @@ Errors about the grammar.
 | [E0250](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0250.md) | malformed binding directive |
 | [E0251](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0251.md) | not allowed in a template |
 | [E0252](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0252.md) | malformed css declaration |
+| [E0253](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0253.md) | malformed stylesheet |
 | [E0254](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0254.md) | malformed from clause |
 | [E0255](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0255.md) | html or css form not allowed here |
+| [E0256](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0256.md) | malformed CSS module construct |
 
 ## E03xx: Names
 

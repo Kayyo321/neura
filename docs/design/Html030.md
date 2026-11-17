@@ -132,12 +132,12 @@ The tables are frozen data in `src/parser/html_tables.inc`, generated into the l
 | Rule | Status |
 | --- | --- |
 | A stylesheet form is the whole initializer of a module-level `const`. It has the type `ui.Stylesheet`, or `ui.StyleModule` for `css.module`. `new css`, a `css` form in an expression, in a function or as an argument is `E0255`. | proposed |
-| The text is kept as written. Selectors, custom properties, media and container queries, layers, keyframes, nesting, vendor prefixes and properties the compiler has never heard of pass through. The only errors are in token and block structure (`E0253`): an unterminated string, comment or `url(`, an unbalanced bracket. | proposed |
+| The text is kept as written. Selectors, custom properties, media and container queries, layers, keyframes, nesting, vendor prefixes and properties the compiler has never heard of pass through. The structural reader reports `E0253` for an unterminated string, comment or `url(`, or an unbalanced delimiter in the CSS body. An inline island whose outer closing brace cannot be identified still reports `E0241`. | structural reader implemented |
 | There is no hole in CSS. A `{` is a CSS brace. | proposed |
 | Nothing is minified in 0.3.0. The build changes three things only: module names, `url(...)` references, and `@import` targets. | proposed |
 | `url(...)` and a local `@import` are resolved relative to the stylesheet's source file. The target is hashed, copied into the bundle and the reference rewritten; an `@import` stays an `@import`, so conditions and layers keep their meaning. A cycle of imports, a missing file, or a remote URL whose origin the manifest does not list under `style` is `E1013`. | proposed |
-| `css.module` renames every class selector and every `@keyframes` name the sheet declares, and every use of such a keyframes name in `animation-name` or `animation` in the same sheet. Identifiers, strings, custom properties and attribute selectors are not touched. `:global(...)` is removed and its content left as written; `:global` without parentheses and `:local` are `E0256`. | proposed |
-| A renamed name is `name__h`, where `h` is the first 10 characters of the lowercase base-32 SHA-256 of the package name, the stylesheet's key and the local name, separated by NUL bytes. The key is the source path relative to the package root for a file, and the constant's qualified name for an inline sheet. The name does not depend on the sheet's content. | proposed |
+| `css.module` renames class selectors, identifier-spelled `@keyframes` declarations and references to those declarations in `animation-name` and `animation`. The shorthand uses CSS animation keyword precedence. Strings, unrelated identifiers, custom properties and attribute selectors keep their spelling. `:global(...)` is removed and its content kept as written. `:global` without parentheses and `:local` report `E0256`. | module analysis and rewrite implemented, stylesheet lowering proposed |
+| A renamed name is `name__h`, where `h` is the first 10 characters of the lowercase base-32 SHA-256 of the package name, the stylesheet's key and the local name, separated by NUL bytes. The key is the source path relative to the package root for a file, and the constant's qualified name for an inline sheet. The name uses the decoded CSS identifier and is independent of the sheet's content. Rewriting appends the suffix to the original identifier spelling. | module name generation implemented |
 | `Styles.class_name("row")` and `Styles.keyframes_name("fade")` are constant strings. The argument is a string literal that names a declared export; anything else is `E1012`. | proposed |
 | Stylesheets are linked from `index.html` in a fixed order: the manifest's `styles` in the order listed, then every stylesheet constant reachable from the target's entry, in module initialization order and then source order. A sheet is listed once, by content digest. The order does not depend on when a component mounts, and unmounting removes nothing. | proposed |
 
@@ -362,7 +362,7 @@ Rejected:
 71. `bind:value={x}`, `on:={f}`, `on:click="save()"`: `E0250`.
 72. `<script>`, `<style>`, `onclick="save()"`, `style="color: red"`, `<!doctype html>`, `{...attributes}`, `<{tag}>`: `E0251`.
 73. `css.global { }`: `E0252`.
-74. `css { .a { color: red; }` with the inner brace unclosed, and `content: "abc` unterminated: `E0253`.
+74. An unbalanced delimiter inside a framed CSS body, or an unterminated string in an external stylesheet, reports `E0253`. With only one closing brace in `css { .a { color: red; }` at end of input, the lexer balances the inner CSS block and reports the missing outer delimiter as `E0241`.
 75. `css from path_variable`, `html(x: int) from "a" + ".html"`: `E0254`.
 76. `new css { }`, `let f = func() { const S = css { }; };`, `use(css { })`: `E0255`.
 77. `:global .a { }`: `E0256`.
