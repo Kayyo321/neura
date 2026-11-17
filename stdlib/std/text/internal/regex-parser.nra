@@ -22,9 +22,22 @@ export let RegexParser = module (
         Class { ranges: uint32[list], negated: bool },
         Concat(Node[list]),
         Alternate(Node[list]),
-        Repeat { item: Node, min: int, max: int, greedy: bool },
-        Group { item: Node, index: int },
+        Repeat { item: NodeLink, min: int, max: int, greedy: bool },
+        Group { item: NodeLink, index: int },
         Assert(Anchor)
+    );
+
+    /// @brief The link from a Repeat or Group node to the node it holds. An enum value is stored inline, so a
+    /// Node cannot hold another Node directly; the class holds it by reference instead.
+    #Final
+    export let NodeLink = class (
+        /// @brief The node that the Repeat or Group holds.
+        export last node: Node;
+
+        /// @brief Links to the given node.
+        export let init = func(value: Node) {
+            node = value;
+        };
     );
 
     /// @brief The maximum accepted explicit repetition count.
@@ -278,7 +291,7 @@ export let RegexParser = module (
             if (failed) {
                 return [Node.Empty, 0];
             }
-            return [Node.Repeat { item: atom, min: min, max: max, greedy: greedy }, total];
+            return [Node.Repeat { item: new NodeLink(atom), min: min, max: max, greedy: greedy }, total];
         };
 
         /// @brief {n}, {n,}, or {n,m} at the current position.
@@ -426,7 +439,7 @@ export let RegexParser = module (
             }
             last total = inner_size + 2;
             check_size(total, open);
-            return [Node.Group { item: inner, index: index }, total];
+            return [Node.Group { item: new NodeLink(inner), index: index }, total];
         };
 
         /// @brief An identifier ended by >, unique among the pattern's group names.
@@ -708,8 +721,8 @@ export let RegexParser = module (
             Node.Class { ranges: _, negated: _ } => false,
             Node.Concat(items) => all_nullable(items),
             Node.Alternate(branches) => any_nullable(branches),
-            Node.Repeat { item, min, max: _, greedy: _ } => min == 0 || nullable(item),
-            Node.Group { item, index: _ } => nullable(item),
+            Node.Repeat { item, min, max: _, greedy: _ } => min == 0 || nullable(item.node),
+            Node.Group { item, index: _ } => nullable(item.node),
             Node.Assert(_) => true,
         };
     };

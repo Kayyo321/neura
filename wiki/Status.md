@@ -79,6 +79,7 @@ Decisions this release takes for a part of an open area, scoped to what it imple
 - An instance field without an initializer starts uninitialized, and reading it before a store faults. Static fields follow the preparation and first-use rules in [Static initialization](Types#static-initialization). Construction and `destroy` follow the order in [Object lifecycle](ObjectLifecycle).
 - In an NVR 1.5 or later image with a `TRNS` table, live frames of every task count toward `--max-heap-cells` (one cell per frame plus one per slot), as do task records and open scopes; `--max-frames` bounds each task's depth. Images without tasks keep their accounting.
 - `Console.print_line` traps with reason 3 when the write fails, and a failed `Std.Test` assertion is a message trap with reason 3.
+- Tuples and payload enums are stored inline as value words, boxed only where the runtime carries one word ([Backend](Backend#tuples-and-enums-are-words)). A value type that contains itself is `E0448` and one of more than 64 words is `E0449`, both reported on the specialized program before optimization.
 
 ## Examples
 

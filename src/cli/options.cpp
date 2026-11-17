@@ -71,6 +71,8 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         options.limits.max_frames = static_cast<std::uint32_t>(value);
     } else if (arg == "--max-heap-cells") {
         options.limits.max_heap_cells = parse_limit(arg, next());
+    } else if (arg == "--max-stack-cells") {
+        options.limits.max_stack_cells = parse_limit(arg, next());
     } else if (arg == "--allow-fs") {
         // Every path, replacing any earlier prefix list.
         options.capabilities.fs = true;
@@ -413,10 +415,6 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-lift-hints applies only to build");
             }
             options.lift_hints = false;
-        } else if (arg == "--max-stack-cells") {
-            // Not part of a native policy: the container records no stack limit.
-            if (!runs) throw std::runtime_error("--max-stack-cells applies only to run and test");
-            options.limits.max_stack_cells = parse_limit(arg, next());
         } else if (arg == "--tier=0" || arg == "--tier=1" || arg == "--tier=2") {
             if (!runs) throw std::runtime_error("--tier applies only to run and test");
             options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');

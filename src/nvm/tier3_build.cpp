@@ -249,6 +249,7 @@ private:
         f_->slot_count = slots_;
         f_->parameter_count = region_.parameter_count;
         f_->uses_float = region_.uses_float;
+        f_->enters_region = region_.enters_region;
         // A function with an inline kernel keeps K as an SSA value, and its
         // native code depends on the floating-point environment.
         for (const auto& op : region_.code) {
@@ -256,6 +257,16 @@ private:
                 inline_sqrt(image_, *region_.exits[op.index])) {
                 f_->inline_kernels = true;
                 f_->uses_float = true;
+            }
+        }
+        // The most words a Return hands over (Context::result_words).
+        for (const auto& op : region_.code) {
+            const auto words = op.code == Code::Return ? std::max<std::size_t>(op.width, 1)
+                               : op.code == Code::Call ? 1 + image_.functions.at(op.a).more_results.size()
+                                                       : 1;
+            if (words > Context::max_result_words) {
+                error_ = "a function with more than " + std::to_string(Context::max_result_words) + " result words";
+                return;
             }
         }
         f_->programs.push_back(&region_);
@@ -361,6 +372,13 @@ private:
             default: break;
             }
             if (dst != none && dst < slots_) assigned_[dst] = 1;
+            // The words after the first of a function with several result
+            // words (NVR 1.7) land in the slots after the result slot.
+            if (op.code == Code::Call && dst != none) {
+                for (std::size_t word = 1; word <= image_.functions.at(op.a).more_results.size(); ++word) {
+                    if (dst + word < slots_) assigned_[dst + word] = 1;
+                }
+            }
         }
         for (std::uint32_t pc = 1; pc < n; ++pc) {
             if (reached[pc] && control(code[pc - 1].code)) leader[pc] = 1;
@@ -779,6 +797,25 @@ private:
         return id;
     }
 
+    // A checked 64-bit unsigned operation of the builder's own (never part of
+    // a block's graph): it deoptimizes to `state` as a lifted block's does.
+    std::uint32_t arithmetic(lift::Opcode op, std::uint32_t a, std::uint32_t b, std::uint32_t state) {
+        lift::Instruction lifted;
+        lifted.op = op;
+        lifted.width = 64;
+        Inst in;
+        in.op = Op::Lift;
+        in.lifted = lifted;
+        in.operands[0] = a;
+        in.operands[1] = b;
+        in.type = result_type(lifted, width_of(a), width_of(b));
+        if (can_fail(lifted)) {
+            in.flags = Checked;
+            in.state = state;
+        }
+        return emit(std::move(in));
+    }
+
     // A heap check (or, for Lookup, the entry it finds) on `a` and `b`.
     std::uint32_t heap_check(Op op, std::uint32_t a, std::uint32_t b, std::uint64_t imm, std::uint32_t state,
                              bool reference = false) {
@@ -840,6 +877,16 @@ private:
     // operation that stays a StateCall.
     bool inline_heap_operation(const tier2::Op& op, const nvr::Exit& exit) {
         using nvr::StateOp;
+        // A collection of aggregates (NVR 1.7) holds `k` eight-byte words per
+        // element: its length is the count word divided by k, and a component
+        // is the word at element * k + component. The operations that build
+        // or change one stay helpers (translate's Helper case).
+        const auto* components =
+            !exit.arguments.empty() ? nvr::collection_components(image_, exit.arguments[0].type) : nullptr;
+        if (components != nullptr && exit.operation != StateOp::ReadLength && exit.operation != StateOp::ReadVersion &&
+            exit.operation != StateOp::ReadComponent && exit.operation != StateOp::WriteComponent) {
+            return false;
+        }
         // The profile and checkable variants write through the reference.
         const bool checkable = variant_ != Variant::Standard;
         switch (exit.operation) {
@@ -849,11 +896,13 @@ private:
         case StateOp::ReadLength:
         case StateOp::ReadElement:
         case StateOp::ReadVersion:
+        case StateOp::ReadComponent:
         case StateOp::ClassIs:
         case StateOp::ClassCast: break;
         case StateOp::WriteField:
         case StateOp::WriteGlobal:
         case StateOp::WriteElement:
+        case StateOp::WriteComponent:
             if (checkable) return false;
             break;
         case StateOp::ScalarText:
@@ -885,9 +934,47 @@ private:
             result = heap_op(Op::LoadGlobal, result_type, none, none, none, none, exit.immediate);
             break;
         case StateOp::WriteGlobal: heap_op(Op::StoreGlobal, {}, args[0], none, none, none, exit.immediate); break;
-        case StateOp::ReadLength:
+        case StateOp::ReadLength: {
             result = heap_op(Op::LoadLength, result_type, typed_entry(args[0], types[0].type, state));
+            if (components != nullptr) {
+                // Elements, not words.
+                const auto k = static_cast<std::uint64_t>(components->size());
+                result = arithmetic(lift::Opcode::Divide, result, constant(k, integer(bits_of(k))), state);
+                if (result_type.type == Type::Int && result_type.width < 64) {
+                    Inst mask;
+                    mask.op = Op::Mask;
+                    mask.operands[0] = result;
+                    mask.imm = result_type.width;
+                    mask.type = result_type;
+                    result = emit(std::move(mask));
+                }
+            }
             break;
+        }
+        case StateOp::ReadComponent:
+        case StateOp::WriteComponent: {
+            // The bounds check of ReadElement and WriteElement against the
+            // length in elements, then the word of the component (checked_
+            // aggregate_index, machine.cpp). Storage is always eight bytes.
+            const auto entry = typed_entry(args[0], types[0].type, state);
+            const auto k = static_cast<std::uint64_t>(components->size());
+            const auto words = heap_op(Op::LoadLength, integer(64), entry);
+            const auto elements = arithmetic(lift::Opcode::Divide, words, constant(k, integer(bits_of(k))), state);
+            heap_check(Op::CheckIndex, args[1], elements, 0, state);
+            const auto first = arithmetic(lift::Opcode::Multiply, args[1], constant(k, integer(bits_of(k))), state);
+            const auto word = arithmetic(lift::Opcode::Add, first, constant(exit.immediate, integer(bits_of(exit.immediate))),
+                                         state);
+            const auto data = heap_op(Op::LoadData, {Type::Ptr, 0}, entry);
+            const auto storage = heap_op(Op::LoadStorage, integer(8), entry);
+            // The component rides in aux: its own alias class (Memory).
+            const auto component = static_cast<std::uint32_t>(exit.immediate);
+            if (exit.operation == StateOp::ReadComponent) {
+                result = heap_op(Op::LoadElement, result_type, data, word, storage, none, 8, component);
+            } else {
+                heap_op(Op::StoreElement, {}, data, word, storage, args[2], 8, component);
+            }
+            break;
+        }
         case StateOp::ReadElement:
         case StateOp::WriteElement: {
             const auto entry = typed_entry(args[0], types[0].type, state);
@@ -958,7 +1045,8 @@ private:
         const bool allocates = exit.operation == nvr::StateOp::AllocateObject && arguments.empty() &&
                                exit.immediate < image_.layouts.size();
         const bool appends = exit.operation == nvr::StateOp::AppendElement && arguments.size() == 2 &&
-                             exit.arguments.size() == 2 && image_.types[exit.arguments[0].type].kind == nvr::TypeKind::List;
+                             exit.arguments.size() == 2 && image_.types[exit.arguments[0].type].kind == nvr::TypeKind::List &&
+                             nvr::collection_components(image_, exit.arguments[0].type) == nullptr;
         if (!allocates && !appends) return false;
         std::uint32_t entry = none;
         if (appends) entry = typed_entry(arguments[0], exit.arguments[0].type, entry_state(op.block));
@@ -1168,6 +1256,7 @@ private:
             if (call) {
                 const auto& callee = image_.functions.at(op.a);
                 f_->call_frames[op.a] = static_cast<std::uint32_t>(callee.frame_types.size());
+                f_->call_results[op.a] = static_cast<std::uint32_t>(1 + callee.more_results.size());
                 std::vector<std::uint8_t> widths;
                 for (std::uint32_t slot = 0; slot < callee.parameter_count && slot < callee.frame_types.size(); ++slot) {
                     widths.push_back(static_cast<std::uint8_t>(std::min(nvr::lane_count(image_.types[callee.frame_types[slot]]), 64U)));
@@ -1176,6 +1265,19 @@ private:
             }
             const auto id = emit(std::move(in));
             if (op.dst != none) write(op.dst, id, true);
+            if (call && op.dst != none) {
+                // The words after the first, which the callee's Return left in
+                // the context: read before anything else runs.
+                const auto words = image_.functions.at(op.a).more_results.size();
+                for (std::size_t word = 1; word <= words; ++word) {
+                    Inst result;
+                    result.op = Op::ResultWord;
+                    result.operands[0] = id;
+                    result.imm = word;
+                    result.type = f_->slot_types.at(op.dst + word);
+                    write(op.dst + static_cast<std::uint32_t>(word), emit(std::move(result)), true);
+                }
+            }
             if (call) {
                 // The callee's counts continue ours: the context holds them.
                 Inst reload;
@@ -1201,6 +1303,12 @@ private:
             in.operands[0] = read(c_var(), cur_);
             if (op.a != none) in.operands[1] = value(op.a);
             in.operands[2] = kernel_steps();
+            if (op.width > 1) {
+                // The words after the first (NVR 1.7), as extras.
+                std::vector<std::uint32_t> rest;
+                for (unsigned i = 1; i < op.width; ++i) rest.push_back(value(region_.operands[op.other + i]));
+                set_extras(in, rest);
+            }
             in.flags = Checked | Effect;
             in.state = entry_state(op.block);
             emit(std::move(in));
@@ -1423,6 +1531,12 @@ private:
         } else if (in.op == Op::Call) {
             const auto slot = f_->exits[in.aux]->result_slot;
             if (slot != none && slot < count) written[slot] = written[count + slot] = 1;
+            if (slot != none) {
+                const auto words = image_.functions.at(in.imm).more_results.size();
+                for (std::size_t word = 1; word <= words && slot + word < count; ++word) {
+                    written[slot + word] = written[count + slot + word] = 1;
+                }
+            }
         }
     }
 
@@ -1472,6 +1586,7 @@ private:
             case Op::Mask:
             case Op::Gather:
             case Op::CounterAdd:
+            case Op::ResultWord:
             case Op::Sqrt: return true;
             case Op::Lift: return (in.flags & Checked) == 0;
             default: return false;
@@ -1507,7 +1622,7 @@ private:
             const auto& in = f_->insts[v];
             for (const auto operand : in.operands) mark(operand);
             if (in.op == Op::Phi || in.op == Op::StateCall || in.op == Op::Helper || in.op == Op::Call ||
-                in.op == Op::Select || in.op == Op::AllocObject || in.op == Op::Append) {
+                in.op == Op::Select || in.op == Op::AllocObject || in.op == Op::Append || in.op == Op::Return) {
                 for (std::uint32_t i = 0; i < in.count; ++i) mark(f_->extras[in.extra + i]);
             } else if (in.op == Op::Gather) {
                 for (std::uint32_t i = 0; i < in.count; i += 2) mark(f_->extras[in.extra + i]);

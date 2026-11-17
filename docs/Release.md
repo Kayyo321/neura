@@ -114,7 +114,7 @@ Each feature of this release with the tests that establish it. A feature counts 
 | Task dumps, profiles, and trace events | [Concurrency 14.1–14.2](lang/Concurrency.md#141-task-dump) | `concurrency-programs` (the dump of a trap in text and JSON, with and without a source map; `SIGQUIT`; event counts and repeatable event files; the profile by spawn site) | End to end |
 | Virtual time, schedule exploration, and saved schedules | [Concurrency 14.4](lang/Concurrency.md#144-testing-concurrent-code), [Testing](lang/Testing.md#tests-of-concurrent-code) | `concurrency-schedules` (virtual time under `run` and `test`, exploration from a seed and its repetition, a saved schedule and its reproduction, malformed and foreign schedules, the service fixture) | End to end |
 | `Parallel.map`, `AtomicInt64`, `Semaphore`, `Guarded<T>` | [Concurrency 8](lang/Concurrency.md#8-shared-state), [12](lang/Concurrency.md#12-multicore-parallelmap) | `concurrency-parallel` (one worker against several: values, the trapping item, item limits, statistics; shared state under every quantum; what the compiler refuses) | Differential |
-| Task settings of a native executable | [Native executables](lang/Standalone.md#5-the-container) | `native-build` (recorded settings, the options variable, the observing options); `native-container` (container versions 1 and 2, invalid settings) | End to end, structural |
+| Task settings of a native executable | [Native executables](lang/Standalone.md#5-the-container) | `native-build` (recorded settings, the options variable, the observing options); `native-container` (container versions 1, 2 and 3, invalid settings) | End to end, structural |
 
 
 ## Standard library

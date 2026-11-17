@@ -1,0 +1,253 @@
+// Payload enums are stored inline: a uint32 tag, then the payload words pooled by word type. This program keeps an
+// enum in each place a value is stored: a frame slot, a parameter, a result, a field, a global, a closure capture,
+// an array or list element, a tuple element and the payload of another enum, through an interface, a function
+// value and a generic function. Variants of different shapes share pooled words, and a word that a variant does
+// not use holds zero, nil or empty text. The one-word runtime boundaries are exercised by inline-enums-tasks.nra.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let error = import:Std.Core.Error;
+let variadic = import:Std.Core.Variadic;
+
+let Point = class (
+    export last x: int;
+    export let init = func(x: int) => set;
+);
+
+// Every kind of pool: integers of two widths, a float, a Boolean, text, a list, an object, a nested enum, and a
+// tuple that holds text.
+let Token = enum (
+    Empty,
+    Number(int),
+    Wide(int64, int),
+    Real(float64),
+    Flag(bool),
+    Word(string),
+    Words(string, string, int),
+    Bytes(uint8[list]),
+    At(Point),
+    Maybe(optional.Optional<int>),
+    Range { span: [int, int], label: string },
+);
+
+let describe = func(token: Token) -> string => match (token) {
+    Token.Empty => "empty",
+    Token.Number(value) => "number " + value.to_string(),
+    Token.Wide(big, small) => "wide " + big.to_string() + " " + small.to_string(),
+    Token.Real(value) => "real " + value.to_bits().to_string(),
+    Token.Flag(value) => "flag " + value.to_string(),
+    Token.Word(text) => "word " + text,
+    Token.Words(first, second, count) => "words " + first + second + count.to_string(),
+    Token.Bytes(bytes) => "bytes " + bytes.length.to_string(),
+    Token.At(point) => "at " + point.x.to_string(),
+    Token.Maybe(inner) => "maybe " + optional.value_or<int>(inner, -1).to_string(),
+    Token.Range { label, span } => "range " + label + " " + span[0].to_string() + ".." + span[1].to_string(),
+};
+
+let make = func(i: int) -> Token {
+    if (i == 0) {
+        return Token.Empty;
+    }
+    if (i == 1) {
+        return Token.Number(i * 10);
+    }
+    if (i == 2) {
+        return Token.Wide((5000000 as int64) * (1000 as int64), i);
+    }
+    if (i == 3) {
+        return Token.Real(0.25);
+    }
+    if (i == 4) {
+        return Token.Flag(true);
+    }
+    if (i == 5) {
+        return Token.Word("five");
+    }
+    if (i == 6) {
+        return Token.Words("s", "ix", 6);
+    }
+    if (i == 7) {
+        return Token.Bytes(new([1, 2, 3]));
+    }
+    if (i == 8) {
+        return Token.At(new Point(8));
+    }
+    if (i == 9) {
+        return Token.Maybe(optional.Optional<int>.Some(9));
+    }
+    return Token.Range { label: "ten", span: [1, 10] };
+};
+
+// An enum in a field and in a tuple field.
+let Holder = class (
+    export let token: Token = Token.Empty;
+    export let history: [Token, int] = [Token.Empty, 0];
+    export let put = func(next: Token) {
+        history = [token, history[1] + 1];
+        token = next;
+    };
+);
+
+let Source = interface (
+    let next = func() -> Token;
+);
+
+let Counter = class implements Source (
+    export let count: int = 0;
+    export let next = func() -> Token {
+        count += 1;
+        return Token.Number(count);
+    };
+);
+
+let Words = class implements Source (
+    export let next = func() -> Token => Token.Words("w", "v", 2);
+);
+
+let parse = func(text: string) -> result.Result<int> {
+    if (text == "seven") {
+        return result.Result<int>.Ok(7);
+    }
+    return result.Result<int>.Err(error.Error.Parse { kind: error.ParseErrorKind.Syntax, offset: 0, message: text });
+};
+
+let identity = func<T>(value: T) -> T => value;
+
+let apply = func(change: func(Token) -> Token, token: Token) -> Token => change(token);
+
+let packed = func(items: ...) -> string {
+    let text = "";
+    for (let argument in items) {
+        text = text + match (argument) {
+            variadic.Argument.Text(value) => value,
+            variadic.Argument.Signed(value) => value.to_string(),
+            variadic.Argument.Floating(value) => value.to_string(),
+            _ => "other",
+        } + "|";
+    }
+    return text;
+};
+
+let Main = module:program.Entry (
+    // An enum in module storage: several globals.
+    let current: Token = Token.Flag(false);
+    let previous: optional.Optional<Token> = optional.Optional<Token>.None;
+
+    let advance = func(next: Token) {
+        previous = optional.Optional<Token>.Some(current);
+        current = next;
+    };
+
+    let choose = func(flag: bool, count: int) -> Token {
+        last chosen: Token;
+        if (flag) {
+            chosen = Token.Words("yes", "!", count);
+        } else {
+            chosen = Token.Number(-count);
+        }
+        return chosen;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // Locals, parameters and results: every variant, and a local that changes variant.
+        for (let i in 0 .. 11) {
+            console.print_line(describe(make(i)));
+        }
+        let local = Token.Words("a", "b", 3);
+        console.print_line(describe(local));
+        local = Token.Number(4);
+        console.print_line(describe(local));
+        local = make(7);
+        console.print_line(describe(local));
+        console.print_line(describe(choose(true, 2)) + " " + describe(choose(false, 3)));
+
+        // A NaN payload keeps its bits through a slot, a list element and a field.
+        let nan = float64.from_bits(9221120237041090561);
+        let reals: Token[list] = new([Token.Real(nan), Token.Real(-0.0)]);
+        console.print_line(describe(reals[0]) + " " + describe(reals[1]));
+
+        // Fields: a whole enum, and an enum inside a tuple field.
+        let holder = new Holder();
+        holder.put(Token.Word("first"));
+        holder.put(Token.Real(nan));
+        holder.put(make(10));
+        console.print_line(describe(holder.token) + " / " + describe(holder.history[0]) + " " +
+                           holder.history[1].to_string());
+        let in_field = match (holder.token) {
+            Token.Range { span, label: _ } => span[1],
+            _ => 0,
+        };
+        console.print_line(in_field.to_string());
+
+        // Globals, and an optional that holds an enum.
+        advance(Token.Number(1));
+        advance(make(6));
+        console.print_line(describe(current) + " / " + match (previous) {
+            optional.Optional.Some(token) => describe(token),
+            optional.Optional.None => "none",
+        });
+
+        // A closure captures an enum by value.
+        let captured = Token.Word("captured");
+        let reader = func(suffix: string) -> string => describe(captured) + suffix;
+        captured = Token.Empty;
+        console.print_line(reader("!") + " " + describe(captured));
+        console.print_line(describe(apply(func(token: Token) -> Token => match (token) {
+            Token.Number(value) => Token.Number(value + 1),
+            _ => Token.Empty,
+        }, Token.Number(41))));
+        console.print_line(describe(identity<Token>(Token.Wide(7 as int64, 8))));
+
+        // Arrays and lists of enums: each element's words are stored inline.
+        let tokens: Token[] = [make(1), make(5), make(9)];
+        tokens[1] = Token.Flag(false);
+        let listed: Token[list] = new([make(0), make(2), make(8)]);
+        listed.append(make(10));
+        listed[0] = Token.Word("zero");
+        listed.remove_at(1);
+        let line = "";
+        for (let token: Token in listed) {
+            line = line + describe(token) + "; ";
+        }
+        console.print_line(line + listed.length.to_string() + " " + tokens.length.to_string());
+        for (let token: Token in tokens) {
+            console.print_line(describe(token));
+        }
+        let pairs: [int, Token][list] = new([[1, make(3)], [2, make(6)]]);
+        pairs.append([3, Token.Maybe(optional.Optional<int>.None)]);
+        console.print_line(describe(pairs[2][1]) + " " + describe(pairs[1][1]) + " " + pairs[0][0].to_string());
+        let nested: Token[][] = [[make(1)], [make(4), make(5)]];
+        console.print_line(describe(nested[1][1]) + " " + nested[1].length.to_string());
+
+        // An enum through an interface, and the variants that share words.
+        let sources: Source[] = [new Counter(), new Words()];
+        for (let source: Source in sources) {
+            console.print_line(describe(source.next()) + " " + describe(source.next()));
+        }
+
+        // The standard library's enums: Optional and Result over values that allocate nothing, and an Error.
+        let maybe = optional.Optional<int>.Some(3);
+        console.print_line(optional.value_or<int>(maybe, 0).to_string() + " " + optional.is_none<int>(maybe).to_string());
+        let seven = parse("seven");
+        let wrong = parse("eight");
+        console.print_line(match (seven) {
+            result.Result.Ok(value) => "ok " + value.to_string(),
+            result.Result.Err(e) => error.message(e),
+        });
+        console.print_line(match (wrong) {
+            result.Result.Ok(value) => "ok " + value.to_string(),
+            result.Result.Err(e) => error.message(e),
+        });
+        let errors: result.Result<int>[list] = new([seven, wrong, parse("seven")]);
+        let oks = 0;
+        for (let item: result.Result<int> in errors) {
+            oks += match (item) { result.Result.Ok(_) => 1, result.Result.Err(_) => 0 };
+        }
+        console.print_line(oks.to_string());
+
+        // Untyped variadic arguments are packed as Argument enums.
+        console.print_line(packed("one", 2, 3.5));
+        return program.ExitCode.Ok;
+    };
+);

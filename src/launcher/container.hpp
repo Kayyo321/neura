@@ -12,17 +12,19 @@
 
 namespace neura::launcher {
 
-// Version 2 added the task settings to the policy. A reader accepts both;
-// a writer writes the current one.
-inline constexpr std::uint32_t container_version = 2;
+// Version 2 added the task settings to the policy, version 3 the stack cell
+// limit (NVR 1.7 storage regions). A reader accepts every version; a writer
+// writes the current one.
+inline constexpr std::uint32_t container_version = 3;
 inline constexpr std::uint32_t max_parallel_workers = 1'024;
 
 struct Policy {
     nvm::Capabilities capabilities;
-    // The container records max_steps, max_frames, and max_heap_cells, and
-    // since version 2 the task settings: max_tasks, task_quantum,
-    // max_queued_messages, max_pending_requests, and parallel_workers. A
-    // version 1 container leaves those at the defaults of RunLimits.
+    // The container records max_steps, max_frames, and max_heap_cells, since
+    // version 2 the task settings: max_tasks, task_quantum,
+    // max_queued_messages, max_pending_requests, and parallel_workers, and
+    // since version 3 max_stack_cells. An older container leaves what it does
+    // not record at the defaults of RunLimits.
     nvm::RunLimits limits;
     bool sealed = false;
 };
