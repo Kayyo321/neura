@@ -4,7 +4,7 @@ This note fixes the grammar and rules of the 0.3.0 data-and-contracts milestone 
 
 Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; "proposed" stays until then. A row the owner changes is changed here and on the page that owns it in one later change.
 
-The milestone adds no NVR operation and changes no image of a program that uses none of its features. It adds one NeuraIR operation (the call of a static requirement through a type parameter), five symbol attributes, and value members for payload enums. The design notes of the hooks, calls and matching milestones were not written when this note was; where a rule depends on them it says what it assumes.
+The milestone adds no NVR operation and changes no image of a program that uses none of its features. It adds one NeuraIR operation (the call of a static requirement through a type parameter), five symbol attributes, and value members for payload enums. The calls milestone's note was written beside this one: it fixes a named argument as `name: expression` and makes the parameter names of an exported declaration part of its signature. The notes of the hooks and matching milestones were not written yet; where a rule depends on them it says what it assumes.
 
 ## Summary of the forms
 
@@ -78,11 +78,14 @@ mapping      = ( "field" | "variant" ) qualified-name ":" string ";"
 | Rule | Status |
 | --- | --- |
 | `record`, `with`, `derive`, `field`, `variant` and `virtual` are contextual. None becomes a keyword, and each stays an ordinary name elsewhere. | proposed |
-| `record` begins a record only as the first token of the initializer of a `let` or `const` declaration that has no type annotation, and only when the tokens after it are `implements`, or `(` followed by tags and then a name and `:`. Every other use of the name is an expression, so `let total = record();`, `let entry = record("B");` and `record(first);` stay calls. | proposed |
+| `record` begins a record only as the first token of the initializer of a `let` or `const` declaration that has no type annotation, and only when the tokens after it are `implements`, or `(` followed by any tags and then one of: a name and `:`; one of the keywords `export`, `let`, `const`, `static`; or the word `last` and a name. None of those begins an argument list today. Every other use of the name is an expression, so `let total = record();`, `let entry = record("B");`, `let small = record < limit;` and `record(first);` keep their meaning. | proposed |
+| A record is declared wherever a class declaration is accepted today, and nowhere else. | proposed |
+| `record<T> (...)` and `record: Base (...)` are therefore read as expressions and fail as such, at the first `:` (`E0202`) and at the `:` (`E0201`); when the initializer begins with `record <` or is the bare name `record`, the error carries the help `a record is not generic in this release` or `a record has no base class`. | proposed |
 | After the M5 named arguments, `let x = record(count: limit);` reads as a record with one field. A call of a function named `record` whose first argument is named, written as the whole initializer of an unannotated declaration, is written `(record)(count: limit)`. | proposed |
 | `new with` always begins copy construction. A class named `with` can no longer be constructed by `new with(...)`; no source in the repository does. The source expression is one expression in parentheses, the braces are required, and they may be empty. | proposed |
 | `derive` begins a derivation only as the first token of a declaration's initializer and only when an identifier follows it. Two adjacent identifiers begin no expression, so no accepted program changes. | proposed |
 | `field` and `variant` are words only at the start of a mapping inside a derivation's braces. A mapping's right side is one string literal: no concatenation, no constant name, no interpolation. | proposed |
+| A clause belongs to the member whose `;` it follows. A clause before the first member of a class is not an accessor clause; the hooks milestone uses that position for class hooks, including its own `get.override` and `set.override`, and nothing in this note reads a clause there. | proposed |
 | An accessor clause's word may be followed by `.virtual` or `.override`. The three tokens may be separated by spaces or comments; `neura fmt` writes them joined. A bodyless clause `\| get;` is accepted only on an interface property, and a clause with a body only in a class. | proposed |
 | A record's components are not grouped (`record (x, y: float64)` is not a record), take no default value, and take no `export`, `let`, `last`, `const` or `static`. Tags and documentation comments before a component apply to its field. A trailing comma is allowed. | proposed |
 | A record is not generic in 0.3.0, has no base, and its body holds components only: no methods, constructors, destructors, accessors, casts, nested types or static members. | proposed |
@@ -193,7 +196,7 @@ The hooks milestone defines the admission events of a class-valued property; thi
 | --- | --- |
 | A static function without a body is a *static requirement* when it is a member of an interface. It may use the interface's type parameters, unlike other static members. Elsewhere a static function still needs a body (`E0501`). | proposed |
 | A requirement is not generic itself, not variadic, not an overload group, has no parameter default, and has no host, kernel or scheduler binding (`E0576`). An interface has no static requirement for a field. | proposed |
-| A class implementing the interface must have an exported static function of that name, its own or inherited, with exactly the requirement's parameter types and result type after substituting the interface's type arguments; otherwise `E0504`, naming the requirement. Parameter labels must agree once M5 makes them part of a signature. An overload group, a generic function or a variadic one does not implement a requirement. | proposed |
+| A class that lists the interface after `implements`, directly or through an interface that extends it, must itself declare an exported static function of that name with exactly the requirement's parameter types and result type after substituting the interface's type arguments; otherwise `E0504`, naming the requirement. An inherited static function does not implement it. A subclass inherits the conformance with its base's functions. Parameter names must agree, under the calls milestone's rule for the names of an overriding method. An overload group, a generic function or a variadic one does not implement a requirement. | proposed |
 | A generic class cannot implement a requirement that mentions its own type parameters, because its static members cannot use them. That is today's `E0501`. | proposed |
 | Inside a generic body, `T.name(arguments)` calls the requirement `name` found in the bounds of the type parameter `T`. A name no bound has is `E0305`; a name two bounds have with different signatures is `E0577`; equal signatures are one requirement. Arguments are evaluated and admitted in order as for any call. | proposed |
 | A requirement is called only through a type parameter or through an implementing class's own name (an ordinary static call). `Additive<int>.zero()`, and `value.zero()` on an interface-typed value, are `E0576`: there is no dispatch on a run-time value. | proposed |
@@ -279,12 +282,12 @@ Schema rules:
 | A copy lowers to a scoped value: the source in a temporary, a nil check that fails as a nil field read does, the replacements, the field reads, and `Allocate` with the constructor. No new operation. | proposed |
 | `T.name(...)` lowers to the new operation `ConformanceCall`: its symbol is the requirement, its first type argument is the type the call goes through, and its operands are the arguments. It is the one NeuraIR format change of the milestone and is written under the next free NeuraIR minor version, which the lead assigns when the step merges (the reader is at 1.10 as this note is written). A file without the operation keeps its version and bytes. An earlier reader rejects the newer version. | proposed |
 | The verifier accepts `ConformanceCall` only before specialization, only for a bodyless static function of an interface, and only with a type argument that is a type parameter bounded by that interface or a type that conforms. After specialization none remains; one that does is `E0899`. | proposed |
-| Specialization resolves a `ConformanceCall` by `static.implements`: the function that carries the attribute for that requirement's declaration and that type. Lowering attaches it to every implementation when it checks a class or a companion, so a library compiled to `.nir` carries its conformances. A bound satisfied by a primitive makes lowering load the companion, by the mechanism that loads it for a primitive-qualified call. | proposed |
-| Analyses that run before specialization (purity, task safety, effect and retention summaries) treat a `ConformanceCall` as they treat a value member of a type parameter: deferred, and decided on each specialization. `DispatchTargets` lists hidden accessors by name like any method, so a `VirtualCall` of a getter has every override and adapter as a target. | proposed |
-| New symbol attributes, which need no format version; each takes the next free identifier in `attributes.def` when its step merges (the calls milestone takes identifiers of its own, so none is fixed here): `class.record` on a class (`s`, the generated constructor); `property.requirement` on a function (`[t u1]`, the property's name and 0 for get or 1 for set); `accessor.virtual` on a function (`b`); `static.implements` on a function, repeatable (`[s y]`, the requirement and the conforming type); `generated` on a function, class or module (`[t p]`, the generator, one of `record`, `property.adapter`, `derive:json.codec`, and the span of the declaration that caused it). | proposed |
+| Specialization resolves a `ConformanceCall` by `static.implements`: the function that carries the attribute for that requirement's declaration and for the type, or for the nearest base of the type that has one. Lowering attaches it to every implementation when it checks a class or a companion, so a library compiled to `.nir` carries its conformances. A bound satisfied by a primitive makes lowering load the companion, by the mechanism that loads it for a primitive-qualified call. | proposed |
+| Analyses that run before specialization (purity, task safety, effect and retention summaries) treat a `ConformanceCall` as they treat a value member of a type parameter: deferred, and decided on each specialization. `DispatchTargets` and `Converter::implementation` find a function by its owner and name, hidden accessors included, so a `VirtualCall` of a getter has every override and adapter as a target and the converter builds its dispatch block unchanged. | proposed |
+| New symbol attributes, which need no format version; each takes the next free identifier in `attributes.def` when its step merges (the calls milestone takes identifiers of its own, so none is fixed here): `class.record` on a class (`s`, the generated constructor); `property.requirement` on a function (`[t u1]`, the property's name and 0 for get or 1 for set); `accessor.virtual` on a function (`b`); `static.implements` on a function, repeatable (`[s y]`, the requirement and the class or primitive whose declaration lists the conformance); `generated` on a function, class or module (`[t p]`, the generator, one of `record`, `property.adapter`, `derive:json.codec`, and the span of the declaration that caused it). | proposed |
 | The verifier checks each: `class.record` names an `init` of that class and every field is `binding.last`; `property.requirement` only on a bodyless `$get_`/`$set_` function of an interface with a matching signature; `accessor.virtual` only on a function with `accessor.of`; `static.implements` names a bodyless static function of an interface and a function of the same substituted signature. | proposed |
 | No NVR change and no new runtime operation. Records are objects, property and virtual-accessor access is the existing dispatch block, static requirements disappear in specialization, and wire names are string constants. The loader, the decompiler and the assembler need no change. | proposed |
-| Tiers 2 and 3 decline nothing new. A dispatched accessor is a dispatch site like any other, so tier 3's guarded inlining applies to it under its existing limits: the tags recorded at the site select at most 6 callees of at most 8 blocks each that have no helper, no call left after inlining and no frame write. A generated field adapter is one block that reads or writes one field, so it meets them; a user's accessor meets them or not by its body. A deoptimization inside an inlined accessor materializes its frame, so steps, traps and callers are those of tier 0. | proposed |
+| Tiers 2 and 3 decline nothing new. A dispatched accessor is a dispatch site like any other, so tier 3's guarded inlining applies to it under its existing limits: the tags recorded at the site select at most 6 callees of at most 8 blocks each that have no helper, no call left after inlining and no frame write. A generated field adapter only reads or writes one field, so it is expected to meet them, and a user's accessor meets them or not by its body; the gate measures it through the `tier: native programs` line and promises no particular site. A deoptimization inside an inlined accessor materializes its frame, so steps, traps and callers are those of tier 0. | proposed |
 | The collector and the ABI are unchanged: a record is traced as an object, and a property of a multiword type returns its words as any function does (NVR 1.7). | proposed |
 | The decompiler shows a record as a class with its generated methods, an adapter as a method, and a derived module as a module. With names in the image it uses them; it does not claim to recover `record`, `new with` or `derive` spellings, which lower as their written-out forms do. | proposed |
 
@@ -296,7 +299,7 @@ Where the work goes. The lowering lane has one writer, so each feature lives in 
 | Records | new `src/neura-ir/lowering_records.inc`: eligibility, value members, copy construction; called from `Lowering::declare`, `Lowering::lower_declaration` and `Lowering::expression_node`; `Lowering::check_constructor_shorthand` unchanged; `src/neura-ir/tags.cpp` for the implied `#Final` and `#Immutable` |
 | Payload-enum value members | `src/neura-ir/aggregate.hpp` (`supports_value_members`), `src/neura-ir/dispatch.cpp` (`DispatchTargets::value_members`), the value functions of `src/backend/converter.cpp` |
 | Properties and virtual accessors | `src/neura-ir/lowering_accessors.inc`: `check_accessor_member`, `declare_accessors`, `accessor`, `lower_accessors`, `route_field`, `read_place`, `store_place`; `Lowering::check_interfaces` and the interface-member check in `Lowering::lower_declaration`; `Lowering::check_override` |
-| Static requirements | `Lowering::resolve` (the body rule for static functions), `Lowering::find` (type parameters in a static requirement), `Lowering::select` and `Lowering::call` (`T.name`), `Lowering::check_interfaces`, `Lowering::resolve_generics` (primitive bounds); `src/neura-ir/ir.hpp`, `nir_format.cpp`, `ir_print.cpp`, `verifier.cpp`, `linker.cpp`, `specialize.cpp`, `purity.cpp`, `task_analysis.cpp`, `src/ir-optimization/effects.cpp` |
+| Static requirements | `Lowering::resolve` (the body rule for static functions), `Lowering::find` (type parameters in a static requirement), `Lowering::select` and `Lowering::call` (`T.name`), `Lowering::check_interfaces`, `Lowering::type_arguments` (the bound check, `E0418`, for a primitive); `src/neura-ir/ir.hpp`, `nir_format.cpp`, `ir_print.cpp`, `verifier.cpp`, `linker.cpp`, `specialize.cpp`, `purity.cpp`, `task_analysis.cpp`, `src/ir-optimization/effects.cpp` |
 | Derivation | new `src/neura-ir/lowering_derive.inc` and `src/neura-ir/derive_json.cpp` (the tree builder and its printer); `stdlib/std/encoding/json.nra` (`Codec`) |
 | Library | new `stdlib/std/core/arithmetic.nra`; the companions under `stdlib/std/core/` |
 | Tooling | `src/tooling/formatter.cpp`, `analysis.cpp`, `lsp.cpp`, `refactor.cpp`; `src/cli/source_docs.cpp`; `src/cli/main.cpp` (`--show-derived`) |
@@ -317,7 +320,7 @@ Codes of this milestone: `E0570` to `E0579`, `E0318`, `E0319` and `E0590`. Synta
 
 | Code | Title | Span | Message and fix |
 | --- | --- | --- | --- |
-| `E0570` | invalid record declaration | The offending token or component | One message per cause: `a record has no base class`, `a record is not generic in this release`, `a record component has no default value`, `a record component takes no 'export'` (or `let`, `last`, `const`, `static`), `a record needs at least one component`, `a record component cannot be named 'init'` (and the other reserved names), `a record holds components only`. Fix: remove the part, or write a class. |
+| `E0570` | invalid record declaration | The offending token or component | One message per cause: `a record component has no default value`, `a record component takes no 'export'` (or `let`, `last`, `const`, `static`), `a record needs at least one component`, `a record component cannot be named 'init'` (and the other reserved names), `a record holds components only`. Fix: remove the part, or write a class. |
 | `E0571` | record field of a type a record cannot hold | The component's type | `field 'tags' has type 'string[list]', which a record cannot hold`, with a label naming the rule (mutable, not a record, no value equality) and help: hold a record, a tuple or an enum of eligible types, or declare the type as an `#Immutable` class and not as a record. |
 | `E0572` | copy construction of a value that is not a record | The source expression | `'new with' copies a record, and this is 'Shape'` (a class, an interface, `class`, nil, a type parameter). Fix: construct the class with `new`. |
 | `E0573` | invalid interface property | The clause or the property | `an interface property needs '| get;'`, `an interface property has no initializer`, `a property clause in an interface has no body`, `an interface property is declared with 'let'`. Suggestion: insert `| get;`, or delete the body. |
@@ -357,9 +360,9 @@ Records:
 4. `let P = record implements Named ();`: reject `E0570`, at `)`.
 5. `let P = record (x, y: float64);`: a call by the lookahead; reject `E0304` with the grouping help.
 6. `let P = record (x: int = 0);`: reject `E0570` at `=`.
-7. `let P = record (export x: int);` and `(last x: int)`: reject `E0570` at the modifier.
-8. `let P = record<T> (x: T);`: reject `E0570` at `<`.
-9. `let P = record: Base (x: int);`: reject `E0570` at `:`.
+7. `let P = record (export x: int);`, `(last x: int)`, `(let x: int)`, `(static x: int)`: records by the lookahead; reject `E0570` at the modifier.
+8. `let P = record<T> (x: T);`: an expression by the lookahead; reject `E0202` at the first `:`, with the help that a record is not generic in this release.
+9. `let P = record: Base (x: int);`: the initializer is the name `record`; reject `E0201` at `:`, with the help that a record has no base class.
 10. `let P = record (x: int; export let f = func() -> int => x;);`: reject `E0202` at `;`, with help that a record holds components only.
 11. `let P: class = record (x: int);`: the annotation makes the initializer an expression, a call of `record` with a named argument; reject `E0304` when no `record` is in scope.
 12. `let total = record();`, `let e = record("B");`, `record(first);`, `return record(second);` with a function `record` in scope: accept; calls, unchanged.
@@ -461,7 +464,7 @@ Static requirements:
 96. `static let make = func<U>() -> U;`, a variadic one, an `or func` group, and `static let limit: int;` without a value in an interface: reject `E0576` (the last stays `E0501`).
 97. `class implements Additive<Money>` with both static functions: accept; `sum<Money>(items)` calls them directly.
 98. A missing `zero`, a `zero` that is not static, not exported, or returns another type: reject `E0504`.
-99. The static functions inherited from a base: accept.
+99. `class Money: Base implements Additive<Money>` with `zero` and `add` declared only in `Base`: reject `E0504`. `Gold: Money` as the type argument of `func<T: Additive<Money>>`: accept; `T.zero()` calls `Money.zero`.
 100. `sum<string>(items)`: reject `E0418`, naming `Additive<string>`.
 101. `sum<int8>`, `sum<int64>`, `sum<uint64>`: accept; overflow traps at the width, at the same element in optimized and unoptimized builds.
 102. `sum<float64>` over `[0.1, 0.2, 0.3]`: the left-to-right sum, bit for bit; a NaN element gives the canonical NaN.
@@ -507,22 +510,31 @@ Derivation:
 139. `let J = derive` at the end of the buffer in the editor: one `E0202`; the rest of the file keeps its symbols.
 140. Renaming `User.name` in the editor with an unpinned derivation: the rename inserts `field User.display: "name";`, and `encode` output is unchanged.
 
+Incomplete input in the editor, and the lookahead:
+
+141. `let P = record (id: int64,` at the end of the buffer: one `E0203`; the recovering parser keeps `P` as a record with the field `id`, so hover and completion on `P` work.
+142. `let P = record (id` at the end of the buffer: an expression by the lookahead; one `E0203`, and no record is declared.
+143. An interface with `let name: string;` and then `|` at the end of the buffer: one `E0202` (expected `get` or `set`); the interface keeps its other members, and completion offers `get;` and `set;`.
+144. `export let.override label: string;` followed by `| get.` at the end of the buffer: one `E0202`; completion offers `override:`. Under an ordinary field it offers `virtual:`.
+145. `let small = record < limit;` and `let pair = record > 0 ? record : 0;` with a binding `record`: accept; comparisons.
+146. `let P = record implements` at the end of the buffer: one `E0206`; no later declaration is lost.
+
 ## Order of work
 
-Each step is one commit on the milestone branch with its targeted tests. No step changes the image of a program that does not use the step's feature; the gate checks it.
+Each step is one commit on the milestone branch with its targeted tests. The last column is about programs that exist before the step: none of their images changes in any step, and the gate checks it. A program that uses a step's feature did not compile before it.
 
-| Step | Content | Targeted tests |
-| --- | --- | --- |
-| 1 | This note | Documentation checks |
-| 2 | Value members of payload enums | Converter and stdlib value-member tests; cases 40 |
-| 3 | Records: parser, formatter, `class.record` and `generated`, eligibility, constructor, value members, `E0570`, `E0571`, language-server support | Parser fixtures with spans, cases 1 to 39, NIR round trip, source/NIR image equality |
-| 4 | Copy construction, `E0572` | Cases 41 to 58, an event-order trace, the allocation counter |
-| 5 | Interface properties: requirements, adapters, `property.requirement`, `E0573` | Cases 59 to 77, cross-mode runs of a hot interface read |
-| 6 | Virtual accessors and overrides: `accessor.virtual`, `E0574`, `E0575` | Cases 78 to 94, layout checks, cross-mode runs |
-| 7 | Static requirements: `ConformanceCall`, the NeuraIR version, `static.implements`, verifier, specializer, analyses, `E0576`, `E0577` | Cases 95 to 111 and 113 to 114 with user classes, invalid-IR tests, old-reader rejection |
-| 8 | Primitive conformance: `module implements`, `Std.Core.Arithmetic`, the companions, `E0578` | Cases 100 to 102, 112; every width; float vectors; stdlib image identity |
-| 9 | JSON derivation: `Codec`, the generator, `--show-derived`, rename pins, `E0579`, `E0318`, `E0319`, `E0590` | Cases 115 to 140, round-trip and rejection vectors, stripped images |
-| 10 | Language pages, diagnostic pages, examples, changelog, migration notes; benchmarks; the gate | The full gate |
+| Step | Content | Targeted tests | Changes images |
+| --- | --- | --- | --- |
+| 1 | This note | Documentation checks | no |
+| 2 | Value members of payload enums | Converter and stdlib value-member tests; cases 40 | no |
+| 3 | Records: parser, formatter, `class.record` and `generated`, eligibility, constructor, value members, `E0570`, `E0571`, language-server support | Parser fixtures with spans, cases 1 to 39, NIR round trip, source/NIR image equality | no |
+| 4 | Copy construction, `E0572` | Cases 41 to 58, an event-order trace, the allocation counter | no |
+| 5 | Interface properties: requirements, adapters, `property.requirement`, `E0573` | Cases 59 to 77, cross-mode runs of a hot interface read | no |
+| 6 | Virtual accessors and overrides: `accessor.virtual`, `E0574`, `E0575` | Cases 78 to 94, layout checks, cross-mode runs | no |
+| 7 | Static requirements: `ConformanceCall`, the NeuraIR version, `static.implements`, verifier, specializer, analyses, `E0576`, `E0577` | Cases 95 to 111 and 113 to 114 with user classes, invalid-IR tests, old-reader rejection | no |
+| 8 | Primitive conformance: `module implements`, `Std.Core.Arithmetic`, the companions, `E0578` | Cases 100 to 102, 112; every width; float vectors; stdlib image identity | no |
+| 9 | JSON derivation: `Codec`, the generator, `--show-derived`, rename pins, `E0579`, `E0318`, `E0319`, `E0590` | Cases 115 to 140, round-trip and rejection vectors, stripped images | no |
+| 10 | Language pages, diagnostic pages, examples, changelog, migration notes; benchmarks; the gate | The full gate | no |
 
 ## Gate and acceptance
 
