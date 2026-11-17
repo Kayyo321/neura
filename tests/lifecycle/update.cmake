@@ -39,22 +39,20 @@ esac
 exit 0
 ]=])
 
-# A copy of the installed prefix whose bin/neura is `script`.
+# A copy of the installed component prefixes whose bin/neura is `script`.
 function(lc_fake_prefix destination script)
     file(REMOVE_RECURSE "${destination}")
     lc_exec(copy COMMAND "${CMAKE_COMMAND}" -E copy_directory "${LC_PREFIX}" "${destination}")
     lc_expect_status("copying the prefix" copy 0)
-    file(REMOVE "${destination}/bin/neura")
-    file(WRITE "${destination}/bin/neura" "${script}")
-    file(CHMOD "${destination}/bin/neura" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
+    file(REMOVE "${destination}/core/bin/neura")
+    file(WRITE "${destination}/core/bin/neura" "${script}")
+    file(CHMOD "${destination}/core/bin/neura" PERMISSIONS OWNER_READ OWNER_WRITE OWNER_EXECUTE GROUP_READ GROUP_EXECUTE WORLD_READ WORLD_EXECUTE)
 endfunction()
 
 # A release directory made by the packaging scripts for a stand-in build.
 function(lc_scripted_release name script)
     lc_fake_prefix("${work}/${name}-prefix" "${script}")
-    lc_exec(archive COMMAND "${LC_SH}" "${SOURCE_DIR}/packaging/make-archive.sh"
-        "${work}/${name}-prefix" "${work}/${name}" "${new_version}" "${LC_TRIPLE}")
-    lc_expect_status("make-archive.sh for ${name}" archive 0)
+    lc_pack("${work}/${name}-prefix" "${work}/${name}" "${new_version}" "${LC_TRIPLE}" BUILD test)
     lc_exec(metadata COMMAND "${LC_SH}" "${SOURCE_DIR}/packaging/make-release-metadata.sh" "${work}/${name}" "${new_version}")
     lc_expect_status("make-release-metadata.sh for ${name}" metadata 0)
 endfunction()

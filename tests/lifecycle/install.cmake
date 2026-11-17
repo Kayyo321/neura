@@ -23,7 +23,7 @@ foreach(path IN ITEMS
         message(FATAL_ERROR "the install has no ${path}")
     endif()
 endforeach()
-if(EXISTS "${LC_PREFIX}/lib/neura/launchers" AND
+if(EXISTS "${LC_PREFIX}/sdk/lib/neura/launchers" AND
    NOT EXISTS "${LC_ROOT}/versions/${LC_VERSION}/lib/neura/launchers/${LC_TRIPLE}")
     message(FATAL_ERROR "the install has no launchers for ${LC_TRIPLE}")
 endif()
@@ -50,9 +50,7 @@ lc_expect_equal("the marker" "${marker}"
 lc_expect_no_leftovers("install.sh" "${LC_ROOT}")
 
 # The archive is reproducible: packing the same prefix again gives the same bytes.
-lc_exec(again COMMAND "${LC_SH}" "${SOURCE_DIR}/packaging/make-archive.sh"
-    "${LC_PREFIX}" "${TEST_DIR}/archives-again" "${LC_VERSION}" "${LC_TRIPLE}")
-lc_expect_status("make-archive.sh again" again 0)
+lc_pack("${LC_PREFIX}" "${TEST_DIR}/archives-again" "${LC_VERSION}" "${LC_TRIPLE}")
 file(SHA256 "${LC_ARCHIVES}/neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz" first_digest)
 file(SHA256 "${TEST_DIR}/archives-again/neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz" second_digest)
 lc_expect_equal("the digest of the archive packed twice" "${second_digest}" "${first_digest}")
@@ -66,7 +64,7 @@ file(READ "${LC_ARCHIVES}/neura-release.txt" release_text)
 lc_expect_equal("neura-release.txt" "${release_text}"
     "neura-release 1\nversion ${LC_VERSION}\nasset ${LC_TRIPLE} neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz ${archive_digest} ${archive_size}\n")
 file(READ "${LC_ARCHIVES}/SHA256SUMS" sums_text)
-lc_expect_equal("SHA256SUMS" "${sums_text}" "${archive_digest}  neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz\n")
+lc_expect_contains("SHA256SUMS" "${sums_text}" "${archive_digest}  neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz\n")
 
 # The installed tool, through the bin link.
 lc_exec(version COMMAND "${LC_LINK}" --version)

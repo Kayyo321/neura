@@ -82,24 +82,53 @@ function(lc_snapshot var root)
     set(${var} "${text}" PARENT_SCOPE)
 endfunction()
 
-# lc_make_install(<dir>): installs the build into <dir>/prefix, packs it with
-# packaging/make-archive.sh, unpacks the archive, and runs its install.sh with
-# HOME, NEURA_INSTALL_ROOT, and NEURA_BIN_DIR below <dir>. Sets LC_PREFIX,
-# LC_ARCHIVES, LC_UNPACKED, LC_ROOT, LC_BIN_DIR, LC_HOME, LC_LINK (the
-# `neura` in the bin directory), LC_VERSION, and LC_TRIPLE.
-function(lc_make_install dir)
-    file(REMOVE_RECURSE "${dir}")
-    file(MAKE_DIRECTORY "${dir}/home")
+# lc_install_components(<prefixes>): installs the build's core, sdk and
+# service components into <prefixes>/<component>.
+function(lc_install_components prefixes)
     set(config_args)
     if(DEFINED CONFIG AND NOT CONFIG STREQUAL "")
         set(config_args --config "${CONFIG}")
     endif()
-    lc_exec(install COMMAND "${CMAKE_COMMAND}" --install "${BINARY_DIR}" --prefix "${dir}/prefix" ${config_args})
-    lc_expect_status("cmake --install" install 0)
+    foreach(component IN ITEMS core sdk service)
+        lc_exec(install COMMAND "${CMAKE_COMMAND}" --install "${BINARY_DIR}" --component ${component}
+            --prefix "${prefixes}/${component}" ${config_args})
+        lc_expect_status("cmake --install --component ${component}" install 0)
+        file(MAKE_DIRECTORY "${prefixes}/${component}")
+    endforeach()
+endfunction()
+
+# lc_pack(<prefixes> <output dir> <version> <triple> [BUILD <commit>]): packs
+# the three archives of a release from component prefixes.
+function(lc_pack prefixes output version triple)
+    cmake_parse_arguments(ARG "" "BUILD" "" ${ARGN})
+    set(build_args)
+    if(ARG_BUILD)
+        set(build_args --build "${ARG_BUILD}")
+    endif()
+    foreach(product IN ITEMS sdk runtime legacy)
+        if(product STREQUAL "runtime")
+            set(parts --service "${prefixes}/service")
+        else()
+            set(parts --sdk "${prefixes}/sdk")
+        endif()
+        lc_exec(archive COMMAND "${LC_SH}" "${SOURCE_DIR}/packaging/make-archive.sh" --product ${product}
+            --core "${prefixes}/core" ${parts} ${build_args} "${output}" "${version}" "${triple}")
+        lc_expect_status("make-archive.sh --product ${product}" archive 0)
+    endforeach()
+endfunction()
+
+# lc_make_install(<dir>): installs the build's components into
+# <dir>/prefixes, packs them with packaging/make-archive.sh, unpacks the
+# legacy archive, and runs its install.sh with HOME, NEURA_INSTALL_ROOT, and
+# NEURA_BIN_DIR below <dir>. Sets LC_PREFIX (the directory of the component
+# prefixes), LC_ARCHIVES, LC_UNPACKED, LC_ROOT, LC_BIN_DIR, LC_HOME, LC_LINK
+# (the `neura` in the bin directory), LC_VERSION, and LC_TRIPLE.
+function(lc_make_install dir)
+    file(REMOVE_RECURSE "${dir}")
+    file(MAKE_DIRECTORY "${dir}/home")
+    lc_install_components("${dir}/prefixes")
     lc_tool_version()
-    lc_exec(archive COMMAND "${LC_SH}" "${SOURCE_DIR}/packaging/make-archive.sh"
-        "${dir}/prefix" "${dir}/archives" "${LC_VERSION}" "${LC_TRIPLE}")
-    lc_expect_status("make-archive.sh" archive 0)
+    lc_pack("${dir}/prefixes" "${dir}/archives" "${LC_VERSION}" "${LC_TRIPLE}")
     file(MAKE_DIRECTORY "${dir}/unpacked")
     lc_exec(unpack COMMAND "${LC_TAR}" -xzf "${dir}/archives/neura-${LC_VERSION}-${LC_TRIPLE}.tar.gz" -C "${dir}/unpacked")
     lc_expect_status("unpacking the archive" unpack 0)
@@ -109,7 +138,7 @@ function(lc_make_install dir)
     lc_expect_status("install.sh" setup 0)
     file(REAL_PATH "${dir}/root" root)
     file(REAL_PATH "${dir}/bin" bin_dir)
-    set(LC_PREFIX "${dir}/prefix" PARENT_SCOPE)
+    set(LC_PREFIX "${dir}/prefixes" PARENT_SCOPE)
     set(LC_ARCHIVES "${dir}/archives" PARENT_SCOPE)
     set(LC_UNPACKED "${unpacked}" PARENT_SCOPE)
     set(LC_ROOT "${root}" PARENT_SCOPE)
