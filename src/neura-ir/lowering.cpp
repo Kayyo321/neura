@@ -473,6 +473,11 @@ private:
     Diagnostic any_boundary(const Span& span, const std::string& what) const;
     std::string shown(const IrType& type) const;
     bool lowers_to_any(const Expr& expr, Context& context);
+    // defer, using and generators (lowering_lifetime.inc).
+    void lower_defer(std::vector<IrNode>& instructions, const Statement& stmt, Context& context);
+    void require_function_block(const Span& keyword, std::string_view word, const Context& context);
+    void hoist_operands(IrNode& call, std::vector<IrNode>& saved, std::size_t number, const Context& context);
+    std::size_t lifetime_statements_ = 0;
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
@@ -3305,6 +3310,9 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             auto error = Diagnostic(expr.span, "unknown name '" + expr.text + "'").with_code("E0304")
                 .label("not found in this scope");
             suggest_name(error, expr.span, expr.text, visible_names(context), "a binding");
+            if (expr.text == "defer")
+                error.help("to defer a call, write 'defer f();' without parentheses around the call; "
+                           "a callee in parentheses is bound to a name first");
             throw error;
         }
         if (symbol(id).kind == SymbolKind::Function &&
@@ -4233,6 +4241,11 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return lower_match(stmt, context, false);
     case StmtKind::Destructure:
         throw Diagnostic(stmt.span, "destructuring requires a statement list").with_code("E0899");
+    case StmtKind::Defer:
+        require_function_block(stmt.keyword, "defer", context);
+        throw Diagnostic(stmt.span, "'defer' requires a statement list").with_code("E0899");
+    case StmtKind::Using:
+        throw Diagnostic(stmt.span, "'using' is not lowered yet").with_code("E0899");
     case StmtKind::While: {
         auto result = node(IrOp::Loop, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
@@ -4570,6 +4583,8 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
     if (stmt.kind == StmtKind::Destructure) {
         destructure(instructions, stmt, context);
+    } else if (stmt.kind == StmtKind::Defer) {
+        lower_defer(instructions, stmt, context);
     } else {
         instructions.push_back(statement(stmt, context));
     }
@@ -5202,6 +5217,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 #include "lowering_matching.inc"
 #include "lowering_optional.inc"
 #include "lowering_any.inc"
+#include "lowering_lifetime.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

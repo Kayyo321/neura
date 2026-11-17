@@ -262,6 +262,11 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
     case IrOp::Continue:
     case IrOp::Return:
     case IrOp::Discard:
+    // A cleanup list runs at its block's exits, and its operations are the
+    // children below; Pending is the value a return carries, like a local.
+    case IrOp::Cleanup:
+    case IrOp::Pending:
+    case IrOp::Yield:
         break;
     case IrOp::Load:
         if (local(node.symbol)) {
@@ -279,6 +284,10 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
             break;
         }
         const auto& destination = node.operands.front();
+        if (destination.op == IrOp::Pending) {
+            add(node.operands.back(), effects);
+            return;
+        }
         if (destination.op == IrOp::Load) {
             if (local(destination.symbol)) {
                 effects.local_writes.insert(destination.symbol);

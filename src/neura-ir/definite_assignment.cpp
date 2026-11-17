@@ -403,7 +403,7 @@ private:
             if (init.kind == StmtKind::Binding) hide(init.declaration->name);
         }
         if (stmt.kind == StmtKind::ForEach) hide(stmt.declaration->name);
-        if (stmt.kind == StmtKind::Scope)
+        if (stmt.kind == StmtKind::Scope || stmt.kind == StmtKind::Using)
             for (const auto& binding : stmt.bindings) hide(binding.text);
         scan_body(stmt.body, visit);
         for (const auto& step : stmt.step) scan_statement(step, visit);
@@ -556,6 +556,7 @@ private:
             check_body(stmt.body, flow);
             break;
         case StmtKind::Scope:
+        case StmtKind::Using:
             scopes_.emplace_back();
             for (const auto& binding : stmt.bindings) hide(binding.text);
             check_body(stmt.body, flow);

@@ -311,6 +311,36 @@ A lambda captures the values of enclosing parameters and local bindings it uses 
 
 Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. A generic function is called with its type arguments written or [inferred](Polymorphism.md#type-argument-inference). Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
 
+### defer
+
+`defer call;` registers one call to run when the enclosing block is left ([design](../design/Lifetime030.md), implemented, proposed). The callee, the receiver and the arguments are evaluated once, in written order, at the statement, and saved; later assignments to the bindings they were read from change nothing, while an object or array that was saved is the same instance when the call runs. The call runs once when its block is left by falling off its end, `return`, `break`, `continue`, or a propagating `?`. Calls deferred in one block run last in, first out, and a `defer` that is not reached registers nothing. A `defer` belongs to the innermost block that contains it, so a loop body runs its deferred calls at the end of each iteration and a branch of `if` at the end of the branch. A `return` evaluates its value first, holds it while the deferred calls run, and then returns it.
+
+The operand is one call of a function, a method, a static function, or a function value. A block, a `new` expression, `spawn`, an optional-chained call, and any other expression are [E0219](../diagnostics/E0219.md), and the call's result type must be `void` ([E0471](../diagnostics/E0471.md)), because nothing can read a deferred call's result. `defer` is written in a function body, a lambda, a constructor or a destructor; at file level it is [E0472](../diagnostics/E0472.md). A trap in a deferred call ends the run, and the deferred calls registered before it do not run: nothing runs after a trap or `Process.exit`.
+
+`defer` is a keyword only at the start of a statement and before a name, `{`, `new` or `spawn`. Everywhere else it is an ordinary identifier, so `defer(x);` calls a function named `defer`.
+
+<!-- example: check -->
+```neura
+let console = import:Std.Io.Console;
+
+let Audit = class (
+    export let end_section = func(name: string) -> void {
+        console.print_line("end " + name);
+    };
+);
+
+let import_items = func(audit: Audit, count: int) -> int {
+    defer audit.end_section("import");
+    for (let index = 0; index < count; index++) {
+        defer console.print_line("item " + index.to_string() + " done");
+        if (index == 2) {
+            return index;
+        }
+    }
+    return count;
+};
+```
+
 ## Loops
 
 Neura supports pre-test, post-test, infinite, three-part, and for-each loops. The `for`-each form accepts an array, list, or an implementation of `Iterable<T>`.

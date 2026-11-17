@@ -25,6 +25,7 @@ constexpr std::uint8_t max_op_1_4 = static_cast<std::uint8_t>(IrOp::RepeatCollec
 constexpr std::uint8_t max_op_1_7 = static_cast<std::uint8_t>(IrOp::ReferencePlace);
 constexpr std::uint8_t max_op_1_9 = static_cast<std::uint8_t>(IrOp::SchedulerCall);
 constexpr std::uint8_t max_op_1_12 = static_cast<std::uint8_t>(IrOp::AnyUnpack);
+constexpr std::uint8_t max_op_1_14 = static_cast<std::uint8_t>(IrOp::Yield);
 // NeuraIR 1.9 stores a node's poll in the top bit of its operation byte.
 constexpr std::uint8_t poll_bit = 0x80;
 constexpr std::uint16_t task_minor = 9;
@@ -81,11 +82,22 @@ bool mentions_any(const IrType& type) {
 
 bool needs_any_minor(const std::vector<IrNode>& nodes) {
     for (const auto& node : nodes) {
-        if (scoped_return(node) || static_cast<std::uint8_t>(node.op) > max_op_1_9 || mentions_any(node.type) ||
+        const auto op = static_cast<std::uint8_t>(node.op);
+        if (scoped_return(node) || (op > max_op_1_9 && op <= max_op_1_12) || mentions_any(node.type) ||
             std::ranges::any_of(node.type_arguments, mentions_any))
             return true;
         for (const auto* region : {&node.operands, &node.body, &node.alternative})
             if (needs_any_minor(*region)) return true;
+    }
+    return false;
+}
+
+// A Cleanup, Pending or Yield anywhere (NeuraIR 1.14).
+bool needs_lifetime_minor(const std::vector<IrNode>& nodes) {
+    for (const auto& node : nodes) {
+        if (static_cast<std::uint8_t>(node.op) > max_op_1_12) return true;
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            if (needs_lifetime_minor(*region)) return true;
     }
     return false;
 }
@@ -189,6 +201,13 @@ public:
                        (item.bound && mentions_any(*item.bound));
             }))
             version = std::max(version, nir_any_minor);
+        if (std::ranges::any_of(program.bodies, [](const IrBody& body) { return needs_lifetime_minor(body.instructions); }) ||
+            std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
+                return std::ranges::any_of(item.attributes, [](const IrAttribute& attribute) {
+                    return attribute.id == AttributeId::GeneratorResume;
+                });
+            }))
+            version = std::max(version, nir_lifetime_minor);
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -412,7 +431,7 @@ public:
         }
         constexpr std::uint8_t operation_limits[]{
             max_op_1_0, max_op_1_1, max_op_1_2, max_op_1_3, max_op_1_4, max_op_1_4, max_op_1_4, max_op_1_7,
-            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12};
+            max_op_1_7, max_op_1_9, max_op_1_9, max_op_1_9, max_op_1_12, max_op_1_12, max_op_1_14};
         static_assert(std::size(operation_limits) == nir_minor_version + 1);
         max_op_ = operation_limits[minor_];
         latches_ = minor_ > 0;
@@ -668,6 +687,9 @@ private:
                 if (has_attribute(value, AttributeId::HostEffects) &&
                     (value.has_body || !value.external || !value.host_binding))
                     fail("symbol '" + value.name + "': a host-effects contract belongs to a host binding without a body");
+                if (has_attribute(value, AttributeId::GeneratorResume) && minor_ < nir_lifetime_minor)
+                    fail("symbol '" + value.name + "': generator.resume requires NeuraIR format 1." +
+                         std::to_string(nir_lifetime_minor));
             }
         }
         return value;

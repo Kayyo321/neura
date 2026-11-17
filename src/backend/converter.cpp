@@ -1,4 +1,5 @@
 #include "converter.hpp"
+#include "cleanup_stack.hpp"
 
 #include "circuit/block_synth.hpp"
 #include "circuit/circuit.hpp"
@@ -9,11 +10,13 @@
 #include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
+#include "neura-ir/attributes.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
+#include "neura-ir/lifetime.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
@@ -185,9 +188,20 @@ private:
     // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
     Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
                       std::uint32_t result_type, const Span& span);
-    // Scope exits for every task scope opened inside `depth` enclosing ones,
-    // innermost first, for a return, break, or continue that leaves them.
-    void leave_task_scopes(std::size_t depth, const Span& span);
+    // The exit work of blocks (cleanup_stack.hpp, cleanup_stack.inc): the
+    // work of every entry above `depth`, innermost first, for an exit of
+    // kind `edge` written at `span`.
+    void leave_cleanups(std::size_t depth, const Span& span, ExitEdge edge);
+    void exit_work(const ExitWork& entry, const Span& span, ExitEdge edge);
+    // Falling off the end of a region that pushed the entries above `depth`.
+    void end_region(std::size_t depth, const Span& span);
+    void release_region(const ExitWork& entry, const Span& span);
+    void return_statement(const IrNode& node);
+    Values pending_values(const IrNode& node);
+    // Generators: the resume chain at the start of a `$resume` method, and
+    // a Yield, which stores its index and returns true.
+    void resume_chain();
+    void yield_statement(const IrNode& node);
 
     // Statements and expressions.
     void region(const std::vector<IrNode>& statements);
@@ -273,12 +287,18 @@ private:
         std::uint32_t exit;
         // `continue` takes the back edge itself and the loop polls there.
         bool poll_on_continue;
-        // Task scopes open where the loop began.
-        std::size_t task_scopes;
+        // Exit work open where the loop began.
+        std::size_t exit_depth;
     };
     std::vector<LoopTargets> loops_;
-    // Task scopes open at the statement being converted.
-    std::size_t task_scopes_ = 0;
+    // Exit work open at the statement being converted, outermost first.
+    ExitStack exit_stack_;
+    // The returned value while a return runs the exit work it leaves.
+    std::optional<PendingSlots> pending_;
+    // A generator's `$resume`: the field of its resume index, and the block
+    // after each Yield, by index minus one.
+    SymbolId resume_field_ = no_symbol;
+    std::vector<std::uint32_t> resume_blocks_;
     std::vector<std::uint32_t> placeholders_;
 
     friend class Converter;
@@ -2160,20 +2180,17 @@ Operand FunctionCompiler::scheduler(nvr::SchedulerOp operation, std::uint32_t ta
     return result_slot == absent ? Operand{} : slot_operand(result_slot);
 }
 
-void FunctionCompiler::leave_task_scopes(std::size_t depth, const Span& span) {
-    for (auto open_scopes = task_scopes_; open_scopes > depth; --open_scopes) {
-        scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, c_.scalar(nvr::TypeKind::Void), span);
-    }
-}
+#include "cleanup_stack.inc"
 
 // ---------------------------------------------------------------------------
 // Statements
 
 void FunctionCompiler::region(const std::vector<IrNode>& statements) {
+    const auto depth = exit_stack_.size();
     for (const auto& item : statements) {
         if (!open()) {
             // Control cannot reach the rest of the region.
-            return;
+            break;
         }
         statement(item);
         if (c_.debug_statements() && open()) {
@@ -2185,6 +2202,7 @@ void FunctionCompiler::region(const std::vector<IrNode>& statements) {
             begin(next, item.span);
         }
     }
+    end_region(depth, statements.empty() ? Span{} : statements.back().span);
 }
 
 void FunctionCompiler::statement(const IrNode& node) {
@@ -2249,44 +2267,33 @@ void FunctionCompiler::statement(const IrNode& node) {
         } else {
             scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
         }
-        ++task_scopes_;
+        exit_stack_.push_back({ExitWorkKind::TaskScope, &node});
         region(node.body);
         // Falling off the end waits for the scope's tasks. A return, break,
         // or continue inside the body has already left it.
         if (open()) {
             scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, node.span);
         }
-        --task_scopes_;
+        exit_stack_.pop_back();
         return;
     }
-    case IrOp::Return: {
-        ExitSpec exit;
-        exit.kind = nvr::ExitKind::Return;
-        if (!node.operands.empty()) {
-            auto value = values(node.operands.front());
-            if (task_scopes_ != 0) {
-                // The value is computed first, then each scope waits for its
-                // tasks, then the function returns it (Concurrency.md 4.1).
-                const auto slot = new_slots(c_.word_types(node.operands.front().type, node.span));
-                for (std::size_t i = 0; i < value.size(); ++i) assign(slot + static_cast<std::uint32_t>(i), value[i]);
-                leave_task_scopes(0, node.span);
-                value = slot_values(slot, value.size());
-            }
-            exit.arguments = std::move(value);
-        } else {
-            leave_task_scopes(0, node.span);
-        }
-        operation_at(node.span);
-        close({exit});
+    case IrOp::Return:
+        return_statement(node);
         return;
-    }
     case IrOp::Break:
-        leave_task_scopes(loops_.back().task_scopes, node.span);
-        jump(loops_.back().exit);
+        leave_cleanups(loops_.back().exit_depth, node.span, ExitEdge::Jump);
+        if (open()) jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        leave_task_scopes(loops_.back().task_scopes, node.span);
-        jump(loops_.back().next, loops_.back().poll_on_continue);
+        leave_cleanups(loops_.back().exit_depth, node.span, ExitEdge::Jump);
+        if (open()) jump(loops_.back().next, loops_.back().poll_on_continue);
+        return;
+    case IrOp::Cleanup:
+        // Registered from here to every exit of the enclosing block.
+        exit_stack_.push_back({ExitWorkKind::Cleanup, &node});
+        return;
+    case IrOp::Yield:
+        yield_statement(node);
         return;
     case IrOp::Fail: {
         // The only failure NeuraIR names is a list changed during for-each.
@@ -2318,6 +2325,13 @@ void FunctionCompiler::store(const IrNode& node) {
     const auto& destination = node.operands[0];
     const auto& source = node.operands[1];
     switch (destination.op) {
+    case IrOp::Pending: {
+        auto value = values(source);
+        pending_values(destination);
+        for (std::size_t i = 0; i < value.size(); ++i)
+            assign(pending_->first + static_cast<std::uint32_t>(i), value[i]);
+        return;
+    }
     case IrOp::Load: {
         const auto kind = c_.symbol(destination.symbol).kind;
         if (kind == SymbolKind::Local || kind == SymbolKind::Parameter) {
@@ -2388,7 +2402,7 @@ void FunctionCompiler::loop(const IrNode& node) {
     // The poll of a loop rides on the exit that takes the back edge: the
     // jump from the latch, or without a latch every jump back to the head.
     const bool poll_at_head = node.poll && latch == head;
-    loops_.push_back({latch, exit, poll_at_head, task_scopes_});
+    loops_.push_back({latch, exit, poll_at_head, exit_stack_.size()});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
     region(node.body);
     if (open()) {
@@ -2539,6 +2553,7 @@ Operand FunctionCompiler::integer_literal(const IrNode& node) {
 }
 
 Values FunctionCompiler::values(const IrNode& node) {
+    if (node.op == IrOp::Pending) return pending_values(node);
     if (node.type.kind != TypeKind::Tuple) return {expression(node)};
     switch (node.op) {
     case IrOp::Tuple:
@@ -2627,6 +2642,8 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         throw std::logic_error("a tuple reached the one-word path at " + node.span.file + ":" +
                                std::to_string(node.span.line));
     switch (node.op) {
+    case IrOp::Pending:
+        return pending_values(node).front();
     case IrOp::ValueEquals:
     case IrOp::ValueHash:
     case IrOp::ValueText:
@@ -3674,6 +3691,7 @@ void FunctionCompiler::compile_function() {
     function_.result_type = results.front();
     function_.more_results.assign(results.begin() + 1, results.end());
     begin(new_block(), function.span);
+    resume_chain();
     region(c_.body(origin_.symbol));
     finish();
 }

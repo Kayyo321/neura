@@ -2,7 +2,7 @@
 
 This note fixes the design of the 0.3.0 milestone that adds `defer`, `using`, generators that produce the standard library's `Sequence`, and a task-local event library. All four are about what happens when a block is left or a computation is suspended, so they share one representation of a block's exit. The note builds on [storage and construction](Storage030.md), whose regions are released at the same exits and whose `new func` and `new bound` the event library needs, and on [semantic facts and representations](Representation030.md), whose retention summaries decide what may escape. It is a design note in the sense of [the 0.3.0 baseline](Release030.md). Rows move to [Core language](../lang/CoreLanguage.md), [Resources and concurrency](../lang/ResourcesConcurrency.md), [Concurrency](../lang/Concurrency.md), [the standard library specification](../lang/Stdlib.md) and [Backend](../Backend.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation. Later changes to a row are made here, with the reason.
+Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch for the steps of the [order of work](#order-of-work) that the rows marked "implemented, proposed" belong to. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; a row marked "implemented, proposed" is in the compiler and still awaits it. Later changes to a row are made here, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation).
 
 None of this adds unwinding. A trap or `Process.exit` ends the run as it does today, and no deferred call, close or handler is promised after it. The collector never calls `close`.
 
@@ -35,17 +35,17 @@ defer-statement = "defer" call-expression ";"
 
 | Rule | Status |
 | --- | --- |
-| `defer` at the start of a statement is the keyword when the next token is an identifier, `{`, `new` or `spawn`; no statement that begins so is valid today. In every other position it is an ordinary identifier, so `defer(x);`, `defer = 1;` and `let defer = ...` keep their meaning. | proposed |
-| The operand is one call: of a function, a method, a static function, or a function value. A block, a `new` expression, `spawn`, an optional-chained call, and any other expression are `E0219`. | proposed |
-| The call's result type is `void`. Any other result, including `Result`, is `E0471`: a deferred call's failure would be lost. A function that handles the result itself can be deferred. | proposed |
-| At the `defer` statement the callee expression, the receiver and the arguments are evaluated once, in written order, and saved in hidden locals of the frame. Later assignments to the bindings they were read from change nothing. | proposed |
-| The saved call runs once when its block is left by falling off its end, `return`, `break`, `continue`, or a propagating `?`. Calls deferred in one block run last in, first out. A block that is not left runs none. | proposed |
-| A `defer` belongs to the innermost block that contains it: a loop body runs its deferred calls at the end of each iteration, and a branch of `if` at the end of the branch. | proposed |
-| A `return` evaluates its expression first. The value is held while deferred calls run and is not evaluated again. | proposed |
+| `defer` at the start of a statement is the keyword when the next token is an identifier, `{`, `new` or `spawn`; no statement that begins so is valid today. In every other position it is an ordinary identifier, so `defer(x);`, `defer = 1;` and `let defer = ...` keep their meaning. | implemented, proposed |
+| The operand is one call: of a function, a method, a static function, or a function value. A block, a `new` expression, `spawn`, an optional-chained call, and any other expression are `E0219`. | implemented, proposed |
+| The call's result type is `void`. Any other result, including `Result`, is `E0471`: a deferred call's failure would be lost. A function that handles the result itself can be deferred. | implemented, proposed |
+| At the `defer` statement the callee expression, the receiver and the arguments are evaluated once, in written order, and saved in hidden locals of the frame. Later assignments to the bindings they were read from change nothing. | implemented, proposed |
+| The saved call runs once when its block is left by falling off its end, `return`, `break`, `continue`, or a propagating `?`. Calls deferred in one block run last in, first out. A block that is not left runs none. | implemented, proposed |
+| A `defer` belongs to the innermost block that contains it: a loop body runs its deferred calls at the end of each iteration, and a branch of `if` at the end of the branch. | implemented, proposed |
+| A `return` evaluates its expression first. The value is held while deferred calls run and is not evaluated again. | implemented, proposed |
 | With class hooks: the reads of the callee, receiver and arguments are events at the `defer` statement; the admissions of the arguments to the callee's parameters are events when the call runs. | proposed |
-| A saved array or reference stays valid until the call runs, because the block's region is released after the block's deferred calls. A saved value follows the escape rules of the binding it was read from; `defer` extends no lifetime. | proposed |
-| `defer` is written inside a function body, at any block depth, including a lambda, a constructor and a destructor. At file level and in a startup block it is `E0472`. | proposed |
-| A trap in a deferred call ends the run; the remaining deferred calls do not run. | proposed |
+| A saved array or reference stays valid until the call runs, because the block's region is released after the block's deferred calls. A saved value follows the escape rules of the binding it was read from; `defer` extends no lifetime. | implemented, proposed |
+| `defer` is written inside a function body, at any block depth, including a lambda, a constructor and a destructor. At file level and in a startup block it is `E0472`. | implemented, proposed |
+| A trap in a deferred call ends the run; the remaining deferred calls do not run. | implemented, proposed |
 
 ## `using`
 
@@ -370,3 +370,13 @@ No existing source changes meaning: the four words stay identifiers wherever the
 | The guard rule for `emit` is a compile-time check of the resolved call graph | The run time has no query for "a guard is held", and an honest partial check is better than none. |
 | The event module is `Std.Events.Event`, in a new area | Events are not collections, I/O or concurrency primitives. |
 | NeuraIR takes "the next free minor" instead of a number | Other milestones allocate versions at the same time; the format page records the number when the step lands. |
+
+## Decisions taken in the implementation
+
+| Decision | Reason |
+| --- | --- |
+| The IR optimizer leaves a body that contains a `Cleanup`, `Pending` or `Yield` entirely as lowering wrote it, and inlines no call into such a body or of its function. | It keeps every row of [the optimization table](#optimization-and-tiers) without an analysis of exits in each pass; it is stricter than the rows require and costs only the optimization of the bodies that use the features. |
+| A deferred call does not save an operand that is a literal, a module, or a primitive reference. | Evaluating such an operand has no effect and gives the same value at the statement and at the exit; a primitive reference designates a place, which the call reads when it runs. |
+| Edge case 23's startup block has no syntax in the base of this milestone, so `E0472` is shown at file level only. The rule applies to a class's static initializer, the only startup code the base has, which holds no statements. | The startup blocks of another milestone take the same check when they land. |
+| The formatter joins `defer` and its call when they are on two lines, and keeps a comment between them on its own line, as it keeps a comment inside any statement. | A comment cannot be joined onto the line of the call without moving it. |
+

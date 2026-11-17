@@ -73,6 +73,10 @@ std::string_view op_name(IrOp op) {
     case IrOp::TaskScope: return "task_scope";
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
+    case IrOp::Cleanup: return "cleanup";
+    case IrOp::Pending: return "pending";
+    case IrOp::Yield: return "yield";
+    default: break;
     }
     return "<invalid>";
 }

@@ -1236,7 +1236,8 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
     statement = [&](const Statement &s) {
         if (s.declaration)
             declaration(*s.declaration);
-        if (s.kind == Statement::Kind::Scope || s.kind == Statement::Kind::Select)
+        if (s.kind == Statement::Kind::Scope || s.kind == Statement::Kind::Select ||
+            s.kind == Statement::Kind::Defer || s.kind == Statement::Kind::Using)
             put(s.keyword, 14, 0, 2);
         if (s.binding_type)
             type(*s.binding_type);
@@ -2055,7 +2056,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
             add_declaration(candidates.front());
         }
         for (const auto &word : {"let", "last", "const", "func", "class", "interface", "module", "enum", "if", "else",
-                                 "while", "for", "return", "match", "scope", "spawn", "select", "new", "nil", "true",
+                                 "while", "for", "return", "match", "scope", "spawn", "select", "defer", "using", "new", "nil", "true",
                                  "false", "export", "import"}) add(word, 14);
     }
     return Json{{"isIncomplete", false}, {"items", items}};

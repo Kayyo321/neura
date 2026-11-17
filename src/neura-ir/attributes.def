@@ -69,3 +69,8 @@ NEURA_ATTRIBUTE(ParameterDefaultVariant, 13, "parameter.default.variant", on_par
 // function that a module enabled with `let.extensions` may call as a member
 // of its first parameter's type. The value is true.
 NEURA_ATTRIBUTE(FunctionExtension, 14, "function.extension", on_function, false, "b")
+// On the `$resume` method of a generator's state class (docs/design/
+// Lifetime030.md, Generators): the field that holds its resume index. Only
+// such a function may contain Yield. Ids 15 to 22 belong to other 0.3.0
+// milestones; the release fixes the numbers.
+NEURA_ATTRIBUTE(GeneratorResume, 23, "generator.resume", on_function, false, "s")

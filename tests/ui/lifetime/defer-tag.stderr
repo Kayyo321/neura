@@ -1,0 +1,11 @@
+error[E0909]: expected a declaration after tags
+ --> $DIR/defer-tag.nra:5:5
+  |
+4 |     #Inline
+  |     ------- these tags need a declaration to apply to
+5 |     defer cleanup();
+  |     ^^^^^ expected 'let' or 'const', found 'defer'
+  |
+  = note: tags apply to declarations only, not to statements or expressions
+
+For more information about this error, try `neura explain E0909`.

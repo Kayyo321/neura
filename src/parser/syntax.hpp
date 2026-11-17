@@ -169,6 +169,11 @@ struct Statement {
         Scope,
         // select { arms }. `keyword` is the contextual word.
         Select,
+        // docs/design/Lifetime030.md. `defer call;`: the call is
+        // expressions[0]. `using (name = value) { body }`: `bindings` holds
+        // the name and expressions[0] the acquisition. `keyword` is the
+        // contextual word.
+        Defer, Using,
     };
 
     Kind kind;

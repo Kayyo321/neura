@@ -1,0 +1,13 @@
+error[E0471]: a deferred call returns nothing, and this one returns 'Result<Unit>'
+  --> $DIR/defer-result.nra:10:11
+   |
+ 5 |     export let close = func() -> Result<Unit> {
+   |                                  ------------ the callee returns 'Result<Unit>'
+...
+10 |     defer file.close();
+   |           ^^^^^^^^^^^^
+   |
+   = note: a deferred call's result would be lost when its block is left
+   = help: defer a function that handles the result, or use 'using' for a Closeable
+
+For more information about this error, try `neura explain E0471`.

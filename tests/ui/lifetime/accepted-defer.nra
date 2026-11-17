@@ -1,0 +1,49 @@
+// Edge cases 1, 2, 3, 9 and 24 (docs/design/Lifetime030.md): the forms of
+// `defer`, and `defer` as an ordinary name where it is not a statement.
+let console = import:Std.Io.Console;
+
+let Section = class (
+    export let end_section = func() -> void {
+        console.print_line("end");
+    };
+    export let next = func(step: int) -> func(int) -> void {
+        return func(value: int) -> void {
+            console.print_line((step + value).to_string());
+        };
+    };
+);
+
+let Registry = class (
+    export static let clear = func() -> void {
+        console.print_line("cleared");
+    };
+);
+
+let release = func(handle: int, count: int) -> void {
+    console.print_line((handle + count).to_string());
+};
+
+let drop = func<T>(value: T) -> void {
+    console.print_line("dropped");
+};
+
+let work = func(log: Section, callback: func() -> void) -> void {
+    defer log.end_section();
+    defer release(7, 2);
+    defer callback();
+    defer Registry.clear();
+    defer
+        // A comment between the word and its call.
+        release(1, 1);
+    defer log.next(1)(2);
+    defer drop<int>(3);
+};
+
+let defer = func<T>(value: T) -> T {
+    return value;
+};
+
+let names = func() -> void {
+    let kept = defer<int>(4);
+    defer<int>(kept);
+};

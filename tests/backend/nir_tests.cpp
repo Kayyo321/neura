@@ -452,24 +452,35 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // Minor 13 is newer than this reader.
+    // The minor after the newest is newer than this reader.
+    const auto newest_text = "1." + std::to_string(nir_minor_version);
     auto newer = bytes;
-    newer[6] = 13;
-    expect_nir_error(newer, "NeuraIR format 1.13 is not supported; this reader accepts 1.0 through 1.12");
+    newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
+    expect_nir_error(newer, "NeuraIR format 1." + std::to_string(nir_minor_version + 1) +
+                                " is not supported; this reader accepts 1.0 through " + newest_text);
     newer[6] = 200;
-    expect_nir_error(newer, "this reader accepts 1.0 through 1.12");
+    expect_nir_error(newer, "this reader accepts 1.0 through " + newest_text);
 
     // An operation tag above the newest one. Operations after the 1.9 set
-    // are those of 1.12 (docs/design/Matching030.md).
+    // are those of 1.12 (docs/design/Matching030.md) and, after them, those
+    // of nir_lifetime_minor (docs/design/Lifetime030.md).
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
-    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::AnyUnpack) + 1);
+    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::Yield) + 1);
     above.bodies.push_back({0, {tagged}});
     const auto above_bytes = write_nir(above);
-    check_equal(static_cast<int>(above_bytes[6]), static_cast<int>(nir_any_minor),
-                "an operation above the 1.9 set is written as 1.12");
+    check_equal(static_cast<int>(above_bytes[6]), static_cast<int>(nir_lifetime_minor),
+                "an operation above the 1.12 set is written as the lifetime minor");
     expect_nir_error(above_bytes, "invalid operation tag " + std::to_string(static_cast<int>(tagged.op)));
+    // The lifetime operations are not accepted in a 1.12 file.
+    IrProgram cleanup = above;
+    cleanup.bodies.front().instructions.front().op = IrOp::Cleanup;
+    auto cleanup_bytes = write_nir(cleanup);
+    check_equal(static_cast<int>(cleanup_bytes[6]), static_cast<int>(nir_lifetime_minor),
+                "a Cleanup is written as the lifetime minor");
+    cleanup_bytes[6] = static_cast<std::uint8_t>(nir_any_minor);
+    expect_nir_error(cleanup_bytes, "invalid operation tag " + std::to_string(static_cast<int>(IrOp::Cleanup)));
     // The newest operation of 1.9 is accepted in 1.9, and the first of
     // 1.12 is not.
     IrProgram newest = above;
@@ -820,6 +831,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]"},
         {AttributeId::ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s"},
         {AttributeId::FunctionExtension, 14, "function.extension", on_function, false, "b"},
+        {AttributeId::GeneratorResume, 23, "generator.resume", on_function, false, "s"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -855,8 +867,11 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
     const auto& program = fixture.program;
     const auto issues = verify_ir(program);
     check(issues.empty(), issues.empty() ? "" : issues.front().message);
-    // Every pre-registered attribute is exercised.
+    // Every pre-registered attribute is exercised. generator.resume needs
+    // NeuraIR 1.14 (docs/design/Lifetime030.md); the lifetime programs
+    // write and read it.
     for (const auto& info : attribute_registry()) {
+        if (info.id == AttributeId::GeneratorResume) continue;
         check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, info.id); }),
               std::string(info.name) + " is not attached by the fixture");
     }

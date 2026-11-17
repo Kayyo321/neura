@@ -247,3 +247,32 @@ NEURA_TEST(structure, programs_with_tasks_are_not_inlined) {
 }
 
 } // namespace neura::testing
+
+namespace neura::testing {
+
+// docs/design/Lifetime030.md, "Optimization and tiers": a Cleanup is never
+// removed, duplicated, merged or moved, and nothing moves across one. The
+// passes leave a body that holds one as lowering wrote it, each alone and
+// all together, and inline no call into it.
+NEURA_TEST(structure, passes_leave_bodies_with_cleanups) {
+    const auto original = lower_fixture(environment, "lifetime.nra");
+    const std::initializer_list<std::string_view> functions{"Lifetime.saved_argument", "Lifetime.held_return",
+                                                            "Lifetime.loop_exits"};
+    for (const auto& pass : optimization_passes()) {
+        auto program = original;
+        only(program, pass.name);
+        for (const auto function : functions)
+            check_equal(shape(program, body_of(program, function)), shape(original, body_of(original, function)),
+                        std::string(pass.name) + " must leave " + std::string(function));
+    }
+    auto program = original;
+    optimize(program, {});
+    for (const auto function : functions) {
+        const auto& body = body_of(program, function);
+        check_equal(shape(program, body), shape(original, body_of(original, function)),
+                    "the optimizer must leave " + std::string(function));
+        check(shape(program, body).find("(cleanup") != std::string::npos, std::string(function) + " keeps its cleanup");
+    }
+}
+
+} // namespace neura::testing

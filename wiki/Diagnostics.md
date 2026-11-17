@@ -41,6 +41,7 @@ Errors about the grammar.
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
+| [E0219](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0219.md) | malformed defer statement |
 | [E0225](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0225.md) | positional argument after a named argument |
 | [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
 | [E0227](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0227.md) | malformed interpolated string |
@@ -124,6 +125,8 @@ Errors about types, values, calls, and statements.
 | [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) | a value type that contains itself |
 | [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md) | a value type larger than its inline limit |
 | [E0450](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0450.md) | a list literal without new |
+| [E0471](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0471.md) | deferred call with a result |
+| [E0472](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0472.md) | defer or using outside a function |
 | [E0480](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0480.md) | conflicting inferred type arguments |
 | [E0481](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0481.md) | lambda does not fit its callable context |
 | [E0482](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0482.md) | unknown argument label |

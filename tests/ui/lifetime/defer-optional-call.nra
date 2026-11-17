@@ -1,0 +1,5 @@
+// An optional-chained call may skip, so it cannot be deferred.
+let Log = class ( export let flush = func() -> void {}; );
+let work = func(log: Log) -> void {
+    defer log?.flush();
+};

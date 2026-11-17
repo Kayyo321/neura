@@ -1,0 +1,5 @@
+// Edge case 5: `defer` takes a call, not a name.
+let log = func() -> void {};
+let work = func() -> void {
+    defer log;
+};

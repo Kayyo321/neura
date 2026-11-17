@@ -84,6 +84,9 @@ struct Hints {
     // The ':' of a conditional or of a range's step, which is spaced on
     // both sides, unlike a label's or an annotation's.
     std::set<std::size_t> spaced_colons;
+    // The '(' of a `using` statement, spaced like the one after `scope`;
+    // `using` is a contextual word, so its calls keep no space.
+    std::set<std::size_t> control_parens;
 };
 
 class SyntaxHints {
@@ -284,6 +287,12 @@ private:
     }
 
     void statement(const Statement& value) {
+        if (value.kind == Statement::Kind::Using) {
+            in_span(value.span, [&, done = false](const Token& token) mutable {
+                if (!done && token.text == "(") hints_.control_parens.insert(token.span.offset);
+                done = done || token.text == "(";
+            });
+        }
         if (value.declaration) declaration(*value.declaration);
         if (value.binding_type) type(*value.binding_type);
         for (const auto& item : value.expressions) expression(item);
@@ -444,7 +453,7 @@ std::string render(std::string_view source, const std::vector<Token>& tokens, co
             // `match.is (x) {` is written as `match (x) {` is.
             const bool match_is = before == "is" && i >= 3 && items[i - 2].text == "." && items[i - 3].text == "match";
             const bool control = before == "if" || before == "while" || before == "for" || before == "match" ||
-                                 before == "scope" || match_is;
+                                 before == "scope" || match_is || hints.control_parens.contains(item.offset);
             const bool body = hints.bodies.contains(item.offset);
             space = control || body || before == "module" || before == "class" || before == "interface" || before == "enum" || before == "singleton";
             out.text(text, indent(), space);

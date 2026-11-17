@@ -1,0 +1,82 @@
+// Deferred calls at a propagating `?`, around a task scope, and at a
+// return that a scope holds (docs/design/Lifetime030.md, "Exit order",
+// edge cases 17 and 19).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let error = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+
+let say = func(text: string) -> void {
+    console.print_line(text);
+};
+
+let parse = func(text: string) -> Result<int> {
+    if (text == "bad") {
+        return Result<int>.Err(error.Error.Parse { kind: error.ParseErrorKind.Syntax, offset: 0, message: "bad number" });
+    }
+    return Result<int>.Ok(text.byte_length);
+};
+
+let consume = func(receiver: channels.Receiver<int>) -> void {
+    let sum = 0;
+    do {
+        match (receiver.receive()) {
+            channels.Received.Value(value) => {
+                sum = sum + value;
+            },
+            _ => {
+                console.print_line("child received " + sum.to_string());
+                return;
+            },
+        }
+    }
+};
+
+let report = func(outcome: Result<int>) -> void {
+    match (outcome) {
+        Result.Ok(value) => {
+            say("ok " + value.to_string());
+        },
+        Result.Err(failure) => {
+            say("error " + error.message(failure));
+        },
+    }
+};
+
+let ExitOrder = module:program.Entry (
+    // `?` returns the error through the deferred calls of every block it
+    // leaves, innermost first.
+    let doubled = func(text: string) -> Result<int> {
+        defer say("outer cleanup for " + text);
+        {
+            defer say("inner cleanup for " + text);
+            let value = parse(text)?;
+            say("parsed " + text);
+            return Result<int>.Ok(value * 2);
+        }
+    };
+
+    // A deferred close of the channel lets the child finish, so the scope's
+    // join, which runs after the scope's deferred calls, can complete.
+    let drain = func() -> int {
+        const [sender, receiver, closer] = channels.open<int>(4);
+        defer say("after the join");
+        scope {
+            defer closer.close();
+            spawn consume(receiver);
+            sender.send(1);
+            sender.send(2);
+            sender.send(3);
+            defer say("the channel is closed next");
+        }
+        return 6;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        report(doubled("four"));
+        report(doubled("bad"));
+        say("drained " + drain().to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -1267,6 +1267,8 @@ private:
                 expect(")");
             }
             result.body = block();
+        } else if (at_defer_statement()) {
+            result = defer_statement();
         } else if (at_contextual("select") && next_is(1, "{")) {
             result.kind = Statement::Kind::Select;
             result.keyword = advance().span;
@@ -1337,6 +1339,8 @@ private:
         const auto& token = tokens_[cursor_ + offset];
         return token.kind == TokenKind::Symbol && token.text == symbol;
     }
+
+#include "parser_lifetime.inc"
 
     bool at_scope_statement() const {
         if (!at_contextual("scope")) return false;

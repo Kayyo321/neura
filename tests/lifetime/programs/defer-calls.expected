@@ -1,0 +1,14 @@
+evaluate argument
+second reports 2
+first reports 1
+evaluate inner
+chain next 10
+evaluate outer
+body of chained
+step 15
+evaluate generic
+body of kinds
+sum 15
+drop 7
+registry cleared
+callback

@@ -1,0 +1,3 @@
+// Edge case 23: `defer` at file level has no block of a function to leave.
+let cleanup = func() -> void {};
+defer cleanup();

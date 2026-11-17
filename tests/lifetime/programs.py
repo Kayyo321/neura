@@ -1,0 +1,135 @@
+#!/usr/bin/env python3
+"""Runs the programs of the lifetime milestone (docs/design/Lifetime030.md)
+in every build and execution mode.
+
+Each `<name>.nra` in the directory, with its standard output in
+`<name>.expected`, is built four ways: from source, unoptimized, from a
+`.nir` module, and without names and a source map. Each image runs at tier
+0, tier 1 and tier 2 (native code off and on), and with blocks lifted and
+regions formed at their first execution (NEURA_TIER_EAGER=1) with tier 3
+off, interpreted and native, with programs formed without tier 3
+(NEURA_TIER_PROGRAMS=1), with every run checked against a shadow run at
+tier 1 (NEURA_TIER_CHECK=2), with native tier 3 checked by its verifier
+(NEURA_TIER3_VERIFY=1), and with native code off (NEURA_JIT=off).
+
+Every run of one image must print the expected output and give the same
+exit status, trap text, steps and peak heap cells. A program that traps
+gives its status in `<name>.status`; its output is what it printed before
+the trap. A program with `<name>.deopt` must form native tier 3 programs
+and deoptimize out of one in each mode that file lists, one per line, so
+that the deoptimization tests do not pass vacuously (the unoptimized build
+is exempt: its calls are not inlined).
+
+Then each program's `.nir` is checked: a program that uses `defer`,
+`using` or a generator is written as NeuraIR 1.14 (nir_lifetime_minor),
+and the same file marked as an older minor is rejected by the reader.
+
+Usage: programs.py <neura> <directory>
+"""
+import os
+import pathlib
+import re
+import subprocess
+import sys
+import tempfile
+
+NEURA = pathlib.Path(sys.argv[1]).resolve()
+DIRECTORY = pathlib.Path(sys.argv[2]).resolve()
+LIFETIME_MINOR = 14
+
+BASE = {'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin'}
+# (name, environment, run options)
+MODES = [
+    ('tier0', {}, ['--tier=0']),
+    ('tier1', {}, ['--tier=1']),
+    ('tier2-jit-off', {'NEURA_TIER3': 'off'}, ['--tier=2', '--jit=off']),
+    ('tier2-jit-on', {'NEURA_TIER3': 'off'}, ['--tier=2', '--jit=on']),
+    ('eager-tier3-off', {'NEURA_TIER_EAGER': '1', 'NEURA_TIER3': 'off'}, ['--jit=on']),
+    ('eager-tier3-interp', {'NEURA_TIER_EAGER': '1', 'NEURA_TIER3': 'interp'}, ['--jit=on']),
+    ('eager-tier3-native', {'NEURA_TIER_EAGER': '1', 'NEURA_TIER3': 'native'}, ['--jit=on']),
+    ('eager-programs', {'NEURA_TIER_EAGER': '1', 'NEURA_TIER_PROGRAMS': '1'}, ['--jit=on']),
+    ('eager-check2', {'NEURA_TIER_EAGER': '1', 'NEURA_TIER_CHECK': '2'}, ['--jit=on']),
+    ('eager-verify', {'NEURA_TIER_EAGER': '1', 'NEURA_TIER3': 'native', 'NEURA_TIER3_VERIFY': '1'}, ['--jit=on']),
+    ('eager-jit-env-off', {'NEURA_TIER_EAGER': '1', 'NEURA_JIT': 'off'}, []),
+]
+STATS = re.compile(r'^stats: steps (\d+), peak heap cells (\d+)', re.M)
+NATIVE = re.compile(r'^tier: native programs (\d+) ', re.M)
+DEOPTIMIZED = re.compile(r'^tier: native deoptimized (\d+) times', re.M)
+TRAP = re.compile(r'^.*trap.*$', re.M)
+
+
+def run(arguments, environment=None):
+    env = dict(BASE)
+    env.update(environment or {})
+    return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=300, env=env)
+
+
+def main():
+    failures = []
+    programs = sorted(DIRECTORY.glob('*.expected'))
+    if not programs:
+        sys.exit('no programs')
+    with tempfile.TemporaryDirectory() as scratch:
+        scratch = pathlib.Path(scratch)
+        for expected_path in programs:
+            source = expected_path.with_suffix('.nra')
+            expected = expected_path.read_text()
+            status_path = expected_path.with_suffix('.status')
+            status = int(status_path.read_text()) if status_path.exists() else 0
+            deopt_path = expected_path.with_suffix('.deopt')
+            deopt_modes = set(deopt_path.read_text().split()) if deopt_path.exists() else set()
+            module = scratch / (source.name + '.nir')
+            result = run(['emit-ir', str(source), '-o', str(module)])
+            if result.returncode != 0:
+                failures.append(f'{source.name}: emit-ir failed\n{result.stderr}')
+                continue
+            builds = {'source': [str(source)], 'unoptimized': ['--no-optimize', str(source)],
+                      'nir': [str(module)], 'stripped': ['--no-source-map', str(source)]}
+            for build, arguments in builds.items():
+                image = scratch / (source.name + '.' + build + '.nvr')
+                result = run(['build', *arguments, '-o', str(image)])
+                if result.returncode != 0:
+                    failures.append(f'{source.name} {build}: build failed\n{result.stderr}')
+                    continue
+                observed = {}
+                for mode, environment, options in MODES:
+                    result = run(['run', '--stats', '--tier-stats', *options, str(image)], environment)
+                    where = f'{source.name} {build} {mode}'
+                    if result.stdout != expected:
+                        failures.append(f'{where}: output differs\n--- expected\n{expected}--- got\n{result.stdout}'
+                                        f'--- stderr\n{result.stderr}')
+                    if result.returncode != status:
+                        failures.append(f'{where}: exit status {result.returncode}, expected {status}\n{result.stderr}')
+                    stats = STATS.search(result.stderr)
+                    traps = sorted(set(TRAP.findall(result.stderr)) - {line for line in TRAP.findall(result.stderr)
+                                                                        if line.startswith('tier:')})
+                    observed[mode] = (stats.groups() if stats else None, traps)
+                    if mode in deopt_modes and build != 'unoptimized':
+                        native = sum(int(n) for n in NATIVE.findall(result.stderr))
+                        deoptimized = sum(int(n) for n in DEOPTIMIZED.findall(result.stderr))
+                        if native == 0 or deoptimized == 0:
+                            failures.append(f'{where}: expected native programs and a deoptimization, found '
+                                            f'{native} programs and {deoptimized} deoptimizations\n{result.stderr}')
+                reference = observed.get('tier0')
+                for mode, value in observed.items():
+                    if value != reference:
+                        failures.append(f'{source.name} {build}: {mode} gives steps, peak cells and traps '
+                                        f'{value}, tier 0 gives {reference}')
+            data = bytearray(module.read_bytes())
+            minor = data[6] | (data[7] << 8)
+            if minor != LIFETIME_MINOR:
+                failures.append(f'{source.name}: NeuraIR 1.{minor}, expected 1.{LIFETIME_MINOR}')
+            data[6], data[7] = LIFETIME_MINOR - 2, 0
+            older = scratch / (source.name + '.older.nir')
+            older.write_bytes(data)
+            result = run(['build', str(older), '-o', str(scratch / 'older.nvr')])
+            if result.returncode == 0:
+                failures.append(f'{source.name}: the file marked NeuraIR 1.{LIFETIME_MINOR - 2} was accepted')
+    for failure in failures:
+        print(failure, file=sys.stderr)
+    print(f'{len(programs)} programs, {len(failures)} failures')
+    return 1 if failures else 0
+
+
+if __name__ == '__main__':
+    sys.exit(main())

@@ -36,7 +36,9 @@ std::size_t node_count(const IrNode& node);
 // and task scopes, including those nested in expressions.
 void each_statement_region(std::vector<IrNode>& body, const std::function<void(std::vector<IrNode>&)>& visit);
 
-// True for a function body, as opposed to a file or module initializer.
+// True for a function body, as opposed to a file or module initializer,
+// that contains no Cleanup, Pending or Yield. A body that contains one is
+// left as lowering wrote it (docs/design/Lifetime030.md, Optimization).
 bool function_body(const IrProgram& program, const IrBody& body);
 
 } // namespace neura::optimization

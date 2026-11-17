@@ -1,0 +1,111 @@
+// Order of deferred calls (docs/design/Lifetime030.md, `defer`).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Log = class (
+    let lines: string[list];
+    export let init = func() -> void {
+        lines = new string[list]();
+    };
+    export let write = func(line: string) -> void {
+        console.print_line(line);
+        lines.append(line);
+    };
+    export let count = func() -> int {
+        return lines.length;
+    };
+);
+
+let DeferOrder = module:program.Entry (
+    let log = new Log();
+
+    let show = func(label: string, value: int) -> void {
+        log.write(label + " " + value.to_string());
+    };
+
+    let compute = func(value: int) -> int {
+        log.write("compute " + value.to_string());
+        return value * 2;
+    };
+
+    // Two defers in one block run last in, first out.
+    let two = func() -> void {
+        defer show("first", 1);
+        defer show("second", 2);
+        log.write("body of two");
+    };
+
+    // The arguments are read at the statement.
+    let saved = func() -> void {
+        let n = 1;
+        defer show("saved", n);
+        n = 2;
+        show("now", n);
+    };
+
+    // The returned value is computed first, then the deferred call runs.
+    let held = func() -> int {
+        defer show("after compute", 0);
+        return compute(21);
+    };
+
+    // A loop body runs its deferred call at the end of each iteration, and
+    // on break and continue.
+    let loop = func() -> void {
+        for (let index = 0; index < 4; index++) {
+            defer show("iteration end", index);
+            if (index == 1) {
+                continue;
+            }
+            if (index == 3) {
+                break;
+            }
+            show("iteration body", index);
+        }
+    };
+
+    // A defer in one branch runs at the end of that branch.
+    let branch = func(flag: bool) -> void {
+        if (flag) {
+            defer show("then end", 1);
+            show("then body", 1);
+        } else {
+            defer show("else end", 0);
+        }
+        show("after if", 2);
+    };
+
+    // A defer after a return that is taken is never registered.
+    let early = func(flag: bool) -> int {
+        defer show("early outer", 0);
+        if (flag) {
+            return 1;
+        }
+        defer show("early late", 2);
+        return 2;
+    };
+
+    // A defer in a lambda belongs to the lambda's block.
+    let lambda = func() -> void {
+        let run = func(value: int) -> void {
+            defer show("lambda end", value);
+            show("lambda body", value);
+        };
+        run(5);
+        show("after lambda", 6);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        two();
+        saved();
+        show("held", held());
+        loop();
+        branch(true);
+        branch(false);
+        show("early", early(true));
+        show("early", early(false));
+        lambda();
+        show("lines", log.count());
+        return program.ExitCode.Ok;
+    };
+);

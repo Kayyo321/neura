@@ -77,6 +77,8 @@ bool is_statement(IrOp op) {
     case IrOp::Fail:
     case IrOp::TrapMessage:
     case IrOp::TaskScope:
+    case IrOp::Cleanup:
+    case IrOp::Yield:
         return true;
     default:
         return false;
@@ -145,7 +147,16 @@ private:
         bool scoped_value = false;
         // Enclosing TaskScope statements of this body.
         unsigned task_scopes = 0;
+        // Cleanups registered before this point in the enclosing blocks,
+        // and whether the region is a Cleanup's return list, where Pending
+        // may appear (docs/design/Lifetime030.md).
+        unsigned cleanups = 0;
+        bool return_list = false;
+        bool cleanup_list = false;
     };
+
+    // The suspension indexes of the body being checked, in written order.
+    std::vector<std::uint64_t> yields_;
 
     // The any tag tests that select the regions being checked: a constant
     // local of type any and the tag its AnyTag equals (AnyUnpack).
@@ -580,7 +591,9 @@ private:
                 report(span, "symbol " + name(body.owner) + " cannot own a body");
                 continue;
             }
+            yields_.clear();
             check_region(body.instructions, context);
+            check_yield_indexes(span);
             if (context.function != no_symbol && owner.type.kind != TypeKind::Void &&
                 !always_returns(body.instructions)) {
                 report(span, "function " + name(body.owner) + " can finish without returning " +
@@ -591,10 +604,71 @@ private:
 
     void check_region(const std::vector<IrNode>& region, Context& context) {
         scopes_.emplace_back();
+        const auto cleanups = context.cleanups;
         for (const auto& node : region) {
             check_statement(node, context);
+            // A Cleanup is registered from where it stands to the end of
+            // its block.
+            if (node.op == IrOp::Cleanup) ++context.cleanups;
         }
+        context.cleanups = cleanups;
         scopes_.pop_back();
+    }
+
+    // docs/design/Lifetime030.md, Lowering and artifacts: a Cleanup is a
+    // direct statement of a block of a function body; its lists neither
+    // break nor continue, and its return list exists only in a function
+    // that returns a value.
+    void check_cleanup(const IrNode& node, Context& context) {
+        expect_operands(node, 0, "cleanup");
+        if (context.function == no_symbol) report(node.span, "a cleanup appears outside a function body");
+        if (context.cleanup_list) report(node.span, "a cleanup appears inside a cleanup list");
+        if (node.body.empty()) report(node.span, "a cleanup has an empty list");
+        const auto loop_control = [](const auto& self, const std::vector<IrNode>& region) -> bool {
+            return std::ranges::any_of(region, [&](const IrNode& item) {
+                return item.op == IrOp::Break || item.op == IrOp::Continue ||
+                       (item.op != IrOp::Loop && (self(self, item.body) || self(self, item.alternative)));
+            });
+        };
+        if (loop_control(loop_control, node.body) || loop_control(loop_control, node.alternative))
+            report(node.span, "a cleanup list contains break or continue");
+        if (!node.alternative.empty() && valid(context.function) && symbol(context.function).type.kind == TypeKind::Void)
+            report(node.span, "a cleanup has a return list in a function that returns no value");
+        auto inner = context;
+        inner.cleanup_list = true;
+        inner.loops = 0;
+        check_region(node.body, inner);
+        inner.return_list = true;
+        check_region(node.alternative, inner);
+    }
+
+    // A Yield is a direct statement of a function that carries
+    // generator.resume, outside every task scope and every registered
+    // cleanup, and no local is in scope where it stands.
+    void check_yield(const IrNode& node, const Context& context) {
+        expect_operands(node, 0, "yield");
+        if (!valid(context.function) || !has_attribute(symbol(context.function), AttributeId::GeneratorResume))
+            report(node.span, "a yield appears outside a generator's resume function");
+        if (context.task_scopes != 0) report(node.span, "a yield appears inside a task scope");
+        if (context.cleanups != 0 || context.cleanup_list) report(node.span, "a yield appears with a cleanup pending");
+        for (const auto& scope : scopes_)
+            for (const auto local : scope)
+                if (valid(local) && symbol(local).kind == SymbolKind::Local)
+                    report(node.span, "a yield appears in the scope of the local " + name(local));
+        std::uint64_t index = 0;
+        const auto [end, error] = std::from_chars(node.text.data(), node.text.data() + node.text.size(), index);
+        if (error != std::errc{} || end != node.text.data() + node.text.size() || index == 0)
+            report(node.span, "a yield's suspension index is not a positive integer");
+        yields_.push_back(index);
+    }
+
+    void check_yield_indexes(const Span& span) {
+        for (std::size_t i = 0; i < yields_.size(); ++i)
+            if (yields_[i] != i + 1) {
+                report(span, "the suspension indexes of a body are not 1 to " + std::to_string(yields_.size()) +
+                             " in written order");
+                return;
+            }
     }
 
     bool visible(SymbolId local) const {
@@ -647,7 +721,7 @@ private:
             return;
         }
         if (node.op != IrOp::Block && node.op != IrOp::Branch && node.op != IrOp::Loop &&
-            node.op != IrOp::TaskScope) {
+            node.op != IrOp::TaskScope && node.op != IrOp::Cleanup) {
             expect_no_regions(node, "a simple statement");
         }
         if (node.type.kind != TypeKind::Void) {
@@ -720,6 +794,8 @@ private:
             --context.task_scopes;
             break;
         case IrOp::Return: check_return(node, context); break;
+        case IrOp::Cleanup: check_cleanup(node, context); break;
+        case IrOp::Yield: check_yield(node, context); break;
         case IrOp::Break:
         case IrOp::Continue:
             expect_operands(node, 0, "loop control");
@@ -909,7 +985,8 @@ private:
         }
         const auto& destination = node.operands[0];
         const auto& source = node.operands[1];
-        if (destination.op != IrOp::Load && destination.op != IrOp::Field && destination.op != IrOp::Index) {
+        if (destination.op != IrOp::Load && destination.op != IrOp::Field && destination.op != IrOp::Index &&
+            destination.op != IrOp::Pending) {
             report(destination.span, "store destination is not a binding, field, or element");
         }
         check_value(destination, context);
@@ -1162,6 +1239,16 @@ private:
             break;
         case IrOp::ScopedValue:
             check_scoped_value(node, context, allow_void);
+            break;
+        case IrOp::Pending:
+            expect_operands(node, 0, "pending");
+            if (!context.return_list || !valid(context.function) ||
+                symbol(context.function).type.kind == TypeKind::Void) {
+                report(node.span, "pending appears outside a cleanup's return list");
+            } else if (node.type != symbol(context.function).type) {
+                report(node.span, "pending has type " + describe(node.type) + ", not the function's result type " +
+                                  describe(symbol(context.function).type));
+            }
             break;
         case IrOp::SelectValue:
             check_select_value(node, context);
