@@ -1718,6 +1718,69 @@ def suite_uninstall(kit: Kit) -> None:
     check(result.returncode == 0 and (outside / "precious").read_text() == "do not delete\n", "a link inside the root is not followed")
 
 
+def suite_service(kit: Kit) -> None:
+    """The service across a change (step 9), with the stand-in service:
+    cases 32 and 33, retire on update, and an application across a rollback.
+    An application is a process that holds its generation's lease, as a
+    worker does (Service030.md); its supervisor holds the supervisor's lock.
+    Cases 30 and 31 (editor sessions) are in lifecycle-update, 40 and 41 in
+    lifecycle-components. What needs the real neurad (ps and stop from the
+    new generation, the old supervisor's exit) belongs to the service
+    milestone's tests."""
+    v, t = kit.version, kit.triple
+    release = kit.release(kit.work / "release", kit.variant("service", neurad=True))
+    tops = {p: unpack(release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
+    newer = kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9", neurad=True), version="9.9.9")
+    newest = kit.release(kit.work / "newest", kit.variant("newest", version="9.9.10", neurad=True), version="9.9.10")
+
+    home = Home(kit, "service")
+    check(home.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "the combined install")
+    service = ServiceStandIn(kit, home)
+    first = home.current()
+    service.supervise(first)
+    application = subprocess.Popen([sys.executable, "-c", "import fcntl, sys, time\nf = open(sys.argv[1])\n"
+                                    "fcntl.flock(f, fcntl.LOCK_SH)\nprint('running', flush=True)\ntime.sleep(600)\n",
+                                    str(home.root / "leases" / first)], stdout=subprocess.PIPE, text=True)
+    application.stdout.readline()
+
+    def update(*arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        return run([home.bin / "neura-update", "update", *arguments], env=home.env({**service.env(), **(env or {})}))
+
+    # Case 33: an update rolled back at step 10 leaves the application alone.
+    result = update("--source", newer, env={"NEURA_TEST_UPDATE_FAULT": "links-add"})
+    check(result.returncode == 1 and "rolled back" in result.stderr and home.current() == first, f"case 33: {result.stderr}")
+    check(application.poll() is None and lease_held(home, first), "case 33: the application runs on")
+    check(not service.log.exists() or "retire" not in service.log.read_text(), "case 33: nothing is retired")
+    # Case 32: an update while an application runs.
+    result = update("--source", newer)
+    check(result.returncode == 0 and home.current() != first, f"case 32: {result.stderr}")
+    check(application.poll() is None and lease_held(home, first) and first in home.generations(), "case 32: the application continues on its generation")
+    check(f"retire --root {home.real_root()} --generation {first}" in service.log.read_text(), f"the old supervisor is told it is retired: {service.log.read_text()}")
+    expect_links(home, set(CORE_TOOLS) | set(SDK_TOOLS) | {"neurad"}, "case 32: the links reach the new generation")
+    # Two updates later the application's generation is still kept, and
+    # the first change after it ends removes it.
+    check(update("--source", newest).returncode == 0 and first in home.generations(), "the application's generation is kept while it runs")
+    result = run([home.bin / "neura-doctor"], env=home.env(service.env()))
+    check(f"warn  generations: {first} is on disk and in use" in result.stdout, "doctor shows it in use")
+    application.kill()
+    application.wait()
+    service.end()
+    result = update("--repair")
+    check(result.returncode == 0 and first not in home.generations(), f"removed after the application ends: {home.generations()}")
+
+    # An application across a rollback.
+    worker_generation = home.current()
+    application = subprocess.Popen([sys.executable, "-c", "import fcntl, sys, time\nf = open(sys.argv[1])\n"
+                                    "fcntl.flock(f, fcntl.LOCK_SH)\nprint('running', flush=True)\ntime.sleep(600)\n",
+                                    str(home.root / "leases" / worker_generation)], stdout=subprocess.PIPE, text=True)
+    application.stdout.readline()
+    result = update("--rollback")
+    check(result.returncode == 0 and home.current() != worker_generation and application.poll() is None and lease_held(home, worker_generation),
+          f"a rollback leaves the application alone: {result.stderr}")
+    application.kill()
+    application.wait()
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
@@ -1727,6 +1790,7 @@ SUITES = {
     "doctor": suite_doctor,
     "components": suite_components,
     "uninstall": suite_uninstall,
+    "service": suite_service,
 }
 
 

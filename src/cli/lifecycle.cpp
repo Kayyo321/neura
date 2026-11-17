@@ -1603,7 +1603,15 @@ ServiceHooks& service_hooks() {
             if (!result.started || result.status != 0) return "the service did not stop: " + failure_detail(result);
             return {};
         };
-        defaults.retire = [](const fs::path&, const std::string&) {};
+        // The service's control client sends Retire (Service030.md); a
+        // supervisor also retires by itself when `current` no longer names
+        // its generation. Without the client, only the tests' stand-in is
+        // told.
+        defaults.retire = [](const fs::path& root, const std::string& generation) {
+            const char* stand_in = std::getenv("NEURA_TEST_SERVICE_CONTROL");
+            if (stand_in == nullptr || *stand_in == '\0' || running_supervisors(root).empty()) return;
+            run_child({stand_in, "retire", "--root", root.string(), "--generation", generation}, 1);
+        };
         return defaults;
     }();
     return hooks;
