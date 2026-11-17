@@ -52,6 +52,10 @@ Errors about declarations, scopes, and name resolution.
 
 | Code | Error |
 | --- | --- |
+| [E0230](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0230.md) | malformed match.is |
+| [E0231](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0231.md) | pattern form that is not supported |
+| [E0232](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0232.md) | postfix ? that needs parentheses |
+| [E0233](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0233.md) | malformed optional access |
 | [E0301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0301.md) | duplicate local binding |
 | [E0302](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0302.md) | duplicate declaration |
 | [E0303](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0303.md) | duplicate parameter or field name |
@@ -136,6 +140,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 
 | Code | Error |
 | --- | --- |
+| [E0490](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0490.md) | pattern that cannot match |
+| [E0491](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0491.md) | unreachable match arm |
+| [E0492](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0492.md) | value cannot be held in any |
+| [E0493](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0493.md) | operation is not defined for any |
+| [E0494](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0494.md) | optional access on a receiver that is never absent |
+| [E0495](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0495.md) | invalid operands of ?? |
+| [E0496](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0496.md) | ? on a value that is not a Result |
+| [E0497](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0497.md) | ? outside a function that returns a Result |
+| [E0498](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0498.md) | any at a boundary that would box it |
 | [E0501](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0501.md) | invalid static member |
 | [E0502](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0502.md) | invalid override |
 | [E0503](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0503.md) | invalid inheritance |

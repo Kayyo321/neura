@@ -2,7 +2,7 @@
 
 This note fixes the design of the 0.3.0 matching milestone before it is implemented, as [the 0.3.0 baseline](Release030.md) requires: `match.is`, guards and nested patterns in `match`, the inline type `any`, optional access `?.`, coalescing `??`, and the postfix `?` that returns an error. It builds on [storage and construction](Storage030.md), whose value words it uses, and on the calls note of the same release (`docs/design/Calls030.md` on the calls milestone's branch), whose argument rules it assumes. Rows move to [Types](../lang/Types.md), [Core language](../lang/CoreLanguage.md) and [Errors](../lang/Errors.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation. Later changes to a row are made here, with the reason.
+Status: *proposed* on 2026-11-17, and *implemented* on the milestone branch the same day for steps 2 to 6, 8 and 10 of the [order of work](#order-of-work). The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written by autonomous agents and await the owner's confirmation; a row marked "implemented, proposed" is in the compiler and still awaits it. Step 7, the converter's value words for `any`, and step 9, which runs `any` in every mode, wait for the storage milestone's layout function; step 11 waits for the class-hook milestone. Later changes to a row are made here, with the reason, under [Decisions taken in the implementation](#decisions-taken-in-the-implementation).
 
 Only `any` adds to NeuraIR: one type kind and three operations. Nothing is added to NVR, NVM or the tiers: an `any` is four value words of types the runtime already has. A program that uses no feature of this note builds the image it builds today, byte for byte.
 
@@ -41,17 +41,17 @@ let describe = func(value: any) -> string {
 
 | Rule | Status |
 | --- | --- |
-| `match.is (subject) { arms }` selects an arm by the type of the subject's value. It is an expression with expression arms or a statement with block arms, as `match` is. | proposed |
-| An arm's pattern is a type, `name: Type`, `nil`, or `_`. A bare type tests and binds nothing. `name: Type` also binds `name`, a constant of that type visible in the guard and the arm. | proposed |
-| The subject is evaluated once, into a hidden snapshot. Every test reads the snapshot. The arms are tried in written order, the first one that matches is selected, and only its result is evaluated. | proposed |
-| The subject's static type is a class, an interface, `class`, `any`, or a scalar or string type. A subject of a type-parameter type is an error; convert it with `as any`. | proposed |
-| A class or interface pattern matches a live reference whose class is that type or derives from or implements it. A scalar or string pattern matches a value of exactly that resolved type: `int` and `int32` are one type, and `int32` never matches an `int64`. No conversion, `let.as` cast, parsing or numeric conversion takes part. | proposed |
-| `nil` matches an absent reference. A type pattern never matches nil. `_` matches everything. | proposed |
-| A binding is initialized from the snapshot by the checked refinement `ClassCast`, never by a source `as`. For a class type this is one admission of the binding; a bare type pattern admits nothing. If an admission hook gives nil, the arm stays selected. A later read of the binding is an ordinary read, and no flow analysis treats it as non-nil. | proposed |
-| A type test is a passive use of the class: it runs no initializer and no hook. | proposed |
-| When the subject is a class, an interface, `class` or `any`, the last arm is an unguarded `_`. No attribute of a class makes a set of class patterns exhaustive. When the subject is a scalar or a string, one unguarded arm of its type, or `_`, is exhaustive. | proposed |
-| A pattern that cannot match the subject's static type is an error. An arm that an earlier unguarded arm already covers is an error: a repeated type, a subtype after its base, any arm after `_`. | proposed |
-| The arms of a `match.is` expression have a common type by the rules of `match`: the expected type, or the first arm's. | proposed |
+| `match.is (subject) { arms }` selects an arm by the type of the subject's value. It is an expression with expression arms or a statement with block arms, as `match` is. | implemented, proposed |
+| An arm's pattern is a type, `name: Type`, `nil`, or `_`. A bare type tests and binds nothing. `name: Type` also binds `name`, a constant of that type visible in the guard and the arm. | implemented, proposed |
+| The subject is evaluated once, into a hidden snapshot. Every test reads the snapshot. The arms are tried in written order, the first one that matches is selected, and only its result is evaluated. | implemented, proposed |
+| The subject's static type is a class, an interface, `class`, `any`, or a scalar or string type. A subject of a type-parameter type is an error; convert it with `as any`. | implemented, proposed |
+| A class or interface pattern matches a live reference whose class is that type or derives from or implements it. A scalar or string pattern matches a value of exactly that resolved type: `int` and `int32` are one type, and `int32` never matches an `int64`. No conversion, `let.as` cast, parsing or numeric conversion takes part. | implemented, proposed |
+| `nil` matches an absent reference. A type pattern never matches nil. `_` matches everything. | implemented, proposed |
+| A binding is initialized from the snapshot by the checked refinement `ClassCast`, never by a source `as`. For a class type this is one admission of the binding; a bare type pattern admits nothing. If an admission hook gives nil, the arm stays selected. A later read of the binding is an ordinary read, and no flow analysis treats it as non-nil. | implemented, proposed; hooks wait for the class-hook milestone |
+| A type test is a passive use of the class: it runs no initializer and no hook. | implemented, proposed; hooks wait for the class-hook milestone |
+| When the subject is a class, an interface, `class` or `any`, the last arm is an unguarded `_`. No attribute of a class makes a set of class patterns exhaustive. When the subject is a scalar or a string, one unguarded arm of its type, or `_`, is exhaustive. | implemented, proposed |
+| A pattern that cannot match the subject's static type is an error. An arm that an earlier unguarded arm already covers is an error: a repeated type, a subtype after its base, any arm after `_`. | implemented, proposed |
+| The arms of a `match.is` expression have a common type by the rules of `match`: the expected type, or the first arm's. | implemented, proposed |
 
 ## Guards and nested patterns in `match`
 
@@ -72,15 +72,15 @@ let area = func(shape: Shape) -> int {
 
 | Rule | Status |
 | --- | --- |
-| An arm is `pattern if condition => result`. The guard is a `bool` expression that sees the arm's bindings. It is evaluated only after the whole pattern has matched and its bindings are made. If it is false the next arm is tried; its effects have happened. | proposed |
-| A payload position holds a sub-pattern: `_`, a name, a variant pattern, or a tuple pattern. A single identifier is always a binding; a dotted name is always a variant. | proposed |
-| A tuple pattern is `[p, q, ...]` with one sub-pattern per element. The subject of a `match` may be a tuple, and then each arm's pattern is a tuple pattern or `_`. | proposed |
-| Type patterns appear only as the whole pattern of a `match.is` arm. Literal, range, list, rest and property patterns, and user-defined deconstruction, are not part of 0.3.0. | proposed |
-| A name is bound at most once in a pattern. Bindings are constants of the arm. | proposed |
-| Within an arm, sub-patterns are handled in written order, depth first: the payload or element is projected, and then tested if the sub-pattern is a variant or tuple pattern, or bound if it is a name. A projection of a class reference is one read, and its binding one admission. An arm that fails at a later sub-pattern has performed the projections and bindings before it. | proposed |
-| Each arm projects for itself. No projection is shared between arms, and the optimizer may merge two only when neither has an effect. | proposed |
-| Coverage is computed over variants and tuples: an enum's constructors are its variants, a tuple has one, and every other type is covered only by `_` or a name. A guarded arm covers nothing. Without `_`, every value must be covered, and the error shows one uncovered value as a pattern. An arm covered by the earlier unguarded arms is an error. | proposed |
-| A `match` whose arms are all in today's form, with one level of bindings and no guard, keeps today's lowering and its NeuraIR. | proposed |
+| An arm is `pattern if condition => result`. The guard is a `bool` expression that sees the arm's bindings. It is evaluated only after the whole pattern has matched and its bindings are made. If it is false the next arm is tried; its effects have happened. | implemented, proposed |
+| A payload position holds a sub-pattern: `_`, a name, a variant pattern, or a tuple pattern. A single identifier is always a binding; a dotted name is always a variant. | implemented, proposed |
+| A tuple pattern is `[p, q, ...]` with one sub-pattern per element. The subject of a `match` may be a tuple, and then each arm's pattern is a tuple pattern or `_`. | implemented, proposed |
+| Type patterns appear only as the whole pattern of a `match.is` arm. Literal, range, list, rest and property patterns, and user-defined deconstruction, are not part of 0.3.0. | implemented, proposed |
+| A name is bound at most once in a pattern. Bindings are constants of the arm. | implemented, proposed |
+| Within an arm, sub-patterns are handled in written order, depth first: the payload or element is projected, and then tested if the sub-pattern is a variant or tuple pattern, or bound if it is a name. A projection of a class reference is one read, and its binding one admission. An arm that fails at a later sub-pattern has performed the projections and bindings before it. | implemented, proposed; hooks wait for the class-hook milestone |
+| Each arm projects for itself. No projection is shared between arms, and the optimizer may merge two only when neither has an effect. | implemented, proposed |
+| Coverage is computed over variants and tuples: an enum's constructors are its variants, a tuple has one, and every other type is covered only by `_` or a name. A guarded arm covers nothing. Without `_`, every value must be covered, and the error shows one uncovered value as a pattern. An arm covered by the earlier unguarded arms is an error. | implemented, proposed |
+| A `match` whose arms are all in today's form, with one level of bindings and no guard, keeps today's lowering and its NeuraIR. | implemented, proposed |
 
 ## `any`
 
@@ -101,22 +101,22 @@ let count = log_all(7 as int64, "seven", 7.0, nil);
 
 | Rule | Status |
 | --- | --- |
-| `any` is a built-in value type that holds one value of a fixed set of types together with which type it is. It is not dynamic dispatch: the only operations on an `any` are to copy it, to pass, return and store it, `is`, and `match.is`. | proposed |
-| It holds: `bool`; each sized integer; `float16`, `bfloat16`, `float32`, `float64`; `string`; a class or interface reference, including `class`; and nil. | proposed |
-| It does not hold an array, a list, a tuple, an enum (including `Optional` and `Result`), a function value, a primitive reference, a module, or a [scope-bound](../lang/Types.md#scope-bound-types) value. A class that wraps such a value, constructed with `new`, can be held as a reference; the rules of the wrapped value still apply to the field. | proposed |
-| A value is *packed* where an `any` is expected: the initializer of a binding or field of type `any`, an assignment to such a place, an argument for a parameter of type `any`, including a variadic `...any`, a `return` in a function whose result is `any`, and an element of a collection literal whose element type is `any`. `value as any` packs anywhere. | proposed |
-| Nothing else produces an `any`. Inference never solves a type parameter to `any` unless an argument already is one, the first arm of a conditional or a match does not become `any` because a later arm differs, and no operator packs its operands. | proposed |
-| A parameter of type `any` takes no default (the calls note's `E0226`), and an `any` is not an argument of an untyped variadic parameter `...`, which would format it (`E0493`). | proposed |
-| In overload selection, packing ranks below every other match, so `f(x: int32)` is preferred to `f(x: any)` for an `int32`. | proposed |
-| Packing an `any` gives the same `any`. There is no nesting. | proposed |
-| Packing keeps a scalar's exact bits, width and signedness, a string's text, and a reference's identity. It allocates nothing and runs no hook: it moves a value already evaluated. | proposed |
-| A float is packed with its bit pattern. Packing is an observation of the bits: an arithmetic NaN is the canonical NaN in the package in every tier, and a NaN made with `from_bits`, or negated, keeps the bits the language gives it. | proposed |
-| Reading a class reference out of an `any`, by a `match.is` binding, is one read and one admission by that reference's class, as for any class value. Storing a scalar over an `any` that held a reference replaces the reference word with nil. | proposed |
-| There is no `as` out of an `any`, no arithmetic, no member access, no `==`, no `equals`, `hash_code` or `to_string`, and no formatting. Match first. | proposed |
-| An `any` is not [transferable](../lang/Types.md#transferable-types), whatever it holds. It is not the result of a spawned call, a parallel item, a callback argument or result, or a host call's argument, because those boundaries would box it. | proposed |
-| A type-parameter value may be packed. The rule on what `any` holds is checked on the specialized program, at the instantiating call. | proposed |
-| Converting a scope-bound value to `class`, to an interface or to `any` is an error from 0.3.0, so that no later packing can hold one. | proposed |
-| `any` is a type name wherever a type is read. No class, interface, enum, alias, module or type parameter may be named `any`. A function, method, field, parameter or local named `any` keeps its meaning. | proposed |
+| `any` is a built-in value type that holds one value of a fixed set of types together with which type it is. It is not dynamic dispatch: the only operations on an `any` are to copy it, to pass, return and store it, `is`, and `match.is`. | implemented, proposed |
+| It holds: `bool`; each sized integer; `float16`, `bfloat16`, `float32`, `float64`; `string`; a class or interface reference, including `class`; and nil. | implemented, proposed |
+| It does not hold an array, a list, a tuple, an enum (including `Optional` and `Result`), a function value, a primitive reference, a module, or a [scope-bound](../lang/Types.md#scope-bound-types) value. A class that wraps such a value, constructed with `new`, can be held as a reference; the rules of the wrapped value still apply to the field. | implemented, proposed |
+| A value is *packed* where an `any` is expected: the initializer of a binding or field of type `any`, an assignment to such a place, an argument for a parameter of type `any`, including a variadic `...any`, a `return` in a function whose result is `any`, and an element of a collection literal whose element type is `any`. `value as any` packs anywhere. | implemented, proposed |
+| Nothing else produces an `any`. Inference never solves a type parameter to `any` unless an argument already is one, the first arm of a conditional or a match does not become `any` because a later arm differs, and no operator packs its operands. | implemented, proposed |
+| A parameter of type `any` takes no default (the calls note's `E0226`), and an `any` is not an argument of an untyped variadic parameter `...`, which would format it (`E0493`). | implemented, proposed |
+| In overload selection, packing ranks below every other match, so `f(x: int32)` is preferred to `f(x: any)` for an `int32`. | implemented, proposed |
+| Packing an `any` gives the same `any`. There is no nesting. | implemented, proposed |
+| Packing keeps a scalar's exact bits, width and signedness, a string's text, and a reference's identity. It allocates nothing and runs no hook: it moves a value already evaluated. | proposed; waits for the converter step |
+| A float is packed with its bit pattern. Packing is an observation of the bits: an arithmetic NaN is the canonical NaN in the package in every tier, and a NaN made with `from_bits`, or negated, keeps the bits the language gives it. | proposed; waits for the converter step |
+| Reading a class reference out of an `any`, by a `match.is` binding, is one read and one admission by that reference's class, as for any class value. Storing a scalar over an `any` that held a reference replaces the reference word with nil. | implemented, proposed; hooks wait for the class-hook milestone |
+| There is no `as` out of an `any`, no arithmetic, no member access, no `==`, no `equals`, `hash_code` or `to_string`, and no formatting. Match first. | implemented, proposed |
+| An `any` is not [transferable](../lang/Types.md#transferable-types), whatever it holds. It is not the result of a spawned call, a parallel item, a callback argument or result, or a host call's argument, because those boundaries would box it. | implemented, proposed |
+| A type-parameter value may be packed. The rule on what `any` holds is checked on the specialized program, at the instantiating call. | implemented, proposed |
+| Converting a scope-bound value to `class`, to an interface or to `any` is an error from 0.3.0, so that no later packing can hold one. | implemented, proposed |
+| `any` is a type name wherever a type is read. No class, interface, enum, alias, module or type parameter may be named `any`. A function, method, field, parameter or local named `any` keeps its meaning. | implemented, proposed |
 
 ### Representation
 
@@ -139,12 +139,12 @@ An `any` is four value words, in this order, wherever a value is stored: a frame
 
 | Rule | Status |
 | --- | --- |
-| Every word has one NVR type and is always initialized, so the collector's descriptor of an `any` is the four types: it traces the text and reference words as it traces any slot of those types, and never reads the bits word as a handle. No collector code changes. | proposed |
-| The tags are fixed numbers, the same in every module, so linking remaps nothing. The class of a reference is the object's own layout, which the linker already remaps. | proposed |
-| An `any` of all zero words is nil. | proposed |
-| The tag is program data. Execution never needs names or a source map to use it. | proposed |
-| An `any` counts four words toward the 64-word limit of an inline shape (`E0449`). | proposed |
-| If the class-hook milestone gives a class reference a policy word, an `any` carries it as a fifth word after the reference, with that milestone's encoding; this note allocates none. | proposed |
+| Every word has one NVR type and is always initialized, so the collector's descriptor of an `any` is the four types: it traces the text and reference words as it traces any slot of those types, and never reads the bits word as a handle. No collector code changes. | proposed; waits for the converter step |
+| The tags are fixed numbers, the same in every module, so linking remaps nothing. The class of a reference is the object's own layout, which the linker already remaps. | proposed; waits for the converter step |
+| An `any` of all zero words is nil. | proposed; waits for the converter step |
+| The tag is program data. Execution never needs names or a source map to use it. | proposed; waits for the converter step |
+| An `any` counts four words toward the 64-word limit of an inline shape (`E0449`). | proposed; waits for the converter step |
+| If the class-hook milestone gives a class reference a policy word, an `any` carries it as a fifth word after the reference, with that milestone's encoding; this note allocates none. | proposed; waits for the converter step |
 
 ## Optional access and coalescing
 
@@ -160,15 +160,15 @@ let owner_name = func(pet: Pet) -> string {
 
 | Rule | Status |
 | --- | --- |
-| `receiver?.member` and `receiver?.method(arguments)` evaluate the receiver once. If it is nil the result is `Optional.None`, and the member is not read and the arguments are not evaluated. Otherwise the member is read or the call made, and the result is `Optional.Some(result)`. | proposed |
-| The type is `Optional<M>` for a member or result of type `M`, always, also when `M` is a reference or an `Optional`. A call that returns nothing gives `Optional<Unit>`, `Some(Unit.Value)` after the call. `Some(nil)` and `None` stay different values. | proposed |
-| The receiver is a class or interface reference, or an `Optional` of one. For an `Optional`, `None` skips; `Some(r)` reads `r` once and then skips if it is nil. This is how a chain `a?.b?.c` has the type `Optional<C>`. | proposed |
-| `a?.b.c` applies `.c` to an `Optional` and is an unknown member; there is no chain-wide short circuit. | proposed |
-| `?.` is not an assignment target and takes no `++` or `--`. | proposed |
-| `left ?? right` evaluates `left` once. A nil reference, or `None`, gives `right`, which is evaluated only then. A live reference gives itself; `Some(v)` gives `v`, read once, and is not tested again: `Some(nil) ?? x` is nil. | proposed |
-| `left` is a class or interface reference or an `Optional<T>`. The expression has the type of the reference, or `T`; `right` is typed with that as its expected type and must be assignable to it. There is no numeric conversion and no unwrapping of a second level. | proposed |
-| Neither operator hides a failure. A trap in the receiver, a member getter, an argument or the fallback is that trap. | proposed |
-| Neither operator makes a type non-nil. A later read of the same place is a new read. | proposed |
+| `receiver?.member` and `receiver?.method(arguments)` evaluate the receiver once. If it is nil the result is `Optional.None`, and the member is not read and the arguments are not evaluated. Otherwise the member is read or the call made, and the result is `Optional.Some(result)`. | implemented, proposed |
+| The type is `Optional<M>` for a member or result of type `M`, always, also when `M` is a reference or an `Optional`. A call that returns nothing gives `Optional<Unit>`, `Some(Unit.Value)` after the call. `Some(nil)` and `None` stay different values. | implemented, proposed |
+| The receiver is a class or interface reference, or an `Optional` of one. For an `Optional`, `None` skips; `Some(r)` reads `r` once and then skips if it is nil. This is how a chain `a?.b?.c` has the type `Optional<C>`. | implemented, proposed |
+| `a?.b.c` applies `.c` to an `Optional` and is an unknown member; there is no chain-wide short circuit. | implemented, proposed |
+| `?.` is not an assignment target and takes no `++` or `--`. | implemented, proposed |
+| `left ?? right` evaluates `left` once. A nil reference, or `None`, gives `right`, which is evaluated only then. A live reference gives itself; `Some(v)` gives `v`, read once, and is not tested again: `Some(nil) ?? x` is nil. | implemented, proposed |
+| `left` is a class or interface reference or an `Optional<T>`. The expression has the type of the reference, or `T`; `right` is typed with that as its expected type and must be assignable to it. There is no numeric conversion and no unwrapping of a second level. | implemented, proposed |
+| Neither operator hides a failure. A trap in the receiver, a member getter, an argument or the fallback is that trap. | implemented, proposed |
+| Neither operator makes a type non-nil. A later read of the same place is a new read. | implemented, proposed |
 
 ## Postfix `?`
 
@@ -183,12 +183,12 @@ let parse_pair = func(left: string, right: string) -> result.Result<int> {
 
 | Rule | Status |
 | --- | --- |
-| `operand?` takes a `Std.Core.Result<T>`, the library's own enum or an overlay of it. The operand is evaluated once. `Ok(v)` gives `v`, of type `T`, as one read of the payload. `Err(e)` returns `Result<U>.Err(e)` from the enclosing function, with the same error value, where `Result<U>` is that function's result type. | proposed |
-| The enclosing function is the innermost function or lambda. Its result type is written, or given by the lambda's expected type, and is a `Result`. It is never inferred from a body that contains `?`. | proposed |
-| The return is an ordinary `return`: task scopes are joined, regions released, and the cleanup of the cleanup milestone run, as for a written `return`. | proposed |
-| `Ok(nil)` is success. A trap stays a trap: `?` handles no trap and unwinds nothing. | proposed |
-| `?` is an error where there is no such function: a file or module statement, a global or field initializer, a startup block, a constructor, a destructor, and a function whose result is not a `Result`. | proposed |
-| `?` does not apply to `Optional` or to a user enum. | proposed |
+| `operand?` takes a `Std.Core.Result<T>`, the library's own enum or an overlay of it. The operand is evaluated once. `Ok(v)` gives `v`, of type `T`, as one read of the payload. `Err(e)` returns `Result<U>.Err(e)` from the enclosing function, with the same error value, where `Result<U>` is that function's result type. | implemented, proposed |
+| The enclosing function is the innermost function or lambda. Its result type is written, or given by the lambda's expected type, and is a `Result`. It is never inferred from a body that contains `?`. | implemented, proposed |
+| The return is an ordinary `return`: task scopes are joined, regions released, and the cleanup of the cleanup milestone run, as for a written `return`. | implemented, proposed |
+| `Ok(nil)` is success. A trap stays a trap: `?` handles no trap and unwinds nothing. | implemented, proposed |
+| `?` is an error where there is no such function: a file or module statement, a global or field initializer, a startup block, a constructor, a destructor, and a function whose result is not a `Result`. | implemented, proposed |
+| `?` does not apply to `Optional` or to a user enum. | implemented, proposed |
 
 ## Grammar
 
@@ -212,37 +212,37 @@ coalesce     := or-expression [ "??" coalesce ]
 
 | Rule | Status |
 | --- | --- |
-| `match` directly followed by `.` and `is` begins a `match.is`. `match` followed by `(` is unchanged. | proposed |
-| In an `is-arm`, an identifier directly followed by `:` is a binding and what follows is a type. Otherwise the pattern is a type, read by the type parser, so `Box<int>`, `App.Shape` and `string` are patterns. | proposed |
-| `if` after a pattern begins a guard. The guard ends at `=>`. | proposed |
-| `?.` and `??` are single tokens, added to the lexer's compound symbols. Neither sequence is valid today, so no program changes meaning. | proposed |
-| A `?` token after a postfix expression is decided by the next token alone. If the next token can begin an expression (an identifier, a literal, an interpolated string, `(`, `[`, `{`, `-`, `!`, `~`, `++`, `--`, `new`, `func`, `match`, `import`, `true`, `false`, `nil`), the `?` is the conditional operator's. If the next token is `.`, it is an error. Otherwise (`)`, `]`, `}`, `,`, `;`, `:`, `=>`, `?`, `??`, a binary or assignment operator that is not also a prefix, `as`, `is`, `and`, `or`, the end of the file) it is postfix propagation. | proposed |
-| Every valid conditional today has an expression after its `?`, so none changes. `r? - 1` is read as a conditional and fails for its missing `:` with today's error, which gains the help "to return an error here, write `(r?)`". Member access, a call or an index after a propagated value is written `(r?).name`, `(r?)(x)`, `(r?)[i]`. | proposed |
-| `r?.name` is always optional access. On a `Result` it is an error whose fix is `(r?).name`. | proposed |
-| `r??` is the token `??`. Two propagations are written `r? ?` or `(r?)?`. | proposed |
-| Precedence: `?.` and postfix `?` are at the level of member access. `??` is a new level, looser than `\|\|` and tighter than `..` and `? :`, and associates to the right. `a ?? b ? c : d` is `(a ?? b) ? c : d`. | proposed |
-| `neura fmt` writes `a?.b` and `r?` without spaces, `a ?? b` with spaces, `pattern if guard => result` with single spaces, and `match.is (x) {` as it writes `match (x) {`. A trailing comma after the last arm is kept or added as for `match`. | proposed |
-| The recovering parser keeps a `match.is` whose last arm is incomplete, an arm without a result, and `a?.` at the end of a buffer, so that completion can offer type names after `match.is` arm starts and member names after `?.`. The language server offers a fix that adds a missing `_` arm, shows the type of a pattern binding, and renames a binding within its arm. | proposed |
-| The debugger shows an `any` as its tag's type name and its payload, read from the four words. It runs no getter and no hook. | proposed |
+| `match` directly followed by `.` and `is` begins a `match.is`. `match` followed by `(` is unchanged. | implemented, proposed |
+| In an `is-arm`, an identifier directly followed by `:` is a binding and what follows is a type. Otherwise the pattern is a type, read by the type parser, so `Box<int>`, `App.Shape` and `string` are patterns. | implemented, proposed |
+| `if` after a pattern begins a guard. The guard ends at `=>`. | implemented, proposed |
+| `?.` and `??` are single tokens, added to the lexer's compound symbols. Neither sequence is valid today, so no program changes meaning. | implemented, proposed |
+| A `?` token after a postfix expression is decided by the next token alone. If the next token can begin an expression (an identifier, a literal, an interpolated string, `(`, `[`, `{`, `-`, `!`, `~`, `++`, `--`, `new`, `func`, `match`, `import`, `true`, `false`, `nil`), the `?` is the conditional operator's. If the next token is `.`, it is an error. Otherwise (`)`, `]`, `}`, `,`, `;`, `:`, `=>`, `?`, `??`, a binary or assignment operator that is not also a prefix, `as`, `is`, `and`, `or`, the end of the file) it is postfix propagation. | implemented, proposed |
+| Every valid conditional today has an expression after its `?`, so none changes. `r? - 1` is read as a conditional and fails for its missing `:` with today's error, which gains the help "to return an error here, write `(r?)`". Member access, a call or an index after a propagated value is written `(r?).name`, `(r?)(x)`, `(r?)[i]`. | implemented, proposed |
+| `r?.name` is always optional access. On a `Result` it is an error whose fix is `(r?).name`. | implemented, proposed |
+| `r??` is the token `??`. Two propagations are written `r? ?` or `(r?)?`. | implemented, proposed |
+| Precedence: `?.` and postfix `?` are at the level of member access. `??` is a new level, looser than `\|\|` and tighter than `..` and `? :`, and associates to the right. `a ?? b ? c : d` is `(a ?? b) ? c : d`. | implemented, proposed |
+| `neura fmt` writes `a?.b` and `r?` without spaces, `a ?? b` with spaces, `pattern if guard => result` with single spaces, and `match.is (x) {` as it writes `match (x) {`. A trailing comma after the last arm is kept or added as for `match`. | implemented, proposed |
+| The recovering parser keeps a `match.is` whose last arm is incomplete, an arm without a result, and `a?.` at the end of a buffer, so that completion can offer type names after `match.is` arm starts and member names after `?.`. The language server offers a fix that adds a missing `_` arm, shows the type of a pattern binding, and renames a binding within its arm. | implemented, proposed; not at the very end of a buffer |
+| The debugger shows an `any` as its tag's type name and its payload, read from the four words. It runs no getter and no hook. | proposed; waits for the converter step |
 
 ## Lowering and artifacts
 
 | Rule | Status |
 | --- | --- |
-| The parser gives `MatchArm` (`src/parser/syntax.hpp`) a pattern tree in place of its flat variant and bindings, and an optional guard. `Statement::Kind::Match` gains a flag for `match.is`. `Expr::Kind` gains `OptionalMember`, `Coalesce` and `Propagate`. | proposed |
-| `match.is`, and a `match` with a guard, a nested pattern or a tuple pattern, lower in two phases inside one `ScopedValue` or `Block`. The head saves the subject in `$match`, declares each binding of each arm as a deferred `last` local (NeuraIR 1.10), and sets a hidden `uint32` local `$arm` to the number of arms. Phase one visits the arms in order; each arm is guarded by `$arm` still being unset, performs its projections, tests and stores in written order as nested `Branch` nodes, evaluates its guard, and stores its index in `$arm`. Phase two is today's chain of `Branch` or `SelectValue`, on `$arm`. | proposed |
-| Tests use existing operations: `EnumTag` with a comparison, `EnumProject`, `Project`, `ClassIs`, `ClassCast`, a comparison with `Nil`, and for an `any` the operations below. | proposed |
-| `a?.m` lowers to a `ScopedValue` that saves the receiver, compares it with nil, and selects `EnumConstruct` of `Some` around the member read or call, or of `None`. `a ?? b` saves `a` and selects by a nil comparison or by `EnumTag`, with `EnumProject` for the payload. `r?` saves `r`, branches on `EnumTag` to a `Return` of `EnumConstruct` of `Err` around `EnumProject` of the error, and yields `EnumProject` of the payload. | proposed |
-| The compiler resolves `Std.Core.Optional`, `Std.Core.Unit` and `Std.Core.Result` from the trusted library by path, as it resolves primitive companions (`Lowering::library_module`), so a file needs no import to use the operators. | proposed |
-| NeuraIR gains the type kind `Any` and the operations `AnyPack` (one operand of a holdable type; the result is an `any`), `AnyTag` (an `any`; the result is its `uint32` tag) and `AnyUnpack` (an `any`; the result is the node's type, which names the payload). They take the next free NeuraIR minor version when the change lands (1.11 on the milestone's base, unless explicit construction has taken it). The writer emits that version only for a program that uses `any`. | proposed |
-| `value is T` on an `any` lowers to a `ScopedValue` that saves the value in a hidden constant local and yields a `SelectValue` on its tag: for a scalar or string type, the comparison of `AnyTag` with that type's tag; for a class or interface, `ClassIs` of the `AnyUnpack` of the reference when the tag is 0, and `false` otherwise. A `nil` arm is the same shape with a comparison to `Nil`. Every `AnyUnpack` the compiler emits is therefore inside a region selected by a tag test of a constant local. | proposed |
-| The verifier checks that `AnyPack`'s operand type is holdable, and that an `AnyUnpack` reads a constant local inside the selected region of a `Branch` or `SelectValue` whose condition compares that local's `AnyTag` with the tag of the unpacked type. A `.nir` file that breaks either rule is rejected. | proposed |
-| The converter (`src/backend/converter.cpp`) gives `Any` the four value words above through `value_words` and the aggregate layout of elements. `AnyPack` writes the tag constant and routes the operand to its word, a scalar zero-extended from its own encoding; the other words are constants. `AnyTag` reads the tag word. `AnyUnpack` selects the low lanes of the bits word, or the text or reference word. | proposed |
-| A float is packed with the circuit of `to_bits()` followed by the widening conversion to `uint64`, and unpacked with the narrowing lane selection followed by the circuit of `from_bits`. The obligation on tier 3 is that the pack is an observation of the float's bits: the canonicalization is placed before it and rule V9 covers it. Whether the existing `to_bits` case already does so, or the placement list and V9 need a case, is decided by edge case 45 under native tier 3 with `NEURA_TIER3_VERIFY`; until it passes, a block that packs a float is declined to tier 1. | proposed |
-| NVR, NVM, the collector and the tiers do not change, and the NVR version of an image is not raised by `any`. A block the lifter cannot recognize runs at tier 1; native lowering of such a block follows the performance gate. | proposed |
-| An argument of type `any` is four exit arguments. A call with more than 255 argument words runs on the interpreter, as today. | proposed |
-| The effect and retention summaries treat `AnyPack` of a reference as a copy of the reference: what retains the `any` retains the object. Projections, guards and skipped operands are effects in the optimizer's analysis: it does not evaluate a guard before its pattern, a skipped member, argument or fallback, or anything after a `?` that returns. | proposed |
-| The decompiler shows an `any` as four words unless the image names them. It claims no recovery of `match.is`, `?.`, `??` or `?`, which lower to the branches a programmer could write. | proposed |
+| The parser gives `MatchArm` (`src/parser/syntax.hpp`) a pattern tree in place of its flat variant and bindings, and an optional guard. `Statement::Kind::Match` gains a flag for `match.is`. `Expr::Kind` gains `OptionalMember`, `Coalesce` and `Propagate`. | implemented, proposed |
+| `match.is`, and a `match` with a guard, a nested pattern or a tuple pattern, lower in two phases inside one `ScopedValue` or `Block`. The head saves the subject in `$match`, declares each binding of each arm as a deferred `last` local (NeuraIR 1.10), and sets a hidden `uint32` local `$arm` to the number of arms. Phase one visits the arms in order; each arm is guarded by `$arm` still being unset, performs its projections, tests and stores in written order as nested `Branch` nodes, evaluates its guard, and stores its index in `$arm`. Phase two is today's chain of `Branch` or `SelectValue`, on `$arm`. | implemented, proposed |
+| Tests use existing operations: `EnumTag` with a comparison, `EnumProject`, `Project`, `ClassIs`, `ClassCast`, a comparison with `Nil`, and for an `any` the operations below. | implemented, proposed |
+| `a?.m` lowers to a `ScopedValue` that saves the receiver, compares it with nil, and selects `EnumConstruct` of `Some` around the member read or call, or of `None`. `a ?? b` saves `a` and selects by a nil comparison or by `EnumTag`, with `EnumProject` for the payload. `r?` saves `r`, branches on `EnumTag` to a `Return` of `EnumConstruct` of `Err` around `EnumProject` of the error, and yields `EnumProject` of the payload. | implemented, proposed |
+| The compiler resolves `Std.Core.Optional`, `Std.Core.Unit` and `Std.Core.Result` from the trusted library by path, as it resolves primitive companions (`Lowering::library_module`), so a file needs no import to use the operators. | implemented, proposed |
+| NeuraIR gains the type kind `Any` and the operations `AnyPack` (one operand of a holdable type; the result is an `any`), `AnyTag` (an `any`; the result is its `uint32` tag) and `AnyUnpack` (an `any`; the result is the node's type, which names the payload). They take the next free NeuraIR minor version when the change lands (1.11 on the milestone's base, unless explicit construction has taken it). The writer emits that version only for a program that uses `any`. | implemented, proposed |
+| `value is T` on an `any` lowers to a `ScopedValue` that saves the value in a hidden constant local and yields a `SelectValue` on its tag: for a scalar or string type, the comparison of `AnyTag` with that type's tag; for a class or interface, `ClassIs` of the `AnyUnpack` of the reference when the tag is 0, and `false` otherwise. A `nil` arm is the same shape with a comparison to `Nil`. Every `AnyUnpack` the compiler emits is therefore inside a region selected by a tag test of a constant local. | implemented, proposed |
+| The verifier checks that `AnyPack`'s operand type is holdable, and that an `AnyUnpack` reads a constant local inside the selected region of a `Branch` or `SelectValue` whose condition compares that local's `AnyTag` with the tag of the unpacked type. A `.nir` file that breaks either rule is rejected. | implemented, proposed |
+| The converter (`src/backend/converter.cpp`) gives `Any` the four value words above through `value_words` and the aggregate layout of elements. `AnyPack` writes the tag constant and routes the operand to its word, a scalar zero-extended from its own encoding; the other words are constants. `AnyTag` reads the tag word. `AnyUnpack` selects the low lanes of the bits word, or the text or reference word. | proposed; waits for the converter step |
+| A float is packed with the circuit of `to_bits()` followed by the widening conversion to `uint64`, and unpacked with the narrowing lane selection followed by the circuit of `from_bits`. The obligation on tier 3 is that the pack is an observation of the float's bits: the canonicalization is placed before it and rule V9 covers it. Whether the existing `to_bits` case already does so, or the placement list and V9 need a case, is decided by edge case 45 under native tier 3 with `NEURA_TIER3_VERIFY`; until it passes, a block that packs a float is declined to tier 1. | implemented, proposed |
+| NVR, NVM, the collector and the tiers do not change, and the NVR version of an image is not raised by `any`. A block the lifter cannot recognize runs at tier 1; native lowering of such a block follows the performance gate. | proposed; waits for the converter step |
+| An argument of type `any` is four exit arguments. A call with more than 255 argument words runs on the interpreter, as today. | proposed; waits for the converter step |
+| The effect and retention summaries treat `AnyPack` of a reference as a copy of the reference: what retains the `any` retains the object. Projections, guards and skipped operands are effects in the optimizer's analysis: it does not evaluate a guard before its pattern, a skipped member, argument or fallback, or anything after a `?` that returns. | implemented, proposed |
+| The decompiler shows an `any` as four words unless the image names them. It claims no recovery of `match.is`, `?.`, `??` or `?`, which lower to the branches a programmer could write. | proposed; waits for the converter step |
 
 ## Diagnostics
 
@@ -447,3 +447,16 @@ For the migration guide of the release:
 | `?.` always gives an `Optional`, and a chain needs `?.` at each step. | No member's type changes with its position in a chain. |
 | `?` applies to the library's `Result` only, and never infers a lambda's result type. | The error type is then always `Error`, and the return target is known before the body is typed. |
 | The general match lowering uses deferred locals and a selected-arm index. | It needs no new NeuraIR operation and evaluates each projection once. |
+
+## Decisions taken in the implementation
+
+| Decision | Reason |
+| --- | --- |
+| The postfix `?` lowers to a scoped value that returns from inside it, so NeuraIR 1.12 lets a `return` leave a scoped value; `break` and `continue` still cannot. A `.nir` file with such a return is 1.12. | The lowering this note gives needs it. The converter treats a scoped value's statements as ordinary statements, so it needed no change; the verifier rule and the version are the whole change. |
+| The NeuraIR minor of this milestone is one named constant, `nir_any_minor`, 12 on this branch. Minor 11 is the class-hook milestone's. | The release fixes the final numbers when the milestones merge. |
+| An arm in the form of 0.2 keeps the flat fields of `MatchArm` beside the pattern tree, which every arm has. | Today's lowering, its NeuraIR and its errors stay byte for byte, and the walkers that only scope names stay correct. |
+| An unqualified name as a whole pattern is E0412 in both lowerings, with the qualified spelling as help. | The baseline gave E0304 there, not the E0412 that edge case 40 states; one code for one mistake. |
+| A collection literal matched by tuple patterns is a tuple. | `match ([a, b])` has no expected type, and a list literal is not a tuple pattern's subject. |
+| E0498 is given for a spawned call's result. A parallel item, a callback and a host call with an `any` keep the diagnostics of those boundaries, which already reject a type they cannot carry; an `any` given to a task or a channel is E0602. | The boundaries' own checks reject `any`, as they reject any type they do not carry. |
+| A tuple of more than 64 value words with `any` is checked where tuples are, when the storage milestone enforces E0449. | The limit's driver is the storage milestone's. |
+| The step 6 migration of the scope-bound rule found no site in `stdlib/`, `examples/` or `tests/`: no source converts a `Task` or `Scope` to `class`, an interface or `any`. | Counted with the compiler: every file that checked before checks after. |

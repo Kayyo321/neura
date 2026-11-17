@@ -503,7 +503,7 @@ The compiler rejects, at the span of the offending expression, a `spawn` outside
 
 Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are
 
-1. member access, indexing, and calls
+1. member access, optional access `?.`, indexing, calls, and the postfix `?`
 2. postfix `++` and `--`
 3. prefix `++`, `--`, `!`, `-`, and `~`
 4. `as` and `is`
@@ -517,8 +517,9 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 12. `==`, `!=`, `===`
 13. `&&`
 14. `||`
-15. `..` and its optional step in [range expressions](Collections#ranges)
-16. `? :`
+15. `??`, which associates to the right
+16. `..` and its optional step in [range expressions](Collections#ranges)
+17. `? :`
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 
@@ -527,6 +528,20 @@ Prefix and postfix increment and decrement require a mutable numeric binding, fi
 `a === b` calls `a.equals(b)` and requires its result to be Boolean. This uses the normal method selection and dispatch rules, including class overrides and value members on built-in types.
 
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
+
+### Optional access and coalescing
+
+`receiver?.member` and `receiver?.method(arguments)` evaluate the receiver once ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented, proposed). When it is nil, the result is `Optional.None` and neither the member nor the arguments are evaluated; otherwise the result is `Optional.Some` of the member or of the call's result, or `Some(Unit.Value)` after a call that returns nothing. The type is always `Optional<M>`, so `Some(nil)` and `None` stay different. The receiver is a class or interface reference or an `Optional` of one: `None` skips, and `Some(r)` skips when `r` is nil, which is how `pet?.owner?.name` has the type `Optional<string>`. A chain needs `?.` at each step: `pet?.owner.name` applies `.name` to an `Optional` ([E0305](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0305.md)). A receiver that is never absent is [E0494](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0494.md), and `?.` is not an assignment target and takes no `++` or `--` ([E0233](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0233.md)).
+
+`left ?? right` evaluates `left` once. A nil reference or `None` gives `right`, which is evaluated only then; a live reference gives itself, and `Some(v)` gives `v`, so `Some(nil) ?? x` is nil. `left` is a reference or an `Optional<T>`, the expression has the reference's type or `T`, and `right` is typed with it and must be assignable to it, with no numeric conversion ([E0495](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0495.md)). The library's `Optional`, `Unit` and `Result` are found by path, so neither operator needs an import.
+
+<!-- example: check -->
+```neura
+let Owner = class ( export let name: string = ""; );
+let Pet = class ( export let owner: Owner = nil; );
+
+let owner_name = func(pet: Pet) -> string => pet?.owner?.name ?? "nobody";
+```
 
 ### Interpolated strings
 
