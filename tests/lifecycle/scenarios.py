@@ -676,10 +676,499 @@ def suite_bootstrap(kit: Kit) -> None:
     check(unknown.returncode == 1 and "unknown option" in unknown.stderr, "an unknown option")
 
 
+FAULT_STEPS_BEFORE = ["download", "checksum", "extract", "verify", "compose", "journal", "place"]
+FAULT_STEPS_AFTER = ["links-remove", "activate-link", "links-add", "activate-marker"]
+
+
+def components_metadata(directory: Path, version: str, build: str, archives: list[tuple[str, str, Path]]) -> None:
+    """Writes neura-components.txt for (product, triple, file) entries."""
+    lines = [f"neura-components 1\nversion {version}\nbuild {build}\n"]
+    for product, triple, file in sorted(archives):
+        lines.append(f"archive {product} {triple} {file.name} {sha256(file)} {file.stat().st_size}\n")
+    (directory / "neura-components.txt").write_text("".join(lines))
+
+
+def hand_archive(kit: Kit, name: str, version: str, build, product: str = "sdk") -> Path:
+    """A release directory with one hand-made archive; `build(top)` fills the
+    top directory and may add members through the returned tar hook."""
+    directory = kit.work / "hand" / name
+    shutil.rmtree(directory, ignore_errors=True)
+    tree = kit.work / "hand" / f"{name}-tree"
+    shutil.rmtree(tree, ignore_errors=True)
+    top_name = f"neura-{product}-{version}-{kit.triple}"
+    top = tree / top_name
+    (top / "bin").mkdir(parents=True)
+    (top / "bin/neura").write_text(f"#!/bin/sh\necho 'neura {version} (x, commit test)'\n")
+    (top / "bin/neura").chmod(0o755)
+    directory.mkdir(parents=True)
+    archive = directory / f"{top_name}.tar.gz"
+    with tarfile.open(archive, "w:gz") as tar:
+        tar.add(top, top_name)
+        build(tar, tree)
+    components_metadata(directory, version, "test", [(product, kit.triple, archive)])
+    return directory
+
+
+class Session:
+    """A long-running tool with its standard input open, such as an editor
+    session: `neura-lsp --stdio` or `neura-debug --stdio`."""
+
+    def __init__(self, home: Home, tool: str):
+        self.process = subprocess.Popen([str(home.bin / tool), "--stdio"], env=home.env(), stdin=subprocess.PIPE,
+                                        stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+
+    def request(self, message: str) -> bytes:
+        data = message.encode()
+        self.process.stdin.write(f"Content-Length: {len(data)}\r\n\r\n".encode() + data)
+        self.process.stdin.flush()
+        header = b""
+        while not header.endswith(b"\r\n\r\n"):
+            byte = self.process.stdout.read(1)
+            if not byte:
+                return b""
+            header += byte
+        length = int(re.search(rb"Content-Length: (\d+)", header).group(1))
+        return self.process.stdout.read(length)
+
+    def alive(self) -> bool:
+        return self.process.poll() is None
+
+    def end(self) -> None:
+        try:
+            self.process.stdin.close()
+        except OSError:
+            pass
+        try:
+            self.process.wait(timeout=20)
+        except subprocess.TimeoutExpired:
+            self.process.kill()
+            self.process.wait()
+
+
+def lease_held(home: Home, generation: str) -> bool:
+    import fcntl
+    with open(home.root / "leases" / generation) as file:
+        try:
+            fcntl.flock(file, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            return True
+        fcntl.flock(file, fcntl.LOCK_UN)
+        return False
+
+
+def suite_update(kit: Kit) -> None:
+    """neura update, --rollback, --repair, leases and pruning (step 5):
+    cases 14, 16 to 21, 25 to 31, 34 to 37 and 61, and the rules of the 0.2
+    update tests that still hold."""
+    v, t = kit.version, kit.triple
+    base_release = kit.release(kit.work / "base-release", kit.variant("service", neurad=True))
+    tops = {p: unpack(base_release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
+    newer = kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9", neurad=True), version="9.9.9")
+    newest = kit.release(kit.work / "newest", kit.variant("newest", version="9.9.10", neurad=True), version="9.9.10")
+
+    home = Home(kit, "update")
+    check(home.install(tops["sdk"]).returncode == 0, "the SDK install for the update tests")
+    base = home.current()
+    image = hello(kit, home)
+
+    def update(*arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        return run([home.bin / "neura-update", "update", *arguments], env=home.env(env), cwd=home.path)
+
+    def expect_untouched(what: str, before: dict, links: dict) -> None:
+        check(snapshot(home.root) == before, f"{what}: the root is unchanged")
+        check(home.links() == links, f"{what}: the links are unchanged")
+        check(not home.leftovers(), f"{what}: no leftovers {home.leftovers()}")
+
+    # Case 25 and the same and older versions: up to date.
+    legacy_only = kit.work / "legacy-only"
+    legacy_only.mkdir()
+    shutil.copy(base_release / "neura-release.txt", legacy_only)
+    before, links = snapshot(home.root), home.links()
+    for source, what in ((base_release, "the installed version"), (legacy_only, "case 25: only neura-release.txt")):
+        for flags in ([], ["--check"]):
+            result = update(*flags, "--source", source)
+            check(result.returncode == 0 and result.stdout == f"neura {v} is up to date\n", f"{what} {flags}: {result.stdout}{result.stderr}")
+    older = kit.work / "older"
+    older.mkdir()
+    (older / "neura-release.txt").write_text("neura-release 1\nversion 0.0.1\n")
+    result = update("--source", older)
+    check(result.returncode == 0 and "is up to date" in result.stdout, "an older version is up to date")
+    expect_untouched("up to date", before, links)
+    # Case 26: a newer version without component metadata.
+    newer_legacy = kit.work / "newer-legacy"
+    newer_legacy.mkdir()
+    shutil.copy(newer / "neura-release.txt", newer_legacy)
+    for flags in ([], ["--check"]):
+        result = update(*flags, "--source", newer_legacy)
+        check(result.returncode == 1 and "release 9.9.9 has no component metadata" in result.stderr, f"case 26 {flags}: {result.stderr}")
+    expect_untouched("case 26", before, links)
+    result = update("--check", "--source", newer)
+    check(result.returncode == 4 and f"neura {v} is installed; neura 9.9.9 is available" in result.stdout, f"--check: {result.stdout}")
+    expect_untouched("--check", before, links)
+
+    # Failures that leave the installation untouched.
+    def expect_failure(what: str, source: Path, text: str, env: dict | None = None, arguments=()) -> None:
+        result = update("--source", source, *arguments, env=env)
+        check(result.returncode == 1 and text in result.stderr, f"{what}: expected '{text}', got {result.returncode}: {result.stderr}")
+        expect_untouched(what, before, links)
+        check(home.neura("run", image).stdout == "Hello, World!\n", f"{what}: the installation works")
+
+    sdk_name = f"neura-sdk-9.9.9-{t}.tar.gz"
+
+    def variant_release(name: str, change) -> Path:
+        directory = kit.work / "variants-release" / name
+        shutil.rmtree(directory, ignore_errors=True)
+        shutil.copytree(newer, directory)
+        change(directory)
+        return directory
+
+    expect_failure("a wrong SHA-256", variant_release("sha", lambda d: (d / "neura-components.txt").write_text(
+        (d / "neura-components.txt").read_text().replace(sha256(d / sdk_name), "0" * 64))), "SHA-256 mismatch")
+    expect_failure("a wrong size", variant_release("size", lambda d: (d / "neura-components.txt").write_text(
+        (d / "neura-components.txt").read_text().replace(f" {(d / sdk_name).stat().st_size}\n", f" {(d / sdk_name).stat().st_size + 1}\n"))),
+        "the release metadata says")
+    # Case 21: members that are refused before anything is unpacked.
+    def member(kind):
+        def add(tar: tarfile.TarFile, tree: Path) -> None:
+            info = tarfile.TarInfo({"dotdot": "../evil", "absolute": "/tmp/neura-absolute-member",
+                                    "symlink": f"neura-sdk-9.9.9-{t}/link", "hardlink": f"neura-sdk-9.9.9-{t}/bin/neura2",
+                                    "outside": "outside/file"}[kind])
+            if kind == "symlink":
+                info.type, info.linkname = tarfile.SYMTYPE, "/etc/passwd"
+                tar.addfile(info)
+            elif kind == "hardlink":
+                info.type, info.linkname = tarfile.LNKTYPE, f"neura-sdk-9.9.9-{t}/bin/neura"
+                tar.addfile(info)
+            else:
+                data = b"outside\n"
+                info.size = len(data)
+                tar.addfile(info, io.BytesIO(data))
+        return add
+    for kind, text in (("dotdot", "is not inside"), ("absolute", "is not inside"), ("outside", "is not inside"),
+                       ("symlink", "is not a regular file or a directory"), ("hardlink", "is not a regular file or a directory")):
+        expect_failure(f"case 21: a {kind} member", hand_archive(kit, kind, "9.9.9", member(kind)), text)
+        check(not (kit.work / "hand" / "evil").exists() and not Path("/tmp/neura-absolute-member").exists(),
+              f"case 21: the {kind} member was not unpacked")
+    # Case 22 through an update: an archive that does not match its manifest.
+    def repack(name: str, change) -> Path:
+        directory = kit.work / "variants-release" / name
+        shutil.rmtree(directory, ignore_errors=True)
+        directory.mkdir(parents=True)
+        top = unpack(newer / sdk_name, kit.work / "variants-release" / f"{name}-tree")
+        change(top)
+        with tarfile.open(directory / sdk_name, "w:gz") as tar:
+            tar.add(top, top.name)
+        components_metadata(directory, "9.9.9", "test", [("sdk", t, directory / sdk_name)])
+        return directory
+    expect_failure("case 22: an unlisted file", repack("unlisted", lambda top: (top / "bin/extra").write_text("x")), "not in any manifest")
+    expect_failure("case 22: a listed file missing", repack("missing", lambda top: (top / "bin/neura-fmt").unlink()), "missing")
+    expect_failure("case 22: a wrong digest", repack("digest", lambda top: (top / "share/neura/stdlib/std/core/version.nra").write_text("x\n")),
+                   "expected")
+    expect_failure("case 22: a wrong mode", repack("mode", lambda top: (top / "bin/neura-fmt").chmod(0o644)), "expected mode 755")
+    expect_failure("case 23 through an update: a manifest with an unknown line", repack("manifest-line", lambda top: (
+        top / "share/neura/components/sdk.txt").write_text((top / "share/neura/components/sdk.txt").read_text() + "note x\n")),
+        "unknown line")
+    expect_failure("an unknown component", repack("unknown-component", lambda top: (
+        top / "share/neura/components/web.txt").write_text("neura-component 1\nname web\nversion 9.9.9\nbuild test\ntarget x\nrequires core\n")),
+        "is not one this neura knows")
+    lying = kit.release(kit.work / "lying", kit.variant("lying", version="9.9.9"), version="9.9.9")
+    script = (kit.work / "variants/lying/core/bin/neura")
+    expect_failure("a staged binary that reports another version",
+                   repack("lying-binary", lambda top: (top / "bin/neura").write_text(script.read_text().replace("9.9.9", "1.2.3"))),
+                   "expected")
+    other_triple = variant_release("other-triple", lambda d: (d / "neura-components.txt").write_text(
+        (d / "neura-components.txt").read_text().replace(t, "riscv64-plan9-gnu")))
+    expect_failure("a release without a build for this platform", other_triple, f"has no sdk archive for {t}")
+    expect_failure("malformed component metadata", variant_release("malformed", lambda d: (d / "neura-components.txt").write_text("nonsense\n")),
+                   "the component metadata is not valid")
+    missing = kit.work / "missing-metadata"
+    missing.mkdir()
+    expect_failure("a source without metadata", missing, "cannot read release metadata")
+    expect_failure("case 24 through an update: a size of 0", variant_release("zero", lambda d: (d / "neura-components.txt").write_text(
+        re.sub(r"(archive .*) \d+\n", r"\1 0\n", (d / "neura-components.txt").read_text()))), "the size is not between")
+    # Cases 17 and 18: a fault at every step.
+    for step in FAULT_STEPS_BEFORE:
+        expect_failure(f"case 17: a fault at {step}", newer, f"injected fault at step {step}", env={"NEURA_TEST_UPDATE_FAULT": step})
+    for step in FAULT_STEPS_AFTER:
+        expect_failure(f"case 18: a fault at {step}", newer, f"update failed and was rolled back; {base} is still active",
+                       env={"NEURA_TEST_UPDATE_FAULT": step})
+    # --require-attestation needs gh, signed in.
+    tools = kit.work / "no-gh"
+    tools.mkdir()
+    for name in ("tar", "gzip", "sha256sum"):
+        found = shutil.which(name, path=SYSTEM_PATH)
+        if found:
+            os.symlink(found, tools / name)
+    expect_failure("--require-attestation without gh", newer, "gh (the GitHub CLI), which is not on PATH",
+                   env={"PATH": str(tools)}, arguments=["--require-attestation"])
+    signed_out = kit.work / "signed-out-gh"
+    shutil.copytree(tools, signed_out, symlinks=True)
+    (signed_out / "gh").write_text("#!/bin/sh\nexit 1\n")
+    (signed_out / "gh").chmod(0o755)
+    expect_failure("--require-attestation with gh signed out", newer, "needs gh (the GitHub CLI) to be signed in",
+                   env={"PATH": str(signed_out)}, arguments=["--require-attestation"])
+    # Sources.
+    for flags in ([], ["--check"]):
+        for source, text in (("http://127.0.0.1:9/releases", "https://"), ("file:///tmp", "https://"),
+                             (str(kit.work / "does-not-exist"), "is not a directory")):
+            result = update(*flags, "--source", source)
+            check(result.returncode == 1 and text in result.stderr, f"a source {source} {flags}: {result.stderr}")
+    check(update("--bogus").returncode == 1, "an unknown option")
+    check(update("--add", "x").returncode == 1 and update("--terminate").returncode == 1, "options of other modes")
+    check(update("--rollback", "--repair").returncode == 1, "two modes at once")
+    expect_untouched("rejected sources", before, links)
+
+    # Case 14: a second command while one holds the lock.
+    import fcntl
+    with open(home.root / ".lock", "w") as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        result = update("--source", newer)
+        check(result.returncode == 1 and "another install, update or uninstall is running (lock " in result.stderr, f"case 14: {result.stderr}")
+        result = home.install(tops["sdk"], "--force")
+        check(result.returncode == 1 and "another install, update or uninstall is running" in result.stderr, "case 14: install.sh too")
+    expect_untouched("case 14", before, links)
+    # Case 16: a 0.2 lock file on a schema 2 root is left over and removed.
+    (home.root / ".update-lock").write_text("1234\n")
+    result = update("--repair")
+    check(result.returncode == 0 and not (home.root / ".update-lock").exists(), f"case 16: {result.stderr}")
+
+    # Case 19: a crash at each of steps 7 to 11, then recovery by the rule
+    # of step 2. Case 20: the tools work before and after it.
+    for step in ["journal", "place", "links-remove", "activate-link", "links-add", "activate-marker"]:
+        before_crash = home.current()
+        result = update("--source", newer, env={"NEURA_TEST_UPDATE_CRASH": step})
+        check(result.returncode == 70, f"case 19: a crash at {step}: {result.returncode} {result.stderr}")
+        completed = step in ("links-add", "activate-marker")
+        if not completed:
+            check(home.current() == before_crash, f"case 19: current is unchanged after a crash at {step}")
+        check((home.root / ".journal").exists() == (step != "journal"), f"case 19: a journal after a crash at {step}")
+        check(run([home.bin / "neura-run", image], env=home.env()).stdout == "Hello, World!\n", f"case 20: a run after a crash at {step}")
+        result = update("--repair")
+        check(result.returncode == 0, f"case 19: recovery after a crash at {step}: {result.stderr}")
+        if step != "journal":
+            check(("completed an interrupted update" if completed else "undid an interrupted update") in result.stdout,
+                  f"case 19: recovery after {step} says what it did: {result.stdout}")
+        check(not (home.root / ".journal").exists() and not home.leftovers(), f"case 19: no journal or leftovers after {step}")
+        expected = home.current()
+        check(expected.startswith("9.9.9+") if completed else expected == base, f"case 19: the active generation after {step}: {expected}")
+        tools_now = set(CORE_TOOLS) | set(SDK_TOOLS)
+        expect_links(home, tools_now, f"case 19: links after recovery from {step}")
+        check(run([home.bin / "neura-run", image], env=home.env()).stdout == "Hello, World!\n", f"case 20: a run after recovery from {step}")
+        if completed:
+            back = update("--rollback")
+            check(back.returncode == 0 and home.current() == base, f"case 19: back to the base after {step}: {back.stderr}")
+            # The new generation is the previous one now; remove it for the next round.
+            shutil.rmtree(home.root / "versions" / expected)
+            (home.root / "leases" / expected).unlink()
+            check(update("--repair").returncode == 0, "repair after removing a generation by hand")
+
+    # Case 27: an SDK installation updates; the runtime archive is not read.
+    no_runtime = variant_release("no-runtime", lambda d: (d / f"neura-runtime-9.9.9-{t}.tar.gz").unlink())
+    sessions = [Session(home, "neura-lsp"), Session(home, "neura-debug")]
+    init = '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"processId":null,"rootUri":null,"capabilities":{}}}'
+    check(b'"capabilities"' in sessions[0].request(init), "case 30: the editor session answers before the update")
+    result = update("--source", no_runtime)
+    check(result.returncode == 0 and f"updated neura {v} to 9.9.9" in result.stdout, f"case 27: {result.stdout}{result.stderr}")
+    first = home.current()
+    check(first.startswith("9.9.9+") and "components core sdk\n" in home.marker(), "case 27: the set stays core sdk")
+    check("verified: size and SHA-256" in result.stdout and re.search(r"(NOT verified|not checked): build provenance", result.stdout),
+          "the update says what it verified")
+    check(home.neura("--version").stdout == f"neura 9.9.9 ({t}, commit test)\n", "the links reach the new generation")
+    check(sorted(home.generations()) == sorted([base, first]), "the previous generation is kept")
+    # Case 30: the sessions keep working on their generation, which stays.
+    check(all(session.alive() for session in sessions) and lease_held(home, base), "case 30: both sessions run and hold the old generation")
+    check(b'"result"' in sessions[0].request('{"jsonrpc":"2.0","id":2,"method":"shutdown"}'), "case 30: the editor session still answers")
+    # Case 31: two updates later the session's generation is still there.
+    result = update("--source", newest)
+    check(result.returncode == 0, f"case 31: the second update: {result.stderr}")
+    second = home.current()
+    check(base in home.generations() and "kept generation " + base + ": it is in use" in result.stdout,
+          f"case 31: the session's generation is kept: {home.generations()} {result.stdout}")
+    check(f"generation {base}\n" in home.marker(), "case 31: the marker lists it")
+    for session in sessions:
+        session.end()
+    third = kit.release(kit.work / "third", kit.variant("third", version="9.9.11", neurad=True), version="9.9.11")
+    result = update("--source", third)
+    check(result.returncode == 0 and base not in home.generations() and first not in home.generations(),
+          f"case 31: removed by the first update after the session ends: {home.generations()}")
+    check(sorted(home.generations()) == sorted([second, home.current()]), "the active and previous generations remain")
+
+    # Cases 34 and 35: rollback, and rollback twice.
+    latest = home.current()
+    result = update("--rollback")
+    check(result.returncode == 0 and home.current() == second, f"case 34: {result.stdout}{result.stderr}")
+    expect_links(home, set(CORE_TOOLS) | set(SDK_TOOLS), "case 34: the links follow")
+    check(sorted(home.generations()) == sorted([second, latest]), "case 34: the newer one is the previous")
+    result = update("--rollback")
+    check(result.returncode == 0 and home.current() == latest, f"case 35: {result.stderr}")
+    # Case 37: a rollback to a generation whose file was changed.
+    changed = home.root / "versions" / second / "share/neura/stdlib/std/core/version.nra"
+    original = changed.read_bytes()
+    changed.write_bytes(original + b"\n")
+    before, links = snapshot(home.root), home.links()
+    result = update("--rollback")
+    check(result.returncode == 1 and "expected" in result.stderr and home.current() == latest, f"case 37: {result.stderr}")
+    expect_untouched("case 37", before, links)
+    changed.write_bytes(original)
+    # Case 19 for a rollback: a crash before step 9 leaves both generations.
+    result = update("--rollback", env={"NEURA_TEST_UPDATE_CRASH": "links-remove"})
+    check(result.returncode == 70, "case 19: a crash during --rollback")
+    check(update("--repair").returncode == 0 and home.current() == latest and sorted(home.generations()) == sorted([second, latest]),
+          f"case 19: both generations after recovering a rollback {home.generations()}")
+    # Case 36: no previous generation.
+    for name in home.generations():
+        if name != latest:
+            shutil.rmtree(home.root / "versions" / name)
+            (home.root / "leases" / name).unlink()
+    result = update("--rollback")
+    check(result.returncode == 1 and "no previous 0.3 generation is installed" in result.stderr, f"case 36: {result.stderr}")
+
+    # Case 28 and 29: a combined installation.
+    both = Home(kit, "combined")
+    check(both.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "the combined install")
+    combined_base = both.current()
+    bad_runtime = variant_release("bad-runtime", lambda d: (d / f"neura-runtime-9.9.9-{t}.tar.gz").open("r+b").write(b"\0"))
+    before_combined = snapshot(both.root)
+    result = run([both.bin / "neura-update", "update", "--source", bad_runtime], env=both.env())
+    check(result.returncode == 1 and "SHA-256 mismatch" in result.stderr and snapshot(both.root) == before_combined,
+          f"case 29: {result.stderr}")
+    result = run([both.bin / "neura-update", "update", "--source", newer], env=both.env())
+    check(result.returncode == 0 and "neura-sdk-9.9.9" in result.stdout and "neura-runtime-9.9.9" in result.stdout,
+          f"case 28: both archives are fetched: {result.stdout}{result.stderr}")
+    check(len(both.generations()) == 2 and both.current() != combined_base and "components core sdk service" in both.marker(),
+          "case 28: one new generation with every component")
+    expect_links(both, set(CORE_TOOLS) | set(SDK_TOOLS) | {"neurad"}, "case 28")
+
+    # The 0.2 rules for installs neura does not manage.
+    for arguments in (["update"], ["update", "--check"], ["uninstall"], ["uninstall", "--dry-run"]):
+        result = run([kit.build / "neura", *arguments], env=home.env())
+        check(result.returncode == 3 and "not an archive install" in result.stderr, f"{arguments} on the build tree's neura")
+    doctor = run([kit.build / "neura", "doctor"], env=home.env())
+    check(doctor.returncode == 0 and "ok  install: unmanaged" in doctor.stdout, "doctor on the build tree's neura")
+
+    # Opt-in prereleases, through the real transport with a stand-in curl.
+    nightly = kit.release(kit.work / "nightly", kit.variant("nightly", version="9.9.9-rc.10"), version="9.9.9-rc.10")
+    fixture = kit.work / "nightly-fixture"
+    fixture.mkdir()
+    mock_tools = kit.work / "nightly-tools"
+    mock_tools.mkdir()
+    for name in ("tar", "gzip", "cp"):
+        os.symlink(shutil.which(name, path=SYSTEM_PATH), mock_tools / name)
+    (mock_tools / "curl").write_text(f"""#!/bin/sh
+output=
+url=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+        --output) shift; output=$1 ;;
+        --url) shift; url=$1 ;;
+    esac
+    shift
+done
+printf '%s\\n' "$url" >> "{fixture}/requests"
+case "$NEURA_NIGHTLY_MODE" in
+    failure) echo "fixture GitHub API failure" >&2; exit 22 ;;
+esac
+case "$url" in
+    'https://api.github.com/repos/Kayyo321/neura/releases?per_page=20&page=1') source="{fixture}/page1.json" ;;
+    'https://api.github.com/repos/Kayyo321/neura/releases?per_page=20&page=2') source="{fixture}/page2.json" ;;
+    'https://github.com/Kayyo321/neura/releases/latest/download/'*) source="{third}/${{url##*/}}" ;;
+    'https://github.com/Kayyo321/neura/releases/download/v9.9.9-rc.10/neura-components.txt')
+        if [ "$NEURA_NIGHTLY_MODE" = mismatch ]; then source="{third}/neura-components.txt"; else source="{nightly}/neura-components.txt"; fi ;;
+    'https://github.com/Kayyo321/neura/releases/download/v9.9.9-rc.10/'*) source="{nightly}/${{url##*/}}" ;;
+    *) echo "unexpected fixture URL: $url" >&2; exit 22 ;;
+esac
+[ -f "$source" ] || exit 22
+cp "$source" "$output"
+""")
+    (mock_tools / "curl").chmod(0o755)
+    page_one = "[" + ",".join(['{"tag_name":"v9.9.8","draft":false,"prerelease":false,"published_at":"2026-11-12T00:00:00Z"}'] * 19) + \
+               ',{"tag_name":"v99.0.0","draft":true,"prerelease":false,"published_at":null}]'
+    (fixture / "page1.json").write_text(page_one)
+    (fixture / "page2.json").write_text('[{"tag_name":"v9.9.9-rc.2","draft":false,"prerelease":true,"published_at":"2026-11-12T00:00:00Z"},'
+                                        '{"tag_name":"v9.9.9-rc.10","draft":false,"prerelease":true,"published_at":"2026-11-11T00:00:00Z"},'
+                                        '{"tag_name":"v98.0.0-rc.1","draft":false,"prerelease":true,"published_at":null}]')
+    night = Home(kit, "nightly")
+    check(night.install(tops["sdk"]).returncode == 0, "the install for the nightly tests")
+    mock_env = {"PATH": str(mock_tools)}
+
+    def night_update(*arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        return run([night.bin / "neura-update", "update", *arguments], env=night.env({**mock_env, **(env or {})}))
+
+    result = night_update("--check")
+    check(result.returncode == 4 and "neura 9.9.11 is available" in result.stdout, f"the default channel stays stable: {result.stdout}{result.stderr}")
+    check((fixture / "requests").read_text() == "https://github.com/Kayyo321/neura/releases/latest/download/neura-components.txt\n",
+          "the stable channel never asks for prereleases")
+    (fixture / "requests").write_text("")
+    result = night_update("--check", "--nightly")
+    requests = (fixture / "requests").read_text()
+    check(result.returncode == 4 and "neura 9.9.9-rc.10 is available" in result.stdout and "neura update --nightly" in result.stdout,
+          f"--nightly --check: {result.stdout}{result.stderr}")
+    check("per_page=20&page=2" in requests and "/download/v9.9.9-rc.10/neura-components.txt" in requests, "--nightly pages and pins its tag")
+    result = night_update("--nightly", "--check", "--source", nightly)
+    check(result.returncode == 4 and "neura 9.9.9-rc.10 is available" in result.stdout, "--nightly with a local source")
+    night_before = snapshot(night.root)
+    for mode, text in (("failure", "cannot check GitHub releases"), ("mismatch", "does not match selected GitHub tag")):
+        result = night_update("--nightly", env={"NEURA_NIGHTLY_MODE": mode})
+        check(result.returncode == 1 and text in result.stderr and snapshot(night.root) == night_before, f"--nightly {mode}: {result.stderr}")
+    for page in ("{}", "[]", "not JSON"):
+        (fixture / "page1.json").write_text(page)
+        result = night_update("--check", "--nightly")
+        check(result.returncode == 1 and snapshot(night.root) == night_before, f"--nightly with the release list {page!r}")
+    (fixture / "page1.json").write_text(page_one)
+    result = night_update("--nightly")
+    check(result.returncode == 0 and f"updated neura {v} to 9.9.9-rc.10" in result.stdout and night.current().startswith("9.9.9-rc.10+"),
+          f"--nightly installs the candidate: {result.stdout}{result.stderr}")
+    check(not night.leftovers(), "--nightly leaves nothing behind")
+
+    # Installs that a package manager owns, and a marker that is not valid.
+    homebrew = kit.work / "homebrew"
+    tree = homebrew / "versions" / base / "bin"
+    tree.parent.mkdir(parents=True)
+    shutil.copytree(kit.prefixes()["core"] / "bin", tree)
+    shutil.copytree(kit.prefixes()["core"] / "lib", tree.parent / "lib")
+    (homebrew / "neura-install.txt").write_text(f"neura-install 1\nmethod homebrew\nlink /opt/homebrew/bin/neura\nversion {v}\n")
+    for arguments in (["neura-update", "update"], ["neura-update", "update", "--check"], ["neura-update", "update", "--migrate-install"],
+                      ["neura-update", "update", "--rollback"], ["neura-uninstall", "uninstall"], ["neura-uninstall", "uninstall", "--yes"]):
+        result = run([tree / arguments[0], *arguments[1:]], env=home.env())
+        check(result.returncode == 3 and "homebrew" in result.stderr, f"case 62: {' '.join(arguments[1:])} on a homebrew install: {result.stderr}")
+    check((homebrew / "neura-install.txt").exists() and (homebrew / "versions" / base).exists(), "case 62: nothing changed")
+    (homebrew / "neura-install.txt").write_text("neura-install 1\nmethod homebrew\n")
+    result = run([tree / "neura-update", "update"], env=home.env())
+    check(result.returncode == 1 and "marker is not valid" in result.stderr, "update with a malformed marker")
+    result = run([tree / "neura-doctor"], env=home.env())
+    check(result.returncode == 1 and "FAIL  install" in result.stdout, "doctor with a malformed marker")
+
+    # Case 61: a file system that cannot lock. A preloaded flock that fails
+    # with ENOLCK stands in for it.
+    compiler = shutil.which("cc") or shutil.which("gcc")
+    if compiler is None:
+        print("NOT RUN: case 61 needs a C compiler for the flock stand-in")
+        return
+    shim = kit.work / "noflock.c"
+    shim.write_text("#include <errno.h>\nint flock(int fd, int operation) { (void)fd; (void)operation; errno = ENOLCK; return -1; }\n")
+    library = kit.work / "libnoflock.so"
+    built = run([compiler, "-shared", "-fPIC", "-o", library, shim])
+    if built.returncode != 0:
+        print(f"NOT RUN: case 61: the flock stand-in did not build: {built.stderr}")
+        return
+    nolock = Home(kit, "nolock")
+    preload = {"LD_PRELOAD": str(library)}
+    result = nolock.install(tops["sdk"], env=preload)
+    check(result.returncode == 0, f"case 61: install without flock: {result.stderr}")
+    out = run([nolock.bin / "neura-run", image], env=nolock.env(preload))
+    check(out.stdout == "Hello, World!\n", f"case 61: tools run without a lease: {out.stderr}")
+    nolock_base = nolock.current()
+    for release in (newer, newest, third):
+        result = run([nolock.bin / "neura-update", "update", "--source", release], env=nolock.env(preload))
+        check(result.returncode == 0, f"case 61: update without flock: {result.stderr}")
+    check(nolock_base in nolock.generations() and len(nolock.generations()) == 4, f"case 61: nothing is pruned: {nolock.generations()}")
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
     "bootstrap": suite_bootstrap,
+    "update": suite_update,
 }
 
 

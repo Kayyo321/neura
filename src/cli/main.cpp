@@ -84,6 +84,9 @@ bool regular_file(const std::string& path) {
     return ::stat(path.c_str(), &info) == 0 && S_ISREG(info.st_mode);
 }
 
+// The real path of this executable, kept for its lease.
+std::string self_path;
+
 std::string directory_of_self(const char* launch) {
     std::string self;
 #ifdef __linux__
@@ -110,6 +113,7 @@ std::string directory_of_self(const char* launch) {
             remaining.remove_prefix(end + 1);
         }
     }
+    self_path = self;
     const auto slash = self.rfind('/');
     return slash == std::string::npos ? std::string() : self.substr(0, slash == 0 ? 1 : slash);
 }
@@ -227,6 +231,18 @@ int main(int argc, char** argv) {
     if (name == "capabilities") return capabilities(bin, argc, argv);
     const auto* command = tool::find_command(name);
     if (!command) return fail(tool::command_list);
+#ifndef _WIN32
+    // The dispatcher holds the lease of its generation until it becomes the
+    // tool, which takes its own (close-on-exec).
+    {
+        bool removed = false;
+        tool::take_lease(self_path.c_str(), removed);
+        if (removed) {
+            print(stderr, tool::removed_generation_message);
+            return 1;
+        }
+    }
+#endif
     const auto where = bin.empty() ? std::string("the directory of neura (its path could not be determined)") : bin;
     if (command->component == tool::Component::Service && !present(bin, tool::service_executable)) {
         return fail("'neura " + std::string(name) + "' needs the Neura-runtime service component (" +

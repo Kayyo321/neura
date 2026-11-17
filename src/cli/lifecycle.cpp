@@ -1261,6 +1261,11 @@ std::vector<std::string> prune_generations(const fs::path& root, const std::set<
     std::vector<std::string> in_use;
     for (const auto& name : generations_on_disk(root)) {
         if (keep.contains(name)) continue;
+        if (name == own_generation) {
+            // This process runs from it.
+            in_use.push_back(name);
+            continue;
+        }
         if (!exists_no_follow(lease_path(root, name))) {
             try {
                 touch_lease(root, name);

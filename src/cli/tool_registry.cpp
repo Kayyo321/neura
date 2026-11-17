@@ -3,6 +3,15 @@
 #include "neura/version.hpp"
 
 #include <array>
+#include <cerrno>
+#include <cstring>
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 // The parts of the tool registry that the dispatcher links: data, the
 // version line and the usage text, with no stream or file system code, so
@@ -117,6 +126,60 @@ std::string dispatch_token() {
     return std::string(dispatch_prefix) + NEURA_DISPATCH_VERSION_OVERRIDE;
 #else
     return std::string(dispatch_prefix) + version_line();
+#endif
+}
+
+int take_lease(const char* executable, bool& removed) {
+    removed = false;
+#ifdef _WIN32
+    (void)executable;
+    return -1;
+#else
+    // <root>/versions/<generation>/bin/<tool>
+    const std::string_view path(executable ? executable : "");
+    const auto tool_slash = path.rfind('/');
+    if (tool_slash == std::string_view::npos || tool_slash < 4) return -1;
+    const auto bin_slash = path.rfind('/', tool_slash - 1);
+    if (bin_slash == std::string_view::npos || path.substr(bin_slash + 1, tool_slash - bin_slash - 1) != "bin") return -1;
+    const auto generation_slash = path.rfind('/', bin_slash - 1);
+    if (generation_slash == std::string_view::npos || generation_slash == 0) return -1;
+    const auto versions_slash = path.rfind('/', generation_slash - 1);
+    if (versions_slash == std::string_view::npos || path.substr(versions_slash + 1, generation_slash - versions_slash - 1) != "versions") {
+        return -1;
+    }
+    const auto root = path.substr(0, versions_slash);
+    const auto generation = path.substr(generation_slash + 1, bin_slash - generation_slash - 1);
+    std::string lease(root);
+    lease += "/leases/";
+    lease += generation;
+    const int descriptor = ::open(lease.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) {
+        if (errno != ENOENT) return -1;
+        // No lease file: a root that a 0.2 client made runs without one; on
+        // a schema 2 root the generation was removed.
+        std::string marker(root);
+        marker += "/neura-install.txt";
+        const int file = ::open(marker.c_str(), O_RDONLY | O_CLOEXEC);
+        if (file < 0) return -1;
+        char head[16] = {};
+        const auto count = ::read(file, head, sizeof head - 1);
+        ::close(file);
+        removed = count >= 16 - 1 && std::memcmp(head, "neura-install 2", 15) == 0;
+        return -1;
+    }
+    if (::flock(descriptor, LOCK_SH | LOCK_NB) != 0) {
+        // Held exclusively: the generation is being removed.
+        removed = errno == EWOULDBLOCK;
+        ::close(descriptor);
+        return -1;
+    }
+    struct stat info {};
+    if (::fstat(descriptor, &info) != 0 || info.st_nlink == 0) {
+        removed = true;
+        ::close(descriptor);
+        return -1;
+    }
+    return descriptor;
 #endif
 }
 
