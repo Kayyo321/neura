@@ -192,6 +192,27 @@ a,   b: float64, // after a group
         self.assertIn("// after a group", formatted)
         self.assertIn("a, b: float64,", formatted)
 
+    def test_labels_defaults_interpolation_and_nameof(self):
+        # docs/design/Calls030.md, Grammar: a label is written 'name: value',
+        # a default 'name: Type = value', and an interpolated string is
+        # copied byte for byte. Labels are never added, removed or reordered.
+        source = '''let schedule=func(job:string,retries:int=-3,urgent:bool=false,ratio:float64=-0.5)->string=>job;
+let first=schedule(urgent : true,job:"backup");
+let second=schedule("x",retries:ok?1:2);
+let text=$"{ job }:{retries:>4}  {{x}} {$"{a}"}";
+let name=nameof( schedule );
+let lengths=transform(names,func(word)=>word.byte_length);
+let r=f(new(0..10:2));
+'''
+        formatted = self.formatted(source)
+        self.assertIn("func(job: string, retries: int = -3, urgent: bool = false, ratio: float64 = -0.5) -> string", formatted)
+        self.assertIn('schedule(urgent: true, job: "backup")', formatted)
+        self.assertIn('schedule("x", retries: ok ? 1 : 2)', formatted)
+        self.assertIn('$"{ job }:{retries:>4}  {{x}} {$"{a}"}"', formatted)
+        self.assertIn("nameof(schedule)", formatted)
+        self.assertIn("transform(names, func(word) => word.byte_length)", formatted)
+        self.assertIn("new(0 .. 10 : 2)", formatted)
+
     def test_real_language_corpus(self):
         repository = pathlib.Path(__file__).resolve().parents[2]
         sources = sorted((repository / 'examples').rglob('*.nra'))

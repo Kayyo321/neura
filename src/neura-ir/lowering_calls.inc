@@ -172,6 +172,9 @@ void Lowering::assemble_arguments(IrNode& call, const Expr& expr, std::size_t fi
                                   const Substitution& replacements, Context& context, std::size_t leading) {
     const auto& params = symbol(target).parameters;
     std::vector<std::optional<IrNode>> slots(map.source.size());
+    for (std::size_t i = 0; i < map.parameter.size() && !expr.labels.empty(); ++i)
+        if (!expr.labels[first + i].empty())
+            program_.name_uses.emplace_back(expr.label_spans[first + i], params[map.parameter[i] + leading]);
     if (map.reordered) {
         // A primitive reference is bound in place; a hidden local would copy
         // the binding, which the storage rules do not yet describe
@@ -1517,6 +1520,7 @@ IrNode Lowering::name_of(const Expr& expr, Context& context) {
             .label("nameof needs a name")
             .help("write a name or a dotted path, such as 'nameof(Invoice.total)'");
     const auto target = name_of_target(expr.operands.front(), context);
+    program_.name_uses.emplace_back(expr.operands.front().span, target);
     auto result = node(IrOp::String, expr.span, string_type);
     result.text = symbol(target).name;
     return result;
