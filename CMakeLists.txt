@@ -1201,7 +1201,7 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_executable(neura_lifecycle_tests tests/lifecycle/unit_tests.cpp)
     target_link_libraries(neura_lifecycle_tests PRIVATE neura_lifecycle)
     neura_target_defaults(neura_lifecycle_tests)
-    foreach(suite IN ITEMS sha256 semver release-metadata marker)
+    foreach(suite IN ITEMS sha256 semver release-metadata marker manifest journal generation)
         add_test(NAME lifecycle-unit-${suite} COMMAND neura_lifecycle_tests ${suite})
     endforeach()
     add_test(NAME version-consistency COMMAND ${CMAKE_COMMAND}

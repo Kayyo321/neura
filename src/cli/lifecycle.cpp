@@ -339,6 +339,14 @@ std::vector<std::string> curl_command(const std::string& url, const fs::path& ou
 
 fs::path version_directory(const fs::path& root, const std::string& version) { return root / "versions" / version; }
 
+// The schema 1 marker of 0.2, which this flow keeps writing until the change
+// procedure of the lifecycle milestone replaces it.
+std::string format_marker_1(const Marker& marker) {
+    std::string text = "neura-install 1\nmethod " + marker.method + "\nlink " + marker.link + "\n";
+    for (const auto& version : marker.generations) text += "version " + version + "\n";
+    return text;
+}
+
 int refuse_unmanaged(const Detection& detection, const fs::path& executable, const char* command) {
     if (detection.kind == Detection::Kind::Broken) {
         std::cerr << "neura: " << command << ": the install marker is not valid: " << detection.problem << "\n";
@@ -749,10 +757,10 @@ int run_update(const fs::path& executable, const Detection& detection, const Upd
 
     // Activate. Everything from here on is undone if a step fails.
     Marker marker = detection.marker;
-    std::vector<std::string> old_versions = marker.versions;
-    if (std::ranges::find(old_versions, detection.running_version) == old_versions.end()) old_versions.push_back(detection.running_version);
-    marker.versions = {metadata.version};
-    std::string old_target = "versions/" + detection.running_version;
+    std::vector<std::string> old_versions = marker.generations;
+    if (std::ranges::find(old_versions, detection.running_generation) == old_versions.end()) old_versions.push_back(detection.running_generation);
+    marker.generations = {metadata.version};
+    std::string old_target = "versions/" + detection.running_generation;
     {
         char buffer[4096];
         const auto length = ::readlink((root / "current").c_str(), buffer, sizeof buffer - 1);
@@ -769,7 +777,7 @@ int run_update(const fs::path& executable, const Detection& detection, const Upd
             throw Failure{"cannot move the new version to " + new_dir.string() + ": " + std::strerror(errno)};
         }
         tree_placed = true;
-        marker_temp = write_temp_file(root, ".marker-", format_marker(marker));
+        marker_temp = write_temp_file(root, ".marker-", format_marker_1(marker));
         inject("activate-link");
         replace_symlink(root, "versions/" + metadata.version);
         link_switched = true;
@@ -799,7 +807,7 @@ int run_update(const fs::path& executable, const Detection& detection, const Upd
             text += "\n" + executable.string() + " still works. See docs/Install.md to repair " + root.string();
             throw Failure{text};
         }
-        throw Failure{"update failed and was rolled back; neura " + detection.running_version + " is still installed (" + failure.message + ")"};
+        throw Failure{"update failed and was rolled back; neura " + detection.running_generation + " is still installed (" + failure.message + ")"};
     }
 
     // The new version is active. Removing the old ones is cleanup.
@@ -816,8 +824,8 @@ int run_update(const fs::path& executable, const Detection& detection, const Upd
     if (!kept.empty()) {
         // Keep uninstall able to find what is left.
         try {
-            marker.versions.insert(marker.versions.end(), kept.begin(), kept.end());
-            const auto replacement = write_temp_file(root, ".marker-", format_marker(marker));
+            marker.generations.insert(marker.generations.end(), kept.begin(), kept.end());
+            const auto replacement = write_temp_file(root, ".marker-", format_marker_1(marker));
             if (::rename(replacement.c_str(), (root / marker_name).c_str()) != 0) ::unlink(replacement.c_str());
         } catch (const Failure&) {
         }
@@ -894,7 +902,7 @@ int uninstall(const fs::path& executable, const UninstallOptions& options) {
     } else if (exists_no_follow(root / "current")) {
         left.push_back((root / "current").string() + ": it is not a symbolic link");
     }
-    for (const auto& version : detection.marker.versions) {
+    for (const auto& version : detection.marker.generations) {
         const auto directory = version_directory(root, version);
         if (exists_no_follow(directory)) plan.push_back({directory, true});
     }
