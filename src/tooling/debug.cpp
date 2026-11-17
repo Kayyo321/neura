@@ -5,6 +5,7 @@
 #include "test_protocol.hpp"
 #include "backend/converter.hpp"
 #include "cli/source_loader.hpp"
+#include "neura-ir/any.hpp"
 #include "neura-ir/class_hooks.hpp"
 #include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
@@ -37,6 +38,7 @@
 #include <mutex>
 #include <optional>
 #include <set>
+#include <span>
 #include <sstream>
 #include <stdexcept>
 #include <string>
@@ -154,6 +156,15 @@ private:
     int write_ = -1;
 };
 
+struct InspectedValue {
+    nvm::DebugValue raw;
+    bool any = false;
+};
+
+using DebugWords = std::span<const nvm::DebugValue>;
+using WordNames = std::span<const std::string>;
+constexpr std::string_view any_marker = ".$any.tag";
+
 class Adapter {
 public:
     Adapter(std::istream& input, std::ostream& output, fs::path executable)
@@ -230,10 +241,15 @@ private:
     std::string type_name(const nvm::DebugValue& value) const;
     nvm::DebugValue policy_value(const nvm::DebugValue& value, const nvm::DebugValue* policy,
                                  std::string_view name, std::string_view policy_name) const;
-    Json variable(std::string name, const nvm::DebugValue& value);
+    template <typename TypeAt>
+    std::size_t any_width(WordNames names, std::size_t size, TypeAt type_at) const;
+    template <typename TypeAt, typename Visit>
+    void bindings(WordNames names, std::size_t size, TypeAt type_at, Visit visit) const;
+    InspectedValue inspect(DebugWords words, WordNames names, std::size_t width = 0) const;
+    Json variable(std::string name, const InspectedValue& value);
     Json variables(const Json& arguments);
     Json evaluate(const Json& arguments);
-    nvm::DebugValue expression(std::string_view text, const FrameRef& frame);
+    InspectedValue expression(std::string_view text, const FrameRef& frame);
     FrameRef find_frame(const Json& arguments) const;
     Json set_breakpoints(const Json& arguments, bool preserve_ids = false);
     Json stack_trace(const Json& arguments);
@@ -350,22 +366,112 @@ nvm::DebugValue Adapter::policy_value(const nvm::DebugValue& value, const nvm::D
     return result;
 }
 
-Json Adapter::variable(std::string name, const nvm::DebugValue& value) {
+template <typename TypeAt>
+std::size_t Adapter::any_width(WordNames names, std::size_t size, TypeAt type_at) const {
+    if (size < any_words || names.size() < any_words || !names[0].ends_with(any_marker) ||
+        names[0].size() == any_marker.size()) return 0;
+    const auto base = std::string_view(names[0]).substr(0, names[0].size() - any_marker.size());
+    const auto named = [&](std::size_t index, std::string_view suffix) {
+        return names[index].size() == base.size() + suffix.size() && names[index].starts_with(base) &&
+               names[index].ends_with(suffix);
+    };
+    const auto typed = [&](std::size_t index, nvr::TypeKind kind, unsigned width = 0) {
+        const auto type = type_at(index);
+        return type < image_->types.size() && image_->types[type].kind == kind &&
+               (width == 0 || image_->types[type].width == width);
+    };
+    if (!named(1, ".bits") || !named(2, ".text") || !named(3, ".reference") ||
+        !typed(0, nvr::TypeKind::Unsigned, 32) || !typed(1, nvr::TypeKind::Unsigned, 64) ||
+        !typed(2, nvr::TypeKind::Text) || !typed(3, nvr::TypeKind::Object)) return 0;
+    if (size > any_words && names.size() > any_words && named(4, ".reference.policy")) {
+        return typed(4, nvr::TypeKind::Unsigned, 32) ? any_words + 1 : 0;
+    }
+    return any_words;
+}
+
+template <typename TypeAt, typename Visit>
+void Adapter::bindings(WordNames names, std::size_t size, TypeAt type_at, Visit visit) const {
+    for (std::size_t i = 0; i < size;) {
+        const auto tail = i < names.size() ? names.subspan(i) : WordNames{};
+        auto name = tail.empty() ? std::string_view{} : std::string_view(tail.front());
+        if (i != 0 && !tail.empty() && name == names[i - 1] + ".policy") {
+            ++i;
+            continue;
+        }
+        const auto width = any_width(tail, size - i, [&](std::size_t offset) { return type_at(i + offset); });
+        if (width) name.remove_suffix(any_marker.size());
+        visit(i, name, width);
+        i += width ? width : 1;
+    }
+}
+
+InspectedValue Adapter::inspect(DebugWords words, WordNames names, std::size_t width) const {
+    if (width == 0) {
+        if (words.size() >= 2 && names.size() >= 2) {
+            return {policy_value(words[0], &words[1], names[0], names[1])};
+        }
+        return {words[0]};
+    }
+    if (!std::ranges::all_of(words.first(width), &nvm::DebugValue::initialized)) {
+        return {{nvr::absent, 0, false, "<uninitialized>", 0}, true};
+    }
+
+    // Tags are the fixed NeuraIR tags in any.hpp. Scalar bits were zero
+    // extended into the carrier, and float bits are displayed without any
+    // conversion through host floating point.
+    constexpr std::string_view types[]{"", "bool", "int8", "int16", "int32", "int64",
+                                      "uint8", "uint16", "uint32", "uint64",
+                                      "float16", "bfloat16", "float32", "float64", "string"};
+    const auto tag = words[0].bits;
+    if (tag == any_reference_tag) {
+        auto value = width > any_words ? policy_value(words[3], &words[4], names[3], names[4]) : words[3];
+        value.text = "any<" + (value.bits == 0 ? std::string("nil") : type_name(value)) + "> " + value.text;
+        return {std::move(value), true};
+    }
+    if (tag >= std::size(types)) {
+        return {{nvr::absent, 0, true, "any<tag " + std::to_string(tag) + "> <invalid tag>", 0}, true};
+    }
+    std::string payload;
+    const auto bits = words[1].bits;
+    if (tag == 1) {
+        payload = (bits & 1) != 0 ? "true" : "false";
+    } else if (tag <= 9) {
+        const auto size = 8U << ((tag - 2) % 4);
+        const auto mask = size == 64 ? UINT64_MAX : (std::uint64_t{1} << size) - 1;
+        const auto raw = bits & mask;
+        if (tag < 6 && (raw & (std::uint64_t{1} << (size - 1)))) {
+            payload = "-" + std::to_string((std::uint64_t{0} - raw) & mask);
+        } else payload = std::to_string(raw);
+    } else if (tag < 14) {
+        const std::size_t digits = tag <= 11 ? 4 : tag == 12 ? 8 : 16;
+        constexpr std::string_view hex = "0123456789abcdef";
+        payload = "0x";
+        for (auto i = digits; i > 0; --i) payload += hex[(bits >> ((i - 1) * 4)) & 15];
+    } else {
+        payload = words[2].text;
+    }
+    return {{nvr::absent, 0, true, "any<" + std::string(types[tag]) + "> " + payload, 0}, true};
+}
+
+Json Adapter::variable(std::string name, const InspectedValue& inspected) {
+    const auto& value = inspected.raw;
     int reference = 0;
     if (value.initialized && value.children != 0) {
         reference = reference_sequence_++;
         variables_.emplace(reference, Variables{Variables::Kind::Children, {}, value});
     }
-    Json result{{"name", std::move(name)}, {"value", value.text}, {"type", type_name(value)},
+    Json result{{"name", std::move(name)}, {"value", value.text}, {"type", inspected.any ? "any" : type_name(value)},
                 {"variablesReference", reference},
                 {"presentationHint", Json{{"attributes", Json::Array{"readOnly"}}}}};
     if (reference != 0) {
         if (value.layout != nvr::absent) {
             auto children = value.children;
-            if (names_ && value.layout < names_->fields.size()) {
+            if (names_ && value.layout < names_->fields.size() && value.layout < image_->layouts.size()) {
                 const auto& fields = names_->fields[value.layout];
-                for (std::size_t i = 1; i < fields.size() && i < value.children; ++i)
-                    if (fields[i] == fields[i - 1] + ".policy") --children;
+                const auto& types = image_->layouts[value.layout].fields;
+                children = 0;
+                bindings(fields, std::min(value.children, types.size()), [&](auto i) { return types[i]; },
+                         [&](auto, auto, auto) { ++children; });
             }
             result["namedVariables"] = children;
         } else result["indexedVariables"] = value.children;
@@ -581,8 +687,8 @@ bool Adapter::hit(Breakpoint& point, const FrameRef& frame) {
     }
     if (!point.condition.empty()) {
         const auto value = expression(point.condition, frame);
-        if (value.text != "true" && value.text != "false") throw std::runtime_error("breakpoint condition must be Boolean");
-        if (value.text == "false") return false;
+        if (value.raw.text != "true" && value.raw.text != "false") throw std::runtime_error("breakpoint condition must be Boolean");
+        if (value.raw.text == "false") return false;
     }
     return true;
 }
@@ -596,7 +702,7 @@ std::string Adapter::interpolate(std::string_view text, const FrameRef& frame) {
         text.remove_prefix(open + 1);
         const auto close = text.find('}');
         if (close == std::string_view::npos) { result += '{'; result += text; break; }
-        try { result += expression(text.substr(0, close), frame).text; }
+        try { result += expression(text.substr(0, close), frame).raw.text; }
         catch (const std::exception& error) { result += "<" + std::string(error.what()) + ">"; }
         text.remove_prefix(close + 1);
     }
@@ -830,38 +936,30 @@ Json Adapter::variables(const Json& arguments) {
     if (count == 0) count = 1000;
     count = std::min<std::size_t>(count, 1000);
     Json result = Json::Array{};
+    const auto append = [&](DebugWords raw, WordNames names, std::size_t first, std::size_t index_offset = 0) {
+        std::size_t position = 0;
+        bindings(names, raw.size(), [&](auto i) { return raw[i].type; },
+                 [&](std::size_t i, std::string_view name, std::size_t width) {
+            if (reference.kind == Variables::Kind::Locals && name.empty()) return;
+            if (reference.kind != Variables::Kind::Children && name.starts_with('$')) return;
+            const auto logical = position++;
+            if (logical < first || logical - first >= count) return;
+            auto displayed = std::string(name);
+            if (name.empty()) {
+                displayed = reference.kind == Variables::Kind::Globals ? "global " + std::to_string(i)
+                            : "[" + std::to_string(index_offset + i) + "]";
+            }
+            const auto tail = i < names.size() ? names.subspan(i) : WordNames{};
+            result.push_back(variable(std::move(displayed), inspect(raw.subspan(i), tail, width)));
+        });
+    };
     if (reference.kind == Variables::Kind::Locals) {
         const auto& frame = snapshot_.threads.at(reference.frame.thread).frames.at(reference.frame.frame);
-        std::vector<std::pair<std::string, nvm::DebugValue>> values;
-        for (std::size_t i = 0; i < frame.slots.size(); ++i) {
-            if (!names_ || frame.function >= names_->slots.size() || i >= names_->slots[frame.function].size()) continue;
-            const auto& name = names_->slots[frame.function][i];
-            if (name.empty() || name.starts_with('$') ||
-                (i > 0 && name == names_->slots[frame.function][i - 1] + ".policy")) continue;
-            const auto& slot_names = names_->slots[frame.function];
-            const auto value = i + 1 < frame.slots.size() && i + 1 < slot_names.size()
-                ? policy_value(frame.slots[i], &frame.slots[i + 1], name, slot_names[i + 1]) : frame.slots[i];
-            values.emplace_back(name, value);
-        }
-        for (auto i = start; i < values.size() && i - start < count; ++i)
-            result.push_back(variable(values[i].first, values[i].second));
+        if (names_ && frame.function < names_->slots.size()) append(frame.slots, names_->slots[frame.function], start);
     } else if (reference.kind == Variables::Kind::Globals) {
-        std::vector<std::pair<std::string, nvm::DebugValue>> values;
-        for (std::size_t i = 0; i < snapshot_.globals.size(); ++i) {
-            const auto name = names_ && i < names_->globals.size() && !names_->globals[i].empty()
-                ? names_->globals[i] : "global " + std::to_string(i);
-            if (name.starts_with('$') || (names_ && i > 0 && i < names_->globals.size() &&
-                name == names_->globals[i - 1] + ".policy")) continue;
-            const auto value = names_ && i + 1 < names_->globals.size() && i + 1 < snapshot_.globals.size()
-                ? policy_value(snapshot_.globals[i], &snapshot_.globals[i + 1], name, names_->globals[i + 1])
-                : snapshot_.globals[i];
-            values.emplace_back(name, value);
-        }
-        for (auto i = start; i < values.size() && i - start < count; ++i)
-            result.push_back(variable(values[i].first, values[i].second));
+        append(snapshot_.globals, names_ ? WordNames(names_->globals) : WordNames{}, start);
     } else {
-        // Named object fields can occupy two words; fetch their raw neighbors
-        // together before applying source-level pagination.
+        // Fetch raw neighbors before paginating logical object fields.
         const bool named = reference.value.layout != nvr::absent && names_ && reference.value.layout < names_->fields.size();
         std::vector<nvm::DebugValue> raw;
         if (named) {
@@ -872,30 +970,16 @@ Json Adapter::variables(const Json& arguments) {
                 if (chunk.empty()) break;
                 raw.insert(raw.end(), chunk.begin(), chunk.end());
             }
+            append(raw, names_->fields[reference.value.layout], start);
         } else {
             raw = execution_->debug_children(reference.value.type, reference.value.bits, start, count);
+            append(raw, {}, 0, start);
         }
-        std::vector<std::pair<std::string, nvm::DebugValue>> values;
-        for (std::size_t i = 0; i < raw.size(); ++i) {
-            std::string name = "[" + std::to_string(start + i) + "]";
-            auto value = raw[i];
-            if (named) {
-                const auto& field_names = names_->fields[reference.value.layout];
-                if (i < field_names.size() && !field_names[i].empty()) name = field_names[i];
-                if (i > 0 && i < field_names.size() && name == field_names[i - 1] + ".policy") continue;
-                if (i + 1 < raw.size() && i + 1 < field_names.size())
-                    value = policy_value(value, &raw[i + 1], name, field_names[i + 1]);
-            }
-            values.emplace_back(std::move(name), value);
-        }
-        const auto first = named ? start : 0;
-        for (auto i = first; i < values.size() && i - first < count; ++i)
-            result.push_back(variable(values[i].first, values[i].second));
     }
     return Json{{"variables", result}};
 }
 
-nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selected) {
+InspectedValue Adapter::expression(std::string_view text, const FrameRef& selected) {
     if (text.size() > 4096) throw std::runtime_error("debug expression is too long");
     // A deliberately read-only subset: names, direct object fields, indexed
     // values, Boolean logic and scalar comparisons. No calls, assignments,
@@ -931,49 +1015,51 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                 if (adapter.image_->types[i].kind == kind && (width == 0 || adapter.image_->types[i].width == width)) return i;
             return nvr::absent;
         }
-        nvm::DebugValue boolean(bool value) const { return {type(nvr::TypeKind::Bool), value ? 1U : 0U, true, value ? "true" : "false", 0}; }
-        bool truth(const nvm::DebugValue& value) const {
-            if (value.text == "true") return true;
-            if (value.text == "false") return false;
+        InspectedValue boolean(bool value) const {
+            return {{type(nvr::TypeKind::Bool), value ? 1U : 0U, true, value ? "true" : "false", 0}};
+        }
+        bool truth(const InspectedValue& value) const {
+            if (value.raw.text == "true") return true;
+            if (value.raw.text == "false") return false;
             throw std::runtime_error("Boolean operand required");
         }
-        nvm::DebugValue lookup(const std::string& identifier) const {
+        InspectedValue lookup(const std::string& identifier) const {
             const auto& f = adapter.snapshot_.threads.at(frame.thread).frames.at(frame.frame);
-            std::optional<nvm::DebugValue> found;
+            std::optional<InspectedValue> found;
             if (adapter.names_ && f.function < adapter.names_->slots.size()) {
-                const auto& names = adapter.names_->slots[f.function];
-                for (std::size_t i = 0; i < names.size() && i < f.slots.size(); ++i) {
-                    if (names[i] == identifier) {
-                        // A later assigned shadow occupies a later slot.
-                        if (!found || f.slots[i].initialized) {
-                            found = i + 1 < f.slots.size() && i + 1 < names.size()
-                                ? adapter.policy_value(f.slots[i], &f.slots[i + 1], names[i], names[i + 1]) : f.slots[i];
-                        }
-                    }
-                }
+                const WordNames names = adapter.names_->slots[f.function];
+                const DebugWords slots = f.slots;
+                adapter.bindings(names, slots.size(), [&](auto i) { return slots[i].type; },
+                                 [&](std::size_t i, std::string_view name, std::size_t width) {
+                    if (name != identifier) return;
+                    // A later assigned shadow occupies a later slot.
+                    auto item = adapter.inspect(slots.subspan(i), names.subspan(i), width);
+                    if (!found || item.raw.initialized) found = std::move(item);
+                });
             }
             if (found) {
-                if (!found->initialized) throw std::runtime_error(identifier + " is not initialized");
+                if (!found->raw.initialized) throw std::runtime_error(identifier + " is not initialized");
                 return *found;
             }
             if (adapter.names_) {
-                for (std::size_t i = 0; i < adapter.names_->globals.size() && i < adapter.snapshot_.globals.size(); ++i) {
-                    const auto& global = adapter.names_->globals[i];
-                    if (global == identifier || global.ends_with("." + identifier)) {
+                const auto suffix = "." + identifier;
+                const WordNames names = adapter.names_->globals;
+                const DebugWords globals = adapter.snapshot_.globals;
+                adapter.bindings(names, globals.size(), [&](auto i) { return globals[i].type; },
+                                 [&](std::size_t i, std::string_view global, std::size_t width) {
+                    if (global == identifier || global.ends_with(suffix)) {
                         if (found) throw std::runtime_error("global name is ambiguous: " + identifier);
-                        found = i + 1 < adapter.snapshot_.globals.size() && i + 1 < adapter.names_->globals.size()
-                            ? adapter.policy_value(adapter.snapshot_.globals[i], &adapter.snapshot_.globals[i + 1],
-                                                   global, adapter.names_->globals[i + 1]) : adapter.snapshot_.globals[i];
+                        found = adapter.inspect(globals.subspan(i), names.subspan(i), width);
                     }
-                }
+                });
             }
             if (!found) throw std::runtime_error("unknown variable: " + identifier);
-            if (!found->initialized) throw std::runtime_error(identifier + " is not initialized");
+            if (!found->raw.initialized) throw std::runtime_error(identifier + " is not initialized");
             return *found;
         }
-        nvm::DebugValue primary() {
+        InspectedValue primary() {
             if (++depth > 32) throw std::runtime_error("debug expression nesting limit exceeded");
-            nvm::DebugValue result;
+            InspectedValue result;
             if (take("(")) {
                 result = logical_or();
                 if (!take(")")) throw std::runtime_error("expected ')'");
@@ -988,12 +1074,12 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                         std::int64_t value = 0;
                         const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
                         if (error != std::errc{} || end != digits.data() + digits.size()) throw std::runtime_error("invalid signed integer literal");
-                        result = {type(nvr::TypeKind::Signed, 64), static_cast<std::uint64_t>(value), true, std::string(digits), 0};
+                        result = {{type(nvr::TypeKind::Signed, 64), static_cast<std::uint64_t>(value), true, std::string(digits), 0}};
                     } else {
                         std::uint64_t value = 0;
                         const auto [end, error] = std::from_chars(digits.data(), digits.data() + digits.size(), value);
                         if (error != std::errc{} || end != digits.data() + digits.size()) throw std::runtime_error("invalid unsigned integer literal");
-                        result = {type(nvr::TypeKind::Unsigned, 64), value, true, std::string(digits), 0};
+                        result = {{type(nvr::TypeKind::Unsigned, 64), value, true, std::string(digits), 0}};
                     }
                 } else {
                     const auto identifier = name();
@@ -1005,46 +1091,53 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                 if (take(".")) {
                     const auto field = name();
                     if (!evaluating) continue;
-                    const auto kind = result.type < adapter.image_->types.size()
-                        ? adapter.image_->types[result.type].kind : nvr::TypeKind::Void;
+                    const auto& raw = result.raw;
+                    const auto kind = raw.type < adapter.image_->types.size()
+                        ? adapter.image_->types[raw.type].kind : nvr::TypeKind::Void;
                     if (field == "length" && (kind == nvr::TypeKind::Array || kind == nvr::TypeKind::List || kind == nvr::TypeKind::Bytes)) {
-                        result = {type(nvr::TypeKind::Unsigned, 64), result.children, true, std::to_string(result.children), 0};
+                        result = {{type(nvr::TypeKind::Unsigned, 64), raw.children, true, std::to_string(raw.children), 0}};
                         continue;
                     }
-                    if (result.layout == nvr::absent || !adapter.names_ || result.layout >= adapter.names_->fields.size())
+                    if (raw.layout == nvr::absent || !adapter.names_ || raw.layout >= adapter.names_->fields.size())
                         throw std::runtime_error("only direct object storage can be inspected; getters are not evaluated");
-                    const auto& names = adapter.names_->fields[result.layout];
-                    const auto found = std::find(names.begin(), names.end(), field);
+                    const WordNames names = adapter.names_->fields[raw.layout];
+                    auto found = std::ranges::find(names, field);
+                    const bool marked = found == names.end();
+                    if (marked) found = std::ranges::find(names, field + std::string(any_marker));
                     if (found == names.end()) throw std::runtime_error("unknown stored field: " + field);
                     const auto index = static_cast<std::size_t>(found - names.begin());
-                    const auto values = adapter.execution_->debug_children(result.type, result.bits, index, 2);
-                    if (values.empty() || !values.front().initialized) throw std::runtime_error("field is not initialized");
-                    result = values.size() > 1 && index + 1 < names.size()
-                        ? adapter.policy_value(values[0], &values[1], field, names[index + 1]) : values.front();
+                    const auto values = adapter.execution_->debug_children(raw.type, raw.bits, index, marked ? any_words + 1 : 2);
+                    const auto tail = names.subspan(index);
+                    const auto width = marked ? adapter.any_width(tail, values.size(), [&](auto i) { return values[i].type; }) : 0;
+                    if (marked && width == 0) throw std::runtime_error("unknown stored field: " + field);
+                    if (values.empty()) throw std::runtime_error("field is not initialized");
+                    result = adapter.inspect(values, tail, width);
+                    if (!result.raw.initialized) throw std::runtime_error("field is not initialized");
                 } else if (take("[")) {
                     const auto index_value = logical_or();
                     if (!take("]")) throw std::runtime_error("expected ']'");
                     if (!evaluating) continue;
                     std::uint64_t index = 0;
-                    const auto [end, error] = std::from_chars(index_value.text.data(), index_value.text.data() + index_value.text.size(), index);
-                    if (error != std::errc{} || end != index_value.text.data() + index_value.text.size() || index >= result.children)
+                    const auto& index_text = index_value.raw.text;
+                    const auto [end, error] = std::from_chars(index_text.data(), index_text.data() + index_text.size(), index);
+                    if (error != std::errc{} || end != index_text.data() + index_text.size() || index >= result.raw.children)
                         throw std::runtime_error("debug index is out of bounds");
-                    const auto values = adapter.execution_->debug_children(result.type, result.bits, static_cast<std::size_t>(index), 1);
+                    const auto values = adapter.execution_->debug_children(result.raw.type, result.raw.bits, static_cast<std::size_t>(index), 1);
                     if (values.empty() || !values.front().initialized) throw std::runtime_error("element is not initialized");
-                    result = values.front();
+                    result = {values.front()};
                 } else break;
             }
             --depth;
             return result;
         }
-        nvm::DebugValue unary() {
+        InspectedValue unary() {
             if (take("!")) {
                 const auto operand = unary();
                 return boolean(evaluating && !truth(operand));
             }
             return primary();
         }
-        nvm::DebugValue comparison() {
+        InspectedValue comparison() {
             auto left = unary();
             std::string_view op;
             for (auto candidate : {std::string_view("=="), std::string_view("!="), std::string_view("<="), std::string_view(">="), std::string_view("<"), std::string_view(">")})
@@ -1056,7 +1149,7 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
             // this remains precise for uint64 even on hosts with 64-bit
             // long double. Boolean equality is handled separately.
             bool equal = false, less = false;
-            if ((left.text == "true" || left.text == "false") && (right.text == "true" || right.text == "false")) {
+            if ((left.raw.text == "true" || left.raw.text == "false") && (right.raw.text == "true" || right.raw.text == "false")) {
                 equal = truth(left) == truth(right); less = !truth(left) && truth(right);
             } else {
                 const auto parse_integer = [](std::string_view text) {
@@ -1067,14 +1160,14 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                         throw std::runtime_error("debug comparisons currently require integer or Boolean operands");
                     return std::pair{negative && magnitude != 0, magnitude};
                 };
-                const auto a = parse_integer(left.text), b = parse_integer(right.text);
+                const auto a = parse_integer(left.raw.text), b = parse_integer(right.raw.text);
                 equal = a == b;
                 less = a.first != b.first ? a.first : a.first ? a.second > b.second : a.second < b.second;
             }
             return boolean(op == "==" ? equal : op == "!=" ? !equal : op == "<" ? less :
                            op == "<=" ? less || equal : op == ">" ? !less && !equal : !less);
         }
-        nvm::DebugValue logical_and() {
+        InspectedValue logical_and() {
             auto result = comparison();
             while (take("&&")) {
                 const bool parent = evaluating;
@@ -1086,7 +1179,7 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
             }
             return result;
         }
-        nvm::DebugValue logical_or() {
+        InspectedValue logical_or() {
             auto result = logical_and();
             while (take("||")) {
                 const bool parent = evaluating;
