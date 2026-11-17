@@ -18,7 +18,7 @@ let work = func(n: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let sum = 0;
         scope {
             let first = spawn work(10);

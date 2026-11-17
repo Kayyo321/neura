@@ -1,0 +1,26 @@
+// Named arguments in parameter order: the same image as the positional
+// calls of named.expanded.nra (docs/design/Calls030.md).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let area = func(width: int, height: int) -> int => width * height;
+
+let Box = class (
+    export let width: int;
+    export let height: int;
+    export let init = func(width: int, height: int) {
+        instance.width = width;
+        instance.height = height;
+    };
+    export let grow = func(by: int, times: int) -> int => (width + by) * times;
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let box = new Box(width: 2, height: 3);
+        console.print_line(area(width: box.width, height: box.height).to_string());
+        console.print_line(area(4, height: 5).to_string());
+        console.print_line(box.grow(by: 1, times: 2).to_string());
+        return program.ExitCode.Ok;
+    };
+);

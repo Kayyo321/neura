@@ -108,7 +108,7 @@ let level = func(depth: int, never: channels.Receiver<int>) -> void {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("== cancelling parked operations");
         let [full_out, full_in, full_closer] = channels.open<int>(1);
         full_out.send(1);

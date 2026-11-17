@@ -11,7 +11,7 @@ let say = func(label: string) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         scope {
             let first = spawn say("a");
             let second = spawn say("b");

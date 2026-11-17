@@ -101,11 +101,11 @@ export let ArrayList = module (
 
         /// @brief Appends each element in order. Reads by position up to the starting
         /// length, so adding the list's own items() doubles it.
-        export let add_all = func(values: T[list]) {
-            last count = values.length;
+        export let add_all = func(items: T[list]) {
+            last count = items.length;
             let i = 0;
             while (i < count) {
-                storage.append(values[i]);
+                storage.append(items[i]);
                 i += 1;
             }
         };

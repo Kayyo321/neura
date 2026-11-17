@@ -1,0 +1,7 @@
+// An implementation keeps the interface method's parameter names (edge case 33).
+let Sized = interface (
+    let resize = func(width: int, height: int) -> int;
+);
+let Box = class implements Sized (
+    export let resize = func(width: int, tall: int) -> int => width * tall;
+);

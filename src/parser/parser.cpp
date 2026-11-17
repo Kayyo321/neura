@@ -1535,6 +1535,37 @@ private:
         return result;
     }
 
+    // The arguments of a call, a `new` or a `super.init`, after the '(':
+    // each one is an expression, or a label and an expression when an
+    // identifier is directly followed by ':' (docs/design/Calls030.md). No
+    // expression starts that way, so an unlabelled call reads as before.
+    // `labels` and `label_spans` are left empty when no argument is named.
+    std::vector<Expr> argument_list(std::vector<std::string>& labels, std::vector<Span>& label_spans) {
+        std::vector<Expr> result;
+        std::vector<std::string> names;
+        std::vector<Span> spans;
+        if (!at(")")) {
+            do {
+                std::string name;
+                Span span{};
+                if (current().kind == TokenKind::Identifier && next_is(1, ":")) {
+                    span = current().span;
+                    name = advance().text;
+                    advance();
+                }
+                names.push_back(std::move(name));
+                spans.push_back(span);
+                result.push_back(expression());
+            } while (match(","));
+        }
+        expect(")");
+        if (std::ranges::any_of(names, [](const std::string& name) { return !name.empty(); })) {
+            labels = std::move(names);
+            label_spans = std::move(spans);
+        }
+        return result;
+    }
+
     // Only unambiguous postfix or terminating tokens commit a type argument list.
     std::vector<TypeSyntax> postfix_type_arguments() {
         const auto start = cursor_;
@@ -1605,10 +1636,19 @@ private:
                 return result;
             }
             const auto open = advance().span;
-            auto operands = expression_list(")");
+            std::vector<std::string> labels;
+            std::vector<Span> label_spans;
+            auto operands = argument_list(labels, label_spans);
             auto call = make_expression(Expr::Kind::Call, span_from(start));
             call.open = open;
             call.type_arguments = std::move(arguments);
+            if (!labels.empty()) {
+                // The callee is operand 0 and carries no label.
+                call.labels.push_back({});
+                call.label_spans.push_back({});
+                call.labels.insert(call.labels.end(), labels.begin(), labels.end());
+                call.label_spans.insert(call.label_spans.end(), label_spans.begin(), label_spans.end());
+            }
             call.operands.reserve(1 + operands.size());
             call.operands.push_back(std::move(result));
             for (auto& operand : operands) {
@@ -1733,7 +1773,9 @@ private:
         const auto open = current().span;
         const auto open_index = cursor_;
         expect("(");
-        auto arguments = expression_list(")");
+        std::vector<std::string> labels;
+        std::vector<Span> label_spans;
+        auto arguments = argument_list(labels, label_spans);
         if (!object_type && at("(")) {
             // `new (T)(x)` once parenthesized the type. The first list is
             // now the arguments of a target-typed `new`.
@@ -1760,6 +1802,8 @@ private:
         result.type = std::move(object_type);
         result.operands = std::move(arguments);
         result.open = open;
+        result.labels = std::move(labels);
+        result.label_spans = std::move(label_spans);
         return result;
     }
 

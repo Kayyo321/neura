@@ -27,7 +27,7 @@ let primes_from = func(start: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let starts: int[] = [
             1000000, 1002000, 1004000, 1006000, 1008000, 1010000, 1012000, 1014000,
             1016000, 1018000, 1020000, 1022000, 1024000, 1026000, 1028000, 1030000,
@@ -39,7 +39,7 @@ export let Main = module : program.Entry (
             1112000, 1114000, 1116000, 1118000, 1120000, 1122000, 1124000, 1126000
         ];
         let total = 0;
-        if (arguments.length > 0 && arguments[0] == "sequential") {
+        if (args.length > 0 && args[0] == "sequential") {
             for (let start: int in starts) {
                 total = total + primes_from(start);
             }

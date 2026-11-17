@@ -106,6 +106,11 @@ struct Expr {
     std::vector<std::string> c_import{};
     // The opening parenthesis of a Call's argument list.
     std::optional<Span> open{};
+    // The labels of named arguments (docs/design/Calls030.md), parallel to
+    // `operands` of a Call or a New: empty when no argument is named, and
+    // otherwise "" for the callee and for each positional argument.
+    std::vector<std::string> labels{};
+    std::vector<Span> label_spans{};
 };
 
 struct Statement {

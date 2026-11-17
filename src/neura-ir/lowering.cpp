@@ -446,6 +446,39 @@ private:
     IrNode read_place(IrNode place, Context& context);
     IrNode store_place(IrNode place, IrNode value, const Span& span);
     [[noreturn]] void accessor_reference(const IrNode& place, const IrType& type) const;
+
+    // Calls: named arguments and constant defaults (docs/design/Calls030.md).
+    // The implementation is in lowering_calls.inc.
+    struct ArgumentMap {
+        // For each parameter after the leading ones, the operand that gives
+        // its value, or none when its default does.
+        std::vector<std::optional<std::size_t>> source;
+        // For each written argument, the parameter it fills.
+        std::vector<std::size_t> parameter;
+        // Whether the written order differs from the parameter order.
+        bool reordered = false;
+    };
+    // The hidden locals of the last reordered call, which finish_call places
+    // before it.
+    std::vector<IrNode> named_prelude_;
+    static Span argument_span(const Expr& expr, std::size_t index);
+    void check_label_order(const Expr& expr, std::size_t first, SymbolId target) const;
+    void reject_labels(const Expr& expr, std::size_t first, std::string_view reason, bool order = true) const;
+    std::optional<ArgumentMap> map_arguments(SymbolId target, const Expr& expr, std::size_t first,
+                                             std::size_t leading, bool diagnose);
+    bool named_call(SymbolId target, const Expr& expr) const;
+    void named_arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
+                         const Substitution& replacements, Context& context, std::size_t leading);
+    void assemble_arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
+                            const ArgumentMap& map, std::vector<IrNode> admitted,
+                            const Substitution& replacements, Context& context, std::size_t leading);
+    IrNode finish_call(IrNode call);
+    std::vector<IrNode> named_call_prelude(IrNode& invocation);
+    void check_parameter_names(SymbolId method, SymbolId base);
+    Diagnostic ambiguous_overload(const Expr& expr, std::size_t first, SymbolId group, SymbolId one, SymbolId other,
+                                  const std::map<SymbolId, ArgumentMap>& maps) const;
+    bool has_default(SymbolId parameter) const;
+    IrNode default_value(SymbolId parameter, const IrType& type, const Span& span);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -1841,6 +1874,8 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
                 if (requirement != no_symbol && !static_member(requirement)) {
                     if (!symbol(id).exported) throw Diagnostic(decl.span, "an override must be exported")
                         .with_code("E0502");
+                    resolve(requirement);
+                    check_parameter_names(id, requirement);
                     symbol(id).overrides = requirement;
                     return;
                 }
@@ -1881,6 +1916,7 @@ void Lowering::check_override(SymbolId id, const Declaration& decl) {
     });
     if (!match) throw Diagnostic(decl.span, "override does not match inherited member '" + decl.name + "'")
         .with_code("E0502");
+    check_parameter_names(id, inherited);
     symbol(id).overrides = inherited;
 }
 
@@ -1937,6 +1973,7 @@ void Lowering::check_interfaces(SymbolId id) {
                 throw Diagnostic(candidate.span, "member '" + name + "' does not match the interface requirement")
                     .with_code("E0504");
             }
+            for (const auto& method : methods) check_parameter_names(implementation, method.method);
             continue;
         }
         std::size_t defaults = 0;
@@ -2179,6 +2216,7 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
 
 void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, SymbolId target,
                          const Substitution& replacements, Context& context, std::size_t leading) {
+    if (named_call(target, expr)) return named_arguments(call, expr, first, target, replacements, context, leading);
     auto params = target == no_symbol ? std::vector<SymbolId>{} : symbol(target).parameters;
     const auto variadic = target == no_symbol ? VariadicKind::None : symbol(target).variadic;
     const bool rest = variadic != VariadicKind::None;
@@ -2192,6 +2230,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
         if (target != no_symbol && !symbol(target).span.file.empty())
             error.label(name_span(target), "'" + symbol(target).name + "' takes " +
                                                std::string(rest ? "at least " : "") + plural(fixed, "parameter"));
+        if (count < fixed) error.note("parameter '" + symbol(params[count + leading]).name + "' is not given a value");
         throw error;
     }
     for (std::size_t i = 0; i < fixed; ++i) {
@@ -2297,6 +2336,7 @@ IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context&
     const auto variant = target.symbol;
     const auto* payload = entries_[variant].declaration;
     const bool named = expr.kind == ExprKind::NamedVariant;
+    reject_labels(expr, 1, "an enum constructor; a named payload is written 'Variant { name: value }'");
     const auto fields = symbol(variant).payload_types;
     if (!payload || fields.empty() || !expr.type_arguments.empty() || named != payload->named_payload)
         throw Diagnostic(expr.span, "use the variant's declared payload constructor").with_code("E0427");
@@ -2346,6 +2386,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     const bool from_utf8 = target->kind == TypeKind::String && callee.text == "from_utf8";
     const auto bits_type = callee.text == "from_bits" ? float_bits_type(*target) : std::nullopt;
     if (!from_utf8 && !bits_type) return std::nullopt;
+    reject_labels(expr, 1, "a call of an intrinsic member");
     if (!expr.type_arguments.empty() || expr.operands.size() != 2)
         throw Diagnostic(expr.span, "expected one argument and no type arguments").with_code("E0407");
     const auto& input = expr.operands[1];
@@ -2379,6 +2420,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         return enum_construct(callee, expr, context);
     }
     if (is_function_value(callee.type)) {
+        reject_labels(expr, 1, "a call of a function value");
         if (!expr.type_arguments.empty()) throw Diagnostic(expr.span, "function values take no type arguments")
             .with_code("E0417");
         const auto signature = callee.type.arguments;
@@ -2409,9 +2451,10 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         result.op = IrOp::BaseInitialize;
         result.operands = std::move(callee.operands);
         result.symbol = select_overload(target, expr, 1, {}, context, result);
-        return result;
+        return finish_call(std::move(result));
     }
     if (target == no_symbol) {
+        reject_labels(expr, 1, "a call of an intrinsic member");
         if (const auto operation = intrinsic_value_member(callee.type.name)) {
             const bool equality = *operation == IrOp::ValueEquals;
             if (!expr.type_arguments.empty() || expr.operands.size() != (equality ? 2U : 1U))
@@ -2480,7 +2523,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
         if (scheduler_operation(bound->second)->typed) {
             result.type_arguments.push_back(replacements.at(symbol(target).generics.front()));
         }
-        return result;
+        return finish_call(std::move(result));
     }
     auto qualifier = static_qualifier(callee);
     auto replacements = callee.operands.empty() ? Substitution{}
@@ -2508,6 +2551,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     result.symbol = select_overload(target, expr, 1, replacements, context, result,
                                     wrapped_receiver ? &*wrapped_receiver : nullptr);
     result.type = substitute(symbol(result.symbol).type, replacements);
+    result = finish_call(std::move(result));
     return qualifier ? discard_before(std::move(*qualifier), std::move(result)) : std::move(result);
 }
 
@@ -2541,7 +2585,7 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
     }
     auto result = node(IrOp::Allocate, expr.span, object);
     result.symbol = select_overload(target, expr, 0, receiver_arguments(object), context, result);
-    return result;
+    return finish_call(std::move(result));
 }
 
 IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative) {
@@ -2626,11 +2670,19 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         throw Diagnostic(expr.span, "overloaded functions take no type arguments").with_code("E0417");
     auto branches = entries_[group].overloads;
     branches.insert(branches.begin(), group);
+    check_label_order(expr, first, no_symbol);
     std::vector<SymbolId> candidates;
+    // Each alternative maps the arguments to its parameters by position and
+    // label (Calls030.md, Overloads); without labels or defaults it applies
+    // when the counts are equal.
+    std::map<SymbolId, ArgumentMap> maps;
     for (const auto branch : branches) {
         resolve(branch);
-        if (symbol(branch).parameters.size() == count + leading && usable_receiver(branch))
+        if (!usable_receiver(branch)) continue;
+        if (auto map = map_arguments(branch, expr, first, leading, false)) {
+            maps.emplace(branch, std::move(*map));
             candidates.push_back(branch);
+        }
     }
     if (candidates.size() == 1) {
         arguments(call, expr, first, candidates.front(), replacements, context, leading);
@@ -2693,7 +2745,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         Match match{branch, {}, {}, {}};
         for (std::size_t i = 0; i < count; ++i) {
             const auto& input = expr.operands[i + first];
-            auto expected = substitute(symbol(symbol(branch).parameters[i + leading]).type, replacements);
+            auto expected = substitute(symbol(symbol(branch).parameters[maps.at(branch).parameter[i] + leading]).type,
+                                       replacements);
             auto conversion = no_symbol;
             Rank rank;
             if (inputs[i]) {
@@ -2779,14 +2832,16 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     for (const auto& match : matches) {
         if (std::ranges::any_of(matches, [&](const Match& other) { return better(other, match); }))
             continue;
-        if (selected) throw Diagnostic(expr.span, "ambiguous overload of '" + symbol(group).name + "'")
-            .with_code("E0409");
+        if (selected) throw ambiguous_overload(expr, first, group, selected->branch, match.branch, maps);
         selected = &match;
     }
     if (!selected) {
         if (matches.empty() && missing_new) throw *missing_new;
         throw no_match();
     }
+    if (!expr.labels.empty() && symbol(selected->branch).variadic != VariadicKind::None)
+        reject_labels(expr, first, "a call of a function with a variadic parameter");
+    std::vector<IrNode> admitted;
     for (std::size_t i = 0; i < count; ++i) {
         const auto& input = expr.operands[i + first];
         auto argument = inputs[i] ? std::move(*inputs[i]) : value(input, context, &selected->types[i]);
@@ -2794,8 +2849,10 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
             argument = bind_reference(std::move(argument), selected->types[i]);
         else if (selected->casts[i] != no_symbol)
             argument = cast_call(selected->casts[i], std::move(argument), selected->types[i], input.span);
-        call.operands.push_back(std::move(argument));
+        admitted.push_back(std::move(argument));
     }
+    assemble_arguments(call, expr, first, selected->branch, maps.at(selected->branch), std::move(admitted),
+                       replacements, context, leading);
     return selected->branch;
 }
 
@@ -3755,6 +3812,9 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         auto inner = std::move(invocation.body.back());
         invocation = std::move(inner);
     }
+    // The parent evaluates the arguments of a reordered named call in
+    // written order before it starts the task (Calls030.md).
+    auto prelude = named_call_prelude(invocation);
     if (invocation.op != IrOp::Call && invocation.op != IrOp::VirtualCall && invocation.op != IrOp::CallClosure)
         throw Diagnostic(operand.span, "spawn requires a call of a function, a method, or a function value")
             .with_code("E0603");
@@ -3819,6 +3879,12 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
         // result until the scope closes.
         auto dropped = node(IrOp::Discard, expr.span);
         dropped.operands.push_back(std::move(started));
+        if (!prelude.empty()) {
+            auto block = node(IrOp::Block, expr.span);
+            block.body = std::move(prelude);
+            block.body.push_back(std::move(dropped));
+            dropped = std::move(block);
+        }
         if (!qualifier) return dropped;
         auto both = node(IrOp::Block, expr.span);
         auto first = node(IrOp::Discard, qualifier->span);
@@ -3831,6 +3897,10 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
     auto task = node(IrOp::Allocate, expr.span, apply_arguments(symbol(task_class).type, arguments));
     task.symbol = task_init;
     task.operands.push_back(std::move(started));
+    if (!prelude.empty()) {
+        named_prelude_ = std::move(prelude);
+        task = finish_call(std::move(task));
+    }
     return qualifier ? discard_before(std::move(*qualifier), std::move(task)) : std::move(task);
 }
 
@@ -4944,6 +5014,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 }
 
 #include "lowering_accessors.inc"
+#include "lowering_calls.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

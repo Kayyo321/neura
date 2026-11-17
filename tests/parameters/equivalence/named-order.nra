@@ -1,0 +1,83 @@
+// The events of named calls, one line each, in the order they happen
+// (docs/design/Calls030.md, Order of evaluation): the receiver first, then
+// each written argument in written order, then the call.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let note = func(text: string, value: int) -> int {
+    console.print_line("evaluate " + text);
+    return value;
+};
+
+let three = func(a: int, b: int, c: int) -> int {
+    console.print_line("call " + a.to_string() + " " + b.to_string() + " " + c.to_string());
+    return a + b + c;
+};
+
+let Text = class (
+    let text: string;
+    export let init = func(text: string) {
+        instance.text = text;
+    };
+    export let.as string = func -> string {
+        console.print_line("cast " + text);
+        return text;
+    };
+);
+
+let join = func(left: string, right: string) -> string {
+    console.print_line("call join");
+    return left + right;
+};
+
+let Base = class (
+    export let x: int;
+    export let y: int;
+    export let init = func(x: int, y: int) {
+        console.print_line("init " + x.to_string() + " " + y.to_string());
+        instance.x = x;
+        instance.y = y;
+    };
+    export let shift = func(dx: int, dy: int) -> int {
+        console.print_line("shift " + dx.to_string() + " " + dy.to_string());
+        return x + y + dx + dy;
+    };
+);
+
+let Derived = class : Base (
+    export let init = func(z: int) {
+        super.init(y: note("y", z), x: note("x", 1));
+    };
+    export let.override shift = func(dx: int, dy: int) -> int {
+        console.print_line("derived shift " + dx.to_string() + " " + dy.to_string());
+        return dx - dy;
+    };
+);
+
+let make = func(label: string) -> Base {
+    console.print_line("receiver " + label);
+    return new Derived(5);
+};
+
+let work = func(limit: int, job: int) -> int {
+    return limit * 10 + job;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        three(note("a", 1), c: note("c", 3), b: note("b", 2));
+        three(c: note("c", 3), b: note("b", 2), a: note("a", 1));
+        three(a: note("a", 1), b: note("b", 2), c: note("c", 3));
+        console.print_line(join(right: new Text("R"), left: new Text("L")));
+        let point = new Base(y: note("y", 2), x: note("x", 1));
+        console.print_line("point " + point.x.to_string() + " " + point.y.to_string());
+        let derived = new Derived(z: 7);
+        console.print_line("derived " + derived.x.to_string() + " " + derived.y.to_string());
+        console.print_line("result " + make("m").shift(dy: note("dy", 4), dx: note("dx", 3)).to_string());
+        scope {
+            let task = spawn work(job: note("job", 2), limit: note("limit", 3));
+            console.print_line("joined " + task.join().to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);

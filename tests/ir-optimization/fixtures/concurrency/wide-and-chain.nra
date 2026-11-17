@@ -37,7 +37,7 @@ let chain = func(depth: int) -> int {
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         console.print_line("wide " + wide(8).to_string());
         console.print_line("chain " + chain(8).to_string());
         return program.ExitCode.Ok;

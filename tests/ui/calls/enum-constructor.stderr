@@ -1,0 +1,9 @@
+error[E0484]: labels are not available for an enum constructor; a named payload is written 'Variant { name: value }'
+ --> $DIR/enum-constructor.nra:3:26
+  |
+3 | let round = Shape.Circle(radius: 2);
+  |                          ^^^^^^ named arguments need the parameter names of a declaration
+  |
+  = help: remove the labels and pass the arguments in parameter order
+
+For more information about this error, try `neura explain E0484`.

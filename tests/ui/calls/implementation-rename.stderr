@@ -1,0 +1,15 @@
+error[E0560]: parameter 'tall' is named 'height' in the method it implements
+ --> $DIR/implementation-rename.nra:6:42
+  |
+3 |     let resize = func(width: int, height: int) -> int;
+  |                                   ------ the parameter is named 'height' here
+...
+6 |     export let resize = func(width: int, tall: int) -> int => width * tall;
+  |                                          ^^^^ a call may name this parameter 'height'
+  |
+help: rename it to the base name
+  |
+6 |     export let resize = func(width: int, height: int) -> int => width * tall;
+  |                                          ~~~~~~
+
+For more information about this error, try `neura explain E0560`.

@@ -42,7 +42,7 @@ let wait_for_permit = func(permits: semaphores.Semaphore) -> bool => match (perm
 };
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let counter = atomics.create(0);
         let permits = semaphores.create(2);
         let active = atomics.create(0);
@@ -71,14 +71,14 @@ export let Main = module : program.Entry (
         }
         permits.release();
         permits.release();
-        if (arguments.length > 0 && arguments[0] == "over-release") {
+        if (args.length > 0 && args[0] == "over-release") {
             permits.release();
         }
-        if (arguments.length > 0 && arguments[0] == "reenter") {
+        if (args.length > 0 && args[0] == "reenter") {
             table.with<int>(func(entries: maps.HashMap<string, int>) -> int =>
                 table.with<int>(func(inner: maps.HashMap<string, int>) -> int => 1));
         }
-        if (arguments.length > 0 && arguments[0] == "overflow") {
+        if (args.length > 0 && args[0] == "overflow") {
             counter.store(9223372036854775807);
             counter.add(1);
         }

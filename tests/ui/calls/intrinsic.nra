@@ -1,0 +1,4 @@
+// An intrinsic member takes no labels (edge case 15).
+let fill = func(items: int[list], x: int) {
+    items.append(element: x);
+};

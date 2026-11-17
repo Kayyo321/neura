@@ -19,7 +19,7 @@ let spawn_pair = func(out: channels.Sender<int>) -> void {
 let alone = func -> int => 7;
 
 export let Main = module : program.Entry (
-    export let.override main = func(arguments: string[]) -> program.ExitCode {
+    export let.override main = func(args: string[]) -> program.ExitCode {
         let [out, incoming, closer] = channels.open<int>(8);
         let sum = 0;
         scope {
