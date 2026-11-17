@@ -4,7 +4,7 @@ This note fixes the project system before it is implemented: the project manifes
 
 The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A6. Later changes to a row are made here, with the reason.
 
-The repository has no project manifest and no TOML reader today. Single-file `neura build`, `neura run` and `neura test` keep working exactly as they do; a project is something a directory opts into by containing `neura.toml`.
+The same TOML reader handles the manifest and lock file. Single-file `neura build`, `neura run` and `neura test` keep working exactly as they do. A project is something a directory opts into by containing `neura.toml`.
 
 ```text
 stock/
@@ -93,7 +93,7 @@ formats = ["deb", "tar.gz"]
 
 | Rule | Status |
 | --- | --- |
-| The manifest is a strict subset of TOML: tables, arrays of tables, basic double-quoted strings, decimal integers, booleans, arrays of strings or integers, and comments. Floats, dates, inline tables, literal and multi-line strings are `E1020`. The reader is new code in `src/project/toml.cpp`. | proposed |
+| The manifest uses the grammar of [TOML 1.0](https://toml.io/en/v1.0.0) for bare, basic double-quoted and dotted keys, tables, arrays of tables, basic double-quoted strings, signed 64-bit decimal integers, booleans, homogeneous arrays of strings or integers, and comments. Files use UTF-8 with LF or CRLF line endings. Floats, dates, inline tables, literal and multi-line strings, and other array element types are `E1020`. The reader lives in `src/project/toml.cpp`. | syntax reader implemented |
 | An unknown key, a key of the wrong type, and a missing required key are `E1020`, each with the key's position. Nothing is ignored. | proposed |
 | `schema` is 1; another value is `E1021`. `project.language` is the language version the sources are written for, `"0.3"`; a compiler that does not implement it is `E1021`. | proposed |
 | `project.name` is lowercase letters, digits and hyphens. `project.id` is a reverse-domain identifier and names the desktop application, its origin and its data directory. `project.version` is three decimal numbers. | proposed |

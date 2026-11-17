@@ -1,0 +1,20 @@
+schema = 1
+language = "0.3"
+
+[[components]]
+name = "browser"
+
+[components.version]
+api = 1
+
+[[components.files]]
+path = "runtime.wasm"
+
+[[components.files]]
+path = "shell.mjs"
+
+[[components]]
+name = "desktop"
+
+[[components.files]]
+path = "shell"

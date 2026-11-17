@@ -238,6 +238,14 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
 
+## E10xx: Application projects
+
+Errors about projects and their artifacts.
+
+| Code | Error |
+| --- | --- |
+| [E1020](E1020.md) | malformed project manifest |
+
 ## Warnings
 
 Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.

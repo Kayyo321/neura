@@ -241,6 +241,14 @@ Errors about `#` tags before declarations ([Tags](Tags)).
 | [E0922](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0923.md) | #HostEffects on a function that is not a host binding without a body |
 
+## E10xx: Application projects
+
+Errors about projects and their artifacts.
+
+| Code | Error |
+| --- | --- |
+| [E1020](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1020.md) | malformed project manifest |
+
 ## Warnings
 
 Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.
