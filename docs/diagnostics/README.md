@@ -49,6 +49,7 @@ Errors about declarations, scopes, and name resolution.
 
 | Code | Error |
 | --- | --- |
+| [E0231](E0231.md) | pattern form that is not supported |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |
@@ -133,6 +134,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 
 | Code | Error |
 | --- | --- |
+| [E0491](E0491.md) | unreachable match arm |
 | [E0501](E0501.md) | invalid static member |
 | [E0502](E0502.md) | invalid override |
 | [E0503](E0503.md) | invalid inheritance |

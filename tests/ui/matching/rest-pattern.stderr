@@ -1,0 +1,9 @@
+error[E0231]: a rest pattern is not supported
+ --> $DIR/rest-pattern.nra:7:13
+  |
+7 |     [first, ...rest] => 1,
+  |             ^^^^^^^ rest and list patterns are not part of 0.3.0
+  |
+  = help: match a tuple with one sub-pattern per element
+
+For more information about this error, try `neura explain E0231`.

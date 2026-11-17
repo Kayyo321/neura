@@ -412,6 +412,24 @@ private:
     void resolve_destructure(const Statement& stmt, SymbolId file);
     IrNode lower_match(const Statement& stmt, Context& context, bool produces_value,
                        const IrType* expected = nullptr, bool call_argument = false);
+    // Guards, nested and tuple patterns, and match.is
+    // (docs/design/Matching030.md). The implementation is in
+    // lowering_matching.inc.
+    struct PatternStep;
+    struct CoverPattern;
+    std::map<SymbolId, std::vector<SymbolId>> variants_;
+    const std::vector<SymbolId>& enum_variants(SymbolId enumeration);
+    SymbolId arm_variant(const std::string& name, const Span& span, const Context& context, const IrType& type);
+    std::vector<IrType> constructor_arguments(const IrType& type, SymbolId constructor) const;
+    bool useful(const std::vector<std::vector<CoverPattern>>& matrix, const std::vector<CoverPattern>& row,
+                const std::vector<IrType>& types, std::vector<CoverPattern>& witness);
+    std::string cover_text(const CoverPattern& pattern, const IrType& type) const;
+    CoverPattern lower_pattern(const PatternSyntax& pattern, const IrNode& value, std::vector<PatternStep>& steps,
+                               std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    CoverPattern element_pattern(const PatternSyntax& pattern, IrNode projection, std::vector<PatternStep>& steps,
+                                 std::vector<IrNode>& declarations, Context& context, SymbolId owner);
+    IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
+                         bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
     IrNode do_loop(const Statement& stmt, Context& context);
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
@@ -4523,8 +4541,12 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
 
 IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produces_value,
                              const IrType* expected, bool call_argument) {
+    if (std::ranges::any_of(stmt.arms, &MatchArm::general))
+        return general_match(stmt, context, produces_value, expected, call_argument);
     auto subject = value(stmt.expressions.front(), context);
     const auto enum_type = subject.type;
+    if (enum_type.kind == TypeKind::Tuple)
+        return general_match(stmt, context, produces_value, expected, call_argument, std::move(subject));
     if (enum_type.kind != TypeKind::Enum)
         throw Diagnostic(subject.span, "match requires an enum value").with_code("E0411");
     auto owner = context.owner;
@@ -4554,7 +4576,7 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
         if (wildcard)
             throw Diagnostic(arm.span, "a wildcard match arm must be last").with_code("E0412");
         wildcard = arm.variant == "_";
-        const auto variant = wildcard ? no_symbol : qualified(arm.variant, arm.span, context);
+        const auto variant = wildcard ? no_symbol : arm_variant(arm.variant, arm.span, context, enum_type);
         if (!wildcard && (symbol(variant).kind != SymbolKind::Variant || symbol(variant).owner != enum_type.symbol))
             throw Diagnostic(arm.span, "match arm must name a variant of " + describe(enum_type)).with_code("E0412");
         if (const auto separator = arm.variant.rfind('.'); !wildcard && separator != std::string::npos) {
@@ -5083,6 +5105,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 
 #include "lowering_accessors.inc"
 #include "lowering_calls.inc"
+#include "lowering_matching.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;
 // ObjectLifecycle.md, Target-typed new).

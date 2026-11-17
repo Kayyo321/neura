@@ -1,6 +1,8 @@
 #include "syntax.hpp"
 
+#include <algorithm>
 #include <charconv>
+#include <functional>
 #include <cstddef>
 #include <string_view>
 #include <utility>
@@ -1378,22 +1380,10 @@ private:
     MatchArm match_arm(bool produces_value) {
         const auto start = cursor_;
         MatchArm result{};
-        result.variant = qualified_name();
-        const bool positional = match("(");
-        result.named = !positional && match("{");
-        if (positional || result.named) {
-            const auto close = positional ? ")" : "}";
-            while (!at(close)) {
-                auto binding = declared_name();
-                if (result.named) {
-                    result.fields.push_back(binding.text);
-                    if (match(":")) binding = identifier();
-                }
-                result.bindings.push_back(std::move(binding));
-                if (!match(",")) break;
-            }
-            expect(close);
-        }
+        auto pattern = std::make_shared<PatternSyntax>(whole_pattern());
+        if (match("if")) result.guard = expression();
+        flatten_arm(result, *pattern);
+        result.pattern = std::move(pattern);
         expect("=>");
         if (produces_value) {
             result.value = expression();
@@ -1402,6 +1392,151 @@ private:
         }
         result.span = span_from(start);
         return result;
+    }
+
+    // The whole pattern of a `match` arm (docs/design/Matching030.md): `_`,
+    // a tuple pattern, or a name read as a variant, with or without a
+    // payload. A single name stays a variant here, as in 0.2.
+    PatternSyntax whole_pattern() {
+        if (at("[")) return tuple_pattern();
+        if (current().kind == TokenKind::Identifier && current().text == "_") {
+            PatternSyntax result{};
+            result.span = advance().span;
+            return result;
+        }
+        if (current().kind != TokenKind::Identifier) unsupported_pattern();
+        return variant_pattern();
+    }
+
+    // A payload or element position: `_`, a binding, a variant pattern
+    // (a dotted name), or a tuple pattern.
+    PatternSyntax sub_pattern(bool positional) {
+        if (at("[")) return tuple_pattern();
+        if (current().kind != TokenKind::Identifier) unsupported_pattern();
+        if (current().text == "_") {
+            PatternSyntax result{};
+            result.span = advance().span;
+            return result;
+        }
+        if (next_is(1, ".")) return variant_pattern();
+        if (positional && next_is(1, ":")) {
+            // `name: Type` is a type pattern, which only a `match.is` arm has.
+            const auto start = cursor_;
+            advance();
+            advance();
+            type();
+            throw Diagnostic(span_from(start), "a type pattern is not supported inside a match pattern")
+                .with_code("E0231").label("type patterns are whole patterns of a 'match.is' arm")
+                .help("bind the value and test it in a guard");
+        }
+        PatternSyntax result{};
+        result.kind = PatternSyntax::Kind::Binding;
+        const auto& name = declared_name();
+        result.span = name.span;
+        result.name_span = name.span;
+        result.name = name.text;
+        return result;
+    }
+
+    PatternSyntax variant_pattern() {
+        const auto start = cursor_;
+        PatternSyntax result{};
+        result.kind = PatternSyntax::Kind::Variant;
+        result.name = qualified_name();
+        const bool positional = match("(");
+        result.named = !positional && match("{");
+        result.payload = positional || result.named;
+        if (result.payload) {
+            const auto close = positional ? ")" : "}";
+            while (!at(close)) {
+                if (result.named) {
+                    const auto& field = identifier();
+                    result.fields.push_back(field.text);
+                    result.field_spans.push_back(field.span);
+                    if (match(":")) {
+                        result.elements.push_back(sub_pattern(false));
+                    } else {
+                        // `{ label }` binds the field to its own name.
+                        PatternSyntax binding{};
+                        binding.kind = PatternSyntax::Kind::Binding;
+                        binding.span = field.span;
+                        binding.name_span = field.span;
+                        binding.name = field.text;
+                        if (field.text == "_") binding.kind = PatternSyntax::Kind::Wildcard;
+                        result.elements.push_back(std::move(binding));
+                    }
+                } else {
+                    result.elements.push_back(sub_pattern(true));
+                }
+                if (!match(",")) break;
+            }
+            expect(close);
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    PatternSyntax tuple_pattern() {
+        const auto start = cursor_;
+        expect("[");
+        PatternSyntax result{};
+        result.kind = PatternSyntax::Kind::Tuple;
+        while (!at("]")) {
+            result.elements.push_back(sub_pattern(true));
+            if (!match(",")) break;
+        }
+        expect("]");
+        result.span = span_from(start);
+        return result;
+    }
+
+    // A literal, a range, a rest element or another form that is not a
+    // pattern of 0.3.0 (E0231). The form is read as an expression, or as
+    // `...name`, so that the error covers all of it.
+    [[noreturn]] void unsupported_pattern() {
+        const auto start = cursor_;
+        const auto& token = current();
+        const bool literal = token.kind == TokenKind::Integer || token.kind == TokenKind::Float ||
+                             token.kind == TokenKind::String || at("true") || at("false") || at("nil") ||
+                             at("-");
+        if (match("...")) {
+            if (current().kind == TokenKind::Identifier) advance();
+            throw Diagnostic(span_from(start), "a rest pattern is not supported").with_code("E0231")
+                .label("rest and list patterns are not part of 0.3.0")
+                .help("match a tuple with one sub-pattern per element");
+        }
+        if (!literal) expected("a pattern");
+        const auto form = expression();
+        const bool range = form.kind == Expr::Kind::Range;
+        throw Diagnostic(form.span, range ? "a range pattern is not supported" : "a literal pattern is not supported")
+            .with_code("E0231").label(range ? "range patterns are not part of 0.3.0" : "literal patterns are not part of 0.3.0")
+            .help("bind the value and test it in a guard");
+    }
+
+    // Keeps an arm in the form of 0.2 in that form as well (syntax.hpp,
+    // MatchArm), and lists every name a general arm binds.
+    static void flatten_arm(MatchArm& arm, const PatternSyntax& pattern) {
+        using Kind = PatternSyntax::Kind;
+        const auto simple_element = [](const PatternSyntax& element) {
+            return element.kind == Kind::Wildcard || element.kind == Kind::Binding;
+        };
+        arm.general = arm.guard.has_value() || pattern.kind == Kind::Tuple ||
+                      !std::ranges::all_of(pattern.elements, simple_element);
+        arm.variant = pattern.kind == Kind::Variant ? pattern.name : pattern.kind == Kind::Wildcard ? "_" : "";
+        if (!arm.general) {
+            arm.named = pattern.named;
+            arm.fields = pattern.fields;
+            for (const auto& element : pattern.elements)
+                arm.bindings.push_back(Token{TokenKind::Identifier, element.kind == Kind::Wildcard ? "_" : element.name,
+                                             element.span});
+            return;
+        }
+        const std::function<void(const PatternSyntax&)> collect = [&](const PatternSyntax& item) {
+            if (item.kind == Kind::Binding)
+                arm.bindings.push_back(Token{TokenKind::Identifier, item.name, item.name_span});
+            for (const auto& element : item.elements) collect(element);
+        };
+        collect(pattern);
     }
 
     // After `for`. A header of the form `(let name [: Type] in collection)`

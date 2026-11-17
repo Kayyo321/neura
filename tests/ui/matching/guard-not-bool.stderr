@@ -1,0 +1,7 @@
+error[E0403]: expected bool, got int32
+ --> $DIR/guard-not-bool.nra:7:22
+  |
+7 |     Shape.Line(n) if n => n,
+  |                      ^ expected bool, found int32
+
+For more information about this error, try `neura explain E0403`.

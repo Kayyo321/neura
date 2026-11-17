@@ -694,6 +694,8 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
         for (const auto &arm : s.arms) {
             for (const auto &token : arm.bindings)
                 add(token.text, token.span, token.span, arm.span, parent, 13, 7, modifier("readonly"));
+            if (arm.guard)
+                expression(*arm.guard, parent, arm.span);
             for (const auto &child : arm.body)
                 statement(child, parent, arm.span);
             if (arm.value)
@@ -1241,6 +1243,8 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
             for (const auto &child : *body)
                 statement(child);
         for (const auto &arm : s.arms) {
+            if (arm.guard)
+                expression(*arm.guard);
             for (const auto &child : arm.body)
                 statement(child);
             if (arm.value)
@@ -2218,6 +2222,8 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 for (const auto &child : *body)
                     statement(child);
             for (const auto &arm : item.arms) {
+                if (arm.guard)
+                    expression(*arm.guard);
                 for (const auto &child : arm.body)
                     statement(child);
                 if (arm.value)

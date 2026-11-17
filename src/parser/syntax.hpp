@@ -182,19 +182,58 @@ struct Statement {
     std::string assignment_operator{};
     // Documentation shared by all bindings in a destructuring declaration.
     std::shared_ptr<const DocComment> documentation{};
+    // `match.is (subject) { arms }` (docs/design/Matching030.md).
+    bool match_is{};
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};
 };
 
+// The pattern of a match arm (docs/design/Matching030.md). In a `match`,
+// a whole pattern is `_`, a variant pattern or a tuple pattern, and a
+// payload or element position holds a sub-pattern: `_`, a binding, a
+// variant pattern or a tuple pattern. In a `match.is`, a pattern is `_`,
+// `nil`, a type, or a binding with a type.
+struct PatternSyntax {
+    enum class Kind { Wildcard, Binding, Variant, Tuple, Type, Nil };
+
+    Kind kind = Kind::Wildcard;
+    Span span;
+    // A binding's name, or a variant pattern's qualified name.
+    std::string name;
+    // A binding's name as written.
+    Span name_span{};
+    // A variant pattern's payload, or a tuple pattern's elements.
+    std::vector<PatternSyntax> elements{};
+    // Whether a variant pattern has a payload list, and whether it is the
+    // braced form, where `fields` names each element's field.
+    bool payload{};
+    bool named{};
+    std::vector<std::string> fields{};
+    std::vector<Span> field_spans{};
+    // The type of a Type pattern, or of a binding `name: Type` in a `match.is`.
+    std::optional<TypeSyntax> type{};
+};
+
 struct MatchArm {
     Span span;
+    // An arm in the form of 0.2 (one level of bindings, no guard) also
+    // keeps that form here: the variant's qualified name or "_", one token
+    // per payload position, and the field names of the braced form. Other
+    // arms set `general`; their `variant` is the whole pattern's variant
+    // name, "_", or empty, and `bindings` lists every name they bind, in
+    // written order, so that walkers that only scope names stay correct.
     std::string variant;
     std::vector<Token> bindings;
     std::vector<std::string> fields;
     bool named{};
     std::vector<Statement> body;
     std::optional<Expr> value;
+    // The whole pattern, set for every arm.
+    std::shared_ptr<const PatternSyntax> pattern{};
+    // `pattern if guard => result`.
+    std::optional<Expr> guard{};
+    bool general{};
 };
 
 // One arm of a select statement: `[let name =] operation => { body }`, or

@@ -1,0 +1,10 @@
+error[E0410]: non-exhaustive match, 'Shape.Line(_)' is not covered
+ --> $DIR/guarded-only.nra:6:43
+  |
+6 | let length = func(shape: Shape) -> int => match (shape) {
+  |                                           ^^^^^ 'Shape.Line(_)' is not covered
+  |
+  = note: a guarded arm covers no value; a match without a '_' arm needs an unguarded arm for every value
+  = help: add an arm for 'Shape.Line(_)', or a '_' arm
+
+For more information about this error, try `neura explain E0410`.

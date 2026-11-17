@@ -46,6 +46,7 @@ NEURA_DIAGNOSTIC(E0227, "malformed interpolated string")
 NEURA_DIAGNOSTIC(E0228, "malformed extension declaration or extension import")
 
 // Names
+NEURA_DIAGNOSTIC(E0231, "pattern form that is not supported")
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
 NEURA_DIAGNOSTIC(E0302, "duplicate declaration")
 NEURA_DIAGNOSTIC(E0303, "duplicate parameter or field name")
@@ -121,6 +122,7 @@ NEURA_DIAGNOSTIC(E0487, "invalid nameof operand")
 NEURA_DIAGNOSTIC(E0488, "invalid extension function")
 
 // Classes, lifecycle, and accessors
+NEURA_DIAGNOSTIC(E0491, "unreachable match arm")
 NEURA_DIAGNOSTIC(E0501, "invalid static member")
 NEURA_DIAGNOSTIC(E0502, "invalid override")
 NEURA_DIAGNOSTIC(E0503, "invalid inheritance")

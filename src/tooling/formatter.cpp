@@ -286,6 +286,7 @@ private:
                     }
                 });
             }
+            if (arm.guard) expression(*arm.guard);
             for (const auto& item : arm.body) statement(item);
             if (arm.value) expression(*arm.value);
         }
