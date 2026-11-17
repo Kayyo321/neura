@@ -477,8 +477,9 @@ neura_add_tool(neura-fmt sdk src/cli/tools/neura-fmt.cpp neura_cli_sdk)
 target_link_libraries(neura-doctor PRIVATE neura_compiler)
 target_compile_definitions(neura-doctor PRIVATE NEURA_DOCTOR_PROBES_LIBCLANG=1)
 
-add_executable(neura src/cli/main.cpp src/tooling/debug.cpp)
-target_link_libraries(neura PRIVATE neura_cli_artifact neura_cli_explain neura_cli_tags)
+# The dispatcher links the registry only.
+add_executable(neura src/cli/main.cpp)
+target_link_libraries(neura PRIVATE neura_cli_tool)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)
 endif()

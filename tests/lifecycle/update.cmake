@@ -378,7 +378,8 @@ lc_expect_contains("doctor on the build tree's neura" "${unmanaged_doctor_OUT}" 
 
 set(homebrew "${work}/homebrew")
 file(MAKE_DIRECTORY "${homebrew}/versions/${LC_VERSION}/bin")
-file(COPY "${NEURA}" DESTINATION "${homebrew}/versions/${LC_VERSION}/bin")
+include("${CMAKE_CURRENT_LIST_DIR}/../tools.cmake")
+neura_copy_tools("${NEURA}" "${homebrew}/versions/${LC_VERSION}/bin")
 get_filename_component(neura_name "${NEURA}" NAME)
 if(NOT neura_name STREQUAL "neura")
     file(RENAME "${homebrew}/versions/${LC_VERSION}/bin/${neura_name}" "${homebrew}/versions/${LC_VERSION}/bin/neura")
