@@ -61,9 +61,11 @@ A tool's first argument may name one of its commands; otherwise it runs its firs
 neura: error: 'neura build' needs neurac, which is not in /opt/neura/bin; it is part of the Neura-sdk component. Install the SDK, or reinstall Neura
 ```
 
+In an installed generation the component manifests say which components are there, so a runtime installation asked for an SDK command answers `neura: "build" needs Neura-sdk, which is not installed here`. `neura` reads the manifests only when a tool is missing, so a command pays nothing for them.
+
 A tool started by a `neura` of another build refuses to run, so a directory of tools from different builds cannot mix them silently. `neura runtime` belongs to the runtime service component, which is not part of this release; it reports that component missing. `capabilities --json` reports a feature whose tool is missing as `false`.
 
-The tools share their code through two libraries in `lib/neura`, named with the full version: `libneura-core-<version>` (the image format, the runner and every execution tier) and `libneura-sdk-<version>` (the compiler, the decompiler, and the editor tools), which needs the core library. Each tool finds them relative to its own executable, so an installation can be moved as a whole, and the build directory holds them in its own `lib/neura`. The tools form two install components. The **core** (`neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, and `libneura-core`) runs images and loads no compiler code. The **SDK** adds the compiler and the other tools, `libneura-sdk`, the standard library, and the native launchers. `cmake --install build --component core --prefix <dir>` installs only the core; without `--component`, both are installed. Configuring with `-DNEURA_SDK=OFF` builds only the core, without the libclang submodule.
+The tools share their code through two libraries in `lib/neura`, named with the full version: `libneura-core-<version>` (the image format, the runner and every execution tier) and `libneura-sdk-<version>` (the compiler, the decompiler, and the editor tools), which needs the core library. Each tool finds them relative to its own executable, so an installation can be moved as a whole, and the build directory holds them in its own `lib/neura`. The tools form three install components. The **core** (`neura`, `neura-run`, `neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall`, and `libneura-core`) runs images and loads no compiler code. The **SDK** adds the compiler and the other tools, `libneura-sdk`, the standard library, and the native launchers. The **service** is `neurad`, the resident runtime service, which a build has only when its target exists. `cmake --install build --component core --prefix <dir>` installs only the core; without `--component`, every component is installed. Configuring with `-DNEURA_SDK=OFF` builds only the core, without the libclang submodule. A release installs the products Neura-sdk (`core` and `sdk`) and Neura-runtime (`core` and `service`), alone or together, and links every tool in one bin directory ([Install](../Install.md#layout)). Each tool of an installed generation holds a lease on it while it runs, so an update leaves a running tool's generation in place ([generations in use](../Install.md#generations-in-use)).
 
 ## Build and run executables
 
@@ -201,11 +203,14 @@ Three commands manage the installed tool; [Install](../Install.md) describes the
 
 | Command | Does |
 | --- | --- |
-| `neura doctor` | Prints `ok`, `warn`, or `FAIL` for each check of the install, the components whose tools are next to it, and its optional tools (the standard library, native launchers, libclang, a C compiler, the GPU backend, `curl`, `tar`, `gh`). Without the SDK, the SDK's checks are not needed. Exits with status 1 if a check failed. Uses no network. |
-| `neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release after checking the archive's size and SHA-256 and, where `gh` is available, its build provenance. `--check` reports without changing anything. `--nightly` includes published GitHub prereleases, selecting the highest semantic version. |
-| `neura uninstall [--dry-run] [--yes]` | Removes an archive install and nothing else. |
+| `neura doctor` | Prints `ok`, `warn`, or `FAIL` for each check of the install: its state (complete, unmigrated, interrupted, damaged), its components from their manifests, the integrity of its files, the service, its links and generations, and its optional tools (the standard library, native launchers, libclang, a C compiler, the GPU backend, `curl`, `tar`, `gh`). Without the SDK, the SDK's checks are not printed. Exits with status 1 if a check failed. Uses no network and changes no file. |
+| `neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]` | Replaces an archive install with a newer release of the same components after checking each archive's size and SHA-256, every file against the component manifests and, where `gh` is available, its build provenance. `--check` reports without changing anything. `--nightly` includes published GitHub prereleases, selecting the highest semantic version. |
+| `neura update --components sdk\|runtime\|sdk,service [--terminate]` | Changes the installed components, fetching an added component's archive of the installed build. |
+| `neura update --rollback`, `--repair`, `--migrate-install` | Returns to the previous generation; completes or undoes an interrupted change and removes unused generations; finishes an installation that a 0.2 updater produced. None fetches anything. |
+| `neura uninstall [--dry-run] [--yes] [--terminate]` | Removes an archive install, its links and its service's registration and state, and nothing else. |
+| `neura uninstall --component sdk\|service [--terminate]` | Removes one component, by a new generation without it. |
 
-`update` and `uninstall` apply only to an install made by the release archive's `install.sh`. A source build, a copy, or a package manager's install exits with status 3.
+`update` and `uninstall` apply only to an install made by a release archive's installer. A source build, a copy, or a package manager's install exits with status 3.
 
 ## Diagnostics
 
