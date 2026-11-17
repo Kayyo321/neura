@@ -58,18 +58,18 @@ The client parses the command with the code of a direct run (`read_options` and 
 
 ### Files
 
-`<id>` is the first 16 hexadecimal digits of the SHA-256 of the real path of the install root, and `<generation>` is the directory name of the runtime generation under `versions/`. A source build that is not installed uses the real path of its `bin` directory as the root and `dev` as the generation.
+`<id>` is the first 16 hexadecimal digits of the SHA-256 of the real path of the install root, and `<generation>` is the directory name of the runtime generation under `versions/`. `<endpoint>` is the first 16 hexadecimal digits of the SHA-256 of that path, a NUL byte, and the generation name: the socket's directory is named by it so that the socket path stays under the 104 bytes macOS allows, whatever the version is called. A source build that is not installed uses the real path of its `bin` directory as the root and `dev` as the generation.
 
 | Path | Holds | Status |
 | --- | --- | --- |
-| `<run>/neura/<id>/<generation>/` | Mode 0700, owned by the user. `s`, the control socket (a Unix stream socket, mode 0600); `lock`, on which the supervisor holds an exclusive `flock` for its whole life; `start`, locked by a client while it starts a supervisor. | proposed |
+| `<run>/neura/<endpoint>/` | Mode 0700, owned by the user. `s`, the control socket (a Unix stream socket, mode 0600); `lock`, on which the supervisor holds an exclusive `flock` for its whole life; `start`, locked by a client while it starts a supervisor. | proposed |
 | `<run>` | `$XDG_RUNTIME_DIR` when it is set, absolute, owned by the user and mode 0700; otherwise `${TMPDIR:-/tmp}/neura-<uid>`, created mode 0700, and refused when it exists with another owner or mode or is a symbolic link. | proposed |
 | `${XDG_STATE_HOME:-$HOME/.local/state}/neura/<id>/<generation>/` | `records/<application ID>`, one small file per application, written whole and renamed into place at each change of state; `epoch-<epoch>`, the highest application number the epoch has issued; `log`, the supervisor's own log, at most 1 MiB and one rotated copy. | proposed |
 | Login start | `~/.config/systemd/user/neurad-<id>.service` on Linux; `~/Library/LaunchAgents/net.neura.neurad-<id>.plist` on macOS. | proposed |
 
-A socket path longer than the platform allows makes the service unavailable on that machine, with a message that names the path. Nothing mutable is written under the install root. No file holds an argument, an environment value or anything a program wrote. The image cache is in the supervisor's memory and has no file.
+A client finds the supervisors of its installation by computing `<endpoint>` for each generation its install marker lists, and the records of generations that are gone by listing the state directory. A socket path longer than the platform allows, which needs a run directory of more than about 75 bytes, makes the service unavailable on that machine, with a message that names the path. Nothing mutable is written under the install root. No file holds an argument, an environment value or anything a program wrote. The image cache is in the supervisor's memory and has no file.
 
-A socket file proves nothing. A client trusts a supervisor only after it has connected, the peer's user ID is its own (`SO_PEERCRED`, `getpeereid`), and the supervisor's reply names the same installation, generation and build as the client. A supervisor accepts a connection only from its own user. A supervisor that starts takes `lock` first; if it gets the lock, any socket file already there is stale and is removed.
+A socket file proves nothing. A client trusts a supervisor only after it has connected, the peer's user ID is its own (`SO_PEERCRED`, `getpeereid`), and the supervisor's reply names the same installation. To launch, the generation and build must also be the client's own. To control (`status`, `ps`, `inspect`, `stop`, `shutdown`, `cache clear`, and an update's `Retire`), the same user, the same installation and a common protocol major are enough, so that a client of the active generation manages the applications of an older one. A supervisor accepts a connection only from its own user. A supervisor that starts takes `lock` first; if it gets the lock, any socket file already there is stale and is removed.
 
 ### Protocol
 
@@ -79,7 +79,7 @@ A message is `length:u32` (the bytes that follow, at most 1,048,576, the baselin
 
 | Kind | From | Carries | Status |
 | --- | --- | --- | --- |
-| `Hello` | client | Lowest and highest protocol major it speaks, its build, installation `<id>` and generation, the features it needs | proposed |
+| `Hello` | client | Lowest and highest protocol major it speaks, its build, installation `<id>` and generation, whether it connects to launch or to control, the features it needs | proposed |
 | `Welcome` | supervisor | The protocol chosen, the service epoch (128 random bits made when the supervisor starts), build, generation, features, limits, and its state: `accepting`, `retiring` or `draining` | proposed |
 | `Prepare` | client | A request ID (128 random bits) and the [launch envelope](#launch-envelope) | proposed |
 | `Prepared` | supervisor | A token (256 random bits), the time it stays valid, whether the image bytes are needed, and the path: `warm` or `fresh` | proposed |
@@ -99,11 +99,11 @@ Every request carries a deadline, and a client that gets no reply by then closes
 
 | `Rejected` reason | Meaning | `auto` | Status |
 | --- | --- | --- | --- |
-| `protocol`, `identity` | A malformed message; a peer that is another user, installation, generation or build | error | proposed |
+| `protocol`, `identity` | A malformed message; a peer that is another user or installation, or a `Prepare` from a client of another generation or build | error | proposed |
 | `unsupported-protocol`, `unsupported-feature`, `unsupported-option` | No common protocol major; a feature or an option of the table above the service does not have | direct | proposed |
 | `not-reproducible` | The worker cannot be given a setting of the caller's process (see [the worker](#the-worker)) | direct | proposed |
 | `admission-applications`, `admission-pending` | 64 applications, or 16 prepared launches, are already held (the baseline's limits). Nothing is queued. | direct | proposed |
-| `image-too-large` | The image is larger than the cache limit | direct | proposed |
+| `image-too-large`, `admission-cache` | The image is larger than the cache limit; or it does not fit beside the images that running applications use | direct | proposed |
 | `image-mismatch` | The bytes read are not of the size and digest the envelope names | error | proposed |
 | `draining`, `retired` | The supervisor is shutting down; or it is retired and the client is not of its generation | direct | proposed |
 | `token-unknown`, `token-expired` | `Commit`, `Image` or `Cancel` with a token this supervisor did not issue in this epoch, or issued more than 30 seconds ago | error | proposed |
@@ -142,7 +142,7 @@ If the client sent `Commit` and the connection ended before `Committed` or `Outc
 | --- | --- |
 | The supervisor starts a worker with `posix_spawn` of `neurad --worker`; it never forks itself. The worker shares one socket pair with the supervisor. | proposed |
 | Before it is given an application, a worker may only load its executable and libraries, run static initializers that read no environment and open no file of the user, and report ready. It does not read `NEURA_*`, create a tier cache, generate code, open a graph device, load a native library, or read an image. | proposed |
-| On assignment the worker, in this order: replaces its environment; applies the umask, the limits and the nice value; changes to the working directory descriptor; makes itself a process group leader; installs the three streams as descriptors 0, 1 and 2 and closes every other descriptor but the supervisor's; resets signal dispositions and the signal mask; maps the image bytes read-only; then loads, validates and binds the image and runs it with the code of a direct run (`runner::run`). | proposed |
+| On assignment the worker, in this order: replaces its environment; applies the umask, the limits and the nice value; changes to the working directory descriptor; makes itself a process group leader; installs the three streams as descriptors 0, 1 and 2 and closes every other descriptor but the supervisor's and its lease on the runtime generation, which it holds until it exits (the lifecycle note); resets signal dispositions and the signal mask; maps the image bytes read-only; then loads, validates and binds the image and runs it with the code of a direct run (`runner::run`). | proposed |
 | The environment readers that keep their first answer for the life of the process (`tier_ceiling`, `tier_check_mode`, `tier_eager`, `tier_programs_enabled`, `tier3_environment`, `tier3_after` in `src/nvm/tier1.cpp`, `environment_mode` in `src/jit/jit.cpp`, and those of `tier3_passes.cpp`, `tier3_build.cpp`, `tier2.cpp` and `gpu_run.cpp`) abort a worker that calls one before its environment is replaced. A test launches twice through one supervisor with different `NEURA_TIER3` and `NEURA_JIT` and requires each run's `--tier-stats` to show its own mode. | proposed |
 | A ready worker is used when the caller's `LD_*`, `DYLD_*`, `GLIBC_TUNABLES` and `MALLOC_*` variables equal those the worker was started with and its limits can be set from inside. Otherwise the supervisor starts a worker for this launch with the caller's environment and limits at `posix_spawn` (the path `fresh`). A setting neither can give, such as a soft limit above the supervisor's hard limit, is `not-reproducible`. | proposed |
 | A worker runs one application and exits. It is never returned to the pool, whatever the application did. | proposed |
@@ -191,12 +191,22 @@ An application ID is `<generation>.<first 8 hexadecimal digits of the epoch>.<nu
 | `enable` writes the unit of the table above, whose command is `<root>/current/bin/neurad --foreground --root <root>` and which is never restarted by the service manager, and enables it for the user (`systemctl --user enable`, `launchctl bootstrap`). Where no user service manager answers, as in WSL without systemd or in a container, it changes nothing and exits with status 1 and a message; `start`, `auto` and `required` still work there. `disable` removes the unit and exits 0 when there is none. | proposed |
 | An installation that an 0.2 updater produced and that has not yet been migrated refuses `start`, `enable`, `auto` and `required` with the instruction to run `neura update --migrate-install`. `--runtime=off` works. | proposed |
 
+### Editors
+
+| Rule | Status |
+| --- | --- |
+| `neura capabilities` reports whether the service component is installed and its protocol version, from the files of the installation. It connects to nothing and starts nothing, and reports a missing component as missing. | proposed |
+| The editor's Run uses a service mode only when the launch configuration sets it (`"runtime": "auto"` or `"required"`), and passes it as `--runtime`. It never infers the mode from a service being installed or running. The mode used, and a fallback, are shown in the run's output. | proposed |
+| The editor's Test and Debug are direct. A configuration that sets a service mode for them is rejected before anything is built or started, with a message that names the setting; it is not dropped. | proposed |
+| In an untrusted workspace the editor may read `neura capabilities`. It starts no supervisor, no application and no debug session. | proposed |
+| The editor's tests run with the service component absent from the installation and the run directory unwritable, then with a supervisor running: build, run, test, a breakpoint at startup, step, restart and stop behave the same in both, and the supervisor sees no connection. | proposed |
+
 ### The image cache
 
 | Rule | Status |
 | --- | --- |
 | The cache maps a SHA-256 to the bytes of one image, in memory the supervisor owns and never writes again, and gives a worker a read-only descriptor to it. Its key is the digest alone, since it lives and dies with one supervisor of one build. | proposed |
-| It holds at most 256 MiB (the baseline's row). An entry in use by a live application is never evicted and does not count as evictable; the least recently used free entry goes first. When an image does not fit beside the entries in use, the launch still proceeds, with bytes that are dropped when the application ends. | proposed |
+| It holds at most 256 MiB (the baseline's row), entries in use included: every image a live or prepared application uses is an entry. An entry in use is never evicted; the least recently used free entry goes first. A launch whose image does not fit after every free entry is evicted is refused at `Prepare` with `admission-cache`. | proposed |
 | The cache holds bytes only. A worker decodes and validates the image every time, with the loader of a direct run. No decoded structure, validation result, source map, lifted block or machine code is cached, in memory or on disk, in 0.3.0. | proposed |
 | A cached image authorizes nothing. Grants, native dependencies and limits come from each launch's envelope. | proposed |
 
@@ -259,7 +269,7 @@ Each case is a test of the order of work. *Accept* means the launch runs; *rejec
 8. Two clients start the first launch at once with no supervisor: one supervisor, both run (accept).
 9. A socket file and no supervisor (the supervisor was killed): the next client starts a supervisor, which removes the file (accept).
 10. A socket owned by another user in a run directory with a wrong mode: `identity`, status 5 in both modes (reject).
-11. A supervisor of another build of the same generation name answers (a rebuilt source tree): `identity`; under `auto` this is an error, not a fallback (reject).
+11. A supervisor of another build of the same generation name answers (a rebuilt source tree): a launch is `identity`, and under `auto` this is an error, not a fallback; `ps` and `stop` still work (reject).
 12. A process ID reused by an unrelated process: no decision rests on a process ID (accept).
 13. Sixty-four applications running, a sixty-fifth under `required`: `admission-applications`, status 5; under `auto`: direct (reject, accept).
 14. Seventeen simultaneous `Prepare` without `Commit`: the seventeenth is `admission-pending`; after 30 seconds the sixteen are released (reject).
@@ -273,7 +283,7 @@ Each case is a test of the order of work. *Accept* means the launch runs; *rejec
 22. The same path launched twice with different contents: two digests, two entries; neither run sees the other's bytes (accept).
 23. An image that fails validation: `load-failed`, status 1, the direct run's message (accept as a launch; the run fails as directly).
 24. A cached entry evicted while its application runs: cannot happen; the entry is in use. `cache clear` during the run leaves it (accept).
-25. A 300 MiB image: `image-too-large`; direct under `auto` (reject).
+25. A 300 MiB image: `image-too-large`. Three different 100 MiB images, the third while the first two run: `admission-cache`; it launches once one has ended. Both run directly under `auto` (reject).
 26. Two launches of one image with `NEURA_TIER3=off` and `NEURA_TIER3=native`: each `--tier-stats` shows its mode; neither sees the other's programs (accept).
 27. `NEURA_JIT=off` in the supervisor's own environment and unset in the caller's: the application runs with the caller's (accept).
 28. `--max-stack-cells 1000` on an image that uses regions: `stack limit exceeded` with the direct run's message and status (accept).
@@ -307,8 +317,11 @@ Each case is a test of the order of work. *Accept* means the launch runs; *rejec
 56. An install root reached through a symbolic link and with spaces and non-ASCII characters: one `<id>`, from the real path (accept).
 57. A message of 2 MiB, a field length past the end, an unknown kind, a `Commit` with three descriptors: one `Rejected` with `protocol`, then the connection closes; the supervisor keeps serving others (reject).
 58. `--record`, `--replay`, `--each` with `required`: status 5; with `auto`: direct, with the line (reject, accept).
-59. `neura test --runtime=required`; a debug launch that asks for a service mode: usage error (reject).
+59. `neura test --runtime=required`; a debug launch that asks for a service mode; an editor Debug configuration with `"runtime": "required"`: rejected before anything starts (reject).
 60. A launch on an installation not yet migrated from a 0.2 update: status 5 with the instruction; `--runtime=off` runs (reject).
+61. `neura capabilities` with a stale socket, with no `neurad`, and with a supervisor running: the same answer about the component each time, no connection, no file written (accept).
+62. An editor Run with `"runtime": "auto"` in an untrusted workspace: nothing is started (reject).
+63. A release candidate's generation name under a macOS `TMPDIR` of 49 bytes: the socket path is under 104 bytes and the service starts (accept).
 
 ## Order of work
 
@@ -324,8 +337,8 @@ Each step is one commit on the milestone branch. No step changes an image.
 | 5 | `neurad --worker` and a test driver that plays the supervisor: assignment order, process settings, one use, reporting, supervisor loss | `service-worker`: cases 26 to 36, 42, 45 |
 | 6 | The supervisor: `lock`, socket, `Hello`, prepare and commit, the pool, records, admission, the cache | `service-protocol`: cases 8 to 25, 43, 44, 57 |
 | 7 | The client in `run`: `required` and `auto`, on-demand start, signals, fallback, statuses 5 and 6 | `service-run`: cases 3, 4, 7, 37 to 41, 58; `service-parity`: the direct identity cases through `required` |
-| 8 | `neura runtime start`, `status`, `ps`, `inspect`, `stop`, `shutdown`, `cache clear`; retiring; the idle exit | `service-control`: cases 46 to 52, 55, 56 |
-| 9 | `enable` and `disable`, with a stand-in `systemctl` and `launchctl` on the test `PATH` | `service-login`: cases 53, 54 |
+| 8 | `neura runtime start`, `status`, `ps`, `inspect`, `stop`, `shutdown`, `cache clear`; retiring; the idle exit | `service-control`: cases 46 to 52, 55, 56, 63 |
+| 9 | `enable` and `disable`, with a stand-in `systemctl` and `launchctl` on the test `PATH`; the service line of `neura capabilities`; the `runtime` launch setting in the editor extension, which is versioned apart | `service-login`: cases 53, 54, 61; the extension's tests: cases 59, 62 |
 | 10 | `scripts/bench-launch.py`, the measurements, the budgets, and the pages: `docs/runtime/Service.md`, Tooling, NVM, Install, the changelog | The documentation checks; the gate below |
 
 ## Gate and acceptance
