@@ -123,6 +123,7 @@ The installer refuses to:
 - install a generation that is already there, unless you pass `--force`;
 - replace any path in `<bin dir>` that is not a symbolic link into this root: a regular file, or a link into another installation, is a conflict;
 - install archives of two builds together;
+- drop a component the installation has: an SDK archive alone over an installation with the service is refused, with the advice to `--add` the runtime archive or to remove the service first with `neura uninstall --component service`;
 - change a root whose marker names a package manager (status 3).
 
 A refusal changes nothing. A different version, or another build of the same version, is another generation; the installation switches to it and keeps the one before as the previous generation.
@@ -204,7 +205,7 @@ Any other line, a repeated generation or link, or a missing final newline makes 
 
 ### Generations in use
 
-Every tool of an installed generation, and `neura` until it becomes the tool, takes a shared `flock` on `<root>/leases/<generation>` when it starts and holds it until it exits. A supervisor and its workers hold it too, so an application that runs holds its generation. The descriptor is close-on-exec: a program a tool starts does not hold a lease. The shared libraries are loaded before the tool's code runs; a removed file stays readable to a process that has it open.
+Every tool of an installed generation, and `neura` until it becomes the tool, takes a shared `flock` on `<root>/leases/<generation>` when it starts and holds it until it exits. A supervisor and its workers hold it too, so an application that runs holds its generation. The descriptor is close-on-exec: a program a tool starts does not hold a lease. The shared libraries are loaded before the tool's code runs; a removed file stays readable to a process that has it open. A tool that finds the lease held exclusively waits for it: a command is removing the generation, and the tool then stops as below, or only checking whether it is in use.
 
 A generation is removed only by a command that holds the installation lock and takes an exclusive `flock` on its lease without waiting; the kernel releases a lock when its holder ends, so a process that died holds nothing. The previous generation is always kept, so that `neura update --rollback` needs no download. Other generations are removed by the next change, or by `neura update --repair`, once no process holds them. On a schema 2 root a tool whose lease file is gone ends with `neura: this generation of neura was removed; run the command again`, status 1. On a root that a 0.2 client made, which has no `leases/`, tools run without a lease. Where the file system cannot lock, tools run without a lease, no generation is removed automatically, and `doctor` says so.
 

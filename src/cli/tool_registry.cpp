@@ -168,10 +168,19 @@ int take_lease(const char* executable, bool& removed) {
         return -1;
     }
     if (::flock(descriptor, LOCK_SH | LOCK_NB) != 0) {
-        // Held exclusively: the generation is being removed.
-        removed = errno == EWOULDBLOCK;
-        ::close(descriptor);
-        return -1;
+        if (errno != EWOULDBLOCK) {
+            // A file system that cannot lock: run without a lease.
+            ::close(descriptor);
+            return -1;
+        }
+        // Held exclusively: a command is removing the generation, or only
+        // probing whether it is in use. Wait, then tell by the link count.
+        while (::flock(descriptor, LOCK_SH) != 0) {
+            if (errno != EINTR) {
+                ::close(descriptor);
+                return -1;
+            }
+        }
     }
     struct stat info {};
     if (::fstat(descriptor, &info) != 0 || info.st_nlink == 0) {

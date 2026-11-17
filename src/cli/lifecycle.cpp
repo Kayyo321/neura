@@ -950,12 +950,13 @@ public:
 
     ExclusiveLease(const fs::path& root, const std::string& generation, const std::string& own_generation) {
         if (generation == own_generation && tool::lease_descriptor() >= 0) {
+            // A conversion that fails drops the shared lock on Linux, so the
+            // destructor takes it again in every case.
             own_ = tool::lease_descriptor();
             if (::flock(own_, LOCK_EX | LOCK_NB) == 0) {
                 result_ = Result::Held;
             } else {
                 result_ = errno == EWOULDBLOCK ? Result::InUse : Result::Unsupported;
-                own_ = -1;
             }
             return;
         }
@@ -1529,10 +1530,17 @@ std::string service_id(const fs::path& root) {
 
 // <run> of docs/design/Service030.md, without creating it.
 fs::path service_run_directory() {
+    // XDG_RUNTIME_DIR only when it is a directory of this user with mode
+    // 0700, as the service decides it.
     const char* runtime = std::getenv("XDG_RUNTIME_DIR");
-    if (runtime != nullptr && *runtime == '/') return runtime;
+    if (runtime != nullptr && *runtime == '/') {
+        struct stat info {};
+        if (::lstat(runtime, &info) == 0 && S_ISDIR(info.st_mode) && info.st_uid == ::geteuid() && (info.st_mode & 0777) == 0700) {
+            return runtime;
+        }
+    }
     const char* temporary = std::getenv("TMPDIR");
-    return fs::path(temporary != nullptr && *temporary != '\0' ? temporary : "/tmp") / ("neura-" + std::to_string(::getuid()));
+    return fs::path(temporary != nullptr && *temporary == '/' ? temporary : "/tmp") / ("neura-" + std::to_string(::geteuid()));
 }
 
 fs::path supervisor_directory(const fs::path& root, const std::string& generation) {
@@ -1850,6 +1858,18 @@ int install_from(const UpdateOptions& options) {
     components = sorted_components(components);
     if (!valid_component_set(components)) throw Failure{"the archives hold the components " + join_names(components) + ", which is not a product"};
 
+    // An installer does not drop a component the installation has: a
+    // removal goes through --components or uninstall --component, which
+    // check the service's applications and remove its state.
+    if (old_marker && old_marker->schema == 2) {
+        for (const auto& name : old_marker->components) {
+            if (std::ranges::find(components, name) == components.end()) {
+                throw Failure{"the installation has the components " + join_names(old_marker->components) + " and these archives bring " +
+                              join_names(components) + "; add the archive of the " + name +
+                              " component with --add, or remove it first with \"neura uninstall --component " + name + "\". Nothing was changed"};
+            }
+        }
+    }
     const auto root = real_directory(root_request, "the install root");
     const auto bin = real_directory(bin_request, "the bin directory");
     InstallLock lock(root, old_marker && old_marker->schema == 1);

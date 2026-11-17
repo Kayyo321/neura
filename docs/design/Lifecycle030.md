@@ -364,6 +364,9 @@ For the migration guide and the pages named in the introduction:
 20. A generation holds the files and manifests of its components only; `install.sh` and `VERSION` stay in the archive. A crash point after each added link (`links-add-<n>`) tests an interrupted migration, and a crash ends the process with status 70.
 21. The scenario tests are Python suites (`tests/lifecycle/scenarios.py`), as the tools' tests are, under the ctest names of the order of work; step 3's archive checks are `lifecycle-archives`. They replace the 0.2 CMake scripts and keep their assertions where the rule still holds.
 22. Step 8 (`doctor`) was committed before step 7, whose tests use it, and the commands of steps 5 to 7 were written in step 4's change procedure and committed with their tests.
+23. The installer refuses to drop a component the installation has (an SDK archive alone over a combined installation): a removal goes through `--components` or `uninstall --component`, which check the service's applications and remove its state.
+24. A tool that finds its lease held exclusively waits for it and then decides by the lease file's link count, since `doctor` and `uninstall --dry-run` take the exclusive lock for an instant to see whether a generation is in use. A command converting its own shared lease to test it takes the shared lock again afterwards, as a failed conversion drops it on Linux.
+25. `<run>` is `XDG_RUNTIME_DIR` only when it is a directory of this user with mode 0700, else `${TMPDIR:-/tmp}/neura-<uid>`, as the service computes it.
 
 ## Results
 

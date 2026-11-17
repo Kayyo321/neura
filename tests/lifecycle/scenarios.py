@@ -455,6 +455,10 @@ def suite_install(kit: Kit) -> None:
           "case 3: one copy of core and the three manifests")
     check("components core sdk service" in both.marker(), "case 3: the marker's components")
     check(both.neura("doctor").returncode == 0, "case 3: doctor exits 0")
+    before = snapshot(both.root)
+    result = both.install(tops["sdk"], "--force")
+    check(result.returncode == 1 and 'neura uninstall --component service' in result.stderr and snapshot(both.root) == before,
+          f"the installer does not drop a component the installation has: {result.stderr}")
 
     # Case 4: two archives of different builds.
     other = kit.pack("runtime", kit.work / "other-build", kit.variant("other", neurad=True), build="0ther")
@@ -528,6 +532,22 @@ def suite_install(kit: Kit) -> None:
     result = sdk.install(tops["sdk"], "--force")
     check(result.returncode == 0 and "is whole" in result.stdout, f"--force on a whole generation: {result.stdout}{result.stderr}")
     expect_links(sdk, sdk_tools, "--force repairs links")
+    # Case 10: --force on a whole generation while a tool of it runs.
+    session = Session(sdk, "neura-lsp")
+    tree_before = snapshot(sdk.root / "versions")
+    result = sdk.install(tops["sdk"], "--force")
+    check(result.returncode == 0 and "is whole" in result.stdout and snapshot(sdk.root / "versions") == tree_before and session.alive(),
+          f"case 10: nothing is overwritten while a tool runs: {result.stderr}")
+    # Case 12: --force on a damaged generation that a running process holds.
+    held = sdk.root / "versions" / generation / "share/neura/stdlib/std/core/version.nra"
+    original = held.read_bytes()
+    held.write_bytes(original[:-1])
+    before = snapshot(sdk.root)
+    result = sdk.install(tops["sdk"], "--force")
+    check(result.returncode == 1 and "in use by a running neura process" in result.stderr and snapshot(sdk.root) == before,
+          f"case 12: refused while the damaged generation is in use: {result.stderr}")
+    session.end()
+    held.write_bytes(original)
 
     # Case 11: --force on a generation with a truncated file and no lease.
     damaged = sdk.root / "versions" / generation / "bin/neura-fmt"
@@ -943,6 +963,8 @@ def suite_update(kit: Kit) -> None:
             check(home.current() == before_crash, f"case 19: current is unchanged after a crash at {step}")
         check((home.root / ".journal").exists() == (step != "journal"), f"case 19: a journal after a crash at {step}")
         check(run([home.bin / "neura-run", image], env=home.env()).stdout == "Hello, World!\n", f"case 20: a run after a crash at {step}")
+        built = run([home.bin / "neurac", REPOSITORY / "examples/hello-world/hello-world.nra", "-o", home.path / "crash.nvr"], env=home.env())
+        check(built.returncode == 0, f"case 20: a build after a crash at {step}: {built.stderr}")
         result = update("--repair")
         check(result.returncode == 0, f"case 19: recovery after a crash at {step}: {result.stderr}")
         if step != "journal":
@@ -954,6 +976,8 @@ def suite_update(kit: Kit) -> None:
         tools_now = set(CORE_TOOLS) | set(SDK_TOOLS)
         expect_links(home, tools_now, f"case 19: links after recovery from {step}")
         check(run([home.bin / "neura-run", image], env=home.env()).stdout == "Hello, World!\n", f"case 20: a run after recovery from {step}")
+        built = run([home.bin / "neurac", REPOSITORY / "examples/hello-world/hello-world.nra", "-o", home.path / "crash.nvr"], env=home.env())
+        check(built.returncode == 0, f"case 20: a build after recovery from {step}: {built.stderr}")
         if completed:
             back = update("--rollback")
             check(back.returncode == 0 and home.current() == base, f"case 19: back to the base after {step}: {back.stderr}")
@@ -1141,8 +1165,8 @@ cp "$source" "$output"
     # Case 61: a file system that cannot lock. A preloaded flock that fails
     # with ENOLCK stands in for it.
     compiler = shutil.which("cc") or shutil.which("gcc")
-    if compiler is None:
-        print("NOT RUN: case 61 needs a C compiler for the flock stand-in")
+    if not sys.platform.startswith("linux") or compiler is None:
+        print("NOT RUN: case 61 needs Linux (LD_PRELOAD) and a C compiler for the flock stand-in")
         return
     shim = kit.work / "noflock.c"
     shim.write_text("#include <errno.h>\nint flock(int fd, int operation) { (void)fd; (void)operation; errno = ENOLCK; return -1; }\n")
@@ -1408,7 +1432,7 @@ def suite_doctor(kit: Kit) -> None:
 
     # Case 61: a file system that cannot lock.
     compiler = shutil.which("cc") or shutil.which("gcc")
-    if compiler:
+    if compiler and sys.platform.startswith("linux"):
         shim = kit.work / "noflock.c"
         shim.write_text("#include <errno.h>\nint flock(int fd, int operation) { (void)fd; (void)operation; errno = ENOLCK; return -1; }\n")
         library = kit.work / "libnoflock.so"
@@ -1416,7 +1440,7 @@ def suite_doctor(kit: Kit) -> None:
             result = run([sdk.bin / "neura-doctor"], env=sdk.env({"LD_PRELOAD": str(library)}))
             check("warn  leases: the file system of" in result.stdout and result.returncode == 0, f"case 61: doctor warns\n{result.stdout}")
     else:
-        print("NOT RUN: case 61 in doctor: no C compiler for the flock stand-in")
+        print("NOT RUN: case 61 in doctor: it needs Linux (LD_PRELOAD) and a C compiler for the flock stand-in")
 
     # Cases 63 and 64: the read-only commands change nothing under the root,
     # and without terminals print no notice and write no state.
