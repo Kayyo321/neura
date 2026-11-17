@@ -416,7 +416,11 @@ export let Light = enum (Red, Yellow, Green);           // fieldless
 let Optional = enum<T> (None, Some(T));                 // generic
 let IntOptional = Optional<int>;                        // overlay of an instance
 
-let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });  // payloads
+let TreeLink = class (                                  // an enum is stored inline: hold a link in a class
+    export last tree: Tree;
+    export let init = func(value: Tree) { tree = value; };
+);
+let Tree = enum (Empty, Leaf(int), Branch { left: TreeLink, right: TreeLink });  // payloads
 
 let next = func(current: Light) -> Light {
     if (current == Light.Red) {                         // fieldless enums support ==
@@ -431,7 +435,7 @@ let sum = func(tree: Tree) -> int {
     return match (tree) {                               // match expression
         Tree.Empty => 0,
         Tree.Leaf(value) => value,
-        Tree.Branch { left, right } => sum(left) + sum(right),
+        Tree.Branch { left, right } => sum(left.tree) + sum(right.tree),
     };
 };
 
@@ -449,7 +453,7 @@ let describe = func(tree: Tree) -> string {
     }
 };
 
-let tree = Tree.Branch { right: Tree.Leaf(2), left: Tree.Leaf(1) };
+let tree = Tree.Branch { right: new TreeLink(Tree.Leaf(2)), left: new TreeLink(Tree.Leaf(1)) };
 let maybe: IntOptional = IntOptional.Some(4);
 let five = Optional<int>.Some(5);                       // generic constructor needs <int>
 ```
@@ -460,6 +464,7 @@ let five = Optional<int>.Some(5);                       // generic constructor n
 - No nested patterns (`Some(Leaf(x))` is a syntax error) and no guards (`pattern if cond`). Bind, then `match` or `if` again.
 - Pattern bindings are constants scoped to their arm.
 - Payload enums have no built-in `==` and no `as` conversion.
+- An enum value is stored inline, so an enum cannot contain itself, directly or through tuples and other enums (`E0448`). Hold the link in a class, which is a reference, or in a list.
 
 ## Classes
 

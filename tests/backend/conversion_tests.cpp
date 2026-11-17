@@ -13,6 +13,10 @@
 #include "neura-ir/float.hpp"
 #include "nvr/names.hpp"
 #include "neura-ir/integer.hpp"
+#include "neura-ir/specialize.hpp"
+#include "neura-ir/reference_storage.hpp"
+#include "neura-ir/inline_limit.hpp"
+#include "neura-ir/containment.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -555,6 +559,73 @@ NEURA_TEST(conversion, source_map_is_optional) {
               "source map label " + location.path + " is relative");
     }
     check(program_label, "the program's own blocks are labeled computation.nra");
+}
+
+// A payload enum is a run of value words: a uint32 tag, then its payload words pooled by type. Optional and Result
+// over a payload that needs no allocation allocate nothing, a function returns an enum's words, a word that the
+// variant does not use is zero, empty text or the nil collection, and the words carry the binding's name.
+NEURA_TEST(conversion, payload_enums_are_value_words) {
+    using Kind = nvr::TypeKind;
+    // The functions use generic library enums, so the program is specialized as `neura build` does.
+    Compiled compiled;
+    compiled.program = lower_files({fixture(environment, "enum-words")});
+    auto specialized = compiled.program;
+    materialize_reference_storage(specialized);
+    specialize(specialized);
+    check_containment(specialized);
+    check_inline_limit(specialized);
+    optimize(specialized);
+    backend::ConversionOptions options;
+    const auto module = find_symbol(specialized, "Words");
+    for (SymbolId id = 0; id < specialized.symbols.size(); ++id) {
+        const auto& symbol = specialized.symbols[id];
+        if (symbol.owner == module && symbol.kind == SymbolKind::Function) options.extra_functions.push_back(id);
+    }
+    compiled.conversion = backend::convert(specialized, options);
+    compiled.image = nvr::load(nvr::encode(compiled.conversion.image));
+    const auto names = nvr::decode_names(compiled.image).value();
+    const auto index_of = [&](std::string_view name) {
+        return function_index(compiled, find_symbol(compiled.program, "Words." + std::string(name)));
+    };
+    const auto words_of = [&](std::string_view name) {
+        return compiled.image.functions[index_of(name)].more_results.size() + 1;
+    };
+    check_equal(words_of("some"), std::size_t{2}, "Optional<int> is a tag and an int32");
+    // Ok(int) and Err(Error) share the int32 word: the tag, then int32, then Error's words but its int32.
+    check_equal(words_of("ok"), std::size_t{8}, "Result<int> is 1 + 7 words");
+    check_equal(words_of("count"), std::size_t{4}, "Token is a tag, an int32, a text and a list");
+    for (const auto* name : {"some", "unwrap", "ok", "count", "tag"}) {
+        for (const auto& block : compiled.image.functions[index_of(name)].blocks) {
+            for (const auto& exit : block.exits) {
+                check(exit.kind != nvr::ExitKind::State || (exit.operation != nvr::StateOp::AllocateObject &&
+                                                            exit.operation != nvr::StateOp::ReadField),
+                      std::string(name) + " allocates no object and reads no field");
+            }
+        }
+    }
+    // Token.Count leaves its text word empty and its list word nil.
+    const auto count = index_of("count");
+    bool empty_text = false;
+    bool nil_list = false;
+    for (const auto& block : compiled.image.functions[count].blocks) {
+        for (const auto& exit : block.exits) {
+            if (exit.kind != nvr::ExitKind::Return) continue;
+            for (const auto& value : exit.arguments) {
+                if (value.kind != nvr::ValueKind::Constant) continue;
+                const auto& constant = compiled.image.constants[value.index];
+                const auto kind = compiled.image.types[constant.type].kind;
+                empty_text = empty_text || (kind == Kind::Text && constant.payload.empty());
+                nil_list = nil_list || (kind == Kind::List && constant.payload.empty());
+            }
+        }
+    }
+    check(empty_text, "an unused text word is the empty text");
+    check(nil_list, "an unused list word is the nil collection constant");
+    check_equal(compiled.image.minor_version, std::uint16_t{7}, "enum results make the image NVR 1.7");
+    const auto& slots = names.slots[index_of("tag")];
+    check(slots.size() >= 4 && slots[0] == "token.tag" && slots[1] == "token.Count.0" && slots[2] == "token.Name.0" &&
+              slots[3] == "token.Items.0",
+          "an enum parameter's words are named by tag and payload");
 }
 
 #ifndef _WIN32

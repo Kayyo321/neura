@@ -30,10 +30,11 @@ namespace {
 constexpr std::string_view magic = "NEURAEXE";
 constexpr std::size_t footer_size = 32;
 // The fixed fields that follow the file-system prefixes: three limits and the
-// image byte count, with the five task settings between them since version 2.
+// image byte count, with the five task settings between them since version 2
+// and the stack cell limit after those since version 3.
 constexpr std::uint64_t task_settings_size = 4 * sizeof(std::uint64_t) + sizeof(std::uint32_t);
 constexpr std::uint64_t policy_tail_size(std::uint32_t version) {
-    return 24 + (version >= 2 ? task_settings_size : 0);
+    return 24 + (version >= 2 ? task_settings_size : 0) + (version >= 3 ? sizeof(std::uint64_t) : 0);
 }
 constexpr std::uint64_t minimum_payload_size(std::uint32_t version) { return 12 + policy_tail_size(version); }
 constexpr std::size_t io_chunk = 64U << 10;
@@ -219,6 +220,7 @@ Container read_payload(PayloadReader& input, const Footer& footer) {
             malformed("invalid task settings");
         }
     }
+    if (footer.version >= 3) policy.limits.max_stack_cells = input.integer<std::uint64_t>();
     const auto image_size = input.integer<std::uint32_t>();
     if (image_size > input.remaining() || static_cast<std::uint64_t>(image_size) > result.image.max_size()) {
         malformed("invalid image length");
@@ -263,6 +265,7 @@ std::vector<std::uint8_t> encode_policy(const Policy& policy, std::uint32_t imag
     append_integer(bytes, limits.max_queued_messages);
     append_integer(bytes, limits.max_pending_requests);
     append_integer(bytes, limits.parallel_workers);
+    append_integer(bytes, limits.max_stack_cells);
     append_integer(bytes, image_size);
     return bytes;
 }

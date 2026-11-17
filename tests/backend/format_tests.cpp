@@ -1304,7 +1304,15 @@ NEURA_TEST(format, constant_and_global_validation) {
     mutate_logic([](nvr::Image& i) { i.constants[0].payload = {2}; }, "Boolean payload");
     mutate_logic([](nvr::Image& i) { i.constants[1].payload = {7, 0}; }, "integer payload has 4 bytes");
     mutate_logic([](nvr::Image& i) { i.constants.push_back({3, {0xc3, 0x28}}); }, "not valid UTF-8");
-    mutate_logic([](nvr::Image& i) { i.constants.push_back({4, {}}); }, "constants cannot have this type");
+    mutate_logic([](nvr::Image& i) { i.constants.push_back({0, {}}); }, "constants cannot have this type");
+    // NVR 1.7: an array or list constant is the nil collection, with no payload.
+    mutate_logic([](nvr::Image& i) { i.constants.push_back({4, {1}}); }, "a nil collection constant has no payload");
+    auto nil_collection = logic_model();
+    nil_collection.constants.push_back({4, {}});
+    const auto bytes = nvr::encode(nil_collection);
+    check_equal(bytes[6], std::uint8_t{7}, "a nil collection constant makes the writer emit 1.7");
+    check(nvr::load(bytes) == [&] { auto loaded = nil_collection; loaded.minor_version = 7; return loaded; }(),
+          "a nil collection constant round-trips");
     mutate_logic([](nvr::Image& i) { i.globals[0].initializer = 0; }, "initializer type does not match");
     mutate_logic([](nvr::Image& i) { i.globals[0].initializer = 5; }, "initializer 5 is out of range");
     mutate_logic([](nvr::Image& i) { i.globals[0].type = 0; }, "void is not a value type");

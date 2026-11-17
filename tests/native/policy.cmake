@@ -280,6 +280,7 @@ refused_options("--task-quantum" "--task-quantum is not accepted by a native exe
 refused_options("--max-steps" "expected a positive integer after --max-steps")
 refused_options("--max-steps 0" "expected a positive integer after --max-steps")
 refused_options("--max-frames x" "expected a positive integer after --max-frames")
+refused_options("--max-stack-cells 0" "expected a positive integer after --max-stack-cells")
 refused_options("--max-tasks -1" "expected a positive integer after --max-tasks")
 refused_options("--record" "expected a value after --record")
 refused_options("--replay" "expected a value after --replay")
@@ -326,6 +327,39 @@ if(compared_stderr STREQUAL recorded_heap_stderr)
     message(FATAL_ERROR "the heap fixture should distinguish the lower limit from the recorded limit")
 endif()
 compare_with_cpu(heap "--max-heap-cells 100000 --stats" 137 "heap limit exceeded" --max-heap-cells 50)
+
+# Storage regions (NVR 1.7): the policy records the stack cell limit (container version 3), the
+# executable traps where neura run with the same limit traps, the variable lowers the limit and
+# never raises it, and inspect reads it back. The compiler does not emit regions yet, so the image
+# is assembled from text; it peaks at 160 stack cells.
+invoke(regions_assembled "${TEST_DIR}" "${NEURA}" assemble "${SOURCE_DIR}/tests/backend/tier/region-storage.nvra"
+    -o "${TEST_DIR}/stack.nvr")
+if(NOT regions_assembled_status STREQUAL "0")
+    message(FATAL_ERROR "assembling the region image failed\n${regions_assembled_stderr}")
+endif()
+build(--native --max-stack-cells 159 stack.nvr -o stack)
+compare_with_cpu(stack "--stats" 139 "stack limit exceeded: region allocation of 4 cells" --max-stack-cells 159)
+set(recorded_stack_stderr "${compared_stderr}")
+compare_with_cpu(stack "--max-stack-cells 20 --stats" 139 "stack limit exceeded" --max-stack-cells 20)
+if(compared_stderr STREQUAL recorded_stack_stderr)
+    message(FATAL_ERROR "the region fixture should distinguish the lower stack limit from the recorded one")
+endif()
+compare_with_cpu(stack "--max-stack-cells 100000 --stats" 139 "stack limit exceeded" --max-stack-cells 159)
+configure_file("${TEST_DIR}/stack.nvr" "${TEST_DIR}/stack-fits.nvr" COPYONLY)
+build(--native --max-stack-cells 160 stack-fits.nvr -o stack-fits)
+compare_with_cpu(stack-fits "--stats" 0 "peak stack cells 160" --max-stack-cells 160)
+invoke(stack_inspect "${TEST_DIR}" "${NEURA}" inspect "${TEST_DIR}/stack")
+if(NOT stack_inspect_status STREQUAL "0" OR
+   NOT stack_inspect_stdout MATCHES "\nlimits: steps [0-9]+, frames [0-9]+, heap cells [0-9]+, stack cells 159\n")
+    message(FATAL_ERROR "inspect should print the recorded stack cell limit\n${stack_inspect_stdout}${stack_inspect_stderr}")
+endif()
+build(--native --sealed --max-stack-cells 159 stack.nvr -o stack-sealed)
+set(ENV{NEURA_RUN_OPTIONS} "--max-stack-cells 100000")
+invoke(stack_sealed "${TEST_DIR}" "${TEST_DIR}/stack-sealed")
+unset(ENV{NEURA_RUN_OPTIONS})
+if(NOT stack_sealed_status STREQUAL "139" OR NOT stack_sealed_stderr MATCHES "trap: stack limit exceeded")
+    message(FATAL_ERROR "a sealed executable keeps its stack limit\n${stack_sealed_stdout}${stack_sealed_stderr}")
+endif()
 
 configure_file("${TEST_DIR}/heap.nvr" "${TEST_DIR}/observed.nvr" COPYONLY)
 build(--native observed.nvr -o observed)
