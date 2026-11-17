@@ -824,6 +824,9 @@ Json Adapter::variables(const Json& arguments) {
             if (reference.value.layout != nvr::absent && names_ && reference.value.layout < names_->fields.size() &&
                 start + i < names_->fields[reference.value.layout].size() && !names_->fields[reference.value.layout][start + i].empty())
                 name = names_->fields[reference.value.layout][start + i];
+            // A generator's state names a moved local `$local<M>:<name>`
+            // (docs/design/Lifetime030.md): show the source name.
+            if (name.starts_with("$local") && name.find(':') != std::string::npos) name = name.substr(name.find(':') + 1);
             result.push_back(variable(std::move(name), values[i]));
         }
     }

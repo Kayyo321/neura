@@ -182,8 +182,8 @@ defer subscription.unsubscribe();
 | --- | --- |
 | The formatter writes `defer` and one space before its call, `using (name = value) {` with one space before `(` (as `scope` has in its keyword list), `iterator(` with none (as `func(`), and `yield` and one space. | implemented, proposed |
 | The language server colors the four words as keywords only where the rules above make them keywords, offers them in statement position, gives a generator the signature and hover of its function type, and lists a generator binding in the outline as a function. | proposed |
-| A cleanup's operations map to the `defer` statement or to the closing brace of the `using` block, so a stop there names it. Step-in at `has_next` or `next` enters the generator body at the statement after the last `yield`. | proposed |
-| The debugger shows a generator's state by its source names, with its flags, and never advances it. It runs no deferred call, close or handler. | proposed |
+| A cleanup's operations map to the `defer` statement or to the closing brace of the `using` block, so a stop there names it. Step-in at `has_next` or `next` enters the generator body at the statement after the last `yield`. | implemented, proposed |
+| The debugger shows a generator's state by its source names, with its flags, and never advances it. It runs no deferred call, close or handler. | implemented, proposed |
 
 ## Diagnostics
 
@@ -391,4 +391,7 @@ No existing source changes meaning: the four words stay identifiers wherever the
 | A generator's call writes out the body of `Sequence.from_iterator`: it keeps the state in a hidden local and returns `new Sequence<T>` over two function values that call the state's `has_next` and `next`, instead of calling `from_iterator`. | Native tier 3 verification (`NEURA_TIER3_VERIFY=1`) rejects, as V7, a `from_iterator` of a fresh iterator that tier 3 inlines two calls deep (the base of this milestone fails the same way on `from_iterator<int>(new Counter(n))` called through a function), and the shape written out passes it, with the same results. |
 | `subscribe` retains its handler as any function value is retained; a handler that captures is accepted without `new func`, and edge case 84 waits for the storage milestone. | The base of this milestone has no `new func`. |
 | `E0550` runs once, on the program that lowering links, when it contains the event module. It finds `emit` and `Guarded.with` by their trusted files, starts from the functions that carry `synchronized` and from the `$invoke` of each lambda written as an argument of `Guarded.with`, and follows Call, VirtualCall (by the runtime's rule) and constructor calls. | The rows above. |
+| A moved source local's field is named `$local<M>:<name>`, and the debug adapter shows the name after the colon; hidden locals keep `$temp<M>`, and the buffer, index and flags keep their names. | The debugger shows a generator's state by source names without a table of its own; the `$local<M>` prefix keeps the note's naming and makes the field unwritable from source. |
+| A `defer` whose operands are all literals or modules saves nothing, so it has a source stop only where its call runs. A failed-close branch of a `using` gives a second stop at the block's closing brace. | Registration that evaluates nothing emits no operation to stop at. |
+| `scripts/tier-boundary.py` generates boundary arithmetic and takes no programs; `tests/lifetime/programs.py` runs the deoptimization programs under `NEURA_TIER_CHECK=2` and `NEURA_TIER3_VERIFY=1` instead, and checks that they deoptimize. | The tier-boundary script has no place for the milestone's programs. |
 

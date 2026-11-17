@@ -636,8 +636,11 @@ void Lowering::lower_generator_body(SymbolId resume, std::vector<IrNode>& instru
     std::size_t locals = 0;
     std::size_t temps = 0;
     for (const auto& [local, yield] : moved_at) {
+        // A moved source local keeps its name after the index, for the
+        // debugger, which shows a generator's state by source names.
         const bool hidden = symbol(local).name.starts_with('$');
-        const auto name = hidden ? "$temp" + std::to_string(temps++) : "$local" + std::to_string(locals++);
+        const auto name = hidden ? "$temp" + std::to_string(temps++)
+                                 : "$local" + std::to_string(locals++) + ":" + symbol(local).name;
         const auto field = add(SymbolKind::Field, name, symbol(local).span, state.cls);
         symbol(field).type = symbol(local).type;
         entries_[state.cls].names.emplace(name, field);
