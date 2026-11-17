@@ -236,6 +236,201 @@ let App = module:program.Entry (
                          if event.get('event') == 'output')
         self.assertIn(before.strip('"') + '\n', output)
 
+    def test_any_reads_named_words_without_hooks_or_steps(self):
+        source = r'''let program = import:Std.Program;
+let counter: int = 0;
+let Session = class (
+    | get: { counter += 1; return instance; };
+    | set: { counter += 1; return value; };
+    export let payload: int = 7;
+);
+let Box = class (
+    export let first: int = 3;
+    export let item: any = nil;
+    export let last_value: int = 5;
+);
+let one32 = func -> uint32 => 1;
+let one64 = func -> uint64 => 1;
+let blank = func -> string => "";
+let Group = module (
+    export let tag: uint32 = one32();
+    export let bits: uint64 = one64();
+    export let text: string = blank();
+    export let reference: class = nil;
+);
+let global: any = nil;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let truth: any = true;
+        let small: any = -128 as int8;
+        let minimum: int64 = -9223372036854775808;
+        let signed: any = minimum;
+        let maximum: uint64 = 18446744073709551615;
+        let unsigned: any = maximum;
+        let half: any = float16.from_bits(32291);
+        let brain: any = bfloat16.from_bits(32657);
+        let negative_zero: any = float32.from_bits(2147483648);
+        let nan: any = float64.from_bits(9221120237041090731);
+        let typed: Session = nil;
+        let policy: any = typed;
+        let empty: any = nil;
+        let object: any = new Session();
+        let materials: [uint32, uint64, string, class] = [Group.tag, Group.bits, Group.text, Group.reference];
+        let box: Box = new;
+        box.item = object;
+        global = "line\n\"quoted\"é";
+        let items: any[list] = new([truth, empty]);
+        let checkpoint = counter;
+        counter += 1;
+        return counter == checkpoint + 1 ? program.ExitCode.Ok : program.ExitCode.Failure;
+    };
+);
+'''
+        path = self.source('any.nra', source)
+        self.launch(path)
+        line = source.splitlines().index('        counter += 1;') + 1
+        points = self.client.request('setBreakpoints', {'source': {'path': str(path)},
+                                     'breakpoints': [{'line': line}]})
+        self.assertTrue(points['breakpoints'][0]['verified'])
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+
+        def evaluate(expression):
+            return self.client.request('evaluate', {'frameId': frame['id'], 'expression': expression})
+
+        def children(reference, **paging):
+            return self.client.request('variables', {'variablesReference': reference, **paging})['variables']
+
+        before = int(evaluate('checkpoint')['result'])
+        self.assertGreater(before, 0)
+        self.assertEqual(int(evaluate('counter')['result']), before)
+        scopes = self.client.request('scopes', {'frameId': frame['id']})['scopes']
+        frames = children(scopes[0]['variablesReference'])
+        locals_ = {value['name']: value for value in frames}
+        expected = {
+            'truth': 'any<bool> true',
+            'small': 'any<int8> -128',
+            'signed': 'any<int64> -9223372036854775808',
+            'unsigned': 'any<uint64> 18446744073709551615',
+            'half': 'any<float16> 0x7e23',
+            'brain': 'any<bfloat16> 0x7f91',
+            'negative_zero': 'any<float32> 0x80000000',
+            'nan': 'any<float64> 0x7ff80000000000ab',
+            'empty': 'any<nil> nil',
+            'policy': 'any<nil> nil (policy Session)',
+        }
+        for name, value in expected.items():
+            with self.subTest(name=name):
+                self.assertEqual((locals_[name]['type'], locals_[name]['value']), ('any', value))
+                watched = evaluate(name)
+                self.assertEqual((watched['type'], watched['result']), ('any', value))
+        self.assertFalse(any('.$any.tag' in name for name in locals_))
+        self.assertEqual(locals_['materials.0']['type'], 'uint32')
+        self.assertEqual(locals_['materials.1']['type'], 'uint64')
+        self.assertNotIn('materials', locals_)
+
+        globals_ = {value['name']: value for value in children(scopes[1]['variablesReference'])}
+        global_text = r'any<string> "line\n\"quoted\"é"'
+        self.assertEqual((globals_['global']['type'], globals_['global']['value']), ('any', global_text))
+        self.assertEqual(evaluate('global')['result'], global_text)
+        self.assertNotIn('Group', globals_)
+        group_start = list(globals_).index('Group.tag')
+        self.assertEqual(list(globals_)[group_start:group_start + 4],
+                         ['Group.tag', 'Group.bits', 'Group.text', 'Group.reference'])
+        for suffix, kind, value in [('tag', 'uint32', '1'), ('bits', 'uint64', '1'),
+                                    ('text', 'string', '""'), ('reference', 'object', 'nil')]:
+            ordinary = globals_['Group.' + suffix]
+            self.assertEqual((ordinary['type'], ordinary['value']), (kind, value))
+
+        object_ = locals_['object']
+        self.assertEqual(object_['type'], 'any')
+        self.assertTrue(object_['value'].startswith('any<Session> object @'))
+        self.assertEqual(children(object_['variablesReference'])[0]['value'], '7')
+        box = locals_['box']
+        fields = children(box['variablesReference'])
+        self.assertEqual(box['namedVariables'], len(fields))
+        self.assertEqual([field['name'] for field in fields], ['first', 'item', 'last_value'])
+        self.assertEqual(children(box['variablesReference'], start=1, count=1)[0]['value'], object_['value'])
+        self.assertEqual(evaluate('box.item')['result'], object_['value'])
+        self.assertEqual(evaluate('box.item.payload')['result'], '7')
+        self.assertEqual(children(locals_['items']['variablesReference'])[0]['type'], 'tuple')
+        self.assertEqual(evaluate('items[0]')['type'], 'tuple')
+        self.assertEqual(int(evaluate('counter')['result']), before)
+        self.assertEqual(self.frame()['line'], line)
+        self.client.request('next')
+        self.assertEqual(self.client.event('stopped')['reason'], 'step')
+        frame = self.frame()
+        self.assertEqual(frame['line'], line + 1)
+        self.assertEqual(int(evaluate('counter')['result']), before + 1)
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+
+    def test_any_prebuilt_artifacts_with_marked_legacy_and_missing_names(self):
+        source = '''let program = import:Std.Program;
+let console = import:Std.Io.Console;
+let erased: any = 42;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("entry");
+        return program.ExitCode.Ok;
+    };
+);
+'''
+        path = self.source('artifact.nra', source)
+        artifact = self.root / 'original.nvr'
+        subprocess.run([NEURA, 'build', '--no-optimize', path, '-o', artifact], check=True, cwd=self.root)
+        assembly = subprocess.check_output([NEURA, 'disassemble', artifact], text=True, cwd=self.root)
+        prefix = 'section "NAME" '
+        record = next(line for line in assembly.splitlines() if line.startswith(prefix))
+        names = bytes.fromhex(record.removeprefix(prefix))
+        marked_name = b'erased.$any.tag'
+        legacy_name = b'erased.tag'
+        marked = len(marked_name).to_bytes(4, 'little') + marked_name
+        self.assertEqual(names.count(marked), 1)
+        legacy = len(legacy_name).to_bytes(4, 'little') + legacy_name
+        legacy_text = assembly.replace(record, prefix + names.replace(marked, legacy).hex())
+        unmarked_path = self.source('legacy-name.nvra', legacy_text)
+        unmarked = self.root / 'legacy-name.nvr'
+        subprocess.run([NEURA, 'assemble', unmarked_path, '-o', unmarked], check=True, cwd=self.root)
+        stripped_text = assembly.replace(record + '\n', '')
+        stripped = self.root / 'without-name.nvr'
+        stripped_path = self.source('without-name.nvra', stripped_text)
+        subprocess.run([NEURA, 'assemble', stripped_path, '-o', stripped], check=True, cwd=self.root)
+
+        for image, mode in [(artifact, 'marked'), (unmarked, 'legacy'), (stripped, 'stripped')]:
+            with self.subTest(mode=mode):
+                client = Client()
+                try:
+                    client.request('initialize', {'adapterID': 'neura', 'linesStartAt1': True, 'columnsStartAt1': True})
+                    client.request('launch', {'program': str(image), 'cwd': str(self.root)})
+                    client.event('initialized')
+                    points = client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 6}]})
+                    self.assertTrue(points['breakpoints'][0]['verified'])
+                    client.request('configurationDone')
+                    self.assertEqual(client.event('stopped')['reason'], 'breakpoint')
+                    thread = client.request('threads')['threads'][0]
+                    frame = client.request('stackTrace', {'threadId': thread['id']})['stackFrames'][0]
+                    scopes = client.request('scopes', {'frameId': frame['id']})['scopes']
+                    variables = client.request('variables', {'variablesReference': scopes[1]['variablesReference']})['variables']
+                    if mode == 'marked':
+                        variable = next(value for value in variables if value['name'] == 'erased')
+                        self.assertEqual((variable['type'], variable['value']), ('any', 'any<int32> 42'))
+                    elif mode == 'legacy':
+                        values = {value['name']: value for value in variables}
+                        self.assertNotIn('erased', values)
+                        self.assertEqual(values['erased.tag']['type'], 'uint32')
+                        self.assertEqual(values['erased.bits']['value'], '42')
+                    else:
+                        self.assertTrue(all(value['name'].startswith('global ') for value in variables))
+                        self.assertIn(('uint64', '42'), [(value['type'], value['value']) for value in variables])
+                    client.request('continue')
+                    self.assertEqual(client.event('exited')['exitCode'], 0)
+                    client.event('terminated')
+                finally:
+                    client.close()
+
     def test_hook_step_and_trapping_admission_preserve_previous_field(self):
         source = '''let program = import:Std.Program;
 let failure = import:Std.Core.Failure;
