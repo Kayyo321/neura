@@ -129,6 +129,12 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Encoding.Json`](Stdlib-Encoding-Json) | [Contracts](Stdlib-Encoding-Json#detailed-contracts) | [Declarations](Stdlib-Encoding-Json#exported-declarations) |
 | [`Std.Encoding.Utf8`](Stdlib-Encoding-Utf8) | [Contracts](Stdlib-Encoding-Utf8#detailed-contracts) | [Declarations](Stdlib-Encoding-Utf8#exported-declarations) |
 
+### `Std.Events`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Events.Event`](Stdlib-Events-Event) | [Contracts](Stdlib-Events-Event#detailed-contracts) | [Declarations](Stdlib-Events-Event#exported-declarations) |
+
 ### `Std.Fs`
 
 | Module | Detailed contracts | Exported declarations |
@@ -316,3 +322,4 @@ The [complete specification](Stdlib-Design) has these sections.
   - [18.11 Test layout](Stdlib-Design#1811-test-layout)
   - [18.12 Concurrency](Stdlib-Design#1812-concurrency)
 - [19. `Std.Concurrent`](Stdlib-Design#19-stdconcurrent)
+- [20. `Std.Events`](Stdlib-Design#20-stdevents)

@@ -458,7 +458,7 @@ There are no concurrent collections; build one on `Guarded<T>` or as an owner ta
 
 ### 8.1 Monitors
 
-A *monitor* is a class whose instances tasks share and whose methods exclude one another. `#Synchronized` on a method makes it run with exclusive access to its receiver; on a class it marks every exported method with a body ([Tags](Tags.md#synchronized)).
+A *monitor* is a class whose instances tasks share and whose methods exclude one another. `#Synchronized` on a method makes it run with exclusive access to its receiver; on a class it marks every exported method with a body ([Tags](Tags.md#synchronized)). A synchronized method, and a lambda passed directly to `Guarded.with`, does not emit a [`Std.Events`](Stdlib.md#20-stdevents) event, directly or through calls the compiler resolves ([E0550](../diagnostics/E0550.md)): the handlers would run while the state is locked.
 
 <!-- example: run -->
 ```neura

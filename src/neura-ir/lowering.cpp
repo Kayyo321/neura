@@ -17,6 +17,7 @@
 #include "reference_initialization.hpp"
 #include "reference_storage.hpp"
 #include "scoped_resources.hpp"
+#include "event_guard.hpp"
 #include "static_initialization.hpp"
 #include "tags.hpp"
 #include "parser/syntax.hpp"
@@ -5248,6 +5249,8 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // A `using` resource does not escape its block (Lifetime030.md), judged
     // with the retention summaries of the linked program.
     check_scoped_resources(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    // No event is emitted under a monitor guard (Lifetime030.md, Events).
+    check_event_guards(program_);
     return std::move(program_);
 }
 

@@ -36,6 +36,7 @@ Ada
 | `Std.Math` | `Math` (an fdlibm 5.3 port), `BigInteger`, `BigDecimal` |
 | `Std.Time` | `Duration`, `Instant`, `Clock`, `SystemClock`, `FixedClock`, `Stopwatch`, `LocalDate`, `LocalTime`, `LocalDateTime`, `ZoneOffset`, `DayOfWeek` |
 | `Std.Concurrent` | `Task`, `Scope`, `Channel`, `Cancellation`, `Timer`, `Tasks`, `WorkerGroup`, `Parallel`, `AtomicInt64`, `Semaphore`, `Guarded` ([below](#stdconcurrent)) |
+| `Std.Events` | `Event`, `EventView`, `Subscription`: task-local events delivered synchronously in registration order ([Stdlib](Stdlib.md#20-stdevents)) |
 | `Std.Random` | `Random` (xoshiro256**), `Uuid` |
 | `Std.Encoding` | `Utf8`, `Hex`, `Base64`, `Csv`, `Json` |
 | `Std.Digest` | `Crc32`, `Sha256` |
@@ -183,6 +184,7 @@ A call that `spawn` starts must be [task-safe](Concurrency.md#52-task-safe-calls
 | `Std.Core`, `Std.Text`, `Std.Math`, `Std.Random`, `Std.Log`, `Std.Program`, `Std.Test` | Every function | None |
 | `Std.Collections` | Every function. The collections keep no module state, text conversion included. A generic member is checked with the callbacks and element types of each specialization, so a comparator or a hasher that is not task-safe makes the calls that use it unsafe. | None |
 | `Std.Concurrent` | Every function | None |
+| `Std.Events` | Every function. The classes keep no module state; their instances are not transferable, so they stay in the task that made them. | None |
 | `Std.Fs`, `Std.Net` | Every function. They issue host requests, which a task may do. | None |
 | `Std.Io` | Console output and formatting, `Closeable`, `ByteBuffer`, `BufferedWriter`, `Utf8Writer` | `Console.read_line` and the byte source that `Console.input()` returns: the read-ahead buffer belongs to the root task. In a program that calls `Console.input()`, also the read functions of `BufferedReader` (`read`, `read_exact`, `read_all`) and `Utf8Reader` (`read_scalar`, `read_line`, `read_to_end`), whatever source they were built from, because that source is a function value of the same type. A program that never calls `Console.input()` may use them in a task |
 | `Std.Time` | Every function, `SystemClock`, `FixedClock`, and `Stopwatch` included. The value classes are `#Immutable`, so a task may be given their instances and may read `Duration.Zero`, `Instant.Epoch`, `LocalTime.Midnight`, and `ZoneOffset.Utc` | None |

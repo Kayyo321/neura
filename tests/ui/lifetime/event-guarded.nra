@@ -1,0 +1,15 @@
+// Edge case 85: an event is not emitted in a lambda passed to Guarded.with,
+// here through a function the lambda calls.
+let events = import:Std.Events.Event;
+let guards = import:Std.Concurrent.Guarded;
+
+let announce = func(event: events.Event<int>, value: int) {
+    event.emit(value);
+};
+
+let update = func(state: guards.Guarded<int>, event: events.Event<int>) -> int {
+    return state.with<int>(func(value: int) -> int {
+        announce(event, value);
+        return value + 1;
+    });
+};

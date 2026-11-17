@@ -192,6 +192,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0536.md) | destructuring declared with last |
 | [E0537](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0537.md) | constructor shorthand names no instance field |
+| [E0550](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0550.md) | event emitted under a monitor guard |
 | [E0560](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0560.md) | parameter names differ from the overridden method |
 | [E0561](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0561.md) | defaults differ from the overridden method |
 

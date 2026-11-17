@@ -1,0 +1,111 @@
+/// @brief Task-local events: an owner emits a payload to the handlers subscribed to it, synchronously and in
+/// registration order (docs/design/Lifetime030.md, Events). An owner keeps the Event and exports its view, which
+/// can only subscribe. A subscription is removed with its token.
+/// @see [Std.Events.Event](https://github.com/Kayyo321/neura/wiki/Stdlib-Events-Event)
+#Since("0.3.0")
+export let Event = module (
+    /// @brief The token of one registration. Unsubscribing removes that registration; doing it again does
+    /// nothing. Two subscriptions are equal only when they are the same object.
+    #[Final, NotThreadSafe]
+    export let Subscription = class (
+        let detach: func(Subscription) -> void;
+        let attached: bool = true;
+
+        /// @brief Use Event.subscribe; the event makes its tokens.
+        export let init = func(remove: func(Subscription) -> void) {
+            detach = remove;
+        };
+
+        /// @brief Removes the registration. It takes effect from the next emission: a handler removed
+        /// during an emission is still called by it. A second call does nothing.
+        export let unsubscribe = func {
+            if (!attached) {
+                return;
+            }
+            attached = false;
+            detach(instance);
+        };
+
+        /// @brief Whether the registration is still in place.
+        export let active = func -> bool => attached;
+    );
+
+    /// @brief One handler and its token.
+    #[Final, NotThreadSafe]
+    let Registration = class<T> (
+        last token: Subscription;
+        last handler: func(T) -> void;
+        export let init = func(subscription: Subscription, run: func(T) -> void) {
+            token = subscription;
+            handler = run;
+        };
+        export let token_of = func -> Subscription => token;
+        export let deliver = func(payload: T) {
+            handler(payload);
+        };
+    );
+
+    /// @brief The owner's side of an event with payloads of type T. The registrations are an immutable list
+    /// that subscribe and unsubscribe replace, so an emission delivers to the registrations that existed when
+    /// it started and copies nothing.
+    #[Final, NotThreadSafe]
+    export let Event = class<T> (
+        let registrations: Registration<T>[list] = new;
+
+        /// @brief Registers `handler` until its subscription is removed, and returns the subscription. The
+        /// event keeps the handler alive; collection is not unsubscription. The same handler subscribed twice
+        /// is two registrations.
+        export let subscribe = func(handler: func(T) -> void) -> Subscription {
+            last subscription = new Subscription(func(token: Subscription) {
+                remove(token);
+            });
+            last next: Registration<T>[list] = new;
+            for (let registration: Registration<T> in registrations) {
+                next.append(registration);
+            }
+            next.append(new Registration<T>(subscription, handler));
+            registrations = next;
+            return subscription;
+        };
+
+        /// @brief Delivers `payload` to every registration that exists when the emission starts, in
+        /// registration order. A registration added or removed by a handler takes effect from the next
+        /// emission; a nested emit uses the registrations at its own start. A trap in a handler ends the run.
+        export let emit = func(payload: T) {
+            last current = registrations;
+            for (let registration: Registration<T> in current) {
+                registration.deliver(payload);
+            }
+        };
+
+        /// @brief A view that can subscribe and nothing else, for the owner to export.
+        export let view = func -> EventView<T> => new EventView<T>(instance);
+
+        /// @brief The number of registrations in place.
+        export let subscriber_count = func -> int => registrations.length;
+
+        let remove = func(token: Subscription) {
+            last next: Registration<T>[list] = new;
+            for (let registration: Registration<T> in registrations) {
+                if (registration.token_of() != token) {
+                    next.append(registration);
+                }
+            }
+            registrations = next;
+        };
+    );
+
+    /// @brief What an owner exports: subscribe only. It cannot emit and gives no access to the Event.
+    #[Final, NotThreadSafe]
+    export let EventView = class<T> (
+        let source: Event<T>;
+
+        /// @brief Use Event.view.
+        export let init = func(event: Event<T>) {
+            source = event;
+        };
+
+        /// @brief Registers `handler` on the event; see Event.subscribe.
+        export let subscribe = func(handler: func(T) -> void) -> Subscription => source.subscribe(handler);
+    );
+);

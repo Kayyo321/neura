@@ -189,6 +189,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](E0536.md) | destructuring declared with last |
 | [E0537](E0537.md) | constructor shorthand names no instance field |
+| [E0550](E0550.md) | event emitted under a monitor guard |
 | [E0560](E0560.md) | parameter names differ from the overridden method |
 | [E0561](E0561.md) | defaults differ from the overridden method |
 

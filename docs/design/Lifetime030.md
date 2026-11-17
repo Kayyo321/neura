@@ -129,20 +129,20 @@ yield     = "yield" expression ";"
 
 | Declaration | Contract | Status |
 | --- | --- | --- |
-| `Event<T>` | The owner's side. `new Event<T>()`; `subscribe(handler: func(T) -> void) -> Subscription`; `emit(payload: T) -> void`; `view() -> EventView<T>`; `subscriber_count() -> int`. `#Final`, `#NotThreadSafe`. | proposed |
-| `EventView<T>` | What an owner exports: `subscribe` only. It cannot emit and gives no access to the `Event`. `#Final`, `#NotThreadSafe`. | proposed |
-| `Subscription` | The token of one registration. `unsubscribe() -> void` removes that registration and does nothing when called again; `active() -> bool`. Two subscriptions are equal only when they are the same object. `#Final`, `#NotThreadSafe`. | proposed |
+| `Event<T>` | The owner's side. `new Event<T>()`; `subscribe(handler: func(T) -> void) -> Subscription`; `emit(payload: T) -> void`; `view() -> EventView<T>`; `subscriber_count() -> int`. `#Final`, `#NotThreadSafe`. | implemented, proposed |
+| `EventView<T>` | What an owner exports: `subscribe` only. It cannot emit and gives no access to the `Event`. `#Final`, `#NotThreadSafe`. | implemented, proposed |
+| `Subscription` | The token of one registration. `unsubscribe() -> void` removes that registration and does nothing when called again; `active() -> bool`. Two subscriptions are equal only when they are the same object. `#Final`, `#NotThreadSafe`. | implemented, proposed |
 
 | Rule | Status |
 | --- | --- |
 | `subscribe` retains its handler until `unsubscribe`. A handler that captures is therefore written `new func(...)`, and a bound method `new bound(receiver.method)`; a handler that borrows a frame is rejected by the storage milestone's rules. Collection is not unsubscription: an event keeps its handlers alive. | proposed |
-| The same handler subscribed twice is two registrations with two tokens. | proposed |
-| `emit` delivers synchronously, in registration order, to the registrations that exist when the emission starts. A registration added or removed by a handler takes effect from the next emission, so a handler removed during an emission is still called by it. A nested `emit` uses the registrations at its own start. | proposed |
-| Handlers return nothing. A trap in a handler ends the run. | proposed |
-| `emit` compares nothing and suppresses nothing. An owner commits its state first and then emits the old and new values it accepted, as a tuple payload; it does not read them again through a getter. | proposed |
-| The three classes are not transferable, so giving one to a task is the existing `E0602`. | proposed |
-| `emit` is not called under a monitor guard (`E0550`): in a `#Synchronized` method, in a lambda passed directly to `Guarded.with`, or in a function either of them reaches through calls the compiler resolves. A call through a function value is not followed, so the check is a check of the known call graph and not a proof. | proposed |
-| The registrations are an immutable list that `subscribe` and `unsubscribe` replace, so `emit` copies nothing. `subscribe` and `unsubscribe` allocate; `emit` does not, beyond what handlers do. | proposed |
+| The same handler subscribed twice is two registrations with two tokens. | implemented, proposed |
+| `emit` delivers synchronously, in registration order, to the registrations that exist when the emission starts. A registration added or removed by a handler takes effect from the next emission, so a handler removed during an emission is still called by it. A nested `emit` uses the registrations at its own start. | implemented, proposed |
+| Handlers return nothing. A trap in a handler ends the run. | implemented, proposed |
+| `emit` compares nothing and suppresses nothing. An owner commits its state first and then emits the old and new values it accepted, as a tuple payload; it does not read them again through a getter. | implemented, proposed |
+| The three classes are not transferable, so giving one to a task is the existing `E0602`. | implemented, proposed |
+| `emit` is not called under a monitor guard (`E0550`): in a `#Synchronized` method, in a lambda passed directly to `Guarded.with`, or in a function either of them reaches through calls the compiler resolves. A call through a function value is not followed, so the check is a check of the known call graph and not a proof. | implemented, proposed |
+| The registrations are an immutable list that `subscribe` and `unsubscribe` replace, so `emit` copies nothing. `subscribe` and `unsubscribe` allocate; `emit` does not, beyond what handlers do. | implemented, proposed |
 
 <!-- example: fragment: 0.3.0 design that the compiler does not accept yet -->
 ```neura
@@ -389,4 +389,6 @@ No existing source changes meaning: the four words stay identifiers wherever the
 | `has_next` and `next` are generated over `$resume` without calling each other; `next` advances when nothing is buffered and then reads the buffer. | It keeps `next` from dispatching through the interface to its own class. |
 | Tier 3 compiles `$resume`, and the resume chain's jump into a loop body leaves native code at each resume (tier 3 lowers a second loop entry by deoptimizing). Output, steps and peak cells are the same in every mode. | Tier 3's handling of an irreducible entry is outside this milestone; a generator's state never needs a native frame to survive a resume. |
 | A generator's call writes out the body of `Sequence.from_iterator`: it keeps the state in a hidden local and returns `new Sequence<T>` over two function values that call the state's `has_next` and `next`, instead of calling `from_iterator`. | Native tier 3 verification (`NEURA_TIER3_VERIFY=1`) rejects, as V7, a `from_iterator` of a fresh iterator that tier 3 inlines two calls deep (the base of this milestone fails the same way on `from_iterator<int>(new Counter(n))` called through a function), and the shape written out passes it, with the same results. |
+| `subscribe` retains its handler as any function value is retained; a handler that captures is accepted without `new func`, and edge case 84 waits for the storage milestone. | The base of this milestone has no `new func`. |
+| `E0550` runs once, on the program that lowering links, when it contains the event module. It finds `emit` and `Guarded.with` by their trusted files, starts from the functions that carry `synchronized` and from the `$invoke` of each lambda written as an argument of `Guarded.with`, and follows Call, VirtualCall (by the runtime's rule) and constructor calls. | The rows above. |
 

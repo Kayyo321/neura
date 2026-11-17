@@ -1,0 +1,57 @@
+// Event ordering in every execution mode (docs/design/Lifetime030.md,
+// Events, edge cases 80 to 83 and 87). An account commits its state, then
+// emits the old and new values it accepted.
+let console = import:Std.Io.Console;
+let events = import:Std.Events.Event;
+let program = import:Std.Program;
+
+let Account = class (
+    let balance: int = 0;
+    let changed = new events.Event<[int, int]>();
+    export let balance_changed = func -> events.EventView<[int, int]> => changed.view();
+
+    export let deposit = func(amount: int) {
+        last before = balance;
+        balance = balance + amount;
+        changed.emit([before, balance]);
+    };
+);
+
+let Ledger = class (
+    export let entries: int = 0;
+    export let total: int = 0;
+    export let record = func(change: [int, int]) {
+        let [before, after] = change;
+        entries = entries + 1;
+        total = total + after - before;
+    };
+);
+
+let EventsOrder = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last account = new Account();
+        last ledger = new Ledger();
+        last book = account.balance_changed().subscribe(func(change: [int, int]) {
+            ledger.record(change);
+        });
+        last printer = account.balance_changed().subscribe(func(change: [int, int]) {
+            let [before, after] = change;
+            console.print_line("balance " + before.to_string() + " -> " + after.to_string());
+        });
+        for (let index = 1; index <= 3; index++) {
+            account.deposit(index * 10);
+        }
+        printer.unsubscribe();
+        printer.unsubscribe();
+        account.deposit(5);
+        // Many emissions, so that the handlers run in every tier.
+        for (let index = 0; index < 20000; index++) {
+            account.deposit(index % 3);
+        }
+        book.unsubscribe();
+        account.deposit(1000);
+        console.print_line("entries " + ledger.entries.to_string());
+        console.print_line("total " + ledger.total.to_string());
+        return program.ExitCode.Ok;
+    };
+);

@@ -317,6 +317,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/control_flow.cpp
     src/neura-ir/lifetime.cpp
     src/neura-ir/scoped_resources.cpp
+    src/neura-ir/event_guard.cpp
     src/neura-ir/specialize.cpp
     src/neura-ir/containment.cpp
     src/neura-ir/inline_limit.cpp
