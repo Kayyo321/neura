@@ -147,6 +147,7 @@ Measured on x86-64 Linux, gcc 14, Release, GPU support compiled in. "Before" is 
 | Every shipped executable depends on no system library beyond rc.3's. | proposed; holds. The tools also load `libneura-core` and `libneura-sdk`, which ship with them; the frozen rule names the system libraries. A portable release needs only `libc`, `libm` and the loader, with glibc symbols no newer than 2.38 |
 | Each archive is at most 25% larger than rc.3's. | proposed; holds on x86-64 Linux (+15.1%, runtime-only −61%); the aarch64 Linux and macOS archives are built only by the release workflow and are not measured here |
 | `neura --version` and `neura run` of a hello-world image within 5% of rc.3. | proposed; holds for the portable build (−72%, +3.5%) |
+| Position-independent code does not slow programs down. | proposed; holds: `scripts/bench-wall.py` at the full sizes, 5 runs, best median of two rounds each, gives a geometric mean of 0.998 against the single binary over 17 programs (0.945 to 1.017), with equal steps and peak heap cells |
 
 Section garbage collection (`-ffunction-sections -fdata-sections` with `--gc-sections`) was tried before the libraries existed and reduced the statically linked tools from 103 MB to 35 MB. With shared libraries it would only remove unreferenced code from the two libraries, and it changes the code generation of the NVM and the JIT, so it is not used.
 
