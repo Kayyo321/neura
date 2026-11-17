@@ -2,7 +2,7 @@
 
 This note fixes the design of the 0.3.0 storage milestone: explicit construction with `new`, tuples and payload enums stored inline, arrays owned by the block that creates them, primitive references as checked borrows, and closures whose environment does not escape. It builds on [semantic facts and representations](Representation030.md) and is a design note in the sense of [the 0.3.0 baseline](Release030.md). Rows move to the language pages, [NVR](../runtime/NVR.md) and [NVM](../runtime/NVM.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-16. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+The storage design is approved. Steps 2–10 are implemented on the storage milestone branch. Step 11 records performance acceptance. When a rule changes, record the reason here and update the corresponding language or artifact contract.
 
 ## Principles
 
@@ -18,7 +18,7 @@ Status: *proposed* on 2026-11-16. The owner was away and had asked for autonomou
 | --- | --- |
 | A list is constructed with `new`: `new([1, 2, 3])` where the list type is known from context, `new int[list]([1, 2, 3])` with the type written, `new` alone for an empty list of a known type, and `new(0 .. count)` or `new int[list](0 .. count)` from a range. The elements, or the range's bounds, are evaluated once, in written order, straight into the list; no array is built and copied. | proposed |
 | A bare literal or range where a list is expected is an error, `E0450`, with a fix that inserts `new` and keeps the literal, its comments and its order. A bare literal where an array is expected stays an array. A nested list needs its own `new`. | proposed |
-| A function value that captures nothing needs no `new`. One that captures and is stored, returned, passed to a parameter that retains it, or captured by another escaping function value is written `new func(...) ...`. A bound method that escapes is written `new bound(receiver.method)`. Whether a capture escapes follows from the retention summaries of M2. | implemented (step 10), proposed |
+| A function value that captures nothing needs no `new`. One that captures and is stored, returned, passed to a parameter that retains it, or captured by another escaping function value is written `new func(...) ...`. A bound method that escapes is written `new bound(receiver.method)`. Whether a capture escapes follows from the retention summaries of M2. | implemented (step 10) |
 | An ordinary call that allocates inside, such as a factory or a list that grows, needs no `new`; its summary says it allocates. | proposed |
 
 The record form `new with(original) { ... }` belongs to the records milestone.
@@ -59,12 +59,12 @@ Arrays, primitive-reference storage and non-escaping closure environments that b
 | Rule | Status |
 | --- | --- |
 | A region belongs to a block, a loop iteration, or a function. It is released on every exit from its owner: the end of the block, `break`, `continue`, `return`, a trap, cancellation, and task teardown. A loop releases each iteration's region before the next. | proposed |
-| A fresh array belongs to the region of the block that creates it. Returning a fresh array moves it, and every entry it owns, to the caller's region. A function that returns an array it did not create, borrowed from a parameter, global or field, is an error. | implemented (step 9), proposed |
-| Assigning an array created in an inner block to a binding of an outer block is an error. An inner binding may borrow an outer array. | implemented (step 9), proposed |
-| An array may not be stored in a class field, a list element, a channel message, an escaping closure, or a task argument. A tuple or enum that contains an array has the array's lifetime. | implemented (step 9), proposed |
-| A primitive reference to a local or parameter is a borrow of a region box that lives as long as the binding's block. It may not be returned, stored in a field, or captured by an escaping closure. Returning `&T` is allowed only for global storage or a field of an owner the result summary names. `reference_storage.cpp` no longer promotes storage to the heap. | implemented (step 10), proposed |
-| A closure environment that does not escape is a region entry of the block that creates it; `new func` and `new bound` allocate on the heap. | implemented (step 10), proposed |
-| Escapes are checked on lowering and again on the linked, specialized program, with the storage and transfer facts of M2. | implemented (step 10), proposed |
+| A fresh array belongs to the region of the block that creates it. Returning a fresh array moves it, and every entry it owns, to the caller's region. A function that returns an array it did not create, borrowed from a parameter, global or field, is an error. | implemented (step 9) |
+| Assigning an array created in an inner block to a binding of an outer block is an error. An inner binding may borrow an outer array. | implemented (step 9) |
+| An array may not be stored in a class field, a list element, a channel message, an escaping closure, or a task argument. A tuple or enum that contains an array has the array's lifetime. | implemented (step 9) |
+| A primitive reference to a local or parameter is a borrow of a region box that lives as long as the binding's block. It may not be returned, stored in a field, or captured by an escaping closure. Returning `&T` is allowed only for global storage or a field of an owner the result summary names. `reference_storage.cpp` no longer promotes storage to the heap. | implemented (step 10) |
+| A nonescaping closure environment uses the lexical region of its construction. `new func` and `new bound` allocate on the heap. | implemented (step 10) |
+| Escapes are checked on lowering and again on the linked, specialized program, with the storage and transfer facts of M2. | implemented (step 10) |
 | Region cells are counted as stack cells, not heap cells. A run reports `peak stack cells` beside `peak heap cells`, and `--max-stack-cells` limits them (default 2^24). Exceeding it is the trap `stack limit exceeded`. | proposed |
 | A handle is never reused, so an access to a released entry finds no entry and traps, in every tier, with `released storage accessed`. The checks above make that unreachable in a verified program. The trap is the runtime's backstop for a malformed image. | proposed |
 | The collector does not sweep a region entry. It traces the references a live region entry holds. | proposed |
@@ -108,6 +108,10 @@ From step 5 on, an image no longer matches rc.3 byte for byte. A step is accepte
 - on the new binary, every execution mode gives exactly what tier 0 gives, including steps, `peak_heap_cells` and peak stack cells;
 - the change in steps and peak cells is listed for each program it changes, with the reason;
 - the performance gate of the plan holds: no program and not the geometric mean more than 5% slower than rc.3.
+
+The storage milestone's tier-0 comparison found 488 shared baseline files with zero differences. The extended comparison covered 14,896 shared files and found 374 resource-limit differences. For the 371 step-limit differences, each pair returned the same status and hit the same numeric step bound. The trap moved to a different operation, or a run emitted a longer prefix of the identical completed output. Three frame-limit diagnostics named different calls in the console stack while preserving the trap kind, status and output. Tier 0 and every compared candidate mode agreed on these cases and their counters. The numeric boundary suite agreed on all 136,816 cases.
+
+The combined storage fixtures cover arrays of explicitly allocated class instances, a list of aliases, an inline tuple inside `Result`, and ragged array ownership transfer over repeated loop exits. Each optimized and unoptimized build produced identical image bytes from source and serialized NeuraIR, with an exact assembly round trip. Mapped and stripped images matched in 11 execution modes. The compiled object-aggregate case contains two explicit object allocations, one array region allocation and no tuple or result box. The ragged-array case completes with a peak of 51 stack cells and traps when the limit is 50. Returning a borrowed array or borrowed row, and moving an inner row into an outer scope, each reports `E0451` before image emission.
 
 ## Acceptance
 

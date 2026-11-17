@@ -428,6 +428,22 @@ if(NOT status STREQUAL "0" OR
    NOT stdout MATCHES "\n[0-9]+ function\\(s\\): [0-9]+ task-safe, of which [0-9]+ can also be the worker of a parallel map\n$")
     message(FATAL_ERROR "check --task-safety: unexpected report (status ${status})\n${stdout}\n${stderr}")
 endif()
+
+# The array return is invalid only after the type parameter is specialized.
+file(WRITE "${TEST_DIR}/report-borrowed-array.nra" [=[
+let alias = func<T>(value: T) -> T => value;
+let use = func() -> int {
+    last values = [1];
+    last borrowed = alias<int[]>(values);
+    return borrowed[0];
+};
+]=])
+execute_process(COMMAND "${NEURA}" check --task-safety report-borrowed-array.nra WORKING_DIRECTORY "${TEST_DIR}"
+    RESULT_VARIABLE status OUTPUT_VARIABLE stdout ERROR_VARIABLE stderr)
+if(NOT status STREQUAL "1" OR NOT stdout STREQUAL "" OR
+   NOT stderr MATCHES "error\\[E0451\\]: array returned but not created")
+    message(FATAL_ERROR "task-safety accepted a specialized borrowed array return (status ${status})\n${stdout}\n${stderr}")
+endif()
 # The audit of section 5.2: with the modules a service needs linked (Std.Core, Std.Text, Std.Collections,
 # Std.Io.Console, Std.Net, Std.Time, Std.Log, and JSON with its big numbers), every library function is task-safe
 # except console input, whose read-ahead buffer belongs to the root task. A new entry here is a library
