@@ -37,13 +37,18 @@ Inline layouts, frame and static regions, and the NVR revision belong to the sto
 | An inline layout holds at most 64 value words. A larger shape is an error that names the shape and its size; it is never moved to the heap silently. | frozen |
 | The analysis runs on the specialized program, so `Optional<Tree>` and a generic enum instantiated with itself are checked per instance. | frozen |
 
-Six enums in the repository close a cycle today:
+Five enums in the repository close a cycle today:
 
 - three in the standard library: `Error`, `PortableError`, and `Node` in `std/text/internal/regex-parser.nra`;
-- two `Tree` enums in `tests/backend/programs`;
+- the `Tree` enum of `tests/backend/programs/aggregates.nra`;
 - the `Tree` example of [Types](../lang/Types.md).
 
-`JsonValue` recurses only through lists, which are references, so it closes none. Step 3 handles the two error types. The others migrate in the change that enforces the rule.
+`JsonValue` and the `Tree` of `tests/backend/programs/generic-enums.nra` recurse only through lists, which are references, so they close none. Step 3 handles the two error types. The others migrate in the change that enforces the rule.
+
+Two corrections of fact, 2026-11-16, from step 2's analysis run over every program in `tests/` and `examples/`; both await the owner's confirmation:
+
+- The list above first said six enums, with two `Tree` enums in `tests/backend/programs`. The analysis finds one there.
+- NeuraIR keeps payload types but not payload field names, and the analysis reads NeuraIR, so it can also check a program built from `.nir`. The path therefore names a payload by its position from zero: `Tree -> Tree.Branch.0: Tree` rather than the example's `Tree.Branch.left`. Field names in the path need NeuraIR to record them, which the change that enforces the rule can add if it is wanted.
 
 ## Error chains
 

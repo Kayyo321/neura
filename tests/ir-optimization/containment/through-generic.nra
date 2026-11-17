@@ -1,0 +1,6 @@
+// Optional<Tree> holds Tree inline, so Tree contains itself through the
+// instance.
+let ThroughGeneric = module (
+    let Optional = enum<T> (None, Some(T));
+    let Tree = enum (Leaf(int), Branch(int, Optional<Tree>));
+);

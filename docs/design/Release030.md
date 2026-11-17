@@ -139,7 +139,7 @@ Counts of the sites in today's syntax that each planned breaking rule would touc
 | A reference to a local primitive no longer moves the local to the heap | 19, and 34 `&T` declarations; none in `stdlib/` | tests (14) | medium |
 | A function cannot return an array that aliases a parameter or field | 6 confirmed (2 in `stdlib/`), 262 candidates | tests | low |
 | An array cannot be kept in a heap field, iterator or closure | 8 fields | `tests/bench-wall` (7) | medium |
-| A recursive enum payload needs an explicit reference | 6 enums: 3 in `stdlib/` (`Error`, `PortableError` and the regular-expression parser's `Node`), 2 in `tests/`, and the `Tree` example of Types.md. `JsonValue` recurses only through lists, which are references. | stdlib | high |
+| A recursive enum payload needs an explicit reference | 5 enums: 3 in `stdlib/` (`Error`, `PortableError` and the regular-expression parser's `Node`), 1 in `tests/` (`aggregates.nra`), and the `Tree` example of Types.md. `JsonValue` and the `Tree` of `generic-enums.nra` recurse only through lists, which are references. Corrected from 6 on 2026-11-16 by [the containment analysis](Representation030.md#finite-aggregates). | stdlib | high |
 | A capturing lambda or bound method that escapes needs `new func` or `new bound` | about 87 lambdas and about 35 bound methods | tests (46) | low |
 | A field or static whose default would be admitted by a class hook | 522, of which 96 have accessors | tests (199) | medium |
 | A class match that relied on boxing a scalar | 0; the language has no such boxing | none | high |

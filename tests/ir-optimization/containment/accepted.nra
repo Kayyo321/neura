@@ -1,0 +1,24 @@
+// Value types that recurse only through a reference or separate storage
+// contain nothing that closes a cycle (docs/design/Representation030.md,
+// "Finite aggregates").
+let Accepted = module (
+    let Node = class (
+        export let next: Shape;
+    );
+
+    let Shape = enum (
+        Empty,
+        Many(Shape[list]),
+        Fixed(Shape[]),
+        Linked(Node),
+        Named(string),
+        Later(func(int) -> Shape),
+        Pair([int, string]),
+    );
+
+    let Box = enum<T> (Empty, Full(T));
+    export let Nested = Box<Box<int>>;
+
+    // A generic enum that would contain itself, never instantiated.
+    let Chain = enum<T> (End, Link(T, Chain<T>));
+);

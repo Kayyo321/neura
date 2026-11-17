@@ -1,0 +1,3 @@
+let SelfCycle = module (
+    let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
+);

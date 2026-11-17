@@ -1,0 +1,4 @@
+let Mutual = module (
+    let Expression = enum (Number(int), Group(Statement));
+    let Statement = enum (Empty, Value(int, Expression));
+);
