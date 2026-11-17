@@ -372,6 +372,10 @@ Each step is one commit on `m4-integration` with the targeted tests named. The f
 - The recursion and nesting traps, the result check and the cast rule each have a program, and a malformed image that leaves an event open or closes one twice is rejected by the loader or trapped.
 - The performance gate of the baseline holds, and a benchmark of a hot hooked read is added to the recorded set with its steps.
 
+The executable hook suite exercises 19 source-derived cases with fixed traces or traps. Source and serialized NeuraIR builds agree byte for byte under each metadata and optimization setting. Each image also round-trips through the assembler. The traces and resource counters agree across eight runtime configurations, including eager shadow execution with verification enabled. The debugger tests step into and out of a getter, inspect nil policy in fields and list elements, and inspect the previous value after a setter trap. Pausing and inspecting at every block preserves output, resource counts and the hook counter.
+
+All 291 images in the preceding storage milestone's identity corpus rebuild byte for byte on the hook compiler, including the original generated programs. The expanded generator compiles seeds 1–40 and includes hook policies in 26 of them. Five hook-bearing seeds matched tier 0 across 25 modes in an unlimited-run check.
+
 ## Migration
 
 No existing source changes meaning: no class has a hook, and `static scope` did not parse. For the migration guide:
