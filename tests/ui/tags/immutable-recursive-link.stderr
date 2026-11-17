@@ -1,0 +1,13 @@
+error[E0919]: field 'cause' of #Immutable class 'Link' has the mutable type Chain
+  --> $DIR/immutable-recursive-link.nra:11:21
+   |
+ 9 |     #[Final, Immutable]
+   |              --------- 'Link' is marked #Immutable here
+10 |     let Link = class (
+11 |         export last cause: Chain;
+   |                     ^^^^^ its value can change after construction
+   |
+   = note: immutable types are bool, numbers, string, tuples and enums of immutable types, and classes marked #Immutable
+   = help: store an immutable value, or mark its class #Immutable
+
+For more information about this error, try `neura explain E0919`.
