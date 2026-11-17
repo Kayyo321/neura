@@ -620,12 +620,72 @@ NEURA_TEST(tier, operand_counts_above_255_run_on_the_interpreter_like_tier_0) {
     }
 }
 
-NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
+// What the function programs of `image` hold of the NVR 1.7 operations, formed
+// from the blocks `cache` has lifted (run the image through the cache first).
+struct ProgramOps {
+    std::uint64_t programs = 0;
+    // Returns of several words, and calls to functions that return them.
+    std::uint64_t multi_returns = 0;
+    std::uint64_t multi_calls = 0;
+    // Component reads and writes run inside the program.
+    std::uint64_t components = 0;
+    // Allocate, repeat, append and remove on aggregate collections as helpers.
+    std::uint64_t aggregate_helpers = 0;
+};
+
+ProgramOps program_ops(const nvr::Image& image, nvm::TierCache& cache) {
+    ProgramOps ops;
+    for (std::uint32_t function = 0; function < image.functions.size(); ++function) {
+        const auto formation = nvm::tier2::form_program(image, function, [&](std::uint32_t block) {
+            nvm::tier2::BlockForm form;
+            const auto& decoded = image.functions[function].blocks[block];
+            const auto& graph = image.graphs[decoded.graph];
+            if (graph.nodes.empty()) {
+                if (!graph.outputs.empty()) form.kind = nvm::tier2::BlockForm::Kind::Wired;
+                else if (decoded.exits.size() == 1) form.kind = nvm::tier2::BlockForm::Kind::Empty;
+                return form;
+            }
+            const auto settled = cache.lookup(function, block);
+            if (!settled.settled) form.pending = true;
+            else if (settled.block) {
+                form.kind = nvm::tier2::BlockForm::Kind::Lifted;
+                form.lifted = settled.block;
+            }
+            return form;
+        }, false);
+        if (!formation.region) continue;
+        ++ops.programs;
+        const auto& program = *formation.region;
+        for (const auto& op : program.code) {
+            using Code = nvm::tier2::Code;
+            if (op.code == Code::Return && op.width > 1) ++ops.multi_returns;
+            if (op.code == Code::Call && !image.functions[op.a].more_results.empty()) ++ops.multi_calls;
+            if (op.code == Code::State || op.code == Code::Helper) {
+                const auto operation = program.exits[op.index]->operation;
+                if (operation == nvr::StateOp::ReadComponent || operation == nvr::StateOp::WriteComponent) {
+                    ops.components += op.code == Code::State;
+                } else if (op.code == Code::Helper &&
+                           (operation == nvr::StateOp::AllocateCollection || operation == nvr::StateOp::RepeatCollection ||
+                            operation == nvr::StateOp::AppendElement || operation == nvr::StateOp::RemoveElement)) {
+                    const auto& arguments = program.exits[op.index]->arguments;
+                    const auto type = operation == nvr::StateOp::AllocateCollection ||
+                                              operation == nvr::StateOp::RepeatCollection
+                                          ? program.exits[op.index]->immediate
+                                          : (arguments.empty() ? 0 : arguments[0].type);
+                    ops.aggregate_helpers += nvr::collection_components(image, type) != nullptr;
+                }
+            }
+        }
+    }
+    return ops;
+}
+
+NEURA_TEST(tier, multi_word_results_run_in_every_tier) {
     // Functions that return two and three words (NVR 1.7, mixed int, float and
     // text), called in a loop, recursively, and with the words discarded. Tier
-    // 2 and tier 3 decline the returns and the calls (docs/design/Storage030.md,
-    // "Tier 2 and tier 3 first decline a block that uses a new operation"), so
-    // every mode must end with the reference run's output, steps and peak heap.
+    // 2 and tier 3 run the returns and the calls themselves
+    // (docs/design/Storage030.md, "Images and runtime"), so every mode must end
+    // with the reference run's output, steps and peak heap.
     const auto image = multi_result_image(environment);
     const auto reference = run_captured(image, limits_at(0));
     check(reference.result.completed, "the image runs at tier 0");
@@ -649,22 +709,25 @@ NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
                 const auto counts = cache.statistics();
                 check(counts.lifted_by_hint > 0 && counts.programs > 0,
                       label + ": the hinted blocks were lifted into programs");
-                // rec's single-word calls to add still run in programs; the
-                // multi-word calls and returns are declined. Where tier 3
-                // native code is unsupported (AArch64, macOS), NEURA_JIT=on
-                // compiles tier 2 code instead, and this fixture's calls are
-                // not counted in programs there; the identical runs above are
-                // the evidence on those platforms.
+                // The multi-word returns and calls are ops of the programs, not
+                // deoptimizations. Where tier 3 native code is unsupported
+                // (AArch64, macOS), NEURA_JIT=on compiles tier 2 code instead,
+                // and this fixture's calls are not counted in programs there;
+                // the identical runs above are the evidence on those platforms.
+                const auto ops = program_ops(image, cache);
+                check(ops.multi_returns >= 3 && ops.multi_calls >= 3,
+                      label + ": programs hold multi-word returns and calls: " + std::to_string(ops.multi_returns) + ", " +
+                          std::to_string(ops.multi_calls));
                 if (jit::native::supported()) {
                     check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
-                          label + ": single-word calls and returns still run in programs");
+                          label + ": calls and returns run in programs");
+                    // Only the prints' host exits are left as deoptimizations.
+                    check(counts.region_counts.exits <= counts.region_counts.calls,
+                          label + ": no call or return deoptimized: " + std::to_string(counts.region_counts.exits));
                 }
-                check(counts.region_counts.exits > 0, label + ": the multi-word exits were declined");
-                // Tier 3 inherits the decline: it builds from these programs and
-                // still runs, so its result is the reference's.
                 if (tier3 != Tier3::Off && jit::native::supported()) {
                     check(counts.native_programs > 0 && counts.native.steps > 0,
-                          label + ": tier 3 built and ran programs around the declined exits");
+                          label + ": tier 3 built and ran the programs");
                 }
             }
         }
@@ -693,14 +756,16 @@ NEURA_TEST(tier, multi_word_results_run_on_the_reference_path_in_every_tier) {
 const char* const aggregate_output =
     "3\n2\n3.5\n9.25\n4\n5\n8\n4\n7\n2\n2\n42\n40\n780\n70\n37\n0.25\n300\n6\n105\n12066\n2\n1.5\n";
 
-NEURA_TEST(tier, aggregate_collections_run_on_the_reference_path_in_every_tier) {
+NEURA_TEST(tier, aggregate_collections_run_in_every_tier) {
     // Arrays and lists of two- and three-component elements (NVR 1.7, mixing int,
     // float, text, object and array components): allocate, repeat, append,
     // remove, read and write a component, length, version, and loops. The texts,
     // objects and arrays are kept alive only by components, under many
     // collections. Tier 2 and tier 3 decline every operation on such a
-    // collection (docs/design/Storage030.md, "Images and runtime"), so every
-    // mode must end with the reference run's output, steps and peak heap.
+    // collection themselves (docs/design/Storage030.md, "Images and runtime"):
+    // component reads and writes inside the program, the allocations, appends
+    // and removals as helpers. Every mode must end with the reference run's
+    // output, steps and peak heap.
     const auto image = aggregate_image(environment);
     const auto reference = run_captured(image, limits_at(0));
     check(reference.result.completed, "the image runs at tier 0");
@@ -730,14 +795,18 @@ NEURA_TEST(tier, aggregate_collections_run_on_the_reference_path_in_every_tier) 
                 // As in the multi-word test: program counts are kept where tier
                 // 3 native code is supported; elsewhere NEURA_JIT=on compiles
                 // tier 2 code and the identical runs above are the evidence.
+                const auto ops = program_ops(image, cache);
+                check(ops.components >= 4 && ops.aggregate_helpers >= 4,
+                      label + ": programs hold the aggregate operations: " + std::to_string(ops.components) + ", " +
+                          std::to_string(ops.aggregate_helpers));
                 if (jit::native::supported()) {
                     check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
-                          label + ": calls and returns still run in programs");
+                          label + ": calls and returns run in programs");
+                    check(counts.region_counts.helpers > 0, label + ": the aggregate allocations ran as helpers");
                 }
-                check(counts.region_counts.exits > 0, label + ": the aggregate exits were declined");
                 if (tier3 != Tier3::Off && jit::native::supported()) {
                     check(counts.native_programs > 0 && counts.native.steps > 0,
-                          label + ": tier 3 built and ran programs around the declined exits");
+                          label + ": tier 3 built and ran the programs");
                 }
             }
         }
@@ -799,7 +868,7 @@ NEURA_TEST(tier, aggregate_traps_are_the_same_in_every_tier) {
     check(none.result.completed && none.result.status == 0, "five arguments run to the end");
 }
 
-NEURA_TEST(tier, aggregate_collections_cost_one_cell_per_word_and_are_declined_by_tiers_2_and_3) {
+NEURA_TEST(tier, aggregate_collections_cost_one_cell_per_word_in_every_tier) {
     // tests/backend/tier/aggregate-cells.nvra: 1 (arguments) + 7 (three two-word
     // elements) + 10 (two three-word elements, then one more) = 18 cells at the
     // peak, and 15 after the removal.
@@ -823,12 +892,14 @@ NEURA_TEST(tier, aggregate_collections_cost_one_cell_per_word_and_are_declined_b
         if (!programs) options.programs = nvm::TierOptions::Programs::Off;
         nvm::TierCache cache(image, options);
         compare_with_tier_0(image, cache, programs ? "programs" : "regions", {});
+        compare_with_tier_0(image, cache, programs ? "programs again" : "regions again", {});
         if (programs && programs_run()) {
             const auto counts = cache.statistics();
-            // Every state operation of this image is on an aggregate collection:
-            // none runs as a program helper, and each is a declined exit.
-            check_equal(counts.region_counts.helpers, std::uint64_t{0}, "no aggregate operation runs as a helper");
-            check(counts.region_counts.exits >= 4, "the aggregate operations were declined");
+            check(program_ops(image, cache).aggregate_helpers >= 4, "the programs hold the aggregate operations");
+            // Every state operation of this image is on an aggregate collection
+            // and the program forms with all of them (nothing is declined);
+            // the entry function runs once, so the run itself stays at tier 0.
+            check_equal(counts.program_stubs, std::uint64_t{0}, "no block of the program is a stub");
         }
     }
     check_clean(image, "aggregate cells", {});

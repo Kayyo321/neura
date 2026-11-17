@@ -257,6 +257,14 @@ private:
                 f_->uses_float = true;
             }
         }
+        // TEMPORARY: multi-word results are not built yet.
+        for (const auto& op : region_.code) {
+            if ((op.code == Code::Return && op.width > 1) ||
+                (op.code == Code::Call && !image_.functions.at(op.a).more_results.empty())) {
+                error_ = "a multi-word call or return";
+                return;
+            }
+        }
         f_->programs.push_back(&region_);
         f_->exits = region_.exits;
         f_->dispatch_tables = region_.dispatch_tables;
@@ -839,6 +847,12 @@ private:
     // operation that stays a StateCall.
     bool inline_heap_operation(const tier2::Op& op, const nvr::Exit& exit) {
         using nvr::StateOp;
+        // TEMPORARY: a collection of aggregates keeps the reference operation.
+        if (!exit.arguments.empty() && exit.operation != StateOp::ReadComponent && exit.operation != StateOp::WriteComponent &&
+            nvr::collection_components(image_, exit.arguments[0].type) != nullptr) {
+            return false;
+        }
+        if (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent) return false;
         // The profile and checkable variants write through the reference.
         const bool checkable = variant_ != Variant::Standard;
         switch (exit.operation) {
