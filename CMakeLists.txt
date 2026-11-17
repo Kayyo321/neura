@@ -409,7 +409,8 @@ neura_target_defaults(neura)
 # images through the same NVM library as any other embedder.
 install(TARGETS neura RUNTIME DESTINATION bin)
 install(FILES LICENSE DESTINATION share/doc/neura)
-install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura RENAME LICENSE-WHATWG-HTML)
+install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura
+    RENAME LICENSE-WHATWG-HTML COMPONENT sdk)
 install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL
     FILES_MATCHING PATTERN "*.nra")
 
