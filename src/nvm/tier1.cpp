@@ -383,6 +383,40 @@ TierCache::Resolution TierCache::lookup(std::uint32_t function, std::uint32_t bl
 }
 
 TierCache::Resolution TierCache::resolve(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
+    if (!options_.defer_proofs) return resolve_now(function, block, runs);
+    const std::lock_guard lock(mutex_);
+    auto& found = entry(function, block);
+    if (found.state == Entry::State::Settled) return {found.lowered.get(), true};
+    if (runs < found.next_attempt) return {nullptr, false, found.next_attempt};
+    if (!found.queued && found.state != Entry::State::Lifting) {
+        proof_queue_.push_back({function, block, runs});
+        found.queued = true;
+    }
+    // The next visit can see the result published by the idle callback.
+    return {nullptr, false, runs};
+}
+
+bool TierCache::proofs_pending() const {
+    const std::lock_guard lock(mutex_);
+    return !proof_queue_.empty();
+}
+
+std::optional<std::chrono::steady_clock::duration> TierCache::prove_one_idle() {
+    QueuedProof proof;
+    {
+        const std::lock_guard lock(mutex_);
+        if (proof_queue_.empty()) return std::nullopt;
+        proof = proof_queue_.front();
+        proof_queue_.pop_front();
+        entry(proof.function, proof.block).queued = false;
+    }
+    const auto runs = counts_[first_entry_[proof.function] + proof.block].load(std::memory_order_relaxed);
+    const auto start = std::chrono::steady_clock::now();
+    resolve_now(proof.function, proof.block, std::max(runs, proof.runs));
+    return std::chrono::steady_clock::now() - start;
+}
+
+TierCache::Resolution TierCache::resolve_now(std::uint32_t function, std::uint32_t block, std::uint64_t runs) {
     const auto& decoded = image_.functions.at(function).blocks.at(block);
     const auto& graph = image_.graphs.at(decoded.graph);
     const auto budget = std::chrono::steady_clock::duration(options_.search_budget);

@@ -439,6 +439,12 @@ public:
     // exit. A host request suspends the run until complete() supplies its
     // response. Advancing a finished run returns its final event again.
     Event advance();
+#ifdef NEURA_WASM_RUNTIME
+    // Stops at the first safe point after `budget` charged steps or at an
+    // event. A kernel or joined parallel item is atomic and may charge more
+    // than the remaining budget. A host-only yield changes no VM state.
+    std::optional<Event> advance_slice(std::uint64_t budget);
+#endif
     // Snapshot of scheduler state between block steps: the task tree with
     // each task's spawn site, state, and stack. Empty for a serial image.
     std::string dump_tasks(TaskDumpFormat format = TaskDumpFormat::Text) const;

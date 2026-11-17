@@ -528,6 +528,35 @@ public:
     }
 #endif
 
+#ifdef NEURA_WASM_RUNTIME
+    std::optional<Event> advance_slice(std::uint64_t budget) try {
+        if (budget == 0) throw std::invalid_argument("a slice needs a positive step budget");
+        if (finished_) return *finished_;
+        if (pending_) throw std::logic_error("advance_slice() called while a host request is pending");
+        serve_dump_request();
+        const auto initial_steps = steps_;
+        while (steps_ - initial_steps < budget) {
+            if (tier2_) {
+                run_regions(budget - (steps_ - initial_steps));
+                if (steps_ - initial_steps >= budget) break;
+            }
+            if (auto event = step(wires_)) {
+                const bool ended = event->kind == Event::Kind::Completed || event->kind == Event::Kind::Trapped;
+                time_as(ended ? TierTimes::Category::Other : TierTimes::Category::Host);
+                return event;
+            }
+        }
+        time_as(TierTimes::Category::Host);
+        return std::nullopt;
+    } catch (const std::bad_alloc&) {
+        try {
+            fault(TrapKind::HeapLimit, "the wasm memory allocator could not grow");
+        } catch (const Fault& failure) {
+            return trap(failure);
+        }
+    }
+#endif
+
     std::optional<Event> begin_step(GraphStep& step) {
         if (auto event = begin_active_step<false>()) return event;
         const auto& graph = image_.graphs[active_block_->graph];
@@ -5050,6 +5079,9 @@ Execution::ReferenceRounds Execution::advance_reference_rounds(std::vector<std::
 }
 
 Event Execution::advance() { return state_->advance(); }
+#ifdef NEURA_WASM_RUNTIME
+std::optional<Event> Execution::advance_slice(std::uint64_t budget) { return state_->advance_slice(budget); }
+#endif
 std::string Execution::dump_tasks(TaskDumpFormat format) const { return state_->dump_tasks(format); }
 DebugPosition Execution::debug_position() const { return state_->debug_position(); }
 DebugSnapshot Execution::debug_snapshot() const { return state_->debug_snapshot(); }

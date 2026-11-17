@@ -10,9 +10,11 @@
 #include <atomic>
 #include <chrono>
 #include <cstdint>
+#include <deque>
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <string>
 #include <utility>
 #include <vector>
@@ -41,8 +43,13 @@ struct TierOptions {
         TierOptions options;
         options.programs = Programs::On;
         options.tier3 = Tier3::Off;
+        options.defer_proofs = true;
         return options;
     }
+
+    // Count and queue due blocks during execution. Only the embedder's
+    // explicit idle callback may perform work on the queue.
+    bool defer_proofs = false;
 
     // Executions of a block with a LIFT hint before the hint is proven, and
     // of a block without one before its form is searched for, counted over
@@ -304,6 +311,10 @@ public:
     // remembered and never retried. Blocks that share a graph and a lift key
     // (lift::lift_key) share the result.
     Resolution resolve(std::uint32_t function, std::uint32_t block, std::uint64_t runs);
+    // Takes one queued attempt, if any, and returns its wall duration. The
+    // embedder calls this between slices when no host work is waiting.
+    std::optional<std::chrono::steady_clock::duration> prove_one_idle();
+    bool proofs_pending() const;
     // The settled result of a block, without lifting it.
     Resolution lookup(std::uint32_t function, std::uint32_t block) const;
 
@@ -411,6 +422,7 @@ private:
         // The hint failed a proof; the block may still be searched for.
         bool hint_failed = false;
         bool attempted = false;
+        bool queued = false;
         // The count of executions at which to try again: every run sharing
         // the cache waits for it.
         std::uint64_t next_attempt = 0;
@@ -419,6 +431,7 @@ private:
 
     Entry& entry(std::uint32_t function, std::uint32_t block);
     const Entry& entry(std::uint32_t function, std::uint32_t block) const;
+    Resolution resolve_now(std::uint32_t function, std::uint32_t block, std::uint64_t runs);
 
     const nvr::Image& image_;
     TierOptions options_;
@@ -429,6 +442,12 @@ private:
     std::vector<Entry> entries_;
     std::unique_ptr<std::atomic<std::uint64_t>[]> counts_;
     mutable std::mutex mutex_;
+    struct QueuedProof {
+        std::uint32_t function;
+        std::uint32_t block;
+        std::uint64_t runs;
+    };
+    std::deque<QueuedProof> proof_queue_;
     // Accepted results by (graph, lift key), and keys whose search failed.
     std::map<Key, std::shared_ptr<const lift::LoweredBlock>> accepted_;
     std::map<Key, std::string> searched_;
