@@ -419,7 +419,9 @@ private:
     // and one type that every name of the group takes. The type is parsed
     // once and copied into each parameter, so copies share an anonymous
     // class declaration (docs/lang/CoreLanguage.md, Grouped parameters).
-    std::vector<Parameter> parameters() {
+    // With `untyped_list`, a list of names without any type, as a lambda
+    // may write it, gives parameters of type "[untyped]".
+    std::vector<Parameter> parameters(bool* untyped_list = nullptr) {
         std::vector<Parameter> result;
         if (!match("(")) return result;
         if (!at(")")) {
@@ -437,6 +439,14 @@ private:
                 if (match(",")) {
                     if (at(")")) throw untyped(group.front());
                     continue;
+                }
+                if (at(")") && untyped_list && result.empty()) {
+                    for (auto& member : group) {
+                        member.type = TypeSyntax{member.span, "[untyped]", {}, {}};
+                        result.push_back(std::move(member));
+                    }
+                    *untyped_list = true;
+                    break;
                 }
                 if (at(")")) throw untyped(group.front());
                 expect(":");
@@ -547,8 +557,9 @@ private:
     }
 
     // Return true when an expression body still needs its terminating semicolon.
-    bool function_body(Declaration& result, std::string_view branch_keyword = {}) {
-        result.parameters = parameters();
+    bool function_body(Declaration& result, std::string_view branch_keyword = {}, bool lambda = false) {
+        result.parameters = parameters(lambda ? &result.untyped_parameters : nullptr);
+        result.result_written = at("->");
         result.type = match("->") ? type() : TypeSyntax{current().span, "void", {}, {}};
         result.has_body = at("{") || at("=>");
         if (!result.has_body) return false;
@@ -1703,7 +1714,7 @@ private:
         if (match("func")) {
             auto lambda = std::make_shared<Declaration>();
             lambda->kind = Declaration::Kind::Function;
-            function_body(*lambda, branch_keyword);
+            function_body(*lambda, branch_keyword, true);
             if (!lambda->has_body)
                 throw Diagnostic(current().span, "expected a function body").with_code("E0202");
             lambda->span = span_from(start);

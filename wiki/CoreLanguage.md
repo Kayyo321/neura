@@ -193,7 +193,7 @@ let apply = func(f, g: func(int, int) -> int, pair: [int, string][]) -> int => f
 | Each parameter keeps its own name and tags. | A [tag](Tags) before a name applies to that name only. Diagnostics name the parameter, and the group's type keeps its own span. |
 | Grouping applies to every parameter list. | Functions, methods, constructors, function values and lambdas, and each alternative of an [overload group](#function-overloads). |
 | A variadic parameter is a group of one name, and it is last. | `func(a, b: int, items: ...string)` is valid. `func(a, items: ...string)` is `E0207`, because `a` would take the variadic type. |
-| A list may not end in names without a type. | The error `E0214` is at the first untyped name, also in a list that mixes typed groups with trailing untyped names. Until contextual typing of lambdas is defined, an untyped parameter is always an error. |
+| A list may not end in names without a type. | The error `E0214` is at the first untyped name, also in a list that mixes typed groups with trailing untyped names. Only a lambda may leave every parameter untyped, where a function type is expected ([below](#function-values-and-closures)). |
 | Duplicates are found after expansion. | A repeated name is `E0303`, and overload alternatives with equal signatures are `E0433`: `func(a, b: int)` and `func(a: int32, b: int32)` are equal because `int` aliases `int32`. |
 | Locals, fields, and enum payloads are not grouped. | `let a, b: int;` and `Point(x, y: int)` stay errors. |
 
@@ -277,7 +277,7 @@ A bare `items: ...` packs mixed types into an array of `Std.Core.Variadic.Argume
 
 ### Function values and closures
 
-A lambda is a function expression with typed parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
+A lambda is a function expression with parameters and a body. Its type lists the parameter types in order, followed by the result. An invocation evaluates the callable expression first and its arguments from left to right.
 
 <!-- example: check -->
 ```neura
@@ -291,11 +291,28 @@ let add_two = make_adder(2);
 let result = add_two(40);
 ```
 
+A lambda may leave all of its parameters untyped, `func(a, b) => a + b`, where a function type is expected: as the argument of a parameter of function type, as the result of a function whose result is a function type, as the value of a binding, field or element with a function type. The expected type gives the parameter types, and the result type unless the lambda writes one, which must then be the expected one. A lambda that takes a different number of parameters, or writes another result type, is `E0481`; one without an expected function type, a list that mixes typed and untyped parameters, and an untyped list in a named declaration are `E0214`. Passed to a [generic function](Polymorphism#type-argument-inference), an untyped lambda takes its parameter types once the earlier arguments solve them, and its expression body then gives its result type. Passed to an [overload group](#function-overloads), it fits each alternative whose parameter is a function type with as many parameters; its body is not used to choose, so two such alternatives are ambiguous. Once typed, it is an ordinary lambda, and builds the image of the lambda with its types written.
+
+<!-- example: check -->
+```neura
+let transform = func<T, U>(items: T[list], convert: func(T) -> U) -> U[list] {
+    let result: U[list] = new;
+    for (let item: T in items) {
+        result.append(convert(item));
+    }
+    return result;
+};
+
+let words: string[list] = new(["a", "bc"]);
+let lengths = transform(words, func(word) => word.byte_length);   // int32[list]
+let add: func(int, int) -> int = func(a, b) => a + b;
+```
+
 Functions with the same parameter and result types have the same function type. A function value can be assigned, passed as an argument, returned, and stored in a field or collection. Parenthesize the function type before a collection suffix to write an array of functions, such as `(func(int) -> int)[]`. A named non-generic function used as a value is callable through the same interface. Reading a class or interface method as a value binds its receiver and keeps normal virtual dispatch.
 
 A lambda captures the values of enclosing parameters and local bindings it uses when it is created. A captured binding cannot be reassigned within the lambda. Capturing an object or collection keeps a reference to the same instance, so updates to its contents are visible. A lambda in a class method can use its enclosing receiver, and a nested lambda can capture values available to its enclosing lambda. Module and file globals are read when the body runs. Closures may outlive the scope that created them.
 
-Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. Call a generic function with explicit type arguments. Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
+Signatures, captures, and local types in a closure can mention the type parameters of the enclosing function, class, or method. The compiler specializes the function type and capture layout with that declaration. A generic function is called with its type arguments written or [inferred](Polymorphism#type-argument-inference). Use a named function declaration when a function needs to call itself by name. A closure resolves implicit module members in the enclosing declaration's module.
 
 ## Loops
 

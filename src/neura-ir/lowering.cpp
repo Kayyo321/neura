@@ -346,7 +346,7 @@ private:
     SymbolId closure_method(SymbolId layout, const IrType& type, const Span& span,
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
-    IrNode lambda(const Declaration& declaration, Context& context);
+    IrNode lambda(const Declaration& declaration, Context& context, const IrType* expected = nullptr);
     IrNode bind_function(IrNode callee, Context& context);
     std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
@@ -501,6 +501,12 @@ private:
     Substitution infer_type_arguments(SymbolId target, const Expr& expr, std::size_t first,
                                       const Substitution& replacements, Context& context, const IrType* expected);
     IrNode argument_value(const Expr& expr, std::size_t index, const IrType& expected, Context& context);
+    // Lambdas with untyped parameters.
+    IrNode untyped_lambda(const Declaration& declaration, Context& context, const IrType* expected,
+                          bool infer_result);
+    static bool untyped_lambda_expr(const Expr& expr);
+    std::string function_text(const IrType& type) const;
+    static bool lambda_fits(const Expr& expr, const IrType& expected);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -1417,7 +1423,8 @@ IrType Lowering::parameter_type(const Parameter& parameter, const Context& conte
     return collection_type(TypeKind::Array, element);
 }
 
-IrNode Lowering::lambda(const Declaration& declaration, Context& context) {
+IrNode Lowering::lambda(const Declaration& declaration, Context& context, const IrType* expected) {
+    if (declaration.untyped_parameters) return untyped_lambda(declaration, context, expected, false);
     const auto& span = declaration.span;
     std::vector<IrType> signature;
     std::vector<std::string> names;
@@ -2737,7 +2744,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
     const auto target_typed = [](const Expr& input) { return input.kind == ExprKind::New && !input.type; };
     const auto contextual = [&](const Expr& input) {
         return numeric_literal(input) || input.kind == ExprKind::Nil ||
-            (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input);
+            (input.kind == ExprKind::Collection && literal_tree(input)) || target_typed(input) ||
+            untyped_lambda_expr(input);
     };
     std::vector<std::optional<IrNode>> inputs;
     std::vector<std::optional<IrType>> defaults;
@@ -2747,7 +2755,7 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         defaults.emplace_back();
         if (!contextual(input)) {
             inputs.back() = value(input, context);
-        } else if (input.kind != ExprKind::Nil && !target_typed(input)) {
+        } else if (input.kind != ExprKind::Nil && !target_typed(input) && !untyped_lambda_expr(input)) {
             // Lowered again below with the chosen parameter type.
             SpeculativeDiagnostics speculative;
             try {
@@ -2790,6 +2798,11 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                 } else {
                     break;
                 }
+            } else if (untyped_lambda_expr(input)) {
+                // Its body is not used to choose (Calls030.md): it fits a
+                // function type with as many parameters.
+                if (!lambda_fits(input, expected)) break;
+                rank = Rank::Contextual;
             } else if (target_typed(input)) {
                 const auto& object = expected;
                 if (object.kind == TypeKind::List) {
@@ -3159,7 +3172,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return target;
     }
     case ExprKind::Lambda:
-        return lambda(*expr.lambda, context);
+        return lambda(*expr.lambda, context, expected);
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {

@@ -1,0 +1,4 @@
+// Two alternatives whose function parameters take one parameter each (edge case 52).
+let run = func(f: func(int) -> int) -> int => f(1)
+    or func(f: func(string) -> int) -> int => f("a");
+let one = run(func(x) => 1);

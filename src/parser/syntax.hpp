@@ -250,6 +250,12 @@ struct Declaration {
     // field of each parameter, through the receiver `$instance`, a name no
     // source can declare. Each store has the span of its parameter.
     std::optional<Span> set_shorthand{};
+    // A lambda whose parameters are all written without types, such as
+    // `func(a, b) => a + b`: each parameter's type is "[untyped]" and comes
+    // from the expected function type (docs/design/Calls030.md).
+    bool untyped_parameters{};
+    // Whether the result type was written with `->`.
+    bool result_written{};
 };
 
 struct ResolvedImport {

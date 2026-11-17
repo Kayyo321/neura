@@ -427,16 +427,21 @@ Diagnostic Lowering::ambiguous_overload(const Expr& expr, std::size_t first, Sym
         const auto& map = maps.at(branch);
         return std::ranges::any_of(map.source, [](const auto& source) { return !source.has_value(); });
     };
-    if (expr.labels.empty() && !omitted(one) && !omitted(other)) return error;
+    const bool lambdas = std::ranges::any_of(expr.operands.begin() + static_cast<std::ptrdiff_t>(first),
+                                             expr.operands.end(), untyped_lambda_expr);
+    if (expr.labels.empty() && !omitted(one) && !omitted(other) && !lambdas) return error;
     for (const auto branch : {one, other}) {
         std::string signature;
         for (const auto parameter : symbol(branch).parameters)
-            signature += (signature.empty() ? "" : ", ") + symbol(parameter).name + ": " + describe(symbol(parameter).type);
+            signature += (signature.empty() ? "" : ", ") + symbol(parameter).name + ": " +
+                         (is_function_value(symbol(parameter).type) ? function_text(symbol(parameter).type)
+                                                                    : describe(symbol(parameter).type));
         error.label(name_span(branch), "this alternative takes (" + signature + ")");
     }
     const auto count = expr.operands.size() - first;
     error.help(count == 0 ? std::string("pass an argument that only one alternative accepts")
-                          : "name or add an argument that only one alternative accepts; a default does not decide");
+               : lambdas ? std::string("write the lambda's parameter types; its body does not choose an alternative")
+                         : "name or add an argument that only one alternative accepts; a default does not decide");
     return error;
 }
 
@@ -610,9 +615,19 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
         const auto declared = substitute(*filled[i], replacements);
         if (!mentions(declared, generics)) continue;
         const auto& input = expr.operands[first + i];
+        if (untyped_lambda_expr(input)) continue;
         if (contextual_argument(input)) {
             if (numeric_argument(input) && declared.kind == TypeKind::TypeParameter)
                 literals.emplace_back(first + i, float_argument(input) ? float64_type : int32_type);
+            continue;
+        }
+        if (input.kind == ExprKind::Lambda && input.lambda) {
+            // A typed lambda's type is in its syntax. It is lowered later, at
+            // its place among the arguments, as in the written call.
+            std::vector<IrType> signature;
+            for (const auto& parameter : input.lambda->parameters) signature.push_back(parameter_type(parameter, context));
+            signature.push_back(type(*input.lambda->type, context));
+            unify(declared, callable_type(std::move(signature), input.span), generics, inference, input.span);
             continue;
         }
         auto lowered = value(input, context);
@@ -623,6 +638,41 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
         const auto found = inference.solutions.find(generic);
         return found == inference.solutions.end() || !found->second;
     };
+    const auto solved_so_far = [&] {
+        Substitution partial;
+        for (const auto& [generic, solution] : inference.solutions)
+            if (solution) partial.emplace(generic, solution->type);
+        return partial;
+    };
+    // Steps 2 and 3: each untyped lambda, in written order, takes its
+    // parameter types from its parameter's function type, and its result
+    // type then gives constraints.
+    for (std::size_t i = 0; i < count; ++i) {
+        const auto& input = expr.operands[first + i];
+        if (!filled[i] || !untyped_lambda_expr(input)) continue;
+        const auto declared = substitute(*filled[i], replacements);
+        if (!mentions(declared, generics)) continue;
+        const auto current = substitute(declared, solved_so_far());
+        if (!is_function_value(current)) {
+            throw Diagnostic(input.span, "cannot infer the parameter types of this lambda").with_code("E0419")
+                .label("its parameter has type " + describe(declared) + ", which is not a function type yet")
+                .help("write the lambda's parameter types, or the call's type arguments");
+        }
+        for (std::size_t p = 0; p + 1 < current.arguments.size(); ++p) {
+            if (!mentions(current.arguments[p], generics)) continue;
+            std::string names;
+            for (const auto generic : generics)
+                if (unsolved(generic)) names += (names.empty() ? "'" : ", '") + symbol(generic).name + "'";
+            throw Diagnostic(input.span, "cannot infer type parameter " + names + " before this lambda")
+                .with_code("E0419")
+                .label("no earlier argument gives the types of this lambda's parameters")
+                .help("write the lambda's parameter types, or the call's type arguments");
+        }
+        const bool open_result = mentions(current.arguments.back(), generics);
+        auto lowered = untyped_lambda(*input.lambda, context, &current, open_result);
+        if (open_result) unify(declared.arguments.back(), lowered.type.arguments.back(), generics, inference, input.span);
+        lowered_arguments[first + i] = std::move(lowered);
+    }
     // The expected type of the call solves what the arguments leave.
     if (expected && std::ranges::any_of(generics, unsolved)) {
         Inference context_inference;
@@ -714,4 +764,114 @@ IrNode Lowering::argument_value(const Expr& expr, std::size_t index, const IrTyp
         return lowered;
     }
     return value(expr.operands[index], context, &expected, true);
+}
+
+// Lambdas with untyped parameters (Calls030.md, Lambdas with untyped
+// parameters): `func(a, b) => a + b` takes its parameter types, and its
+// result type unless it writes one, from the function type it is expected
+// to have. With `infer_result`, an expression body gives the result type
+// instead, for the third step of inference.
+
+// A function type as it is written, `func(int32) -> bool`.
+std::string Lowering::function_text(const IrType& type) const {
+    std::string text = "func(";
+    for (std::size_t i = 0; i + 1 < type.arguments.size(); ++i)
+        text += (i ? ", " : "") + describe(type.arguments[i]);
+    return text + ") -> " + describe(type.arguments.back());
+}
+
+bool Lowering::untyped_lambda_expr(const Expr& expr) {
+    return expr.kind == ExprKind::Lambda && expr.lambda && expr.lambda->untyped_parameters;
+}
+
+bool Lowering::lambda_fits(const Expr& expr, const IrType& expected) {
+    return is_function_value(expected) && expected.arguments.size() == expr.lambda->parameters.size() + 1;
+}
+
+IrNode Lowering::untyped_lambda(const Declaration& declaration, Context& context, const IrType* expected,
+                                bool infer_result) {
+    const auto& span = declaration.span;
+    const auto& parameters = declaration.parameters;
+    Span list = span;
+    if (!parameters.empty()) {
+        const auto& first = parameters.front().span;
+        const auto& last = parameters.back().span;
+        list = {first.file, first.line, first.column, first.offset, last.offset + last.length - first.offset};
+    }
+    if (!expected || !is_function_value(*expected)) {
+        throw Diagnostic(parameters.front().span, "parameter '" + parameters.front().name + "' has no type")
+            .with_code("E0214")
+            .label("a lambda with untyped parameters takes its types from the function type expected here")
+            .help("write the parameter types, or pass the lambda where a function type is expected");
+    }
+    const auto expected_count = expected->arguments.size() - 1;
+    if (expected_count != parameters.size()) {
+        throw Diagnostic(list, "this lambda takes " + plural(parameters.size(), "parameter") +
+                                   "; the expected function type takes " + std::to_string(expected_count))
+            .with_code("E0481")
+            .label("expected " + function_text(*expected))
+            .help("give the lambda " + plural(expected_count, "parameter"));
+    }
+    std::vector<IrType> signature(expected->arguments.begin(), expected->arguments.end() - 1);
+    std::vector<std::string> names;
+    for (const auto& parameter : parameters) {
+        names.push_back(parameter.name);
+        check_tags(parameter.tags, TagTarget::Parameter, parameter.span);
+    }
+    std::optional<IrType> result;
+    if (declaration.result_written) {
+        result = type(*declaration.type, context);
+        if (!infer_result && *result != expected->arguments.back())
+            throw Diagnostic(declaration.type->span, "this lambda returns " + describe(*result) +
+                                                         "; the expected function type returns " +
+                                                         describe(expected->arguments.back()))
+                .with_code("E0481")
+                .label("expected " + function_text(*expected))
+                .help("remove the result type, or write " + describe(expected->arguments.back()));
+    } else if (!infer_result) {
+        result = expected->arguments.back();
+    } else if (!declaration.expression_body) {
+        throw Diagnostic(span, "cannot infer the result type of a lambda with a block body").with_code("E0419")
+            .label("the call's type parameters wait for this result")
+            .help("write the lambda's result type, as in 'func(...) -> T { ... }'");
+    }
+    ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
+    auto provisional = signature;
+    provisional.push_back(result ? *result : void_type);
+    const auto method = closure_method(environment.layout, callable_type(provisional, span), span, names);
+    if (declaration.result_written) result_spans_.emplace(method, declaration.type->span);
+    Context inner{method, method, context.receiver, 0, {entries_[method].names}, &environment};
+    check_definite_assignment(declaration, no_symbol);
+    std::vector<IrNode> instructions;
+    const auto& only = declaration.body.front();
+    if (!result) {
+        // The expression body gives the result.
+        auto lowered = expression(only.expressions.front(), inner);
+        if (lowered.op == IrOp::Reference)
+            throw Diagnostic(lowered.span, "cannot infer the result type of this lambda").with_code("E0419")
+                .help("write the lambda's result type, as in 'func(...) -> T => ...'");
+        result = lowered.type;
+        symbol(method).type = *result;
+        auto finish = node(result->kind == TypeKind::Void ? IrOp::Discard : IrOp::Return, only.span);
+        finish.operands.push_back(std::move(lowered));
+        instructions.push_back(std::move(finish));
+    } else if (declaration.expression_body && !declaration.result_written && result->kind != TypeKind::Void &&
+               only.kind == StmtKind::Expression) {
+        // `=> expression` without a written result type was read as a void
+        // body; the expected result makes it the returned value.
+        std::vector<Statement> body_statements;
+        Statement returned{};
+        returned.kind = StmtKind::Return;
+        returned.span = only.span;
+        returned.expressions.push_back(only.expressions.front());
+        body_statements.push_back(std::move(returned));
+        instructions = body(body_statements, inner);
+    } else {
+        instructions = body(declaration.body, inner);
+    }
+    if (symbol(method).type.kind != TypeKind::Void && !always_returns(instructions))
+        throw missing_return(span, method, declaration);
+    program_.bodies.push_back({method, std::move(instructions)});
+    signature.push_back(*result);
+    return closure_value(callable_type(std::move(signature), span), environment, span);
 }

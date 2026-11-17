@@ -1,0 +1,9 @@
+error[E0481]: this lambda takes 3 parameters; the expected function type takes 2
+ --> $DIR/untyped-lambda-count.nra:3:64
+  |
+3 | let use = func(names: string[list]) -> int => sort(names, func(a, b, c) => true);
+  |                                                                ^^^^^^^ expected func(string, string) -> bool
+  |
+  = help: give the lambda 2 parameters
+
+For more information about this error, try `neura explain E0481`.

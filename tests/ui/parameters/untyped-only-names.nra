@@ -1,5 +1,8 @@
-// Without a type for any name, even a lambda has no expected type yet.
-let apply = func(f: func(int, int) -> int) -> int {
-    return f(1, 2);
+// Without a type for any name, a lambda takes its types from an expected
+// function type; a local binding without an annotation gives none. Passed to
+// a parameter of function type the same lambda is valid
+// (tests/ui/types/accepted-untyped-lambdas.nra).
+let total = func -> int {
+    let add = func(a, b) -> int { return a + b; };
+    return add(1, 2);
 };
-let total = apply(func(a, b) -> int { return a + b; });
