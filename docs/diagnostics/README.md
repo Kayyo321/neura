@@ -113,6 +113,7 @@ Errors about types, values, calls, and statements.
 | [E0448](E0448.md) | a value type that contains itself |
 | [E0449](E0449.md) | a value type larger than its inline limit |
 | [E0450](E0450.md) | a list literal without new |
+| [E0480](E0480.md) | conflicting inferred type arguments |
 | [E0482](E0482.md) | unknown argument label |
 | [E0483](E0483.md) | argument supplied twice |
 | [E0484](E0484.md) | labels are not available for this call |

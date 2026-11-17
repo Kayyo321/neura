@@ -47,7 +47,7 @@ A bound, written `T:Renderable`, requires the supplied type to be `Renderable` o
 
 ### Type arguments and specialization
 
-Calls to generic functions and uses of generic classes supply their type arguments explicitly. A class or function can have several type parameters, as in `class<K, V>`. A bound can name one class or interface, as in `<T: Comparable>`, or a bracketed list, as in `<T: [Comparable<T>, Iterable<int>], K: Key>`. A type argument must satisfy every bound on its parameter. Type arguments include enums, collections, function types, and other generic instances such as `Box<Box<int32>>` and `Box<int32>[]`. `Box<int>` and `Box<int32>` are the same type because `int` is an alias.
+Uses of generic classes supply their type arguments explicitly, and a call of a generic function either writes all of its type arguments or [infers](#type-argument-inference) them. A class or function can have several type parameters, as in `class<K, V>`. A bound can name one class or interface, as in `<T: Comparable>`, or a bracketed list, as in `<T: [Comparable<T>, Iterable<int>], K: Key>`. A type argument must satisfy every bound on its parameter. Type arguments include enums, collections, function types, and other generic instances such as `Box<Box<int32>>` and `Box<int32>[]`. `Box<int>` and `Box<int32>` are the same type because `int` is an alias.
 
 A method of a class can be generic itself:
 
@@ -69,7 +69,33 @@ let Box = class<T> (
 );
 ```
 
-A type argument that does not satisfy its parameter's bound is a compile-time error at the type argument, naming the bound. Missing or extra type arguments are errors too.
+A type argument that does not satisfy its parameter's bound is a compile-time error at the type argument, naming the bound. Written type arguments that are too few or too many are errors too (`E0417`).
+
+### Type argument inference
+
+A call of a generic function or method that writes no type arguments infers them from its arguments and its context.
+
+<!-- example: check -->
+```neura
+let identity = func<T>(value: T) -> T => value;
+let same = func<T>(a: T, b: T) -> T => b;
+let empty = func<T>() -> T[list] => new;
+
+let use = func(big: int64) {
+    let seven = identity(7);          // T is int32, a literal's default type
+    let wide = same(1, big);          // T is int64 from big; the literal takes it
+    let names: string[list] = empty(); // T is string from the expected type
+};
+```
+
+| Rule | Detail |
+| --- | --- |
+| Inference has four steps, in order and without going back. | 1: the receiver and every argument except a lambda with untyped parameters give constraints. 2: each such lambda, in written order, takes its parameter types from its parameter's function type, which must by then mention no unsolved type parameter ([Core language](CoreLanguage.md#function-values-and-closures)). 3: the result type of each lambda gives constraints. 4: a type parameter still unsolved is taken from the expected type of the call, when there is one. |
+| A constraint matches a parameter's type against an argument's static type, structure by structure. | `T` against `A` gives `T = A`; `T[]` against `A[]` gives `T = A`; a generic instance is matched argument by argument, also through the class or interface instance that the argument's type extends or implements. |
+| Every constraint on one type parameter gives the same type. | Two different types are `E0480`, also when one is assignable to the other: no common base is computed. Inference never chooses `any`, never widens a number, and never inserts a constructor or a box. |
+| A numeric literal, `nil`, an empty collection literal and a target-typed `new` give no constraint. | They are typed from the solution. When numeric literals are the only source of a type parameter, each gives its default type, `int32` or `float64`, and those must agree. A type parameter that nothing gives is `E0419`. |
+| The solution is checked like written type arguments. | Bounds (`E0418`, at the argument that gave the type), `void`, primitive references, scope-bound types, and the specialization limits. |
+| An inferred call is the written call. | It lowers to the NeuraIR of the same call with the type arguments written, and builds the same image apart from its source map. Overload groups have no function type parameters, so inference and overload selection never meet in one call; `new` and enum constructors keep written or target-typed type arguments. |
 
 Every generic class and function is specialized: the compiler makes a concrete copy for each combination of declaration and type arguments that the program instantiates, and each distinct combination gets exactly one copy. Specialization happens when the program is built, so generic code runs at the same cost as code written for the concrete types. A program whose instances never stop growing, such as a function that calls itself with `T[]` or `Box<T>`, is rejected. The compiler stops when a type argument nests more than 32 generic instances or collections deep, or when a program needs more than 4,096 instances. The diagnostic points at the instantiating call and names the chain's starting instantiation.
 

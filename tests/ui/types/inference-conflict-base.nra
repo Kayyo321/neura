@@ -1,0 +1,7 @@
+// No common base is computed, even when one class extends the other (edge case 41).
+let Animal = class ();
+let Dog = class : Animal ();
+let same = func<T>(a: T, b: T) -> T => b;
+let use = func(dog: Dog, animal: Animal) {
+    let either = same(dog, animal);
+};

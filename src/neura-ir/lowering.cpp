@@ -373,7 +373,7 @@ private:
     IrNode select(const Expr& expr, Context& context, bool for_call = false);
     IrNode wrapped_member(const Expr& expr, const IrType& type, Context& context,
                           std::optional<IrNode> receiver = std::nullopt);
-    IrNode call(const Expr& expr, Context& context);
+    IrNode call(const Expr& expr, Context& context, const IrType* expected = nullptr);
     std::optional<IrNode> primitive_call(const Expr& expr, Context& context);
     IrNode enum_construct(const IrNode& variant, const Expr& expr, Context& context);
     Substitution enum_arguments(const IrType& type) const;
@@ -481,6 +481,26 @@ private:
     bool has_default(SymbolId parameter) const;
     IrNode default_value(SymbolId parameter, const IrType& type, const Span& span);
     void record_defaults(SymbolId function, const Declaration& decl, Context& context);
+    // Contextual inference of type arguments.
+    struct Inference {
+        struct Solution {
+            IrType type;
+            Span source;
+            bool from_literal = false;
+        };
+        std::map<SymbolId, std::optional<Solution>> solutions;
+    };
+    // Arguments that inference lowered, by call and operand index, until the
+    // call assembles them.
+    std::map<const Expr*, std::vector<std::optional<IrNode>>> inferred_;
+    bool mentions(const IrType& type, const std::vector<SymbolId>& generics) const;
+    void unify(const IrType& parameter, const IrType& argument, const std::vector<SymbolId>& generics,
+               Inference& inference, const Span& source);
+    Substitution call_type_arguments(SymbolId target, const Expr& expr, const Substitution& replacements,
+                                     Context& context, const IrType* expected);
+    Substitution infer_type_arguments(SymbolId target, const Expr& expr, std::size_t first,
+                                      const Substitution& replacements, Context& context, const IrType* expected);
+    IrNode argument_value(const Expr& expr, std::size_t index, const IrType& expected, Context& context);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -2248,7 +2268,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
             expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here",
                 function && index < function->parameters.size() ? &function->parameters[index].type : nullptr};
         }
-        call.operands.push_back(value(expr.operands[i + first], context, &expected, true));
+        call.operands.push_back(argument_value(expr, i + first, expected, context));
     }
     if (!rest) return;
     auto pack = node(IrOp::Collection, expr.span, substitute(symbol(params.back()).type, replacements));
@@ -2256,7 +2276,7 @@ void Lowering::arguments(IrNode& call, const Expr& expr, std::size_t first, Symb
     for (std::size_t i = fixed; i < count; ++i) {
         const auto& input = expr.operands[i + first];
         pack.operands.push_back(variadic == VariadicKind::Untyped
-            ? pack_argument(input, element, context) : value(input, context, &element, true));
+            ? pack_argument(input, element, context) : argument_value(expr, i + first, element, context));
     }
     call.operands.push_back(std::move(pack));
 }
@@ -2410,7 +2430,7 @@ std::optional<IrNode> Lowering::primitive_call(const Expr& expr, Context& contex
     return result;
 }
 
-IrNode Lowering::call(const Expr& expr, Context& context) {
+IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected) {
     if (auto result = primitive_call(expr, context)) return std::move(*result);
     const auto& callee_expr = expr.operands.front();
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
@@ -2518,8 +2538,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     resolve(target);
     if (const auto bound = scheduler_bindings_.find(target); bound != scheduler_bindings_.end()) {
         // A copy: type() can add symbols.
-        const auto generics = symbol(target).generics;
-        auto replacements = type_arguments(generics, expr.type_arguments, expr.span, context);
+        auto replacements = call_type_arguments(target, expr, {}, context, expected);
         arguments(result, expr, 1, target, replacements, context);
         result.op = IrOp::SchedulerCall;
         result.symbol = no_symbol;
@@ -2535,7 +2554,7 @@ IrNode Lowering::call(const Expr& expr, Context& context) {
     auto replacements = callee.operands.empty() ? Substitution{}
         : receiver_arguments(callee.operands.front().type, symbol(target).owner);
     auto generics = symbol(target).generics;
-    auto instantiated = type_arguments(generics, expr.type_arguments, expr.span, context);
+    auto instantiated = call_type_arguments(target, expr, replacements, context, expected);
     for (auto generic : generics) result.type_arguments.push_back(instantiated.at(generic));
     replacements.merge(std::move(instantiated));
     if (symbol(target).external) {
@@ -3224,7 +3243,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     case ExprKind::Member:
         return select(expr, context);
     case ExprKind::Call:
-        return call(expr, context);
+        return call(expr, context, expected);
     case ExprKind::Index: {
         auto receiver = value(expr.operands[0], context);
         if (receiver.type.kind == TypeKind::Tuple) {

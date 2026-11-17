@@ -162,7 +162,7 @@ void Lowering::named_arguments(IrNode& call, const Expr& expr, std::size_t first
             expected_origin_ = ExpectedOrigin{parameter.span, "parameter '" + parameter.name + "' is declared here",
                 function && index < function->parameters.size() ? &function->parameters[index].type : nullptr};
         }
-        admitted.push_back(value(expr.operands[first + i], context, &expected, true));
+        admitted.push_back(argument_value(expr, first + i, expected, context));
     }
     assemble_arguments(call, expr, first, target, map, std::move(admitted), replacements, context, leading);
 }
@@ -495,4 +495,223 @@ void Lowering::check_parameter_names(SymbolId method, SymbolId base) {
         error.help(base_default ? "copy the base default" : "remove the default");
         throw error;
     }
+}
+
+// Contextual inference of type arguments (Calls030.md, Contextual inference).
+// The arguments whose parameter mentions a type parameter of the callee and
+// that are not contextual (a numeric literal, nil, an empty collection
+// literal, a target-typed `new`) are lowered once, without an expected
+// type, and their static types are matched against their parameters. A type
+// parameter left unsolved is taken from the expected type of the call, and
+// then from the default types of numeric literals. The lowered arguments are
+// kept in inferred_ and admitted when the call assembles its arguments; every
+// other argument is lowered then, as in a call with written type arguments.
+
+namespace {
+
+bool contextual_argument(const Expr& input) {
+    if (input.kind == ExprKind::Integer || input.kind == ExprKind::Float || input.kind == ExprKind::Nil) return true;
+    if (input.kind == ExprKind::Unary && input.text == "-" &&
+        (input.operands.front().kind == ExprKind::Integer || input.operands.front().kind == ExprKind::Float))
+        return true;
+    if (input.kind == ExprKind::Collection && input.operands.empty()) return true;
+    return input.kind == ExprKind::New && !input.type;
+}
+
+bool numeric_argument(const Expr& input) {
+    return input.kind == ExprKind::Integer || input.kind == ExprKind::Float ||
+           (input.kind == ExprKind::Unary && input.text == "-" &&
+            (input.operands.front().kind == ExprKind::Integer || input.operands.front().kind == ExprKind::Float));
+}
+
+bool float_argument(const Expr& input) {
+    return input.kind == ExprKind::Float || (input.kind == ExprKind::Unary && input.operands.front().kind == ExprKind::Float);
+}
+
+} // namespace
+
+bool Lowering::mentions(const IrType& type, const std::vector<SymbolId>& generics) const {
+    if (type.kind == TypeKind::TypeParameter && std::ranges::find(generics, type.symbol) != generics.end()) return true;
+    return std::ranges::any_of(type.arguments, [&](const IrType& argument) { return mentions(argument, generics); });
+}
+
+void Lowering::unify(const IrType& parameter, const IrType& argument, const std::vector<SymbolId>& generics,
+                     Inference& inference, const Span& source) {
+    if (parameter.kind == TypeKind::TypeParameter && std::ranges::find(generics, parameter.symbol) != generics.end()) {
+        auto& solution = inference.solutions[parameter.symbol];
+        if (!solution) {
+            solution = Inference::Solution{argument, source};
+            return;
+        }
+        if (solution->type == argument) return;
+        throw Diagnostic(source, "type parameter '" + symbol(parameter.symbol).name + "' is " + describe(argument) +
+                                     " from this argument and " + describe(solution->type) + " from that one")
+            .with_code("E0480")
+            .label("gives " + describe(argument))
+            .label(solution->source, "gives " + describe(solution->type))
+            .help("write the type arguments; no common type is computed");
+    }
+    if (parameter.arguments.empty()) return;
+    const auto pairwise = [&](const IrType& actual) {
+        for (std::size_t i = 0; i < parameter.arguments.size(); ++i)
+            unify(parameter.arguments[i], actual.arguments[i], generics, inference, source);
+    };
+    if (argument.kind == parameter.kind && argument.symbol == parameter.symbol &&
+        argument.arguments.size() == parameter.arguments.size()) {
+        pairwise(argument);
+        return;
+    }
+    if (parameter.kind != TypeKind::Object || argument.kind != TypeKind::Object) return;
+    for (const auto& view : nominal_views(program_, argument)) {
+        if (view.symbol == parameter.symbol && view.arguments.size() == parameter.arguments.size()) {
+            pairwise(view);
+            return;
+        }
+    }
+}
+
+Substitution Lowering::call_type_arguments(SymbolId target, const Expr& expr, const Substitution& replacements,
+                                           Context& context, const IrType* expected) {
+    const auto generics = symbol(target).generics;
+    if (!expr.type_arguments.empty() || generics.empty())
+        return type_arguments(generics, expr.type_arguments, expr.span, context);
+    return infer_type_arguments(target, expr, 1, replacements, context, expected);
+}
+
+Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, std::size_t first,
+                                            const Substitution& replacements, Context& context,
+                                            const IrType* expected) {
+    const auto generics = symbol(target).generics;
+    const auto& params = symbol(target).parameters;
+    const auto count = expr.operands.size() - first;
+    // The parameter each written argument fills; the tail of a variadic
+    // function fills the element type of its last parameter.
+    std::vector<std::optional<IrType>> filled(count);
+    const bool rest = symbol(target).variadic != VariadicKind::None;
+    if (!expr.labels.empty() && !rest) {
+        check_label_order(expr, first, target);
+        const auto map = *map_arguments(target, expr, first, 0, true);
+        for (std::size_t i = 0; i < count; ++i) filled[i] = symbol(params[map.parameter[i]]).type;
+    } else {
+        for (std::size_t i = 0; i < count; ++i) {
+            if (rest && i + 1 >= params.size()) {
+                const auto& pack = symbol(params.back()).type;
+                if (!pack.arguments.empty()) filled[i] = pack.arguments.front();
+            } else if (i < params.size()) {
+                filled[i] = symbol(params[i]).type;
+            }
+        }
+    }
+    Inference inference;
+    std::vector<std::pair<std::size_t, IrType>> literals;
+    std::vector<std::optional<IrNode>> lowered_arguments(expr.operands.size());
+    for (std::size_t i = 0; i < count; ++i) {
+        if (!filled[i]) continue;
+        const auto declared = substitute(*filled[i], replacements);
+        if (!mentions(declared, generics)) continue;
+        const auto& input = expr.operands[first + i];
+        if (contextual_argument(input)) {
+            if (numeric_argument(input) && declared.kind == TypeKind::TypeParameter)
+                literals.emplace_back(first + i, float_argument(input) ? float64_type : int32_type);
+            continue;
+        }
+        auto lowered = value(input, context);
+        unify(declared, lowered.type, generics, inference, input.span);
+        lowered_arguments[first + i] = std::move(lowered);
+    }
+    const auto unsolved = [&](SymbolId generic) {
+        const auto found = inference.solutions.find(generic);
+        return found == inference.solutions.end() || !found->second;
+    };
+    // The expected type of the call solves what the arguments leave.
+    if (expected && std::ranges::any_of(generics, unsolved)) {
+        Inference context_inference;
+        const auto result = substitute(symbol(target).type, replacements);
+        SpeculativeDiagnostics speculative;
+        try {
+            unify(result, *expected, generics, context_inference, expr.span);
+        } catch (const Diagnostic&) {
+            // A conflict within the expected type leaves the parameters unsolved.
+        }
+        for (const auto generic : generics)
+            if (unsolved(generic) && context_inference.solutions[generic])
+                inference.solutions[generic] = context_inference.solutions[generic];
+    }
+    // Numeric literals alone give their default types, which must agree.
+    for (const auto& [index, type] : literals) {
+        const auto generic = substitute(*filled[index - first], replacements).symbol;
+        if (!unsolved(generic) && !inference.solutions[generic]->from_literal) continue;
+        auto& solution = inference.solutions[generic];
+        if (!solution) {
+            solution = Inference::Solution{type, expr.operands[index].span, true};
+            continue;
+        }
+        if (solution->type != type)
+            throw Diagnostic(expr.operands[index].span, "type parameter '" + symbol(generic).name + "' is " +
+                                                            describe(type) + " from this argument and " +
+                                                            describe(solution->type) + " from that one")
+                .with_code("E0480")
+                .label("a literal of default type " + describe(type))
+                .label(solution->source, "a literal of default type " + describe(solution->type))
+                .help("write the type arguments, or give the literals one type");
+    }
+    Substitution result;
+    for (const auto generic : generics) {
+        if (unsolved(generic)) {
+            std::string written;
+            for (const auto other : generics) written += (written.empty() ? "" : ", ") + symbol(other).name;
+            throw Diagnostic(expr.span, "cannot infer type parameter '" + symbol(generic).name + "'")
+                .with_code("E0419")
+                .label("no argument or expected type gives '" + symbol(generic).name + "'")
+                .help("write the type arguments, as in '" + symbol(target).name + "<" + written + ">(...)'");
+        }
+        result.emplace(generic, inference.solutions[generic]->type);
+    }
+    // The solution is checked like written type arguments.
+    for (const auto generic : generics) {
+        const auto& solution = *inference.solutions[generic];
+        const auto& actual = solution.type;
+        if (actual.kind == TypeKind::Void)
+            throw Diagnostic(solution.source, "void is not a type argument").with_code("E0416");
+        if (is_primitive_reference(actual))
+            throw Diagnostic(solution.source, "a primitive reference cannot be a type argument").with_code("E0428");
+        if (scope_bound(actual))
+            throw Diagnostic(solution.source, "a value of type " + describe(actual) +
+                                                  " cannot leave its scope: it cannot be a type argument")
+                .with_code("E0605");
+        const auto& parameter = symbol(generic);
+        const auto check = [&](const IrType& declared) {
+            const auto bound = substitute(declared, result);
+            if (!assignable(actual, bound))
+                throw Diagnostic(solution.source, "type argument " + describe(actual) + " does not satisfy the bound " +
+                                                      describe(bound) + " of type parameter '" + parameter.name + "'")
+                    .with_code("E0418")
+                    .label("'" + parameter.name + "' is inferred as " + describe(actual) + " from this argument");
+        };
+        if (parameter.bound) check(*parameter.bound);
+        for (const auto& bound : parameter.additional_bounds) check(bound);
+    }
+    if (std::ranges::any_of(lowered_arguments, [](const auto& item) { return item.has_value(); }))
+        inferred_[&expr] = std::move(lowered_arguments);
+    return result;
+}
+
+// The argument at operand `index` for a parameter of type `expected`: the one
+// inference lowered, admitted to the parameter, or a newly lowered one.
+IrNode Lowering::argument_value(const Expr& expr, std::size_t index, const IrType& expected, Context& context) {
+    const auto found = inferred_.find(&expr);
+    if (found != inferred_.end() && index < found->second.size() && found->second[index]) {
+        expected_origin_.reset();
+        auto lowered = std::move(*found->second[index]);
+        found->second[index].reset();
+        if (std::ranges::none_of(found->second, [](const auto& item) { return item.has_value(); }))
+            inferred_.erase(found);
+        if (!assignable(lowered.type, expected)) {
+            if (const auto method = cast_method(lowered.type, expected, context); method != no_symbol)
+                return cast_call(method, std::move(lowered), expected, expr.operands[index].span);
+        }
+        require_type(lowered.type, expected, expr.operands[index].span);
+        return lowered;
+    }
+    return value(expr.operands[index], context, &expected, true);
 }

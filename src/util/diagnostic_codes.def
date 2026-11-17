@@ -106,6 +106,7 @@ NEURA_DIAGNOSTIC(E0447, "a deferred 'last' binding that is not a local or an ins
 NEURA_DIAGNOSTIC(E0448, "a value type that contains itself")
 NEURA_DIAGNOSTIC(E0449, "a value type larger than its inline limit")
 NEURA_DIAGNOSTIC(E0450, "a list literal without new")
+NEURA_DIAGNOSTIC(E0480, "conflicting inferred type arguments")
 NEURA_DIAGNOSTIC(E0482, "unknown argument label")
 NEURA_DIAGNOSTIC(E0483, "argument supplied twice")
 NEURA_DIAGNOSTIC(E0484, "labels are not available for this call")
