@@ -481,6 +481,20 @@ if(BUILD_TESTING)
     neura_target_defaults(neura_http_wire_tests)
     add_test(NAME server-http-wire COMMAND neura_http_wire_tests)
 
+    if(UNIX AND NOT EMSCRIPTEN)
+        find_package(Threads REQUIRED)
+        add_executable(neura_http_connection_tests
+            src/server/http_wire.cpp
+            src/server/http_connection.cpp
+            src/server/http_tcp.cpp
+            tests/server/http_connection_tests.cpp)
+        target_include_directories(neura_http_connection_tests PRIVATE src)
+        target_link_libraries(neura_http_connection_tests PRIVATE Threads::Threads)
+        neura_target_defaults(neura_http_connection_tests)
+        add_test(NAME server-http-connection COMMAND neura_http_connection_tests)
+        set_tests_properties(server-http-connection PROPERTIES TIMEOUT 15)
+    endif()
+
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)
         neura_target_defaults(neura_native_container_tests)
