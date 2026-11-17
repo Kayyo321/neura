@@ -9,7 +9,7 @@
 
 namespace neura {
 
-enum class TokenKind { Identifier, Integer, Float, String, Keyword, Symbol, End };
+enum class TokenKind { Identifier, Integer, Float, String, Keyword, Symbol, End, HtmlIsland, CssIsland };
 
 struct DocComment {
     Span span;
@@ -18,6 +18,8 @@ struct DocComment {
 
 struct Token {
     TokenKind kind;
+    // An island has the exact body bytes here and includes its braces in its span.
+    // For an unfinished editor island the span ends after the available body.
     std::string text;
     Span span;
     std::shared_ptr<const DocComment> documentation{};

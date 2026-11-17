@@ -41,6 +41,7 @@ Errors about the grammar.
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
+| [E0241](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0241.md) | unterminated template or stylesheet |
 
 ## E03xx: Names
 

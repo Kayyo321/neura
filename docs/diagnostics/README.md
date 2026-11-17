@@ -38,6 +38,7 @@ Errors about the grammar.
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
+| [E0241](E0241.md) | unterminated template or stylesheet |
 
 ## E03xx: Names
 

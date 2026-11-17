@@ -12,7 +12,7 @@ Lexer -> Parser -> NeuraIR -> IR optimization -> IRtoNeuronConversion -> output
 
 | Stage | Input and output | Contract |
 | --- | --- | --- |
-| Lexer | Source text → tokens with source spans | Recognize keywords, identifiers, literals, operators, and delimiters. Report invalid input with a span. Preserve enough location information to point back to source in later stages. |
+| Lexer | Source text → tokens with source spans | Recognize keywords, identifiers, literals, operators, and delimiters. Frame inline HTML and CSS bodies as single tokens with their original contents and brace-inclusive spans. Report invalid input with a span. Preserve enough location information to point back to source in later stages. |
 | Parser | Tokens → syntax tree | Resolve grammar, precedence, and associativity. Preserve declaration and expression spans. Keep syntax errors distinct from errors that depend on names or types. |
 | NeuraIR | Syntax tree → validated, typed intermediate representation | Resolve names and imports, check types and declared interfaces, and lower source constructs into explicit control flow, operations, and state access. Reject unsupported semantics with a diagnostic at the relevant source location. |
 | IR optimization | Validated NeuraIR → validated NeuraIR | Transform code under the same observable behavior contract. Keep the result valid for the selected target and maintain meaningful source provenance. |

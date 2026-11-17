@@ -1,4 +1,5 @@
 #include "lexer.hpp"
+#include "island.hpp"
 
 #include <algorithm>
 #include <array>
@@ -59,6 +60,13 @@ public:
                 continue;
             }
             const Span start = location();
+            if (c == '{') {
+                if (const auto body = island::start(tokens)) {
+                    tokens.push_back(scan_island(start, *body, diagnostics != nullptr));
+                    documentation_.reset();
+                    continue;
+                }
+            }
             TokenKind kind;
             try {
                 kind = scan(start);
@@ -102,6 +110,24 @@ private:
     }
 
     Span location() const { return {file_, line_, column_, offset_, 0}; }
+
+    Token scan_island(Span span, island::Start body, bool recovering) {
+        const auto begin = span.offset + 1;
+        const auto close = island::close(source_, begin, body.kind);
+        auto end = close.value_or(source_.size());
+        if (!close) {
+            auto opening = span;
+            opening.length = 1;
+            report(Diagnostic(opening, "unterminated template or stylesheet").with_code("E0241")
+                .label("this body has no closing '}'"));
+            if (!recovering) throw combined();
+            end = island::recover(source_, span.offset, body.declaration);
+        }
+        const auto limit = end + (close ? 1 : 0);
+        while (offset_ < limit) advance_text();
+        span.length = limit - span.offset;
+        return {body.kind, std::string(source_.substr(begin, end - begin)), std::move(span)};
+    }
 
     // The first error, carrying the others (Tooling.md, Diagnostics).
     Diagnostic combined() const {

@@ -40,6 +40,7 @@ NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
 NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
 NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
+NEURA_DIAGNOSTIC(E0241, "unterminated template or stylesheet")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")

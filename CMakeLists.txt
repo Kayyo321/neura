@@ -308,6 +308,7 @@ add_library(neura_compiler STATIC
     src/cli/diagnostic_render.cpp
     src/cli/source_loader.cpp
     src/cli/source_docs.cpp
+    src/lexer/island.cpp
     src/lexer/lexer.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
@@ -593,6 +594,11 @@ if(BUILD_TESTING)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence")
     set_tests_properties(parameters-equivalence PROPERTIES TIMEOUT 180)
+
+    add_executable(neura_island_lexer_tests tests/lexer/html_island_tests.cpp)
+    target_link_libraries(neura_island_lexer_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_island_lexer_tests)
+    add_test(NAME lexer-islands COMMAND neura_island_lexer_tests)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.
