@@ -49,6 +49,10 @@ export let start = func(context: desktop.Context) -> result.Result<unit.Unit> {
 | Every permission request of the page (camera, location, notifications and the rest) is denied. Notifications and the clipboard are native-child operations. | proposed |
 | `preload.js` exposes one object with two functions to the page: `call(operation_id, bytes)` and `next_host_event()`. There is no function that takes a channel name, a path, a command or a script. | proposed |
 
+The shell takes the web bundle directory, application ID and expected SHA-256 of `bundle.json` from trusted package metadata. In the schema 1 web manifest, `csp` carries the response policy, `image` has `path` and `digest`, and each `files` row has `path`, `sha256`, `bytes`, `media_type` and `initial`. Digests are lowercase hex. `requires` maps each required axis to its version. The shell compares these versions with the supported versions provided by the package loader. The desktop target's `origins.external` is supplied separately by that loader.
+
+`hosts/desktop/main.js` exports `verifyWebBundle` for the package loader and `launchDesktopShell` for the trusted Electron entry. If the entry reads package metadata asynchronously before launch, it calls `registerDesktopScheme` first. The Linux shell fixture runs with `python3 tests/desktop/run_shell_test.py /path/to/electron`.
+
 ## Bridge
 
 A bridge call carries the JSON bytes of a contract operation ([Components](Components030.md#contracts)).
