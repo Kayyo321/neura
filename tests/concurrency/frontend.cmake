@@ -224,7 +224,7 @@ check_rejection(argument_not_transferable_array "let total = func(items: int[]) 
         scope {
             let task = spawn total(items);
         }
-]=] "8:36" "int32\\[\\] is not transferable")
+]=] "8:24" "error\\[E0451\\]: array passed to a task")
 
 check_rejection(receiver_not_transferable [=[
 let Counter = class (
@@ -246,7 +246,7 @@ let Box = class (
 );
 ]=] [=[
         let box = new Box(1);
-        let read = func -> int => box.value;
+        let read = new func -> int => box.value;
         scope {
             let task = spawn read();
         }
@@ -782,7 +782,7 @@ check_accepted(channel_of_function_values "${channels_import}" [=[
 
 check_rejection(channel_of_function_values_with_a_capturing_closure "${box_class}${channels_import}" [=[
         let box = new Box(3);
-        let read = func -> int => box.value;
+        let read = new func -> int => box.value;
         let [sender, receiver, closer] = channels.open<func() -> int>(1);
 ]=] "12:42" "a value of type func\\(\\) -> int32 is not transferable, so it cannot be a channel's element type")
 
@@ -906,7 +906,7 @@ check_labels(group_work_writes_a_global
 # When the helper's function value captures an object, the message names the capture.
 check_rejection(group_work_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
-        let add = func(job: int) -> void { box.value = box.value + job; };
+        let add = new func(job: int) -> void { box.value = box.value + job; };
         groups.with_workers<int>(1, 1, add, func(group: groups.WorkerGroup<int>) -> void { });
 ]=] "14:9"
     "a value of type func\\(int32\\) -> void is not transferable, so it cannot be given to a spawned task")
@@ -929,7 +929,7 @@ check_labels(tasks_all_call_writes_a_global
 
 check_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
-        let calls: (func() -> result.Result<int>)[list] = new([func() -> result.Result<int> => result.Result<int>.Ok(box.value)]);
+        let calls: (func() -> result.Result<int>)[list] = new([new func() -> result.Result<int> => result.Result<int>.Ok(box.value)]);
         tasks.all_ok<int>(calls);
 ]=] "14:9"
     "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task")
