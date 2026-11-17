@@ -10,6 +10,7 @@
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/driver.hpp"
 #include "nvm/machine.hpp"
@@ -402,8 +403,9 @@ void Adapter::launch(const Json& arguments) {
             if (test == tests.end()) throw std::runtime_error("selected test no longer exists: " + test_filter);
             const auto symbol = test->symbol;
             require_valid_ir(program, "before debug specialization");
-            materialize_reference_storage(program);
             specialize(program);
+            check_storage(program, StorageStage::Specialized);
+            materialize_reference_storage(program);
             check_containment(program);
             check_inline_limit(program);
             elaborate_class_hooks(program);

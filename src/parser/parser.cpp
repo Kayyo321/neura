@@ -1890,17 +1890,7 @@ private:
             result.match = std::make_shared<Statement>(std::move(statement));
             return result;
         }
-        if (match("func")) {
-            auto lambda = std::make_shared<Declaration>();
-            lambda->kind = Declaration::Kind::Function;
-            function_body(*lambda, branch_keyword);
-            if (!lambda->has_body)
-                throw Diagnostic(current().span, "expected a function body").with_code("E0202");
-            lambda->span = span_from(start);
-            auto result = make_expression(Expr::Kind::Lambda, lambda->span);
-            result.lambda = std::move(lambda);
-            return result;
-        }
+        if (match("func")) return lambda_expression(start, branch_keyword);
         if (match("(")) {
             auto result = expression();
             expect(")");
@@ -1921,7 +1911,7 @@ private:
             result.span = span_from(start);
             return result;
         }
-        if (match("new")) return new_expression(start);
+        if (match("new")) return new_expression(start, branch_keyword);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&
@@ -1975,6 +1965,18 @@ private:
                                                 : "expected an expression, found '" + token.text + "'");
     }
 
+    Expr lambda_expression(std::size_t start, std::string_view branch_keyword, bool owned = false) {
+        auto lambda = std::make_shared<Declaration>();
+        lambda->kind = Declaration::Kind::Function;
+        function_body(*lambda, branch_keyword);
+        if (!lambda->has_body)
+            throw Diagnostic(current().span, "expected a function body").with_code("E0202");
+        lambda->span = span_from(start);
+        auto result = make_expression(Expr::Kind::Lambda, lambda->span, owned ? "new" : "");
+        result.lambda = std::move(lambda);
+        return result;
+    }
+
     // After `new` (ObjectLifecycle.md, Construction):
     //   new T(arguments)     the class T
     //   new(arguments)       target-typed: `(` always begins arguments
@@ -1982,9 +1984,19 @@ private:
     //                        anything that cannot begin a type, such as
     //                        `;`, `,`, `)`, `]`, or `}`
     // A target-typed `new` has no type; lowering takes the expected type.
-    Expr new_expression(std::size_t start) {
+    Expr new_expression(std::size_t start, std::string_view branch_keyword) {
+        if (match("func")) return lambda_expression(start, branch_keyword, true);
+        if (at_contextual("bound") && next_is(1, "(")) {
+            advance();
+            expect("(");
+            auto target = expression();
+            expect(")");
+            auto result = make_expression(Expr::Kind::New, span_from(start), "bound");
+            result.operands.push_back(std::move(target));
+            return result;
+        }
         const bool type_start = current().kind == TokenKind::Identifier || at("&") || at("[") ||
-                                at("func") || at("class");
+                                at("class");
         if (!at("(") && !type_start) return make_expression(Expr::Kind::New, span_from(start));
         std::optional<TypeSyntax> object_type;
         if (at("class") && next_is(1, "(") && next_is(2, ")") && !next_is(3, "(")) {

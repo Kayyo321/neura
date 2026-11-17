@@ -231,6 +231,14 @@ No source construct creates an object constant of a tuple type (a constant initi
 
 Images that use a tuple or a payload enum change. A function that returns one, or a program with an array of them, makes the image NVR 1.7. Every program's `main` returns `Std.Program.ExitCode`, whose `Status(int)` makes it a payload enum of two words, so every program image is NVR 1.7; the start function reads the status from those words instead of from an object. An image of NVR 1.6 or earlier still runs as before. Tiers 2 and 3 run several-word returns and calls and component reads and writes themselves ([execution tiers](runtime/NVM.md#execution-tiers)). Steps and `peak_heap_cells` of a program that uses tuples drop where a tuple used to be allocated and was only passed or read, and rise where a whole tuple is read from a field, global or element, which now costs one state exit for each word; boxing at a boundary costs an allocation and a read for each field.
 
+## Region-backed values
+
+Conversion receives checked, specialized storage facts. A lexical block that creates arrays, local borrow boxes, or nonescaping closure environments enters an NVR region. Its exits release the region after any task-scope join. Functions that return owned array words receive a destination region token in an extra frame slot, and the converter emits a move before releasing the callee's regions.
+
+A primitive borrow of an object field uses a box with a reference to the containing object. The converter checks the owner's liveness before each access through the box. Local and static boxes carry a nil owner and use their storage region's lifetime. The collector follows the stored owner handle from a live box.
+
+A noncapturing callable uses a fieldless static object constant. Explicit `new func` and `new bound` use ordinary heap objects. All environments share the ordinary virtual dispatch interface.
+
 ## Format decisions
 
 Each of these decisions holds in both the writer and the loader and is recorded in [NVR](runtime/NVR.md) where it changes or narrows the format text:

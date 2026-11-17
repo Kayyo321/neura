@@ -1,0 +1,5 @@
+let escape = func -> func() -> int {
+    let value = 2;
+    let alias: &int = value;
+    return new func -> int => alias;
+};

@@ -115,6 +115,9 @@ Errors about types, values, calls, and statements.
 | [E0448](E0448.md) | a value type that contains itself |
 | [E0449](E0449.md) | a value type larger than its inline limit |
 | [E0450](E0450.md) | a list literal without new |
+| [E0451](E0451.md) | an array escapes its owner |
+| [E0452](E0452.md) | a primitive borrow escapes its owner |
+| [E0453](E0453.md) | an escaping closure requires explicit construction |
 | [E0470](E0470.md) | return in a startup block |
 
 ## E05xx: Classes and lifecycle

@@ -9,7 +9,7 @@ export let Main = module:program.Entry (
         let set = tree_set.create<int>(int32.compare);
         set.add(1);
         set.add(2);
-        set.for_each(func(value: int) -> void {
+        set.for_each(new func(value: int) -> void {
             set.add(3);
         });
         return program.ExitCode.Ok;

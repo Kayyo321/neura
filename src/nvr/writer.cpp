@@ -326,6 +326,9 @@ std::vector<Section> sections(const Image& image, std::uint16_t minor) {
 } // namespace
 
 bool uses_regions(const Image& image) {
+    if (std::ranges::any_of(image.constants, [&](const Constant& value) {
+            return value.type < image.types.size() && is_static_object_constant(image.types[value.type], value);
+        })) return true;
     return std::ranges::any_of(image.functions, [](const Function& function) {
         return std::ranges::any_of(function.blocks, [](const Block& block) {
             return std::ranges::any_of(block.exits, [](const Exit& exit) {
@@ -356,16 +359,21 @@ std::uint16_t required_minor_version(const Image& image) {
         }
     }
     if (std::ranges::any_of(image.types, [](const Type& type) { return type.kind == TypeKind::Aggregate; })) return 7;
-    // A nil collection constant (NVR 1.7).
+    // Nil collection and static object constants (NVR 1.7).
     if (std::ranges::any_of(image.constants, [&](const Constant& value) {
-            return value.type < image.types.size() && (image.types[value.type].kind == TypeKind::Array ||
-                                                       image.types[value.type].kind == TypeKind::List);
+            if (value.type >= image.types.size()) return false;
+            const auto& type = image.types[value.type];
+            return type.kind == TypeKind::Array || type.kind == TypeKind::List || is_static_object_constant(type, value);
         })) {
         return 7;
     }
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {
+                if (exit.kind == ExitKind::Scheduler && exit.scheduler == SchedulerOp::ParallelFinish &&
+                    exit.arguments.size() == 2) {
+                    return 7;
+                }
                 if (exit.kind == ExitKind::State &&
                     (exit.operation == StateOp::ReadComponent || exit.operation == StateOp::WriteComponent ||
                      is_region_operation(exit.operation))) {

@@ -65,6 +65,11 @@ struct Layout {
     bool operator==(const Layout&) const = default;
 };
 
+// NVR 1.7: a non-nil constant of a fieldless object layout.
+inline bool is_static_object_constant(const Type& type, const Constant& value) {
+    return type.kind == TypeKind::Object && value.payload.size() == 1 && value.payload.front() == 1;
+}
+
 struct Global {
     std::uint32_t type = 0;
     std::uint32_t initializer = absent;
@@ -208,6 +213,9 @@ inline constexpr std::size_t max_hook_events = 64;
 inline constexpr bool is_hook_operation(StateOp operation) {
     return operation == StateOp::HookEnter || operation == StateOp::HookLeave;
 }
+
+// Reserved token of execution-lifetime static storage (NVR 1.7).
+inline constexpr std::uint64_t static_region_token = UINT64_MAX;
 
 // Whether `operation` is one of the NVR 1.7 region operations.
 inline constexpr bool is_region_operation(StateOp operation) {
