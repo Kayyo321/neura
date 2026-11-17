@@ -3,17 +3,29 @@
 
 #include "cli/commands.hpp"
 #include "cli/driver.hpp"
-#include "cli/tool.hpp"
 #include "cli/lifecycle.hpp"
+#include "cli/tool.hpp"
+
+#include <filesystem>
+#include <system_error>
 
 namespace {
 
 using namespace neura::cli;
 
+// The lifecycle commands manage the installation that `neura` belongs to,
+// and name it by the dispatcher next to this tool, as 0.2 named its single
+// executable; without one, by this tool itself.
+std::filesystem::path installation(const std::filesystem::path& self) {
+    std::error_code error;
+    const auto neura = self.parent_path() / neura::tool::executable_file("neura");
+    return !self.empty() && std::filesystem::is_regular_file(neura, error) ? neura : self;
+}
+
 int command(const Options& options) {
     switch (options.command) {
     case Command::Update:
-        return neura::lifecycle::update(options.executable, options.update);
+        return neura::lifecycle::update(installation(options.executable), options.update);
     default:
         return 1;
     }

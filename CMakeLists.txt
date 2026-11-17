@@ -670,6 +670,26 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_executable(neura_coverage_tests tests/tooling/coverage_unit.cpp)
     target_link_libraries(neura_coverage_tests PRIVATE neura_compiler)
     neura_target_defaults(neura_coverage_tests)
+    # The dispatcher and its tools (docs/design/Products030.md): every command
+    # directly and through neura, missing and mixed components, and the
+    # build tree against an install on PATH. The mixed dispatcher claims
+    # another build in its dispatch token.
+    add_executable(neura_test_mixed_dispatcher src/cli/main.cpp src/cli/tool.cpp)
+    target_include_directories(neura_test_mixed_dispatcher PRIVATE src "${CMAKE_CURRENT_BINARY_DIR}/generated")
+    target_compile_definitions(neura_test_mixed_dispatcher PRIVATE
+        "NEURA_DISPATCH_VERSION_OVERRIDE=\"neura 0.0.0-mixed (test, commit test)\"")
+    set_target_properties(neura_test_mixed_dispatcher PROPERTIES
+        RUNTIME_OUTPUT_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/test-tools")
+    neura_target_defaults(neura_test_mixed_dispatcher)
+    add_test(NAME tools-parity COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/dispatch.py" parity "$<TARGET_FILE_DIR:neura>")
+    add_test(NAME tools-components COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/dispatch.py" components "$<TARGET_FILE_DIR:neura>"
+        "$<TARGET_FILE:neura_test_mixed_dispatcher>")
+    add_test(NAME tools-install COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/tools/dispatch.py" install "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_COMMAND}")
+    set_tests_properties(tools-parity tools-components tools-install PROPERTIES TIMEOUT 600)
+
     add_test(NAME tooling-coverage-unit COMMAND neura_coverage_tests)
     add_executable(neura_test_output_tests tests/tooling/test_output_unit.cpp)
     target_link_libraries(neura_test_output_tests PRIVATE neura_compiler)
