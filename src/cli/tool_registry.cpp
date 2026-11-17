@@ -3,6 +3,15 @@
 #include "neura/version.hpp"
 
 #include <array>
+#include <cerrno>
+#include <cstring>
+
+#ifndef _WIN32
+#include <fcntl.h>
+#include <sys/file.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 // The parts of the tool registry that the dispatcher links: data, the
 // version line and the usage text, with no stream or file system code, so
@@ -120,6 +129,69 @@ std::string dispatch_token() {
 #endif
 }
 
+int take_lease(const char* executable, bool& removed) {
+    removed = false;
+#ifdef _WIN32
+    (void)executable;
+    return -1;
+#else
+    // <root>/versions/<generation>/bin/<tool>
+    const std::string_view path(executable ? executable : "");
+    const auto tool_slash = path.rfind('/');
+    if (tool_slash == std::string_view::npos || tool_slash < 4) return -1;
+    const auto bin_slash = path.rfind('/', tool_slash - 1);
+    if (bin_slash == std::string_view::npos || path.substr(bin_slash + 1, tool_slash - bin_slash - 1) != "bin") return -1;
+    const auto generation_slash = path.rfind('/', bin_slash - 1);
+    if (generation_slash == std::string_view::npos || generation_slash == 0) return -1;
+    const auto versions_slash = path.rfind('/', generation_slash - 1);
+    if (versions_slash == std::string_view::npos || path.substr(versions_slash + 1, generation_slash - versions_slash - 1) != "versions") {
+        return -1;
+    }
+    const auto root = path.substr(0, versions_slash);
+    const auto generation = path.substr(generation_slash + 1, bin_slash - generation_slash - 1);
+    std::string lease(root);
+    lease += "/leases/";
+    lease += generation;
+    const int descriptor = ::open(lease.c_str(), O_RDONLY | O_CLOEXEC);
+    if (descriptor < 0) {
+        if (errno != ENOENT) return -1;
+        // No lease file: a root that a 0.2 client made runs without one; on
+        // a schema 2 root the generation was removed.
+        std::string marker(root);
+        marker += "/neura-install.txt";
+        const int file = ::open(marker.c_str(), O_RDONLY | O_CLOEXEC);
+        if (file < 0) return -1;
+        char head[16] = {};
+        const auto count = ::read(file, head, sizeof head - 1);
+        ::close(file);
+        removed = count >= 16 - 1 && std::memcmp(head, "neura-install 2", 15) == 0;
+        return -1;
+    }
+    if (::flock(descriptor, LOCK_SH | LOCK_NB) != 0) {
+        if (errno != EWOULDBLOCK) {
+            // A file system that cannot lock: run without a lease.
+            ::close(descriptor);
+            return -1;
+        }
+        // Held exclusively: a command is removing the generation, or only
+        // probing whether it is in use. Wait, then tell by the link count.
+        while (::flock(descriptor, LOCK_SH) != 0) {
+            if (errno != EINTR) {
+                ::close(descriptor);
+                return -1;
+            }
+        }
+    }
+    struct stat info {};
+    if (::fstat(descriptor, &info) != 0 || info.st_nlink == 0) {
+        removed = true;
+        ::close(descriptor);
+        return -1;
+    }
+    return descriptor;
+#endif
+}
+
 std::string executable_file(std::string_view name) {
 #ifdef _WIN32
     return std::string(name) + ".exe";
@@ -169,7 +241,9 @@ const char* usage_text() {
            "       neura --help | help\n"
            "       neura doctor\n"
            "       neura update [--check] [--nightly] [--source <https-url-or-directory>] [--require-attestation]\n"
-           "       neura uninstall [--dry-run] [--yes]\n"
+           "       neura update --components sdk|runtime|sdk,service [--terminate] [--source <https-url-or-directory>]\n"
+           "       neura update --rollback | --repair | --migrate-install\n"
+           "       neura uninstall [--dry-run] [--yes] [--component sdk|service] [--terminate]\n"
            "\n"
            "doctor, update, and uninstall manage an installed neura and are described in docs/Install.md.\n"
            "update and uninstall exit with status 3 for an install that neura did not make, and update --check\n"

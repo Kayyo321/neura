@@ -8,12 +8,17 @@
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
+#ifndef _WIN32
+#include <unistd.h>
+#endif
 
 namespace neura::tool {
 
 namespace fs = std::filesystem;
 
 namespace {
+
+int lease = -1;
 
 void tool_help(const Tool& tool, std::ostream& out) {
     out << tool.name << ": the direct form of";
@@ -78,6 +83,35 @@ fs::path executable_path(const fs::path& launch) {
 
 Start start(const Tool& tool, int argc, char** argv) {
     Start result;
+    // The lease comes first: before the tool opens any other file of its
+    // generation (docs/design/Lifecycle030.md).
+#ifdef __linux__
+    {
+        char self[4096];
+        const auto length = ::readlink("/proc/self/exe", self, sizeof self - 1);
+        if (length > 0) {
+            self[length] = '\0';
+            bool removed = false;
+            lease = take_lease(self, removed);
+            if (removed) {
+                std::cerr << removed_generation_message;
+                result.status = 1;
+                return result;
+            }
+        }
+    }
+#elif !defined(_WIN32)
+    {
+        const auto self = executable_path(argc > 0 ? argv[0] : "");
+        bool removed = false;
+        lease = take_lease(self.c_str(), removed);
+        if (removed) {
+            std::cerr << removed_generation_message;
+            result.status = 1;
+            return result;
+        }
+    }
+#endif
     int first = 1;
     if (argc > 1 && std::string_view(argv[1]).starts_with(dispatch_prefix)) {
         const auto claimed = std::string_view(argv[1]).substr(dispatch_prefix.size());
@@ -110,6 +144,8 @@ Start start(const Tool& tool, int argc, char** argv) {
     for (int i = first; i < argc; ++i) result.arguments.emplace_back(argv[i]);
     return result;
 }
+
+int lease_descriptor() { return lease; }
 
 std::vector<char*> argv_of(std::vector<std::string>& arguments) {
     std::vector<char*> pointers;

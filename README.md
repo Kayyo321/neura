@@ -30,7 +30,7 @@ On Linux, on macOS, and on Windows inside a WSL 2 distribution, one command inst
 curl --proto '=https' --tlsv1.2 -fsSL https://github.com/Kayyo321/neura/releases/latest/download/install.sh | sh
 ```
 
-It downloads the archive for your machine, verifies it, and installs `neura` under your home directory without `sudo`. That one installation compiles, runs, tests, and decompiles Neura programs. [Install and update](docs/Install.md) lists the supported platforms and describes each step, `neura update`, and `neura uninstall`.
+It downloads Neura-sdk for your machine, verifies it, and installs it under your home directory without `sudo`, with `neura` and each of its tools linked in `~/.local/bin`. That one installation compiles, runs, tests, and decompiles Neura programs. Add `| sh -s -- --components runtime` for Neura-runtime, which only runs built images and adds the runtime service, or `sdk,service` for both. [Install and update](docs/Install.md) lists the supported platforms and describes each step, `neura update`, and `neura uninstall`.
 
 ## Your first program
 

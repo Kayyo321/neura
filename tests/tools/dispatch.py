@@ -327,7 +327,7 @@ def components(bin_dir: Path, mixed: Path) -> None:
               "runtime only: neura-run")
         status, out, _ = run([str(neura), "doctor"], work, None)
         check(status == 0 and b"ok  components: core (runtime only: the Neura-sdk component is not installed)\n" in out
-              and b"ok  stdlib: not needed: the Neura-sdk component is not installed\n" in out,
+              and b"ok  sdk: not installed; source commands need Neura-sdk\n" in out and b"stdlib" not in out,
               f"runtime only: neura doctor is healthy\n{out.decode()}")
         capabilities = json.loads(run([str(neura), "capabilities", "--json"], work, None)[1])["features"]
         check(capabilities == {"lsp": False, "formatter": False, "debugger": False, "testDiscovery": False,

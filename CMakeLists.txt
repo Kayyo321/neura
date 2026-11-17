@@ -667,6 +667,10 @@ neura_target_defaults(neura)
 
 install(TARGETS neura RUNTIME DESTINATION bin COMPONENT core)
 install(FILES LICENSE DESTINATION share/doc/neura COMPONENT core)
+# The third install component, service, holds neurad when its target exists
+# (docs/design/Service030.md). Without it the component is empty, and
+# packaging/make-archive.sh still writes its manifest with no tool or file
+# (docs/design/Lifecycle030.md).
 if(NEURA_SDK)
     install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL COMPONENT sdk
         FILES_MATCHING PATTERN "*.nra")
@@ -1264,7 +1268,7 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_executable(neura_lifecycle_tests tests/lifecycle/unit_tests.cpp)
     target_link_libraries(neura_lifecycle_tests PRIVATE neura_lifecycle)
     neura_target_defaults(neura_lifecycle_tests)
-    foreach(suite IN ITEMS sha256 semver release-metadata marker)
+    foreach(suite IN ITEMS sha256 semver release-metadata marker manifest journal generation)
         add_test(NAME lifecycle-unit-${suite} COMMAND neura_lifecycle_tests ${suite})
     endforeach()
     add_test(NAME version-consistency COMMAND ${CMAKE_COMMAND}
@@ -1272,16 +1276,13 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/version.cmake"
     )
-    foreach(suite IN ITEMS install update uninstall bootstrap)
-        add_test(NAME lifecycle-${suite} COMMAND ${CMAKE_COMMAND}
-            "-DNEURA=$<TARGET_FILE:neura>"
-            "-DBINARY_DIR=${CMAKE_CURRENT_BINARY_DIR}"
-            "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
-            "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/lifecycle-${suite}-tests"
-            "-DCONFIG=$<CONFIG>"
-            -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/${suite}.cmake"
-        )
-        set_tests_properties(lifecycle-${suite} PROPERTIES TIMEOUT 600)
+    # The scenario suites of the 0.3 lifecycle (docs/design/Lifecycle030.md).
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    foreach(suite IN ITEMS archives install bootstrap update migrate doctor components uninstall service)
+        add_test(NAME lifecycle-${suite} COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/lifecycle/scenarios.py" ${suite}
+            "${CMAKE_CURRENT_BINARY_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/lifecycle-${suite}-tests" "${CMAKE_COMMAND}")
+        set_tests_properties(lifecycle-${suite} PROPERTIES TIMEOUT 900)
     endforeach()
 
     get_property(neura_tests DIRECTORY PROPERTY TESTS)

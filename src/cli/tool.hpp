@@ -80,6 +80,23 @@ struct Start {
 };
 Start start(const Tool& tool, int argc, char** argv);
 
+// The descriptor of the shared lease this process holds on its installed
+// generation (docs/design/Lifecycle030.md, "Generations in use"), or -1.
+int lease_descriptor();
+
+// Takes the shared lease of the generation that holds `executable`, the
+// real path of the running executable, when it is
+// <root>/versions/<generation>/bin/<tool>: a shared flock, not waited for,
+// on <root>/leases/<generation>, close-on-exec. Returns the descriptor, or
+// -1 when the process runs without a lease (not an installed generation, a
+// root without leases/ that a 0.2 client made, or a file system that cannot
+// lock). Sets `removed` when the generation was removed or is being
+// removed, which the caller reports. POSIX only; -1 on Windows.
+int take_lease(const char* executable, bool& removed);
+
+// The message for `removed`.
+inline constexpr const char* removed_generation_message = "neura: this generation of neura was removed; run the command again\n";
+
 // Pointers into `arguments` for code that takes argc and argv.
 std::vector<char*> argv_of(std::vector<std::string>& arguments);
 

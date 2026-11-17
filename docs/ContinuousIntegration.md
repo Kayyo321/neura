@@ -85,7 +85,7 @@ The scripts need Python 3 and Git, and use no packages outside the Python standa
 
 ## Tier 3: release qualification
 
-[`release.yml`](../.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds and tests the tagged commit, packs the release archive, and runs the lifecycle checks of [`packaging/qualify.sh`](../packaging/qualify.sh) on the packed archive on a second runner. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess.md) describes each job and check.
+[`release.yml`](../.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds and tests the tagged commit, packs the three archives of the target (Neura-sdk, Neura-runtime, and the legacy archive for 0.2 clients), and runs the lifecycle checks of [`packaging/qualify.sh`](../packaging/qualify.sh) on them on a second runner, including the update from the published 0.2 releases with their own clients. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess.md) describes each job and check.
 
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings.md).
 

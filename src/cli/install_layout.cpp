@@ -1,5 +1,7 @@
 #include "install_layout.hpp"
 
+#include "util/sha256.hpp"
+
 #include <algorithm>
 #include <charconv>
 #include <cstdio>
@@ -136,35 +138,72 @@ bool is_newer(std::string_view latest, std::string_view current) {
     return a && b && compare_semver(*a, *b) > 0;
 }
 
-std::optional<Marker> parse_marker(std::string_view text, std::string& error) {
-    std::vector<std::string_view> lines;
-    if (!split_lines(text, lines, error)) return std::nullopt;
-    if (lines.size() < 4 || lines[0] != "neura-install 1") {
-        error = "the first line is not \"neura-install 1\" or the file is incomplete";
+namespace {
+
+// `<key> <value>` where the value takes the rest of the line and may hold
+// spaces, but no tab.
+std::optional<std::string> rest_value(std::string_view line, std::string_view key) {
+    if (!line.starts_with(key) || line.size() <= key.size() + 1 || line[key.size()] != ' ') return std::nullopt;
+    const auto rest = line.substr(key.size() + 1);
+    if (rest.find('\t') != std::string_view::npos) return std::nullopt;
+    return std::string(rest);
+}
+
+// `<key> <word>`: one field without spaces.
+std::optional<std::string> word_value(std::string_view line, std::string_view key) {
+    auto value = rest_value(line, key);
+    if (!value || value->find(' ') != std::string::npos) return std::nullopt;
+    return value;
+}
+
+bool is_component_name(std::string_view text) {
+    return !text.empty() && text.size() <= 64 && text.front() >= 'a' && text.front() <= 'z' &&
+           std::ranges::all_of(text, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || c == '-'; });
+}
+
+bool is_tool_name(std::string_view text) { return is_component_name(text); }
+
+bool is_build_id(std::string_view text) {
+    return !text.empty() && text.size() <= 64 &&
+           std::ranges::all_of(text, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z'); });
+}
+
+bool is_generation_id(std::string_view text) {
+    return text.size() == 12 && std::ranges::all_of(text, [](char c) { return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f'); });
+}
+
+int component_rank(std::string_view name) {
+    if (name == "core") return 0;
+    if (name == "sdk") return 1;
+    if (name == "service") return 2;
+    return 3;
+}
+
+std::optional<Marker> parse_marker_1(const std::vector<std::string_view>& lines, std::string& error) {
+    if (lines.size() < 4) {
+        error = "the file is incomplete";
         return std::nullopt;
     }
     Marker marker;
-    const auto value = [&](std::string_view line, std::string_view key) -> std::optional<std::string> {
-        if (!line.starts_with(key) || line.size() <= key.size() + 1 || line[key.size()] != ' ') return std::nullopt;
-        std::string_view rest = line.substr(key.size() + 1);
-        if (rest.find_first_of(" \t") != std::string_view::npos) return std::nullopt;
-        return std::string(rest);
-    };
-    const auto method = value(lines[1], "method");
+    marker.schema = 1;
+    const auto method = word_value(lines[1], "method");
     if (!method || !is_method_name(*method)) {
         error = "line 2 is not \"method <name>\"";
         return std::nullopt;
     }
     marker.method = *method;
     // A link path can hold spaces, so it takes the rest of the line.
-    if (!lines[2].starts_with("link /") || lines[2].find_first_of("\t") != std::string_view::npos) {
+    if (!lines[2].starts_with("link /") || lines[2].find('\t') != std::string_view::npos) {
         error = "line 3 is not \"link <absolute path>\"";
         return std::nullopt;
     }
     marker.link = std::string(lines[2].substr(5));
+    const std::filesystem::path link(marker.link);
+    marker.bin = link.parent_path().string();
+    marker.links = {link.filename().string()};
     std::set<std::string> seen;
     for (std::size_t i = 3; i < lines.size(); ++i) {
-        const auto version = value(lines[i], "version");
+        const auto version = word_value(lines[i], "version");
         if (!version || !parse_semver(*version)) {
             error = "line " + std::to_string(i + 1) + " is not \"version <semantic version>\"";
             return std::nullopt;
@@ -173,15 +212,361 @@ std::optional<Marker> parse_marker(std::string_view text, std::string& error) {
             error = "line " + std::to_string(i + 1) + " repeats version " + *version;
             return std::nullopt;
         }
-        marker.versions.push_back(*version);
+        marker.generations.push_back(*version);
     }
     return marker;
 }
 
+std::optional<Marker> parse_marker_2(const std::vector<std::string_view>& lines, std::string& error) {
+    const auto fail = [&](std::size_t line, const std::string& reason) -> std::optional<Marker> {
+        error = "line " + std::to_string(line + 1) + ": " + reason;
+        return std::nullopt;
+    };
+    if (lines.size() < 4) {
+        error = "the file is incomplete";
+        return std::nullopt;
+    }
+    Marker marker;
+    marker.schema = 2;
+    const auto method = word_value(lines[1], "method");
+    if (!method || !is_method_name(*method)) return fail(1, "expected \"method <name>\"");
+    marker.method = *method;
+    const auto bin = rest_value(lines[2], "bin");
+    if (!bin || !bin->starts_with('/')) return fail(2, "expected \"bin <absolute path>\"");
+    marker.bin = *bin;
+    {
+        std::vector<std::string_view> fields;
+        if (!split_fields(lines[3], fields) || fields[0] != "components" || fields.size() < 2) {
+            return fail(3, "expected \"components <name>...\"");
+        }
+        for (std::size_t i = 1; i < fields.size(); ++i) {
+            if (!is_component_name(fields[i])) return fail(3, "not a component name: " + std::string(fields[i]));
+            if (!marker.components.empty() && !component_before(marker.components.back(), fields[i])) {
+                return fail(3, "the components are not in order, or one is repeated");
+            }
+            marker.components.emplace_back(fields[i]);
+        }
+    }
+    std::size_t i = 4;
+    std::set<std::string> generations;
+    for (; i < lines.size() && lines[i].starts_with("generation "); ++i) {
+        const auto name = word_value(lines[i], "generation");
+        if (!name || !parse_generation_name(*name)) return fail(i, "expected \"generation <generation name>\"");
+        if (!marker.generations.empty() && !(marker.generations.back() < *name)) return fail(i, "the generations are not sorted, or one is repeated");
+        marker.generations.push_back(*name);
+    }
+    for (; i < lines.size(); ++i) {
+        const auto name = word_value(lines[i], "link");
+        if (!name || !is_tool_name(*name)) return fail(i, "expected \"link <tool name>\"");
+        if (!marker.links.empty() && !(marker.links.back() < *name)) return fail(i, "the links are not sorted, or one is repeated");
+        marker.links.push_back(*name);
+    }
+    return marker;
+}
+
+} // namespace
+
+bool component_before(std::string_view left, std::string_view right) {
+    const auto a = component_rank(left);
+    const auto b = component_rank(right);
+    if (a != b) return a < b;
+    return left < right;
+}
+
+bool known_component(std::string_view name) { return component_rank(name) < 3; }
+
+bool valid_component_set(const std::vector<std::string>& components) {
+    std::vector<std::string> sorted = components;
+    std::ranges::sort(sorted, [](const std::string& a, const std::string& b) { return component_before(a, b); });
+    return sorted == std::vector<std::string>{"core", "sdk"} || sorted == std::vector<std::string>{"core", "service"} ||
+           sorted == std::vector<std::string>{"core", "sdk", "service"};
+}
+
+std::optional<Marker> parse_marker(std::string_view text, std::string& error) {
+    std::vector<std::string_view> lines;
+    if (!split_lines(text, lines, error)) return std::nullopt;
+    if (lines[0] == "neura-install 1") return parse_marker_1(lines, error);
+    if (lines[0] == "neura-install 2") return parse_marker_2(lines, error);
+    error = "the first line is not \"neura-install 1\" or \"neura-install 2\"";
+    return std::nullopt;
+}
+
 std::string format_marker(const Marker& marker) {
-    std::string text = "neura-install 1\nmethod " + marker.method + "\nlink " + marker.link + "\n";
-    for (const auto& version : marker.versions) text += "version " + version + "\n";
+    auto components = marker.components;
+    std::ranges::sort(components, [](const std::string& a, const std::string& b) { return component_before(a, b); });
+    auto generations = marker.generations;
+    std::ranges::sort(generations);
+    generations.erase(std::unique(generations.begin(), generations.end()), generations.end());
+    auto links = marker.links;
+    std::ranges::sort(links);
+    links.erase(std::unique(links.begin(), links.end()), links.end());
+    std::string text = "neura-install 2\nmethod " + marker.method + "\nbin " + marker.bin + "\ncomponents";
+    for (const auto& component : components) text += " " + component;
+    text += "\n";
+    for (const auto& generation : generations) text += "generation " + generation + "\n";
+    for (const auto& link : links) text += "link " + link + "\n";
     return text;
+}
+
+bool is_safe_relative_path(std::string_view path) {
+    if (path.empty() || path.front() == '/' || path.back() == '/') return false;
+    const bool characters = std::ranges::all_of(path, [](char c) {
+        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '.' || c == '_' || c == '+' ||
+               c == '-' || c == '/';
+    });
+    if (!characters) return false;
+    while (true) {
+        const auto slash = path.find('/');
+        const auto part = path.substr(0, slash);
+        if (part.empty() || part == "." || part == "..") return false;
+        if (slash == std::string_view::npos) return true;
+        path.remove_prefix(slash + 1);
+    }
+}
+
+std::optional<ComponentManifest> parse_manifest(std::string_view text, std::string& error) {
+    std::vector<std::string_view> lines;
+    if (!split_lines(text, lines, error)) return std::nullopt;
+    const auto fail = [&](std::size_t line, const std::string& reason) -> std::optional<ComponentManifest> {
+        error = "line " + std::to_string(line + 1) + ": " + reason;
+        return std::nullopt;
+    };
+    if (lines[0] != "neura-component 1") return fail(0, "expected \"neura-component 1\"");
+    if (lines.size() < 5) return fail(lines.size() - 1, "the manifest is incomplete");
+    ComponentManifest manifest;
+    const auto name = word_value(lines[1], "name");
+    if (!name || !is_component_name(*name)) return fail(1, "expected \"name <component>\"");
+    manifest.name = *name;
+    const auto version = word_value(lines[2], "version");
+    if (!version || !parse_semver(*version)) return fail(2, "expected \"version <semantic version>\"");
+    manifest.version = *version;
+    const auto build = word_value(lines[3], "build");
+    if (!build || !is_build_id(*build)) return fail(3, "expected \"build <commit>\"");
+    manifest.build = *build;
+    const auto target = word_value(lines[4], "target");
+    if (!target || !is_triple(*target)) return fail(4, "expected \"target <triple>\"");
+    manifest.target = *target;
+    std::size_t i = 5;
+    for (; i < lines.size() && lines[i].starts_with("requires "); ++i) {
+        const auto required = word_value(lines[i], "requires");
+        if (!required || !is_component_name(*required)) return fail(i, "expected \"requires <component>\"");
+        if (std::ranges::find(manifest.requirements, *required) != manifest.requirements.end()) return fail(i, "a repeated requires line");
+        manifest.requirements.push_back(*required);
+    }
+    if (i < lines.size() && lines[i].starts_with("protocol ")) {
+        const auto protocol = rest_value(lines[i], "protocol");
+        std::vector<std::string_view> fields;
+        if (!protocol || !split_fields(*protocol, fields) || fields.size() != 2) return fail(i, "expected \"protocol <name> <version>\"");
+        manifest.protocol = *protocol;
+        ++i;
+    }
+    for (; i < lines.size() && lines[i].starts_with("tool "); ++i) {
+        const auto tool = word_value(lines[i], "tool");
+        if (!tool || !is_tool_name(*tool)) return fail(i, "expected \"tool <name>\"");
+        if (!manifest.tools.empty() && !(manifest.tools.back() < *tool)) return fail(i, "the tools are not sorted, or one is repeated");
+        manifest.tools.push_back(*tool);
+    }
+    for (; i < lines.size(); ++i) {
+        std::vector<std::string_view> fields;
+        if (!split_fields(lines[i], fields) || fields[0] != "file") return fail(i, "unknown line kind");
+        if (fields.size() != 5) return fail(i, "expected \"file <mode> <sha256> <size> <path>\"");
+        ManifestFile file;
+        if (fields[1] == "755") file.mode = 0755;
+        else if (fields[1] == "644") file.mode = 0644;
+        else return fail(i, "the mode is not 755 or 644");
+        if (!is_hex_digest(fields[2])) return fail(i, "the SHA-256 is not 64 lowercase hexadecimal digits");
+        file.sha256 = std::string(fields[2]);
+        if (!parse_number(fields[3], file.size) || file.size > max_asset_size * 4) return fail(i, "the size is not a number of bytes");
+        if (!is_safe_relative_path(fields[4])) return fail(i, "the path is not a safe relative path");
+        file.path = std::string(fields[4]);
+        if (file.path.starts_with(std::string(components_directory) + "/")) return fail(i, "a manifest does not list the manifests");
+        if (!manifest.files.empty() && !(manifest.files.back().path < file.path)) return fail(i, "the files are not sorted by path, or one is repeated");
+        manifest.files.push_back(std::move(file));
+    }
+    for (const auto& tool : manifest.tools) {
+        const auto path = "bin/" + tool;
+        const auto found = std::ranges::find_if(manifest.files, [&](const ManifestFile& f) { return f.path == path; });
+        if (found == manifest.files.end() || found->mode != 0755) {
+            error = "the tool " + tool + " has no file bin/" + tool + " with mode 755";
+            return std::nullopt;
+        }
+    }
+    return manifest;
+}
+
+std::string format_manifest(const ComponentManifest& manifest) {
+    std::string text = "neura-component 1\nname " + manifest.name + "\nversion " + manifest.version + "\nbuild " + manifest.build +
+                       "\ntarget " + manifest.target + "\n";
+    for (const auto& required : manifest.requirements) text += "requires " + required + "\n";
+    if (!manifest.protocol.empty()) text += "protocol " + manifest.protocol + "\n";
+    auto tools = manifest.tools;
+    std::ranges::sort(tools);
+    for (const auto& tool : tools) text += "tool " + tool + "\n";
+    auto files = manifest.files;
+    std::ranges::sort(files, [](const ManifestFile& a, const ManifestFile& b) { return a.path < b.path; });
+    for (const auto& file : files) {
+        text += std::string("file ") + (file.mode == 0755 ? "755 " : "644 ") + file.sha256 + " " + std::to_string(file.size) + " " +
+                file.path + "\n";
+    }
+    return text;
+}
+
+std::string check_known_manifest(const ComponentManifest& manifest) {
+    if (!known_component(manifest.name)) return "the component " + manifest.name + " is not one this neura knows";
+    const std::vector<std::string> requirements =
+        manifest.name == "core" ? std::vector<std::string>{} : std::vector<std::string>{"core"};
+    if (manifest.requirements != requirements) {
+        return manifest.name == "core" ? "the core component requires nothing" : "the " + manifest.name + " component requires core alone";
+    }
+    if (manifest.name == "service" ? manifest.protocol != "service 1.0" : !manifest.protocol.empty()) {
+        return manifest.name == "service" ? "the service component has no \"protocol service 1.0\" line"
+                                          : "only the service component has a protocol line";
+    }
+    return {};
+}
+
+const ComponentArchive* ComponentsMetadata::find(std::string_view product, std::string_view triple) const {
+    for (const auto& archive : archives) {
+        if (archive.product == product && archive.triple == triple) return &archive;
+    }
+    return nullptr;
+}
+
+std::string product_archive_name(std::string_view product, std::string_view version, std::string_view triple) {
+    return "neura-" + std::string(product) + "-" + std::string(version) + "-" + std::string(triple) + ".tar.gz";
+}
+
+std::optional<ComponentsMetadata> parse_components_metadata(std::string_view text, std::string& error) {
+    std::vector<std::string_view> lines;
+    if (!split_lines(text, lines, error)) return std::nullopt;
+    const auto fail = [&](std::size_t line, const std::string& reason) -> std::optional<ComponentsMetadata> {
+        error = "line " + std::to_string(line + 1) + ": " + reason;
+        return std::nullopt;
+    };
+    if (lines[0] != "neura-components 1") return fail(0, "expected \"neura-components 1\"");
+    if (lines.size() < 3) return fail(lines.size() - 1, "the file is incomplete");
+    ComponentsMetadata metadata;
+    const auto version = word_value(lines[1], "version");
+    if (!version || !parse_semver(*version)) return fail(1, "expected \"version <semantic version>\"");
+    metadata.version = *version;
+    const auto build = word_value(lines[2], "build");
+    if (!build || !is_build_id(*build)) return fail(2, "expected \"build <commit>\"");
+    metadata.build = *build;
+    std::string previous;
+    for (std::size_t i = 3; i < lines.size(); ++i) {
+        std::vector<std::string_view> fields;
+        if (!split_fields(lines[i], fields) || fields[0] != "archive") return fail(i, "unknown line kind");
+        if (fields.size() != 6) return fail(i, "expected \"archive <product> <triple> <file> <sha256> <size>\"");
+        ComponentArchive archive;
+        if (fields[1] != "sdk" && fields[1] != "runtime") return fail(i, "unknown product \"" + std::string(fields[1]) + "\"");
+        archive.product = std::string(fields[1]);
+        if (!is_triple(fields[2])) return fail(i, "the target triple is not valid");
+        archive.triple = std::string(fields[2]);
+        if (fields[3] != product_archive_name(archive.product, metadata.version, archive.triple)) {
+            return fail(i, "the file is not " + product_archive_name(archive.product, metadata.version, archive.triple));
+        }
+        archive.file = std::string(fields[3]);
+        if (!is_hex_digest(fields[4])) return fail(i, "the SHA-256 is not 64 lowercase hexadecimal digits");
+        archive.sha256 = std::string(fields[4]);
+        if (!parse_number(fields[5], archive.size) || archive.size == 0 || archive.size > max_asset_size) {
+            return fail(i, "the size is not between 1 byte and 1 GiB");
+        }
+        if (metadata.find(archive.product, archive.triple)) return fail(i, "a second archive for " + archive.product + " on " + archive.triple);
+        const std::string key = std::string(fields[1]) + " " + std::string(fields[2]) + " " + std::string(fields[3]);
+        if (!previous.empty() && !(previous < key)) return fail(i, "the archive lines are not sorted");
+        previous = key;
+        metadata.archives.push_back(std::move(archive));
+    }
+    return metadata;
+}
+
+std::optional<Journal> parse_journal(std::string_view text, std::string& error) {
+    std::vector<std::string_view> lines;
+    if (!split_lines(text, lines, error)) return std::nullopt;
+    const auto fail = [&](std::size_t line, const std::string& reason) -> std::optional<Journal> {
+        error = "line " + std::to_string(line + 1) + ": " + reason;
+        return std::nullopt;
+    };
+    if (lines[0] != "neura-journal 1") return fail(0, "expected \"neura-journal 1\"");
+    if (lines.size() < 5) return fail(lines.size() - 1, "the journal is incomplete");
+    Journal journal;
+    const auto operation = word_value(lines[1], "operation");
+    if (!operation || !is_method_name(*operation)) return fail(1, "expected \"operation <name>\"");
+    journal.operation = *operation;
+    if (lines[2] == "old -") {
+        journal.old_generation.clear();
+    } else if (const auto old = word_value(lines[2], "old"); old && parse_generation_name(*old)) {
+        journal.old_generation = *old;
+    } else {
+        return fail(2, "expected \"old <generation>\" or \"old -\"");
+    }
+    const auto next = word_value(lines[3], "new");
+    if (!next || !parse_generation_name(*next)) return fail(3, "expected \"new <generation>\"");
+    journal.new_generation = *next;
+    if (lines[4] == "placed yes") journal.placed = true;
+    else if (lines[4] != "placed no") return fail(4, "expected \"placed yes\" or \"placed no\"");
+    for (std::size_t i = 5; i < lines.size(); ++i) {
+        if (auto aside = rest_value(lines[i], "aside"); aside && aside->starts_with('/') && journal.aside.empty()) {
+            journal.aside = *aside;
+        } else if (auto path = rest_value(lines[i], "remove"); path && path->starts_with('/')) {
+            journal.remove.push_back(*path);
+        } else if (auto added = rest_value(lines[i], "add"); added && added->starts_with('/')) {
+            journal.add.push_back(*added);
+        } else if (lines[i].starts_with("old-marker ")) {
+            journal.old_marker += std::string(lines[i].substr(11)) + "\n";
+        } else if (lines[i].starts_with("new-marker ")) {
+            journal.new_marker += std::string(lines[i].substr(11)) + "\n";
+        } else {
+            return fail(i, "unknown line kind");
+        }
+    }
+    if (journal.new_marker.empty()) return fail(lines.size() - 1, "the journal has no new marker");
+    return journal;
+}
+
+std::string format_journal(const Journal& journal) {
+    std::string text = "neura-journal 1\noperation " + journal.operation + "\nold " +
+                       (journal.old_generation.empty() ? std::string("-") : journal.old_generation) + "\nnew " + journal.new_generation +
+                       "\nplaced " + (journal.placed ? "yes" : "no") + "\n";
+    if (!journal.aside.empty()) text += "aside " + journal.aside + "\n";
+    for (const auto& path : journal.remove) text += "remove " + path + "\n";
+    for (const auto& path : journal.add) text += "add " + path + "\n";
+    const auto lines = [&](std::string_view marker, std::string_view key) {
+        while (!marker.empty()) {
+            const auto end = marker.find('\n');
+            text += std::string(key) + " " + std::string(marker.substr(0, end)) + "\n";
+            if (end == std::string_view::npos) break;
+            marker.remove_prefix(end + 1);
+        }
+    };
+    lines(journal.old_marker, "old-marker");
+    lines(journal.new_marker, "new-marker");
+    return text;
+}
+
+std::optional<GenerationName> parse_generation_name(std::string_view name) {
+    const auto plus = name.find('+');
+    GenerationName result;
+    result.version = std::string(name.substr(0, plus));
+    if (!parse_semver(result.version)) return std::nullopt;
+    if (plus != std::string_view::npos) {
+        result.id = std::string(name.substr(plus + 1));
+        if (!is_generation_id(result.id)) return std::nullopt;
+    }
+    return result;
+}
+
+std::string generation_name(std::string_view version, std::vector<std::pair<std::string, std::string>> manifests) {
+    std::ranges::sort(manifests, [](const auto& a, const auto& b) { return component_before(a.first, b.first); });
+    util::Sha256 hash;
+    for (const auto& [name, bytes] : manifests) hash.update(bytes);
+    const auto digest = hash.finish();
+    std::string hex;
+    for (std::size_t i = 0; i < 6; ++i) {
+        hex += "0123456789abcdef"[digest[i] >> 4];
+        hex += "0123456789abcdef"[digest[i] & 15];
+    }
+    return std::string(version) + "+" + hex;
 }
 
 const ReleaseAsset* ReleaseMetadata::find(std::string_view triple) const {
@@ -266,7 +651,7 @@ bool update_check_due(const std::optional<UpdateCheck>& state, std::int64_t now)
 
 Detection detect_install(const fs::path& executable) {
     Detection detection;
-    // <root>/versions/<version>/bin/neura
+    // <root>/versions/<generation>/bin/<tool>
     const auto bin = executable.parent_path();
     const auto version_dir = bin.parent_path();
     const auto versions = version_dir.parent_path();
@@ -275,12 +660,12 @@ Detection detect_install(const fs::path& executable) {
     }
     const auto root = versions.parent_path();
     const auto name = version_dir.filename().string();
-    if (!parse_semver(name)) return detection;
+    if (!parse_generation_name(name)) return detection;
     std::error_code error;
     const auto marker_path = root / marker_name;
     if (!fs::is_regular_file(marker_path, error)) return detection;
     detection.root = root;
-    detection.running_version = name;
+    detection.running_generation = name;
     std::string text;
     {
         std::FILE* file = std::fopen(marker_path.c_str(), "rb");
