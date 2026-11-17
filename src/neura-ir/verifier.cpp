@@ -622,6 +622,7 @@ private:
     void check_cleanup(const IrNode& node, Context& context) {
         expect_operands(node, 0, "cleanup");
         if (context.function == no_symbol) report(node.span, "a cleanup appears outside a function body");
+        if (context.scoped_value) report(node.span, "a cleanup appears among the statements of a scoped value");
         if (context.cleanup_list) report(node.span, "a cleanup appears inside a cleanup list");
         if (node.body.empty()) report(node.span, "a cleanup has an empty list");
         const auto loop_control = [](const auto& self, const std::vector<IrNode>& region) -> bool {

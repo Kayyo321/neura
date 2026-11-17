@@ -1,2 +1,0 @@
-native tier 3 verification rejects every inlined Sequence.from_iterator of a fresh iterator (V7), with or without generators
-eager-verify

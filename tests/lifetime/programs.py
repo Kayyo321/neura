@@ -13,7 +13,9 @@ tier 1 (NEURA_TIER_CHECK=2), with native tier 3 checked by its verifier
 (NEURA_TIER3_VERIFY=1), and with native code off (NEURA_JIT=off).
 
 Every run of one image must print the expected output and give the same
-exit status, trap text, steps and peak heap cells. A program that traps
+exit status, trap text, steps and peak heap cells, and the builds from
+source, from `.nir` and without names give the same steps and peak heap
+cells as each other. A program that traps
 gives its status in `<name>.status`; its output is what it printed before
 the trap. A program with `<name>.deopt` must form native tier 3 programs
 and deoptimize out of one in each mode that file lists, one per line, so
@@ -21,16 +23,13 @@ that the deoptimization tests do not pass vacuously (the unoptimized build
 is exempt: its calls are not inlined).
 
 A program may list modes in `<name>.skip`, one per line after a line that
-says why; the reason is printed. The generator programs skip
-`eager-verify`: native tier 3 verification rejects, as V7, any call of
-`Std.Collections.Sequence.from_iterator` with a fresh iterator that tier 3
-inlines into its caller, with or without generators (a program built by the
-base of this milestone from `from_iterator<int>(new Counter(n))` fails the
-same way), so that mode cannot judge a generator.
+says why; the reason is printed.
 
 Then each program's `.nir` is checked: a program that uses `defer`,
 `using` or a generator is written as NeuraIR 1.14 (nir_lifetime_minor),
-and the same file marked as an older minor is rejected by the reader.
+and the same file marked as an older minor is rejected by the reader. A
+program with `<name>.plain` uses none of them, and is written as an older
+minor.
 
 Usage: programs.py <neura> <directory>
 """
@@ -99,6 +98,7 @@ def main():
                 continue
             builds = {'source': [str(source)], 'unoptimized': ['--no-optimize', str(source)],
                       'nir': [str(module)], 'stripped': ['--no-source-map', str(source)]}
+            counts = {}
             for build, arguments in builds.items():
                 image = scratch / (source.name + '.' + build + '.nvr')
                 result = run(['build', *arguments, '-o', str(image)])
@@ -127,12 +127,19 @@ def main():
                             failures.append(f'{where}: expected native programs and a deoptimization, found '
                                             f'{native} programs and {deoptimized} deoptimizations\n{result.stderr}')
                 reference = observed.get('tier0')
+                counts[build] = reference[0] if reference else None
                 for mode, value in observed.items():
                     if value != reference:
                         failures.append(f'{source.name} {build}: {mode} gives steps, peak cells and traps '
                                         f'{value}, tier 0 gives {reference}')
+            if len({counts.get(build) for build in ('source', 'nir', 'stripped')}) != 1:
+                failures.append(f'{source.name}: steps and peak cells differ between builds: {counts}')
             data = bytearray(module.read_bytes())
             minor = data[6] | (data[7] << 8)
+            if expected_path.with_suffix('.plain').exists():
+                if minor >= LIFETIME_MINOR:
+                    failures.append(f'{source.name}: NeuraIR 1.{minor}, expected a minor below 1.{LIFETIME_MINOR}')
+                continue
             if minor != LIFETIME_MINOR:
                 failures.append(f'{source.name}: NeuraIR 1.{minor}, expected 1.{LIFETIME_MINOR}')
             data[6], data[7] = LIFETIME_MINOR - 2, 0

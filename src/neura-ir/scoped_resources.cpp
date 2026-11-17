@@ -53,6 +53,10 @@ private:
     std::set<SymbolId> scoped_;
     std::set<SymbolId> inner_;
     unsigned task_scopes_ = 0;
+    // The walk repeats until the set of locals that hold the resource stops
+    // growing, so that an alias made late in a loop is seen at its top;
+    // only the last walk reports.
+    bool report_ = true;
 
     const IrSymbol& symbol(SymbolId id) const { return program_.symbols[id]; }
     bool local(SymbolId id) const {
@@ -60,7 +64,23 @@ private:
                (symbol(id).kind == SymbolKind::Local || symbol(id).kind == SymbolKind::Parameter);
     }
 
-    [[noreturn]] void escape(const Span& at, const std::string& how) const {
+    // Whether a value of `type` can hold a reference to the resource.
+    static bool can_hold(const IrType& type) {
+        switch (type.kind) {
+        case TypeKind::Void:
+        case TypeKind::Bool:
+        case TypeKind::Integer:
+        case TypeKind::Float:
+        case TypeKind::String:
+        case TypeKind::Module:
+            return false;
+        default:
+            return true;
+        }
+    }
+
+    void escape(const Span& at, const std::string& how) const {
+        if (!report_) return;
         throw Diagnostic(at, "'" + name_ + "' is closed at the end of its 'using' block and cannot be " + how)
             .with_code("E0475")
             .label(keyword_, "'" + name_ + "' is bound here, and closed when this block is left")
@@ -78,6 +98,12 @@ private:
         // The Cleanup after the token is the block's own close.
         auto first = token_index + 1;
         if (first < region.size() && region[first].op == IrOp::Cleanup) ++first;
+        report_ = false;
+        for (std::size_t before = 0; before != scoped_.size();) {
+            before = scoped_.size();
+            for (auto i = first; i < region.size(); ++i) statement(region[i]);
+        }
+        report_ = true;
         for (auto i = first; i < region.size(); ++i) statement(region[i]);
     }
 
@@ -106,7 +132,10 @@ private:
             for (const auto& part : destination.operands) expression(part);
             const bool held = expression(node.operands.back());
             if (!held) return;
-            if (destination.op == IrOp::Pending) escape(node.operands.back().span, "returned");
+            if (destination.op == IrOp::Pending) {
+                escape(node.operands.back().span, "returned");
+                return;
+            }
             if (destination.op == IrOp::Load && local(destination.symbol)) {
                 if (!inner_.contains(destination.symbol))
                     escape(node.operands.back().span, "stored in a binding of an outer block");
@@ -116,6 +145,7 @@ private:
             escape(node.operands.back().span, destination.op == IrOp::Field ? "stored in a field"
                                               : destination.op == IrOp::Index ? "stored in an element"
                                                                               : "stored in a global");
+            return;
         }
         case IrOp::Return:
             if (!node.operands.empty() && expression(node.operands.front()))
@@ -218,8 +248,19 @@ private:
             for (std::size_t i = 1; i < node.operands.size(); ++i)
                 if (expression(node.operands[i]))
                     escape(node.operands[i].span, "passed to a function value, which may retain it");
-            if (!node.operands.empty()) expression(node.operands.front());
-            return false;
+            // A function value that captured the resource may return it.
+            const bool held = !node.operands.empty() && expression(node.operands.front());
+            return held && can_hold(node.type);
+        }
+        // A part of a value that holds the resource may be the resource.
+        case IrOp::Field:
+        case IrOp::Index:
+        case IrOp::Project:
+        case IrOp::EnumProject:
+        case IrOp::AnyUnpack: {
+            bool held = false;
+            for (const auto& operand : node.operands) held = expression(operand) || held;
+            return held && can_hold(node.type);
         }
         case IrOp::Spawn: {
             const bool held = !node.operands.empty() && expression(node.operands.front());

@@ -1,0 +1,12 @@
+error[E0475]: 'source' is closed at the end of its 'using' block and cannot be returned
+  --> $DIR/using-element-return.nra:12:16
+   |
+10 |     using (source = new Resource()) {
+   |     ----- 'source' is bound here, and closed when this block is left
+11 |         let held = [source];
+12 |         return Result<Resource>.Ok(held[0]);
+   |                ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+   |
+   = help: use the resource inside the block, or keep what it produced instead of the resource
+
+For more information about this error, try `neura explain E0475`.

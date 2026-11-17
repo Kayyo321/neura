@@ -481,23 +481,44 @@ std::vector<IrNode> Lowering::generator_factory(const Declaration& declaration, 
         code.push_back(std::move(result));
         program_.bodies.push_back({next, std::move(code)});
     }
-    // The call: Sequence.from_iterator<T>(new $generator<N>(...)).
-    const auto sequences = library_module("std/collections/sequence.nra", "Sequence", span, context,
-                                          "a generator needs Std.Collections.Sequence");
-    const auto from_iterator = own_member(sequences, "from_iterator");
-    if (from_iterator == no_symbol)
-        throw Diagnostic(span, "Std.Collections.Sequence must export from_iterator").with_code("E0899");
-    resolve(from_iterator);
-    auto wrap = node(IrOp::VirtualCall, span, sequence_type);
-    wrap.symbol = from_iterator;
-    wrap.type_arguments.push_back(element);
-    auto module = node(IrOp::Reference, span, symbol(sequences).type);
-    module.symbol = sequences;
-    wrap.operands.push_back(std::move(module));
-    wrap.operands.push_back(std::move(allocation));
+    // The call: the state in a hidden local, then the body of
+    // Sequence.from_iterator<T> written out, new Sequence<T>(func() -> bool
+    // { return state.has_next(); }, func() -> T { return state.next(); }).
+    // Written out, a generator's call is one call shallower for tier 3,
+    // whose verifier rejects from_iterator inlined two calls deep.
+    std::vector<IrNode> code;
+    const auto held = hidden_local("$state", symbol(cls).type, span, context);
+    auto hold = node(IrOp::Initialize, span);
+    hold.symbol = held;
+    hold.operands.push_back(std::move(allocation));
+    code.push_back(std::move(hold));
+    const auto forward = [&](SymbolId target, const IrType& result) {
+        ClosureEnvironment closure{closure_layout(span, lexical_owner(context)), context, {}, {}};
+        const auto callable = callable_type({result}, span);
+        const auto invoke = closure_method(closure.layout, callable, span, {});
+        auto load = node(IrOp::Load, span, symbol(cls).type);
+        load.symbol = held;
+        auto call = node(IrOp::VirtualCall, span, result);
+        call.symbol = target;
+        call.operands.push_back(capture(closure, held, std::move(load), span));
+        auto give = node(IrOp::Return, span);
+        give.operands.push_back(std::move(call));
+        std::vector<IrNode> body;
+        body.push_back(std::move(give));
+        program_.bodies.push_back({invoke, std::move(body)});
+        return closure_value(callable, closure, span);
+    };
+    const auto sequence_class = sequence_type.symbol;
+    const auto sequence_init = own_member(sequence_class, "init");
+    if (sequence_init == no_symbol)
+        throw Diagnostic(span, "Std.Collections.Sequence must declare its constructor").with_code("E0899");
+    resolve(sequence_init);
+    auto wrap = node(IrOp::Allocate, span, sequence_type);
+    wrap.symbol = sequence_init;
+    wrap.operands.push_back(forward(has_next, bool_type));
+    wrap.operands.push_back(forward(next, element));
     auto result = node(IrOp::Return, span);
     result.operands.push_back(std::move(wrap));
-    std::vector<IrNode> code;
     code.push_back(std::move(result));
     return code;
 }
