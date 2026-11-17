@@ -1,0 +1,33 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    #NoInline
+    let calculate = func(zero: float64, rounds: int) -> int {
+        let checked = 0;
+        for (let i = 0; i < rounds; i = i + 1) {
+            let quotient = zero / zero;
+            let packed: any = quotient;
+            let bits: uint64 = match.is (packed) {
+                value: float64 => value.to_bits(),
+                _ => 0,
+            };
+            if (bits != 9221120237041090560) {
+                return -1;
+            }
+            checked = checked + 1;
+        }
+        return checked;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let zero = float64.from_bits(args.length as uint64);
+        let checked = calculate(zero, 1000);
+        if (checked != 1000) {
+            console.print_line("nan mismatch");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("nan 1000 ok");
+        return program.ExitCode.Ok;
+    };
+);

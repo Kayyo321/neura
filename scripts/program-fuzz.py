@@ -98,7 +98,7 @@ FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
     "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
-    "sqrt-special", "tuples", "enums", "class-hooks",
+    "sqrt-special", "tuples", "enums", "class-hooks", "any",
 ]
 
 
@@ -1185,7 +1185,38 @@ SECTIONS = [
 ]
 
 
-def build_program(seed, *, class_hooks=True):
+def section_any(p, k):
+    """Pack mixed exact-width scalars and match them after collection storage."""
+    p.feature("any", "arrays", "floats", "nan-payloads")
+    number = p.between(1, 200)
+    half = p.between(31745, 32767)
+    brain = p.between(32641, 32767)
+    p.declarations.append(fill("""let s${k}_read = func(value: any) -> int64 => match.is (value) {
+    small: int32 => small as int64,
+    wide: int64 => wide,
+    half: float16 => half.to_bits() as int64,
+    brain: bfloat16 => brain.to_bits() as int64,
+    flag: bool => flag ? 1 : 0,
+    text: string => text.byte_length as int64,
+    nil => 7,
+    _ => -1,
+};
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    last values: any[] = [$number as int32, $number as int64, float16.from_bits($half as uint16),
+                          bfloat16.from_bits($brain as uint16), true, "neura", nil];
+    let result: int64 = 0;
+    for (let value in values) {
+        result = mix(result, s${k}_read(value));
+    }
+    console.println("s$k any {}", result);
+    return result;
+};
+""", k=k, number=number, half=half, brain=brain))
+    p.calls.append(k)
+
+
+def build_program(seed, *, class_hooks=True, any_values=True):
     """The program for a seed: its source text and the argument list to run it with."""
     p = Program(seed)
     p.use("console", "program", "int32s", "result")
@@ -1243,6 +1274,14 @@ def build_program(seed, *, class_hooks=True):
         section_class_hooks(p, k)
         p.calls.remove(k)
         p.calls.insert(0, k)
+    # Its own random stream leaves the earlier corpus unchanged when omitted.
+    p.random = random.Random(f"any values {seed}")
+    if any_values and p.chance(50):
+        k = p.next_id
+        p.next_id += 1
+        section_any(p, k)
+        p.calls.remove(k)
+        p.calls.insert(0, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)
     calls = "\n".join(
         f"        check = mix(check, s{k}_run(size, faults));" for k in p.calls)
@@ -1280,7 +1319,7 @@ def generate(args):
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
     for seed in parse_seeds(args.seed):
-        source, _, _ = build_program(seed)
+        source, _, _ = build_program(seed, any_values=not args.without_any_values)
         (out / f"program-{seed}.nra").write_text(source)
     return 0
 
@@ -1301,7 +1340,7 @@ def coverage(args):
     seeds = parse_seeds(args.seeds)
     counts = {name: 0 for name in FEATURES}
     for seed in seeds:
-        for name in build_program(seed)[2].features:
+        for name in build_program(seed, any_values=not args.without_any_values)[2].features:
             counts[name] += 1
     for name in FEATURES:
         print(f"{name:20} {counts[name]:5} of {len(seeds)}  {100.0 * counts[name] / len(seeds):5.1f}%")
@@ -1468,12 +1507,12 @@ class SeedResult:
         self.seconds = 0.0
 
 
-def check_seed(seed, coarse, runner, work, modes):
+def check_seed(seed, coarse, runner, work, modes, any_values=True):
     """Builds a seed's program, runs it at tier 0 and in every mode, and sweeps the limits. Each mode's first
     difference in each kind of run (no limit, steps, heap, stack, frames, quantum) is a failure."""
     result = SeedResult(seed)
     started = time.monotonic()
-    source, arguments, program = build_program(seed)
+    source, arguments, program = build_program(seed, any_values=any_values)
     program_path = work / f"program-{seed}.nra"
     image = work / f"program-{seed}.nvr"
     program_path.write_text(source)
@@ -1581,13 +1620,13 @@ def check_seed(seed, coarse, runner, work, modes):
     return result
 
 
-def write_failure(report, failure, neura, script):
+def write_failure(report, failure, neura, script, any_values=True):
     """Writes a difference: the program, both outputs, and a shell script that reproduces it."""
     name = f"seed-{failure.seed}-{failure.mode}-{failure.kind}" + (
         f"-{failure.limit}" if failure.limit is not None else "")
     directory = report / name
     directory.mkdir(parents=True, exist_ok=True)
-    source, arguments, _ = build_program(failure.seed)
+    source, arguments, _ = build_program(failure.seed, any_values=any_values)
     (directory / f"program-{failure.seed}.nra").write_text(source)
     (directory / "reference.txt").write_text(failure.reference.text())
     (directory / "actual.txt").write_text(failure.actual.text())
@@ -1602,7 +1641,8 @@ def write_failure(report, failure, neura, script):
         "set -u",
         f"NEURA={shlex.quote(str(neura))}",
         "WORK=$(mktemp -d)",
-        f"python3 {shlex.quote(str(script))} generate --seed {failure.seed} --out \"$WORK\"",
+        f"python3 {shlex.quote(str(script))} generate --seed {failure.seed} --out \"$WORK\""
+        + ("" if any_values else " --without-any-values"),
         f"\"$NEURA\" build \"$WORK/program-{failure.seed}.nra\" -o \"$WORK/program.nvr\" || exit 2",
     ]
     if failure.mode != "build":
@@ -1669,7 +1709,8 @@ def run_command(args):
         work = Path(directory)
 
         def one(seed):
-            return check_seed(seed, coarse, Runner(neura, args.timeout), work, modes)
+            return check_seed(seed, coarse, Runner(neura, args.timeout), work, modes,
+                              any_values=not args.without_any_values)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
             futures = [pool.submit(one, seed) for seed in seeds]
@@ -1683,7 +1724,8 @@ def run_command(args):
                     print(f"  {failure.description}: {where}", flush=True)
                     if report is not None:
                         report.mkdir(parents=True, exist_ok=True)
-                        folder = write_failure(report, failure, neura, Path(__file__).resolve())
+                        folder = write_failure(report, failure, neura, Path(__file__).resolve(),
+                                               any_values=not args.without_any_values)
                         print(f"    written to {folder}", flush=True)
                 failures.extend(result.failures)
     print(f"{len(seeds)} seeds, {len(modes)} modes, {len(failures)} differences, "
@@ -1699,7 +1741,7 @@ def compile_command(args):
     with tempfile.TemporaryDirectory() as directory:
         def one(seed):
             path = Path(directory) / f"program-{seed}.nra"
-            path.write_text(build_program(seed)[0])
+            path.write_text(build_program(seed, any_values=not args.without_any_values)[0])
             return seed, subprocess.run([neura, "check", str(path)], capture_output=True, stdin=subprocess.DEVNULL)
 
         with concurrent.futures.ThreadPoolExecutor(max_workers=args.jobs) as pool:
@@ -1735,6 +1777,9 @@ def main():
     compile_parser.add_argument("--jobs", type=int, default=2)
     coverage_parser = commands.add_parser("coverage", help="the share of programs that use each feature")
     coverage_parser.add_argument("--seeds", required=True)
+    for command in (generate_parser, run_parser, compile_parser, coverage_parser):
+        command.add_argument("--without-any-values", action="store_true",
+                             help="omit the any section for comparison with the earlier corpus")
     args = parser.parse_args()
     if args.command == "generate":
         return generate(args)
