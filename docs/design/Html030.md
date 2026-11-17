@@ -2,7 +2,7 @@
 
 This note fixes the grammar and rules of the `html` and `css` forms before they are implemented, as [the 0.3.0 baseline](Release030.md) requires: HTML factories with bindings, conditions and keyed lists, external template files, ordinary stylesheets and CSS modules, the evaluation order of a render, and what a commit does. It is one of the notes of [the application platform](Apps030.md), which owns the limits (`U-1` and the like), the budgets and the code ranges this note refers to. Rows move to `docs/apps/Html.md` and `docs/apps/Css.md` in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A1. Later changes to a row are made here, with the reason.
 
 <!-- example: fragment: the html and css forms are not implemented until A1 -->
 ```neura
@@ -435,7 +435,7 @@ Each step is one commit on the milestone branch with its targeted tests. No step
 
 Nothing in a 0.2 program changes. A program that assembled markup as text replaces it with factories; text that was concatenated into attributes becomes a whole-expression hole; a handler that was a string becomes a function; styles written as strings become a stylesheet and a class or a `var:` binding.
 
-## Decisions taken without the owner
+## Approved design decisions
 
 1. The lexer, not the parser, finds an island's end, because every tool lexes a whole file before parsing it. A bare `html {` or `css {` is a body only after `=`, `new`, `(`, `return` or `=>`, which keeps named-field match arms on variants of those names valid.
 2. `@else if`, not `@else @if`; a key is required on every `@for`.
