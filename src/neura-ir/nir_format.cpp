@@ -1,4 +1,5 @@
 #include "nir_format.hpp"
+#include "lexer/lexer.hpp"
 #include "attributes.hpp"
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
@@ -8,12 +9,14 @@
 #include <iterator>
 #include <limits>
 #include <map>
+#include <set>
 #include <string_view>
 
 namespace neura {
 namespace {
 
 constexpr std::string_view magic = "NEIR";
+constexpr std::string_view payload_names_tag = "PNAM";
 constexpr std::uint32_t absent = 0xffffffffU;
 // Bounds the reader's recursion and that of the passes that later walk the
 // program, with room to spare under sanitizers.
@@ -150,6 +153,92 @@ enum LinkFlag : std::uint8_t {
     HasAttributes = 32
 };
 
+// A program may load a standard library with named variants even when no
+// user declaration exposes them and no value member can observe their names.
+// Keep such programs at their earlier format minor.
+bool needs_payload_names(const IrProgram& program) {
+    const auto& symbols = program.symbols;
+    std::vector<std::vector<SymbolId>> children(symbols.size());
+    for (SymbolId id = 0; id < symbols.size(); ++id)
+        if (symbols[id].owner < symbols.size()) children[symbols[id].owner].push_back(id);
+
+    std::set<SymbolId> exposed;
+    const auto exposes = [&](const auto& self, const IrType& type) -> bool {
+        for (const auto& argument : type.arguments)
+            if (self(self, argument)) return true;
+        const auto id = type.symbol;
+        if (id >= symbols.size() || !exposed.insert(id).second) return false;
+        const auto& declaration = symbols[id];
+        if (self(self, declaration.type)) return true;
+        if (declaration.base < symbols.size() && self(self, symbols[declaration.base].type)) return true;
+        for (const auto& view : declaration.interfaces)
+            if (self(self, view)) return true;
+        if (declaration.bound && self(self, *declaration.bound)) return true;
+        for (const auto& bound : declaration.additional_bounds)
+            if (self(self, bound)) return true;
+        for (const auto child : children[id]) {
+            const auto& member = symbols[child];
+            if (member.kind == SymbolKind::Variant) {
+                if (!member.payload_names.empty()) return true;
+                for (const auto& payload : member.payload_types)
+                    if (self(self, payload)) return true;
+            } else if (member.exported || member.kind == SymbolKind::Field) {
+                if (self(self, member.type)) return true;
+                for (const auto parameter : member.parameters)
+                    if (parameter < symbols.size() && self(self, symbols[parameter].type)) return true;
+            }
+        }
+        return false;
+    };
+    // Only declarations reachable from the user's exported interface are
+    // signature roots. Imported trusted modules contribute when exposed.
+    for (SymbolId file = 0; file < symbols.size(); ++file) {
+        if (symbols[file].kind != SymbolKind::File || !symbols[file].library_path.empty()) continue;
+        for (const auto child : children[file]) {
+            const auto& item = symbols[child];
+            // A top-level module can be the root of a file import even
+            // without an export modifier; its members still need export.
+            if (!item.exported && item.kind != SymbolKind::Module) continue;
+            if (exposes(exposes, item.type)) return true;
+            for (const auto parameter : item.parameters)
+                if (parameter < symbols.size() && exposes(exposes, symbols[parameter].type)) return true;
+        }
+    }
+    // A generic function can format its type parameter in a different
+    // module. Follow calls back from each value-text operation to preserve
+    // names of both explicit and inferred concrete instantiations.
+    std::set<SymbolId> printers;
+    std::vector<std::pair<SymbolId, const IrNode*>> calls;
+    const auto visit = [&](const auto& self, SymbolId owner, const IrNode& node) -> bool {
+        if (node.op == IrOp::ValueText && !node.operands.empty()) {
+            printers.insert(owner);
+            if (exposes(exposes, node.operands.front().type)) return true;
+        }
+        if (node.symbol < symbols.size() && symbols[node.symbol].kind == SymbolKind::Function)
+            calls.emplace_back(owner, &node);
+        for (const auto* region : {&node.operands, &node.body, &node.alternative})
+            for (const auto& child : *region)
+                if (self(self, owner, child)) return true;
+        return false;
+    };
+    for (const auto& body : program.bodies)
+        for (const auto& node : body.instructions)
+            if (visit(visit, body.owner, node)) return true;
+    for (std::size_t previous = 0; previous != printers.size();) {
+        previous = printers.size();
+        for (const auto& [caller, call] : calls) {
+            if (!printers.contains(call->symbol)) continue;
+            printers.insert(caller);
+            for (const auto& argument : call->type_arguments)
+                if (exposes(exposes, argument)) return true;
+            if (!call->operands.empty())
+                for (const auto& argument : call->operands.front().type.arguments)
+                    if (exposes(exposes, argument)) return true;
+        }
+    }
+    return false;
+}
+
 class Writer {
 public:
     explicit Writer(const IrProgram& program) {
@@ -173,7 +262,9 @@ public:
         u16(nir_major_version);
         std::uint16_t version = program.static_constants.empty() ? 0 : 6;
         if (program.native_library) version = 8;
+        std::size_t named_variants = 0;
         for (const auto& item : program.symbols) {
+            if (!item.payload_names.empty()) ++named_variants;
             if (item.variadic != VariadicKind::None || item.user_cast ||
                 item.overload_group != no_symbol || item.singleton_instance != no_symbol) {
                 version = std::max<std::uint16_t>(version, 6);
@@ -204,6 +295,10 @@ public:
                        (item.bound && mentions_any(*item.bound));
             }))
             version = std::max(version, nir_any_minor);
+        if (named_variants != 0 && version < nir_records_minor) {
+            if (needs_payload_names(program)) version = nir_records_minor;
+            else named_variants = 0;
+        }
         polls_ = version >= 9;
         u16(version);
         count(files_.size());
@@ -234,6 +329,24 @@ public:
                 for (const auto byte : program.native_library->object) u8(byte);
                 count(program.native_library->symbols.size());
                 for (const auto& symbol : program.native_library->symbols) text(symbol);
+            }
+        }
+        if (named_variants != 0) {
+            for (const char letter : payload_names_tag) u8(letter);
+            count(named_variants);
+            for (SymbolId id = 0; id < program.symbols.size(); ++id) {
+                const auto& item = program.symbols[id];
+                if (item.payload_names.empty()) continue;
+                if (item.kind != SymbolKind::Variant || item.payload_names.size() != item.payload_types.size())
+                    throw NirError("named payload fields require one name per variant payload");
+                reference(id);
+                count(item.payload_names.size());
+                std::set<std::string_view> seen;
+                for (const auto& name : item.payload_names) {
+                    if (!is_identifier(name) || !seen.insert(name).second)
+                        throw NirError("invalid or repeated named payload field");
+                    text(name);
+                }
             }
         }
         return std::move(bytes_);
@@ -475,6 +588,28 @@ public:
             for (std::uint32_t i = 0; i < symbols; ++i) library.symbols.push_back(text());
             if (library.triple.empty() || library.object.empty()) fail("a native library needs a triple and an object");
             program.native_library = std::move(library);
+        }
+        if (remaining() >= payload_names_tag.size() &&
+            std::equal(payload_names_tag.begin(), payload_names_tag.end(), bytes_.begin() + position_)) {
+            if (minor_ < nir_records_minor) fail("named payload fields require NeuraIR format 1.13");
+            position_ += payload_names_tag.size();
+            const auto entries = count(8);
+            if (entries == 0 || entries > symbol_count_) fail("invalid named variant count");
+            for (std::uint32_t i = 0; i < entries; ++i) {
+                auto& item = program.symbols[required_reference()];
+                if (item.kind != SymbolKind::Variant || !item.payload_names.empty())
+                    fail("invalid or repeated named variant");
+                const auto fields = count(4);
+                if (fields == 0 || fields != item.payload_types.size())
+                    fail("named payload fields require one name per variant payload");
+                std::set<std::string> seen;
+                for (std::uint32_t f = 0; f < fields; ++f) {
+                    auto name = text();
+                    if (!is_identifier(name) || !seen.insert(name).second)
+                        fail("invalid or repeated named payload field");
+                    item.payload_names.push_back(std::move(name));
+                }
+            }
         }
         if (position_ != bytes_.size()) {
             fail(std::to_string(bytes_.size() - position_) + " unread bytes at the end of the file");

@@ -1,0 +1,7 @@
+error[E0305]: a payload of Cell does not support 'to_string'
+ --> $DIR/payload-without-value-member.nra:3:44
+  |
+3 | let render = func(cell: Cell) -> string => cell.to_string();
+  |                                            ^^^^^^^^^^^^^^
+
+For more information about this error, try `neura explain E0305`.

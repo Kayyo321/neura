@@ -9,6 +9,7 @@ the record's attributes survive the round trip.
 Usage: records.py <neura>
 """
 import pathlib
+import struct
 import subprocess
 import sys
 import tempfile
@@ -89,6 +90,92 @@ class RecordBoundaryTests(unittest.TestCase):
         self.assertEqual(self.build_and_run('app.nra'), expected)
         (self.directory / 'app.nra').write_text(APP.format(source='Shapes'))
         self.assertEqual(self.build_and_run('app.nra', 'shapes.nra'), expected)
+
+    def test_named_payload_schema_round_trip_and_rejections(self):
+        library = self.directory / 'palette.nra'
+        library.write_text("""let Palette = module (
+            export let Color = enum (None, Rgb { red: int, blue: int });
+        );""")
+        module = self.directory / 'palette.nir'
+        result = run('emit-ir', library, '-o', module, cwd=self.directory)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        data = module.read_bytes()
+        self.assertEqual(data[6:8], bytes([13, 0]))
+        marker = data.rindex(b'PNAM')
+        head, table = data[:marker], data[marker:]
+        entry = table[8:]
+        self.assertEqual(struct.unpack_from('<I', table, 4)[0], 1)
+        legacy = self.directory / 'legacy.nir'
+        legacy.write_bytes(head)
+        self.assertEqual(run('emit-ir', legacy, cwd=self.directory).returncode, 0)
+
+        app = self.directory / 'app.nra'
+        app_text = """let palette = import:{source};
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {{
+        let color = palette.Color.Rgb {{ blue: 4, red: 3 }};
+        let red = match (color) {{ palette.Color.None => 0, palette.Color.Rgb {{ blue: _, red: value }} => value, }};
+        console.print_line(color.to_string());
+        return red == 3 ? program.ExitCode.Ok : program.ExitCode.Failure;
+    }};
+);"""
+        app.write_text(app_text.format(source='"palette.nir".Palette'))
+        expected = 'Rgb{red: 3, blue: 4}\n'
+        self.assertEqual(self.build_and_run(app), expected)
+        app.write_text(app_text.format(source='Palette'))
+        self.assertEqual(self.build_and_run(app, library), expected)
+        app.write_text(app_text.format(source='"legacy.nir".Palette'))
+        unavailable = run('check', app, cwd=self.directory)
+        self.assertEqual(unavailable.returncode, 1)
+        self.assertIn('rebuild its .nir', unavailable.stderr)
+
+        u32 = lambda x: struct.pack('<I', x)
+        bad = self.directory / 'bad.nir'
+        cases = [
+            (head[:6] + bytes([12, 0]) + head[8:] + table, 'require NeuraIR format 1.13'),
+            (head + table[:-1], 'truncated'),
+            (head + b'PNAM' + u32(0), 'invalid named variant count'),
+            (head + b'PNAM' + u32(0xffffffff), 'truncated'),
+            (head + b'PNAM' + u32(2) + entry * 2, 'invalid or repeated named variant'),
+            (head + table[:8] + u32(0) + entry[4:], 'invalid or repeated named variant'),
+            (head + table[:12] + u32(1) + entry[8:], 'one name per variant payload'),
+            (head + table.replace(b'blue', b'nil!'), 'invalid or repeated named payload field'),
+            (head + table.replace(b'blue', b'else'), 'invalid or repeated named payload field'),
+            (head + table[:-8] + u32(3) + b'red', 'invalid or repeated named payload field'),
+            (head + table + b'x', 'unread bytes'),
+        ]
+        for raw, message in cases:
+            with self.subTest(message=message):
+                bad.write_bytes(raw)
+                result = run('emit-ir', bad, cwd=self.directory)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(message, result.stderr)
+
+    def test_exported_wrapper_retains_its_trusted_generic_payload(self):
+        library = self.directory / 'envelope.nra'
+        library.write_text("""let errors = import:Std.Core.Error;
+export let Envelope = module (
+    export let Box = enum<T> (Item(T));
+    export let sample = func() -> Box<errors.Error> =>
+        Box<errors.Error>.Item(errors.Error.Io { kind: errors.IoErrorKind.NotFound, path: "p", message: "m" });
+);""")
+        module = self.directory / 'envelope.nir'
+        result = run('emit-ir', library, '-o', module, cwd=self.directory)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(module.read_bytes()[6:8], bytes([13, 0]))
+        app = self.directory / 'wrapper-app.nra'
+        app.write_text("""let wrap = import:"envelope.nir".Envelope;
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(wrap.sample().to_string());
+        return program.ExitCode.Ok;
+    };
+);""")
+        self.assertEqual(self.build_and_run(app), 'Item(Io{kind: NotFound, message: m, path: p})\n')
 
     def test_the_attributes_survive_the_round_trip(self):
         listing = run('emit-ir', 'shapes.nir', cwd=self.directory)

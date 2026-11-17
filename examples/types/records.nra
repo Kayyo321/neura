@@ -9,6 +9,12 @@ let Records = module (
         label: string,
     );
 
+    export let Endpoint = enum (Origin, At { point: Point });
+    export let Pin = record (label: string, endpoint: Endpoint);
+
+    /// Prints the named payload in declaration order.
+    export let describe_pin = func(pin: Pin) -> string => pin.endpoint.to_string();
+
     /// Whether two segments built from equal parts are equal values but distinct objects.
     export let example = func() -> bool {
         let first = new Segment(new Point(0, 0), new Point(3, 4), "a");

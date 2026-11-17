@@ -649,6 +649,11 @@ private:
 
 } // namespace
 
+bool is_identifier(std::string_view spelling) {
+    return !spelling.empty() && is_name_start(spelling.front()) &&
+           std::ranges::all_of(spelling, is_name_char) && std::ranges::find(keywords, spelling) == keywords.end();
+}
+
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
 }

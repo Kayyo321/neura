@@ -121,6 +121,8 @@ struct IrSymbol {
     SymbolId singleton_instance = no_symbol;
     // NeuraIR 1.10. Registered attributes in the order they were attached.
     std::vector<IrAttribute> attributes{};
+    // Written field names of a named enum variant, in payload order (NeuraIR 1.13).
+    std::vector<std::string> payload_names{};
 };
 
 // Class-owned namespace for class-level storage and receiver-free functions.

@@ -559,7 +559,7 @@ The body has accessors, so it is a class of its own: `code` and `non_zero` take 
 
 ### Records
 
-*Status: proposed in [the 0.3.0 records note](../design/Records030.md); implemented, with copy construction, except that a record cannot yet hold a payload enum.*
+*Status: proposed in [the 0.3.0 records note](../design/Records030.md); implemented, including copy construction and eligible payload-enum fields.*
 
 A record is a nominal class that is final and deeply immutable, with a generated constructor and generated value members. It is declared by its components, written where `class` is: `let User = record (id: int64, name: string);`.
 
@@ -574,7 +574,7 @@ Each component becomes an `export last` field, in order, and the record has exac
 
 A record behaves as a class tagged [`#Final`](Tags.md) and [`#Immutable`](#immutable-classes): extending it is [E0912](../diagnostics/E0912.md), its instances are shared between tasks, and writing either tag changes nothing. It is a reference type: `nil` is a value of every record type, `==` compares identity, `is` and `as` work as for classes, and `destroy` of a record is [E0514](../diagnostics/E0514.md), since copies share their children. A record may implement interfaces whose requirements its fields, its generated members or interface defaults satisfy.
 
-A field's type must be one a record can hold ([E0571](../diagnostics/E0571.md)): `bool`, the integer and floating-point types, `string`, a fieldless enum, a record (the record being declared included), or a tuple of those. In this release a record cannot hold a payload enum, `Optional` included, until payload enums have value members.
+A field's type must be one a record can hold ([E0571](../diagnostics/E0571.md)): `bool`, the integer and floating-point types, `string`, a record (including the record being declared), a tuple of eligible values, or an enum whose payloads are all eligible. This includes `Optional<Node>` when `Node` is a record.
 
 Lowering generates three members, ordinary exported methods with bodies:
 

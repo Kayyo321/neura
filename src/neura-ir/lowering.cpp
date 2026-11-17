@@ -615,7 +615,7 @@ private:
     void declare_record(SymbolId id, const Declaration& decl);
     void lower_record_members(SymbolId id);
     std::vector<TagSyntax> record_tags(const Declaration& decl) const;
-    std::optional<std::string> record_ineligible(const IrType& type, IrType& inner) const;
+    std::optional<std::string> record_ineligible(const IrType& type, IrType& inner, std::vector<IrType> path = {}) const;
     void check_record(SymbolId id);
     void reject_record_destroy(const IrNode& object) const;
     static void record_call_help(const Expr& initializer, Diagnostic& error);
@@ -840,12 +840,12 @@ Diagnostic Lowering::non_exhaustive(const Statement& stmt, const std::vector<Sym
     std::string arms;
     for (const auto variant : missing) {
         std::string pattern = qualifier + symbol(variant).name;
-        const auto* declaration = variant < entries_.size() ? entries_[variant].declaration : nullptr;
-        if (declaration && !declaration->parameters.empty()) {
+        const auto& item = symbol(variant);
+        if (!item.payload_types.empty()) {
             std::string fields;
-            for (const auto& field : declaration->parameters)
-                fields += (fields.empty() ? "" : ", ") + (declaration->named_payload ? field.name : std::string("_"));
-            pattern += declaration->named_payload ? " { " + fields + " }" : "(" + fields + ")";
+            for (std::size_t i = 0; i < item.payload_types.size(); ++i)
+                fields += (i == 0 ? "" : ", ") + (item.payload_names.empty() ? std::string("_") : item.payload_names[i]);
+            pattern += item.payload_names.empty() ? "(" + fields + ")" : " { " + fields + " }";
         }
         arms += arm_indent + pattern + (produces_value ? " => <value>,\n" : " => {},\n");
     }
@@ -1934,6 +1934,7 @@ void Lowering::resolve(SymbolId id) {
                                                  " cannot leave its scope: it cannot be an enum payload")
                         .with_code("E0605");
                 symbol(variant).payload_types.push_back(std::move(payload));
+                if (member.named_payload) symbol(variant).payload_names.push_back(field.name);
             }
         }
     } else if (decl.kind == DeclKind::Function) {
@@ -2370,13 +2371,25 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
     if (nominal.kind != TypeKind::Object &&
         (receiver.op != IrOp::Reference ||
          (receiver.symbol != no_symbol && symbol(receiver.symbol).kind == SymbolKind::Variant)) &&
-        intrinsic_value_member(expr.text) && supports_value_members(program_, nominal)) {
-        // Ensure the root method contracts are available when a generic
-        // instantiation or a composite operation encounters a class value.
-        root_class();
-        auto result = node(IrOp::Reference, expr.span, {TypeKind::Callable, expr.text, no_symbol, {}});
-        result.operands.push_back(std::move(receiver));
-        return result;
+        intrinsic_value_member(expr.text)) {
+        if (!supports_value_members(program_, nominal)) {
+            if (nominal.kind == TypeKind::Enum)
+                throw Diagnostic(expr.span, "a payload of " + describe(nominal) + " does not support '" + expr.text + "'")
+                    .with_code("E0305");
+        } else {
+            if (receiver.op == IrOp::Reference && nominal.kind == TypeKind::Enum &&
+                has_enum_payload(program_, nominal.symbol)) {
+                if (!symbol(receiver.symbol).payload_types.empty())
+                    throw Diagnostic(operand.span, "enum variant requires a payload").with_code("E0427");
+                receiver.op = IrOp::EnumConstruct;
+            }
+            // Ensure the root method contracts are available when a generic
+            // instantiation or a composite operation encounters a class value.
+            root_class();
+            auto result = node(IrOp::Reference, expr.span, {TypeKind::Callable, expr.text, no_symbol, {}});
+            result.operands.push_back(std::move(receiver));
+            return result;
+        }
     }
     if (nominal.kind == TypeKind::String && expr.text == "byte_length") {
         auto result = node(IrOp::TextLength, expr.span, int32_type);
@@ -2614,11 +2627,14 @@ Substitution Lowering::enum_arguments(const IrType& type) const {
 
 IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context& context) {
     const auto variant = target.symbol;
-    const auto* payload = entries_[variant].declaration;
+    const auto names = symbol(variant).payload_names;
     const bool named = expr.kind == ExprKind::NamedVariant;
     reject_labels(expr, 1, "an enum constructor; a named payload is written 'Variant { name: value }'");
     const auto fields = symbol(variant).payload_types;
-    if (!payload || fields.empty() || !expr.type_arguments.empty() || named != payload->named_payload)
+    if (named && names.empty() && !entries_[variant].declaration)
+        throw Diagnostic(expr.span, "imported variant has no named payload fields").with_code("E0427")
+            .help("if this variant declares named fields, rebuild its .nir with NeuraIR 1.13");
+    if (fields.empty() || !expr.type_arguments.empty() || named != !names.empty())
         throw Diagnostic(expr.span, "use the variant's declared payload constructor").with_code("E0427");
     if (fields.size() != expr.operands.size() - 1)
         throw Diagnostic(expr.span, "expected " + std::to_string(fields.size()) + " enum payload field(s)")
@@ -2631,10 +2647,10 @@ IrNode Lowering::enum_construct(const IrNode& target, const Expr& expr, Context&
         auto index = i;
         if (named) {
             const auto& name = expr.field_names[i];
-            const auto field = std::ranges::find(payload->parameters, name, &Parameter::name);
-            if (field == payload->parameters.end() || !seen.insert(name).second)
+            const auto field = std::ranges::find(names, name);
+            if (field == names.end() || !seen.insert(name).second)
                 throw Diagnostic(expr.span, "unknown or repeated enum payload field '" + name + "'").with_code("E0427");
-            index = static_cast<std::size_t>(field - payload->parameters.begin());
+            index = static_cast<std::size_t>(field - names.begin());
             if (i != 0) result.text += ',';
             result.text += std::to_string(index);
         }
@@ -4864,8 +4880,8 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
             throw Diagnostic(arm.span, "duplicate match arm for '" + arm.variant + "'").with_code("E0412");
         auto fields = wildcard ? std::vector<IrType>{} : symbol(variant).payload_types;
         for (auto& field : fields) field = substitute(std::move(field), replacements);
-        const auto* declaration = wildcard ? nullptr : entries_[variant].declaration;
-        if (arm.bindings.size() != fields.size() || arm.named != (declaration && declaration->named_payload))
+        const auto names = wildcard ? std::vector<std::string>{} : symbol(variant).payload_names;
+        if (arm.bindings.size() != fields.size() || arm.named != !names.empty())
             throw Diagnostic(arm.span, "match pattern must bind each payload field, using _ to ignore a field")
                 .with_code("E0412");
 
@@ -4876,11 +4892,11 @@ IrNode Lowering::lower_match(const Statement& stmt, Context& context, bool produ
             auto field = i;
             if (arm.named) {
                 const auto& name = arm.fields[i];
-                const auto found = std::ranges::find(declaration->parameters, name, &Parameter::name);
-                if (found == declaration->parameters.end() || !seen_fields.insert(name).second)
+                const auto found = std::ranges::find(names, name);
+                if (found == names.end() || !seen_fields.insert(name).second)
                     throw Diagnostic(arm.span, "unknown or repeated enum payload field '" + name + "'")
                         .with_code("E0427");
-                field = static_cast<std::size_t>(found - declaration->parameters.begin());
+                field = static_cast<std::size_t>(found - names.begin());
             }
             const auto& binding = arm.bindings[i];
             if (binding.text == "_") continue;

@@ -375,9 +375,12 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
         // For a coalesced symbol the chosen name is the existing one. Its
         // original name and scope were checked when pairing the definitions.
         if (mapped < existing) {
-            const auto& previous = destination.symbols[mapped];
-            if (!same_symbol(previous, symbol, trusted_metadata(mapped)))
+            auto& previous = destination.symbols[mapped];
+            if ((!previous.payload_names.empty() && !symbol.payload_names.empty() &&
+                 previous.payload_names != symbol.payload_names) ||
+                !same_symbol(previous, symbol, trusted_metadata(mapped)))
                 conflict(import_site, previous.span.file, previous.name);
+            if (previous.payload_names.empty()) previous.payload_names = symbol.payload_names;
         }
     }
 

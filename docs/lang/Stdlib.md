@@ -43,7 +43,7 @@ A specialized enum can hold tuples, collection elements, callbacks, class refere
 
 ### G3. Universal members
 
-- **G3a. Value members.** Supported scalars, strings, fieldless enums, tuples, arrays, and lists have `equals`, `hash_code`, and `to_string`. Generic calls resolve after specialization. Tuples and collections recurse into supported element types. Payload enums require functions supplied by their authors. Calling a generic value operation with an unsupported specialized type is diagnosed.
+- **G3a. Value members.** Supported scalars, strings, fieldless enums, tuples, arrays, and lists have `equals`, `hash_code`, and `to_string`. Generic calls resolve after specialization. Tuples and collections recurse into supported element types. Payload enums also have value members when every payload has them. Calling a generic value operation with an unsupported specialized type is diagnosed.
 - **G3b. Class members.** The root type `class` holds class and interface references. Classes inherit `equals(other: class)`, `hash_code()`, and `to_string()`, with ordinary override dispatch. An override can use `other is MyClass` before a checked `other as MyClass` to compare fields. `==` and `!=` on class references compare identity and never call an override. Default hashing and text allocate an identity number on the first request; the number follows request order rather than allocation order. Variant and class names used by these operations are execution data.
 - **Nil.** A class or interface reference can be explicitly `nil`. An uninitialized field remains a separate runtime fault. Direct member dispatch on a nil receiver traps. Nil participates in identity comparison. Generic and composite value operations treat two nil references as equal, hash nil to 0, and print `nil`.
 
@@ -257,12 +257,12 @@ The compiler supplies these results for supported value members. Companion funct
 | `int64`, `uint64` | Same value | Low 32 bits exclusive-or high 32 bits | Decimal, as above |
 | Floats | Same bit pattern, except that every NaN equals every NaN. `0.0` and `-0.0` are **not** equal. | The bit pattern with every NaN replaced by the canonical NaN; 16-bit patterns zero-extended, the 64-bit pattern folded like `uint64` | [Section 7.5](#75-float-text-conversion) |
 | Fieldless enum | Same variant | The ordinal | The variant name |
+| Payload enum | Same variant and equal payloads in declaration order | Start with ordinal + 1, then multiply by 31 and add each payload hash with wrapping arithmetic | Variant name, then positional values in parentheses or named fields in braces, separated by commas and spaces |
 | `string` | Same bytes | Start with 0; for each byte, 31 times the hash plus the byte, wrapping | The string itself |
 | Tuple | Same element types and each pair of elements equal, in order | Start with 1; for each element, 31 times the hash plus the element's hash, wrapping | `[`, the elements' text separated by `, `, `]` |
 | Array, list | Same kind, same length, and each pair of elements equal in index order | As for a tuple | As for a tuple |
 | Class (default, G3b) | Identity | The identity number times 2,654,435,761, wrapping | The qualified class name, `#`, and the identity number, for example `Acme.Shapes.Circle#3` |
 | Function value | Not comparable | None | None |
-| Payload enum | Not provided | Not provided | Not provided |
 
 Float equality here deliberately differs from `==`: it is an equivalence relation consistent with the hash, which hash tables need, while `==` stays IEEE 754. The multiplier 31 is chosen because multiplying by 31 is a shift and a subtraction.
 
@@ -347,7 +347,7 @@ These are the intended source-module contracts. Compiler support for the operati
 | --- | --- | --- | --- | --- |
 | Integers, floats, `bool`, fieldless enums, `string`, tuples | Built in (G3a) | Companion `compare` functions | No (`Strings.scalars` gives a list) | |
 | Array, list | Built in, structural (G3a) | No | Built-in for-each | |
-| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Module functions; payload enums have no built-in equality | No | No | |
+| `Optional<T>`, `Result<T>`, `Error`, `JsonValue` | Built in when each payload supports value members | No | No | |
 | `ArrayList`, `LinkedList` | As lists | No | Yes | `MutableList`; `LinkedList` also `Deque` |
 | `ArrayDeque`, `PriorityQueue` | Identity | No | Yes | `Deque` or `Queue` |
 | `HashSet`, `TreeSet`, `BitSet` | As sets | No | Yes | `MutableSet`; `TreeSet` also `SortedSet` |

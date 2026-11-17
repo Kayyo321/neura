@@ -4422,6 +4422,7 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     const bool equality = op == IrOp::ValueEquals;
     const bool hashing = op == IrOp::ValueHash;
     const bool inline_value = c_.inline_value(type);
+    const bool enumeration = type.kind == TypeKind::Enum;
     // An inline value arrives as its words, and an equality takes the words
     // of both operands; a collection arrives as one handle.
     const auto input = inline_value ? c_.word_types(type, span) : std::vector<std::uint32_t>{c_.type_of(type, span)};
@@ -4443,7 +4444,9 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     if (hashing) assign(hash, immediate(hash_type, 1));
     if (!equality && !hashing) {
         const auto list = c_.type_index({nvr::TypeKind::List, 0, byte});
-        buffer = state(nvr::StateOp::AllocateCollection, list, {immediate(byte, '[')}, list, span);
+        Values contents;
+        if (!enumeration) contents.push_back(immediate(byte, '['));
+        buffer = state(nvr::StateOp::AllocateCollection, list, std::move(contents), list, span);
     }
     const auto append = [&](unsigned char value) {
         state(nvr::StateOp::AppendElement, 0, {buffer, immediate(byte, value)}, none, span);
@@ -4470,20 +4473,64 @@ void FunctionCompiler::compile_value_member(IrOp op) {
             append_text_bytes(buffer, value, span);
         }
     };
-    if (inline_value) {
+    const auto component = [&](const IrType& field, const std::vector<std::size_t>& positions) {
+        auto operands = slots_at(left, positions);
+        if (equality) {
+            const auto other = slots_at(right, positions);
+            operands.insert(operands.end(), other.begin(), other.end());
+        }
+        process(field, std::move(operands));
+    };
+    if (enumeration) {
         const auto layout = c_.value_layout(type, span);
-        for (std::uint32_t i = 0; i < layout.parts.size(); ++i) {
+        const auto tag = slot_operand(left);
+        const auto same_tag = [&](const Operand& other) {
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(tag), lanes(other))});
+            return described(std::move(same), binary_form("==", boolean, tag, other));
+        };
+        if (equality) require_equal(same_tag(slot_operand(right)));
+        const auto done = new_block();
+        for (std::size_t i = 0; i < layout.variants.size(); ++i) {
+            const bool last = i + 1 == layout.variants.size();
+            auto next = absent;
+            if (!last) {
+                const auto selected = new_block();
+                next = new_block();
+                branch(same_tag(immediate(tag.type, i)), selected, next);
+                begin(selected, span);
+            }
+            const auto& variant = c_.symbol(layout.variants[i]);
+            const bool named = !variant.payload_names.empty();
+            const bool printing = !equality && !hashing;
+            if (hashing) assign(hash, immediate(hash_type, i + 1));
+            if (printing) {
+                for (const char ch : variant.name) append(ch);
+                if (!variant.payload_types.empty()) append(named ? '{' : '(');
+            }
+            for (std::size_t field = 0; field < variant.payload_types.size(); ++field) {
+                if (printing) {
+                    if (field != 0) { append(','); append(' '); }
+                    if (named) {
+                        for (const char ch : variant.payload_names[field]) append(ch);
+                        append(':');
+                        append(' ');
+                    }
+                }
+                component(variant.payload_types[field], layout.payloads[i][field]);
+            }
+            if (printing && !variant.payload_types.empty()) append(named ? '}' : ')');
+            jump(done);
+            if (!last) begin(next, span);
+        }
+        begin(done, span);
+    } else if (inline_value) {
+        const auto layout = c_.value_layout(type, span);
+        for (std::size_t i = 0; i < layout.parts.size(); ++i) {
             if (!equality && !hashing && i != 0) {
                 append(',');
                 append(' ');
             }
-            // Each element is a member of its own type, over its own words.
-            auto operands = slots_at(left, layout.elements[i]);
-            if (equality) {
-                const auto other = slots_at(right, layout.elements[i]);
-                operands.insert(operands.end(), other.begin(), other.end());
-            }
-            process(layout.parts[i], std::move(operands));
+            component(layout.parts[i], layout.elements[i]);
         }
     } else {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
@@ -4551,7 +4598,7 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     } else if (hashing) {
         return_value(slot_operand(hash));
     } else {
-        append(']');
+        if (!enumeration) append(']');
         return_value(state(nvr::StateOp::ConstructText, text, {buffer}, text, span));
     }
     finish();

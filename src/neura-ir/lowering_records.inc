@@ -205,7 +205,8 @@ std::vector<TagSyntax> Lowering::record_tags(const Declaration& decl) const {
 // Why a field of type `type` cannot be held by a record, or nothing when it
 // can (Records030.md, the record-eligible types). `inner` names the part of
 // the type that fails, when it is not the type itself.
-std::optional<std::string> Lowering::record_ineligible(const IrType& type, IrType& inner) const {
+std::optional<std::string> Lowering::record_ineligible(const IrType& type, IrType& inner,
+                                                       std::vector<IrType> path) const {
     switch (type.kind) {
     case TypeKind::Bool:
     case TypeKind::Integer:
@@ -214,26 +215,32 @@ std::optional<std::string> Lowering::record_ineligible(const IrType& type, IrTyp
         return std::nullopt;
     case TypeKind::Tuple:
         for (const auto& element : type.arguments) {
-            if (auto reason = record_ineligible(element, inner)) return reason;
+            if (auto reason = record_ineligible(element, inner, path)) return reason;
         }
         return std::nullopt;
     case TypeKind::Enum: {
         if (!has_enum_payload(program_, type.symbol)) return std::nullopt;
+        // A finite nested application (Box<Box<T>>) descends into a
+        // written argument. Other revisits are inline cycles, checked by
+        // containment once the program is specialized.
+        const auto contains = [&](const auto& self, const IrType& parent) -> bool {
+            return std::ranges::any_of(parent.arguments, [&](const IrType& part) {
+                return part == type || self(self, part);
+            });
+        };
+        for (const auto& parent : path)
+            if (parent.symbol == type.symbol && !contains(contains, parent)) return std::nullopt;
+        path.push_back(type);
         const auto arguments = enum_arguments(type);
         for (const auto& item : program_.symbols) {
             if (item.kind != SymbolKind::Variant || item.owner != type.symbol) continue;
             for (const auto& payload : item.payload_types) {
                 const auto concrete = substitute(payload, arguments);
                 if (concrete == type) continue;
-                if (auto reason = record_ineligible(concrete, inner)) return reason;
+                if (auto reason = record_ineligible(concrete, inner, path)) return reason;
             }
         }
-        // The value members of payload enums are the step of the milestone
-        // that follows the storage milestone's inline payload enums
-        // (Records030.md, Order of work, step 2). Until then a record cannot
-        // compare, hash or print such a field, so it cannot hold one.
-        inner = type;
-        return "a payload enum, which has no value members in this release yet";
+        return std::nullopt;
     }
     case TypeKind::Object:
         if (record_class(type.symbol)) return std::nullopt;

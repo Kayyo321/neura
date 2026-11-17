@@ -65,7 +65,7 @@ The tags follow the declaration order of the enumerations in [`src/neura-ir/ir.h
 
 | Enumeration | Tags |
 | --- | --- |
-| Type kind | 0 void, 1 bool, 2 string, 3 integer, 4 float, 5 array, 6 list, 7 object, 8 type parameter, 9 module, 10 enum, 11 callable, 12 tuple (1.2) |
+| Type kind | 0 void, 1 bool, 2 string, 3 integer, 4 float, 5 array, 6 list, 7 object, 8 type parameter, 9 module, 10 enum, 11 callable, 12 tuple (1.2), 13 any (1.12) |
 | Symbol kind | 0 file, 1 module, 2 class, 3 alias, 4 import, 5 field, 6 function, 7 parameter, 8 local, 9 global, 10 type parameter, 11 enum, 12 variant, 13 interface (1.3) |
 | Operation | 0 initialize, 1 store, 2 load, 3 reference, 4 receiver, 5 field, 6 index, 7 collection, 8 integer, 9 float, 10 string, 11 boolean, 12 unary, 13 binary, 14 short circuit, 15 call, 16 virtual call, 17 external call, 18 base initialize, 19 allocate, 20 length, 21 append, 22 remove at, 23 return, 24 block, 25 branch, 26 loop, 27 break, 28 continue, 29 destroy, 30 discard. In 1.1, 31 convert, 32 collection version, 33 fail. In 1.2, 34 tuple, 35 project, 36 enum construct, 37 enum tag, 38 enum project, 39 comparison chain, 40 scoped value, 41 select value. In 1.3, 42 make closure, 43 call closure, 44 text length, 45 text byte at, 46 text slice, 47 text from UTF-8, 48 text equal, 49 reinterpret float, 50 trap message, 51 nil, 52 class hash, 53 class text, 54 class is, 55 class cast, 56 value equals, 57 value hash, 58 value text. In 1.4, 59 repeat collection. In 1.7, 60 reference place. In 1.9, 61 task scope, 62 spawn, 63 scheduler call. Ordinals 64 and 65 are reserved for in-memory class hook events. In 1.12, 66 any pack, 67 any tag, 68 any unpack. In 1.13, 69 conformance call. |
 
@@ -233,7 +233,9 @@ Version 1.13 adds one operation for [static interface requirements](Polymorphism
 
 Specialization replaces each conformance call with a direct call of the function whose `static.implements` names the requirement and the type argument, or the nearest base of a class type argument that has one. The verifier accepts the operation only through a type parameter, so none can remain in a specialized function; a conformance call through a concrete type is an error. Analyses that run before specialization treat it as deferred, as they treat a value member of a type parameter.
 
-A file is written as 1.13 only when a body contains a conformance call; every other program keeps the earliest version that can encode it, and its bytes are unchanged. A 1.10 reader rejects a 1.13 file with `NeuraIR format 1.13 is not supported; this reader accepts 1.0 through 1.10`. A build from a 1.13 file produces the same image bytes as a build from the source that wrote it.
+NeuraIR 1.13 can append a named-payload table after the native library record. The four bytes `PNAM` are followed by a `u32` entry count. Each entry contains the variant symbol id, its `u32` payload count and one length-prefixed identifier per field in declaration order. Each variant occurs once, each has at least one payload, and its field names are distinct. A 1.13 file without the table remains readable.
+
+A conformance call requires 1.13. The writer also selects 1.13 when exported types or value text can expose named payload fields. A linked dependency that only appeared in the build and contributes no observable names leaves an earlier format available. Older files can execute their original operations. Re-emit a dependency when a named constructor needs field metadata its file omitted. The executable embeds any labels it prints as ordinary text constants.
 
 ## Reading
 

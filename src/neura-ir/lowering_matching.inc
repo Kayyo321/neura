@@ -168,12 +168,12 @@ std::string Lowering::cover_text(const CoverPattern& pattern, const IrType& type
     }
     result = symbol(type.symbol).name + "." + symbol(pattern.constructor).name;
     if (arguments.empty()) return result;
-    const auto* declaration = pattern.constructor < entries_.size() ? entries_[pattern.constructor].declaration : nullptr;
-    const bool named = declaration && declaration->named_payload;
+    const auto& names = symbol(pattern.constructor).payload_names;
+    const bool named = !names.empty();
     result += named ? " { " : "(";
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         result += i ? ", " : "";
-        if (named) result += declaration->parameters[i].name + ": ";
+        if (named) result += names[i] + ": ";
         result += cover_text(pattern.arguments[i], arguments[i]);
     }
     return result + (named ? " }" : ")");
@@ -284,8 +284,8 @@ Lowering::CoverPattern Lowering::lower_pattern(const PatternSyntax& pattern, con
             throw Diagnostic(pattern.span, "match arm must use an overlay of " + describe(type)).with_code("E0412");
     }
     const auto fields = constructor_arguments(type, variant);
-    const auto* declaration = entries_[variant].declaration;
-    if (pattern.elements.size() != fields.size() || (pattern.payload && pattern.named != (declaration && declaration->named_payload)))
+    const auto names = symbol(variant).payload_names;
+    if (pattern.elements.size() != fields.size() || (pattern.payload && pattern.named != !names.empty()))
         throw Diagnostic(pattern.span, "match pattern must bind each payload field, using _ to ignore a field")
             .with_code("E0412");
     // The test, on a payload enum's tag or a fieldless enum's value.
@@ -308,11 +308,11 @@ Lowering::CoverPattern Lowering::lower_pattern(const PatternSyntax& pattern, con
         auto field = i;
         if (pattern.named) {
             const auto& name = pattern.fields[i];
-            const auto found = std::ranges::find(declaration->parameters, name, &Parameter::name);
-            if (found == declaration->parameters.end() || !seen.insert(name).second)
+            const auto found = std::ranges::find(names, name);
+            if (found == names.end() || !seen.insert(name).second)
                 throw Diagnostic(pattern.field_spans[i], "unknown or repeated enum payload field '" + name + "'")
                     .with_code("E0427");
-            field = static_cast<std::size_t>(found - declaration->parameters.begin());
+            field = static_cast<std::size_t>(found - names.begin());
         }
         auto project = node(IrOp::EnumProject, pattern.elements[i].span, fields[field]);
         project.symbol = variant;
