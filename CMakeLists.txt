@@ -474,6 +474,13 @@ endif()
 # --- End of kernels -----------------------------------------------------------
 
 if(BUILD_TESTING)
+    add_executable(neura_http_wire_tests
+        src/server/http_wire.cpp
+        tests/server/http_wire_tests.cpp)
+    target_include_directories(neura_http_wire_tests PRIVATE src)
+    neura_target_defaults(neura_http_wire_tests)
+    add_test(NAME server-http-wire COMMAND neura_http_wire_tests)
+
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)
         neura_target_defaults(neura_native_container_tests)
