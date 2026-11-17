@@ -699,7 +699,7 @@ neura(invalid_region "${TEST_DIR}" run "${TEST_DIR}/region-storage.nvr" -- x x x
 if(NOT invalid_region_status STREQUAL "132" OR NOT invalid_region_stderr MATCHES "trap: invalid region operation: region [0-9]+ does not enclose")
     message(FATAL_ERROR "a move to a region that does not enclose: ${invalid_region_status}\n${invalid_region_stderr}")
 endif()
-expect_failure("--max-stack-cells on build" "applies only to run and test" build --max-stack-cells 5 "${hello}" -o "${TEST_DIR}/never.nvr")
+expect_failure("--max-stack-cells on build" "--max-stack-cells applies only with --native" build --max-stack-cells 5 "${hello}" -o "${TEST_DIR}/never.nvr")
 expect_failure("--max-stack-cells needs a number" "expected a positive integer" run --max-stack-cells 0 "${TEST_DIR}/hello.nvr")
 
 # Unsupported operations fail before an image is published.
