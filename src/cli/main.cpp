@@ -1,6 +1,7 @@
 #include "argument_lists.hpp"
 #include "diagnostic_render.hpp"
 #include "explain.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/tags.hpp"
 #include "util/diagnostic_codes.hpp"
 #include "util/suggest.hpp"
@@ -1002,6 +1003,7 @@ int emit_ir(const Options& options) {
         neura::require_valid_ir(program, "before specialization");
         neura::materialize_reference_storage(program);
         neura::specialize(program);
+        neura::elaborate_class_hooks(program);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
@@ -1477,6 +1479,7 @@ int run_tests(const Options& options) {
     neura::materialize_reference_storage(program);
     neura::specialize(program);
     neura::check_inline_limit(program);
+    neura::elaborate_class_hooks(program);
     if (options.optimize) {
         neura::optimize(program);
     } else {
@@ -1826,13 +1829,15 @@ int check_program(neura::IrProgram program) {
     const bool thread_safe_tags = std::any_of(program.symbols.begin(), program.symbols.end(), [](const auto& item) {
         return neura::has_tag(item, neura::TagId::ThreadSafe);
     });
-    if (neura::uses_tasks(program) || thread_safe_tags) {
+    const bool hooks = neura::has_class_hooks(program);
+    if (neura::uses_tasks(program) || thread_safe_tags || hooks) {
         // The isolation rules of a spawn, and the #ThreadSafe check, need
         // concrete types, which exist after specialization (Concurrency.md
-        // section 5).
+        // section 5); so do the class hook checks E0544 and E0546.
         neura::require_valid_ir(program, "before specialization");
         neura::materialize_reference_storage(program);
         neura::specialize(program);
+        if (hooks) neura::elaborate_class_hooks(program);
     }
     return 0;
 }

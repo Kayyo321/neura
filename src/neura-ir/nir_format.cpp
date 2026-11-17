@@ -348,6 +348,9 @@ private:
     }
 
     void node(const IrNode& value) {
+        // Events are derived on the linked program and never stored.
+        if (value.op == IrOp::HookRead || value.op == IrOp::HookAdmit)
+            throw NirError("class hook events exist only in an elaborated program and are not written to .nir");
         // Only bodies carry polls, and a body with one makes the file 1.9.
         u8(static_cast<std::uint8_t>(value.op) | (polls_ && value.poll ? poll_bit : 0));
         type(value.type);

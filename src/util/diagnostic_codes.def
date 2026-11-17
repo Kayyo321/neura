@@ -148,7 +148,9 @@ NEURA_DIAGNOSTIC(E0540, "`.override` on a class hook that overrides nothing")
 NEURA_DIAGNOSTIC(E0541, "class hook on a class with synchronized methods")
 NEURA_DIAGNOSTIC(E0542, "class hook that does not yield its class")
 NEURA_DIAGNOSTIC(E0543, "class hook that returns a new object")
+NEURA_DIAGNOSTIC(E0544, "class hook that may suspend")
 NEURA_DIAGNOSTIC(E0545, "hooked class storage without an initializer")
+NEURA_DIAGNOSTIC(E0546, "hooked class reference at a bodyless function")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

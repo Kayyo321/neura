@@ -73,6 +73,8 @@ std::string_view op_name(IrOp op) {
     case IrOp::TaskScope: return "task_scope";
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
+    case IrOp::HookRead: return "hook_read";
+    case IrOp::HookAdmit: return "hook_admit";
     }
     return "<invalid>";
 }

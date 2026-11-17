@@ -1,4 +1,5 @@
 #include "verifier.hpp"
+#include "class_hooks.hpp"
 
 #include "aggregate.hpp"
 #include "attributes.hpp"
@@ -131,6 +132,9 @@ public:
         check_symbols();
         check_bodies();
         check_static_constants();
+        // Every event is wrapped exactly once (docs/design/Hooks030.md).
+        if (program_.hooks_elaborated && issues_.empty())
+            if (const auto problem = check_class_hook_events(program_)) report({}, "class hook events: " + *problem);
         return std::move(issues_);
     }
 
@@ -1051,6 +1055,18 @@ private:
             break;
         case IrOp::SchedulerCall:
             check_scheduler_call(node);
+            break;
+        case IrOp::HookRead:
+        case IrOp::HookAdmit:
+            // docs/design/Hooks030.md, Stored form: only in an elaborated
+            // program, where the events are checked as a whole in run().
+            if (!program_.hooks_elaborated) report(node.span, "a class hook event outside an elaborated program");
+            if (expect_operands(node, 1, node.op == IrOp::HookRead ? "hook read" : "hook admission")) {
+                if (node.op == IrOp::HookRead && node.type != node.operands.front().type)
+                    report(node.span, "a hook read has the type of its operand");
+                if (node.op == IrOp::HookAdmit)
+                    require_assignable(node.operands.front().type, node.type, node.span, "admitted value");
+            }
             break;
         case IrOp::CallClosure:
             check_call_closure(node);

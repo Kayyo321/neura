@@ -160,7 +160,13 @@ enum class IrOp {
     // yields the uint64 task identity. SchedulerCall asks the NVM scheduler
     // for the operation its text names; the scheduler defines each
     // operation's arguments and result.
-    TaskScope, Spawn, SchedulerCall
+    TaskScope, Spawn, SchedulerCall,
+    // Class hooks (docs/design/Hooks030.md). Present only after
+    // elaborate_class_hooks and never written to .nir. HookRead is one read
+    // event on its operand's value; HookAdmit is one admission of its
+    // operand to a destination of the node's type, whose previous value is
+    // what its parent writes over, or the field `symbol` names.
+    HookRead, HookAdmit
 };
 
 struct IrNode {
@@ -251,6 +257,9 @@ struct IrProgram {
     // Calls inlined by the optimizer; empty before optimization and not part
     // of a .nir file, which holds IR as lowered.
     std::vector<IrInlineSite> inline_sites{};
+    // Set by elaborate_class_hooks on a program whose events it derived; not
+    // part of a .nir file.
+    bool hooks_elaborated = false;
 };
 
 // The source loader can supply this trusted library file and retry lowering.

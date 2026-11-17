@@ -160,7 +160,9 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0541](E0541.md) | class hook on a class with synchronized methods |
 | [E0542](E0542.md) | class hook that does not yield its class |
 | [E0543](E0543.md) | class hook that returns a new object |
+| [E0544](E0544.md) | class hook that may suspend |
 | [E0545](E0545.md) | hooked class storage without an initializer |
+| [E0546](E0546.md) | hooked class reference at a bodyless function |
 
 ## E06xx: Concurrency
 

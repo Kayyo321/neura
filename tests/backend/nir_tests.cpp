@@ -465,7 +465,8 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
-    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::SchedulerCall) + 1);
+    // Past the last operation; HookRead and HookAdmit are never written.
+    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::HookAdmit) + 1);
     above.bodies.push_back({0, {tagged}});
     const auto above_bytes = write_nir(above);
     check_equal(static_cast<int>(above_bytes[6]), 9, "an operation above the 1.7 set is written as 1.9");

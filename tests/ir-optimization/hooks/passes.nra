@@ -1,0 +1,55 @@
+// Programs in which each optimizer pass must leave a class hook event in
+// place (docs/design/Hooks030.md, Optimization and tiers).
+let Session = class (
+    | get: instance;
+    | set: value;
+
+    export let count: int32 = 0;
+);
+
+let Passes = module (
+    // eliminate-common-subexpressions: two reads in one expression.
+    export let twice = func(s: Session) -> int32 {
+        return s.count + s.count;
+    };
+
+    // hoist-loop-invariants: a read of an unchanging local in a loop.
+    export let loop = func(s: Session) -> int32 {
+        let total = 0;
+        let i = 0;
+        while (i < 3) {
+            let seen = s;
+            total = total + i;
+            i = i + 1;
+        }
+        return total;
+    };
+
+    // remove-pure-discards: a discarded read.
+    export let discard = func(s: Session) {
+        s;
+    };
+
+    // remove-dead-stores: an admission whose value is never read.
+    export let dead = func(s: Session) -> int32 {
+        let unused = s;
+        unused = s;
+        return 0;
+    };
+
+    // inline-calls: a small function with an event.
+    export let small = func(s: Session) -> bool => s == nil;
+    export let caller = func(s: Session) -> bool => small(s);
+
+    // propagate-copies: a copy through an admission.
+    export let copy = func(s: Session) -> bool {
+        let b = s;
+        return b == nil;
+    };
+
+    // fold-constants: an admission of a literal nil.
+    export let constant = func() -> bool {
+        let n: Session = nil;
+        return n == nil;
+    };
+);

@@ -4204,6 +4204,7 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     specialize(program);
     // A tuple stays stored inline: its shape has a limit (E0449).
     check_inline_limit(program);
+    elaborate_class_hooks(program);
     if (options.optimize) {
         optimize(program);
     } else {

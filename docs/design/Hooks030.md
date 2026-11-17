@@ -106,7 +106,7 @@ An *event* is one run of an effective clause. The table gives every source opera
 | Each task has a stack of active events. An entry is the kind (get or set), the policy, and the identity of the reference: the object's handle, or nil. Handles are never reused, so no entry can name a released object. | proposed |
 | Starting an event equal to an active one is the trap `class hook recursion: <get or set> of <Policy>`. A hook may freely read or admit other objects, and references of other classes. | proposed |
 | The stack holds 64 entries. A 65th is the trap `class hook nesting limit exceeded`. | proposed |
-| A hook body may not use the scheduler: a channel operation, a guard, `spawn`, `scope`, `select`, or a call whose summary says it may (`E0544`). An event therefore starts and ends without its task being suspended. | proposed |
+| A hook body may not use the scheduler: a channel operation, a guard, `spawn`, `scope`, `select`, or a call whose summary says it may (`E0544`). An event therefore starts and ends without its task being suspended. | proposed; implemented |
 | Both traps are NVM trap reasons with their own names in `--trace` and in the debugger's stop reason. | proposed |
 
 ## Representation
@@ -129,10 +129,10 @@ An *event* is one run of an effective clause. The table gives every source opera
 | Parser | `class_hook_clauses` beside `accessor_clauses`, called after the `(` of a declared class; the result is `Declaration::hooks`, a list of `HookClause` (kind, override, spans, expression or block). `skip_accessor_clauses` recovers past a bad clause. | proposed; implemented |
 | Lowering | A new `lowering_hooks.inc`. Each clause becomes a hidden static function `$class_get(instance, policy)` or `$class_set(value, instance, policy)` of its class, with the attributes `hook.get` and `hook.set` on the class and `hook.of` on the function (the next three free identifiers in `attributes.def` when the change lands). The checks `E0538` to `E0543` and `E0545` run here. | proposed; implemented |
 | NeuraIR | A module that declares a clause is written with the next free NeuraIR minor version when the change lands, so that an older reader refuses it. The encoding gains nothing else. Events are not stored: they are derived from the tree. | proposed; implemented |
-| Elaboration | A new pass, `elaborate_class_hooks` (`src/neura-ir/class_hooks.cpp`), runs on the linked program after `specialize` and before `optimize`, at every place those two are called together (`build_image_bytes`, `emit_ir`, the test runner and `tooling/debug.cpp`). It computes the policy-carrying types and wraps each event's operand in `IrOp::HookRead` or `IrOp::HookAdmit`. It does nothing when the program has no clause. | proposed |
-| Derivation | The pass applies [the derivation table](#derivation) to the tree, and reports `E0544` and `E0546`, which need the linked program's summaries and specialized signatures. | proposed |
-| Stored form | `HookRead` and `HookAdmit` exist only after elaboration. The `.nir` writer refuses them, the verifier accepts them only in an elaborated program, and there it derives the events again and requires each to be wrapped exactly once. `emit-ir` prints them. | proposed |
-| Summaries | Elaboration sets `Summary::hooks`, with the clause as its cause, on every function that contains an event with a clause that is not identity, and the clause's own effects join that function's summary. `#Pure` and the other checked tags are checked again after elaboration; a violation is reported with today's code and a label at the clause. | proposed |
+| Elaboration | A new pass, `elaborate_class_hooks` (`src/neura-ir/class_hooks.cpp`), runs on the linked program after `specialize` and before `optimize`, at every place those two are called together (`build_image_bytes`, `emit_ir`, the test runner and `tooling/debug.cpp`). It computes the policy-carrying types and wraps each event's operand in `IrOp::HookRead` or `IrOp::HookAdmit`. It does nothing when the program has no clause. | proposed; implemented |
+| Derivation | The pass applies [the derivation table](#derivation) to the tree, and reports `E0544` and `E0546`, which need the linked program's summaries and specialized signatures. | proposed; implemented |
+| Stored form | `HookRead` and `HookAdmit` exist only after elaboration. The `.nir` writer refuses them, the verifier accepts them only in an elaborated program, and there it derives the events again and requires each to be wrapped exactly once. `emit-ir` prints them. | proposed; implemented |
+| Summaries | Elaboration sets `Summary::hooks`, with the clause as its cause, on every function that contains an event with a clause that is not identity, and the clause's own effects join that function's summary. `#Pure` and the other checked tags are checked again after elaboration; a violation is reported with today's code and a label at the clause. | proposed; implemented |
 | Literal nil | An initializer the pass wraps in `HookAdmit` is not a literal, so `constant_initializer` no longer makes it an image constant: it becomes a startup action at its place in source order. The converter decides nothing about hooks. | proposed |
 | Converter | `HookRead` and `HookAdmit` become: select the policy, compare it against the classes of the operand's static type that have a clause, in ascending layout identifier, and call the clause's function, or do nothing for identity. A setter's result goes to fresh slots, and one exit's `assignments` then writes handle, policy word and flags to the destination. | proposed |
 | NVR | The next free NVR minor version: the state operations `HookEnter(kind, policy, handle)` and `HookLeave`, which the hidden functions run first and last, and the trap reasons `HookRecursion` and `HookLimit`. The result check is a `ReadTag` and a compare. The writer emits the version only for an image with a clause. | proposed |
@@ -144,20 +144,20 @@ Every NeuraIR operation is in exactly one row. An event exists only where the va
 
 | Operation | Event | Status |
 | --- | --- | --- |
-| `Load` of a local, parameter or global; `Field`, including the `$accessor` form, whose event is on the adapter's result; `Index`; `Project`; `EnumProject`; `RemoveAt` when it yields the element | Read | proposed |
-| The value operand of `Initialize` and `Store`; the appended operand of `Append`; each element operand of `Collection`; the fill operand of `RepeatCollection`, admitted once per element; each capture operand of `MakeClosure` | Admission to the destination | proposed |
-| Each written argument operand of `Call`, `VirtualCall`, `CallClosure` and `BaseInitialize`, but not the receiver operand | Admission to the parameter | proposed |
-| The operand of `Return` | Admission to the function's declared result | proposed |
-| `Tuple`, `EnumConstruct`, `ScopedValue`, `SelectValue`, `ShortCircuit`, `Convert`, `ClassCast`, `Nil`, `Allocate`, `Receiver`, `Discard`, `Destroy` | None of their own; their operands keep theirs | proposed |
-| `ClassIs`, `ClassHash`, `ClassText`, `ValueEquals`, `ValueHash`, `ValueText`, `EnumTag`, `ComparisonChain`, `Binary`, `Unary`, `Length`, `CollectionVersion` | None; they consume values that were already read | proposed |
-| `Spawn`, `SchedulerCall`, `ExternalCall`, `TaskScope` | None; a value they carry is boxed or rejected by the representation rules, and the binding that receives a result has its own admission | proposed |
-| `Block`, `Branch`, `Loop`, `Break`, `Continue`, `Fail`, `TrapMessage`, `Integer`, `Float`, `String`, `Boolean`, `Reference`, `ReferencePlace`, and the text operations | None | proposed |
+| `Load` of a local, parameter or global; `Field`, including the `$accessor` form, whose event is on the adapter's result; `Index`; `Project`; `EnumProject`; `RemoveAt` when it yields the element | Read | proposed; implemented |
+| The value operand of `Initialize` and `Store`; the appended operand of `Append`; each element operand of `Collection`; the fill operand of `RepeatCollection`, admitted once per element; each capture operand of `MakeClosure` | Admission to the destination | proposed; implemented |
+| Each written argument operand of `Call`, `VirtualCall`, `CallClosure` and `BaseInitialize`, but not the receiver operand | Admission to the parameter | proposed; implemented |
+| The operand of `Return` | Admission to the function's declared result | proposed; implemented |
+| `Tuple`, `EnumConstruct`, `ScopedValue`, `SelectValue`, `ShortCircuit`, `Convert`, `ClassCast`, `Nil`, `Allocate`, `Receiver`, `Discard`, `Destroy` | None of their own; their operands keep theirs | proposed; implemented |
+| `ClassIs`, `ClassHash`, `ClassText`, `ValueEquals`, `ValueHash`, `ValueText`, `EnumTag`, `ComparisonChain`, `Binary`, `Unary`, `Length`, `CollectionVersion` | None; they consume values that were already read | proposed; implemented |
+| `Spawn`, `SchedulerCall`, `ExternalCall`, `TaskScope` | None; a value they carry is boxed or rejected by the representation rules, and the binding that receives a result has its own admission | proposed; implemented |
+| `Block`, `Branch`, `Loop`, `Break`, `Continue`, `Fail`, `TrapMessage`, `Integer`, `Float`, `String`, `Boolean`, `Reference`, `ReferencePlace`, and the text operations | None | proposed; implemented |
 
 | Exemption | Status |
 | --- | --- |
-| A symbol whose name begins with `$` is a compiler temporary: reading it and storing to it are not events. A capture field `$capture<N>` is the exception, since it is a binding of its lambda. | proposed |
-| The parameters and the result of a function that carries `accessor.of` or `hook.of` have no events. | proposed |
-| Anything the rules do not exempt is an event. A temporary that lowering creates without a `$` name therefore shows as an extra event in the trace tests and never as a missing one. | proposed |
+| A symbol whose name begins with `$` is a compiler temporary: reading it and storing to it are not events. A capture field `$capture<N>` is the exception, since it is a binding of its lambda. | proposed; implemented |
+| The parameters and the result of a function that carries `accessor.of` or `hook.of` have no events. | proposed; implemented |
+| Anything the rules do not exempt is an event. A temporary that lowering creates without a `$` name therefore shows as an extra event in the trace tests and never as a missing one. | proposed; implemented |
 
 ### Rows other milestones add
 
@@ -179,11 +179,11 @@ A hook is a call with effects, whatever its body does. A getter whose body is `i
 
 | Pass | Rule | Status |
 | --- | --- | --- |
-| IR `eliminate-common-subexpressions` (`repeatable`) | A `HookRead` or `HookAdmit`, and a call of a function whose summary has the hook fact, is never repeatable, and ends the availability of every expression before it. | proposed |
-| IR `hoist-loop-invariants` (`pure_and_total`) | Neither node is pure or total. | proposed |
-| IR `remove-pure-discards`, `remove-dead-stores` | A discarded event stays. A store that is an admission stays even when the stored value is never read. | proposed |
-| IR `inline-calls` (`inlinable`) | A function that contains an event, and a hook function, is not inlined. | proposed |
-| IR `propagate-copies`, `fold-constants` | A read through a `HookRead` is not a copy of the storage, and a `HookAdmit` of a literal nil is not a constant. | proposed |
+| IR `eliminate-common-subexpressions` (`repeatable`) | A `HookRead` or `HookAdmit`, and a call of a function whose summary has the hook fact, is never repeatable, and ends the availability of every expression before it. | proposed; implemented |
+| IR `hoist-loop-invariants` (`pure_and_total`) | Neither node is pure or total. | proposed; implemented |
+| IR `remove-pure-discards`, `remove-dead-stores` | A discarded event stays. A store that is an admission stays even when the stored value is never read. | proposed; implemented |
+| IR `inline-calls` (`inlinable`) | A function that contains an event, and a hook function, is not inlined. | proposed; implemented |
+| IR `propagate-copies`, `fold-constants` | A read through a `HookRead` is not a copy of the storage, and a `HookAdmit` of a literal nil is not a constant. | proposed; implemented |
 | Tier 2 | A block that contains `HookEnter` or `HookLeave` is declined and runs at tier 1. A block that calls a hook function is an ordinary block with a `Call` exit. | proposed |
 | Tier 3 inlining (`inline_calls`) | A function with `HookEnter` or `HookLeave` is not inlined at first, as a callee with a `Helper` is not. Native inlining follows in its own change, and then keeps both operations and the result check in place. | proposed |
 | Tier 3 value numbering (`number_values`, `Memory::apply`) and LICM (`hoist_invariants`) | The call of a hook function is a `Call`: `is_effect`, never numbered or hoisted, and it kills every memory class. `HookEnter` and `HookLeave` are added to `is_effect` and are never hoisted. | proposed |
@@ -412,3 +412,9 @@ No existing source changes meaning: no class has a hook, and `static scope` did 
 | `E0543` is checked after the clause's types, so `return new Other();` is `E0542` | A `new` of another class is a wrong type first. |
 | Until step 6, a program with a clause is rejected where an image is produced, with the existing `E0801` (not supported by circuit conversion) | `neura check` and `neura emit-ir` must accept clauses for their tests; nothing unimplemented can run. |
 | A hook function of a generic class is copied for each instance of the class by specialization, although it is a static function | Each specialization has its own policy; other statics of a generic class stay shared. |
+| An event exists wherever the value's type is policy-carrying, whatever kinds of clause the classes assignable to it have | The converter selects the policy of every policy-carrying admission at the `HookAdmit`; an event with no clause of its kind runs nothing and is still kept in order. |
+| `new C(x)` admits `x` to the constructor's parameter, although `Allocate` is in the row of operations without events of their own | The Events table says that passing an argument to a parameter of class type is one setter, and a constructor's parameter is one. |
+| `remove_at` yields no element, so `RemoveAt` has no event from source, and `RepeatCollection` is built only for ranges of numbers | The rows stay in the pass for the operations' other uses; tests cover the source rows. |
+| The audit of lowering's hidden symbols found every temporary already named with `$`. Three compiler-written places are exempt in `class_hooks.cpp` instead: the bodies of the root class's members (`other` of `equals`), the constructor of a closure layout (its `$capture<N>` parameters and stores, which the `MakeClosure` already admitted), and the initialization of a singleton's instance | None of them is a binding the program writes. |
+| The body of an accessor adapter reads and writes its own field's storage without an event | `object.field` is one getter and `object.field = x` one setter, at the call (`HookAdmit` names the field for its previous value). |
+| `#Pure` is checked again on the specialized, elaborated program only when the program declares a clause | A program without clauses is unchanged. |
