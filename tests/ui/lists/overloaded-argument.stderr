@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/overloaded-argument.nra:9:18
+  |
+9 |     return total([1, 2]);
+  |                  ^^^^^^ the expected type is int32[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+9 |     return total(new([1, 2]));
+  |                  ++++      +
+
+For more information about this error, try `neura explain E0450`.

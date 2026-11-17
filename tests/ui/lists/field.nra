@@ -1,0 +1,4 @@
+// A list field initialized with a bare literal.
+let Bag = class (
+    export let items: int[list] = [1, 2, 3]; // keep
+);

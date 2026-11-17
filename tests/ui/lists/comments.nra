@@ -1,0 +1,6 @@
+// The fix keeps the literal's comments and order.
+let values: int[list] = [
+    3, // first
+    1, // second
+    2 // third
+];

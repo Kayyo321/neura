@@ -1,0 +1,4 @@
+// A generic element type does not change the rule.
+let wrap = func<T>(item: T) -> T[list] {
+    return new([item]);
+};

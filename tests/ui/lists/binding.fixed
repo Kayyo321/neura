@@ -1,0 +1,2 @@
+// A bare list literal where a binding's list type is expected (E0450).
+let names: string[list] = new(["Ada", "Lin"]);

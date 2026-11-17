@@ -1,0 +1,4 @@
+// A bare literal returned where a list is the declared result.
+let make = func() -> int[list] {
+    return new([1, 2, 3]);
+};

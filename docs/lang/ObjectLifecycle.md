@@ -118,6 +118,8 @@ The class to construct is the expected type of the `new`, which comes from:
 - the parameter, for a call argument, once the callee is known. Among overloads, a target-typed `new` fits every alternative whose parameter is a class it can construct, as a contextual argument, and an ambiguity is the usual [overload error](CoreLanguage.md#function-overloads);
 - the element type of a collection literal whose type is expected, and the arms of a conditional expression whose type is expected.
 
+Where the expected type, or the type written after `new`, is a list, `new` constructs a list, not an object: its one argument is the initializer, a list literal or a range, as in `new([1, 2, 3])`, `new(0 .. count)` and `new int[list]([1, 2, 3])`, and `new` alone is an empty list ([Arrays and lists](Collections.md#construction-and-length)). Among overloads, a `new(...)` of that form fits an alternative whose parameter is a list that its literal fits, and also a class it can construct, so write the type, `new int[list](...)`, where both fit.
+
 A generic class takes its type arguments from the expected type, so `let box: Box<string> = new("text");` constructs `Box<string>`. The expected type must be a concrete class. With no expected type, or with an interface, the umbrella type `class`, a singleton, a type parameter, or a type that is not a class, the `new` is [E0420](../diagnostics/E0420.md). An abstract class is rejected as for `new T()`.
 
 <!-- example: check -->

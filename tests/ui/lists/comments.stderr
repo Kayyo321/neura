@@ -1,0 +1,15 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/comments.nra:2:25
+  |
+2 | let values: int[list] = [
+  |                         ^... the expected type is int32[list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+2 | let values: int[list] = new([
+  |                         ++++
+6 | ]);
+  |  +
+
+For more information about this error, try `neura explain E0450`.

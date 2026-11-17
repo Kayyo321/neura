@@ -1,0 +1,58 @@
+// Every accepted way to construct a list, and an array literal that stays an array.
+let total = func(values: int[list]) -> int {
+    return values.length;
+};
+
+let Bag = class (
+    export let items: int[list] = new([1, 2, 3]);
+);
+
+let make = func(count: int) -> int[list] {
+    return new(0 .. count);
+};
+
+let wrap = func<T>(item: T) -> T[list] {
+    return new([item]);
+};
+
+let Pair = class (
+    export let a: int = 0;
+    export let init = func(x: int, y: int) {
+        a = x;
+    };
+);
+
+// `new(...)` chooses the class or the list from the parameter that it fits.
+let measure = func(pair: Pair) -> int {
+    return pair.a;
+} or func(items: int[list]) -> int {
+    return items.length;
+};
+
+let kind = func(items: int[list]) -> int {
+    return items.length;
+} or func(items: string[list]) -> int {
+    return items.length + 10;
+};
+
+let main = func() -> int {
+    let by_class = measure(new(1, 2));
+    let by_list = measure(new int[list](0 .. 4));
+    let by_type = kind(new([1, 2])) + kind(new(["a"]));
+    let literal: int[list] = new([1, 2, 3]);
+    let empty: int[list] = new;
+    let from_range: int[list] = new(0 .. 4);
+    let stepped: int[list] = new(0 .. 8 : 2);
+    let typed = new int[list]([4, 5]);
+    let typed_range = new int[list](0 .. 3);
+    let typed_empty = new int[list]();
+    let rows: int[list][list] = new([new([1, 2]), new([3]), new]);
+    let arrays: int[][list] = new([[1, 2], [3]]);
+    let array: int[] = [1, 2, 3];
+    let picked: int[list] = true ? new([1]) : new;
+    let bag = new Bag();
+    return literal.length + empty.length + from_range.length + stepped.length + typed.length +
+        typed_range.length + typed_empty.length + rows.length + arrays.length + array.length +
+        picked.length + total(new([1, 2])) + total(new(0 .. 2)) + bag.items.length + make(3).length +
+        wrap<int>(7).length + by_class + by_list + by_type;
+};

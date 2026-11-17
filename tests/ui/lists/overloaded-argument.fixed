@@ -1,0 +1,10 @@
+// An overloaded callee reports the missing `new`, not a missing overload.
+let total = func(values: int[list]) -> int {
+    return values.length;
+} or func(values: int[list], extra: int) -> int {
+    return values.length + extra;
+};
+
+let use = func() -> int {
+    return total(new([1, 2]));
+};

@@ -268,6 +268,9 @@ private:
     std::optional<ExpectedOrigin> expected_origin_;
     // The origin that value() received for a `new` expression it lowers.
     std::optional<std::pair<const Expr*, ExpectedOrigin>> new_origin_;
+    // The list literals and ranges that a `new` initializes (Storage030.md,
+    // Construction); every other one where a list is expected is E0450.
+    std::set<const Expr*> constructed_lists_;
 
     // Anonymous classes (Types.md, Anonymous classes). A fields-only
     // class is interned by its fields; any other is one class per written
@@ -285,6 +288,8 @@ private:
     IrNode construct(const Expr& expr, Context& context, const IrType* expected);
     IrNode construct_structural(const Expr& expr, Context& context, const IrType& object,
                                 const Declaration* body);
+    IrNode construct_list(const Expr& expr, Context& context, const IrType& list);
+    void require_new_for_list(const Expr& expr, const IrType* expected) const;
     IrNode destructure_source(const Statement& stmt, Context& context);
 
     Span name_span(SymbolId id) const;
@@ -2683,6 +2688,7 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         std::vector<SymbolId> casts;
     };
     std::vector<Match> matches;
+    std::optional<Diagnostic> missing_new;
     for (const auto branch : candidates) {
         Match match{branch, {}, {}, {}};
         for (std::size_t i = 0; i < count; ++i) {
@@ -2708,6 +2714,32 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                 }
             } else if (target_typed(input)) {
                 const auto& object = expected;
+                if (object.kind == TypeKind::List) {
+                    // `new(...)` for a list takes no argument or one literal or
+                    // range, which must fit this list type. It is lowered once,
+                    // for the chosen candidate.
+                    if (input.operands.size() > 1) break;
+                    if (input.operands.size() == 1) {
+                        const auto& payload = input.operands.front();
+                        if (payload.kind != ExprKind::Collection && payload.kind != ExprKind::Range) break;
+                        if (literal_tree(payload)) {
+                            SpeculativeDiagnostics speculative;
+                            constructed_lists_.insert(&payload);
+                            bool fits = true;
+                            try {
+                                value(payload, context, &object);
+                            } catch (const Diagnostic&) {
+                                fits = false;
+                            }
+                            constructed_lists_.erase(&payload);
+                            if (!fits) break;
+                        }
+                    }
+                    match.ranks.push_back(Rank::Contextual);
+                    match.types.push_back(std::move(expected));
+                    match.casts.push_back(conversion);
+                    continue;
+                }
                 if (object.kind != TypeKind::Object || symbol(object.symbol).kind != SymbolKind::Class ||
                     object.symbol == root_class_ || entries_[object.symbol].singleton_instance != no_symbol)
                     break;
@@ -2716,7 +2748,9 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
                 SpeculativeDiagnostics speculative;
                 try {
                     value(input, context, &expected);
-                } catch (const Diagnostic&) {
+                } catch (const Diagnostic& rejected) {
+                    // A bare literal for a list parameter is E0450, not a missing overload.
+                    if (rejected.code() == "E0450" && !missing_new) missing_new = rejected;
                     break;
                 }
                 rank = defaults[i] == expected ? Rank::Exact : Rank::Contextual;
@@ -2749,7 +2783,10 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
             .with_code("E0409");
         selected = &match;
     }
-    if (!selected) throw no_match();
+    if (!selected) {
+        if (matches.empty() && missing_new) throw *missing_new;
+        throw no_match();
+    }
     for (std::size_t i = 0; i < count; ++i) {
         const auto& input = expr.operands[i + first];
         auto argument = inputs[i] ? std::move(*inputs[i]) : value(input, context, &selected->types[i]);
@@ -2910,6 +2947,7 @@ IrNode Lowering::comparison_chain(const Expr& expr, Context& context) {
 }
 
 IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expected) {
+    require_new_for_list(expr, expected);
     const auto& span = expr.span;
     const auto* expected_element = expected && collection(*expected) ? &expected->arguments.front() : nullptr;
     auto start = value(expr.operands[0], context, expected_element);
@@ -3149,6 +3187,7 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
     }
     case ExprKind::Collection: {
         if (expected && expected->kind == TypeKind::Tuple) return tuple(expr, context, expected);
+        require_new_for_list(expr, expected);
         auto result = node(IrOp::Collection, expr.span);
         if (expected && collection(*expected)) {
             result.type = *expected;
@@ -5145,11 +5184,13 @@ IrNode Lowering::construct(const Expr& expr, Context& context, const IrType* exp
         // `new class ( ... )()`: the body written here is constructed.
         mark_binding_annotation(*expr.type);
         auto object = type(*expr.type, context);
+        if (object.kind == TypeKind::List) return construct_list(expr, context, object);
         if (structural_class(object))
             return construct_structural(expr, context, object,
                                         plain_anonymous(*expr.type) ? expr.type->anonymous.get() : nullptr);
         return allocate(expr, context, &object);
     }
+    if (expected && expected->kind == TypeKind::List) return construct_list(expr, context, *expected);
     const auto problem = [&]() -> std::string {
         if (!expected) return {};
         if (expected->kind == TypeKind::TypeParameter) return "a type parameter";
@@ -5202,6 +5243,50 @@ IrNode Lowering::construct(const Expr& expr, Context& context, const IrType* exp
         return construct_structural(expr, context, *expected, origin->initializes ? body : nullptr);
     }
     return allocate(expr, context, expected);
+}
+
+// `new([1, 2, 3])`, `new(0 .. count)`, `new int[list](...)`, and `new` alone:
+// the list that the literal or range lowers to, built in place. The payload is
+// lowered exactly as the bare literal was before `new` was required, so the
+// emitted code is the same.
+IrNode Lowering::construct_list(const Expr& expr, Context& context, const IrType& list) {
+    if (expr.operands.empty()) return node(IrOp::Collection, expr.span, list);
+    if (expr.operands.size() != 1)
+        throw Diagnostic(expr.span, "'new' for a list takes one list literal or range").with_code("E0420")
+            .label("found " + std::to_string(expr.operands.size()) + " arguments")
+            .help("write 'new([a, b, c])' or 'new(0 .. count)', or 'new' alone for an empty list");
+    const auto& payload = expr.operands.front();
+    if (payload.kind != ExprKind::Collection && payload.kind != ExprKind::Range)
+        throw Diagnostic(payload.span, "'new' for a list takes a list literal or a range").with_code("E0420")
+            .label("this is neither")
+            .help("write 'new([a, b, c])' or 'new(0 .. count)'");
+    constructed_lists_.insert(&payload);
+    auto result = value(payload, context, &list);
+    constructed_lists_.erase(&payload);
+    return result;
+}
+
+// A bare literal or range where a list is expected (E0450). The fix wraps it
+// in `new(...)`, or replaces an empty literal with `new`.
+void Lowering::require_new_for_list(const Expr& expr, const IrType* expected) const {
+    if (!expected || expected->kind != TypeKind::List || constructed_lists_.contains(&expr)) return;
+    const bool literal = expr.kind == ExprKind::Collection;
+    auto error = Diagnostic(expr.span, std::string("a list is constructed with 'new', and this ") +
+                                       (literal ? "list literal" : "range") + " is not").with_code("E0450")
+        .label("the expected type is " + describe(*expected))
+        .note("a bare literal or range is an array; a list needs 'new'");
+    if (user_source(expr.span.file)) {
+        if (literal && expr.operands.empty()) {
+            error.suggest("write 'new' for an empty list", expr.span, "new", Applicability::MachineApplicable);
+        } else {
+            const Span front{expr.span.file, expr.span.line, expr.span.column, expr.span.offset, 0};
+            const Span back{expr.span.file, expr.span.line, expr.span.column,
+                            expr.span.offset + expr.span.length, 0};
+            error.suggest("construct the list with 'new'", {{front, "new("}, {back, ")"}},
+                          Applicability::MachineApplicable);
+        }
+    }
+    throw error;
 }
 
 IrNode Lowering::construct_structural(const Expr& expr, Context& context, const IrType& object,

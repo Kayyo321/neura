@@ -557,7 +557,7 @@ private:
         out << "    export let " << record.name << " = class (\n";
         for (const auto& field : record.fields) {
             if (field.count >= 0) {
-                out << "        export let " << field.name << ": " << neura_type(field.type) << "[list] = [];\n";
+                out << "        export let " << field.name << ": " << neura_type(field.type) << "[list] = new;\n";
             } else {
                 out << "        export let " << field.name << ": " << neura_type(field.type) << " = "
                     << default_value(field.type) << ";\n";
@@ -828,7 +828,7 @@ private:
             out << "    export let " << name << " = func(";
             for (const auto& [parameter, mapped] : parameters) out << parameter << ": " << neura_type(mapped) << ", ";
             out << "neura_rest: ...) -> " << result_type << " {\n";
-            out << "        let neura_arguments: c_variadic.Argument[list] = [];\n";
+            out << "        let neura_arguments: c_variadic.Argument[list] = new;\n";
             for (const auto& [parameter, mapped] : parameters) out << "        neura_arguments.append(" << pack(mapped, parameter) << ");\n";
             out << "        for (let neura_argument in neura_rest) {\n            neura_arguments.append(neura_argument);\n        }\n";
             const auto call = "c_method.MethodHandle.call_variadic(" + symbol(target) + ", " + descriptor + ", neura_arguments)";

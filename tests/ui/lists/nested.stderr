@@ -1,0 +1,13 @@
+error[E0450]: a list is constructed with 'new', and this list literal is not
+ --> $DIR/nested.nra:2:29
+  |
+2 | let rows: int[list][list] = [[1, 2], [3]];
+  |                             ^^^^^^^^^^^^^ the expected type is int32[list][list]
+  |
+  = note: a bare literal or range is an array; a list needs 'new'
+help: construct the list with 'new'
+  |
+2 | let rows: int[list][list] = new([[1, 2], [3]]);
+  |                             ++++             +
+
+For more information about this error, try `neura explain E0450`.
