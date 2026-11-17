@@ -98,7 +98,7 @@ FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
     "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
-    "sqrt-special", "tuples",
+    "sqrt-special", "tuples", "enums",
 ]
 
 
@@ -164,6 +164,7 @@ IMPORTS = {
     "lists": "Std.Collections.Lists",
     "float64s": "Std.Core.Float64",
     "float32s": "Std.Core.Float32",
+    "optional": "Std.Core.Optional",
 }
 
 
@@ -972,6 +973,110 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     p.calls.append(k)
 
 
+def section_enums(p, k):
+    """Payload enums stored inline: a random choice of variants whose payloads share pooled words, in locals,
+    parameters, results, class fields, a tuple field, a module global, a closure capture and the elements of lists
+    and arrays; each value is matched and folded into the checksum, and its text is printed."""
+    p.feature("enums", "classes", "lists", "arrays", "closures")
+    p.use("optional")
+    a, b, c = p.between(2, 9), p.between(3, 11), p.between(1, 6)
+    E = f"S{k}Shape"
+    pair = p.pick([("[int32, string]", "[i, \"p\" + i.to_string()]", "(x[0] + x[1].byte_length) as int64",
+                    "x[1]"),
+                   ("[int64, bool]", "[(i as int64) * $b, i % 2 == 0]", "x[0] + (x[1] ? 5 : 2)",
+                    "x[1].to_string()")])
+    variants = [
+        ("Dot", "Dot", f"{E}.Dot", "1", "\"dot\""),
+        ("Count", "Count(int32)", f"{E}.Count(i * $a)", "v as int64", "\"count \" + v.to_string()"),
+        ("Big", "Big(int64, int32)", f"{E}.Big((i as int64) * $b, i)", "big + (small as int64)",
+         "\"big \" + big.to_string()"),
+        ("Name", "Name(string, int32)", f"{E}.Name(\"n\" + i.to_string(), i + $a)",
+         "(text.byte_length + v) as int64", "\"name \" + text"),
+        ("Pair", f"Pair({pair[0]})", f"{E}.Pair({pair[1]})", pair[2], "\"pair \" + " + pair[3]),
+        ("Maybe", "Maybe(optional.Optional<int32>)",
+         f"{E}.Maybe(i % 2 == 0 ? optional.Optional<int32>.Some(i) : optional.Optional<int32>.None)",
+         "optional.value_or<int32>(o, 13) as int64", "\"maybe \" + optional.value_or<int32>(o, -1).to_string()"),
+        ("Rows", "Rows(int32[list])", f"{E}.Rows(new([i, i + 1, i * $c]))", "(rows.length + rows[0]) as int64",
+         "\"rows \" + rows.length.to_string()"),
+        ("Real", "Real(float64)", f"{E}.Real((i as float64) * 0.5)", "(r * 4.0) as int64",
+         "\"real \" + r.to_string()"),
+    ]
+    bindings = {"Dot": "", "Count": "(v)", "Big": "(big, small)", "Name": "(text, v)", "Pair": "(x)",
+                "Maybe": "(o)", "Rows": "(rows)", "Real": "(r)"}
+    chosen = p.random.sample(variants, p.between(3, len(variants)))
+    if not any(name == "Count" for name, *_ in chosen):
+        chosen.append(variants[1])
+    declaration = ", ".join(decl for _, decl, _, _, _ in chosen)
+    makes = "\n".join(f"    if (pick == {n}) {{ return {make}; }}" for n, (_, _, make, _, _) in enumerate(chosen[:-1]))
+    reads = "\n".join(f"        {E}.{name}{bindings[name]} => {read}," for name, _, _, read, _ in chosen)
+    texts = "\n".join(f"        {E}.{name}{bindings[name]} => {text}," for name, _, _, _, text in chosen)
+    p.declarations.append(fill("""let $E = enum ($D);
+
+let s${k}_global: $E = $first;
+
+let s${k}_make = func(i: int32) -> $E {
+    last pick = i % $n;
+$makes
+    return $last;
+};
+
+let s${k}_read = func(s: $E, acc: int64) -> int64 => mix(acc, match (s) {
+$reads
+});
+
+let s${k}_text = func(s: $E) -> string => match (s) {
+$texts
+};
+
+let S${k}Holder = class (
+    export let cursor: $E = $first;
+    export let marks: [int32, $E] = [0, $first];
+    export let rows: $E[list] = new;
+    export let put = func(next: $E, index: int32) {
+        marks = [index, cursor];
+        cursor = next;
+        rows.append(next);
+    };
+);
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let holder = new S${k}Holder();
+    let acc: int64 = 0;
+    for (let i: int32 = 0; i < size + 5; i++) {
+        holder.put(s${k}_make(i), i);
+        acc = s${k}_read(holder.cursor, acc);
+        acc = s${k}_read(holder.marks[1], mix(acc, holder.marks[0] as int64));
+        if (i % 3 == 0) {
+            holder.rows[i / 3] = s${k}_make(i * 2 + 1);
+        }
+    }
+    let table: $E[] = [s${k}_make(size), s${k}_make(size + 1), s${k}_make(size + 2)];
+    for (let s in table) {
+        acc = s${k}_read(s, acc);
+    }
+    for (let s in holder.rows) {
+        acc = s${k}_read(s, acc);
+    }
+    let captured = s${k}_make(size + $c);
+    let probe = func(x: int32) -> $E => match (captured) {
+        $E.Count(v) => $E.Count(v + x),
+        _ => s${k}_make(x),
+    };
+    s${k}_global = probe(size);
+    acc = s${k}_read(s${k}_global, acc);
+    console.println("s$k enums {} {} {} {}", holder.rows.length, s${k}_text(holder.cursor),
+                    s${k}_text(holder.rows[holder.rows.length - 1]), s${k}_text(s${k}_global));
+    return acc;
+};
+""", k=k, E=E, D=declaration, n=len(chosen), c=c,
+                                makes=makes.replace("$a", str(a)).replace("$b", str(b)).replace("$c", str(c)),
+                                last=chosen[-1][2].replace("$a", str(a)).replace("$b", str(b)).replace("$c", str(c)),
+                                first=re.sub(r"\bi\b", "(0)", chosen[0][2]).replace("$a", str(a)).replace("$b", str(b))
+                                .replace("$c", str(c)),
+                                reads=reads, texts=texts))
+    p.calls.append(k)
+
+
 SECTIONS = [
     (section_integers, 100),
     (section_loops, 80),
@@ -1027,6 +1132,14 @@ def build_program(seed):
         section_tuples(p, k)
         # Its declaration stays last, so the sections above keep their text; its call goes first, so that a
         # fault trap in an earlier section cannot end the run before the tuples have run.
+        p.calls.remove(k)
+        p.calls.insert(0, k)
+    # Payload enums come last, from a source of their own, and their call runs first, for the same reasons.
+    p.random = random.Random(f"enums {seed}")
+    if p.chance(75):
+        k = p.next_id
+        p.next_id += 1
+        section_enums(p, k)
         p.calls.remove(k)
         p.calls.insert(0, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)

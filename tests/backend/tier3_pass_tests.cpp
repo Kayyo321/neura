@@ -709,6 +709,58 @@ NEURA_TEST(tier3, value_numbering_merges_equal_ops_and_checks_that_a_dominating_
     check_equal(ir.f.insts[use].operands[1], pure_first, "also for the pure op");
 }
 
+// Elements of collections of aggregates (NVR 1.7) name their component in
+// `aux`, and a component is its own alias class: a store to another component
+// does not change what a load reads, a store to the same one does.
+NEURA_TEST(tier3, value_numbering_keeps_a_component_load_across_a_store_to_another_component_only) {
+    struct Case {
+        const char* label;
+        // The component (or none) of the first load, the store, the second load.
+        std::uint32_t first, written, second;
+        bool merged;
+    };
+    const std::uint32_t none = t3::none;
+    for (const auto& c : {Case{"another component", 0, 1, 0, true}, Case{"the same component", 0, 0, 0, false},
+                          Case{"plain elements of the width", none, none, none, false},
+                          Case{"plain elements (no collection of aggregates has them)", 0, none, 0, true}}) {
+        Straight s(2, 64);
+        auto& ir = s.ir;
+        t3::Inst lookup;
+        lookup.op = t3::Op::Lookup;
+        lookup.type = {t3::Type::Ptr, 0};
+        lookup.operands[0] = s.entry.slot[0];
+        lookup.flags = t3::Checked;
+        lookup.state = s.state;
+        const auto entry = ir.add(s.body, lookup);
+        const auto heap = [&](t3::Op op, t3::ValueType type, std::uint32_t a, std::uint32_t b = t3::none,
+                              std::uint32_t c2 = t3::none, std::uint32_t d = t3::none, std::uint64_t imm = 0,
+                              std::uint32_t aux = t3::none) {
+            t3::Inst in;
+            in.op = op;
+            in.type = type;
+            in.operands[0] = a;
+            in.operands[1] = b;
+            in.operands[2] = c2;
+            in.operands[3] = d;
+            in.imm = imm;
+            in.aux = aux;
+            if (op == t3::Op::StoreElement) in.flags = t3::Effect;
+            return ir.add(s.body, in);
+        };
+        const auto data = heap(t3::Op::LoadData, {t3::Type::Ptr, 0}, entry);
+        const auto storage = heap(t3::Op::LoadStorage, {t3::Type::Int, 8}, entry);
+        const auto first = heap(t3::Op::LoadElement, {t3::Type::Int, 64}, data, s.entry.slot[1], storage, t3::none, 8, c.first);
+        heap(t3::Op::StoreElement, {}, data, s.entry.slot[1], storage, s.entry.slot[1], 8, c.written);
+        const auto second = heap(t3::Op::LoadElement, {t3::Type::Int, 64}, data, s.entry.slot[1], storage, t3::none, 8, c.second);
+        end_straight(s);
+        ir.expect_valid(std::string("before: ") + c.label);
+        d3::number_values(ir.f, ir.counts);
+        ir.expect_valid(std::string("after: ") + c.label);
+        check(ir.present(first), std::string("the first load stays: ") + c.label);
+        check_equal(!ir.present(second), c.merged, std::string("the second load after a store to ") + c.label);
+    }
+}
+
 NEURA_TEST(tier3, ops_that_do_not_dominate_each_other_are_not_merged) {
     Ir ir(2);
     const auto head = ir.block(1);

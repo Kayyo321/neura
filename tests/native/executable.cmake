@@ -66,11 +66,12 @@ if(SUITE STREQUAL "build")
     success("${NEURA}" build --native "${TEST_DIR}/copies/deeper/still/hello-world.nra" -o from-copy)
     equal_files("${TEST_DIR}/source" "${TEST_DIR}/from-copy")
     # The default policy holds no prefixes. Its encoded size, including the
-    # five task settings of container version 2 (36 bytes) and the image
-    # length word, is 72 bytes. Compare both unmodified regions.
+    # five task settings of container version 2 (36 bytes), the stack cell
+    # limit of version 3 (8 bytes) and the image length word, is 80 bytes.
+    # Compare both unmodified regions.
     file(SIZE "${LAUNCHER}" launcher_size)
     file(SIZE "${TEST_DIR}/hello.nvr" image_size)
-    math(EXPR image_offset "${launcher_size} + 72")
+    math(EXPR image_offset "${launcher_size} + 80")
     file(READ "${LAUNCHER}" launcher_hex HEX)
     file(READ "${TEST_DIR}/source" prefix LIMIT "${launcher_size}" HEX)
     file(READ "${TEST_DIR}/source" payload OFFSET "${image_offset}" LIMIT "${image_size}" HEX)
@@ -269,7 +270,7 @@ if(SUITE STREQUAL "build")
     endif()
     invoke(inspect "${NEURA}" inspect source -o extracted.nvr)
     if(NOT inspect_status STREQUAL "0" OR NOT inspect_stderr STREQUAL "" OR
-       NOT inspect_stdout MATCHES "^native executable: source\nlauncher: neura [0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?, [^,]+, default, runs NVR up to 1[.]7\ncapabilities: console, process exit, files, network, environment, clock, entropy, native\nlimits: steps 100000000, frames 10000, heap cells 67108864\ntasks: at most 65536, quantum 1024, queued messages 1048576, pending requests 4096, parallel workers 1\nrun options: accepted\nimage: ${image_size} bytes, NVR 1[.]2, [0-9]+ graphs, source map present, native library absent\n$")
+       NOT inspect_stdout MATCHES "^native executable: source\nlauncher: neura [0-9]+[.][0-9]+[.][0-9]+(-[0-9A-Za-z.-]+)?, [^,]+, default, runs NVR up to 1[.]7\ncapabilities: console, process exit, files, network, environment, clock, entropy, native\nlimits: steps 100000000, frames 10000, heap cells 67108864, stack cells 16777216\ntasks: at most 65536, quantum 1024, queued messages 1048576, pending requests 4096, parallel workers 1\nrun options: accepted\nimage: ${image_size} bytes, NVR 1[.]7, [0-9]+ graphs, source map present, native library absent\n$")
         message(FATAL_ERROR "unexpected inspect output\n${inspect_stdout}${inspect_stderr}")
     endif()
     equal_files("${TEST_DIR}/hello.nvr" "${TEST_DIR}/extracted.nvr")

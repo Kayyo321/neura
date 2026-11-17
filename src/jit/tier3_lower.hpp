@@ -40,7 +40,7 @@ enum class Kind : std::uint8_t {
     WriteBack,       // writes the physical frame from frame state `state`
     Helper,          // R3 helper exits[index] of the uses
     Call,            // function imm through exits[index] of the uses
-    Return,          // returns uses[0] (or nothing)
+    Return,          // returns uses[0] (or nothing) and `index` more words, which follow it in the uses
     Leave,           // ends at block imm of the innermost frame
     Deopt,           // deoptimizes to frame state `state`
     Branch,          // uses[0] & 1: succs[0], else succs[1]
@@ -82,6 +82,7 @@ enum class Kind : std::uint8_t {
     Canon,           // defs[0] = uses[0] with a NaN of `width` bits replaced by the canonical NaN
     Sqrt,            // defs[0] = the binary64 square root of uses[0]; canonical unless `checked` is false
     Abs,             // defs[0] = uses[0] with the sign bit of `width` bits cleared
+    ResultWord,      // defs[0] = the context's result word imm (a word after the first of a multi-word result)
 };
 
 struct Step {

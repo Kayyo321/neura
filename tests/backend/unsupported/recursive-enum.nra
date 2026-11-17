@@ -1,0 +1,12 @@
+// expect: 6:37 enum 'Expression' contains itself, so its values have no finite size
+// A payload enum is stored inline, so an enum that holds itself, here through a tuple, has no finite size
+// (E0448). The error is at the variant whose payload closes the cycle.
+let program = import:Std.Program;
+
+let Expression = enum (Number(int), Sum([Expression, Expression]));
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        return program.ExitCode.Ok;
+    };
+);

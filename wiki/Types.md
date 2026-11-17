@@ -112,7 +112,7 @@ captured variable, or an element of an array or list, and a nested tuple is
 flattened into the run. A tuple of more than 64 value words is
 [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md). Copying a tuple copies its words, so a
 reference stored in it keeps the identity of the object it names. See
-[Backend](Backend#tuples-are-words).
+[Backend](Backend#tuples-and-enums-are-words).
 
 ### Typed and listed destructuring
 
@@ -534,18 +534,36 @@ a match. An enum with payloads has no built-in equality or numeric cast.
 
 <!-- example: check -->
 ```neura
-let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
+let TreeLink = class (
+    export last tree: Tree;
+
+    export let init = func(value: Tree) {
+        tree = value;
+    };
+);
+
+let Tree = enum (Empty, Leaf(int), Branch { left: TreeLink, right: TreeLink });
 
 let sum = func(tree: Tree) -> int {
     return match (tree) {
         Tree.Empty => 0,
         Tree.Leaf(value) => value,
-        Tree.Branch { left, right } => sum(left) + sum(right),
+        Tree.Branch { left, right } => sum(left.tree) + sum(right.tree),
     };
 };
 
-let tree = Tree.Branch { right: Tree.Leaf(2), left: Tree.Leaf(1) };
+let tree = Tree.Branch { right: new TreeLink(Tree.Leaf(2)), left: new TreeLink(Tree.Leaf(1)) };
 ```
+
+A payload enum is stored inline, as a tuple is: a value is a `uint32` tag
+and the words of its payloads, wherever it lives, and copying it copies those
+words. An enum therefore cannot contain itself, directly or through tuples and
+other enums; that is [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md), reported at the
+variant whose payload closes the cycle. Hold the link in a class, which is a
+reference, as `TreeLink` does above, or in a list. An enum's payload words
+are shared among its variants by type, and an enum of more than 64 value
+words is [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md). See
+[Backend](Backend#tuples-and-enums-are-words).
 
 `match (value)` evaluates the subject once and evaluates only the selected arm.
 Each arm names a different variant, or a final `_` arm covers the remaining
