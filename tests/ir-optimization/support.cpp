@@ -74,6 +74,9 @@ std::string_view op_name(IrOp op) {
     case IrOp::Spawn: return "spawn";
     case IrOp::SchedulerCall: return "scheduler_call";
     case IrOp::HookRead: return "hook_read";
+    case IrOp::AnyPack: return "any_pack";
+    case IrOp::AnyTag: return "any_tag";
+    case IrOp::AnyUnpack: return "any_unpack";
     case IrOp::HookAdmit: return "hook_admit";
     }
     return "<invalid>";

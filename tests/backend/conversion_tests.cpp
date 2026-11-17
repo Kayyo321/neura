@@ -391,6 +391,81 @@ NEURA_TEST(conversion, initialization_order_matches_the_evaluator) {
     check_equal(captured.output, recorded, "stdout matches main.out");
 }
 
+NEURA_TEST(conversion, any_keeps_the_same_mebibyte_text_handle) {
+    const auto path = environment.source_dir / "tests" / "matching" / "programs" / "any-storage.nra";
+    const auto image = build_program({path});
+    const auto names = nvr::decode_names(image).value();
+    const auto original = std::ranges::find(names.globals, "original");
+    const auto packed = std::ranges::find(names.globals, "erased.text");
+    check(original != names.globals.end() && packed != names.globals.end(), "the original and packed text storage");
+    const std::vector<std::string> inputs{std::string(1U << 20, 'q')};
+    nvm::Execution execution(image, inputs);
+    const auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::HostRequest, "the packed text compared equal");
+    const auto globals = execution.debug_snapshot().globals;
+    const auto handle = globals[original - names.globals.begin()].bits;
+    check(handle != 0, "the source text is a live entry");
+    check_equal(globals[packed - names.globals.begin()].bits, handle, "packing retained precisely the same handle");
+    CapturingConsole console;
+    execution.complete(console.invoke(event.request));
+    const auto finish = execution.advance();
+    check(finish.kind == nvm::Event::Kind::Completed && finish.status == 0, "collection and field round trip");
+}
+
+NEURA_TEST(conversion, any_marks_only_its_active_reference) {
+    const auto path = backend_dir(environment) / "any" / "collector.nra";
+    // The first run finds the real handle. In the second image an integer
+    // with exactly those bits replaces that same object in the global any.
+    std::uint64_t handle = 0;
+    for (const bool overwrite : {false, true}) {
+        auto program = lower_files({path});
+        if (overwrite) {
+            bool replaced = false;
+            const std::function<void(IrNode&)> set_bits = [&](IrNode& node) {
+                if (node.op == IrOp::Integer && node.text == "123456") {
+                    node.text = std::to_string(handle);
+                    replaced = true;
+                }
+                for (auto* region : {&node.operands, &node.body, &node.alternative})
+                    for (auto& child : *region) set_bits(child);
+            };
+            for (auto& body : program.bodies)
+                for (auto& instruction : body.instructions) set_bits(instruction);
+            check(replaced, "the scalar overwrite uses the observed handle bits");
+        }
+        const auto image = nvr::load(nvr::encode(backend::build(std::move(program)).image));
+        const auto names = nvr::decode_names(image).value();
+        const auto raw = std::ranges::find(names.globals, "stored.reference");
+        const auto scalar = std::ranges::find(names.globals, "stored.bits");
+        check(raw != names.globals.end() && scalar != names.globals.end(), "the carrier has distinct typed roots");
+        nvm::RunLimits limits;
+        limits.max_heap_cells = 768;
+        nvm::Execution execution(image, std::span<const std::string>{}, limits);
+        CapturingConsole console;
+        auto event = execution.advance();
+        check(event.kind == nvm::Event::Kind::HostRequest, "the object survived bounded allocation");
+        const auto stored = execution.debug_snapshot().globals[raw - names.globals.begin()].bits;
+        check(stored > 0, "the reference word contains a live handle");
+        if (!overwrite) {
+            handle = stored;
+            continue;
+        }
+        check_equal(stored, handle, "both runs reached the same object");
+        execution.complete(console.invoke(event.request));
+        event = execution.advance();
+        check(event.kind == nvm::Event::Kind::HostRequest, "the scalar overwrite completed");
+        const auto globals = execution.debug_snapshot().globals;
+        check_equal(globals[raw - names.globals.begin()].bits, std::uint64_t{0}, "the inactive reference was cleared");
+        check_equal(globals[scalar - names.globals.begin()].bits, handle, "the scalar equals the old handle");
+        const auto entries = execution.heap_entry_widths();
+        check(std::ranges::none_of(entries, [&](const auto& entry) { return entry.handle == handle; }),
+              "the scalar word did not keep the old object alive");
+        execution.complete(console.invoke(event.request));
+        check(execution.advance().kind == nvm::Event::Kind::Completed, "the run completed");
+        check_equal(console.output(), std::string("kept\nreleased\n"), "both collection checkpoints");
+    }
+}
+
 NEURA_TEST(conversion, inspection_preserves_hook_execution) {
     const auto image = build_program({backend_dir(environment) / "hooks" / "references.nra"});
     const auto oracle = run_captured(image);

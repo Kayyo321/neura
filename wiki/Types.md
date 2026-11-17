@@ -658,7 +658,7 @@ let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
 
 ## The type any
 
-`any` is a built-in value type that holds one value of a fixed set of types together with which type it is ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented in the frontend and NeuraIR, proposed). It holds a `bool`, each sized integer, `float16`, `bfloat16`, `float32` and `float64`, a `string`, a class or interface reference including `class`, and nil. It does not hold an array, a list, a tuple, an enum (`Optional` and `Result` included), a function value, a primitive reference or a [scope-bound](#scope-bound-types) value ([E0492](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0492.md)); a class that wraps such a value can be held as a reference.
+`any` is a built-in value type that holds one value of a fixed set of types together with which type it is ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented on the milestone branch, proposed). It holds a `bool`, each sized integer, `float16`, `bfloat16`, `float32` and `float64`, a `string`, a class or interface reference including `class`, and nil. It does not hold an array, a list, a tuple, an enum (`Optional` and `Result` included), a function value, a primitive reference or a [scope-bound](#scope-bound-types) value ([E0492](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0492.md)); a class that wraps such a value can be held as a reference.
 
 A value is packed where an `any` is expected: a binding, field or parameter of type `any`, an assignment to one, a `return` from a function that returns `any`, an element of a collection of `any`, each argument of a variadic `...any`, and each result of a conditional or `match` whose expected type is `any`. `value as any` packs anywhere. Nothing else produces an `any`: inference never solves a type parameter to `any` unless an argument is one, and packing ranks below every other match in overload selection. Packing an `any` gives the same `any`, and packing keeps a scalar's bits, width and signedness, a string's text and a reference's identity.
 
@@ -679,7 +679,7 @@ let count_integers = func(values: ...any) -> int {
 let count = count_integers(7 as int64, "seven", 7.0, nil);
 ```
 
-An `any` is four value words: a `uint32` tag, a `uint64` with a scalar's bits, a text, and a reference. Programs that use `any` are checked and written to `.nir` modules (NeuraIR 1.12); building them waits for the converter step of the milestone, and until then `neura build` declines them with [E0801](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0801.md).
+An `any` uses a `uint32` tag, a `uint64` for the scalar bits, a text handle and a root class reference. If a linked class can carry a hook policy, the reference also has its nil-policy word. Packing preserves text and object handles and clears the inactive words. Source and NeuraIR 1.12 modules compile to independently executable images. [Class hook representation](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md#representation)
 
 ## Scope-bound and transferable types
 

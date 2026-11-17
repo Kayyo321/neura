@@ -4,7 +4,12 @@ let program = import:Std.Program;
 let.promote _ = import:Std.Core.Optional;
 
 let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
-let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Link = class (
+    export last item: Tree;
+    export let init = func(item: Tree) => set;
+);
+let Branch = enum (Leaf(int), Node(Link, Link));
+let Tree = enum (Leaf(int), Node(Branch, Link));
 let Light = enum (Red, Yellow, Green);
 
 let area = func(shape: Shape) -> int {
@@ -25,8 +30,8 @@ let trace = func(text: string, result: bool) -> bool {
 let leftmost = func(tree: Tree) -> int {
     return match (tree) {
         Tree.Leaf(value) => value,
-        Tree.Node(Tree.Leaf(a), _) => a,
-        Tree.Node(Tree.Node(inner, _), _) => leftmost(inner),
+        Tree.Node(Branch.Leaf(a), _) => a,
+        Tree.Node(Branch.Node(inner, _), _) => leftmost(inner.item),
     };
 };
 
@@ -43,7 +48,7 @@ export let Main = module : program.Entry (
         console.println("{}", area(Shape.Line(7)));
         console.println("{}", area(Shape.Box { size: [3, 4], label: Optional<string>.Some("box") }));
         console.println("{}", area(Shape.Box { size: [3, 4], label: Optional<string>.None }));
-        console.println("{}", leftmost(Tree.Node(Tree.Node(Tree.Leaf(5), Tree.Leaf(6)), Tree.Leaf(7))));
+        console.println("{}", leftmost(Tree.Node(Branch.Node(new Link(Tree.Leaf(5)), new Link(Tree.Leaf(6))), new Link(Tree.Leaf(7)))));
         console.println("{} {} {}", pair(Light.Red, Light.Green), pair(Light.Green, Light.Red), pair(Light.Green, Light.Yellow));
         // Guards run in order after their pattern; a false guard's effect stays.
         let total = 0;

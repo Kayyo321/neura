@@ -31,6 +31,8 @@ struct ValueLayout {
         Enum,
         // A class handle and the policy of an admitted nil.
         Reference,
+        // Tag, scalar encoding, text, and root reference (with its nil policy).
+        Any,
     };
 
     Form form = Form::Word;
@@ -95,6 +97,7 @@ private:
 
     const IrProgram& program_;
     HookIndex hooks_;
+    IrType any_reference_{TypeKind::Object, "class", no_symbol, {}};
     std::map<SymbolId, std::vector<SymbolId>> variants_;
     std::set<SymbolId> payload_enums_;
     std::map<SymbolId, Counts> enum_counts_;

@@ -9,21 +9,26 @@ let Owner = class (
     export let score: int = 0;
 );
 
-let Tagged = enum (Plain(int), Owned(Owner, int), Pair(Tagged, Tagged));
+let Leaf = enum (Plain(int), Owned(Owner, int));
+let Link = class (
+    export last item: Tagged;
+    export let init = func(item: Tagged) => set;
+);
+let Tagged = enum (Plain(int), Owned(Owner, int), Pair(Leaf, Link));
 
 let make = func(i: int) -> Tagged {
     let owner = new Owner();
     owner.name = "owner" + i.to_string();
     owner.score = i;
-    return i % 3 == 0 ? Tagged.Plain(i) : i % 3 == 1 ? Tagged.Owned(owner, i) : Tagged.Pair(Tagged.Owned(owner, i), Tagged.Plain(i));
+    return i % 3 == 0 ? Tagged.Plain(i) : i % 3 == 1 ? Tagged.Owned(owner, i) : Tagged.Pair(Leaf.Owned(owner, i), new Link(Tagged.Plain(i)));
 };
 
 let sum = func(item: Tagged) -> int => match (item) {
     Tagged.Plain(n) => n,
     Tagged.Owned(owner, n) if owner.score > 1000 => 0,
     Tagged.Owned(owner, n) => owner.score + n,
-    Tagged.Pair(Tagged.Owned(owner, _), rest) => owner.score + sum(rest),
-    Tagged.Pair(left, right) => sum(left) + sum(right),
+    Tagged.Pair(Leaf.Owned(owner, _), rest) => owner.score + sum(rest.item),
+    Tagged.Pair(Leaf.Plain(n), rest) => n + sum(rest.item),
 };
 
 export let Main = module : program.Entry (
@@ -35,7 +40,7 @@ export let Main = module : program.Entry (
             let garbage = new int[list]([i, i, i, i, i, i, i, i]);
             total += sum(item) + garbage.length - 8;
             match (item) {
-                Tagged.Pair(Tagged.Owned(owner, _), _) if i > 2990 => {
+                Tagged.Pair(Leaf.Owned(owner, _), _) if i > 2990 => {
                     last_name = owner.name;
                     if (i == 2999) {
                         break;

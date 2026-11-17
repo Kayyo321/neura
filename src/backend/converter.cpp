@@ -9,6 +9,7 @@
 #include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
+#include "neura-ir/any.hpp"
 #include "neura-ir/class_hooks.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
@@ -214,6 +215,8 @@ private:
     Operand expression(const IrNode& node);
     // The words of a node: `expression` for a node that is not inline.
     Values values(const IrNode& node);
+    Values pack_any(const IrNode& node);
+    Values unpack_any(const IrNode& node);
     Values reference_cast(const IrNode& node);
     Values fit_reference(Values words, const IrType& destination);
     Operand repeat_hooked(const IrNode& node);
@@ -468,6 +471,7 @@ private:
     // -Wstringop-overread for ordered comparisons of std::vector<uint8_t>.
     std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> constants_;
     std::map<SymbolId, std::uint32_t> layouts_;
+    std::optional<std::uint32_t> empty_root_layout_;
     std::vector<std::pair<IrType, std::uint32_t>> box_layouts_;
     std::map<std::vector<std::uint32_t>, std::uint32_t> aggregates_;
     std::map<std::vector<std::uint32_t>, std::uint32_t> reference_aggregates_;
@@ -596,6 +600,15 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         return type_index({type.kind == TypeKind::Array ? nvr::TypeKind::Array : nvr::TypeKind::List, 0, element});
     }
     case TypeKind::Object:
+        // A scalar-only module can have an any without declaring a class.
+        // Its inactive reference still has an object type in the image.
+        if (type.symbol == no_symbol && type.name == "class") {
+            if (!empty_root_layout_) {
+                empty_root_layout_ = static_cast<std::uint32_t>(image_.layouts.size());
+                image_.layouts.push_back({absent, {}, {}});
+            }
+            return type_index({nvr::TypeKind::Object, 0, *empty_root_layout_});
+        }
         if (!type.arguments.empty() || !symbol(type.symbol).generics.empty()) {
             throw Diagnostic(where, "generic class '" + symbol(type.symbol).name +
                                         "' is not supported: IRtoNeuronConversion does not specialize generics")
@@ -610,6 +623,7 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         throw Diagnostic(where, "type parameter '" + type.name +
                                     "' is not supported: IRtoNeuronConversion does not specialize generics")
             .with_code("E0801");
+    case TypeKind::Any:
     case TypeKind::Tuple:
     case TypeKind::Module:
     case TypeKind::Callable:
@@ -2980,9 +2994,45 @@ Values FunctionCompiler::normalize_hook_result(Values value, const IrNode& sourc
     return {value.front(), choose(present(value.front()), zero, selected)};
 }
 
+// Every inactive handle is overwritten. The collector sees precisely the
+// text and object words of this layout, never scalar bits as a handle.
+Values FunctionCompiler::pack_any(const IrNode& node) {
+    const auto& operand = node.operands.front();
+    const auto tag = any_tag(operand.type).value();
+    auto source = values(operand);
+    const auto types = c_.word_types(node.type, node.span);
+    Values packed;
+    for (auto type : types) packed.push_back(zero_word(type, node.span));
+    packed[0] = immediate(types[0], tag);
+    if (operand.type.kind == TypeKind::Object) {
+        packed[3] = source.front();
+        if (source.size() == 2) packed[4] = source[1];
+    } else if (operand.type.kind == TypeKind::String) {
+        packed[2] = source.front();
+    } else {
+        auto word = lanes(source.front());
+        word.resize(64, Signal::of(0));
+        packed[1] = bits(types[1], std::move(word));
+    }
+    return packed;
+}
+
+Values FunctionCompiler::unpack_any(const IrNode& node) {
+    auto packed = values(node.operands.front());
+    if (node.type.kind == TypeKind::Object) return {packed.begin() + 3, packed.end()};
+    if (node.type.kind == TypeKind::String) return {packed[2]};
+    auto word = lanes(packed[1]);
+    const auto type = c_.type_of(node.type, node.span);
+    const auto& scalar = c_.type_at(type);
+    word.resize(scalar.kind == nvr::TypeKind::Bool ? 1 : scalar.width);
+    return {bits(type, std::move(word))};
+}
+
 Values FunctionCompiler::values(const IrNode& node) {
     if (!c_.inline_value(node.type)) return {expression(node)};
     switch (node.op) {
+    case IrOp::AnyPack: return pack_any(node);
+    case IrOp::AnyUnpack: return unpack_any(node);
     case IrOp::HookAdmit:
     case IrOp::HookRead:
         return hook_event(node, values(node.operands.front()));
@@ -3095,6 +3145,8 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         throw std::logic_error("an inline value reached the one-word path at " + node.span.file + ":" +
                                std::to_string(node.span.line));
     switch (node.op) {
+    case IrOp::AnyTag: return values(node.operands.front())[0];
+    case IrOp::AnyUnpack: return unpack_any(node).front();
     case IrOp::ValueEquals:
     case IrOp::ValueHash:
     case IrOp::ValueText:
@@ -4772,34 +4824,7 @@ void FunctionCompiler::compile() {
 
 } // namespace
 
-namespace {
-
-// The value words of `any` (docs/design/Matching030.md, step 7) are not in
-// this converter yet: a program that uses `any` is declined here.
-void reject_any(const IrProgram& program) {
-    const std::function<bool(const IrType&)> mentions = [&](const IrType& type) {
-        return type.kind == TypeKind::Any || std::ranges::any_of(type.arguments, mentions);
-    };
-    const std::function<const IrNode*(const std::vector<IrNode>&)> find = [&](const std::vector<IrNode>& nodes) -> const IrNode* {
-        for (const auto& node : nodes) {
-            if (mentions(node.type) || std::ranges::any_of(node.type_arguments, mentions)) return &node;
-            for (const auto* region : {&node.operands, &node.body, &node.alternative})
-                if (const auto* found = find(*region)) return found;
-        }
-        return nullptr;
-    };
-    for (const auto& body : program.bodies)
-        if (const auto* node = find(body.instructions))
-            throw Diagnostic(node->span, "the type any is not supported by IRtoNeuronConversion yet").with_code("E0801");
-    for (const auto& item : program.symbols)
-        if (mentions(item.type))
-            throw Diagnostic(item.span, "the type any is not supported by IRtoNeuronConversion yet").with_code("E0801");
-}
-
-} // namespace
-
 Conversion convert(const IrProgram& program, const ConversionOptions& options) {
-    reject_any(program);
     return Converter(program, options).run();
 }
 

@@ -346,7 +346,7 @@ private:
         case IrOp::TrapMessage: case IrOp::Nil: case IrOp::ClassHash: case IrOp::ClassText:
         case IrOp::ClassIs: case IrOp::ClassCast: case IrOp::ValueEquals: case IrOp::ValueHash:
         case IrOp::ValueText: case IrOp::ReferencePlace: case IrOp::TaskScope: case IrOp::Spawn:
-        case IrOp::SchedulerCall:
+        case IrOp::SchedulerCall: case IrOp::AnyPack: case IrOp::AnyTag: case IrOp::AnyUnpack:
             break;
         }
         for (auto& operand : node.operands) value(operand);
@@ -395,7 +395,7 @@ namespace {
 
 bool contains_reference(const IrProgram& program, const HookIndex& index, const IrType& type,
                         bool collections, std::set<SymbolId>& visited) {
-    if (index.carrying(type)) return true;
+    if (index.carrying(type) || (type.kind == TypeKind::Any && index.any())) return true;
     if (type.kind == TypeKind::Tuple || (collections && (type.kind == TypeKind::Array || type.kind == TypeKind::List))) {
         return std::ranges::any_of(type.arguments, [&](const auto& part) {
             return contains_reference(program, index, part, collections, visited);

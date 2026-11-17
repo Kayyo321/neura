@@ -781,6 +781,7 @@ IrNode Lowering::argument_value(const Expr& expr, std::size_t index, const IrTyp
             if (const auto method = cast_method(lowered.type, expected, context); method != no_symbol)
                 return cast_call(method, std::move(lowered), expected, expr.operands[index].span);
         }
+        if (expected.kind == TypeKind::Any) return pack_any(std::move(lowered), expr.operands[index].span);
         require_type(lowered.type, expected, expr.operands[index].span);
         return lowered;
     }

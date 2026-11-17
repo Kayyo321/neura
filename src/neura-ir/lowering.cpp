@@ -3009,6 +3009,8 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
             argument = bind_reference(std::move(argument), selected->types[i]);
         else if (selected->casts[i] != no_symbol)
             argument = cast_call(selected->casts[i], std::move(argument), selected->types[i], input.span);
+        else if (selected->types[i].kind == TypeKind::Any)
+            argument = pack_any(std::move(argument), input.span);
         admitted.push_back(std::move(argument));
     }
     assemble_arguments(call, expr, first, selected->branch, maps.at(selected->branch), std::move(admitted),

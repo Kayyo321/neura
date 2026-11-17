@@ -3,8 +3,8 @@
 
 A program that uses no feature of the milestone writes the version it wrote
 before. A program that uses `any` passes the verifier before and after
-optimization and stops at the converter (E0801) until its value words land. A program whose postfix `?` returns from inside a scoped value is
-written as NeuraIR 1.12 (nir_any_minor), and the same file marked 1.10 is
+optimization and executes as value words. A program whose postfix `?` returns from
+inside a scoped value is written as NeuraIR 1.12 (nir_any_minor), and the same file marked 1.10 is
 rejected by the reader.
 
 Usage: nir_versions.py <neura> <directory of programs>
@@ -49,14 +49,43 @@ def main():
         expected = f'a return inside a scoped value requires NeuraIR format 1.{ANY_MINOR}'
         if result.returncode == 0 or expected not in result.stderr:
             failures.append(f'a 1.10 file with a scoped return: expected "{expected}", got:\n{result.stderr}')
-        # A program that uses any passes the verifier before and after
-        # optimization, and the converter declines it until its value
-        # words land (docs/design/Matching030.md, step 7).
+        # The any fixture includes variadics, generic results, a field and an overload.
         fixture = PROGRAMS.parent.parent / 'backend' / 'nir-versions' / 'any.nra'
+        nir = scratch / 'any.nir'
+        emit(fixture, nir)
         for flags in ([], ['--no-optimize']):
-            result = run('build', *flags, str(fixture), '-o', str(scratch / 'any.nvr'))
-            if result.returncode == 0 or 'E0801' not in result.stderr or 'not supported by IRtoNeuronConversion' not in result.stderr:
-                failures.append(f'any fixture {flags}: expected E0801 from the converter, got:\n{result.stderr}')
+            images = []
+            for source in (fixture, nir):
+                image = scratch / (source.suffix[1:] + '.nvr')
+                result = run('build', *flags, str(source), '-o', str(image))
+                if result.returncode:
+                    failures.append(f'any fixture {flags}: {result.stderr}')
+                    continue
+                data = image.read_bytes()
+                if int.from_bytes(data[6:8], 'little') != 7:
+                    failures.append(f'any fixture {flags}: hook-free image uses a different minor from NVR 1.7')
+                images.append(data)
+                for mode in ([], ['--tier=0']):
+                    executed = run('run', *mode, str(image))
+                    if executed.returncode or executed.stdout:
+                        failures.append(f'any fixture {flags} {mode}: {executed.stdout} {executed.stderr}')
+            if len(images) != 2 or images[0] != images[1]:
+                failures.append(f'any fixture {flags}: source and NIR images differ')
+        # The optional nil policy belongs to the root reference word. The
+        # same inline limit therefore allows 16 or 12 carriers, respectively.
+        for hooked, width, words in ((False, 16, 64), (False, 17, 68), (True, 12, 60), (True, 13, 65)):
+            source = scratch / 'width.nra'
+            clause = 'let Item = class (| set: value;);' if hooked else ''
+            source.write_text('let program = import:Std.Program; ' + clause +
+                              ' let take = func(x: [' + ', '.join(['any'] * width) + ']) {};'
+                              ' let App = module:program.Entry (export let.override main = func(args: string[])'
+                              ' -> program.ExitCode => program.ExitCode.Ok;);')
+            result = run('build', str(source), '-o', str(scratch / 'width.nvr'))
+            if words <= 64:
+                if result.returncode:
+                    failures.append(f'{words} words failed: {result.stderr}')
+            elif result.returncode != 1 or 'E0449' not in result.stderr or f'{words} value words' not in result.stderr:
+                failures.append(f'{words} words did not report the representation limit: {result.stderr}')
     for failure in failures:
         print(failure)
     print(f'{len(failures)} failures')

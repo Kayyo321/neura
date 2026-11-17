@@ -33,7 +33,7 @@ std::string type_identity(const IrType& type) {
 }
 
 bool inline_value(const IrProgram& program, const IrType& type) {
-    if (type.kind == TypeKind::Tuple) return true;
+    if (type.kind == TypeKind::Tuple || type.kind == TypeKind::Any) return true;
     if (type.kind == TypeKind::Object) return HookIndex(program).carrying(type);
     return type.kind == TypeKind::Enum && type.symbol < program.symbols.size() &&
            has_enum_payload(program, type.symbol);
@@ -42,6 +42,7 @@ bool inline_value(const IrProgram& program, const IrType& type) {
 ValueLayouts::ValueLayouts(const IrProgram& program) : program_(program), hooks_(program) {
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
+        if (item.kind == SymbolKind::Class && item.name == "$class") any_reference_ = item.type;
         if (item.kind != SymbolKind::Variant || item.owner == no_symbol) continue;
         variants_[item.owner].push_back(id);
         if (!item.payload_types.empty()) payload_enums_.insert(item.owner);
@@ -49,7 +50,7 @@ ValueLayouts::ValueLayouts(const IrProgram& program) : program_(program), hooks_
 }
 
 bool ValueLayouts::inline_value(const IrType& type) const {
-    if (type.kind == TypeKind::Tuple) return true;
+    if (type.kind == TypeKind::Tuple || type.kind == TypeKind::Any) return true;
     return hooks_.carrying(type) || (type.kind == TypeKind::Enum && payload_enums_.contains(type.symbol));
 }
 
@@ -118,6 +119,11 @@ ValueLayouts::Counts ValueLayouts::counts(const IrType& type) {
     if (!inline_value(type)) return {{word_key(type), 1}};
     if (type.kind == TypeKind::Object) return {{word_key(type), 1}, {"u32", 1}};
     Counts result;
+    if (type.kind == TypeKind::Any) {
+        result = {{"u32", 1}, {"u64", 1}, {"t", 1}};
+        add(result, counts(any_reference_));
+        return result;
+    }
     if (type.kind == TypeKind::Tuple) {
         for (const auto& element : type.arguments) add(result, counts(element));
         return result;
@@ -161,6 +167,18 @@ ValueLayout ValueLayouts::build(const IrType& type, const Span& where) {
     if (!inline_value(type)) {
         result.words = {type};
         result.suffixes = {""};
+        return result;
+    }
+    if (type.kind == TypeKind::Any) {
+        result.form = ValueLayout::Form::Any;
+        result.words = {tag_type, IrType{TypeKind::Integer, "uint64", no_symbol, {}},
+                        IrType{TypeKind::String, "string", no_symbol, {}}, any_reference_};
+        result.suffixes = {".tag", ".bits", ".text", ".reference"};
+        result.carries_policy = hooks_.carrying(any_reference_);
+        if (result.carries_policy) {
+            result.words.push_back(tag_type);
+            result.suffixes.push_back(".reference.policy");
+        }
         return result;
     }
     if (type.kind == TypeKind::Object) {
