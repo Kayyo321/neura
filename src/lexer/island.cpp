@@ -70,8 +70,15 @@ class BodyScanner {
 public:
     BodyScanner(std::string_view source, std::size_t begin) : source_(source), offset_(begin) {}
 
+    std::optional<std::size_t> embedded_neura(char end) {
+        if (!neura_group(end)) return std::nullopt;
+        return offset_ - 1;
+    }
+
     std::optional<std::size_t> html() {
-        std::size_t control_depth = 0;
+        std::vector<std::size_t> controls;
+        std::size_t element_depth = 0;
+        std::size_t tag = 0;
         bool in_tag = false;
         while (!done()) {
             const char c = peek();
@@ -79,7 +86,21 @@ public:
                 if (c == '"' || c == '\'') quoted(c, false);
                 else if (c == '{') neura_group('}');
                 else {
-                    in_tag = c != '>';
+                    if (c == '}') {
+                        if (controls.empty()) return offset_;
+                        controls.pop_back();
+                        in_tag = false;
+                    }
+                    if (c == '>') {
+                        in_tag = false;
+                        if (source_[tag] == '/') {
+                            if (element_depth > 0) --element_depth;
+                        } else if (alpha(source_[tag]) && source_[offset_ - 1] != '/') {
+                            auto end = tag;
+                            while (end < offset_ && (name_char(source_[end]) || source_[end] == '-')) ++end;
+                            if (!html_void_element(source_.substr(tag, end - tag))) ++element_depth;
+                        }
+                    }
                     ++offset_;
                 }
             } else if (remaining().starts_with("<!--")) {
@@ -88,15 +109,20 @@ public:
             } else if (c == '<' && (alpha(peek(1)) || peek(1) == '/' || peek(1) == '!' ||
                                      peek(1) == '?' || peek(1) == '{')) {
                 in_tag = true;
-                ++offset_;
+                tag = ++offset_;
             } else if (c == '{') {
                 neura_group('}');
             } else if (c == '}') {
-                if (control_depth == 0) return offset_;
-                --control_depth;
+                const auto outer_depth = controls.empty() ? 0 : controls.back();
+                if (element_depth > outer_depth && text_continues_after_brace()) {
+                    ++offset_;
+                    continue;
+                }
+                if (controls.empty()) return offset_;
+                controls.pop_back();
                 ++offset_;
             } else if (c == '@' && alpha(peek(1)) && !text_word_char(source_[offset_ - 1])) {
-                if (control_head()) ++control_depth;
+                if (control_head()) controls.push_back(element_depth);
             } else {
                 ++offset_;
             }
@@ -137,7 +163,15 @@ public:
     }
 
 private:
-    static bool text_word_char(char c) { return name_char(c) || static_cast<unsigned char>(c) >= 0x80; }
+    // Leave a stray text brace to the template parser when the same element
+    // clearly continues. A brace at the declaration boundary still frames an
+    // island with an unclosed start tag, so the parser can diagnose that tag.
+    bool text_continues_after_brace() const {
+        const auto next = source_.find_first_of("<{};", offset_ + 1);
+        return next != std::string_view::npos && source_.substr(next).starts_with("</");
+    }
+
+    static bool text_word_char(char c) { return name_char(c) || c == '-' || static_cast<unsigned char>(c) >= 0x80; }
 
     bool done() const { return offset_ >= source_.size(); }
     char peek(std::size_t ahead = 0) const {
@@ -182,7 +216,7 @@ private:
     // Balance only the Neura delimiters that matter for this boundary. The
     // template parser lexes and parses the expression itself, including any
     // invalid tokens that this scan steps over.
-    void neura_group(char close) {
+    bool neura_group(char close) {
         std::vector<char> closes = {close};
         ++offset_;
         while (!done() && !closes.empty()) {
@@ -214,6 +248,9 @@ private:
                 continue;
             } else if (c == '{') {
                 closes.push_back('}');
+            } else if (remaining().starts_with("</") && alpha(peek(2))) {
+                // An end tag cannot appear in a Neura expression outside a literal or comment.
+                return false;
             } else if (c == '(' && closes.back() == ')') {
                 closes.push_back(')');
             } else if (c == closes.back()) {
@@ -221,6 +258,7 @@ private:
             }
             ++offset_;
         }
+        return closes.empty();
     }
 
     bool control_head() {
@@ -235,6 +273,11 @@ private:
         if (peek() == '(') {
             neura_group(')');
             whitespace();
+        } else if (peek() != '{') {
+            // Frame the body of a malformed, unparenthesized head. The
+            // template parser reports the missing parentheses at the head.
+            const auto boundary = source_.find_first_of("<{}\r\n", offset_);
+            if (boundary != std::string_view::npos && source_[boundary] == '{') offset_ = boundary;
         }
         if (peek() != '{') return false;
         ++offset_;
@@ -242,7 +285,7 @@ private:
     }
 
     static bool css_name_char(char c) {
-        return text_word_char(c) || c == '-';
+        return text_word_char(c);
     }
 
     static int hex_digit(char c) {
@@ -335,6 +378,18 @@ std::optional<Start> start(const std::vector<Token>& tokens) {
 std::optional<std::size_t> close(std::string_view source, std::size_t body, TokenKind kind) {
     BodyScanner scanner(source, body);
     return kind == TokenKind::HtmlIsland ? scanner.html() : scanner.css();
+}
+
+std::optional<std::size_t> close_neura(std::string_view source, std::size_t open, char close) {
+    return BodyScanner(source, open).embedded_neura(close);
+}
+
+bool html_void_element(std::string_view name) {
+    constexpr std::string_view names[] = {"br", "col", "hr", "img", "input", "source", "track", "wbr"};
+    for (const auto candidate : names) {
+        if (name == candidate) return true;
+    }
+    return false;
 }
 
 std::size_t recover(std::string_view source, std::size_t open, std::size_t declaration) {

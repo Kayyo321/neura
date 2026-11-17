@@ -3065,6 +3065,9 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
 
 IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     switch (expr.kind) {
+    case ExprKind::HtmlFactory:
+    case ExprKind::Stylesheet:
+        throw Diagnostic(expr.span, "application forms cannot be lowered yet").with_code("E0801");
     case ExprKind::TypeApplication: {
         auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||

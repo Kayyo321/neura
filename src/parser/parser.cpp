@@ -1,4 +1,5 @@
 #include "syntax.hpp"
+#include "html_template.hpp"
 
 #include <charconv>
 #include <cstddef>
@@ -10,7 +11,30 @@ namespace {
 
 class Parser {
 public:
-    explicit Parser(const std::vector<Token>& tokens) : tokens_(tokens) {}
+    explicit Parser(const std::vector<Token>& tokens, bool template_neura = false)
+        : tokens_(tokens), template_neura_(template_neura) {}
+
+    Expr template_expression() {
+        auto value = expression();
+        if (!at_end()) expected("the end of the expression");
+        return value;
+    }
+
+    TemplateForHead template_for_head() {
+        const bool constant = match("const");
+        if (!constant) expect("let");
+        const auto binding = identifier();
+        std::optional<TypeSyntax> annotation;
+        if (match(":")) annotation = type();
+        expect("in");
+        auto input = expression();
+        expect(";");
+        if (!at_contextual("key")) expected("'key'");
+        advance();
+        expect(":");
+        auto key = template_expression();
+        return {constant, binding, std::move(annotation), std::move(input), std::move(key)};
+    }
 
     ParsedFile file(std::vector<Diagnostic>* diagnostics = nullptr) {
         ParsedFile result;
@@ -37,6 +61,7 @@ public:
 
 private:
     const std::vector<Token>& tokens_;
+    bool template_neura_;
     std::size_t cursor_{};
     // Syntax errors found so far (Tooling.md, Diagnostics): the parser
     // records an error, skips to the end of the statement or member that
@@ -77,8 +102,11 @@ private:
 
     // The span just after the previous token, where a missing token belongs.
     Span after_previous() const {
-        const auto& previous = tokens_[cursor_ - 1].span;
+        const auto& token = tokens_[cursor_ - 1];
+        const auto& previous = token.span;
         Span after{previous.file, previous.line, previous.column, previous.offset + previous.length, 0};
+        const bool island = token.kind == TokenKind::HtmlIsland || token.kind == TokenKind::CssIsland;
+        if (island) ++after.column;
         // Columns count code points, and lines end as the lexer ends them.
         const std::string_view text = tokens_[cursor_ - 1].text;
         for (std::size_t i = 0; i < text.size(); ++i) {
@@ -91,10 +119,13 @@ private:
                 ++after.column;
             }
         }
+        if (island && token.span.length == token.text.size() + 2) ++after.column;
         return after;
     }
 
     std::string found_text(const Token& token) const {
+        if (token.kind == TokenKind::HtmlIsland) return "found an HTML body";
+        if (token.kind == TokenKind::CssIsland) return "found a CSS body";
         return token.kind == TokenKind::End ? "found the end of the file" : "found '" + token.text + "'";
     }
 
@@ -163,7 +194,8 @@ private:
         // A keyword that begins a statement cannot continue this one, and a
         // ';' outside a for header ends it, even inside an unclosed
         // delimiter: stop there rather than skip the statements that follow.
-        if (cursor_ > start && current().kind == TokenKind::Keyword && statement_keyword(current().text)) return;
+        if (cursor_ > start && ((current().kind == TokenKind::Keyword && statement_keyword(current().text)) ||
+                               at_last_declaration())) return;
         if (cursor_ > start && at(";")) {
             bool header = false;
             for (auto i = start; i < cursor_ && !header; ++i)
@@ -191,7 +223,8 @@ private:
                     advance();
                     return;
                 }
-            } else if (depth == 0 && cursor_ > start && token.kind == TokenKind::Keyword && statement_keyword(token.text)) {
+            } else if (depth == 0 && cursor_ > start &&
+                       ((token.kind == TokenKind::Keyword && statement_keyword(token.text)) || at_last_declaration())) {
                 return;
             }
             advance();
@@ -218,8 +251,8 @@ private:
         throw error;
     }
 
-    const Token& identifier() {
-        if (current().kind != TokenKind::Identifier) {
+    const Token& identifier(bool allow_module = false) {
+        if (current().kind != TokenKind::Identifier && !((allow_module || template_neura_) && at("module"))) {
             if (current().kind == TokenKind::Keyword) {
                 throw Diagnostic(current().span, "expected an identifier").with_code("E0202")
                     .label("'" + current().text + "' is a keyword");
@@ -419,7 +452,7 @@ private:
     // and one type that every name of the group takes. The type is parsed
     // once and copied into each parameter, so copies share an anonymous
     // class declaration (docs/lang/CoreLanguage.md, Grouped parameters).
-    std::vector<Parameter> parameters() {
+    std::vector<Parameter> parameters(bool factory = false) {
         std::vector<Parameter> result;
         if (!match("(")) return result;
         if (!at(")")) {
@@ -432,7 +465,7 @@ private:
             };
             while (true) {
                 auto parameter_tags = tag_list();
-                const auto& name = identifier();
+                const auto& name = identifier(factory);
                 group.push_back({name.span, name.text, {}, false, std::move(parameter_tags)});
                 if (match(",")) {
                     if (at(")")) throw untyped(group.front());
@@ -454,7 +487,7 @@ private:
                         .label("'" + group.front().name + "' would take the variadic type")
                         .help("give '" + group.front().name + "' its own type, as in 'func(" +
                               group.front().name + ": <type>, " + group.back().name + ": ...<type>)'");
-                if (variadic && at(","))
+                if (variadic && at(",") && !(factory && next_is(1, ")")))
                     throw Diagnostic(current().span, "a variadic parameter must be last").with_code("E0207");
                 for (auto& member : group) {
                     member.type = parameter_type;
@@ -462,7 +495,7 @@ private:
                     result.push_back(std::move(member));
                 }
                 group.clear();
-                if (!match(",")) break;
+                if (!match(",") || (factory && at(")"))) break;
             }
         }
         expect(")");
@@ -936,8 +969,22 @@ private:
                 }
                 expect(")");
                 expand_constructor_shorthands(result);
+            } else if (result.constant && !result.last && block_depth_ == 0 &&
+                       (!owner || *owner == Declaration::Kind::Module) && at_stylesheet()) {
+                const auto initializer = cursor_;
+                result.initializer = stylesheet(initializer);
+                if (at("(") || at("[") || at(".") || at("as") || at("is") || at("?") || precedence() != 0)
+                    throw misplaced_stylesheet(span_from(initializer));
             } else {
                 result.initializer = expression();
+                if (result.initializer->kind == Expr::Kind::HtmlFactory) {
+                    auto& alternatives = result.initializer->html_factory->overloads;
+                    while (at("or") && contextual_at(1, "html")) {
+                        advance();
+                        const auto factory = cursor_;
+                        alternatives.push_back(html_factory(factory, false));
+                    }
+                }
             }
         } else if (!result.type && result.last) {
             throw deferred_last_without_type(result);
@@ -1618,6 +1665,128 @@ private:
         }
     }
 
+    bool contextual_at(std::size_t offset, std::string_view word) const {
+        return cursor_ + offset < tokens_.size() && tokens_[cursor_ + offset].kind == TokenKind::Identifier &&
+               tokens_[cursor_ + offset].text == word;
+    }
+
+    bool kind_at(std::size_t offset, TokenKind kind) const {
+        return cursor_ + offset < tokens_.size() && tokens_[cursor_ + offset].kind == kind;
+    }
+
+    // `html(x)` remains a call. A top-level parameter annotation cannot
+    // begin an argument in the ordinary call grammar on this compiler line.
+    bool at_html_factory() const {
+        if (!at_contextual("html")) return false;
+        if (kind_at(1, TokenKind::HtmlIsland)) return true;
+        auto index = std::size_t{1};
+        if (next_is(index, "<")) {
+            std::size_t angles = 1;
+            for (++index; cursor_ + index < tokens_.size() && angles > 0; ++index) {
+                if (next_is(index, "<")) ++angles;
+                else if (next_is(index, ">")) --angles;
+                else if (next_is(index, ";")) return false;
+            }
+        }
+        if (!next_is(index, "(")) return false;
+        bool annotated = false;
+        bool conditional = false;
+        std::size_t depth = 1;
+        for (++index; cursor_ + index < tokens_.size(); ++index) {
+            if (next_is(index, "(") || next_is(index, "[") || next_is(index, "{")) ++depth;
+            else if (next_is(index, ")") || next_is(index, "]") || next_is(index, "}")) {
+                if (depth == 1 && !next_is(index, ")")) return false;
+                if (--depth == 0) {
+                    return annotated || kind_at(index + 1, TokenKind::HtmlIsland) ||
+                           contextual_at(index + 1, "from") || next_is(index + 1, "->");
+                }
+            } else if (depth == 1 && next_is(index, "?")) conditional = true;
+            else if (depth == 1 && next_is(index, ",")) conditional = false;
+            else if (depth == 1 && next_is(index, ":") && !conditional && index > 1 &&
+                     kind_at(index - 1, TokenKind::Identifier)) annotated = true;
+            else if (depth == 1 && next_is(index, ";")) return false;
+        }
+        return false;
+    }
+
+    bool at_stylesheet() const {
+        if (!at_contextual("css")) return false;
+        if (kind_at(1, TokenKind::CssIsland) || contextual_at(1, "from")) return true;
+        if (!next_is(1, ".")) return false;
+        return next_keyword(2, "module") || kind_at(3, TokenKind::CssIsland) || contextual_at(3, "from");
+    }
+
+    Span through(std::size_t first, const Token& last) const {
+        auto span = tokens_[first].span;
+        span.length = last.span.offset + last.span.length - span.offset;
+        return span;
+    }
+
+    Diagnostic malformed_factory(std::size_t first, std::string reason) const {
+        return Diagnostic(through(first, current()), "malformed html factory").with_code("E0240")
+            .label(std::move(reason)).help("write 'html(parameters) { ... }' or 'html(parameters) from \"path.html\"'");
+    }
+
+    Token form_path() {
+        advance(); // from
+        if (current().kind != TokenKind::String || current().text.find('\\') != std::string::npos)
+            throw Diagnostic(current().span, "malformed from clause").with_code("E0254")
+                .label("expected a literal path without escapes");
+        auto path = advance();
+        if (precedence() != 0)
+            throw Diagnostic(through(cursor_ - 1, current()), "malformed from clause").with_code("E0254")
+                .label("write the path as one string literal");
+        return path;
+    }
+
+    Expr html_factory(std::size_t start, bool retained) {
+        const auto word = cursor_;
+        advance(); // html
+        if (at("<")) throw malformed_factory(word, "an HTML factory has no type parameters");
+        if (!at("(")) throw malformed_factory(word, "the parameter list is required");
+        auto params = parameters(true);
+        if (at("->")) throw malformed_factory(word, "an HTML factory has no result annotation");
+        std::variant<TemplateSyntax, Token> source;
+        if (at_contextual("from")) {
+            source = form_path();
+        } else if (current().kind == TokenKind::HtmlIsland) {
+            const auto& body = advance();
+            auto contents = body.span;
+            ++contents.column;
+            ++contents.offset;
+            contents.length = body.text.size();
+            source = parse_template(body.text, std::move(contents));
+        } else {
+            throw malformed_factory(word, "expected a body or 'from' after the parameter list");
+        }
+        auto result = make_expression(Expr::Kind::HtmlFactory, span_from(start));
+        result.html_factory = std::make_shared<HtmlFactorySyntax>(HtmlFactorySyntax{
+            retained, std::move(params), std::move(source)});
+        return result;
+    }
+
+    Diagnostic malformed_stylesheet(std::size_t start, std::string reason) const {
+        return Diagnostic(through(start, current()), "malformed css declaration").with_code("E0252")
+            .label(std::move(reason)).help("write 'css { ... }' or 'css.module { ... }'");
+    }
+
+    Expr stylesheet(std::size_t start) {
+        advance(); // css
+        const bool module = match(".");
+        if (module && !match("module")) throw malformed_stylesheet(start, "only '.module' can follow 'css'");
+        if (current().kind != TokenKind::CssIsland && !at_contextual("from"))
+            throw malformed_stylesheet(start, "expected a body or 'from'");
+        auto source = at_contextual("from") ? form_path() : advance();
+        auto result = make_expression(Expr::Kind::Stylesheet, span_from(start));
+        result.stylesheet = std::make_shared<StylesheetSyntax>(StylesheetSyntax{module, std::move(source)});
+        return result;
+    }
+
+    static Diagnostic misplaced_stylesheet(const Span& span) {
+        return Diagnostic(span, "html or css form not allowed here").with_code("E0255")
+            .label("a stylesheet must be the whole initializer of a module-level 'const'");
+    }
+
     Expr primary(std::string_view branch_keyword) {
         const auto start = cursor_;
         if (match("match")) {
@@ -1657,7 +1826,16 @@ private:
             result.span = span_from(start);
             return result;
         }
-        if (match("new")) return new_expression(start);
+        if (match("new")) {
+            if (at_html_factory()) return html_factory(start, true);
+            if (at_stylesheet()) {
+                (void)stylesheet(cursor_);
+                throw misplaced_stylesheet(span_from(start));
+            }
+            return new_expression(start);
+        }
+        if (at_html_factory()) return html_factory(start, false);
+        if (at_stylesheet()) throw misplaced_stylesheet(stylesheet(start).span);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&
@@ -1702,7 +1880,8 @@ private:
         }
         if (at("true") || at("false")) return token_expression(Expr::Kind::Boolean);
         if (at("nil")) return token_expression(Expr::Kind::Nil);
-        if (token.kind == TokenKind::Identifier) return token_expression(Expr::Kind::Name);
+        if (token.kind == TokenKind::Identifier || (template_neura_ && at("module")))
+            return token_expression(Expr::Kind::Name);
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
         if (token.kind == TokenKind::String) return token_expression(Expr::Kind::String);
@@ -1786,6 +1965,14 @@ ParsedFile parse_recovering(const std::vector<Token>& tokens, std::vector<Diagno
     if (tokens.empty() || tokens.back().kind != TokenKind::End)
         throw std::invalid_argument("parser requires an end-of-file token");
     return Parser(tokens).file(&diagnostics);
+}
+
+Expr parse_template_expression(const std::vector<Token>& tokens) {
+    return Parser(tokens, true).template_expression();
+}
+
+TemplateForHead parse_template_for_head(const std::vector<Token>& tokens) {
+    return Parser(tokens, true).template_for_head();
 }
 
 } // namespace neura

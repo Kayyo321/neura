@@ -1,0 +1,1 @@
+let view = html() { <button onclick="save()">Save</button> };

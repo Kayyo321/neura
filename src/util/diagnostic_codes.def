@@ -40,7 +40,21 @@ NEURA_DIAGNOSTIC(E0211, "malformed scope statement")
 NEURA_DIAGNOSTIC(E0212, "braces that do not enclose a range")
 NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
+NEURA_DIAGNOSTIC(E0240, "malformed html factory")
 NEURA_DIAGNOSTIC(E0241, "unterminated template or stylesheet")
+NEURA_DIAGNOSTIC(E0242, "mismatched or unclosed element")
+NEURA_DIAGNOSTIC(E0243, "nesting a browser would repair")
+NEURA_DIAGNOSTIC(E0244, "malformed tag")
+NEURA_DIAGNOSTIC(E0245, "malformed or repeated attribute")
+NEURA_DIAGNOSTIC(E0246, "unknown or malformed character reference")
+NEURA_DIAGNOSTIC(E0247, "malformed hole")
+NEURA_DIAGNOSTIC(E0248, "stray brace or control word in text")
+NEURA_DIAGNOSTIC(E0249, "malformed control block")
+NEURA_DIAGNOSTIC(E0250, "malformed binding directive")
+NEURA_DIAGNOSTIC(E0251, "not allowed in a template")
+NEURA_DIAGNOSTIC(E0252, "malformed css declaration")
+NEURA_DIAGNOSTIC(E0254, "malformed from clause")
+NEURA_DIAGNOSTIC(E0255, "html or css form not allowed here")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
@@ -203,6 +217,9 @@ NEURA_DIAGNOSTIC(E0920, "#Immutable class with a base or subclass that is not #I
 NEURA_DIAGNOSTIC(E0921, "#Synchronized on a method without a body to guard")
 NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchronized")
 NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding without a body")
+
+// Applications
+NEURA_DIAGNOSTIC(E1015, "template or stylesheet exceeds a limit")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

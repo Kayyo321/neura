@@ -42,7 +42,8 @@ struct Skipped {};
 
 class Lexer {
 public:
-    Lexer(std::string_view source, const std::string& file) : source_(source), file_(file) {}
+    Lexer(std::string_view source, const std::string& file, bool template_neura = false)
+        : source_(source), file_(file), template_neura_(template_neura) {}
 
     std::vector<Token> run(std::vector<Diagnostic>* diagnostics = nullptr) {
         if (source_.starts_with("\xEF\xBB\xBF")) {
@@ -57,6 +58,13 @@ public:
             }
             if (c == '/' && peek(1) == '/') {
                 comment();
+                continue;
+            }
+            if (template_neura_ && c == '/' && peek(1) == '*') {
+                const auto close = source_.find("*/", offset_ + 2);
+                const auto end = close == std::string_view::npos ? source_.size() : close + 2;
+                while (offset_ < end) advance_text();
+                documentation_.reset();
                 continue;
             }
             const Span start = location();
@@ -392,6 +400,7 @@ private:
 
     std::string_view source_;
     const std::string& file_;
+    bool template_neura_;
     std::size_t offset_{};
     std::size_t line_{1};
     std::size_t column_{1};
@@ -405,6 +414,10 @@ private:
 
 std::vector<Token> lex(std::string_view source, const std::string& file) {
     return Lexer(source, file).run();
+}
+
+std::vector<Token> lex_template_neura(std::string_view source, const std::string& file) {
+    return Lexer(source, file, true).run();
 }
 
 std::vector<Token> lex_recovering(std::string_view source, const std::string& file,

@@ -72,6 +72,8 @@ struct Declaration;
 struct MatchArm;
 struct SelectArm;
 struct Statement;
+struct HtmlFactorySyntax;
+struct StylesheetSyntax;
 
 struct Expr {
     enum class Kind {
@@ -83,7 +85,7 @@ struct Expr {
         Lambda, Nil, TypeTest, TypeApplication,
         // `spawn call` (Concurrency.md section 4.4): the call is operand 0.
         // The span starts at the contextual keyword, which is five bytes long.
-        Spawn,
+        Spawn, HtmlFactory, Stylesheet,
     };
 
     Kind kind;
@@ -106,6 +108,8 @@ struct Expr {
     std::vector<std::string> c_import{};
     // The opening parenthesis of a Call's argument list.
     std::optional<Span> open{};
+    std::shared_ptr<HtmlFactorySyntax> html_factory{};
+    std::shared_ptr<StylesheetSyntax> stylesheet{};
 };
 
 struct Statement {

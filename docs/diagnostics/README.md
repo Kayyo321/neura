@@ -38,7 +38,21 @@ Errors about the grammar.
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
+| [E0240](E0240.md) | malformed html factory |
 | [E0241](E0241.md) | unterminated template or stylesheet |
+| [E0242](E0242.md) | mismatched or unclosed element |
+| [E0243](E0243.md) | nesting a browser would repair |
+| [E0244](E0244.md) | malformed tag |
+| [E0245](E0245.md) | malformed or repeated attribute |
+| [E0246](E0246.md) | unknown or malformed character reference |
+| [E0247](E0247.md) | malformed hole |
+| [E0248](E0248.md) | stray brace or control word in text |
+| [E0249](E0249.md) | malformed control block |
+| [E0250](E0250.md) | malformed binding directive |
+| [E0251](E0251.md) | not allowed in a template |
+| [E0252](E0252.md) | malformed css declaration |
+| [E0254](E0254.md) | malformed from clause |
+| [E0255](E0255.md) | html or css form not allowed here |
 
 ## E03xx: Names
 
@@ -235,6 +249,14 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0921](E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
+
+## E10xx: Applications
+
+Errors about application forms and their build limits.
+
+| Code | Error |
+| --- | --- |
+| [E1015](E1015.md) | template or stylesheet exceeds a limit |
 
 ## Warnings
 

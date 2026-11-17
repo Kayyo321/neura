@@ -41,7 +41,21 @@ Errors about the grammar.
 | [E0212](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0212.md) | braces that do not enclose a range |
 | [E0213](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0213.md) | malformed binding clause |
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
+| [E0240](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0240.md) | malformed html factory |
 | [E0241](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0241.md) | unterminated template or stylesheet |
+| [E0242](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0242.md) | mismatched or unclosed element |
+| [E0243](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0243.md) | nesting a browser would repair |
+| [E0244](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0244.md) | malformed tag |
+| [E0245](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0245.md) | malformed or repeated attribute |
+| [E0246](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0246.md) | unknown or malformed character reference |
+| [E0247](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0247.md) | malformed hole |
+| [E0248](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0248.md) | stray brace or control word in text |
+| [E0249](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0249.md) | malformed control block |
+| [E0250](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0250.md) | malformed binding directive |
+| [E0251](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0251.md) | not allowed in a template |
+| [E0252](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0252.md) | malformed css declaration |
+| [E0254](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0254.md) | malformed from clause |
+| [E0255](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0255.md) | html or css form not allowed here |
 
 ## E03xx: Names
 
@@ -238,6 +252,14 @@ Errors about `#` tags before declarations ([Tags](Tags)).
 | [E0921](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0923.md) | #HostEffects on a function that is not a host binding without a body |
+
+## E10xx: Applications
+
+Errors about application forms and their build limits.
+
+| Code | Error |
+| --- | --- |
+| [E1015](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1015.md) | template or stylesheet exceeds a limit |
 
 ## Warnings
 

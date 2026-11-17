@@ -26,6 +26,9 @@ struct Token {
 };
 
 std::vector<Token> lex(std::string_view source, const std::string& file);
+// Lexes the Neura part of an HTML hole or control head, where a block comment
+// is also allowed. The caller has already found the enclosing delimiters.
+std::vector<Token> lex_template_neura(std::string_view source, const std::string& file);
 // Editor mode retains valid tokens when another token is malformed.
 std::vector<Token> lex_recovering(std::string_view source, const std::string& file,
                                   std::vector<Diagnostic>& diagnostics);

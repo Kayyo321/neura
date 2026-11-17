@@ -1,0 +1,8 @@
+error[E0242]: mismatched or unclosed template element
+ --> $DIR/template-mismatched-element.nra:1:26
+  |
+1 | let view = html() { <div><span></div> };
+  |                          ^^^^^^ close '<span>' with '</span>'
+  |                                ------ the template reached this point first
+
+For more information about this error, try `neura explain E0242`.

@@ -310,6 +310,7 @@ add_library(neura_compiler STATIC
     src/cli/source_docs.cpp
     src/lexer/island.cpp
     src/lexer/lexer.cpp
+    src/parser/html_template.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
     src/neura-ir/ir_print.cpp
@@ -407,6 +408,7 @@ neura_target_defaults(neura)
 # images through the same NVM library as any other embedder.
 install(TARGETS neura RUNTIME DESTINATION bin)
 install(FILES LICENSE DESTINATION share/doc/neura)
+install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura RENAME LICENSE-WHATWG-HTML)
 install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL
     FILES_MATCHING PATTERN "*.nra")
 
@@ -599,6 +601,11 @@ if(BUILD_TESTING)
     target_link_libraries(neura_island_lexer_tests PRIVATE neura_compiler)
     neura_target_defaults(neura_island_lexer_tests)
     add_test(NAME lexer-islands COMMAND neura_island_lexer_tests)
+
+    add_executable(neura_html_template_tests tests/parser/html_template_tests.cpp)
+    target_link_libraries(neura_html_template_tests PRIVATE neura_compiler)
+    neura_target_defaults(neura_html_template_tests)
+    add_test(NAME parser-html-templates COMMAND neura_html_template_tests)
 
     # Diagnostics: the core's unit tests, and one UI test per area under
     # tests/ui that compares rendered errors and applied fixes.

@@ -1,0 +1,7 @@
+error[E0247]: malformed template hole
+ --> $DIR/template-unclosed-hole.nra:1:24
+  |
+1 | let view = html() { <p>{value</p> };
+  |                        ^^^^^^^^^^^ expected a closing '}'
+
+For more information about this error, try `neura explain E0247`.
