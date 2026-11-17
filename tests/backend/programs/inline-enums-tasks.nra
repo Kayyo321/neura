@@ -1,0 +1,112 @@
+// A payload enum is a run of value words in the program, and a box of its words wherever the runtime carries one
+// word: the result of a spawned task and its join, a channel message, a select's send and join arms, a guard's
+// state, and the item and result of a parallel map. Each boundary boxes before and unboxes after, and every value
+// comes out as it went in, including the words a variant does not use.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let channels = import:Std.Concurrent.Channel;
+let guarded = import:Std.Concurrent.Guarded;
+let parallel = import:Std.Concurrent.Parallel;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+
+let Reading = enum (Missing, Value(int), Labelled(string, int), Real(float64), Nested(optional.Optional<int>));
+
+let describe = func(reading: Reading) -> string => match (reading) {
+    Reading.Missing => "missing",
+    Reading.Value(value) => "value " + value.to_string(),
+    Reading.Labelled(label, value) => label + " " + value.to_string(),
+    Reading.Real(value) => "real " + value.to_bits().to_string(),
+    Reading.Nested(inner) => "nested " + optional.value_or<int>(inner, -1).to_string(),
+};
+
+let measure = func(seed: int) -> Reading {
+    if (seed < 0) {
+        return Reading.Missing;
+    }
+    if (seed % 2 == 0) {
+        return Reading.Labelled("even", seed);
+    }
+    return Reading.Value(seed * 3);
+};
+
+let wrap = func(reading: Reading) -> Reading => match (reading) {
+    Reading.Value(value) => Reading.Nested(optional.Optional<int>.Some(value)),
+    _ => reading,
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // A task that returns an enum, and a task that captures one.
+        let captured = Reading.Labelled("captured", 7);
+        scope {
+            let task = spawn measure(4);
+            let missing = spawn measure(-1);
+            let from_capture = spawn wrap(captured);
+            console.print_line(describe(task.join()) + " / " + describe(missing.join()) + " / " +
+                               describe(from_capture.join()));
+        }
+
+        // Channel messages of an enum and of the standard library's portable error.
+        let [out, inbox, closer] = channels.open<Reading>(4);
+        out.send(Reading.Value(1));
+        out.send(Reading.Real(float64.from_bits(9221120237041090561)));
+        console.print_line(out.try_send(Reading.Missing).to_string());
+        for (let i: int = 0; i < 3; i++) {
+            console.print_line(received(inbox.receive()));
+        }
+        match (inbox.try_receive()) {
+            channels.TryReceived.Value(message) => { console.print_line("value " + describe(message)); },
+            channels.TryReceived.Empty => { console.print_line("empty"); },
+            channels.TryReceived.Closed => { console.print_line("closed"); },
+        }
+        let [errors_out, errors_in, errors_closer] = channels.open<error.PortableError>(1);
+        errors_out.send(error.to_portable(error.custom("E1", "custom failure")));
+        match (errors_in.receive()) {
+            channels.Received.Value(failure) => {
+                console.print_line(error.message(error.from_portable(failure)));
+            },
+            _ => { console.print_line("no error"); },
+        }
+        errors_closer.close();
+
+        // A select send arm boxes its value, and select receive and join arms unbox theirs.
+        select {
+            let sent = out.send(Reading.Labelled("selected", 2)) => {
+                console.print_line("sent " + sent.to_string());
+            },
+        }
+        select {
+            let message = inbox.receive() => {
+                console.print_line("select " + received(message));
+            },
+        }
+        scope {
+            let finisher = spawn measure(5);
+            select {
+                let joined = finisher.join() => {
+                    console.print_line("joined " + describe(joined));
+                },
+            }
+        }
+        closer.close();
+
+        // A guard whose state is an enum.
+        let guard = guarded.create<Reading>(func() -> Reading => Reading.Labelled("guard", 3));
+        console.print_line(guard.with<string>(func(state: Reading) -> string => describe(state)));
+
+        // Parallel items: enums in and out.
+        let seeds: Reading[] = [Reading.Value(1), Reading.Missing, Reading.Labelled("x", 2)];
+        let wrapped = parallel.map<Reading, Reading>(seeds, wrap, parallel.limits(100000, 100000));
+        for (let item: Reading in wrapped) {
+            console.print_line(describe(item));
+        }
+        return program.ExitCode.Ok;
+    };
+
+    let received = func(message: channels.Received<Reading>) -> string => match (message) {
+        channels.Received.Value(value) => describe(value),
+        channels.Received.Closed => "closed",
+        channels.Received.Cancelled => "cancelled",
+    };
+);

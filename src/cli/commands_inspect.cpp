@@ -61,7 +61,10 @@ int inspect(const Options& options) {
     if (caps.entropy) std::cout << ", entropy";
     if (caps.native) std::cout << ", native";
     std::cout << "\nlimits: steps " << policy.limits.max_steps << ", frames " << policy.limits.max_frames
-              << ", heap cells " << policy.limits.max_heap_cells
+              << ", heap cells " << policy.limits.max_heap_cells << ", stack cells " << policy.limits.max_stack_cells
+              << (executable.version < 3
+                      ? " (default: container version " + std::to_string(executable.version) + " records none)"
+                      : "")
               << "\ntasks: at most " << policy.limits.max_tasks << ", quantum " << policy.limits.task_quantum
               << ", queued messages " << policy.limits.max_queued_messages << ", pending requests "
               << policy.limits.max_pending_requests << ", parallel workers " << policy.limits.parallel_workers

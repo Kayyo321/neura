@@ -346,11 +346,18 @@ Result interpret(Context& context, const Program& program, std::uint32_t entry_i
                 values[id] = result.value;
                 break;
             }
+            case Op::ResultWord:
+                // The words a Return left for the Call that precedes this op.
+                values[id] = context.result_words[in.imm - 1];
+                break;
             case Op::Return: {
                 const bool has_value = in.operands[1] != none;
                 const auto value = has_value ? values[in.operands[1]] : 0;
+                // A function with several result words hands the others over in
+                // the context, for the helper and for the caller's ResultWords.
+                for (std::uint32_t i = 0; i < in.count; ++i) context.result_words[i] = values[fn.extras[in.extra + i]];
                 if (in.operands[2] != none) context.K = operand(2);
-                if (helpers.ret(&context, value, has_value, operand(0)) == Status::Fault) {
+                if (helpers.ret(&context, value, has_value, operand(0), in.count) == Status::Fault) {
                     return deoptimize(in, Reason::Exits);
                 }
                 if (from_native) return {Outcome::Return, value};

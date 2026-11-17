@@ -777,7 +777,10 @@ private:
         // The task's open storage regions, outermost first (NVR 1.7). They
         // live beside the frames, not in a frame's header, which native code
         // indexes; they move with the stack when the task parks, and native
-        // code never touches them: a frame that owns one is never popped there.
+        // code never touches them: it pops a frame in place only for a
+        // function without EnterRegion (tier3::Function::enters_region), and
+        // every other return goes through the return helper, which releases
+        // them as commit_exit does.
         std::vector<StorageRegion> regions;
 
     private:

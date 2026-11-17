@@ -4,6 +4,7 @@
 #include "source_loader.hpp"
 #include "backend/converter.hpp"
 #include "ir-optimization/optimizer.hpp"
+#include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/reference_storage.hpp"
@@ -139,6 +140,7 @@ int run_tests(const Options& options) {
     }
     neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_containment(program);
     neura::check_inline_limit(program);
     if (options.optimize) {
         neura::optimize(program);

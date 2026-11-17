@@ -349,6 +349,13 @@ bool concurrent_image(const Image& image) {
 
 std::uint16_t required_minor_version(const Image& image) {
     if (std::ranges::any_of(image.types, [](const Type& type) { return type.kind == TypeKind::Aggregate; })) return 7;
+    // A nil collection constant (NVR 1.7).
+    if (std::ranges::any_of(image.constants, [&](const Constant& value) {
+            return value.type < image.types.size() && (image.types[value.type].kind == TypeKind::Array ||
+                                                       image.types[value.type].kind == TypeKind::List);
+        })) {
+        return 7;
+    }
     for (const auto& function : image.functions) {
         for (const auto& block : function.blocks) {
             for (const auto& exit : block.exits) {

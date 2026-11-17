@@ -39,7 +39,16 @@ A tuple or payload-enum value occupies a fixed sequence of *value words* whereve
 | Where the runtime carries one word today, an aggregate is boxed into a runtime-owned transport object at the boundary and unboxed on the other side: a channel message, a task's result, a scheduler outcome, a host call's arguments and results, a kernel's arguments, a parallel item's argument and result, a callback, and an object constant. The box is a heap allocation charged as today. | proposed |
 | Value equality, hashing and text of an aggregate read its words; their results are those of rc.3. | proposed |
 
-Step 5 implements the tuple rows ([Backend](../Backend.md#tuples-are-words)); payload enums stay heap objects until step 7, and a tuple payload of one is several consecutive fields of its object, not yet pooled words. Three rows differ from what the table expects, with the reason. A kernel's arguments are never tuples (the kernel table admits scalars, text and byte lists), so the kernel boundary is its result, the outcome tuple the runtime allocates. No source construct produces an object constant of a tuple type, so that boundary does not arise. And two boundaries the table does not list exist: the pair `string.from_utf8` returns, which the runtime allocates, and the array of results `parallel.finish` builds from boxed tuples, which a compiler-generated function copies into aggregate elements.
+Step 5 implements the tuple rows ([Backend](../Backend.md#tuples-and-enums-are-words)); payload enums stay heap objects until step 7, and a tuple payload of one is several consecutive fields of its object, not yet pooled words. Three rows differ from what the table expects, with the reason. A kernel's arguments are never tuples (the kernel table admits scalars, text and byte lists), so the kernel boundary is its result, the outcome tuple the runtime allocates. No source construct produces an object constant of a tuple type, so that boundary does not arise. And two boundaries the table does not list exist: the pair `string.from_utf8` returns, which the runtime allocates, and the array of results `parallel.finish` builds from boxed tuples, which a compiler-generated function copies into aggregate elements.
+
+Step 7 implements the enum rows ([Backend](../Backend.md#tuples-and-enums-are-words)), and the four enums that closed a cycle then (the regular expression parser's `Node`, the `Tree` of `tests/backend/programs/aggregates.nra`, and the `Tree` examples of [Types](../lang/Types.md#enums) and of the agent reference `prompts/neura/references/syntax.md`) hold their links in classes. Four details the table leaves open are decided there, with the reason:
+
+- A text word that the variant does not use holds the empty text, not nil: a reference read from graph lanes must name a live entry, and only an object reference may be nil there.
+- An array or list word holds the nil collection, a constant that NVR 1.7 gains for this ([NVR](../runtime/NVR.md#types-constants-and-storage)). Allocating an empty collection instead would allocate for every value of such an enum, and the format had no other value that is no allocation.
+- Words are pooled by NVR type, except that an array or list of inline values of two or more words is pooled by its element type: that element's aggregate can hold a collection of itself, as `Node` holds `Node[list]`, and two such collections of different element types rarely share a word.
+- A boxed enum has one field for each of its words, where a boxed tuple has one for each element.
+
+Every program image is NVR 1.7 from step 7 on: `main` returns `Std.Program.ExitCode`, a payload enum of two words because of `Status(int)`.
 
 `Optional<T>` and `Result<T>` built over a payload that needs no allocation then need none either. `Result<T>` over `Error` takes at most 1 + 7 words more than `T` alone, by the pooling rule.
 
@@ -66,12 +75,12 @@ Arrays, primitive-reference storage and non-escaping closure environments that b
 | --- | --- |
 | The changes are NVR 1.7: multi-word results, aggregate element types and their component operations, region allocation and release, and the move of an array to the caller's region. The writer emits 1.7 only for an image that uses one of them, so an image that uses none keeps its bytes. | proposed |
 | An image of NVR 1.6 or earlier runs as it does in rc.3, with the accounting of rc.3. | proposed |
-| Tier 2 and tier 3 first decline a block that uses a new operation; it runs at tier 1. Native lowering follows in its own change, and the performance gate decides when it is required. | proposed |
+| Tiers 2 and 3 run every new operation: multi-word calls and returns and component accesses inline or as helpers, aggregate allocation and region operations as helpers. A function that uses a region operation is not inlined, and only a function that enters no region pops its frame in place. | proposed (steps 6 and 8) |
 | The decompiler and assembler read and write every new form. A region entry and a flattened aggregate are shown with their source names when the image carries names. | proposed |
 
 ## Order of work
 
-Each step is one pull request.
+Amended on 2026-11-16: declining every new operation in tiers 2 and 3 would hold hot paths at tier 1, so the tiers learn the multi-word and aggregate operations before payload enums are inlined, and the region operations before arrays move into regions. Under the milestone process of 2026-11-17 each step is a commit on the milestone's integration branch, and the milestone is one pull request.
 
 | Step | Content | Changes images |
 | --- | --- | --- |
@@ -79,16 +88,19 @@ Each step is one pull request.
 | 2 | Construction with `new`, `E0450`, and the migration of the repository's sources | no |
 | 3 | M2 step 5: storage, owner and transfer facts and the verifier rules that check them | no |
 | 4 | NVR 1.7 and the runtime: multi-word results, aggregate elements, region entries and release, stack accounting; assembler tests only | no |
-| 5 | Inline tuples and payload enums in the converter; `E0448` enforced; `E0449`; the recursive enums migrated | yes |
-| 6 | Arrays in regions, with the escape checks | yes |
-| 7 | Primitive references as checked borrows, and closures in regions | yes |
-| 8 | Native lowering of the new operations in tier 3, and the performance gate | yes |
+| 5 | Inline tuples in the converter; `E0449` | yes |
+| 6 | Tiers 2 and 3 run multi-word calls and returns and aggregate operations | no |
+| 7 | Inline payload enums; `E0448` enforced; the recursive enums migrated | yes |
+| 8 | Tiers 2 and 3 run the region operations; native executables carry the stack limit | no (native containers: yes) |
+| 9 | Arrays in regions, with the escape checks | yes |
+| 10 | Primitive references as checked borrows, and closures in regions | yes |
+| 11 | The performance gate | no |
 
 ## Gate
 
 From step 5 on, an image no longer matches rc.3 byte for byte. A step is accepted when:
 
-- every program of the identity set, the extended set and the fuzzer gives the output, exit status and trap of rc.3;
+- every program of the identity set, the extended set and the fuzzer gives the output, exit status and trap of rc.3. Two parts of a trap's text depend on layout as counts do and are listed rather than compared: the handle number in `invalid reference handle: handle N`, which counts allocations, and the source position of a `--max-steps` trap, which depends on which operations a block runs. A run stopped by `--max-steps` is a count too, and so is how far it got: from step 7 on, every console write takes fewer steps because its outcome enum is no longer allocated, and a step-limit sweep's run prints more lines before the same limit (step 7: 362 of the 15,136 extended captures, every one a step-limit sweep, amended 2026-11-17);
 - on the new binary, every execution mode gives exactly what tier 0 gives, including steps, `peak_heap_cells` and peak stack cells;
 - the change in steps and peak cells is listed for each program it changes, with the reason;
 - the performance gate of the plan holds: no program and not the geometric mean more than 5% slower than rc.3.

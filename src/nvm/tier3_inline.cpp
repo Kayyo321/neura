@@ -27,7 +27,9 @@
 // write-back: inlined code writes a frame only on the slow path of an
 // allocation or append (AllocObject, Append), which materializes every frame
 // of its state, runs the helper, and leaves at the helper's resume block. Its arguments and return
-// values fit the types of the slots they go to. Host, scheduler and message
+// values fit the types of the slots they go to. A callee whose function has a storage region
+// operation (NVR 1.7), lifted or not, is never inlined: its regions belong to its own frame,
+// which only a call pushes, and its Return releases them through the return helper. Host, scheduler and message
 // exits are deoptimizations in function programs already.
 //
 // Dispatch and closure sites: the exits the recorded tags select (at most 6,
@@ -157,6 +159,8 @@ struct CallSite {
     std::uint32_t reload = none;
     std::uint32_t jump = none;
     std::uint32_t kernel_reload = none;
+    // The words after the first of a multi-word callee (NVR 1.7), by word - 1.
+    std::vector<std::uint32_t> words;
 };
 
 std::optional<CallSite> call_site(const Function& f, std::uint32_t block) {
@@ -168,7 +172,16 @@ std::optional<CallSite> call_site(const Function& f, std::uint32_t block) {
         // jump.
         if (k == 0 || insts.size() < k + 3) return std::nullopt;
         auto r = k + 1;
-        while (r < insts.size() && f.insts[insts[r]].op == Op::Const) ++r;
+        std::vector<std::uint32_t> words;
+        while (r < insts.size() && (f.insts[insts[r]].op == Op::Const || f.insts[insts[r]].op == Op::ResultWord)) {
+            if (f.insts[insts[r]].op == Op::ResultWord) {
+                if (f.insts[insts[r]].operands[0] != insts[k] || f.insts[insts[r]].imm != words.size() + 1) {
+                    return std::nullopt;
+                }
+                words.push_back(insts[r]);
+            }
+            ++r;
+        }
         const bool kernel = f.inline_kernels && r + 3 == insts.size() && f.insts[insts[r + 1]].op == Op::EntryCounter &&
                             f.insts[insts[r + 1]].imm == 1;
         if (r + (kernel ? 3 : 2) != insts.size()) return std::nullopt;
@@ -179,7 +192,8 @@ std::optional<CallSite> call_site(const Function& f, std::uint32_t block) {
             reload.imm != 0 || jump.op != Op::Jump || f.blocks[block].succs.size() != 1) {
             return std::nullopt;
         }
-        return CallSite{block, insts[k - 1], insts[k], insts[r], insts.back(), kernel ? insts[r + 1] : none};
+        return CallSite{block, insts[k - 1], insts[k], insts[r], insts.back(), kernel ? insts[r + 1] : none,
+                        std::move(words)};
     }
     return std::nullopt;
 }
@@ -309,6 +323,7 @@ private:
         for (const auto slot : program->entries.front().reads) {
             if (slot >= program->parameter_count) return std::nullopt;
         }
+        if (uses_storage_regions(image_.functions.at(function))) return std::nullopt;
         const auto base = size_of(*program);
         if (base.blocks > max_blocks || base.ops > max_callee_ops) return std::nullopt;
         auto key = chain;
@@ -333,6 +348,16 @@ private:
         slot = Callee{std::make_shared<const Function>(std::move(ir)), own};
         if (slot->size.blocks > max_blocks) return std::nullopt;
         return slot;
+    }
+
+    // Whether a function has a storage region operation (NVR 1.7) in any
+    // block, lifted or not.
+    static bool uses_storage_regions(const nvr::Function& function) {
+        return std::any_of(function.blocks.begin(), function.blocks.end(), [](const nvr::Block& block) {
+            return std::any_of(block.exits.begin(), block.exits.end(), [](const nvr::Exit& exit) {
+                return exit.kind == nvr::ExitKind::State && nvr::is_region_operation(exit.operation);
+            });
+        });
     }
 
     // The callee's code from entry 0 never writes a frame, never calls, and
@@ -384,7 +409,17 @@ private:
             const auto& last = g.insts[block.insts.back()];
             if (last.op != Op::Return) continue;
             if (!has_result) continue;
-            if (last.operands[1] == none || !fits(g.insts[last.operands[1]].type, call.type)) return false;
+            if (last.operands[1] == none ||
+                !(fits(g.insts[last.operands[1]].type, call.type) || constant_fits(g.insts[last.operands[1]], call.type))) {
+                return false;
+            }
+            // Each word after the first fits the slot it lands in.
+            if (last.count != site.words.size()) return false;
+            for (std::uint32_t w = 0; w < last.count; ++w) {
+                const auto& word = g.insts[g.extras[last.extra + w]];
+                const auto slot = f.insts[site.words[w]].type;
+                if (!fits(word.type, slot) && !constant_fits(word, slot)) return false;
+            }
         }
         return true;
     }
@@ -512,6 +547,7 @@ private:
         for (const auto& [program, table] : g.dispatch_origins) f.dispatch_origins.emplace_back(program + op, table);
         f.programs.insert(f.programs.end(), g.programs.begin(), g.programs.end());
         f.call_frames.insert(g.call_frames.begin(), g.call_frames.end());
+        f.call_results.insert(g.call_results.begin(), g.call_results.end());
         f.call_widths.insert(g.call_widths.begin(), g.call_widths.end());
 
         // Frame states: the callee's own level becomes an inlined frame
@@ -563,7 +599,7 @@ private:
             auto& insts = f.blocks[x].insts;
             std::erase_if(insts, [&](std::uint32_t id) {
                 return id == site.write_back || id == site.call || id == site.reload || id == site.jump ||
-                       id == site.kernel_reload;
+                       id == site.kernel_reload || std::find(site.words.begin(), site.words.end(), id) != site.words.end();
             });
             insts.insert(insts.end(), made.begin(), made.end());
             insts.push_back(site.jump);
@@ -576,6 +612,7 @@ private:
         std::vector<std::uint32_t> results;
         std::vector<std::uint32_t> counts;
         std::vector<std::uint32_t> kernel_counts;
+        std::vector<std::vector<std::uint32_t>> extra_results;
         for (std::uint32_t b = ob; b < ob + g.blocks.size(); ++b) {
             auto& block = f.blocks[b];
             if (block.insts.empty() || f.insts[block.insts.back()].op != Op::Return) continue;
@@ -585,23 +622,44 @@ private:
             jump.origin_block = f.insts[ret].origin_block;
             jump.origin_function = f.insts[ret].origin_function;
             jump.origin_seq = f.insts[ret].origin_seq;
-            const auto value = f.insts[ret].operands[1];
+            // A constant that is a float word's bits, in the slot's type.
+            std::vector<std::uint32_t> made_here;
+            const auto typed = [&](std::uint32_t v, ValueType slot) {
+                if (v == none || f.insts[v].op != Op::Const || fits(f.insts[v].type, slot)) return v;
+                Inst constant;
+                constant.op = Op::Const;
+                constant.type = slot;
+                constant.imm = f.insts[v].imm;
+                constant.origin_block = f.insts[ret].origin_block;
+                constant.origin_function = f.insts[ret].origin_function;
+                constant.origin_seq = f.insts[ret].origin_seq;
+                made_here.push_back(add_inst(f, std::move(constant)));
+                return made_here.back();
+            };
+            const auto value = typed(f.insts[ret].operands[1], f.insts[site.call].type);
             kernel_counts.push_back(f.insts[ret].operands[2]);
+            if (extra_results.empty()) extra_results.resize(site.words.size());
+            for (std::uint32_t w = 0; w < site.words.size() && w < f.insts[ret].count; ++w) {
+                extra_results[w].push_back(typed(f.extras[f.insts[ret].extra + w], f.insts[site.words[w]].type));
+            }
             auto& add = f.insts[ret];
             add.op = Op::CounterAdd;
             add.type = integer(64);
             add.operands[1] = none;
             add.operands[2] = none;
+            add.count = 0;
             add.imm = 1;
             add.flags = 0;
             add.state = none;
             results.push_back(value);
             counts.push_back(ret);
             const auto jump_id = add_inst(f, std::move(jump));
+            for (const auto id : made_here) f.blocks[b].insts.push_back(id);
             f.blocks[b].insts.push_back(jump_id);
             f.blocks[b].succs = {join};
             f.blocks[join].preds.push_back(b);
         }
+        extra_results.resize(site.words.size());
         const auto phi = [&](std::uint32_t id, const std::vector<std::uint32_t>& operands) {
             auto& in = f.insts[id];
             in.op = Op::Phi;
@@ -618,6 +676,11 @@ private:
         if (exit.result_slot != none) {
             phi(site.call, results);
             join_insts.push_back(site.call);
+            // The call's words after the first: the callee's returns' words.
+            for (std::uint32_t w = 0; w < site.words.size(); ++w) {
+                phi(site.words[w], extra_results[w]);
+                join_insts.push_back(site.words[w]);
+            }
         }
         phi(site.reload, counts);
         join_insts.push_back(site.reload);

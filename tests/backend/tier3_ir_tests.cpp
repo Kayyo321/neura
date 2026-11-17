@@ -223,6 +223,23 @@ bool has_loop_head(const t3::Function& ir) {
     return false;
 }
 
+// The control-flow graph has a cycle: a loop of the program.
+bool has_cycle(const t3::Function& ir) {
+    std::vector<std::uint8_t> state(ir.blocks.size(), 0);
+    const std::function<bool(std::uint32_t)> visit = [&](std::uint32_t b) {
+        state[b] = 1;
+        for (const auto s : ir.blocks[b].succs) {
+            if (state[s] == 1 || (state[s] == 0 && visit(s))) return true;
+        }
+        state[b] = 2;
+        return false;
+    };
+    for (std::uint32_t b = 0; b < ir.blocks.size(); ++b) {
+        if (state[b] == 0 && visit(b)) return true;
+    }
+    return false;
+}
+
 // No phi joins one value (and itself): the builder removes them.
 void check_no_trivial_phis(const t3::Function& ir, const std::string& label) {
     for (std::uint32_t id = 0; id < ir.insts.size(); ++id) {
@@ -1017,16 +1034,20 @@ NEURA_TEST(tier3, the_verifier_rejects_a_crafted_violation_of_each_rule) {
                 }
             }
         });
-        expect_rejected(*found.image, *found.ir, "V8", "V8 a loop without a Budget", [](t3::Function& ir) {
+        // Every Budget that starts a block becomes a plain counter, so no
+        // block of a loop is a Budget block.
+        const auto looping = find_ir(all, [](const t3::Function& ir) { return has_cycle(ir); });
+        check(looping.ir != nullptr, "a function with a loop");
+        expect_rejected(*looping.image, *looping.ir, "V8", "V8 a loop without a Budget", [](t3::Function& ir) {
             for (const auto& block : ir.blocks) {
-                if (block.insts.empty() || ir.insts[block.insts.front()].op != t3::Op::Phi) continue;
                 for (const auto id : block.insts) {
+                    if (ir.insts[id].op == t3::Op::Phi) continue;
                     if (ir.insts[id].op == t3::Op::Budget) {
                         ir.insts[id].op = t3::Op::CounterAdd;
                         ir.insts[id].imm = 0;
                         ir.insts[id].type = {t3::Type::Int, 64};
-                        return;
                     }
+                    break;
                 }
             }
         });
