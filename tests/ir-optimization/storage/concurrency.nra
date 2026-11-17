@@ -1,0 +1,20 @@
+// An array that crosses to a task, and one sent on a channel.
+let channels = import:Std.Concurrent.Channel;
+
+let Tasks = module (
+    let work = func(values: int[]) -> int {
+        return values[0];
+    };
+
+    export let spawned = func(source: int[]) -> int {
+        scope (group) {
+            last task = spawn work(source);
+            return task.join();
+        }
+    };
+
+    export let sent = func(source: int[]) {
+        const [sender, receiver, closer] = channels.open<int[]>(1);
+        sender.send(source);
+    };
+);

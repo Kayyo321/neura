@@ -99,6 +99,15 @@ The optimizer takes the allocation, trap, host and scheduler flags of a function
 
 The optimizer's flags and the precise facts differ in three places, which keeps every image as it was. The flags resolve a virtual call only on a module with a fixed target and take every other virtual call as unknown, where the facts take the union over the known targets; the flags leave out what the constructors of an allocation do; and the flags take every host binding and every function without a body as unknown, where the facts use a kernel's signature and a host binding's `host.effects` contract. A function with a body is summarized from its body, never from a recorded summary. A call through a function value, a virtual call with no known target, and a function without a body or a contract are unknown in every fact. The `structure` suite compares the flags with a reference of the optimizer's own rules for every function of every fixture, example and test program, before and after optimization.
 
+#### Storage facts
+
+[`neura-ir/storage.hpp`](../src/neura-ir/storage.hpp) derives the storage, owner and transfer facts of [the representation design](design/Representation030.md#storage-owner-and-transfer-facts) from declarations, types, the tree of each body and the summaries above. Nothing is stored: no attribute, node field or `.nir` record carries them, and no stage calls the analyses, so they change no program and reject none. The storage milestone ([Storage030](design/Storage030.md#regions)) enforces the region rules with them. The `structure` suite is their evidence until then.
+
+- **Storage class** of a local, parameter, field or global: frame, static, inside a heap object, or a borrow. A parameter that holds an array and anything of primitive reference type is a borrow.
+- **Owner** of each fresh array: the block, branch arm or loop iteration whose tree position holds the creation, as a path in the body. A `ScopedValue` or `SelectValue` opens no scope, so a range literal belongs to the block that holds it.
+- **Result transfer** of a function that returns an array or a primitive reference: a fresh value, or a borrow with an origin (parameter, global, field of an owner, frame storage). The summary of `PurityAnalysis` records one and the body gives the other. `check_result_transfer` reports a contradiction, and an unknown fact agrees with anything.
+- **Escapes**: an array stored in a field, a global, a list element, a channel message, a task argument or a closure; an array created in an inner scope and assigned to a binding of an outer one; a function that returns an array it did not create; a reference to a local or parameter that is returned, stored in a field or captured. The findings are structured data with the operation's span and the storage's declaration. The analysis follows no control flow, so a local's origins are the union over all of its stores. Where a rule is open it reports. Run it before `materialize_reference_storage`, which replaces references with heap boxes.
+
 ## Passes
 
 All ten passes are enabled by default and run in this order. `inline-calls` runs between rounds, as described under termination.
