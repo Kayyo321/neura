@@ -109,7 +109,7 @@ captured variable, or an element of an array or list, and a nested tuple is
 flattened into the run. A tuple of more than 64 value words is
 [E0449](../diagnostics/E0449.md). Copying a tuple copies its words, so a
 reference stored in it keeps the identity of the object it names. See
-[Backend](../Backend.md#tuples-are-words).
+[Backend](../Backend.md#tuples-and-enums-are-words).
 
 ### Typed and listed destructuring
 
@@ -551,6 +551,16 @@ let sum = func(tree: Tree) -> int {
 
 let tree = Tree.Branch { right: new TreeLink(Tree.Leaf(2)), left: new TreeLink(Tree.Leaf(1)) };
 ```
+
+A payload enum is stored inline, as a tuple is: a value is a `uint32` tag
+and the words of its payloads, wherever it lives, and copying it copies those
+words. An enum therefore cannot contain itself, directly or through tuples and
+other enums; that is [E0448](../diagnostics/E0448.md), reported at the
+variant whose payload closes the cycle. Hold the link in a class, which is a
+reference, as `TreeLink` does above, or in a list. An enum's payload words
+are shared among its variants by type, and an enum of more than 64 value
+words is [E0449](../diagnostics/E0449.md). See
+[Backend](../Backend.md#tuples-and-enums-are-words).
 
 `match (value)` evaluates the subject once and evaluates only the selected arm.
 Each arm names a different variant, or a final `_` arm covers the remaining
