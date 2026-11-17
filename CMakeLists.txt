@@ -100,6 +100,7 @@ set(neura_nvm_sources
     src/nvm/layered.cpp
     src/nvm/machine.cpp
     src/nvm/net_provider.cpp
+    src/nvm/pending_requests.cpp
     src/nvm/placement.cpp
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
@@ -526,6 +527,18 @@ if(NEURA_ENABLE_SERVER_TLS)
 endif()
 
 if(BUILD_TESTING)
+    add_executable(neura_wait_source_tests
+        src/nvm/pending_requests.cpp
+        tests/backend/wait_source_tests.cpp)
+    target_include_directories(neura_wait_source_tests PRIVATE src)
+    if(NOT EMSCRIPTEN)
+        find_package(Threads REQUIRED)
+        target_link_libraries(neura_wait_source_tests PRIVATE Threads::Threads)
+    endif()
+    neura_target_defaults(neura_wait_source_tests)
+    add_test(NAME nvm-wait-source COMMAND neura_wait_source_tests)
+    set_tests_properties(nvm-wait-source PROPERTIES TIMEOUT 10)
+
     add_executable(neura_worker_wire_tests tests/server/worker_wire_tests.cpp)
     target_link_libraries(neura_worker_wire_tests PRIVATE neura_server_worker_wire)
     neura_target_defaults(neura_worker_wire_tests)

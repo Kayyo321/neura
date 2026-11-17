@@ -3,8 +3,8 @@
 // The driver of an image with tasks (docs/lang/Concurrency.md section 10.4):
 // it starts overlapping host requests without blocking, keeps them while the
 // other tasks run, and supplies their completions at scheduling points. The
-// live run, the recorder, and nothing else share it, so a recorded run and
-// an unrecorded one make the same calls. It starts no thread.
+// live run and recorder share it, so a recorded run and an unrecorded one
+// make the same calls. It starts no thread.
 
 #include "machine.hpp"
 
@@ -43,13 +43,15 @@ public:
     // it can finish now and with host_error::cancelled otherwise; the answer
     // is delivered at the next check like any other.
     void cancel(std::uint64_t sequence);
-    // Checks without blocking which operations can finish, and returns their
-    // answers in ascending order of sequence number.
+    // Checks without blocking and returns answers in ascending sequence order.
+    // An embedding loop can keep this queue and poll it when a provider
+    // publishes external readiness or a timer passes.
     std::vector<Done> poll();
     // Blocks until an operation can finish or the clock reads `clock_deadline`
     // (the earliest timer of the scheduler, when it has one), then returns
     // what poll() would. May return nothing; the caller then checks the clock
     // and waits again. Under virtual time it never blocks on the clock.
+    // This is for a native run that can block. An event loop uses poll().
     std::vector<Done> wait(std::optional<std::int64_t> clock_deadline);
 
     bool empty() const { return entries_.empty(); }
@@ -63,10 +65,9 @@ private:
         bool cancelled = false;
     };
 
-    int descriptor_of(const Entry& entry) const;
-    // Tries every entry that may have progressed, or only `only`. The poll
-    // timeout, in milliseconds, applies when there are descriptors to wait
-    // for; zero never blocks and -1 waits without limit.
+    // Tries every entry that may have progressed, or only `only`. The native
+    // wait timeout is in milliseconds. Zero never blocks and -1 waits
+    // without a clock limit.
     void check(int timeout_ms, std::optional<std::uint64_t> only = std::nullopt);
     std::vector<Done> collect();
 

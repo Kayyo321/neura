@@ -288,8 +288,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         const auto descriptor = input_.descriptor();
         if (max < 1 || descriptor < 0) return read_input(request);
         PendingOperation operation;
-        operation.descriptor = descriptor;
-        operation.readable = true;
+        operation.wait_source = PosixWait{{descriptor, PosixWait::Events::Read}};
         const auto count = std::min(static_cast<std::size_t>(max), max_read_bytes);
         operation.attempt = [this, descriptor, count](bool cancelled) -> std::optional<HostCompletion> {
             if (!readable_now(descriptor)) {
