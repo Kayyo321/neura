@@ -98,7 +98,7 @@ FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
     "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
-    "sqrt-special",
+    "sqrt-special", "tuples",
 ]
 
 
@@ -886,6 +886,92 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     p.calls.append(k)
 
 
+def section_tuples(p, k):
+    """Tuples stored inline: in locals, parameters, results, class fields, a module global, a closure capture and
+    the elements of lists and arrays, nested, with their value members; the words are folded into the checksum."""
+    p.feature("tuples", "classes", "lists", "arrays", "closures")
+    a, b, c = p.between(2, 7), p.between(3, 9), p.between(5, 40)
+    shapes = [
+        ("[int32, [int64, string]]", "[i, [(i as int64) * $a, \"t\" + i.to_string()]]",
+         "(t[0] as int64) + t[1][0] + (t[1][1].byte_length as int64)"),
+        ("[bool, int32, string]", "[i % 2 == 0, i * $b, \"u\" + (i % 4).to_string()]",
+         "(t[1] as int64) + (t[2].byte_length as int64) + (t[0] ? 7 : 3)"),
+        ("[uint8, [int16, bool], int64]", "[(i % 200) as uint8, [(i * 3) as int16, i % 3 == 0], (i as int64) * $c]",
+         "(t[0] as int64) + (t[1][0] as int64) + t[2] + (t[1][1] ? 1 : 0)"),
+    ]
+    shape, make, read = p.pick(shapes)
+    pair = p.pick(["[int32, int32]", "[int64, bool]", "[string, int32]"])
+    pair_make = {"[int32, int32]": "[i, i * $a]", "[int64, bool]": "[(i as int64) * $b, i % 2 == 0]",
+                 "[string, int32]": "[\"p\" + i.to_string(), i + $a]"}[pair]
+    pair_read = {"[int32, int32]": "(x[0] + x[1]) as int64", "[int64, bool]": "x[0] + (x[1] ? 5 : 2)",
+                 "[string, int32]": "(x[0].byte_length + x[1]) as int64"}[pair]
+    p.declarations.append(fill("""let s${k}_global: [int32, int64] = [1, 2];
+
+let s${k}_make = func(i: int32) -> $S => $make;
+
+let s${k}_read = func(t: $S, acc: int64) -> int64 => mix(acc, $read);
+
+let s${k}_swap = func(x: [int32, int64]) -> [int64, int32] => [x[1], x[0]];
+
+let S${k}Holder = class (
+    export let cursor: $S;
+    export let marks: [int32, bool] = [0, false];
+    export let rows: $S[list] = new;
+    export let put = func(next: $S, index: int32) {
+        cursor = next;
+        marks = [index, index % 3 == 0];
+        rows.append(next);
+    };
+);
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let holder = new S${k}Holder();
+    let acc: int64 = 0;
+    let first = s${k}_make(0);
+    holder.put(first, 0);
+    for (let i: int32 = 1; i < size + 4; i++) {
+        let row = s${k}_make(i);
+        holder.put(row, i);
+        acc = s${k}_read(holder.cursor, acc);
+        if (i % 3 == 0) {
+            holder.rows[i / 3] = s${k}_make(i * 2);
+        }
+        acc = mix(acc, (holder.marks[0] as int64) + (holder.marks[1] ? 11 : 1));
+    }
+    let table: $P[] = [$pm0, $pm1, $pm2];
+    let sums: $P[list] = new;
+    for (let i: int32 = 0; i < size % 4 + 2; i++) {
+        sums.append($pm);
+    }
+    for (let x in table) {
+        acc = mix(acc, $pr);
+    }
+    for (let x in sums) {
+        acc = mix(acc, $pr);
+    }
+    let captured: [int32, string] = [size, "cap"];
+    let probe = func(x: int32) -> [int32, int32] => [captured[0] + x, x * $a];
+    let probed = probe(size);
+    s${k}_global = [probed[0], (probed[1] as int64) + s${k}_global[1]];
+    let swapped = s${k}_swap(s${k}_global);
+    acc = mix(acc, swapped[0] + (swapped[1] as int64));
+    let last_row = holder.rows[holder.rows.length - 1];
+    console.println("s$k tuples {} {} {} {}", holder.rows.length, last_row, holder.cursor, s${k}_global);
+    console.println("s$k members {} {} {}", last_row.hash_code(), last_row.equals(holder.cursor),
+                    holder.rows.equals(holder.rows));
+    console.println("s$k table {} {}", table, sums.hash_code());
+    return mix(acc, (last_row.hash_code() as int64) + (holder.rows.length as int64));
+};
+""", k=k, S=shape, make=make.replace("$a", str(a)).replace("$b", str(b)).replace("$c", str(c)),
+                                read=read, a=a, b=b, P=pair,
+                                pm0=re.sub(r"\bi\b", "0", pair_make).replace("$a", str(a)).replace("$b", str(b)),
+                                pm1=re.sub(r"\bi\b", "size", pair_make).replace("$a", str(a)).replace("$b", str(b)),
+                                pm2=re.sub(r"\bi\b", "7", pair_make).replace("$a", str(a)).replace("$b", str(b)),
+                                pm=pair_make.replace("$a", str(a)).replace("$b", str(b)),
+                                pr=pair_read))
+    p.calls.append(k)
+
+
 SECTIONS = [
     (section_integers, 100),
     (section_loops, 80),
@@ -932,6 +1018,17 @@ def build_program(seed):
         k = p.next_id
         p.next_id += 1
         section_nan_bits(p, k)
+    # Tuples come after the NaN bits, from a source of their own, so that the sections above are those of earlier
+    # versions.
+    p.random = random.Random(f"tuples {seed}")
+    if p.chance(75):
+        k = p.next_id
+        p.next_id += 1
+        section_tuples(p, k)
+        # Its declaration stays last, so the sections above keep their text; its call goes first, so that a
+        # fault trap in an earlier section cannot end the run before the tuples have run.
+        p.calls.remove(k)
+        p.calls.insert(0, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)
     calls = "\n".join(
         f"        check = mix(check, s{k}_run(size, faults));" for k in p.calls)
