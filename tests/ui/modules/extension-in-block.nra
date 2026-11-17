@@ -1,0 +1,4 @@
+// let.extension belongs to a file or a module, not a block (edge case 66).
+let use = func {
+    let.extension twice = func(value: int) -> int => value * 2;
+};

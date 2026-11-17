@@ -43,6 +43,7 @@ Errors about the grammar.
 | [E0214](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0214.md) | parameter without a type |
 | [E0225](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0225.md) | positional argument after a named argument |
 | [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
+| [E0228](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0228.md) | malformed extension declaration or extension import |
 
 ## E03xx: Names
 
@@ -61,6 +62,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0309](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0309.md) | cyclic declaration |
 | [E0310](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0310.md) | misuse of the discard name '_' |
 | [E0311](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0311.md) | reserved name |
+| [E0315](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0315.md) | ambiguous extension function |
+| [E0316](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0316.md) | extension function used without a call |
 
 ## E04xx: Types and bindings
 
@@ -122,6 +125,7 @@ Errors about types, values, calls, and statements.
 | [E0483](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0483.md) | argument supplied twice |
 | [E0484](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0484.md) | labels are not available for this call |
 | [E0485](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0485.md) | default value is not a constant |
+| [E0488](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0488.md) | invalid extension function |
 
 ## E05xx: Classes and lifecycle
 

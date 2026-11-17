@@ -739,6 +739,7 @@ Attributed attributed_fixture(const Environment& environment, bool attributes = 
             }
         }
         check(variant_default, "the linked program has an enum parameter for a variant default");
+        set_attribute(s[a.sum_to], AttributeId::FunctionExtension, attribute_bool(true));
     }
     if (deferred) {
         for (const auto local : {a.step, a.point_local}) {
@@ -808,6 +809,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::HostEffects, 11, "host.effects", on_function, false, "[b b b b]"},
         {AttributeId::ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]"},
         {AttributeId::ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s"},
+        {AttributeId::FunctionExtension, 14, "function.extension", on_function, false, "b"},
     };
     check_equal(attribute_registry().size(), rows.size(), "registered attributes");
     for (const auto& row : rows) {
@@ -816,7 +818,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
                   info->repeats == row.repeats && info->schema == row.schema,
               std::string(row.name) + " differs from the documented registry");
     }
-    check(find_attribute_info(0) == nullptr && find_attribute_info(14) == nullptr, "ids 0 and 14 are unregistered");
+    check(find_attribute_info(0) == nullptr && find_attribute_info(15) == nullptr, "ids 0 and 15 are unregistered");
     check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
 
     // Schemas accept the payloads of the helpers and reject other shapes.
@@ -997,6 +999,11 @@ NEURA_TEST(nir, verifier_checks_attributes_and_deferred_initialization) {
     program = base.program;
     program.symbols[base.sum_to].variadic = VariadicKind::Typed;
     expect_issue(program, "belongs to a parameter of a function without a variadic parameter");
+    // An extension function has a receiver parameter.
+    program = base.program;
+    set_attribute(program.symbols[base.main], AttributeId::FunctionExtension, attribute_bool(true));
+    program.symbols[base.main].parameters.clear();
+    expect_issue(program, "an extension function needs a receiver parameter");
 
     // Registry rules.
     program = base.program;

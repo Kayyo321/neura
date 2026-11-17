@@ -1,0 +1,7 @@
+error[E0228]: malformed extension declaration
+ --> $DIR/extension-set-discard.nra:2:5
+  |
+2 | let.extensions _ = import:App.Words;
+  |     ^^^^^^^^^^ an extension set needs an alias, which calls its functions when they are ambiguous
+
+For more information about this error, try `neura explain E0228`.

@@ -506,6 +506,17 @@ private:
                           bool infer_result);
     static bool untyped_lambda_expr(const Expr& expr);
     std::string function_text(const IrType& type) const;
+    // Extension sets.
+    std::map<std::string, std::vector<SymbolId>, std::less<>> extension_index_;
+    std::size_t extensions_indexed_ = 0;
+    void check_extension(SymbolId function, const Declaration& decl);
+    const std::vector<SymbolId>& extension_functions(std::string_view name);
+    SymbolId extension_group(SymbolId function) const;
+    std::vector<std::pair<SymbolId, SymbolId>> enabled_extension_sets(const Context& context);
+    bool finds_member(const IrNode& receiver, std::string_view name, const Context& context, const Span& span) const;
+    bool accepts_receiver(SymbolId function, const IrType& type);
+    std::optional<IrNode> extension_member(const Expr& expr, const IrNode& receiver, Context& context, bool for_call);
+    IrNode extension_call(const Expr& expr, IrNode callee, Context& context, const IrType* expected);
     static bool lambda_fits(const Expr& expr, const IrType& expected);
 };
 
@@ -1749,6 +1760,7 @@ void Lowering::resolve(SymbolId id) {
             }
         }
         record_defaults(id, decl, ctx);
+        check_extension(id, decl);
         if (!decl.has_body && symbol(symbol(id).owner).kind != SymbolKind::Module &&
             !class_or_interface(symbol(symbol(id).owner).kind))
             throw Diagnostic(decl.span, "only class, interface or module members may omit a function body")
@@ -2130,6 +2142,7 @@ IrNode Lowering::select(const Expr& expr, Context& context, bool for_call) {
             return wrapped_member(expr, *builtin, context);
     }
     auto receiver = expression(operand, context);
+    if (auto extension = extension_member(expr, receiver, context, for_call)) return std::move(*extension);
     auto nominal = receiver_type(receiver.type);
     if (nominal.kind != TypeKind::Object &&
         (receiver.op != IrOp::Reference ||
@@ -2452,6 +2465,8 @@ IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected
         symbol(callee.symbol).kind == SymbolKind::Variant) {
         return enum_construct(callee, expr, context);
     }
+    if (callee.type.kind == TypeKind::Callable && callee.type.name == "[extension]")
+        return extension_call(expr, std::move(callee), context, expected);
     if (is_function_value(callee.type)) {
         reject_labels(expr, 1, "a call of a function value");
         if (!expr.type_arguments.empty()) throw Diagnostic(expr.span, "function values take no type arguments")
@@ -2753,7 +2768,12 @@ SymbolId Lowering::select_overload(SymbolId group, const Expr& expr, std::size_t
         const auto& input = expr.operands[i];
         inputs.emplace_back();
         defaults.emplace_back();
-        if (!contextual(input)) {
+        if (const auto lowered = inferred_.find(&expr);
+            lowered != inferred_.end() && i < lowered->second.size() && lowered->second[i]) {
+            // Lowered before the call, such as the receiver of an extension call.
+            inputs.back() = std::move(*lowered->second[i]);
+            lowered->second[i].reset();
+        } else if (!contextual(input)) {
             inputs.back() = value(input, context);
         } else if (input.kind != ExprKind::Nil && !target_typed(input) && !untyped_lambda_expr(input)) {
             // Lowered again below with the chosen parameter type.

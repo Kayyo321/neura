@@ -65,3 +65,7 @@ NEURA_ATTRIBUTE(HostEffects, 11, "host.effects", on_function, false, "[b b b b]"
 NEURA_ATTRIBUTE(ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]")
 // A default that is an enum variant without payload.
 NEURA_ATTRIBUTE(ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s")
+// An extension function (docs/design/Calls030.md, Extension sets): a
+// function that a module enabled with `let.extensions` may call as a member
+// of its first parameter's type. The value is true.
+NEURA_ATTRIBUTE(FunctionExtension, 14, "function.extension", on_function, false, "b")

@@ -1,0 +1,26 @@
+// Extension functions that are accepted (docs/design/Calls030.md, edge cases
+// 57, 59, 60, 61, 62, 63, 68 and 69). The sets are in app/ of
+// accepted-extensions.files.
+let.extensions words = import:App.Words;
+let.extensions shapes = import:App.Shapes;
+let.extensions plain = import:App.Plain;
+let path = import:Std.Fs.Path;
+
+let Local = module (
+    let.extension twice = func(value: int) -> int => value * 2;
+    export let use = func -> int => 4.twice();
+);
+
+let use = func(square: shapes.Square, sized: shapes.Sized, box: shapes.Box, items: int[list], file: path.Path) {
+    let loud = "ready".shout();
+    let qualified = words.shout("ready", marks: 2);
+    let member = box.label();
+    let hidden = box.secret();
+    let companion = "a".concat("b");
+    let base = square.doubled();
+    let through_interface = square.area();
+    let interface_receiver = sized.area();
+    let counted = items.count();
+    let extension = 1;
+    let suffix = file.extension();
+};

@@ -610,11 +610,21 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
     Inference inference;
     std::vector<std::pair<std::size_t, IrType>> literals;
     std::vector<std::optional<IrNode>> lowered_arguments(expr.operands.size());
+    // Arguments lowered before the call, such as an extension call's receiver.
+    if (const auto earlier = inferred_.find(&expr); earlier != inferred_.end()) {
+        lowered_arguments = std::move(earlier->second);
+        lowered_arguments.resize(expr.operands.size());
+        inferred_.erase(earlier);
+    }
     for (std::size_t i = 0; i < count; ++i) {
         if (!filled[i]) continue;
         const auto declared = substitute(*filled[i], replacements);
         if (!mentions(declared, generics)) continue;
         const auto& input = expr.operands[first + i];
+        if (lowered_arguments[first + i]) {
+            unify(declared, lowered_arguments[first + i]->type, generics, inference, input.span);
+            continue;
+        }
         if (untyped_lambda_expr(input)) continue;
         if (contextual_argument(input)) {
             if (numeric_argument(input) && declared.kind == TypeKind::TypeParameter)
@@ -756,6 +766,7 @@ IrNode Lowering::argument_value(const Expr& expr, std::size_t index, const IrTyp
         found->second[index].reset();
         if (std::ranges::none_of(found->second, [](const auto& item) { return item.has_value(); }))
             inferred_.erase(found);
+        if (is_primitive_reference(expected)) return bind_reference(std::move(lowered), expected);
         if (!assignable(lowered.type, expected)) {
             if (const auto method = cast_method(lowered.type, expected, context); method != no_symbol)
                 return cast_call(method, std::move(lowered), expected, expr.operands[index].span);
@@ -874,4 +885,273 @@ IrNode Lowering::untyped_lambda(const Declaration& declaration, Context& context
     program_.bodies.push_back({method, std::move(instructions)});
     signature.push_back(*result);
     return closure_value(callable_type(std::move(signature), span), environment, span);
+}
+
+// Extension sets (Calls030.md, Extension sets). An extension function is an
+// ordinary function marked function.extension. `value.name(arguments)` calls
+// one when the static type of `value` has no accessible member and no
+// primitive companion function of that name, and exactly one enabled
+// extension function named `name` accepts the receiver. The functions a
+// file or module enables are its own and those of the modules it imports
+// with `let.extensions`.
+
+void Lowering::check_extension(SymbolId function, const Declaration& decl) {
+    if (!decl.extension) return;
+    const auto& params = symbol(function).parameters;
+    if (params.empty()) return;  // E0228 in the parser
+    const auto& receiver = symbol(params.front());
+    const auto& type = receiver.type;
+    std::optional<std::string> reason;
+    if (decl.parameters.front().variadic) reason = "the receiver cannot be a variadic parameter";
+    else if (type.kind == TypeKind::Void) reason = "the receiver cannot have type void";
+    else if (is_function_value(type)) reason = "the receiver cannot have a function type";
+    else if (type.kind == TypeKind::TypeParameter && !symbol(type.symbol).bound)
+        reason = "the receiver cannot be a bare type parameter without a bound";
+    if (reason)
+        throw Diagnostic(receiver.span, "invalid extension function").with_code("E0488").label(*reason)
+            .help("an extension function extends one type, named by its first parameter");
+    set_attribute(symbol(function), AttributeId::FunctionExtension, attribute_bool(true));
+}
+
+const std::vector<SymbolId>& Lowering::extension_functions(std::string_view name) {
+    // Source declarations are seen through their syntax, prebuilt ones
+    // through the attribute; new symbols are indexed as they appear.
+    for (; extensions_indexed_ < program_.symbols.size(); ++extensions_indexed_) {
+        const auto id = static_cast<SymbolId>(extensions_indexed_);
+        const auto& item = symbol(id);
+        if (item.kind != SymbolKind::Function) continue;
+        const auto* declaration = id < entries_.size() ? entries_[id].declaration : nullptr;
+        if ((declaration && declaration->extension) || has_attribute(item, AttributeId::FunctionExtension))
+            extension_index_[item.name].push_back(id);
+    }
+    static const std::vector<SymbolId> none;
+    const auto found = extension_index_.find(name);
+    return found == extension_index_.end() ? none : found->second;
+}
+
+// The module or file that declares `function`, and the group it belongs to.
+SymbolId Lowering::extension_group(SymbolId function) const {
+    const auto owner = symbol(function).owner;
+    if (owner == no_symbol || owner >= entries_.size()) return function;
+    const auto found = entries_[owner].names.find(symbol(function).name);
+    return found != entries_[owner].names.end() && symbol(found->second).kind == SymbolKind::Function
+        ? found->second : function;
+}
+
+// The enabled sets in the lexical scopes of `context`: each scope's own
+// functions, and the modules its `let.extensions` declarations import, with
+// their aliases.
+std::vector<std::pair<SymbolId, SymbolId>> Lowering::enabled_extension_sets(const Context& context) {
+    std::vector<std::pair<SymbolId, SymbolId>> result;
+    for (auto scope = lexical_owner(context); scope != no_symbol; scope = symbol(scope).owner) {
+        const auto kind = symbol(scope).kind;
+        if (kind != SymbolKind::Module && kind != SymbolKind::File) continue;
+        result.emplace_back(scope, no_symbol);
+        if (scope >= entries_.size()) continue;
+        const auto names = entries_[scope].names;
+        for (const auto& [name, alias] : names) {
+            const auto* declaration = alias < entries_.size() ? entries_[alias].declaration : nullptr;
+            if (!declaration || !declaration->extension_set) continue;
+            resolve(alias);
+            if (symbol(alias).type.kind == TypeKind::Module) result.emplace_back(symbol(alias).type.symbol, alias);
+        }
+    }
+    return result;
+}
+
+// Whether `value.name` finds something before extensions do: a member of the
+// static type or an intrinsic member, or a primitive companion function.
+bool Lowering::finds_member(const IrNode& receiver, std::string_view name, const Context& context,
+                            const Span& span) const {
+    const auto nominal = receiver_type(receiver.type);
+    if (nominal.kind != TypeKind::Object && intrinsic_value_member(name) && supports_value_members(program_, nominal))
+        return true;
+    if (nominal.kind == TypeKind::String && (name == "byte_length" || name == "byte_at" || name == "slice"))
+        return true;
+    if (nominal.kind == TypeKind::Float && name == "to_bits") return true;
+    if (collection(nominal))
+        return name == "length" ||
+               (nominal.kind == TypeKind::List && (name == "version" || name == "append" || name == "remove_at"));
+    if (nominal.kind == TypeKind::Object) {
+        const bool exported = !inside(lexical_owner(context), nominal.symbol);
+        return value_member(receiver.type, name, exported) != no_symbol;
+    }
+    if (nominal.kind == TypeKind::Module || nominal.kind == TypeKind::Enum) return true;
+    if (const auto wrapper = primitive_wrapper(nominal)) {
+        const auto file = library_files_.find(wrapper->path);
+        if (file == library_files_.end()) {
+            // The companion is loaded on demand, and lowering starts again
+            // with it, as wrapped_member asks for it.
+            MissingPrimitiveWrapper missing(span, "type " + describe(nominal) + " has no member '" + std::string(name) + "'",
+                                            std::string(wrapper->path));
+            missing.with_code("E0305");
+            throw missing;
+        }
+        const auto module = own_member(file->second, wrapper->module);
+        if (module == no_symbol) return false;
+        const auto method = member(module, name, true);
+        return method != no_symbol && symbol(method).kind == SymbolKind::Function;
+    }
+    return false;
+}
+
+// Whether the first parameter of `function` accepts a receiver of `type`: an
+// equal type, a base class or interface of it, the referent of a `&T`, or a
+// type that inference solves.
+bool Lowering::accepts_receiver(SymbolId function, const IrType& type) {
+    resolve(function);
+    const auto& params = symbol(function).parameters;
+    if (params.empty()) return false;
+    auto expected = symbol(params.front()).type;
+    if (is_primitive_reference(expected)) return reference_field(expected) != no_symbol &&
+        symbol(reference_field(expected)).type == type;
+    const auto& generics = symbol(function).generics;
+    if (mentions(expected, generics)) {
+        Inference inference;
+        SpeculativeDiagnostics speculative;
+        try {
+            unify(expected, type, generics, inference, symbol(function).span);
+        } catch (const Diagnostic&) {
+            return false;
+        }
+        Substitution solved;
+        for (const auto& [generic, solution] : inference.solutions)
+            if (solution) solved.emplace(generic, solution->type);
+        expected = substitute(expected, solved);
+        if (mentions(expected, generics)) return false;
+        for (const auto& [generic, solution] : solved) {
+            const auto& parameter = symbol(generic);
+            if (parameter.bound && !assignable(solution, substitute(*parameter.bound, solved))) return false;
+        }
+    }
+    return expected == type || (class_reference(expected) && assignable(type, expected));
+}
+
+std::optional<IrNode> Lowering::extension_member(const Expr& expr, const IrNode& receiver, Context& context,
+                                                 bool for_call) {
+    const auto& named = extension_functions(expr.text);
+    if (named.empty()) return std::nullopt;
+    // Only a value has extension members, not a module, a type or an alias.
+    if (receiver.op == IrOp::Reference && receiver.symbol != no_symbol &&
+        symbol(receiver.symbol).kind != SymbolKind::Variant)
+        return std::nullopt;
+    if (receiver.type.kind == TypeKind::Module) return std::nullopt;
+    if (finds_member(receiver, expr.text, context, expr.span)) return std::nullopt;
+    const auto sets = enabled_extension_sets(context);
+    struct Candidate {
+        SymbolId group;
+        SymbolId alias;
+    };
+    std::vector<Candidate> candidates;
+    std::vector<SymbolId> elsewhere;
+    for (const auto function : named) {
+        const auto owner = symbol(function).owner;
+        const auto set = std::ranges::find_if(sets, [&](const auto& entry) { return entry.first == owner; });
+        const bool own = set != sets.end() && set->second == no_symbol;
+        if (set == sets.end() || (!own && !symbol(function).exported)) {
+            if (symbol(function).exported) elsewhere.push_back(function);
+            continue;
+        }
+        const auto group = extension_group(function);
+        if (std::ranges::any_of(candidates, [&](const Candidate& c) { return c.group == group; })) continue;
+        bool accepts = accepts_receiver(group, receiver.type);
+        for (const auto branch : entries_[group].overloads) accepts = accepts || accepts_receiver(branch, receiver.type);
+        if (accepts) candidates.push_back({group, set->second});
+    }
+    if (candidates.empty()) {
+        if (elsewhere.empty()) return std::nullopt;
+        // Edge case 57: the member is unknown, and an imported module that
+        // is not enabled here exports an extension function of that name.
+        // The import that names a module exporting it, as the set would.
+        std::string path;
+        for (auto scope = lexical_owner(context); scope != no_symbol && path.empty(); scope = symbol(scope).owner) {
+            if (scope >= entries_.size()) continue;
+            for (const auto& [name, alias] : entries_[scope].names) {
+                const auto* declaration = alias < entries_.size() ? entries_[alias].declaration : nullptr;
+                if (!declaration || !declaration->initializer || declaration->initializer->kind != ExprKind::Import ||
+                    symbol(alias).kind != SymbolKind::Import)
+                    continue;
+                const auto target = symbol(alias).type.symbol;
+                if (std::ranges::any_of(elsewhere, [&](SymbolId f) { return symbol(f).owner == target; })) {
+                    path = declaration->initializer->import_path ? "\"" + *declaration->initializer->import_path + "\""
+                                                                  : declaration->initializer->text;
+                    break;
+                }
+            }
+        }
+        const auto help = path.empty()
+            ? "'" + expr.text + "' is an extension function of the module " +
+                  symbol(symbol(elsewhere.front()).owner).name +
+                  ", whose set this file or module does not enable; a set is enabled with 'let.extensions'"
+            : "'" + expr.text + "' is an extension function of " + path +
+                  "; enable its set in this file or module with 'let.extensions <alias> = import:" + path + ";'";
+        auto error = Diagnostic(expr.span, "unknown or inaccessible member '" + expr.text + "' of " +
+                                               describe(receiver_type(receiver.type)))
+            .with_code("E0305")
+            .label(describe(receiver_type(receiver.type)) + " has no member '" + expr.text + "'")
+            .help(help);
+        throw error;
+    }
+    if (candidates.size() > 1) {
+        auto error = Diagnostic(expr.span, "ambiguous extension function '" + expr.text + "'").with_code("E0315")
+            .label(std::to_string(candidates.size()) + " enabled extension functions accept " +
+                   describe(receiver.type));
+        for (const auto& candidate : candidates) {
+            const auto from = candidate.alias == no_symbol ? std::string("declared here")
+                                                           : "enabled by the set '" + symbol(candidate.alias).name + "'";
+            error.label(name_span(candidate.group), "'" + expr.text + "' " + from);
+        }
+        const auto& first = candidates.front();
+        error.help(first.alias == no_symbol
+                       ? std::string("call one of them as an ordinary function, with the receiver first")
+                       : "call one through its set's alias, as in '" + symbol(first.alias).name + "." + expr.text +
+                             "(receiver, ...)'");
+        throw error;
+    }
+    if (!for_call)
+        throw Diagnostic(expr.span, "an extension function is not a bound method").with_code("E0316")
+            .label("'" + expr.text + "' is an extension function")
+            .help(candidates.front().alias == no_symbol
+                      ? "call it, or pass '" + expr.text + "' itself as a function value"
+                      : "call it, or pass '" + symbol(candidates.front().alias).name + "." + expr.text + "'");
+    auto result = node(IrOp::Reference, expr.span, {TypeKind::Callable, "[extension]", candidates.front().group, {}});
+    result.symbol = candidates.front().group;
+    result.operands.push_back(receiver);
+    return result;
+}
+
+// `value.name(arguments)` as the ordinary call `name(value, arguments)`:
+// the receiver, already evaluated once, is the first argument.
+IrNode Lowering::extension_call(const Expr& expr, IrNode callee, Context& context, const IrType* expected) {
+    const auto target = callee.symbol;
+    Expr call = expr;
+    call.operands.insert(call.operands.begin() + 1, expr.operands.front().operands.front());
+    if (!call.labels.empty()) {
+        call.labels.insert(call.labels.begin() + 1, std::string{});
+        call.label_spans.insert(call.label_spans.begin() + 1, Span{});
+    }
+    std::vector<std::optional<IrNode>> receiver(call.operands.size());
+    receiver[1] = std::move(callee.operands.front());
+    inferred_[&call] = std::move(receiver);
+    resolve(target);
+    auto result = node(IrOp::Call, expr.span);
+    result.symbol = target;
+    const auto owner = symbol(target).owner;
+    if (symbol(owner).kind == SymbolKind::Module) {
+        // A module's function is called with the module as its static
+        // qualifier, as `alias.name(value, ...)` calls it.
+        result.op = IrOp::VirtualCall;
+        auto module = node(IrOp::Reference, expr.span, symbol(owner).type);
+        module.symbol = owner;
+        result.operands.push_back(std::move(module));
+    }
+    Substitution replacements;
+    if (!symbol(target).generics.empty()) {
+        replacements = call_type_arguments(target, call, {}, context, expected);
+        for (const auto generic : symbol(target).generics) result.type_arguments.push_back(replacements.at(generic));
+    }
+    result.symbol = select_overload(target, call, 1, replacements, context, result);
+    result.type = substitute(symbol(result.symbol).type, replacements);
+    inferred_.erase(&call);
+    return finish_call(std::move(result));
 }

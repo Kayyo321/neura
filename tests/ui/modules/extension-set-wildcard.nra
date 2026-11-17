@@ -1,0 +1,2 @@
+// An extension set names one module (edge case 67).
+let.extensions words = import:App.*;

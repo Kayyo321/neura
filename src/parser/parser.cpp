@@ -815,8 +815,32 @@ private:
             expect("let");
         }
         if (match(".")) {
-            if (!result.constant && match("promote")) {
+            const auto malformed_extension = [&](const Span& word, const std::string& reason) {
+                return Diagnostic(word, "malformed extension declaration").with_code("E0228").label(reason);
+            };
+            if (current().kind == TokenKind::Identifier &&
+                (current().text == "extension" || current().text == "extensions")) {
+                // `extension` and `extensions` are words only directly after
+                // `let.` (Calls030.md, Grammar).
+                const auto& word = advance();
+                result.extension = word.text == "extension";
+                result.extension_set = !result.extension;
+                result.extension_word = word.span;
+                const auto form = "'let." + word.text + "'";
+                if (result.constant)
+                    throw malformed_extension(word.span, form + " is written with 'let', not 'const'");
+                if (result.static_member)
+                    throw malformed_extension(word.span, form + " takes no 'static'");
+                if (block_depth_ > 0)
+                    throw malformed_extension(word.span, form + " belongs to a file or a module, not a block");
+                if (owner == Declaration::Kind::Class || owner == Declaration::Kind::Interface)
+                    throw malformed_extension(word.span, form + " belongs to a file or a module, not a class");
+                if (at(".")) throw malformed_extension(word.span, form + " combines with no other form");
+            } else if (!result.constant && match("promote")) {
                 result.promote_import = true;
+                if (at(".") && next_is_word(1, "extensions"))
+                    throw Diagnostic(tokens_[cursor_ + 1].span, "malformed extension declaration").with_code("E0228")
+                        .label("an extension set is not promoted; call its functions as members or through its alias");
             } else if (!result.constant && at("as")) {
                 if (owner != Declaration::Kind::Class)
                     throw Diagnostic(current().span, "a cast declaration requires a class").with_code("E0512");
@@ -856,6 +880,7 @@ private:
                     branch.constant = result.constant;
                     branch.exported = result.exported;
                     branch.override_member = result.override_member;
+                    branch.extension = result.extension;
                     branch.static_member = result.static_member;
                     if (result.cast_target) {
                         expect("as");
@@ -992,6 +1017,8 @@ private:
                 .help("write ': T' after the name for its type, and '= value' for its value");
         }
 
+        if (result.extension || result.extension_set) check_extension_form(result);
+
         // Every declaration ends with ';', including one whose value is a body.
         const auto& final_branch = result.overloads.empty() ? result : result.overloads.back();
         const bool body_value = (final_branch.has_body && !expression_body) ||
@@ -1005,6 +1032,32 @@ private:
         if (result.overloads.empty()) result.span = span_from(start);
         if (owner) accessor_clauses(result);
         return result;
+    }
+
+    // `let.extension` declares a function with a receiver parameter, and
+    // `let.extensions` imports a module by an alias (Calls030.md, E0228).
+    static void check_extension_form(const Declaration& declaration) {
+        const auto& word = *declaration.extension_word;
+        const auto malformed = [&](const std::string& reason) {
+            return Diagnostic(word, "malformed extension declaration").with_code("E0228").label(reason);
+        };
+        if (declaration.extension) {
+            if (declaration.kind != Declaration::Kind::Function)
+                throw malformed("'let.extension' declares a function, as in 'let.extension name = func(receiver: T)'");
+            const auto no_receiver = [](const Declaration& branch) { return branch.parameters.empty(); };
+            if (no_receiver(declaration) || std::ranges::any_of(declaration.overloads, no_receiver))
+                throw malformed("an extension function takes its receiver as its first parameter");
+            return;
+        }
+        const auto& value = declaration.initializer;
+        if (!value || value->kind != Expr::Kind::Import)
+            throw malformed("'let.extensions' imports a module, as in 'let.extensions alias = import:Module'");
+        if (!value->c_import.empty())
+            throw malformed("a C header has no extension functions");
+        if (value->text.ends_with(".*"))
+            throw malformed("an extension set names one module, not a wildcard");
+        if (declaration.name == "_")
+            throw malformed("an extension set needs an alias, which calls its functions when they are ambiguous");
     }
 
     // `last x;`: a deferred `last` binding is assigned later, so only its
@@ -1258,6 +1311,12 @@ private:
     // Each form is recognized only where no expression can begin that way.
     bool at_contextual(std::string_view word) const {
         return current().kind == TokenKind::Identifier && current().text == word;
+    }
+
+    bool next_is_word(std::size_t offset, std::string_view word) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        return token.kind == TokenKind::Identifier && token.text == word;
     }
 
     bool next_is(std::size_t offset, std::string_view symbol) const {

@@ -42,6 +42,7 @@ NEURA_DIAGNOSTIC(E0213, "malformed binding clause")
 NEURA_DIAGNOSTIC(E0214, "parameter without a type")
 NEURA_DIAGNOSTIC(E0225, "positional argument after a named argument")
 NEURA_DIAGNOSTIC(E0226, "default value on a parameter that takes none")
+NEURA_DIAGNOSTIC(E0228, "malformed extension declaration or extension import")
 
 // Names
 NEURA_DIAGNOSTIC(E0301, "duplicate local binding")
@@ -55,6 +56,8 @@ NEURA_DIAGNOSTIC(E0308, "not a namespace")
 NEURA_DIAGNOSTIC(E0309, "cyclic declaration")
 NEURA_DIAGNOSTIC(E0310, "misuse of the discard name '_'")
 NEURA_DIAGNOSTIC(E0311, "reserved name")
+NEURA_DIAGNOSTIC(E0315, "ambiguous extension function")
+NEURA_DIAGNOSTIC(E0316, "extension function used without a call")
 
 // Types and bindings
 NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
@@ -112,6 +115,7 @@ NEURA_DIAGNOSTIC(E0482, "unknown argument label")
 NEURA_DIAGNOSTIC(E0483, "argument supplied twice")
 NEURA_DIAGNOSTIC(E0484, "labels are not available for this call")
 NEURA_DIAGNOSTIC(E0485, "default value is not a constant")
+NEURA_DIAGNOSTIC(E0488, "invalid extension function")
 
 // Classes, lifecycle, and accessors
 NEURA_DIAGNOSTIC(E0501, "invalid static member")

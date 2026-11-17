@@ -1,0 +1,2 @@
+// An extension set needs an alias (edge case 67).
+let.extensions _ = import:App.Words;

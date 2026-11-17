@@ -435,6 +435,11 @@ private:
             case AttributeId::ParameterDefaultVariant:
                 check_parameter_default(id, entry, attribute);
                 break;
+            case AttributeId::FunctionExtension:
+                if (entry.parameters.empty())
+                    report(entry.span, "an extension function needs a receiver parameter, and " + name(id) +
+                                           " has none");
+                break;
             default:
                 break;
             }

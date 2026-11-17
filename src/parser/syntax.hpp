@@ -256,6 +256,13 @@ struct Declaration {
     bool untyped_parameters{};
     // Whether the result type was written with `->`.
     bool result_written{};
+    // `let.extension name = func(receiver: T, ...)` declares an extension
+    // function, and `let.extensions alias = import:Module;` is an import
+    // that enables a module's extension functions (docs/design/Calls030.md).
+    // `extension_word` is the word after `let.`.
+    bool extension{};
+    bool extension_set{};
+    std::optional<Span> extension_word{};
 };
 
 struct ResolvedImport {

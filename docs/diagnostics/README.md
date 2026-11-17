@@ -40,6 +40,7 @@ Errors about the grammar.
 | [E0214](E0214.md) | parameter without a type |
 | [E0225](E0225.md) | positional argument after a named argument |
 | [E0226](E0226.md) | default value on a parameter that takes none |
+| [E0228](E0228.md) | malformed extension declaration or extension import |
 
 ## E03xx: Names
 
@@ -58,6 +59,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0309](E0309.md) | cyclic declaration |
 | [E0310](E0310.md) | misuse of the discard name '_' |
 | [E0311](E0311.md) | reserved name |
+| [E0315](E0315.md) | ambiguous extension function |
+| [E0316](E0316.md) | extension function used without a call |
 
 ## E04xx: Types and bindings
 
@@ -119,6 +122,7 @@ Errors about types, values, calls, and statements.
 | [E0483](E0483.md) | argument supplied twice |
 | [E0484](E0484.md) | labels are not available for this call |
 | [E0485](E0485.md) | default value is not a constant |
+| [E0488](E0488.md) | invalid extension function |
 
 ## E05xx: Classes and lifecycle
 

@@ -223,6 +223,38 @@ let text = defaults.schedule("a", retrys: 1);
 ]=])
 reject("defaults-label.nra:2:[0-9]+: error\\[E0482\\]: no parameter named 'retrys'" check "${artifacts}/defaults-label.nra")
 
+# An extension set from a prebuilt module (edge case 71): the .nir module
+# records function.extension, and an importer enables it.
+file(WRITE "${source}/texts.nra" [=[
+let Texts = module (
+    export let.extension shout = func(text: string, marks: int = 1) -> string => text + "!";
+);
+]=])
+neura(emit-ir "${source}/texts.nra" -o "${artifacts}/texts.nir")
+file(WRITE "${artifacts}/texts-app.nra" [=[
+let.extensions texts = import:"texts.nir";
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("ready".shout() + " " + texts.shout("set", marks: 2));
+        return program.ExitCode.Ok;
+    };
+);
+]=])
+neura(build "${artifacts}/texts-app.nra" -o "${TEST_DIR}/texts.nvr")
+neura(run "${TEST_DIR}/texts.nvr")
+if(NOT output STREQUAL "ready! set!\n")
+    message(FATAL_ERROR "an extension set from a prebuilt module produced:\n${output}")
+endif()
+neura(emit-ir "${artifacts}/texts-app.nra" -o "${TEST_DIR}/texts-combined.nir")
+neura(build "${TEST_DIR}/texts-combined.nir" -o "${TEST_DIR}/texts-round-trip.nvr")
+file(SHA256 "${TEST_DIR}/texts.nvr" original)
+file(SHA256 "${TEST_DIR}/texts-round-trip.nvr" rebuilt)
+if(NOT original STREQUAL rebuilt)
+    message(FATAL_ERROR "a program with an extension set changed through its IR round trip")
+endif()
+
 file(WRITE "${artifacts}/missing-module.nra" [=[
 let missing = import:"first.nir".Missing;
 ]=])

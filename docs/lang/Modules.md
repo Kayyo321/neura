@@ -109,6 +109,37 @@ let dispatch = func(stub: int64, arguments: uint8[list]) -> uint8[list] {
 
 A callback is a non-generic module function whose parameters are host data and whose result is host data or void. The image includes a callback when the built program reaches a member of the module that declares it, and records it in the `CALB` table ([NVR](../runtime/NVR.md#imports-and-optional-source-maps)). `Std.DynamicForeign` uses one for [upcalls](ForeignInterop.md#upcalls).
 
+### Extension sets
+
+`let.extension name = func(receiver: T, ...) ...;` declares an extension function in a file or a module. It is an ordinary function, callable as one, that may also be called as a member of its first parameter's type. `let.extensions alias = import:Module;` is an import that also enables the extension functions the module exports, in the file or module that contains the declaration; `alias` is an ordinary import alias.
+
+<!-- example: fragment: two files; the second imports the first as App.Words -->
+```neura
+// In app/words.nra:
+let Words = module (
+    export let.extension shout = func(text: string, marks: int = 1) -> string {
+        return text + "!";
+    };
+);
+
+// In a file that uses it:
+let.extensions words = import:App.Words;
+
+let loud = "ready".shout();
+let same = words.shout("ready", marks: 2);
+```
+
+| Rule | Detail |
+| --- | --- |
+| A file or module enables its own extension functions and those of the modules it imports with `let.extensions`. | A plain `import` enables nothing. Enabling is not inherited by importers, not exported, and not available in a function body. A module without extension functions is still imported. |
+| `value.name(arguments)` looks for an extension function last. | On the static type of `value`: an accessible member of the type or its bases and an intrinsic member, then a function of the [primitive companion](Types.md#primitive-companions), then the enabled extension functions named `name` whose first parameter accepts the receiver: an equal type, a base class or interface of it, the referent of a `&T`, or a type that [inference](Polymorphism.md#type-argument-inference) solves. The first step that finds something wins, so a member of the same name hides an extension function, and a private member, which is not accessible outside its class, does not. |
+| Two enabled extension functions that accept the receiver are `E0315`. | Whatever the order of the imports and however the receiver types relate. The qualified call `alias.name(value, ...)` is the way out. The alternatives of one `or func` group are one function, chosen by the overload rules. Without a set that enables it, the member is unknown (`E0305`), with a help naming the set when an imported module exports one. |
+| The call is the ordinary call `name(value, arguments)`. | The receiver is evaluated first and once, and is the first argument; named arguments and defaults apply to the others. A nil receiver is passed, not trapped. To change a primitive receiver, the first parameter is `&T`, and the receiver obeys the borrow rules of a `&T` argument. |
+| An extension function has the access of any function of its module. | It reaches no private member of the receiver's class, adds no storage, overrides nothing, and satisfies no interface requirement. `value.name` without a call is `E0316`: an extension function is not a bound method. |
+| The forms are checked as they are written. | `let.extension` on something that is not a function, without a parameter, in a class or a block, or with `static`, and `let.extensions` on something that is not a module import, in a block, or with `promote`, a wildcard, `_`, `const` or a C header are `E0228`. A first parameter that is variadic, a bare type parameter without a bound, `void`, or a function type is `E0488`. |
+
+`extension` and `extensions` are words only directly after `let.`: a binding named `extension` and a call such as `path.extension()` keep their meaning. A prebuilt `.nir` module marks each extension function with the `function.extension` attribute ([NeuraIR format](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization)), so an importer enables its set as it enables a source module's.
+
 ## Interfaces and inheritance
 
 A module can inherit another module with `module:Base`. Its interface includes the inherited exports as well as its own. The derived module can implement inherited function signatures and use inherited implementations.

@@ -1,0 +1,3 @@
+let Other = module (
+    export let.extension shout = func(text: string) -> string => text + "?";
+);
