@@ -54,6 +54,26 @@ Count events(const IrProgram& program, SymbolId function) {
 
 Count events(const IrProgram& program, std::string_view name) { return events(program, find_symbol(program, name)); }
 
+// The events inside loops: a hoisted event would leave its loop.
+void count_in_loops(const std::vector<IrNode>& nodes, bool inside, Count& into) {
+    for (const auto& node : nodes) {
+        if (inside && node.op == IrOp::HookRead) ++into.reads;
+        if (inside && node.op == IrOp::HookAdmit) ++into.admissions;
+        const bool loop = inside || node.op == IrOp::Loop;
+        count_in_loops(node.operands, loop, into);
+        count_in_loops(node.body, loop, into);
+        count_in_loops(node.alternative, loop, into);
+    }
+}
+
+Count loop_events(const IrProgram& program, std::string_view name) {
+    Count result;
+    const auto function = find_symbol(program, name);
+    for (const auto& body : program.bodies)
+        if (body.owner == function) count_in_loops(body.instructions, false, result);
+    return result;
+}
+
 Count total(const IrProgram& program) {
     Count result;
     for (const auto& body : program.bodies) count(body.instructions, result);
@@ -180,9 +200,21 @@ NEURA_TEST(hooks, every_pass_leaves_every_event_in_place) {
         const auto issues = verify_ir(program);
         check(issues.empty(), pass + ": " + (issues.empty() ? "" : issues.front().message));
     }
+    // Case 55: the read of an unchanging local stays in its loop, one
+    // event per iteration.
+    const auto in_loop = loop_events(reference, "Passes.loop");
+    check(in_loop.reads > 0, "the loop of Passes.loop has a read event");
+    for (const auto& pass : all_pass_names()) {
+        auto program = reference;
+        OptimizationOptions options;
+        options.passes = {pass};
+        optimize(program, options);
+        check_equal(loop_events(program, "Passes.loop"), in_loop, "events inside the loop after " + pass);
+    }
     auto program = reference;
     optimize(program);
     check_equal(total(program), before, "after every pass");
+    check_equal(loop_events(program, "Passes.loop"), in_loop, "events inside the loop after every pass");
     for (const auto* name : {"Passes.twice", "Passes.loop", "Passes.discard", "Passes.dead", "Passes.caller",
                              "Passes.copy", "Passes.constant"}) {
         check_equal(events(program, name), events(reference, name), name);
