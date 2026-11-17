@@ -2,7 +2,7 @@
 
 This note fixes the desktop contracts before they are implemented: the window host, the renderer that shows the web target's bundle, the native Neura child, the typed bridge between them, windows, menus, dialogs and granted files, and packages for Windows, macOS and Linux. It is one of the notes of [the application platform](Apps030.md), which owns the matrix, the limits (`D-1` and the like), budgets and code ranges referred to here. Rows move to `docs/apps/Desktop.md` and `docs/runtime/Providers.md` in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A5. Later changes to a row are made here, with the reason.
 
 Nothing below exists in the repository. The note adds no syntax.
 
@@ -193,7 +193,7 @@ Linux x86-64 is qualified on the development machine under Xvfb. Windows, macOS 
 
 A 0.2 program has no desktop form to migrate. A prototype that served its UI from a local HTTP server loads the bundle from the application origin instead, and its endpoints become bridge operations of a contract. A prototype that passed file paths to the page passes a public reply and keeps the file behind a `GrantedFile`.
 
-## Decisions taken without the owner
+## Approved design decisions
 
 1. The window host is Electron 45.3.3, with fixed scripts shipped by the SDK.
 2. One UI bundle serves web and desktop; the bridge is a host service that a browser denies, so the transport is chosen at run time from an `Optional`.

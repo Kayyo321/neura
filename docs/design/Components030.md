@@ -2,7 +2,7 @@
 
 This note fixes the library and generation contracts that sit on [HTML factories](Html030.md): `Std.Ui` roots, state, components, events, commands and routing; `Std.Collections.Frozen.FrozenList<T>`; and typed contracts with their generated HTTP clients, server adapters and desktop bridges. It is one of the notes of [the application platform](Apps030.md), which owns the limits and code ranges referred to here. Rows move to `docs/apps/Components.md` and `docs/apps/Contracts.md` in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A3. Later changes to a row are made here, with the reason.
 
 This note adds no syntax. It depends, by name, on records and `new with`, derived JSON codecs, named arguments, `using` and `?` on a `Result`, each fixed by the note of its own milestone.
 
@@ -291,7 +291,7 @@ Each step is one commit with its targeted tests. None changes the image of a pro
 
 A program that passed an `ImmutableList` to another task or stored one as shared state copies it with `frozen.copy_of`. A program that modelled reactive values with accessor clauses moves the value into a `ui.State`; the accessors keep their ordinary meaning. Hand-written HTTP calls to a known service become a contract and a generated client.
 
-## Decisions taken without the owner
+## Approved design decisions
 
 1. There is no default equality for state: every accepted update notifies, and suppression is opt-in with an explicit function.
 2. A render happens once per turn, after all of the turn's updates.

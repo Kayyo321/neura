@@ -2,7 +2,7 @@
 
 This note fixes the backend contracts before they are implemented: the server host and its request workers, `Std.Net.Http` routes and middleware, the provider ABI that every application host service follows, TLS, `Std.Data.Sql` with SQLite and PostgreSQL, migrations, and operation. It is one of the notes of [the application platform](Apps030.md), which owns the limits (`S-1` and the like), budgets and code ranges referred to here. Rows move to `docs/apps/Backend.md` and `docs/runtime/Providers.md` in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A4. Later changes to a row are made here, with the reason.
 
 Nothing below exists in the repository: it has TCP streams and listeners and no HTTP, TLS or SQL code ([inventory](Apps030.md#inventory-of-reusable-code)). The note adds no syntax and depends, by name, on records, `using`, `?` on a `Result`, constructor shorthand and named arguments.
 
@@ -274,7 +274,7 @@ Each step is one commit with its targeted tests. None changes the image of a pro
 
 A 0.2 server built on `TcpListener` and hand-written parsing keeps working unchanged. Moving it to this model means: routes in a router, state out of globals and into the database, and one `serve` function. A program that assumed a trap would end only one task, or that a handler could keep an object for the next request, must change, because each request now has its own execution.
 
-## Decisions taken without the owner
+## Approved design decisions
 
 1. The isolation unit is a process per request with a full startup, and no reuse, as the stricter reading of trap isolation.
 2. The host, not Neura code, parses the HTTP wire and terminates TLS; routing and validation are Neura code in the worker.

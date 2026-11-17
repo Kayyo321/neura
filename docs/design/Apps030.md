@@ -11,9 +11,9 @@ This note freezes the contracts of the 0.3.0 application platform before its fir
 | [Desktop](Desktop030.md) | The window host, the native child, the bridge, packages |
 | [Projects and tools](Projects030.md) | `neura.toml`, `neura.lock`, bundles, and the `new`, `dev`, `contracts`, `build` and `package` commands |
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. A row that changes is changed here, with the reason. Rows move to the pages named under [Owning pages](#owning-pages) in the change that implements them.
+The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* specify work scheduled for A1–A6. Each milestone records implementation and qualification evidence as its checks pass. A row that changes is changed here, with the reason. Rows move to the pages named under [Owning pages](#owning-pages) in the change that implements them.
 
-Nothing in these notes is implemented. Every command, module, manifest key and host service below is a contract to build, not a description of the repository.
+A1–A6 remain pending. The [target matrix](#targets) identifies where each platform needs a recorded run. Provisional budgets await measurements of the reference application.
 
 ## Principles
 
@@ -39,7 +39,7 @@ Outside 0.3.0: a native-widget renderer, mobile, server-side rendering and hydra
 
 ### Browsers
 
-| Browser | Qualified versions | Where it is qualified |
+| Browser | Target versions | Qualification environment |
 | --- | --- | --- |
 | Chromium (Chrome, Edge) | 156 and later | This machine (headless and under Xvfb) and hosted Linux, macOS and Windows runners |
 | Firefox | 153 ESR and later | This machine and hosted runners |
@@ -49,7 +49,7 @@ The adapter needs WebAssembly with exception handling and 64-bit integers as `Bi
 
 ### Desktop
 
-| System | Architecture | Package | Where it is qualified |
+| System | Architecture | Package | Qualification environment |
 | --- | --- | --- | --- |
 | Windows 11 and Windows Server 2025 | x86-64 | `.zip` and `.msix` | A hosted Windows runner (new for the repository) |
 | macOS 15 | arm64 and x86-64 | `.app` in a `.dmg` | The hosted `macos-15` and `macos-15-intel` runners the release workflow already uses |
@@ -65,7 +65,7 @@ Looked up on 2026-11-17. Each is pinned exactly, with its license and digest, in
 | Dependency | Version | Used by | Pinned in |
 | --- | --- | --- | --- |
 | Electron | 45.3.3 (Chromium 156.0.8078.100, Node 24.22.3) | Desktop window host | [Desktop](Desktop030.md#order-of-work) step 1 |
-| Emscripten | The 7.0 line; the exact release is chosen when the toolchain is installed | Building `nvm.wasm` | A2 step 1, below |
+| Emscripten | 7.0.0 (compiler commit `777e6e5`, emsdk tag `7.0.0` at `1693ce7`) | Building `nvm.wasm` | A2 step 1, below |
 | OpenSSL | 3.5 LTS (3.5.9 at lookup) | TLS provider of the server host | [Backend](Backend030.md#order-of-work) step 3 |
 | SQLite | 3.54.1 amalgamation | SQLite provider | Backend step 5 |
 | libpq | 18.7; PostgreSQL servers 16, 17 and 18 are qualified | PostgreSQL provider | Backend step 6 |
@@ -113,7 +113,7 @@ A2's order of work:
 
 | Step | Content | Changes images |
 | --- | --- | --- |
-| 1 | Install and pin the toolchain; a CMake preset that builds `neura_nvr`, `neura_lift`, `neura_circuit` and the portable part of `neura_nvm` for `wasm32`; `TierOptions` selectable without the environment | no |
+| 1 | Record the pinned toolchain in the component lock file; a CMake preset that builds `neura_nvr`, `neura_lift`, `neura_circuit` and the portable part of `neura_nvm` for `wasm32`; `TierOptions` selectable without the environment | no |
 | 2 | `src/wasm/entry.cpp` and `hosts/web/nvm.js`: load, bind, run in slices with queued proofs, console and clock services; the conformance programs under Node | no |
 | 3 | The `bench-wall` set in `nvm.wasm` under Node and headless Chromium; the table above repeated | no |
 | 4 | The `neura.ui.*`, history and timer services ([HTML](Html030.md#host-services)); the same commits as the model host | no |
@@ -265,7 +265,7 @@ A budget is a number the release must meet, with the workload, the statistic, th
 
 | Id | Budget | Number | Workload and statistic | Measured by | Where |
 | --- | --- | ---: | --- | --- | --- |
-| B-W1 | `nvm.wasm` | 4 MiB; 1.25 MiB as Brotli level 11 | The release build. Basis: the static native executable, 4.86 MB with the code generators and native calls the browser build omits. *Provisional.* | `scripts/check-web-size.py dist/web` (new), in CI | Here, once the toolchain is installed; A2 step 2 |
+| B-W1 | `nvm.wasm` | 4 MiB; 1.25 MiB as Brotli level 11 | The release build. Basis: the static native executable, 4.86 MB with the code generators and native calls the browser build omits. *Provisional.* | `scripts/check-web-size.py dist/web` (new), in CI | Here, A2 step 2 |
 | B-W2 | `nvm.js` | 64 KiB; 20 KiB as Brotli | The shipped adapter. *Provisional.* | The same script | Here; A2 step 2 |
 | B-W3 | First load of the reference web bundle | 2 MiB transferred as Brotli | Every file `index.html` needs before its first commit. *Provisional.* | The same script, summing `bundle.json` entries marked `initial` | Here; A6 |
 | B-W4 | First usable UI | 1.0 s median, 1.5 s 95th percentile; 3.0 s median at 4 times CPU throttling | Navigation start to the mark `neura:first-commit`, cold HTTP cache, 30 loads from a local static host. *Provisional.* | `scripts/bench-web.mjs` (new; Node and the DevTools protocol, no package dependency) | Here in headless Chromium and Firefox; Safari on a hosted runner |
@@ -288,13 +288,13 @@ Published results name the hardware, system, browser, engine, driver and workloa
 
 ## What this machine can qualify
 
-Probed on 2026-11-17: x86-64, 8 cores, Debian 13, Chromium 156.0.8078.79, Firefox 153.7.0 ESR, Node 26.13.1, clang 19.1.7 (which lists a `wasm32` target but has no WebAssembly linker and no system root), Xvfb and a display, Docker 29.9.3, SQLite 3.46.1 and OpenSSL 3.5.7 development files. Both browsers were run headless, and Chromium ran a 64-bit WebAssembly addition whose result passed through `BigInt` exactly.
+Probed on 2026-11-17: x86-64, 8 cores, Debian 13, Chromium 156.0.8078.79, Firefox 153.7.0 ESR, Node 26.13.1, clang 19.1.7 (which lists a `wasm32` target but has no WebAssembly linker and no system root), Xvfb and a display, Docker 29.9.3, SQLite 3.46.1 and OpenSSL 3.5.7 development files. The local Emscripten installation reports `emcc 7.0.0` at compiler commit `777e6e5`. A2 still needs to build and run the browser NVM. Both browsers were run headless, and Chromium ran a 64-bit WebAssembly addition whose result passed through `BigInt` exactly.
 
 | Can be qualified here | Cannot be qualified here |
 | --- | --- |
 | The frontend, lowering, images and every compiler diagnostic | Safari, on any system |
 | Templates, commits and events on the model UI host, with replay | Windows and macOS desktop packages, their launch, menus, dialogs and uninstall |
-| `nvm.wasm`, once Emscripten is installed (a download the owner must allow), under Node, headless Chromium and headless Firefox | Signing and notarization on any system: there are no credentials |
+| `nvm.wasm` under Node, headless Chromium and headless Firefox after the A2 build | Signing and notarization on any system: there are no credentials |
 | Browser journeys by injected events: clicks, keys, focus, controlled inputs, history, fetch | Input method editors, screen readers and a physical keyboard: injected events do not prove them |
 | The server host, HTTPS on loopback, SQLite, and PostgreSQL 16 to 18 in containers | PostgreSQL on a remote network, and load beyond 8 cores |
 | The Linux desktop package under Xvfb: launch, window, bridge, dialogs through the test driver, process-tree cleanup | The appearance of native menus and dialogs to a person; arm64 Linux |
@@ -351,13 +351,13 @@ For the 0.3.0 migration guide:
 - A server written on `TcpListener` keeps working. To gain routes, TLS and request isolation it moves to `Std.Net.Http` and a `server` target.
 - Single-file `neura build` and `neura run` are unchanged; a project is opt-in.
 
-## Decisions taken without the owner
+## Approved design decisions
 
 1. No NeuraIR or NVR change: templates are ordinary NeuraIR plus a descriptor constant. A format change would bind the image format to a UI design that has not shipped once.
 2. The browser NVM runs function programs on the portable interpreter, by the measurement above.
 3. `nvm.wasm` is single-threaded and built with Emscripten, so that a static host needs no special headers and traps keep their C++ exceptions.
 4. JSON stays `Std.Encoding.Json`; SQL is `Std.Data.Sql`.
-5. The qualified matrix is what a runner or this machine can run: Chromium 156, Firefox 153 ESR, Safari by rule; Windows 11 x86-64, macOS 15, Ubuntu 24.04 and Debian 13.
+5. The target matrix covers what a runner or this machine can run: Chromium 156, Firefox 153 ESR, Safari by rule; Windows 11 x86-64, macOS 15, Ubuntu 24.04 and Debian 13.
 6. Electron 45.3.3, OpenSSL 3.5, SQLite 3.54.1 and libpq 18.7 are the pinned lines, from a lookup on the date above.
 7. The diagnostic ranges are split as the table shows, with free codes left in each.
 8. Every budget number marked provisional is an estimate; the rule for resolving a miss is fixed, the number is not.

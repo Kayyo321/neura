@@ -2,7 +2,7 @@
 
 This note fixes the project system before it is implemented: the project manifest `neura.toml`, the lock file `neura.lock`, the bundle a target builds to, and the commands `neura new`, `neura contracts`, `neura build --target`, `neura dev`, `neura package` and `neura run` of a bundle. It also defines the reference application and the integration milestone that qualifies the whole platform. It is one of the notes of [the application platform](Apps030.md), which owns the limits, budgets and code ranges referred to here. Rows move to `docs/apps/Projects.md` and [Tooling](../lang/Tooling.md) in the change that implements them.
 
-Status: *proposed* on 2026-11-17. The owner was away and had asked for autonomous work toward 0.3.0, so the rows are implemented as written and await the owner's confirmation. Later changes to a row are made here, with the reason.
+The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A6. Later changes to a row are made here, with the reason.
 
 The repository has no project manifest and no TOML reader today. Single-file `neura build`, `neura run` and `neura test` keep working exactly as they do; a project is something a directory opts into by containing `neura.toml`.
 
@@ -299,7 +299,7 @@ The integration milestone (A6). Each step is one commit with its targeted tests.
 
 No 0.2 workflow changes: a directory without `neura.toml` behaves as before. A multi-file program that passed `-I` roots can keep doing so, or declare them as packages. A deployment that copied a single `.nvr` can keep doing so for programs that are not applications; an application is deployed as a bundle or a package.
 
-## Decisions taken without the owner
+## Approved design decisions
 
 1. The manifest and the lock are a strict TOML subset read by new code; unknown keys are errors.
 2. Packages are source roots with declared dependencies, and target separation is the import rule `E1030`, not a tag on modules.
