@@ -7,8 +7,6 @@ namespace neura {
 
 namespace {
 
-constexpr std::size_t saturated_words = std::size_t{1} << 32;
-
 bool in_template(const IrProgram& program, SymbolId id) {
     for (auto scope = id; scope != no_symbol && scope < program.symbols.size(); scope = program.symbols[scope].owner) {
         const auto& item = program.symbols[scope];
@@ -21,17 +19,17 @@ bool in_template(const IrProgram& program, SymbolId id) {
 // The first tuple, in a pre-order walk of `type`, whose own word count is over
 // the limit. A tuple that holds an oversized tuple is not itself reported: the
 // inner one names the shape that is too large.
-const IrType* oversized(const IrType& type) {
+const IrType* oversized(const IrProgram& program, const IrType& type) {
     for (const auto& part : type.arguments) {
-        if (const auto* inner = oversized(part)) return inner;
+        if (const auto* inner = oversized(program, part)) return inner;
     }
-    if (type.kind == TypeKind::Tuple && value_words(type) > max_inline_words) return &type;
+    if (inline_value(program, type) && value_words(program, type) > max_inline_words) return &type;
     return nullptr;
 }
 
 void check_type(const IrProgram& program, const IrType& type, const Span& span) {
     if (type.kind == TypeKind::Void) return;
-    if (const auto* big = oversized(type)) throw inline_limit_diagnostic(program, *big, span);
+    if (const auto* big = oversized(program, type)) throw inline_limit_diagnostic(program, *big, span);
 }
 
 void check_node(const IrProgram& program, const IrNode& node) {
@@ -43,16 +41,6 @@ void check_node(const IrProgram& program, const IrNode& node) {
 }
 
 } // namespace
-
-std::size_t value_words(const IrType& type) {
-    if (type.kind != TypeKind::Tuple) return 1;
-    std::size_t total = 0;
-    for (const auto& element : type.arguments) {
-        total += value_words(element);
-        if (total > saturated_words) return saturated_words;
-    }
-    return total;
-}
 
 std::string describe_shape(const IrProgram& program, const IrType& type) {
     switch (type.kind) {
@@ -87,7 +75,7 @@ std::string describe_shape(const IrProgram& program, const IrType& type) {
 
 Diagnostic inline_limit_diagnostic(const IrProgram& program, const IrType& type, const Span& span) {
     const auto shape = describe_shape(program, type);
-    const auto words = value_words(type);
+    const auto words = value_words(program, type);
     auto error = Diagnostic(span, "the tuple " + shape + " has " + std::to_string(words) +
                                       " value words, more than the inline limit of " + std::to_string(max_inline_words))
                      .with_code("E0449");

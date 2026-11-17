@@ -1,6 +1,7 @@
 #pragma once
 
 #include "ir.hpp"
+#include "value_layout.hpp"
 
 #include <cstddef>
 #include <string>
@@ -11,12 +12,6 @@ namespace neura {
 // "Inline tuples and payload enums"). It is also the largest aggregate element
 // NVR 1.7 allows.
 inline constexpr std::size_t max_inline_words = 64;
-
-// The value words a value of `type` occupies wherever it is stored: a tuple's
-// elements' words, in order, with nested tuples flattened in place; every other
-// type is one word, whatever it refers to. The count saturates at 2^32, so a
-// hostile type cannot overflow it.
-std::size_t value_words(const IrType& type);
 
 // The source spelling of a tuple shape for diagnostics, with a run of equal
 // elements shortened to `T x N`, as in "[int32 x 65]".
