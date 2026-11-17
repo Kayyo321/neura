@@ -1847,9 +1847,12 @@ class RealService:
     that the socket path fits), its state, and the processes that hold a
     generation's lease, read from /proc/locks."""
 
+    created: list[Path] = []
+
     def __init__(self, home: Home):
         self.home = home
         self.run_dir = Path(tempfile.mkdtemp(prefix="neura-run-", dir="/tmp"))
+        RealService.created.append(self.run_dir)
 
     def env(self) -> dict:
         # The service refuses a launch that may use a graph device.
@@ -1896,7 +1899,32 @@ def wait_for(condition, seconds: float = 20) -> bool:
     return condition()
 
 
+def end_installed_processes(kit: Kit) -> None:
+    """Kills every process that runs an executable below the work
+    directory, such as a supervisor a failed check left behind, and removes
+    the run directories of RealService."""
+    work = str(kit.work.resolve()) + "/"
+    for entry in Path("/proc").iterdir():
+        if not entry.name.isdigit():
+            continue
+        try:
+            if os.path.realpath(entry / "exe").startswith(work):
+                os.kill(int(entry.name), 9)
+        except OSError:
+            pass
+    for directory in RealService.created:
+        shutil.rmtree(directory, ignore_errors=True)
+
+
 def suite_neurad(kit: Kit) -> None:
+    try:
+        neurad_checks(kit)
+    finally:
+        if sys.platform.startswith("linux"):
+            end_installed_processes(kit)
+
+
+def neurad_checks(kit: Kit) -> None:
     """The real neurad across a change: a supervisor and an application of
     the installed generation while `neura update` moves to a stand-in
     release. The update sends Retire through the service's control client;
