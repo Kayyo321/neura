@@ -202,7 +202,7 @@ export let Error = module (
     /// @brief The error, then each cause in order.
     #[Pure, ThreadSafe]
     export let chain = func(e: Error) -> Error[list] {
-        last result: Error[list] = [];
+        last result: Error[list] = new;
         let current = e;
         let more = true;
         while (more) {

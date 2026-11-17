@@ -50,9 +50,9 @@ let consume = func(incoming: channels.Receiver<int>, total: int, delay: int) -> 
 let run = func(label: string, delay: int) -> void {
     let [out, incoming, closer] = channels.open<int>(Capacity);
     let sum = 0;
-    let waits: int[list] = [];
+    let waits: int[list] = new;
     scope {
-        let producers: tasks.Task<int>[list] = [];
+        let producers: tasks.Task<int>[list] = new;
         for (let id: int = 1; id <= Producers; id++) {
             producers.append(spawn produce(id, out, PerProducer));
         }

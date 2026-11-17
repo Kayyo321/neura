@@ -9,7 +9,7 @@ let test = import:Std.Test;
 let HexTests = module (
     // x = (x * 1103515245 + 12345) mod 2^31; each byte is bits 16 through 23.
     let seeded_bytes = func(length: int, seed: uint64) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         let x = seed;
         for (let i = 0; i < length; i = i + 1) {
             x = (x * 1103515245 + 12345) & 2147483647;
@@ -38,10 +38,10 @@ let HexTests = module (
     };
 
     export let test_encode_lowercase = func() -> void {
-        test.assert_equal_string("", hex.encode([]));
-        test.assert_equal_string("00010f10ff", hex.encode([0, 1, 15, 16, 255]));
+        test.assert_equal_string("", hex.encode(new));
+        test.assert_equal_string("00010f10ff", hex.encode(new([0, 1, 15, 16, 255])));
         test.assert_equal_string("666f6f626172", hex.encode(strings.to_bytes("foobar")));
-        let all: uint8[list] = [];
+        let all: uint8[list] = new;
         for (let b = 0; b < 256; b = b + 1) {
             all.append(b as uint8);
         }
@@ -51,11 +51,11 @@ let HexTests = module (
     };
 
     export let test_decode_either_case = func() -> void {
-        test.assert_equal<uint8[list]>([], test.assert_ok<uint8[list]>(hex.decode("")));
+        test.assert_equal<uint8[list]>(new, test.assert_ok<uint8[list]>(hex.decode("")));
         test.assert_equal<uint8[list]>(strings.to_bytes("foobar"), test.assert_ok<uint8[list]>(hex.decode("666F6F626172")));
-        test.assert_equal<uint8[list]>([171, 205, 239, 171, 205, 239],
+        test.assert_equal<uint8[list]>(new([171, 205, 239, 171, 205, 239]),
             test.assert_ok<uint8[list]>(hex.decode("abCDefABcdEF")));
-        test.assert_equal<uint8[list]>([9, 144], test.assert_ok<uint8[list]>(hex.decode("0990")));
+        test.assert_equal<uint8[list]>(new([9, 144]), test.assert_ok<uint8[list]>(hex.decode("0990")));
     };
 
     export let test_seeded_python_vectors = func() -> void {

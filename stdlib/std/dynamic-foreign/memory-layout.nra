@@ -39,9 +39,9 @@ export let MemoryLayout = module (
         /// @brief The optional name, empty when unnamed.
         let label: string = "";
         /// @brief Struct and union members, or the one element layout of a sequence.
-        last parts: MemoryLayout[list] = [];
+        last parts: MemoryLayout[list] = new;
         /// @brief The byte offset of each part: member offsets, or 0 for a sequence element.
-        last offsets: int64[list] = [];
+        last offsets: int64[list] = new;
         /// @brief The element count of a sequence.
         last count: int64;
 
@@ -107,7 +107,7 @@ export let MemoryLayout = module (
         /// @brief The members of a struct or union in order, or the element of a sequence.
         #Pure
         export let member_layouts = func -> MemoryLayout[list] {
-            last copy: MemoryLayout[list] = [];
+            last copy: MemoryLayout[list] = new;
             for (let part in parts) {
                 copy.append(part);
             }
@@ -117,7 +117,7 @@ export let MemoryLayout = module (
         /// @brief The offsets of the members of a struct or union, in the order of member_layouts.
         #Pure
         export let member_offsets = func -> int64[list] {
-            last copy: int64[list] = [];
+            last copy: int64[list] = new;
             for (let offset in offsets) {
                 copy.append(offset);
             }
@@ -252,7 +252,7 @@ export let MemoryLayout = module (
     #Pure
     export let value = func(carrier: Carrier) -> MemoryLayout {
         last size = carrier_size(carrier);
-        return new(Shape.Value, carrier, size, size, [], [], 0);
+        return new(Shape.Value, carrier, size, size, new, new, 0);
     };
 
     /// @brief A scalar layout with an explicit size and alignment, for C types whose size the runner reports.
@@ -261,7 +261,7 @@ export let MemoryLayout = module (
         if (size != carrier_size(carrier) || alignment < 1 || (alignment & (alignment - 1)) != 0) {
             trap_with_message("invalid argument: value layout size or alignment");
         }
-        return new(Shape.Value, carrier, size, alignment, [], [], 0);
+        return new(Shape.Value, carrier, size, alignment, new, new, 0);
     };
 
     /// @brief `bytes` bytes of padding with alignment 1.
@@ -270,17 +270,17 @@ export let MemoryLayout = module (
         if (bytes < 1) {
             trap_with_message("invalid argument: padding size");
         }
-        return new(Shape.Padding, Carrier.Bool, bytes, 1, [], [], 0);
+        return new(Shape.Padding, Carrier.Bool, bytes, 1, new, new, 0);
     };
 
     /// @brief A struct with C's natural layout: each member at the next offset aligned for it, the size rounded
     /// up to the largest member alignment. Traps when two members share a nonempty name.
     export let struct_layout = func(members: ...MemoryLayout) -> MemoryLayout {
         check_names(members);
-        last offsets: int64[list] = [];
+        last offsets: int64[list] = new;
         let offset: int64 = 0;
         let alignment: int64 = 1;
-        last list_members: MemoryLayout[list] = [];
+        last list_members: MemoryLayout[list] = new;
         for (let member in members) {
             offset = align_up(offset, member.byte_alignment());
             offsets.append(offset);
@@ -298,10 +298,10 @@ export let MemoryLayout = module (
     /// alignment.
     export let union_layout = func(members: ...MemoryLayout) -> MemoryLayout {
         check_names(members);
-        last offsets: int64[list] = [];
+        last offsets: int64[list] = new;
         let size: int64 = 0;
         let alignment: int64 = 1;
-        last list_members: MemoryLayout[list] = [];
+        last list_members: MemoryLayout[list] = new;
         for (let member in members) {
             offsets.append(0);
             if (member.byte_size() > size) {
@@ -325,7 +325,7 @@ export let MemoryLayout = module (
             trap_with_message("invalid argument: element size is not a multiple of its alignment");
         }
         return new(Shape.Sequence, Carrier.Bool, elements * element.byte_size(),
-                   element.byte_alignment(), [element], [0], elements);
+                   element.byte_alignment(), new([element]), new([0]), elements);
     };
 
     /// @brief `offset` rounded up to a multiple of `alignment`.

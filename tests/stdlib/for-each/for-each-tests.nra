@@ -43,10 +43,10 @@ let ForEachTests = module (
     };
 
     export let test_lists_and_queues = func {
-        test.assert_equal_int32(10, sum<array_list.ArrayList<int>>(array_list.of<int>([1, 2, 3, 4])));
-        test.assert_equal_int32(10, sum<linked_list.LinkedList<int>>(linked_list.of<int>([1, 2, 3, 4])));
-        test.assert_equal_int32(10, sum<array_deque.ArrayDeque<int>>(array_deque.of<int>([1, 2, 3, 4])));
-        test.assert_equal_int32(10, sum<immutable_list.ImmutableList<int>>(immutable_list.of<int>([1, 2, 3, 4])));
+        test.assert_equal_int32(10, sum<array_list.ArrayList<int>>(array_list.of<int>(new([1, 2, 3, 4]))));
+        test.assert_equal_int32(10, sum<linked_list.LinkedList<int>>(linked_list.of<int>(new([1, 2, 3, 4]))));
+        test.assert_equal_int32(10, sum<array_deque.ArrayDeque<int>>(array_deque.of<int>(new([1, 2, 3, 4]))));
+        test.assert_equal_int32(10, sum<immutable_list.ImmutableList<int>>(immutable_list.of<int>(new([1, 2, 3, 4]))));
         let queue = priority_queue.create<int>(int32.compare);
         queue.enqueue(4);
         queue.enqueue(1);
@@ -64,8 +64,8 @@ let ForEachTests = module (
         sorted.add(9);
         sorted.add(1);
         test.assert_equal_int32(10, sum<tree_set.TreeSet<int>>(sorted));
-        test.assert_equal_int32(10, sum<immutable_set.ImmutableSet<int>>(immutable_set.of<int>([2, 8, 2])));
-        test.assert_equal_int32(10, sum<bit_set.BitSet>(bit_set.of([0, 4, 6])));
+        test.assert_equal_int32(10, sum<immutable_set.ImmutableSet<int>>(immutable_set.of<int>(new([2, 8, 2]))));
+        test.assert_equal_int32(10, sum<bit_set.BitSet>(bit_set.of(new([0, 4, 6]))));
     };
 
     export let test_maps = func {
@@ -92,7 +92,7 @@ let ForEachTests = module (
         sums = entry_sums<ordinal_map.OrdinalMap<int>>(ordinals);
         test.assert_equal_int32(3, sums[0]);
         test.assert_equal_int32(31, sums[1]);
-        let fixed = immutable_map.of<int, int>([[7, 70]]);
+        let fixed = immutable_map.of<int, int>(new([[7, 70]]));
         sums = entry_sums<immutable_map.ImmutableMap<int, int>>(fixed);
         test.assert_equal_int32(7, sums[0]);
         test.assert_equal_int32(70, sums[1]);
@@ -108,19 +108,19 @@ let ForEachTests = module (
 
     export let test_sequences_and_ranges = func {
         test.assert_equal_int32(10, sum<sequences.Sequence<int>>(sequences.range(0, 5)));
-        test.assert_equal_int32(6, sum<sequences.Sequence<int>>(sequences.from_list<int>([1, 2, 3])));
+        test.assert_equal_int32(6, sum<sequences.Sequence<int>>(sequences.from_list<int>(new([1, 2, 3]))));
         test.assert_equal_int32(12, sum<ranges.IntRange>(ranges.stepped(0, 7, 2)));
     };
 
     export let test_direct_loops = func {
         let total = 0;
-        for (let value in array_list.of<int>([5, 6])) {
+        for (let value in array_list.of<int>(new([5, 6]))) {
             total += value;
         }
         for (let value in ranges.of(0, 3)) {
             total += value;
         }
-        for (let value: int in bit_set.of([1, 2])) {
+        for (let value: int in bit_set.of(new([1, 2]))) {
             total += value;
         }
         test.assert_equal_int32(17, total);

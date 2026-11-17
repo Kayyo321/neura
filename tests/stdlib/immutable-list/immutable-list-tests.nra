@@ -19,7 +19,7 @@ let ImmutableListTests = module (
     };
 
     export let test_copies_at_construction = func() -> void {
-        let source: int[list] = [3, 1, 4];
+        let source: int[list] = new([3, 1, 4]);
         let items = immutable_list.of<int>(source);
         source.append(1);
         source[0] = 9;
@@ -33,16 +33,16 @@ let ImmutableListTests = module (
     };
 
     export let test_reads = func() -> void {
-        let items = immutable_list.of<int>([3, 1, 4, 1, 5]);
+        let items = immutable_list.of<int>(new([3, 1, 4, 1, 5]));
         test.assert_equal_int32(5, items.size());
         test.assert(!items.is_empty());
-        test.assert(immutable_list.of<int>([]).is_empty());
+        test.assert(immutable_list.of<int>(new).is_empty());
         test.assert_equal_int32(4, items.get(2));
         test.assert_equal_int32(3, items.first());
         test.assert_equal_int32(5, items.last());
         test.assert_equal_int32(3, test.assert_some<int>(items.first_or_none()));
         test.assert_equal_int32(5, test.assert_some<int>(items.last_or_none()));
-        let empty = immutable_list.of<int>([]);
+        let empty = immutable_list.of<int>(new);
         test.assert_none<int>(empty.first_or_none());
         test.assert_none<int>(empty.last_or_none());
         test.assert(items.contains(4));
@@ -57,12 +57,12 @@ let ImmutableListTests = module (
         test.assert_equal_int32(-1, items.index_where(func(value: int) -> bool {
             return value > 5;
         }));
-        test.assert(items.contains_all([1, 5]));
-        test.assert(!items.contains_all([2]));
+        test.assert(items.contains_all(new([1, 5])));
+        test.assert(!items.contains_all(new([2])));
     };
 
     export let test_iteration = func() -> void {
-        let items = immutable_list.of<int>([3, 1, 4]);
+        let items = immutable_list.of<int>(new([3, 1, 4]));
         let walk = items.iterator();
         test.assert(walk.has_next());
         test.assert(walk.has_next());
@@ -70,7 +70,7 @@ let ImmutableListTests = module (
         test.assert_equal_int32(1, walk.next());
         test.assert_equal_int32(4, walk.next());
         test.assert(!walk.has_next());
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         for (let value in items) {
             seen.append(value);
         }
@@ -81,7 +81,7 @@ let ImmutableListTests = module (
     };
 
     export let test_slice_and_search = func() -> void {
-        let items = immutable_list.of<int>([1, 3, 3, 5]);
+        let items = immutable_list.of<int>(new([1, 3, 3, 5]));
         test.assert_equal_string("[3, 3]", items.slice(1, 3).to_string());
         test.assert(items.slice(2, 2).is_empty());
         test.assert(items.slice(0, 4).equals(items));
@@ -91,22 +91,22 @@ let ImmutableListTests = module (
     };
 
     export let test_equality_hash_and_text = func() -> void {
-        let a = immutable_list.of<int>([1, 2]);
-        let b = immutable_list.of<int>([1, 2]);
+        let a = immutable_list.of<int>(new([1, 2]));
+        let b = immutable_list.of<int>(new([1, 2]));
         test.assert(a.equals(b));
-        test.assert(!a.equals(immutable_list.of<int>([1])));
-        test.assert(!a.equals(immutable_list.of<int>([2, 1])));
-        test.assert(!a.equals(immutable_list.of<int64>([1, 2])));
+        test.assert(!a.equals(immutable_list.of<int>(new([1]))));
+        test.assert(!a.equals(immutable_list.of<int>(new([2, 1]))));
+        test.assert(!a.equals(immutable_list.of<int64>(new([1, 2]))));
         test.assert(!a.equals(nil));
         // Same elements, different class.
-        let other = array_list.of<int>([1, 2]);
+        let other = array_list.of<int>(new([1, 2]));
         test.assert(!a.equals(other));
         test.assert(lists.same_elements<int>(a, other));
         test.assert_equal_int32(994, a.hash_code() as int);
-        test.assert_equal_int32(1, immutable_list.of<int>([]).hash_code() as int);
+        test.assert_equal_int32(1, immutable_list.of<int>(new).hash_code() as int);
         test.assert_equal_string("[1, 2]", a.to_string());
-        test.assert_equal_string("[]", immutable_list.of<string>([]).to_string());
-        let objects = immutable_list.of<class>([nil, a]);
+        test.assert_equal_string("[]", immutable_list.of<string>(new).to_string());
+        let objects = immutable_list.of<class>(new([nil, a]));
         test.assert_equal_string("[nil, [1, 2]]", objects.to_string());
         test.assert_equal_int32(1, objects.index_of(b));
     };
@@ -116,7 +116,7 @@ let ImmutableListTests = module (
         let random = model_random.seeded(99);
         let round = 0;
         while (round < 100) {
-            let model: int[list] = [];
+            let model: int[list] = new;
             let count = random.below(40);
             let i = 0;
             while (i < count) {

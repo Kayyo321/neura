@@ -12,7 +12,7 @@ export let FunctionDescriptor = module (
         /// @brief The result layout, or None for a void function.
         last result: Optional<MemoryLayout>;
         /// @brief The argument layouts.
-        last arguments: MemoryLayout[list] = [];
+        last arguments: MemoryLayout[list] = new;
 
         /// @brief Use of or of_void.
         export let init = func(result_layout: Optional<MemoryLayout>, argument_layouts: MemoryLayout[list]) {
@@ -30,7 +30,7 @@ export let FunctionDescriptor = module (
         /// @brief A copy of the argument layouts.
         #Pure
         export let argument_layouts = func -> MemoryLayout[list] {
-            last copy: MemoryLayout[list] = [];
+            last copy: MemoryLayout[list] = new;
             for (let layout in arguments) {
                 copy.append(layout);
             }
@@ -92,7 +92,7 @@ export let FunctionDescriptor = module (
 
     /// @brief The layouts of an array as a list.
     let listed = func(layouts: MemoryLayout[]) -> MemoryLayout[list] {
-        last list: MemoryLayout[list] = [];
+        last list: MemoryLayout[list] = new;
         for (let layout in layouts) {
             list.append(layout);
         }

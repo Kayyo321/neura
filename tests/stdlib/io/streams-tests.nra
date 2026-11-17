@@ -12,7 +12,7 @@ let utf8_writer = import:Std.Io.Utf8Writer;
 
 let StreamsTests = module (
     let bytes_of = func(text: string) -> uint8[list] {
-        let out: uint8[list] = [];
+        let out: uint8[list] = new;
         let i = 0;
         while (i < text.byte_length) {
             out.append(text.byte_at(i));
@@ -22,7 +22,7 @@ let StreamsTests = module (
     };
 
     let numbers = func(count: int) -> uint8[list] {
-        let out: uint8[list] = [];
+        let out: uint8[list] = new;
         let i = 0;
         while (i < count) {
             out.append((i % 251) as uint8);
@@ -45,7 +45,7 @@ let StreamsTests = module (
             if (end - position.value > piece) {
                 end = position.value + piece;
             }
-            let out: uint8[list] = [];
+            let out: uint8[list] = new;
             while (position.value < end) {
                 out.append(data[position.value]);
                 position.value = position.value + 1;
@@ -93,9 +93,9 @@ let StreamsTests = module (
     export let test_byte_buffer_content_members = func {
         let a = byte_buffer.create();
         let b = byte_buffer.create();
-        test.assert_ok<unit.Unit>(a.write([0, 255]));
-        test.assert_ok<unit.Unit>(b.write([0]));
-        test.assert_ok<unit.Unit>(b.write([255]));
+        test.assert_ok<unit.Unit>(a.write(new([0, 255])));
+        test.assert_ok<unit.Unit>(b.write(new([0])));
+        test.assert_ok<unit.Unit>(b.write(new([255])));
         let read = b.reader();
         test.assert_ok<uint8[list]>(read(1));
         test.assert(a != b);
@@ -218,13 +218,13 @@ let StreamsTests = module (
     };
 
     export let test_utf8_reader_rejects_invalid_scalars = func() -> void {
-        let overlong: uint8[list] = [192, 128];
-        let surrogate: uint8[list] = [237, 160, 128];
-        let truncated: uint8[list] = [240, 159, 153];
-        let too_large: uint8[list] = [244, 144, 128, 128];
-        let continuation: uint8[list] = [128];
-        let bad_follow: uint8[list] = [226, 65];
-        let three_overlong: uint8[list] = [224, 128, 128];
+        let overlong: uint8[list] = new([192, 128]);
+        let surrogate: uint8[list] = new([237, 160, 128]);
+        let truncated: uint8[list] = new([240, 159, 153]);
+        let too_large: uint8[list] = new([244, 144, 128, 128]);
+        let continuation: uint8[list] = new([128]);
+        let bad_follow: uint8[list] = new([226, 65]);
+        let three_overlong: uint8[list] = new([224, 128, 128]);
         test.assert(kind_of(scalar_error(overlong)) == error.IoErrorKind.InvalidData);
         test.assert(kind_of(scalar_error(surrogate)) == error.IoErrorKind.InvalidData);
         test.assert(kind_of(scalar_error(truncated)) == error.IoErrorKind.InvalidData);
@@ -248,7 +248,7 @@ let StreamsTests = module (
         test.assert_none<string>(test.assert_ok<optional.Optional<string>>(reader.read_line()));
         let lone_cr = utf8_reader.create(byte_source(bytes_of("a\rb\n")));
         test.assert_equal_string("a\rb", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(lone_cr.read_line())));
-        let invalid: uint8[list] = [104, 255, 10, 111, 107, 10];
+        let invalid: uint8[list] = new([104, 255, 10, 111, 107, 10]);
         let broken = utf8_reader.create(byte_source(invalid));
         test.assert(kind_of(test.assert_err<optional.Optional<string>>(broken.read_line())) == error.IoErrorKind.InvalidData);
         test.assert_equal_string("ok", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(broken.read_line())));
@@ -263,7 +263,7 @@ let StreamsTests = module (
         test.assert_equal_string("héllo", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
         test.assert_equal_string("wörld", test.assert_ok<string>(reader.read_to_end()));
         test.assert_equal_string("", test.assert_ok<string>(reader.read_to_end()));
-        let invalid: uint8[list] = [104, 195];
+        let invalid: uint8[list] = new([104, 195]);
         let broken = utf8_reader.create(byte_source(invalid));
         test.assert(kind_of(test.assert_err<string>(broken.read_to_end())) == error.IoErrorKind.InvalidData);
         test.assert_err<string>(utf8_reader.create(failing_source).read_to_end());

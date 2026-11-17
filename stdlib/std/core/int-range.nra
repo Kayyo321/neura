@@ -94,7 +94,7 @@ export let IntRange = module (
         /// @brief A new built-in list of the values in order.
         #Pure
         export let to_list = func -> int[list] {
-            last values: int[list] = [];
+            last values: int[list] = new;
             let current = start as int64;
             last stop = end as int64;
             last stride = step as int64;

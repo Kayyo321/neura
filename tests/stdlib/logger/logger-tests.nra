@@ -41,7 +41,7 @@ let LoggerTests = module (
     };
 
     export let test_record_format_and_levels = func() -> void {
-        let lines: string[list] = [];
+        let lines: string[list] = new;
         let log = logger.create("app.db", collector(lines), logger.LogLevel.Trace);
         log.trace("t");
         log.debug("d");
@@ -50,14 +50,14 @@ let LoggerTests = module (
         log.error("e");
         log.log(logger.LogLevel.Warn, "via log");
         log.log(logger.LogLevel.Off, "never");
-        let expected: string[list] = [
+        let expected: string[list] = new([
             "TRACE app.db: t", "DEBUG app.db: d", "INFO app.db: i", "WARN app.db: w", "ERROR app.db: e", "WARN app.db: via log"
-        ];
+        ]);
         check_lines(expected, lines);
     };
 
     export let test_threshold_and_level = func() -> void {
-        let lines: string[list] = [];
+        let lines: string[list] = new;
         let log = logger.create("svc", collector(lines), logger.LogLevel.Warn);
         log.trace("no");
         log.debug("no");
@@ -79,12 +79,12 @@ let LoggerTests = module (
         log.error("no");
         log.level = logger.LogLevel.Trace;
         test.assert(log.is_enabled(logger.LogLevel.Trace) && !log.is_enabled(logger.LogLevel.Off));
-        let expected: string[list] = ["WARN svc: yes 1", "ERROR svc: yes 2", "DEBUG svc: yes 3"];
+        let expected: string[list] = new(["WARN svc: yes 1", "ERROR svc: yes 2", "DEBUG svc: yes 3"]);
         check_lines(expected, lines);
     };
 
     export let test_log_lazy = func() -> void {
-        let lines: string[list] = [];
+        let lines: string[list] = new;
         let calls = cell.of<int>(0);
         let make = func() -> string {
             calls.value = calls.value + 1;
@@ -99,12 +99,12 @@ let LoggerTests = module (
         test.assert_equal_int32(1, calls.value);
         log.log_lazy(logger.LogLevel.Error, make);
         test.assert_equal_int32(2, calls.value);
-        let expected: string[list] = ["INFO lazy: built 1", "ERROR lazy: built 2"];
+        let expected: string[list] = new(["INFO lazy: built 1", "ERROR lazy: built 2"]);
         check_lines(expected, lines);
     };
 
     export let test_timed_records = func() -> void {
-        let lines: string[list] = [];
+        let lines: string[list] = new;
         let fixed = fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
         let log = logger.create_timed("timed", collector(lines), logger.LogLevel.Info, fixed);
         log.info("first");
@@ -116,10 +116,10 @@ let LoggerTests = module (
         other.trace("no clock");
         broken.failing = false;
         other.info("clock back");
-        let expected: string[list] = [
+        let expected: string[list] = new([
             "2023-11-14T22:13:20Z INFO timed: first", "2023-11-14T22:13:21.500Z WARN timed: second",
             "- TRACE broken: no clock", "1970-01-01T00:00:00.000001Z INFO broken: clock back"
-        ];
+        ]);
         check_lines(expected, lines);
     };
 

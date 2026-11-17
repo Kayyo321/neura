@@ -229,7 +229,7 @@ export let ReferenceMathTrig = module (
         // set z = scalbn(|x|,ilogb(x)-23)
         let e0 = (ix >> 20) - 1046; // e0 = ilogb(z)-23;
         let z = words.from_words(ix - (e0 << 20), words.low(x));
-        let tx: float64[list] = [];
+        let tx: float64[list] = new;
         for (let i = 0; i < 2; i++) {
             let chunk = (z as int) as float64;
             tx.append(chunk);
@@ -262,7 +262,7 @@ export let ReferenceMathTrig = module (
 
     /// @brief two_over_pi: 2/pi in 24-bit chunks, most significant first.
     let two_over_pi = func -> int[list] {
-        let table: int[list] = [
+        let table: int[list] = new([
             10680707, 7228996, 1387004, 2578385, 16069853, 12639074, // 0xA2F983 0x6E4E44 0x1529FC 0x2757D1 0xF534DD 0xC0DB62
             9804092, 4427841, 16666979, 11263675, 12935607, 2387514, // 0x95993C 0x439041 0xFE5163 0xABDEBB 0xC561B7 0x246E3A
             4345298, 14681673, 3074569, 13734428, 16653803, 1880361, // 0x424DD2 0xE00649 0x2EEA09 0xD1921C 0xFE1DEB 0x1CB129
@@ -274,13 +274,13 @@ export let ReferenceMathTrig = module (
             5636912, 4652155, 7056368, 13614112, 10155062, 1944035, // 0x560330 0x46FC7B 0x6BABF0 0xCFBC20 0x9AF436 0x1DA9E3
             9527646, 15080200, 6658437, 6231200, 6832269, 16767104, // 0x91615E 0xE61B08 0x659985 0x5F14A0 0x68408D 0xFFD880
             5075751, 3212806, 1398474, 7579849, 6349435, 12618859 // 0x4D7327 0x310606 0x1556CA 0x73A8C9 0x60E27B 0xC08C6B
-        ];
+        ]);
         return table;
     };
 
     /// @brief PIo2: pi/2 in 24-bit chunks, as float64 values.
     let pio2_chunks = func -> float64[list] {
-        let table: float64[list] = [
+        let table: float64[list] = new([
             float64.from_bits(4609753056584663040), // 0x3FF921FB40000000 1.57079625129699707031e+00
             float64.from_bits(4500296887714185216), // 0x3E74442D00000000 7.54978941586159635335e-08
             float64.from_bits(4393339057296375808), // 0x3CF8469880000000 5.39030252995776476554e-15
@@ -289,7 +289,7 @@ export let ReferenceMathTrig = module (
             float64.from_bits(4069606033725587456), // 0x387A252040000000 1.22933308981111328932e-36
             float64.from_bits(3955147982449410048), // 0x36E3822280000000 2.73370053816464559624e-44
             float64.from_bits(3848874662444400640) // 0x3569F31D00000000 2.16741683877804819444e-51
-        ];
+        ]);
         return table;
     };
 
@@ -313,10 +313,10 @@ export let ReferenceMathTrig = module (
         }
         let q0 = e0 - 24 * (jv + 1);
         // set up f[0] to f[jx+jk] where f[jx+jk] = ipio2[jv+jk]
-        let f: float64[list] = [];
-        let iq: int[list] = [];
-        let q: float64[list] = [];
-        let fq: float64[list] = [];
+        let f: float64[list] = new;
+        let iq: int[list] = new;
+        let q: float64[list] = new;
+        let fq: float64[list] = new;
         for (let i = 0; i < 20; i++) {
             f.append(0.0);
             iq.append(0);

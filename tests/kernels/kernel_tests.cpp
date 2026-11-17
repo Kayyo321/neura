@@ -975,11 +975,11 @@ std::map<std::string, std::vector<std::uint64_t>> read_math_vectors(const std::s
             continue;
         }
         if (current.empty()) continue;
-        if (line.find("];") != std::string::npos) {
+        if (line.find("]);") != std::string::npos) {
             current.clear();
             continue;
         }
-        // Only the rows of numbers; skip `let cases: uint64[list] = [`.
+        // Only the rows of numbers; skip `let cases: uint64[list] = new([`.
         if (line.find_first_not_of("0123456789, ") != std::string::npos) continue;
         std::string digits;
         for (char c : line + ",") {

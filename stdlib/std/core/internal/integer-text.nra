@@ -42,7 +42,7 @@ export let IntegerText = module (
     /// @brief The text of digits stored least significant first, with a leading `-` when `negative` is set.
     #Pure
     export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
-        last bytes: uint8[list] = [];
+        last bytes: uint8[list] = new;
         if (negative) {
             bytes.append(45);
         }

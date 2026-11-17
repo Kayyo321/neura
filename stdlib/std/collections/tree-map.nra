@@ -144,7 +144,7 @@ export let TreeMap = module (
 
         /// @brief Copies the keys to a new built-in list in ascending key order.
         export let keys = func -> K[list] {
-            last result: K[list] = [];
+            last result: K[list] = new;
             let node = leftmost(root);
             while (node != nil) {
                 result.append(node.key);
@@ -155,7 +155,7 @@ export let TreeMap = module (
 
         /// @brief Copies the values to a new built-in list in ascending key order.
         export let values = func -> V[list] {
-            last result: V[list] = [];
+            last result: V[list] = new;
             let node = leftmost(root);
             while (node != nil) {
                 result.append(node.value);
@@ -166,7 +166,7 @@ export let TreeMap = module (
 
         /// @brief Copies the `[key, value]` tuples to a new built-in list in ascending key order.
         export let entries = func -> [K, V][list] {
-            last result: [K, V][list] = [];
+            last result: [K, V][list] = new;
             let node = leftmost(root);
             while (node != nil) {
                 last item: [K, V] = [node.key, node.value];
@@ -215,7 +215,7 @@ export let TreeMap = module (
         /// @return The number of removed entries.
         export let remove_if = func(drop: func(K, V) -> bool) -> int {
             last expected = changes.value;
-            last chosen: K[list] = [];
+            last chosen: K[list] = new;
             let node = leftmost(root);
             while (node != nil) {
                 last removing = drop(node.key, node.value);
@@ -359,7 +359,7 @@ export let TreeMap = module (
         /// @brief Returns a new list of entries in ascending key order from `from` inclusive to `to` exclusive.
         /// Returns an empty list when `to` is at or below `from`.
         export let range = func(from: K, to: K) -> [K, V][list] {
-            last result: [K, V][list] = [];
+            last result: [K, V][list] = new;
             let node = ceiling_node(from, true);
             while (node != nil && compare(to, node.key) == ordering.Ordering.Greater) {
                 last item: [K, V] = [node.key, node.value];
@@ -371,7 +371,7 @@ export let TreeMap = module (
 
         /// @brief Copies the keys from `from` inclusive to `to` exclusive in ascending order.
         export let key_range = func(from: K, to: K) -> K[list] {
-            last result: K[list] = [];
+            last result: K[list] = new;
             let node = ceiling_node(from, true);
             while (node != nil && compare(to, node.key) == ordering.Ordering.Greater) {
                 result.append(node.key);
@@ -382,7 +382,7 @@ export let TreeMap = module (
 
         /// @brief Copies entries into a new list in descending key order.
         export let descending = func -> [K, V][list] {
-            last result: [K, V][list] = [];
+            last result: [K, V][list] = new;
             let node = rightmost(root);
             while (node != nil) {
                 last item: [K, V] = [node.key, node.value];
@@ -394,7 +394,7 @@ export let TreeMap = module (
 
         /// @brief Copies the keys into a new list in descending order.
         export let descending_keys = func -> K[list] {
-            last result: K[list] = [];
+            last result: K[list] = new;
             let node = rightmost(root);
             while (node != nil) {
                 result.append(node.key);
@@ -529,7 +529,7 @@ export let TreeMap = module (
                 return "(this collection)";
             }
             printing = true;
-            last parts: string[list] = [];
+            last parts: string[list] = new;
             let node = leftmost(root);
             while (node != nil) {
                 parts.append(node.key.to_string() + ": " + node.value.to_string());

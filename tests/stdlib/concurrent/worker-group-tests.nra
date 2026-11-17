@@ -14,7 +14,7 @@ let WorkerGroupTests = module (
     );
 
     let drain = func(source: channels.Receiver<int>) -> int[list] {
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         let more = true;
         while (more) {
             match (source.try_receive()) {

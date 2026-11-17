@@ -6,40 +6,40 @@ let UnicodeCaseTests = module (
         test.assert_equal_string("", "".to_upper_case());
         test.assert_equal_string("STRASSE FF É", "Straße ﬀ é".to_upper_case());
         test.assert_equal_string("aé", "AÉ".to_lower_case());
-        test.assert_equal_string(text.from_scalars([105, 775]), "İ".to_lower_case());
+        test.assert_equal_string(text.from_scalars(new([105, 775])), "İ".to_lower_case());
         test.assert_equal_string("ος οσα σ", "ΟΣ ΟΣΑ Σ".to_lower_case());
-        test.assert_equal_string(text.from_scalars([97, 962, 769, 33]),
-            text.from_scalars([65, 931, 769, 33]).to_lower_case());
-        test.assert_equal_string(text.from_scalars([97, 963, 39, 98]),
-            text.from_scalars([65, 931, 39, 66]).to_lower_case());
-        test.assert_equal_string(text.from_scalars([66600]), text.from_scalars([66560]).to_lower_case());
-        test.assert_equal_string(text.from_scalars([42955]), text.from_scalars([612]).to_upper_case());
-        test.assert_equal_string(text.from_scalars([93883]), text.from_scalars([93856]).to_lower_case());
+        test.assert_equal_string(text.from_scalars(new([97, 962, 769, 33])),
+            text.from_scalars(new([65, 931, 769, 33])).to_lower_case());
+        test.assert_equal_string(text.from_scalars(new([97, 963, 39, 98])),
+            text.from_scalars(new([65, 931, 39, 66])).to_lower_case());
+        test.assert_equal_string(text.from_scalars(new([66600])), text.from_scalars(new([66560])).to_lower_case());
+        test.assert_equal_string(text.from_scalars(new([42955])), text.from_scalars(new([612])).to_upper_case());
+        test.assert_equal_string(text.from_scalars(new([93883])), text.from_scalars(new([93856])).to_lower_case());
         test.assert_equal_string("I", "i".to_upper_case("en-US"));
     };
 
     export let test_turkic_case_conversion = func {
         test.assert_equal_string("ıi", "Iİ".to_lower_case("TR-tr"));
         test.assert_equal_string("İI", "iı".to_upper_case("az-Latn-AZ"));
-        test.assert_equal_string("i", text.from_scalars([73, 775]).to_lower_case("tr"));
-        test.assert_equal_string(text.from_scalars([105, 808]),
-            text.from_scalars([73, 808, 775]).to_lower_case("az"));
-        test.assert_equal_string(text.from_scalars([305, 769, 775]),
-            text.from_scalars([73, 769, 775]).to_lower_case("tr"));
+        test.assert_equal_string("i", text.from_scalars(new([73, 775])).to_lower_case("tr"));
+        test.assert_equal_string(text.from_scalars(new([105, 808])),
+            text.from_scalars(new([73, 808, 775])).to_lower_case("az"));
+        test.assert_equal_string(text.from_scalars(new([305, 769, 775])),
+            text.from_scalars(new([73, 769, 775])).to_lower_case("tr"));
         test.assert_equal_string("i", "I".to_lower_case("trs"));
     };
 
     export let test_lithuanian_case_conversion = func {
-        test.assert_equal_string(text.from_scalars([105, 775, 769]),
-            text.from_scalars([73, 769]).to_lower_case("lt-LT"));
-        test.assert_equal_string(text.from_scalars([106, 775, 769, 303, 775, 769]),
-            text.from_scalars([74, 769, 302, 769]).to_lower_case("LT"));
-        test.assert_equal_string(text.from_scalars([105, 775, 768, 105, 775, 769, 105, 775, 771]),
+        test.assert_equal_string(text.from_scalars(new([105, 775, 769])),
+            text.from_scalars(new([73, 769])).to_lower_case("lt-LT"));
+        test.assert_equal_string(text.from_scalars(new([106, 775, 769, 303, 775, 769])),
+            text.from_scalars(new([74, 769, 302, 769])).to_lower_case("LT"));
+        test.assert_equal_string(text.from_scalars(new([105, 775, 768, 105, 775, 769, 105, 775, 771])),
             "ÌÍĨ".to_lower_case("lt"));
-        test.assert_equal_string(text.from_scalars([73, 808, 769]),
-            text.from_scalars([105, 808, 775, 769]).to_upper_case("lt"));
-        test.assert_equal_string(text.from_scalars([73, 769, 775]),
-            text.from_scalars([105, 769, 775]).to_upper_case("lt"));
+        test.assert_equal_string(text.from_scalars(new([73, 808, 769])),
+            text.from_scalars(new([105, 808, 775, 769])).to_upper_case("lt"));
+        test.assert_equal_string(text.from_scalars(new([73, 769, 775])),
+            text.from_scalars(new([105, 769, 775])).to_upper_case("lt"));
     };
 
     export let test_simple_and_full_case_matching = func {

@@ -1155,7 +1155,7 @@ file(WRITE "${TEST_DIR}/tag-pure-fresh.nra" [=[
 let sorting = import:Std.Collections.Sorting;
 
 let Box = class (
-    export let items: int64[list] = [];
+    export let items: int64[list] = new;
 );
 
 let fill = func(box: Box, value: int64) {
@@ -1164,7 +1164,7 @@ let fill = func(box: Box, value: int64) {
 
 #Pure
 let smallest = func(a: int64, b: int64) -> int64 {
-    let items: int64[list] = [a, b];
+    let items: int64[list] = new([a, b]);
     sorting.sort_ascending(items);
     return items[0];
 };
@@ -1178,8 +1178,8 @@ let filled = func(value: int64) -> int64 {
 };
 ]=])
 run_success(unused check tag-pure-fresh.nra)
-check_rejection(tag-pure-helper-write "let Box = class (\n    export let items: int64[list] = [];\n);\nlet fill = func(box: Box, value: int64) {\n    box.items.append(value);\n};\n#Pure\nlet f = func(box: Box) -> int64 {\n    fill(box, 1);\n    return 0;\n};" "8:1" "E0917.*it reaches 'fill', which changes a list it did not allocate")
-check_rejection(tag-pure-stored-argument "let Box = class (\n    export let inner: int64[list] = [];\n);\n#Pure\nlet f = func(items: int64[list]) -> int64 {\n    let box = new Box();\n    box.inner = items;\n    box.inner.append(1);\n    return 0;\n};" "5:1" "E0917.*changes a list it did not allocate")
+check_rejection(tag-pure-helper-write "let Box = class (\n    export let items: int64[list] = new;\n);\nlet fill = func(box: Box, value: int64) {\n    box.items.append(value);\n};\n#Pure\nlet f = func(box: Box) -> int64 {\n    fill(box, 1);\n    return 0;\n};" "8:1" "E0917.*it reaches 'fill', which changes a list it did not allocate")
+check_rejection(tag-pure-stored-argument "let Box = class (\n    export let inner: int64[list] = new;\n);\n#Pure\nlet f = func(items: int64[list]) -> int64 {\n    let box = new Box();\n    box.inner = items;\n    box.inner.append(1);\n    return 0;\n};" "5:1" "E0917.*changes a list it did not allocate")
 # #Pure on a generic function holds for each specialization, which is checked
 # when the program is built: a call through a type parameter reaches the type
 # argument's member.

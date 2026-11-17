@@ -4,7 +4,7 @@ let program = import:Std.Program;
 
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let _ = string.decode_bytes([], "unknown");
+        let _ = string.decode_bytes(new, "unknown");
         return program.ExitCode.Ok;
     };
 );

@@ -314,7 +314,7 @@ export let Mathops = module (
 
     /// @brief Calls the variadic C function sum_ints. Each further argument is an int when it fits, a long long otherwise, a double, an int for a bool, or an address.
     export let sum_ints = func(count: int32, neura_rest: ...) -> int32 {
-        let neura_arguments: c_variadic.Argument[list] = [];
+        let neura_arguments: c_variadic.Argument[list] = new;
         neura_arguments.append(c_variadic.Argument.Signed(count as int64));
         for (let neura_argument in neura_rest) {
             neura_arguments.append(neura_argument);

@@ -90,7 +90,7 @@ export let Path = module (
             if (!is_absolute) {
                 return parts;
             }
-            last all: string[list] = ["/"];
+            last all: string[list] = new(["/"]);
             for (let part in parts) {
                 all.append(part);
             }
@@ -101,7 +101,7 @@ export let Path = module (
         /// `..` directly below the root is removed; leading `..` of a relative path are kept.
         #Pure
         export let resolve_lexically = func -> Path {
-            last kept: string[list] = [];
+            last kept: string[list] = new;
             for (let part in split(text)) {
                 if (part == "..") {
                     if (kept.length > 0 && kept[kept.length - 1] != "..") {
@@ -151,7 +151,7 @@ export let Path = module (
             while (common < mine.length && common < theirs.length && mine[common] == theirs[common]) {
                 common++;
             }
-            last parts: string[list] = [];
+            last parts: string[list] = new;
             let i = common;
             while (i < theirs.length) {
                 if (theirs[i] == "..") {
@@ -199,7 +199,7 @@ export let Path = module (
 
     /// @brief The components of `text` other than empty ones and `.`.
     let split = func(text: string) -> string[list] {
-        last parts: string[list] = [];
+        last parts: string[list] = new;
         let start = 0;
         let i = 0;
         last count = text.byte_length;

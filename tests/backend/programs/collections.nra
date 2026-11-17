@@ -9,7 +9,7 @@ let Collections = module:program.Entry (
         names[0] = "Grace";
         console.print_line(names[0] + " and " + names[1]);
 
-        let queue: int32[list] = [1];
+        let queue: int32[list] = new([1]);
         queue.append(2);
         queue.append(3);
         queue.remove_at(0);

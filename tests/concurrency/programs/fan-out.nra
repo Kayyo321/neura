@@ -27,7 +27,7 @@ let twice = func<T>(value: T, work: func(T) -> T) -> T {
 let fan_out = func(width: int) -> int {
     let sum = 0;
     scope {
-        let pending: tasks.Task<int>[list] = [];
+        let pending: tasks.Task<int>[list] = new;
         for (let i: int = 0; i < width; i++) {
             pending.append(spawn Counter.count_to("w" + i.to_string(), 3));
         }

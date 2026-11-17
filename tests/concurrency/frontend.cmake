@@ -376,7 +376,7 @@ let tasks = import:Std.Concurrent.Task;
 let work = func(x: int) -> int => x + 1;
 ]=] [=[
         scope {
-            let pending: tasks.Task<int>[list] = [];
+            let pending: tasks.Task<int>[list] = new;
             scope {
                 pending.append(spawn work(2));
             }
@@ -918,18 +918,18 @@ check_rejection(tasks_all_call_writes_a_global "${groups_import}\
 let total: int = 0;
 let add = func -> int { total = total + 1; return total; };
 " [=[
-        let calls: (func() -> int)[list] = [add];
+        let calls: (func() -> int)[list] = new([add]);
         tasks.all<int>(calls);
 ]=] "11:9"
     "the spawned call is not task-safe: it reaches 'add', which uses the reassignable binding 'total'")
 check_labels(tasks_all_call_writes_a_global
-    "\"line\":10,\"column\":45,\"primary\":false,\"label\":\"calls 'add'\""
+    "\"line\":10,\"column\":49,\"primary\":false,\"label\":\"calls 'add'\""
     "\"line\":7,\"column\":25,\"primary\":false,\"label\":\"uses the reassignable binding 'total' here\""
     "tasks.nra\",[^}]*,\"primary\":false,\"label\":\"the library starts the task here\"")
 
 check_rejection(tasks_all_ok_call_captures_an_object "${box_class}${groups_import}" [=[
         let box = new Box(1);
-        let calls: (func() -> result.Result<int>)[list] = [func() -> result.Result<int> => result.Result<int>.Ok(box.value)];
+        let calls: (func() -> result.Result<int>)[list] = new([func() -> result.Result<int> => result.Result<int>.Ok(box.value)]);
         tasks.all_ok<int>(calls);
 ]=] "14:9"
     "a value of type func\\(\\) -> Result<int32> is not transferable, so it cannot be given to a spawned task")
@@ -944,7 +944,7 @@ check_labels(tasks_all_ok_call_captures_an_object
 set(reader_declarations "let readers = import:Std.Io.Utf8Reader;
 let result = import:Std.Core.Result;
 let nothing = func(max: int) -> result.Result<uint8[list]> {
-    let empty: uint8[list] = [];
+    let empty: uint8[list] = new;
     return result.Result<uint8[list]>.Ok(empty);
 };
 let lines = func -> int => match (readers.create(nothing).read_line()) {

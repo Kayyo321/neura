@@ -130,15 +130,15 @@ Policies that combine results are named helpers in `Std.Concurrent.Tasks`, not l
 <!-- example: fragment: calls fetch_price, which the page does not define, and omits the result and tasks imports -->
 ```neura
 let quote = func -> result.Result<int[list]> {
-    let calls: (func() -> result.Result<int>)[list] = [
+    let calls: (func() -> result.Result<int>)[list] = new([
         func -> result.Result<int> => fetch_price("tea"),
         func -> result.Result<int> => fetch_price("cake")
-    ];
+    ]);
     return tasks.all_ok<int>(calls);
 };
 ```
 
-- The helpers take and return lists, not arrays. The language cannot build an array whose length is known only at run time, and a function with type parameters cannot be overloaded for arrays as well. A list literal writes the calls where the parameter's type is expected, and a loop builds them for a width known only at run time.
+- The helpers take and return lists, not arrays. The language cannot build an array whose length is known only at run time, and a function with type parameters cannot be overloaded for arrays as well. A list literal in `new(...)` writes the calls where the parameter's type is expected, and a loop builds them for a width known only at run time.
 - A call must be task-safe and its captures transferable, as for any spawn (section 5). A violation is reported at the program's call of the helper (section 5.2).
 - A cancelled call learns of it through `Cancellation.requested()` or through a parked operation that returns `Cancelled` (section 7). A call that never asks runs to its end, and the helper waits for it.
 - With no calls, `all` returns an empty list, `all_ok` returns `Ok` of an empty list, and `first_ok` returns an `Err` whose code is `tasks.empty`.

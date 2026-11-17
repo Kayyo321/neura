@@ -48,7 +48,7 @@ let RandomTests = module (
     // fill_bytes(0), (5), (8), and (13) in turn.
     let check_fill = func(seed: uint64, expected: uint8[]) -> void {
         let r = randoms.seeded(seed);
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         let counts: int[] = [0, 5, 8, 13];
         for (let count in counts) {
             let part = r.fill_bytes(count);
@@ -66,17 +66,17 @@ let RandomTests = module (
     // chooses four times from five names.
     let check_shuffle = func(seed: uint64, expected: int[], chosen: string[]) -> void {
         let r = randoms.seeded(seed);
-        let items: int[list] = [0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
+        let items: int[list] = new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9]);
         r.shuffle<int>(items);
         for (let i = 0; i < 10; i = i + 1) {
             test.assert_equal_int32(expected[i], items[i]);
         }
-        let one: int[list] = [7];
+        let one: int[list] = new([7]);
         let version = one.version;
         r.shuffle<int>(one);
         test.assert_equal_int32(7, one[0]);
         test.assert(one.version == version);
-        let names: string[list] = ["a", "b", "c", "d", "e"];
+        let names: string[list] = new(["a", "b", "c", "d", "e"]);
         for (let name in chosen) {
             test.assert_equal_string(name, r.choose<string>(names));
         }
@@ -122,7 +122,7 @@ let RandomTests = module (
 
     export let test_empty_shuffle = func() -> void {
         let r = randoms.seeded(3);
-        let empty: string[list] = [];
+        let empty: string[list] = new;
         r.shuffle<string>(empty);
         test.assert_equal_int32(0, empty.length);
         // An empty shuffle draws nothing.
@@ -133,7 +133,7 @@ let RandomTests = module (
     // floats stay in [0, 1), and the counts are near uniform.
     export let test_distribution = func() -> void {
         let r = randoms.seeded(2024);
-        let counts: int[list] = [0, 0, 0, 0, 0, 0, 0];
+        let counts: int[list] = new([0, 0, 0, 0, 0, 0, 0]);
         let low = 1.0;
         let high = 0.0;
         for (let i = 0; i < 7000; i = i + 1) {

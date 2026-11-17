@@ -28,13 +28,13 @@ export let ReferenceSha256 = module (
     export let Sha256 = class (
         /// @brief The eight hash words, initially the first 32 bits of the fractional parts of the square roots
         /// of the first eight primes.
-        let state: uint32[list] = [
+        let state: uint32[list] = new([
             1779033703, 3144134277, 1013904242, 2773480762, 1359893119, 2600822924, 528734635, 1541459225
-        ];
+        ]);
         /// @brief The message schedule, reused by every block.
-        let schedule: uint32[list] = [];
+        let schedule: uint32[list] = new;
         /// @brief The bytes of an incomplete block, fewer than 64.
-        let pending: uint8[list] = [];
+        let pending: uint8[list] = new;
         /// @brief The number of message bytes added so far.
         let total: uint64 = 0;
         /// @brief Records whether finish has already consumed the digest state.
@@ -65,7 +65,7 @@ export let ReferenceSha256 = module (
                     return;
                 }
                 compress(pending, 0);
-                pending = [];
+                pending = new;
             }
             while (i + 64 <= count) {
                 compress(bytes, i);
@@ -85,7 +85,7 @@ export let ReferenceSha256 = module (
             finished = true;
             let bits = total * 8;
             let tail = pending;
-            pending = [];
+            pending = new;
             tail.append(128);
             while (tail.length % 64 != 56) {
                 tail.append(0);
@@ -96,7 +96,7 @@ export let ReferenceSha256 = module (
             for (let offset = 0; offset < tail.length; offset = offset + 64) {
                 compress(tail, offset);
             }
-            let digest: uint8[list] = [];
+            let digest: uint8[list] = new;
             for (let word in state) {
                 digest.append((word >> 24) as uint8);
                 digest.append(((word >> 16) & 255) as uint8);

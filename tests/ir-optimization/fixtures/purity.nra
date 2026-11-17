@@ -97,7 +97,7 @@ let Purity = module (
     // kernel after reading its first element: the method writes the list of
     // its receiver, which it did not allocate, so it is not pure.
     let Bag = class (
-        export let items: int64[list] = [];
+        export let items: int64[list] = new;
 
         export let first_then_sort = func -> int64 {
             let first: int64 = items[0];
@@ -108,7 +108,7 @@ let Purity = module (
 
     // Pure: the list it sorts is one it allocated.
     export let smaller = func(a: int16, b: int16) -> int64 {
-        let items: int64[list] = [a as int64, b as int64];
+        let items: int64[list] = new([a as int64, b as int64]);
         sorting.sort_ascending(items);
         return items[0];
     };
@@ -117,7 +117,7 @@ let Purity = module (
     // returns the smaller value although the first returned b.
     export let keep_kernel_writer_calls = func(a: int16, b: int16) -> int64 {
         let bag = new Bag();
-        bag.items = [b as int64, a as int64];
+        bag.items = new([b as int64, a as int64]);
         let first: int64 = bag.first_then_sort();
         let second: int64 = bag.first_then_sort();
         return first - second;
@@ -126,14 +126,14 @@ let Purity = module (
     // Kept: the unused call still sorts the list that the result reads.
     export let keep_unused_kernel_writer = func(a: int16, b: int16) -> int64 {
         let bag = new Bag();
-        bag.items = [b as int64, a as int64];
+        bag.items = new([b as int64, a as int64]);
         bag.first_then_sort();
         return bag.items[0];
     };
 
     // Not reused: the kernel writes the list between the two reads.
     export let reread_after_kernel_write = func(a: int16, b: int16) -> int64 {
-        let items: int64[list] = [b as int64, a as int64];
+        let items: int64[list] = new([b as int64, a as int64]);
         let before: int64 = items[0];
         sorting.sort_ascending(items);
         let after: int64 = items[0];

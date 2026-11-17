@@ -287,9 +287,9 @@ let echo = func(text: string) -> string => text + "!";
 
 export let Main = module : program.Entry (
     export let.override main = func(arguments: string[]) -> program.ExitCode {
-        let bytes: uint8[list] = [1, 2, 3];
+        let bytes: uint8[list] = new([1, 2, 3]);
         let flags: bool[] = [true, false];
-        let reals: float64[list] = [1.5];
+        let reals: float64[list] = new([1.5]);
         let words: string[] = ["a", "b"];
         let digest = sha256s.of(bytes);
         let doubled = parallel.map<int, int>([1, 2, 3], twice, parallel.limits(100000, 100000));

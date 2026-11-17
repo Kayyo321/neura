@@ -70,7 +70,7 @@ let ProgramCalls = module:program.Entry (
     };
 
     let shapes = func(count: int32, rounds: int32) -> int64 {
-        let all: Shape[list] = [];
+        let all: Shape[list] = new;
         for (let i = 0; i < count; i = i + 1) {
             if (i % 3 == 0) {
                 all.append(new Stick((i % 11) as int64));
@@ -119,7 +119,7 @@ let ProgramCalls = module:program.Entry (
 
     let trap = func(kind: string, size: int32) -> int64 {
         let total: int64 = 0;
-        let values: int64[list] = [1, 2, 3];
+        let values: int64[list] = new([1, 2, 3]);
         let cell = new Cell();
         cell.label = "cell";
         for (let i = 0; i <= size; i = i + 1) {

@@ -12,7 +12,7 @@ let test = import:Std.Test;
 let Sha256KernelOracle = module (
     // Bytes that differ from position to position: i * 31 + 7, modulo 256.
     let pattern = func(length: int) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         for (let i = 0; i < length; i++) {
             bytes.append(((i * 31 + 7) % 256) as uint8);
         }
@@ -21,7 +21,7 @@ let Sha256KernelOracle = module (
 
     // The bytes from `start` up to `end`.
     let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
-        let part: uint8[list] = [];
+        let part: uint8[list] = new;
         for (let i = start; i < end; i++) {
             part.append(bytes[i]);
         }

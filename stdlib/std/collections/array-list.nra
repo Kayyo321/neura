@@ -197,7 +197,7 @@ export let ArrayList = module (
             if (start < 0 || start > end || end > storage.length) {
                 trap_with_message("invalid argument: range");
             }
-            last result: T[list] = [];
+            last result: T[list] = new;
             let i = start;
             while (i < end) {
                 result.append(storage[i]);
@@ -208,7 +208,7 @@ export let ArrayList = module (
 
         /// @brief A new built-in list in order.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             last count = storage.length;
             let i = 0;
             while (i < count) {
@@ -407,13 +407,13 @@ export let ArrayList = module (
 
     /// @brief Creates an empty list with independent backing storage.
     export let create = func<T> -> ArrayList<T> {
-        last values: T[list] = [];
+        last values: T[list] = new;
         return new ArrayList<T>(values);
     };
 
     /// @brief Copies `items`.
     export let of = func<T>(items: T[list]) -> ArrayList<T> {
-        last values: T[list] = [];
+        last values: T[list] = new;
         last count = items.length;
         let i = 0;
         while (i < count) {
@@ -428,7 +428,7 @@ export let ArrayList = module (
         if (count < 0) {
             trap_with_message("invalid argument: negative count");
         }
-        last values: T[list] = [];
+        last values: T[list] = new;
         let i = 0;
         while (i < count) {
             values.append(value);

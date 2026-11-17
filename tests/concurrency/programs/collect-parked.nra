@@ -21,7 +21,7 @@ let send_note = func(out: channels.Sender<string>, id: int) -> void {
 let churn = func(rounds: int) -> int {
     let kept = 0;
     for (let round: int = 0; round < rounds; round++) {
-        let garbage: string[list] = [];
+        let garbage: string[list] = new;
         for (let i: int = 0; i < 20; i++) {
             garbage.append("garbage " + round.to_string() + " " + i.to_string());
         }

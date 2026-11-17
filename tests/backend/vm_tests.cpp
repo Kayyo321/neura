@@ -682,7 +682,7 @@ NEURA_TEST(vm, list_versions_count_structural_changes) {
 let program = import:Std.Program;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let values: int32[list] = [1, 2];
+        let values: int32[list] = new([1, 2]);
         let seen: int32 = 0;
         for (let value in values) {
             values[1] = 5;

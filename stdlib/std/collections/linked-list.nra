@@ -335,7 +335,7 @@ export let LinkedList = module (
 
         /// @brief A new built-in list in order.
         export let to_list = func -> T[list] {
-            last result: T[list] = [];
+            last result: T[list] = new;
             let node = head;
             while (node != nil) {
                 result.append(node.value);

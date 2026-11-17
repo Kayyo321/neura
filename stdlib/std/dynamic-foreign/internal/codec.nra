@@ -25,7 +25,7 @@ export let Codec = module (
                 check_promoted(layouts[i]);
             }
         }
-        last encoded: uint8[list] = [];
+        last encoded: uint8[list] = new;
         encoded.append(1);
         put_u16(encoded, (variadic_index < 0) ? 65535 : variadic_index);
         put_u16(encoded, layouts.length);
@@ -91,7 +91,7 @@ export let Codec = module (
             },
             Shape.Struct => {
                 check_natural(layout);
-                last fields: MemoryLayout[list] = [];
+                last fields: MemoryLayout[list] = new;
                 for (let member in layout.member_layouts()) {
                     flatten(fields, member);
                 }
@@ -322,7 +322,7 @@ export let Codec = module (
         -> ForeignValue {
         if (layout.shape() == Shape.Struct) {
             last segment = allocator.allocate(layout);
-            last part: uint8[list] = [];
+            last part: uint8[list] = new;
             for (let i = 0; i < (layout.byte_size() as int); i++) {
                 part.append(bytes[offset + i]);
             }

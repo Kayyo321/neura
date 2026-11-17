@@ -20,7 +20,7 @@ export let PartialWrites = module:program.Entry (
             },
         }
         let sink = console.output();
-        let data: uint8[list] = [120, 121, 122, 10];
+        let data: uint8[list] = new([120, 121, 122, 10]);
         match (sink(data)) {
             result.Result.Ok(_) => {
                 console.print_line("sink ok");

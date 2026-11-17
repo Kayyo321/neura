@@ -11,7 +11,7 @@ export let Main = module:program.Entry (
         let number = 0;
         for (let line in strings.lines(text)) {
             number = number + 1;
-            let words: string[list] = [];
+            let words: string[list] = new;
             for (let word in strings.split(strings.trim(line), " ")) {
                 if (!strings.is_empty(word)) {
                     words.append(strings.to_ascii_upper(word));
@@ -26,7 +26,7 @@ export let Main = module:program.Entry (
             + strings.byte_length(reversed).to_string());
         console.print_line(strings.replace("a-b-c", "-", "+") + " " + strings.index_of("a-b-c", "c").to_string());
         console.print_line(optional.value_or<string>(strings.strip_suffix("report.txt", ".txt"), "?"));
-        console.print_line(strings.from_bytes_lossy([65, 255, 66, 226, 130]));
+        console.print_line(strings.from_bytes_lossy(new([65, 255, 66, 226, 130])));
         return program.ExitCode.Ok;
     };
 );

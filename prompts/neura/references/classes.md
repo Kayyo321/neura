@@ -19,7 +19,7 @@ How 0.2.0 writes classes. [syntax.md](syntax.md#classes) has the basics (members
 | is changed by the class, read by callers | `export let size: int = 0;` + `\| get: size;` | read `obj.size`; assigning is `E0510` |
 | is checked or reacted to on every write | `export let level: int = 0;` + `\| get: level;` + `\| set: { ... };` | read and assign; the setter runs |
 | is plain data callers may change | `export let retries: int = 3;` | read and assign |
-| is internal | `let cache: int[list] = [];` (or `last`) | not visible |
+| is internal | `let cache: int[list] = new;` (or `last`) | not visible |
 
 A field is read as `obj.field`, never `obj.field()`: calling a field is `E0423` `expression is not callable`. Keep a method for a value that is computed, takes arguments, or implements an interface member (an accessor cannot satisfy an interface member).
 
@@ -132,7 +132,7 @@ let origin: Point = new;                     // annotation: new Point()
 let corner: Point = new(3, 4);               // new Point(3, 4)
 let label: Box<string> = new("corner");      // type arguments from the annotation
 let far = distance(new, new(10, 10));        // parameter types
-let path: Point[list] = [new, new(1, 1)];    // element type of an expected collection
+let path: Point[list] = new([new, new(1, 1)]);    // element type of an expected collection
 
 let make = func(flag: bool) -> Point {
     let p: Point = flag ? new(1, 1) : new;   // both arms of an expected conditional

@@ -330,7 +330,7 @@ let classify = func(x: int, y: int) -> string {
 <!-- example: check -->
 ```neura
 let numbers = {0 .. 5};                 // int[]: 0, 1, 2, 3, 4
-let evens: int[list] = 0 .. 8 : 2;      // list: 0, 2, 4, 6
+let evens: int[list] = new(0 .. 8 : 2);      // list: 0, 2, 4, 6
 let descending = 5 .. 0 : -2;           // 5, 3, 1
 let wide: int64[] = 0 .. 3;             // the expected type picks the element type
 let total = func -> int {
@@ -349,8 +349,8 @@ let total = func -> int {
 <!-- example: check -->
 ```neura
 let names: string[] = ["Ada", "Lin"];          // array: fixed length
-let queue: string[list] = ["first", "second"]; // list: grows and shrinks
-let empty: string[list] = [];                  // empty literal needs a type
+let queue: string[list] = new(["first", "second"]); // list: grows and shrinks
+let empty: string[list] = new;                  // empty literal needs a type
 let rows: string[][] = [["a", "b"], ["c"]];    // jagged
 
 let edit = func {

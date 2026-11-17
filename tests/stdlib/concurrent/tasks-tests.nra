@@ -72,7 +72,7 @@ let TasksTests = module (
     };
 
     let drain = func(source: channels.Receiver<int>) -> int[list] {
-        let seen: int[list] = [];
+        let seen: int[list] = new;
         let more = true;
         while (more) {
             match (source.try_receive()) {
@@ -92,7 +92,7 @@ let TasksTests = module (
 
     export let test_all_returns_results_in_call_order = func() -> void {
         let [order, completed, closer] = channels.open<int>(8);
-        let calls: (func() -> int)[list] = [counting(order, 0, 5000), counting(order, 1, 2500), counting(order, 2, 10)];
+        let calls: (func() -> int)[list] = new([counting(order, 0, 5000), counting(order, 1, 2500), counting(order, 2, 10)]);
         let values = tasks.all<int>(calls);
         test.assert_equal_int32(3, values.length);
         test.assert_equal_int32(0, values[0]);
@@ -106,12 +106,12 @@ let TasksTests = module (
     };
 
     export let test_all_without_calls_is_empty = func() -> void {
-        let none: (func() -> int)[list] = [];
+        let none: (func() -> int)[list] = new;
         test.assert_equal_int32(0, tasks.all<int>(none).length);
     };
 
     export let test_all_returns_any_result_type = func() -> void {
-        let words: (func() -> string)[list] = [func() -> string => "a", func() -> string => "b"];
+        let words: (func() -> string)[list] = new([func() -> string => "a", func() -> string => "b"]);
         let values = tasks.all<string>(words);
         test.assert_equal_string("a", values[0]);
         test.assert_equal_string("b", values[1]);
@@ -119,9 +119,9 @@ let TasksTests = module (
 
     export let test_all_ok_returns_every_value_in_call_order = func() -> void {
         let [order, completed, closer] = channels.open<int>(8);
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             outcome_after(order, 0, 3000, true), outcome_after(order, 1, 10, true), outcome_after(order, 2, 1500, true)
-        ];
+        ]);
         let values = test.assert_ok<int[list]>(tasks.all_ok<int>(calls));
         test.assert_equal_int32(3, values.length);
         test.assert_equal_int32(0, values[0]);
@@ -131,7 +131,7 @@ let TasksTests = module (
     };
 
     export let test_all_ok_without_calls_is_an_empty_ok = func() -> void {
-        let none: (func() -> result.Result<int>)[list] = [];
+        let none: (func() -> result.Result<int>)[list] = new;
         test.assert_equal_int32(0, test.assert_ok<int[list]>(tasks.all_ok<int>(none)).length);
     };
 
@@ -140,11 +140,11 @@ let TasksTests = module (
     export let test_all_ok_returns_the_first_error_by_completion_and_cancels_the_rest = func() -> void {
         let [order, completed, closer] = channels.open<int>(8);
         let [seen, saw, saw_closer] = channels.open<int>(8);
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             outcome_after(order, 0, 4000, false),
             outcome_after(order, 1, 10, false),
             until_cancelled(seen, 2)
-        ];
+        ]);
         let outcome = tasks.all_ok<int>(calls);
         test.assert_equal_string("call 1", message_of<int[list]>(outcome));
         let cancelled = drain(saw);
@@ -160,11 +160,11 @@ let TasksTests = module (
     export let test_first_ok_returns_the_first_success_by_completion_and_cancels_the_rest = func() -> void {
         let [order, completed, closer] = channels.open<int>(8);
         let [seen, saw, saw_closer] = channels.open<int>(8);
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             outcome_after(order, 0, 4000, true),
             outcome_after(order, 1, 10, true),
             until_cancelled(seen, 2)
-        ];
+        ]);
         test.assert_equal_int32(1, test.assert_ok<int>(tasks.first_ok<int>(calls)));
         let cancelled = drain(saw);
         test.assert_equal_int32(1, cancelled.length);
@@ -176,22 +176,22 @@ let TasksTests = module (
 
     export let test_first_ok_skips_failures_before_a_success = func() -> void {
         let [order, completed, closer] = channels.open<int>(8);
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             outcome_after(order, 0, 10, false),
             outcome_after(order, 1, 2000, true),
             outcome_after(order, 2, 5, false)
-        ];
+        ]);
         test.assert_equal_int32(1, test.assert_ok<int>(tasks.first_ok<int>(calls)));
         test.assert_equal_int32(3, drain(completed).length);
     };
 
     export let test_first_ok_returns_the_last_error_when_every_call_fails = func() -> void {
         let [order, completed, closer] = channels.open<int>(8);
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             outcome_after(order, 0, 3000, false),
             outcome_after(order, 1, 10, false),
             outcome_after(order, 2, 1500, false)
-        ];
+        ]);
         let outcome = tasks.first_ok<int>(calls);
         // Completion order is 1, 2, 0: the last error is call 0's.
         test.assert_equal_string("call 0", message_of<int>(outcome));
@@ -201,7 +201,7 @@ let TasksTests = module (
     };
 
     export let test_first_ok_without_calls_reports_it = func() -> void {
-        let none: (func() -> result.Result<int>)[list] = [];
+        let none: (func() -> result.Result<int>)[list] = new;
         let failure = test.assert_err<int>(tasks.first_ok<int>(none));
         test.assert_equal_string("tasks.empty", code_of(failure));
     };
@@ -212,19 +212,19 @@ let TasksTests = module (
         let [seen, saw, saw_closer] = channels.open<int>(8);
         let [begun, began, began_closer] = channels.open<int>(8);
         let [order, completed, closer] = channels.open<int>(8);
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             parked(silent, begun, seen, 7),
             outcome_after(order, 1, 10, false)
-        ];
+        ]);
         let outcome = tasks.all_ok<int>(calls);
         test.assert_equal_string("call 1", message_of<int[list]>(outcome));
         let cancelled = drain(saw);
         test.assert_equal_int32(1, cancelled.length);
         test.assert_equal_int32(7, cancelled[0]);
-        let first: (func() -> result.Result<int>)[list] = [
+        let first: (func() -> result.Result<int>)[list] = new([
             parked(silent, begun, seen, 8),
             outcome_after(order, 2, 10, true)
-        ];
+        ]);
         test.assert_equal_int32(2, test.assert_ok<int>(tasks.first_ok<int>(first)));
         let woken = drain(saw);
         test.assert_equal_int32(1, woken.length);
@@ -237,9 +237,9 @@ let TasksTests = module (
     // it stops waiting and reports tasks.cancelled, and it returns only after the calls have finished.
     let run_all_ok_in_a_task = func(never: channels.Receiver<int>, started: channels.Sender<int>,
             report: channels.Sender<int>) -> result.Result<int[list]> {
-        let calls: (func() -> result.Result<int>)[list] = [
+        let calls: (func() -> result.Result<int>)[list] = new([
             parked(never, started, report, 1), parked(never, started, report, 2)
-        ];
+        ]);
         return tasks.all_ok<int>(calls);
     };
 
@@ -247,7 +247,7 @@ let TasksTests = module (
         let [silent, never, never_closer] = channels.open<int>(0);
         let [seen, saw, saw_closer] = channels.open<int>(8);
         let [begun, began, began_closer] = channels.open<int>(8);
-        let outcome: result.Result<int[list]> = result.Result<int[list]>.Ok([]);
+        let outcome: result.Result<int[list]> = result.Result<int[list]>.Ok(new);
         scope (outer) {
             let helper = spawn run_all_ok_in_a_task(never, begun, seen);
             // Wait until both calls have announced themselves; they park right after, and the helper parks

@@ -16,7 +16,7 @@ export let Main = module:program.Entry (
             }
             return ordering.Ordering.Equal;
         };
-        let walk = priority_queue.from_list<int>([1], compare).iterator();
+        let walk = priority_queue.from_list<int>(new([1]), compare).iterator();
         console.print_line(walk.next().to_string());
         console.print_line(walk.next().to_string());
         return program.ExitCode.Ok;

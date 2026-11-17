@@ -12,7 +12,7 @@ export let Main = module:program.Entry (
             }
             return ordering.Ordering.Greater;
         };
-        let items: int[list] = [3, 2, 1];
+        let items: int[list] = new([3, 2, 1]);
         sorting.sort_range<int>(items, -1, 2, compare);
         return program.ExitCode.Ok;
     };

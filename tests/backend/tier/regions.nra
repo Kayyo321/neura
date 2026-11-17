@@ -58,7 +58,7 @@ let Regions = module:program.Entry (
 
     // A loop whose region ends at list growth, an allocation.
     let squares = func(count: int32) -> int64[list] {
-        let values: int64[list] = [];
+        let values: int64[list] = new;
         for (let i = 0; i < count; i = i + 1) {
             values.append((i as int64) * (i as int64));
         }
@@ -101,7 +101,7 @@ let Regions = module:program.Entry (
             size = result.value_or<int32>(int32s.parse(args[0]), 6);
         }
         console.println("multiply {}", multiply(size));
-        let cells: Cell[list] = [];
+        let cells: Cell[list] = new;
         for (let i = 0; i < size; i = i + 1) {
             cells.append(new Cell());
         }
@@ -114,7 +114,7 @@ let Regions = module:program.Entry (
         console.println("squares {} {}", values.length, sum);
         console.println("series {}", series(size * 50));
         console.println("collatz {}", collatz(27));
-        let words: string[list] = [];
+        let words: string[list] = new;
         for (let i = 0; i < size; i = i + 1) {
             words.append("w" + i.to_string());
         }

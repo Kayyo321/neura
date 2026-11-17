@@ -95,7 +95,7 @@ export let ParseResults = module:program.Entry (
 
     export let.override main = func(args: string[]) -> program.ExitCode {
         last n = result.value_or<int32>(int32s.parse(args[0]), 0);
-        last lines: string[list] = [];
+        last lines: string[list] = new;
         let seed: int64 = 12345;
         for (let i = 0; i < Records; i = i + 1) {
             seed = (seed * 1103515245 + 12345) & 2147483647;

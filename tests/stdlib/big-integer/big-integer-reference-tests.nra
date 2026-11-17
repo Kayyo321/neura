@@ -12,7 +12,7 @@ let vectors = import:BigIntegerVectors;
 let BigIntegerReferenceTests = module (
     // Reads numbers and integers from a flat vector list.
     let Reader = class (
-        let data: uint32[list] = [];
+        let data: uint32[list] = new;
         let position: int = 0;
 
         export let init = func(cases: uint32[list]) -> void {
@@ -43,7 +43,7 @@ let BigIntegerReferenceTests = module (
         export let next = func() -> big.BigInteger {
             let code = next_int();
             let count = next_int();
-            let limbs: uint32[list] = [];
+            let limbs: uint32[list] = new;
             for (let i = 0; i < count; i = i + 1) {
                 limbs.append(data[position + i]);
             }

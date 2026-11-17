@@ -38,7 +38,7 @@ export let Console = module (
     let read_stream = func(max: int) -> BytesOutcome host("neura.console.read", 2);
 
     /// @brief Input read ahead of the caller: pending[pending_start] onwards.
-    let pending: uint8[list] = [];
+    let pending: uint8[list] = new;
     /// @brief The index of the next unread byte in the pending input.
     let pending_start: int = 0;
 
@@ -151,7 +151,7 @@ export let Console = module (
     /// A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line.
     #NoDiscard
     export let read_line = func -> result.Result<Optional<string>> {
-        last line: uint8[list] = [];
+        last line: uint8[list] = new;
         do {
             if (pending_start < pending.length) {
                 last end = bytes.index_of(pending, pending_start, 10 as uint8);
@@ -220,7 +220,7 @@ export let Console = module (
 
     /// @brief Clears the console's read-ahead buffer and resets its cursor.
     let discard_pending = func {
-        last empty: uint8[list] = [];
+        last empty: uint8[list] = new;
         pending = empty;
         pending_start = 0;
     };

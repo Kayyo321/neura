@@ -303,13 +303,13 @@ def main():
     for name, arity, flat, worst in sections:
         lines.append(f"    // [{'x, y' if arity == 2 else 'x'}, fdlibm, libm] per case.")
         lines.append(f"    export let {name}_cases = func() -> uint64[list] {{")
-        lines.append("        let cases: uint64[list] = [")
+        lines.append("        let cases: uint64[list] = new([")
         width = 3 + arity - 1
         for i in range(0, len(flat), width):
             row = ", ".join(str(v) for v in flat[i:i + width])
             comma = "," if i + width < len(flat) else ""
             lines.append(f"            {row}{comma}")
-        lines.append("        ];")
+        lines.append("        ]);")
         lines.append("        return cases;")
         lines.append("    };")
         lines.append("")

@@ -130,7 +130,7 @@ export let String = module:strings (
     /// @brief Finds the first byte offset of the scalar, or returns -1.
     #[Pure, ThreadSafe]
     export let index_of_code_point = func(s: string, scalar: uint32) -> int =>
-        strings.index_of(s, strings.from_scalars([scalar]));
+        strings.index_of(s, strings.from_scalars(new([scalar])));
 
     /// @brief Finds the last occurrence starting at or before the specified byte offset, or returns -1.
     #[Pure, ThreadSafe]
@@ -151,7 +151,7 @@ export let String = module:strings (
     /// @brief Finds the last byte offset of the scalar, or returns -1.
     #[Pure, ThreadSafe]
     export let last_index_of_code_point = func(s: string, scalar: uint32) -> int =>
-        strings.last_index_of(s, strings.from_scalars([scalar]));
+        strings.last_index_of(s, strings.from_scalars(new([scalar])));
 
     /// @brief Returns the Unicode scalar beginning at a UTF-8 byte offset.
     #[Pure, ThreadSafe]
@@ -359,7 +359,7 @@ export let String = module:strings (
     /// @brief CR, LF, and CRLF each end a line. An empty string has no lines.
     #[Pure, ThreadSafe]
     export let.override lines = func(s: string) -> string[list] {
-        last pieces: string[list] = [];
+        last pieces: string[list] = new;
         let start = 0;
         let i = 0;
         last length = s.byte_length;
@@ -390,7 +390,7 @@ export let String = module:strings (
         }
         last prefix = count > 0 ? strings.repeat(" ", count) : "";
         last remove_count = count < 0 ? -(count as int64) : 0;
-        last changed: string[list] = [];
+        last changed: string[list] = new;
         for (let line in parts) {
             last start = leading_whitespace_end(line, remove_count);
             changed.append(prefix + line.slice(start, line.byte_length));
@@ -424,7 +424,7 @@ export let String = module:strings (
                 }
             }
         }
-        last changed: string[list] = [];
+        last changed: string[list] = new;
         for (let line in parts) {
             last start = leading_whitespace_end(line, common as int64);
             changed.append(strip_trailing(line.slice(start, line.byte_length)));
@@ -442,7 +442,7 @@ export let String = module:strings (
     /// @brief Replaces every occurrence of a Unicode scalar with another scalar.
     #[NoDiscard, Pure, ThreadSafe]
     export let replace_code_point = func(s: string, target: uint32, replacement: uint32) -> string =>
-        strings.replace(s, strings.from_scalars([target]), strings.from_scalars([replacement]));
+        strings.replace(s, strings.from_scalars(new([target])), strings.from_scalars(new([replacement])));
 
     /// @brief Replaces all regex matches. An invalid pattern or replacement traps.
     #NoDiscard
@@ -544,7 +544,7 @@ export let String = module:strings (
 
     /// @brief Copies the half-open range of UTF-16 units, possibly selecting only one half of a surrogate pair.
     let utf16_window = func(s: string, start: int, end: int) -> uint16[list] {
-        last units: uint16[list] = [];
+        last units: uint16[list] = new;
         let offset = 0;
         let index = 0;
         while (index < end && offset < s.byte_length) {
@@ -621,7 +621,7 @@ export let String = module:strings (
             trap_with_message("invalid argument: limit below 1");
         }
         last expression = compile_pattern(pattern);
-        last pieces: string[list] = [];
+        last pieces: string[list] = new;
         let start = 0;
         let from = 0;
         let remaining = limit - 1;

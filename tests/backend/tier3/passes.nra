@@ -15,7 +15,7 @@ let Tier3Passes = module:program.Entry (
     };
 
     let table = func(size: int32) -> int64[list] {
-        let values: int64[list] = [];
+        let values: int64[list] = new;
         for (let i = 0; i < size; i = i + 1) {
             values.append((i * 3) as int64);
         }

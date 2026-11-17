@@ -51,16 +51,16 @@ let TreeSetTests = module (
         test.assert_equal_string("[1, 3, 5]", set.to_list().to_string());
         test.assert(set.remove(3));
         test.assert(!set.remove(3));
-        set.add_all([9, 7, 1]);
+        set.add_all(new([9, 7, 1]));
         test.assert_equal_string("{1, 5, 7, 9}", set.to_string());
-        test.assert(set.contains_all([1, 9]));
+        test.assert(set.contains_all(new([1, 9])));
         set.validate();
         set.clear();
         test.assert(set.is_empty());
     };
 
     export let test_sorted_members = func() -> void {
-        let set = of([40, 10, 30, 20]);
+        let set = of(new([40, 10, 30, 20]));
         test.assert_equal_int32(10, set.first());
         test.assert_equal_int32(40, set.last());
         test.assert_equal_string("[20, 30]", set.range(15, 40).to_string());
@@ -82,7 +82,7 @@ let TreeSetTests = module (
     };
 
     export let test_iteration_and_callbacks = func() -> void {
-        let set = of([3, 1, 2, 6, 5, 4]);
+        let set = of(new([3, 1, 2, 6, 5, 4]));
         let items = set.iterator();
         test.assert_equal_int32(1, items.next());
         test.assert_equal_int32(2, items.next());
@@ -107,21 +107,21 @@ let TreeSetTests = module (
     };
 
     export let test_algebra = func() -> void {
-        let a = of([1, 2, 3, 4]);
-        let b = of([8, 6, 4, 2]);
+        let a = of(new([1, 2, 3, 4]));
+        let b = of(new([8, 6, 4, 2]));
         test.assert_equal_string("{1, 2, 3, 4, 6, 8}", a.union(b).to_string());
         test.assert_equal_string("{2, 4}", a.intersection(b).to_string());
         test.assert_equal_string("{1, 3}", a.difference(b).to_string());
-        test.assert(of([2, 4]).is_subset_of(a));
+        test.assert(of(new([2, 4])).is_subset_of(a));
         test.assert(!a.is_subset_of(b));
-        test.assert(of([5, 7]).is_disjoint_from(b));
+        test.assert(of(new([5, 7])).is_disjoint_from(b));
         test.assert(!a.is_disjoint_from(b));
         a.union(b).validate();
     };
 
     export let test_equals_and_hash = func() -> void {
-        let a = of([3, 1, 2]);
-        let b = of([1, 2, 3]);
+        let a = of(new([3, 1, 2]));
+        let b = of(new([1, 2, 3]));
         test.assert(a.equals(b));
         test.assert_equal_uint64(6, a.hash_code() as uint64);
         b.add(4);
@@ -146,9 +146,9 @@ let TreeSetTests = module (
     };
 
     export let test_interfaces = func() -> void {
-        let sorted: sorted_set.SortedSet<int> = of([2, 1]);
+        let sorted: sorted_set.SortedSet<int> = of(new([2, 1]));
         test.assert_equal_int32(1, sorted.first());
-        let mutable: mutable_set.MutableSet<int> = of([2, 1]);
+        let mutable: mutable_set.MutableSet<int> = of(new([2, 1]));
         test.assert(mutable.add(3));
         test.assert_equal_int32(3, mutable.size());
     };

@@ -15,7 +15,7 @@ let StringMapModelTests = module (
     // Short keys with the empty string and multi-byte text.
     export let test_model_varied_keys = func() -> void {
         let map = string_map.with_capacity<int>(40);
-        let keys: string[list] = ["", "a", "b", "ab", "ba", "é", "日本", "Ω", "zz"];
+        let keys: string[list] = new(["", "a", "b", "ab", "ba", "é", "日本", "Ω", "zz"]);
         map_model.run<string>(map, func(id: int) -> string {
             return keys[id % 9] + (id / 9).to_string();
         }, map.validate, map.trim, false, 32, 3000, 20, 60);

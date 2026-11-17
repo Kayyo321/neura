@@ -23,9 +23,9 @@ export let IntMap = module (
         /// @brief Never replaced, so iterators can read its modification count.
         last core: hash_core.HashCore;
         /// @brief The keys indexed by dense entry number, including entries pending compaction.
-        let stored_keys: int[list] = [];
+        let stored_keys: int[list] = new;
         /// @brief The values indexed by the same dense entry numbers as their keys.
-        let stored_values: V[list] = [];
+        let stored_values: V[list] = new;
         /// @brief Whether this instance's text conversion is running.
         let printing: bool = false;
 
@@ -43,8 +43,8 @@ export let IntMap = module (
         /// @brief Removes all entries, resets the table to its original size, and invalidates iterators.
         export let clear = func {
             core.reset();
-            stored_keys = [];
-            stored_values = [];
+            stored_keys = new;
+            stored_values = new;
         };
 
         /// @brief Reports whether an entry exists for `key`.
@@ -126,7 +126,7 @@ export let IntMap = module (
 
         /// @brief Copies the keys to a new built-in list in insertion order.
         export let keys = func -> int[list] {
-            last result: int[list] = [];
+            last result: int[list] = new;
             last live = core.live;
             last length = live.length;
             let entry = 0;
@@ -141,7 +141,7 @@ export let IntMap = module (
 
         /// @brief Copies the values to a new built-in list in insertion order.
         export let values = func -> V[list] {
-            last result: V[list] = [];
+            last result: V[list] = new;
             last live = core.live;
             last length = live.length;
             let entry = 0;
@@ -156,7 +156,7 @@ export let IntMap = module (
 
         /// @brief Copies the `[key, value]` tuples to a new built-in list in insertion order.
         export let entries = func -> [int, V][list] {
-            last result: [int, V][list] = [];
+            last result: [int, V][list] = new;
             last live = core.live;
             last length = live.length;
             let entry = 0;
@@ -207,7 +207,7 @@ export let IntMap = module (
         /// @return The number of removed entries.
         export let remove_if = func(drop: func(int, V) -> bool) -> int {
             last expected = core.modifications;
-            last chosen: int[list] = [];
+            last chosen: int[list] = new;
             last length = core.live.length;
             let entry = 0;
             while (entry < length) {
@@ -387,7 +387,7 @@ export let IntMap = module (
                 return "(this collection)";
             }
             printing = true;
-            last parts: string[list] = [];
+            last parts: string[list] = new;
             last live = core.live;
             let entry = 0;
             while (entry < live.length) {
@@ -525,7 +525,7 @@ export let IntMap = module (
 
     /// @brief Copies entries from `old` at the indices in `order`.
     let reordered = func<T>(old: T[list], order: int[list]) -> T[list] {
-        last result: T[list] = [];
+        last result: T[list] = new;
         last count = order.length;
         let i = 0;
         while (i < count) {

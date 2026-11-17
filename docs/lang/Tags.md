@@ -162,7 +162,7 @@ A generic function is checked with each set of type arguments it is used with, a
 ```neura
 #Pure
 let squares = func(count: int32) -> int64[list] {
-    let result: int64[list] = [];
+    let result: int64[list] = new;
     for (let i = 0; i < count; i++) {
         result.append((i as int64) * (i as int64));
     }

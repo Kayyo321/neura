@@ -6,13 +6,13 @@ let sorting = import:Std.Collections.Sorting;
 
 export let Main = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        let items: int[list] = [];
+        let items: int[list] = new;
         let i = 0;
         while (i < 40) {
             items.append(40 - i);
             i = i + 1;
         }
-        let calls: int[list] = [];
+        let calls: int[list] = new;
         sorting.sort<int>(items, func(a: int, b: int) -> ordering.Ordering {
             calls.append(a);
             if (calls.length == 120) {

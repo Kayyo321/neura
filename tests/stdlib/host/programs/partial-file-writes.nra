@@ -24,7 +24,7 @@ export let PartialFileWrites = module:program.Entry (
 
     export let.override main = func(args: string[]) -> program.ExitCode {
         let f = result.expect<file.File>(file.open(path.of("partial.txt"), file.OpenMode.Write), "open");
-        let data: uint8[list] = [48, 49, 50, 51, 52, 53, 54, 55, 56, 57];
+        let data: uint8[list] = new([48, 49, 50, 51, 52, 53, 54, 55, 56, 57]);
         report(f.write(data));
         report(f.write(data));
         report(f.close());

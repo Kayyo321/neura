@@ -274,7 +274,7 @@ let Retry = module (
     export let backoff_ms = func(attempt: int) -> int => 100 * attempt;
 
     export let delays = func(attempts: int) -> int[list] {
-        let result: int[list] = [];
+        let result: int[list] = new;
         for (let attempt = 1; attempt <= attempts; attempt++) {
             result.append(backoff_ms(attempt));
         }

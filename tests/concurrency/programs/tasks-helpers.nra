@@ -57,28 +57,28 @@ let show_one = func(outcome: result.Result<int>) -> string => match (outcome) {
 export let Main = module : program.Entry (
     export let.override main = func(arguments: string[]) -> program.ExitCode {
         console.print_line("== all");
-        let squares: (func() -> int)[list] = [square(2), square(3), square(4)];
+        let squares: (func() -> int)[list] = new([square(2), square(3), square(4)]);
         let values = tasks.all<int>(squares);
         console.print_line("all returned " + values[0].to_string() + ", " + values[1].to_string() + ", " + values[2].to_string());
 
         console.print_line("== all_ok, every call succeeds");
-        let good: (func() -> result.Result<int>)[list] = [works("a", 1), works("b", 2)];
+        let good: (func() -> result.Result<int>)[list] = new([works("a", 1), works("b", 2)]);
         console.print_line("all_ok returned " + show(tasks.all_ok<int>(good)));
 
         console.print_line("== all_ok, the first failure cancels the rest");
-        let mixed: (func() -> result.Result<int>)[list] = [works("slow", 1), fails("quick"), works("other", 3)];
+        let mixed: (func() -> result.Result<int>)[list] = new([works("slow", 1), fails("quick"), works("other", 3)]);
         console.print_line("all_ok returned " + show(tasks.all_ok<int>(mixed)));
 
         console.print_line("== first_ok, the first success cancels the rest");
-        let racing: (func() -> result.Result<int>)[list] = [works("slow", 1), succeeds("quick", 5), works("other", 3)];
+        let racing: (func() -> result.Result<int>)[list] = new([works("slow", 1), succeeds("quick", 5), works("other", 3)]);
         console.print_line("first_ok returned " + show_one(tasks.first_ok<int>(racing)));
 
         console.print_line("== first_ok, failures before the success are skipped");
-        let late: (func() -> result.Result<int>)[list] = [fails("first"), fails("second"), succeeds("third", 8)];
+        let late: (func() -> result.Result<int>)[list] = new([fails("first"), fails("second"), succeeds("third", 8)]);
         console.print_line("first_ok returned " + show_one(tasks.first_ok<int>(late)));
 
         console.print_line("== first_ok, every call fails");
-        let none: (func() -> result.Result<int>)[list] = [fails("first"), fails("second"), fails("third")];
+        let none: (func() -> result.Result<int>)[list] = new([fails("first"), fails("second"), fails("third")]);
         console.print_line("first_ok returned " + show_one(tasks.first_ok<int>(none)));
         return program.ExitCode.Ok;
     };

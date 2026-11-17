@@ -112,9 +112,9 @@ let JsonTests = module (
         accept("[\"\\u001f\\u001B\\u0010\"]", "[\"\\u001f\\u001b\\u0010\"]");
         accept("[\"é日本🙂\"]", "[\"é日本🙂\"]");
         accept("[\"\\u00e9\"]", "[\"é\"]");
-        accept("[\"\\uFFFF\\uffFE\"]", "[\"" + strings.from_scalars([65535, 65534]) + "\"]");
+        accept("[\"\\uFFFF\\uffFE\"]", "[\"" + strings.from_scalars(new([65535, 65534])) + "\"]");
         accept("[\"a/b\"]", "[\"a/b\"]");
-        accept("[\"\\u2028\\u2029\"]", "[\"" + strings.from_scalars([8232, 8233]) + "\"]");
+        accept("[\"\\u2028\\u2029\"]", "[\"" + strings.from_scalars(new([8232, 8233])) + "\"]");
     };
 
     // A repeated name keeps its first position and takes the last value.
@@ -207,11 +207,11 @@ let JsonTests = module (
         reject("[1] /* c */", error.ParseErrorKind.Syntax, 4, "unexpected text after value");
         reject("// c\n[1]", error.ParseErrorKind.Syntax, 0, "expected a value");
         reject("[1, # c\n2]", error.ParseErrorKind.Syntax, 4, "expected a value");
-        reject(strings.from_scalars([12]) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
-        reject("[" + strings.from_scalars([11]) + "]", error.ParseErrorKind.Syntax, 1, "expected a value");
-        reject(strings.from_scalars([160]) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
-        reject(strings.from_scalars([65279]) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
-        reject("[]" + strings.from_scalars([0]), error.ParseErrorKind.Syntax, 2, "unexpected text after value");
+        reject(strings.from_scalars(new([12])) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[" + strings.from_scalars(new([11])) + "]", error.ParseErrorKind.Syntax, 1, "expected a value");
+        reject(strings.from_scalars(new([160])) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject(strings.from_scalars(new([65279])) + "[]", error.ParseErrorKind.Syntax, 0, "expected a value");
+        reject("[]" + strings.from_scalars(new([0])), error.ParseErrorKind.Syntax, 2, "unexpected text after value");
     };
 
     export let test_n_literals = func() -> void {
@@ -266,9 +266,9 @@ let JsonTests = module (
         reject("\"\\uD800\\u", error.ParseErrorKind.UnexpectedEnd, 9, "unexpected end of input");
         reject("[\"a\tb\"]", error.ParseErrorKind.InvalidCharacter, 3, "control character in string");
         reject("[\"a\nb\"]", error.ParseErrorKind.InvalidCharacter, 3, "control character in string");
-        reject("[\"\\n" + strings.from_scalars([1]) + "\"]", error.ParseErrorKind.InvalidCharacter, 4,
+        reject("[\"\\n" + strings.from_scalars(new([1])) + "\"]", error.ParseErrorKind.InvalidCharacter, 4,
             "control character in string");
-        reject("[\"" + strings.from_scalars([31]) + "\"]", error.ParseErrorKind.InvalidCharacter, 2,
+        reject("[\"" + strings.from_scalars(new([31])) + "\"]", error.ParseErrorKind.InvalidCharacter, 2,
             "control character in string");
     };
 
@@ -403,7 +403,7 @@ let JsonTests = module (
     };
 
     export let test_write_escapes = func() -> void {
-        let controls: uint32[list] = [];
+        let controls: uint32[list] = new;
         for (let c: uint32 = 0; c < 32; c = c + 1) {
             controls.append(c);
         }
@@ -414,13 +414,13 @@ let JsonTests = module (
         let text = json.write(json.JsonValue.Text(strings.from_scalars(controls)));
         test.assert_equal_string("\"\\u0000\\u0001\\u0002\\u0003\\u0004\\u0005\\u0006\\u0007\\b\\t\\n\\u000b\\f\\r"
             + "\\u000e\\u000f\\u0010\\u0011\\u0012\\u0013\\u0014\\u0015\\u0016\\u0017\\u0018\\u0019\\u001a\\u001b"
-            + "\\u001c\\u001d\\u001e\\u001f\\\"\\\\/" + strings.from_scalars([127]) + "\"", text);
+            + "\\u001c\\u001d\\u001e\\u001f\\\"\\\\/" + strings.from_scalars(new([127])) + "\"", text);
         test.assert_equal_string(strings.from_scalars(controls), match (parsed(text)) {
             json.JsonValue.Text(s) => s,
             _ => "not text",
         });
         // Member names are escaped the same way.
-        let members: [string, json.JsonValue][list] = [["a\"b\n", json.JsonValue.Null]];
+        let members: [string, json.JsonValue][list] = new([["a\"b\n", json.JsonValue.Null]]);
         test.assert_equal_string("{\"a\\\"b\\n\":null}", json.write(json.JsonValue.Object(members)));
     };
 
@@ -434,7 +434,7 @@ let JsonTests = module (
         test.assert_equal_string("[]", json.write_pretty(parsed("[]"), 4));
         test.assert_equal_string("\"s\"", json.write_pretty(parsed("\"s\""), 4));
         // Every member is written, including repeated names.
-        let members: [string, json.JsonValue][list] = [["k", json.number_of_int64(1)], ["k", json.number_of_int64(2)]];
+        let members: [string, json.JsonValue][list] = new([["k", json.number_of_int64(1)], ["k", json.number_of_int64(2)]]);
         test.assert_equal_string("{\"k\":1,\"k\":2}", json.write(json.JsonValue.Object(members)));
         test.assert_equal_string("{\n \"k\": 1,\n \"k\": 2\n}", json.write_pretty(json.JsonValue.Object(members), 1));
     };
@@ -454,14 +454,14 @@ let JsonTests = module (
     };
 
     export let test_member = func() -> void {
-        let members: [string, json.JsonValue][list] = [
+        let members: [string, json.JsonValue][list] = new([
             ["a", json.number_of_int64(1)], ["b", json.JsonValue.Null], ["a", json.number_of_int64(2)]
-        ];
+        ]);
         test.assert(json.equals(json.number_of_int64(1), test.assert_some<json.JsonValue>(json.member(members, "a"))));
         test.assert(json.equals(json.JsonValue.Null, test.assert_some<json.JsonValue>(json.member(members, "b"))));
         test.assert_none<json.JsonValue>(json.member(members, "c"));
         test.assert_none<json.JsonValue>(json.member(members, "A"));
-        test.assert_none<json.JsonValue>(json.member([], "a"));
+        test.assert_none<json.JsonValue>(json.member(new, "a"));
     };
 
     export let test_number_to_int64 = func() -> void {
@@ -577,16 +577,16 @@ let JsonTests = module (
     export let test_repeated_names_equality = func() -> void {
         let one = json.number_of_int64(1);
         let two = json.number_of_int64(2);
-        let a: [string, json.JsonValue][list] = [["x", one], ["x", two]];
-        let b: [string, json.JsonValue][list] = [["x", two], ["x", one]];
+        let a: [string, json.JsonValue][list] = new([["x", one], ["x", two]]);
+        let b: [string, json.JsonValue][list] = new([["x", two], ["x", one]]);
         same(json.JsonValue.Object(a), json.JsonValue.Object(b));
-        let c: [string, json.JsonValue][list] = [["x", one], ["x", one], ["x", two]];
-        let d: [string, json.JsonValue][list] = [["x", one], ["x", two], ["x", two]];
+        let c: [string, json.JsonValue][list] = new([["x", one], ["x", one], ["x", two]]);
+        let d: [string, json.JsonValue][list] = new([["x", one], ["x", two], ["x", two]]);
         same(json.JsonValue.Object(c), json.JsonValue.Object(d));
-        let e: [string, json.JsonValue][list] = [["x", one], ["x", json.number_of_int64(3)]];
+        let e: [string, json.JsonValue][list] = new([["x", one], ["x", json.number_of_int64(3)]]);
         different(json.JsonValue.Object(a), json.JsonValue.Object(e));
-        let f: [string, json.JsonValue][list] = [["x", one], ["x", one]];
-        let g: [string, json.JsonValue][list] = [["x", one], ["y", one]];
+        let f: [string, json.JsonValue][list] = new([["x", one], ["x", one]]);
+        let g: [string, json.JsonValue][list] = new([["x", one], ["y", one]]);
         different(json.JsonValue.Object(f), json.JsonValue.Object(g));
         different(json.JsonValue.Object(f), json.JsonValue.Object(a));
         same(json.JsonValue.Object(f), json.JsonValue.Object(f));
@@ -611,15 +611,15 @@ let JsonTests = module (
     };
 
     export let test_index = func() -> void {
-        let members: [string, json.JsonValue][list] = [
+        let members: [string, json.JsonValue][list] = new([
             ["a", json.number_of_int64(1)], ["b", json.JsonValue.Null], ["a", json.number_of_int64(2)]
-        ];
+        ]);
         let map = json.index(members);
         test.assert_equal_int32(2, map.size());
         test.assert(json.equals(json.number_of_int64(2), test.assert_some<json.JsonValue>(map.get("a"))));
         test.assert(json.equals(json.JsonValue.Null, test.assert_some<json.JsonValue>(map.get("b"))));
         test.assert_none<json.JsonValue>(map.get("c"));
-        test.assert_equal<string[list]>(["a", "b"], map.keys());
-        test.assert_equal_int32(0, json.index([]).size());
+        test.assert_equal<string[list]>(new(["a", "b"]), map.keys());
+        test.assert_equal_int32(0, json.index(new).size());
     };
 );

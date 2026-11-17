@@ -41,7 +41,7 @@ export let ReferenceIntegerText = module (
 
     /// @brief The text of digits stored least significant first, with a leading `-` when `negative` is set.
     export let digits_text = func(reversed: uint8[list], negative: bool) -> string {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         if (negative) {
             bytes.append(45);
         }

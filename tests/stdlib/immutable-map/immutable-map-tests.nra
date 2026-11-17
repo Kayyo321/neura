@@ -11,12 +11,12 @@ let tree_map = import:Std.Collections.TreeMap;
 
 let ImmutableMapTests = module (
     let sample = func() -> immutable_map.ImmutableMap<string, int> {
-        let entries: [string, int][list] = [["b", 2], ["a", 1], ["c", 3]];
+        let entries: [string, int][list] = new([["b", 2], ["a", 1], ["c", 3]]);
         return immutable_map.of<string, int>(entries);
     };
 
     export let test_members = func() -> void {
-        let empty: [string, int][list] = [];
+        let empty: [string, int][list] = new;
         test.assert(immutable_map.of<string, int>(empty).is_empty());
         let map = sample();
         test.assert_equal_int32(3, map.size());
@@ -48,7 +48,7 @@ let ImmutableMapTests = module (
     };
 
     export let test_copies_at_construction = func() -> void {
-        let entries: [int, int][list] = [[1, 10]];
+        let entries: [int, int][list] = new([[1, 10]]);
         let map = immutable_map.of<int, int>(entries);
         let extra: [int, int] = [2, 20];
         entries.append(extra);
@@ -59,16 +59,16 @@ let ImmutableMapTests = module (
 
     export let test_equals_and_hash = func() -> void {
         let a = sample();
-        let entries: [string, int][list] = [["c", 3], ["b", 2], ["a", 1]];
+        let entries: [string, int][list] = new([["c", 3], ["b", 2], ["a", 1]]);
         let b = immutable_map.of<string, int>(entries);
         test.assert(a.equals(b));
         test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
         let expected = ((("b".hash_code() ^ 2) as uint64) + (("a".hash_code() ^ 1) as uint64)
             + (("c".hash_code() ^ 3) as uint64)) & 4294967295;
         test.assert_equal_uint64(expected, a.hash_code() as uint64);
-        let changed: [string, int][list] = [["c", 3], ["b", 2], ["a", 4]];
+        let changed: [string, int][list] = new([["c", 3], ["b", 2], ["a", 4]]);
         test.assert(!a.equals(immutable_map.of<string, int>(changed)));
-        let fewer: [string, int][list] = [["c", 3], ["b", 2]];
+        let fewer: [string, int][list] = new([["c", 3], ["b", 2]]);
         test.assert(!a.equals(immutable_map.of<string, int>(fewer)));
         let other: class = hash_map.create<string, int>();
         test.assert(!a.equals(other));
@@ -87,7 +87,7 @@ let ImmutableMapTests = module (
         let numbered = int_map.create<string>();
         numbered.set(1, "a");
         numbered.set(2, "b");
-        let entries: [int, string][list] = [[1, "a"], [2, "b"]];
+        let entries: [int, string][list] = new([[1, "a"], [2, "b"]]);
         let fixed = immutable_map.of<int, string>(entries);
         test.assert(maps.same_entries<int, string>(hashed, sorted));
         test.assert(maps.same_entries<int, string>(sorted, numbered));
@@ -110,9 +110,9 @@ let ImmutableMapTests = module (
         let generator = random.seeded(71);
         let round = 0;
         while (round < 50) {
-            let entries: [int, int][list] = [];
-            let keys: int[list] = [];
-            let values: int[list] = [];
+            let entries: [int, int][list] = new;
+            let keys: int[list] = new;
+            let values: int[list] = new;
             let length = generator.next_int_below(40);
             let next_key = generator.next_int_below(5);
             while (entries.length < length) {

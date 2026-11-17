@@ -188,8 +188,8 @@ neura explain E0441                    # what an error code means, with a fixed 
 15. `==` on class references compares identity; `a === b` calls `a.equals(b)`.
 16. `x == 1 or 2 or 3` is a comparison chain. `&&` and `||` are the Boolean operators; `and` and `or` are only chain connectors.
 17. `a .. b` is a half-open range (`{0 .. 5}` is `[0, 1, 2, 3, 4]`); `a .. b : step` adds a step.
-18. Array and list literals do not allow a trailing comma. An empty literal needs an expected type: `let names: string[list] = [];`.
-19. `T[]` is a fixed-length array; `T[list]` is a growable list with `append` and `remove_at`. Both have `length`. There is no `new int[5]`; use a literal, a range, or `Std.Collections.Lists.filled<T>(count, value)`.
+18. Array and list literals do not allow a trailing comma. An empty literal needs an expected type: `let names: string[] = [];`. A list is constructed with `new`: `new([1, 2])`, `new(0 .. n)`, `new` for an empty one, or `new int[list]([1, 2])`; a bare literal or range where a list is expected is `E0450`, and `neura check --fix` inserts the `new`.
+19. `T[]` is a fixed-length array; `T[list]` is a growable list with `append` and `remove_at`. Both have `length`. There is no `new int[5]`; use an array literal, a range, or `Std.Collections.Lists.filled<T>(count, value)`.
 
 **Generics, enums, and errors**
 

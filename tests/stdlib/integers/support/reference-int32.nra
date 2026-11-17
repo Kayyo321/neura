@@ -26,7 +26,7 @@ export let ReferenceInt32 = module (
         if (rest > 0) {
             rest = -rest;
         }
-        let digits: uint8[list] = [];
+        let digits: uint8[list] = new;
         do {
             digits.append(integer_text.digit_byte(-(rest % base) as int));
             rest /= base;

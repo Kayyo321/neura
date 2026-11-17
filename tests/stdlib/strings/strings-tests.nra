@@ -43,7 +43,7 @@ let StringsTests = module (
         test.assert(strings.compare("abd", "abc") == ordering.Ordering.Greater);
         test.assert(strings.compare("B", "a") == ordering.Ordering.Less);
         // Byte order equals scalar order: U+FFFF sorts before U+10000.
-        test.assert(strings.compare(strings.from_scalars([65535]), "🙂") == ordering.Ordering.Less);
+        test.assert(strings.compare(strings.from_scalars(new([65535])), "🙂") == ordering.Ordering.Less);
         test.assert(strings.compare("z", "é") == ordering.Ordering.Less);
         test.assert(strings.compare("é", "ê") == ordering.Ordering.Less);
     };
@@ -94,44 +94,44 @@ let StringsTests = module (
     };
 
     export let test_split = func() -> void {
-        check_list(["a", "", "b", ""], strings.split("a,,b,", ","));
-        check_list([""], strings.split("", ","));
-        check_list(["abc"], strings.split("abc", ","));
-        check_list(["", ""], strings.split(",", ","));
-        check_list(["a", "b", "c"], strings.split("a::b::c", "::"));
-        check_list(["", "a"], strings.split("aaa", "aa"));
-        check_list(["x", "y"], strings.split("x🙂y", "🙂"));
-        check_list(["a,b,c"], strings.split_limit("a,b,c", ",", 1));
-        check_list(["a", "b,c"], strings.split_limit("a,b,c", ",", 2));
-        check_list(["a", "b", "c"], strings.split_limit("a,b,c", ",", 3));
-        check_list(["a", "b", "c"], strings.split_limit("a,b,c", ",", 10));
-        check_list([""], strings.split_limit("", ",", 3));
-        check_list(["", ","], strings.split_limit(",,", ",", 2));
+        check_list(new(["a", "", "b", ""]), strings.split("a,,b,", ","));
+        check_list(new([""]), strings.split("", ","));
+        check_list(new(["abc"]), strings.split("abc", ","));
+        check_list(new(["", ""]), strings.split(",", ","));
+        check_list(new(["a", "b", "c"]), strings.split("a::b::c", "::"));
+        check_list(new(["", "a"]), strings.split("aaa", "aa"));
+        check_list(new(["x", "y"]), strings.split("x🙂y", "🙂"));
+        check_list(new(["a,b,c"]), strings.split_limit("a,b,c", ",", 1));
+        check_list(new(["a", "b,c"]), strings.split_limit("a,b,c", ",", 2));
+        check_list(new(["a", "b", "c"]), strings.split_limit("a,b,c", ",", 3));
+        check_list(new(["a", "b", "c"]), strings.split_limit("a,b,c", ",", 10));
+        check_list(new([""]), strings.split_limit("", ",", 3));
+        check_list(new(["", ","]), strings.split_limit(",,", ",", 2));
     };
 
     export let test_lines = func() -> void {
-        check_list(["a", "b"], strings.lines("a\nb"));
-        check_list(["a", "b"], strings.lines("a\nb\n"));
-        check_list(["a", "b"], strings.lines("a\r\nb\r\n"));
-        check_list(["a", "", "b"], strings.lines("a\n\nb"));
-        check_list(["a", ""], strings.lines("a\n\n"));
-        check_list(["a\r", "b"], strings.lines("a\r\r\nb"));
-        check_list(["a\rb"], strings.lines("a\rb"));
-        check_list(["\r"], strings.lines("\r"));
-        check_list([""], strings.lines("\n"));
-        check_list([""], strings.lines("\r\n"));
-        check_list([""], strings.lines(""));
-        check_list(["only"], strings.lines("only"));
+        check_list(new(["a", "b"]), strings.lines("a\nb"));
+        check_list(new(["a", "b"]), strings.lines("a\nb\n"));
+        check_list(new(["a", "b"]), strings.lines("a\r\nb\r\n"));
+        check_list(new(["a", "", "b"]), strings.lines("a\n\nb"));
+        check_list(new(["a", ""]), strings.lines("a\n\n"));
+        check_list(new(["a\r", "b"]), strings.lines("a\r\r\nb"));
+        check_list(new(["a\rb"]), strings.lines("a\rb"));
+        check_list(new(["\r"]), strings.lines("\r"));
+        check_list(new([""]), strings.lines("\n"));
+        check_list(new([""]), strings.lines("\r\n"));
+        check_list(new([""]), strings.lines(""));
+        check_list(new(["only"]), strings.lines("only"));
     };
 
     export let test_join_and_repeat = func() -> void {
-        let none: string[list] = [];
+        let none: string[list] = new;
         test.assert_equal_string("", strings.join(none, ","));
-        test.assert_equal_string("a", strings.join(["a"], ","));
-        test.assert_equal_string("a, b, c", strings.join(["a", "b", "c"], ", "));
-        test.assert_equal_string("abc", strings.join(["a", "b", "c"], ""));
-        test.assert_equal_string(",,", strings.join(["", "", ""], ","));
-        test.assert_equal_string("é🙂é", strings.join(["é", "é"], "🙂"));
+        test.assert_equal_string("a", strings.join(new(["a"]), ","));
+        test.assert_equal_string("a, b, c", strings.join(new(["a", "b", "c"]), ", "));
+        test.assert_equal_string("abc", strings.join(new(["a", "b", "c"]), ""));
+        test.assert_equal_string(",,", strings.join(new(["", "", ""]), ","));
+        test.assert_equal_string("é🙂é", strings.join(new(["é", "é"]), "🙂"));
         test.assert_equal_string("", strings.repeat("ab", 0));
         test.assert_equal_string("ab", strings.repeat("ab", 1));
         test.assert_equal_string("ababab", strings.repeat("ab", 3));
@@ -141,7 +141,7 @@ let StringsTests = module (
     };
 
     export let test_trim = func() -> void {
-        let spaces = strings.from_scalars([32, 9, 10, 11, 12, 13]);
+        let spaces = strings.from_scalars(new([32, 9, 10, 11, 12, 13]));
         let padded = spaces + "a b" + spaces;
         test.assert_equal_string("a b", strings.trim(padded));
         test.assert_equal_string("a b" + spaces, strings.trim_start(padded));
@@ -152,7 +152,7 @@ let StringsTests = module (
         test.assert_equal_string("", strings.trim(""));
         test.assert_equal_string("x", strings.trim("x"));
         // Only ASCII whitespace: U+00A0 and U+3000 stay.
-        let wide = strings.from_scalars([160, 120, 12288]);
+        let wide = strings.from_scalars(new([160, 120, 12288]));
         test.assert_equal_string(wide, strings.trim(wide));
     };
 

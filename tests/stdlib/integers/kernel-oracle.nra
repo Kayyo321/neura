@@ -62,23 +62,23 @@ let IntegersKernelOracle = module (
     // text parses the same back.
     let agree_value = func(bits: uint64, radix: int) {
         let signed = uint64s.to_signed(bits);
-        let texts: string[list][list] = [
-            [ref_uint64.to_string_radix(bits, radix), uint64s.to_string_radix(bits, radix)],
-            [ref_int64.to_string_radix(signed, radix), int64s.to_string_radix(signed, radix)],
-            [ref_uint32.to_string_radix((bits & 4294967295) as uint32, radix),
-                uint32s.to_string_radix((bits & 4294967295) as uint32, radix)],
-            [ref_uint16.to_string_radix((bits & 65535) as uint16, radix),
-                uint16s.to_string_radix((bits & 65535) as uint16, radix)],
-            [ref_uint8.to_string_radix((bits & 255) as uint8, radix), uint8s.to_string_radix((bits & 255) as uint8, radix)]
-        ];
+        let texts: string[list][list] = new([
+            new([ref_uint64.to_string_radix(bits, radix), uint64s.to_string_radix(bits, radix)]),
+            new([ref_int64.to_string_radix(signed, radix), int64s.to_string_radix(signed, radix)]),
+            new([ref_uint32.to_string_radix((bits & 4294967295) as uint32, radix),
+                uint32s.to_string_radix((bits & 4294967295) as uint32, radix)]),
+            new([ref_uint16.to_string_radix((bits & 65535) as uint16, radix),
+                uint16s.to_string_radix((bits & 65535) as uint16, radix)]),
+            new([ref_uint8.to_string_radix((bits & 255) as uint8, radix), uint8s.to_string_radix((bits & 255) as uint8, radix)])
+        ]);
         if (signed >= -2147483648 && signed <= 2147483647) {
-            texts.append([ref_int32.to_string_radix(signed as int32, radix), int32s.to_string_radix(signed as int32, radix)]);
+            texts.append(new([ref_int32.to_string_radix(signed as int32, radix), int32s.to_string_radix(signed as int32, radix)]));
         }
         if (signed >= -32768 && signed <= 32767) {
-            texts.append([ref_int16.to_string_radix(signed as int16, radix), int16s.to_string_radix(signed as int16, radix)]);
+            texts.append(new([ref_int16.to_string_radix(signed as int16, radix), int16s.to_string_radix(signed as int16, radix)]));
         }
         if (signed >= -128 && signed <= 127) {
-            texts.append([ref_int8.to_string_radix(signed as int8, radix), int8s.to_string_radix(signed as int8, radix)]);
+            texts.append(new([ref_int8.to_string_radix(signed as int8, radix), int8s.to_string_radix(signed as int8, radix)]));
         }
         for (let pair in texts) {
             test.assert_equal_string(pair[0], pair[1]);
@@ -96,10 +96,10 @@ let IntegersKernelOracle = module (
     // Values at every type's bounds and one past them, in every radix, and
     // malformed texts.
     export let test_edge_corpus = func {
-        let values: uint64[list] = [0, 1, 2, 9, 10, 35, 36, 126, 127, 128, 129, 254, 255, 256, 32766, 32767, 32768,
+        let values: uint64[list] = new([0, 1, 2, 9, 10, 35, 36, 126, 127, 128, 129, 254, 255, 256, 32766, 32767, 32768,
             32769, 65534, 65535, 65536, 2147483646, 2147483647, 2147483648, 2147483649, 4294967294, 4294967295,
             4294967296, 9223372036854775806, 9223372036854775807, 9223372036854775808, 9223372036854775809,
-            18446744073709551488, 18446744073709551615, 18446744073709551614];
+            18446744073709551488, 18446744073709551615, 18446744073709551614]);
         for (let radix in radixes) {
             for (let bits in values) {
                 agree_value(bits, radix);

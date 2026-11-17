@@ -113,7 +113,7 @@ export let Random = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            last bytes: uint8[list] = [];
+            last bytes: uint8[list] = new;
             while (bytes.length < count) {
                 let word = next_uint64();
                 let k = 0;

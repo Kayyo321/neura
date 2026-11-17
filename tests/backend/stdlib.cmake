@@ -170,9 +170,9 @@ let kernels = import:Std.KernelBindings;
 
 export let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        services.write(kernels.hex([0, 15, 255]));
-        services.write(kernels.crc32([49, 50, 51, 52, 53, 54, 55, 56, 57]).to_string());
-        let items: int64[list] = [5, -3, 9, 0];
+        services.write(kernels.hex(new([0, 15, 255])));
+        services.write(kernels.crc32(new([49, 50, 51, 52, 53, 54, 55, 56, 57])).to_string());
+        let items: int64[list] = new([5, -3, 9, 0]);
         kernels.sort(items);
         services.write(items.to_string());
         let bad = kernels.unhex("0g");
@@ -239,7 +239,7 @@ let kernels = import:Std.TaggedKernels;
 
 export let KernelFacade = module (
     export let checksum = func(bytes: uint8[list]) -> string {
-        return kernels.hex([0, 15]) + " " + kernels.crc32(bytes).to_string();
+        return kernels.hex(new([0, 15])) + " " + kernels.crc32(bytes).to_string();
     };
 );
 ]=])
@@ -250,7 +250,7 @@ let facade = import:Std.KernelFacade;
 
 export let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
-        services.write(facade.checksum([49, 50, 51, 52, 53, 54, 55, 56, 57]));
+        services.write(facade.checksum(new([49, 50, 51, 52, 53, 54, 55, 56, 57])));
         return program.ExitCode.Ok;
     };
 );

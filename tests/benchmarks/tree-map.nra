@@ -13,7 +13,7 @@ export let TreeMapBenchmark = module:program.Entry (
         let n = result.value_or<int32>(int32s.parse(args[0]), 0);
         let map = tree_map.create<int32, int32>(int32s.compare);
         let seed: uint64 = 7;
-        let keys: int32[list] = [];
+        let keys: int32[list] = new;
         for (let i = 0; i < n; i = i + 1) {
             seed = (seed * 1103515245 + 12345) & 2147483647;
             let key = (seed % 100000000) as int32;

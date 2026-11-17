@@ -66,7 +66,7 @@ export let RegexParser = module (
         /// @brief The number of capturing groups, excluding group zero.
         export let groups: int = 0;
         /// @brief The names of capturing groups in order, with empty names for unnamed groups.
-        export let names: string[list] = [];
+        export let names: string[list] = new;
         /// @brief The current group nesting depth.
         let depth: int = 0;
         /// @brief The pattern's UTF-8 byte length.
@@ -137,7 +137,7 @@ export let RegexParser = module (
             if (at_end() || peek() != 124) {
                 return [first, first_size];
             }
-            last branches: Node[list] = [first];
+            last branches: Node[list] = new([first]);
             let total = first_size;
             while (!at_end() && peek() == 124) {
                 position += 1;
@@ -157,7 +157,7 @@ export let RegexParser = module (
 
         /// @brief Parses successive atoms and quantifiers up to an alternative, closing group, or end.
         let parse_concat = func -> [Node, int] {
-            last items: Node[list] = [];
+            last items: Node[list] = new;
             let total = 0;
             while (!at_end()) {
                 last b = peek();
@@ -469,7 +469,7 @@ export let RegexParser = module (
                 negated = true;
                 position += 1;
             }
-            last ranges: uint32[list] = [];
+            last ranges: uint32[list] = new;
             let first = true;
             do {
                 if (at_end()) {
@@ -652,24 +652,24 @@ export let RegexParser = module (
     #Pure
     export let shorthand_ranges = func(letter: uint8) -> uint32[list] {
         if (letter == 100) {
-            return [48, 57];
+            return new([48, 57]);
         }
         if (letter == 119) {
-            return [48, 57, 65, 90, 95, 95, 97, 122];
+            return new([48, 57, 65, 90, 95, 95, 97, 122]);
         }
         if (letter == 115) {
-            return [9, 13, 32, 32];
+            return new([9, 13, 32, 32]);
         }
         if (letter == 68) {
-            return [0, 47, 58, MaxScalar];
+            return new([0, 47, 58, MaxScalar]);
         }
         if (letter == 87) {
-            return [0, 47, 58, 64, 91, 94, 96, 96, 123, MaxScalar];
+            return new([0, 47, 58, 64, 91, 94, 96, 96, 123, MaxScalar]);
         }
         if (letter == 83) {
-            return [0, 8, 14, 31, 33, MaxScalar];
+            return new([0, 8, 14, 31, 33, MaxScalar]);
         }
-        last none: uint32[list] = [];
+        last none: uint32[list] = new;
         return none;
     };
 

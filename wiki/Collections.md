@@ -18,13 +18,13 @@ Read suffixes from left to right: each suffix wraps the type to its left. Nested
 
 ## Construction and length
 
-A bracketed literal constructs a collection using the expected type. Its elements must be assignable to that type's element type. An empty literal requires an expected type. For example:
+A bracketed literal constructs an array using the expected type. Its elements must be assignable to that type's element type. An empty literal requires an expected type. A list is constructed with `new`: `new([1, 2, 3])` where the list type is known from context, `new int[list]([1, 2, 3])` with the type written, `new` alone for an empty list of a known type, and `new(0 .. count)` or `new int[list](0 .. count)` from a range. The elements, or the range's bounds, are evaluated once, in written order, straight into the list. A bare literal or range where a list is expected is the error `E0450`, and `neura check --fix` inserts the `new` and keeps the literal, its comments and its order. A nested list needs its own `new`, and a list that is already a value, such as the result of a call, needs none. For example:
 
 <!-- example: check -->
 ```neura
 let names: string[] = ["Ada", "Lin"];
-let queue: string[list] = ["first", "second"];
-let empty: string[list] = [];
+let queue: string[list] = new(["first", "second"]);
+let empty: string[list] = new;
 let rows: string[][] = [["a", "b"], ["c"]];
 ```
 
@@ -37,11 +37,11 @@ An array's length is fixed when it is created, including when that length is det
 <!-- example: check -->
 ```neura
 let numbers = {0 .. 5};                 // int[] containing 0, 1, 2, 3, 4
-let evens: int[list] = 0 .. 8 : 2;      // [0, 2, 4, 6]
+let evens: int[list] = new(0 .. 8 : 2); // [0, 2, 4, 6]
 let descending = 5 .. 0 : -2;          // [5, 3, 1]
 ```
 
-An expected array or list type determines the result and the integer type of the bounds and step. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` and heap limits and does not advance past the last element. A constructed list starts with version zero.
+An expected array or list type determines the result and the integer type of the bounds and step; a list is constructed with `new(start .. stop)`. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` and heap limits and does not advance past the last element. A constructed list starts with version zero.
 
 Binary operators bind more tightly than `..` and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
 

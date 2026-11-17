@@ -292,7 +292,7 @@ let HashMapTests = module (
     // with_keys stores the caller's functions: keys equal ignoring case.
     export let test_with_keys = func() -> void {
         let lower = func(s: string) -> string {
-            let bytes: uint8[list] = [];
+            let bytes: uint8[list] = new;
             let i = 0;
             while (i < s.byte_length) {
                 let b = s.byte_at(i);

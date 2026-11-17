@@ -11,7 +11,7 @@ let test = import:Std.Test;
 let Crc32KernelOracle = module (
     // Bytes that differ from position to position: i * 31 + 7, modulo 256.
     let pattern = func(length: int) -> uint8[list] {
-        let bytes: uint8[list] = [];
+        let bytes: uint8[list] = new;
         for (let i = 0; i < length; i++) {
             bytes.append(((i * 31 + 7) % 256) as uint8);
         }
@@ -24,13 +24,13 @@ let Crc32KernelOracle = module (
         test.assert_equal_uint64(reference.of(bytes) as uint64, crc32s.of(bytes) as uint64);
         let kernel = crc32s.create();
         let oracle = reference.create();
-        let part: uint8[list] = [];
+        let part: uint8[list] = new;
         for (let b in bytes) {
             part.append(b);
             if (part.length == piece) {
                 kernel.update(part);
                 oracle.update(part);
-                part = [];
+                part = new;
             }
         }
         kernel.update(part);

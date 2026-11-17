@@ -223,7 +223,7 @@ let strings = import:Std.Text.Strings;
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         // Built-in list plus helpers
-        let numbers: int[list] = [5, 3, 9, 1];
+        let numbers: int[list] = new([5, 3, 9, 1]);
         sorting.sort_ascending(numbers);                          // in place, on a kernel
         lists.insert_at<int>(numbers, 0, 0);
         console.println("{} {} {}", numbers[0], numbers[1], numbers.length);
@@ -384,7 +384,7 @@ let App = module:program.Entry (
                 return program.ExitCode.Failure;
             },
         }
-        let members: [string, json.JsonValue][list] = [];
+        let members: [string, json.JsonValue][list] = new;
         members.append(["ok", json.JsonValue.Boolean(true)]);
         members.append(["count", json.number_of_int64(3)]);
         console.print_line(json.write(json.JsonValue.Object(members)));
@@ -439,7 +439,7 @@ let App = module:program.Entry (
         let first = rng.next_int_below(100);
         let again = randoms.seeded(42).next_int_below(100);
         console.println("{}", first == again);
-        let deck: int[list] = [1, 2, 3, 4];
+        let deck: int[list] = new([1, 2, 3, 4]);
         rng.shuffle<int>(deck);
         console.println("{}", deck.length);
         return program.ExitCode.Ok;

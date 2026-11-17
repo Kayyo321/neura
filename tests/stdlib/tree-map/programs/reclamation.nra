@@ -12,7 +12,7 @@ let tree_map = import:Std.Collections.TreeMap;
 // about 600,000.
 export let Main = module:program.Entry (
     let block = func(seed: int) -> int[list] {
-        let values: int[list] = [];
+        let values: int[list] = new;
         let i = 0;
         while (i < 2000) {
             values.append(seed + i);
@@ -25,7 +25,7 @@ export let Main = module:program.Entry (
         let map = tree_map.create<int, int[list]>(int32.compare);
         let i = 0;
         while (i < 7) {
-            let small: int[list] = [i];
+            let small: int[list] = new([i]);
             map.set(1000 + i, small);
             i = i + 1;
         }

@@ -35,11 +35,11 @@ let Tier3Alloc = module:program.Entry (
     );
 
     let churn = func(rounds: int32) -> int64 {
-        let kept: Pair[list] = [];
-        let bytes: uint8[list] = [];
-        let words: int64[list] = [];
+        let kept: Pair[list] = new;
+        let bytes: uint8[list] = new;
+        let words: int64[list] = new;
         let sum: int64 = 0;
-        let nodes: Node[list] = [];
+        let nodes: Node[list] = new;
         for (let i = 0; i < rounds; i = i + 1) {
             let pair = new Pair();
             pair.left = i as int64;

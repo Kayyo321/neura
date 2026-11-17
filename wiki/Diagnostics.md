@@ -112,6 +112,7 @@ Errors about types, values, calls, and statements.
 | [E0446](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0446.md) | a constructor that does not assign a 'last' field |
 | [E0447](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0447.md) | a deferred 'last' binding that is not a local or an instance field |
 | [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md) | a value type that contains itself |
+| [E0450](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0450.md) | a list literal without new |
 
 ## E05xx: Classes and lifecycle
 
