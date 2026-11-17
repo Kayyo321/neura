@@ -473,6 +473,41 @@ if(BUILD_TESTING)
 endif()
 # --- End of kernels -----------------------------------------------------------
 
+option(NEURA_ENABLE_SERVER_TLS "Build the OpenSSL 3.5 server TLS transport" OFF)
+if(NEURA_ENABLE_SERVER_TLS)
+    if(NOT UNIX OR EMSCRIPTEN)
+        message(FATAL_ERROR "The Neura server TLS transport requires POSIX sockets")
+    endif()
+
+    function(neura_configure_server_tls)
+        set(OPENSSL_USE_STATIC_LIBS TRUE)
+        find_package(OpenSSL 3.5 REQUIRED COMPONENTS SSL Crypto)
+        if(NOT OPENSSL_VERSION MATCHES "^3\\.5\\." OR NOT OPENSSL_SSL_LIBRARY MATCHES "\\.a$"
+           OR NOT OPENSSL_CRYPTO_LIBRARY MATCHES "\\.a$")
+            message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 3.5 static archives")
+        endif()
+
+        add_library(neura_server_tls STATIC
+            src/server/http_wire.cpp
+            src/server/http_connection.cpp
+            src/server/http_tls.cpp)
+        target_include_directories(neura_server_tls PUBLIC src)
+        target_link_libraries(neura_server_tls PRIVATE OpenSSL::SSL)
+        neura_target_defaults(neura_server_tls)
+
+        if(BUILD_TESTING)
+            find_package(Threads REQUIRED)
+            add_executable(neura_http_tls_tests tests/server/http_tls_tests.cpp)
+            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls OpenSSL::SSL Threads::Threads)
+            neura_target_defaults(neura_http_tls_tests)
+            add_test(NAME server-http-tls COMMAND neura_http_tls_tests)
+            set_tests_properties(server-http-tls PROPERTIES TIMEOUT 15)
+        endif()
+    endfunction()
+
+    neura_configure_server_tls()
+endif()
+
 if(BUILD_TESTING)
     add_executable(neura_http_wire_tests
         src/server/http_wire.cpp
