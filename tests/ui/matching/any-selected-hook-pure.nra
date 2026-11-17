@@ -1,0 +1,11 @@
+// Reading the selected payload reaches Session's getter.
+let count = 0;
+let Session = class (
+    | get: { count += 1; return instance; };
+);
+
+#Pure
+let selected = func(x: any) -> bool => match.is (x) {
+    item: Session => true,
+    _ => false,
+};

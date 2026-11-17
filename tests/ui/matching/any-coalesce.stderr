@@ -1,0 +1,9 @@
+error[E0495]: invalid left operand of '??'
+ --> $DIR/any-coalesce.nra:4:43
+  |
+4 | let pick = func(v: any, x: any) -> any => v ?? x;
+  |                                           ^ any is not a reference or an Optional
+  |
+  = note: '??' gives its right operand when the left one is nil or None
+
+For more information about this error, try `neura explain E0495`.

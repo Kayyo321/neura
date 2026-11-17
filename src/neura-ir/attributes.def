@@ -69,6 +69,12 @@ NEURA_ATTRIBUTE(ParameterDefaultVariant, 13, "parameter.default.variant", on_par
 // function that a module enabled with `let.extensions` may call as a member
 // of its first parameter's type. The value is true.
 NEURA_ATTRIBUTE(FunctionExtension, 14, "function.extension", on_function, false, "b")
+// On a class that declares a class hook clause: its hidden hook function.
+NEURA_ATTRIBUTE(HookGet, 15, "hook.get", on_class, false, "s")
+NEURA_ATTRIBUTE(HookSet, 16, "hook.set", on_class, false, "s")
+// On a hidden hook function: [the class that declares the clause, 0 for a
+// getter or 1 for a setter].
+NEURA_ATTRIBUTE(HookOf, 17, "hook.of", on_function, false, "[s u1]")
 // Records, property contracts, static requirements and derivation
 // (docs/design/Records030.md). The milestone's identifiers start at 18 and
 // are renumbered when it merges.

@@ -1,0 +1,13 @@
+bare=
+pack=sg
+guard=gsgsg
+interface=gs
+nominal=gs
+enum=g
+nested=gsgs
+optional=g
+present=ga
+hidden=g
+substitution=gsg
+nil pack=sg
+nil test=

@@ -131,7 +131,8 @@ foreach(name IN LISTS fixtures)
     must("${name}" assemble "${name}.nvra" -o "${name}.reassembled.nvr")
     same_bytes("${name}: assembly round trip" "${name}.nvr" "${name}.reassembled.nvr")
     file(READ "${TEST_DIR}/${name}.nvra" assembly)
-    # A task image is 1.5, or 1.7 when the program also returns a tuple (several result words).
+    # A task image is 1.5, or 1.7 when a function returns several result words (a tuple, or an
+    # ExitCode, which every program's main returns).
     if(NOT assembly MATCHES "\nnvr 1\\.[57] profile 1\n" OR NOT assembly MATCHES "exit scheduler scope-enter" OR
        NOT assembly MATCHES "exit scheduler spawn" OR NOT assembly MATCHES "transferable-layouts \\[")
         message(FATAL_ERROR "${name}: the assembly does not show a 1.5 task image")

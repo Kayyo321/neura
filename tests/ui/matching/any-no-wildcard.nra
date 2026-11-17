@@ -1,0 +1,7 @@
+// A match.is on any without '_'.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let read = func(v: any) -> int => match.is (v) {
+    int64 => 1,
+    nil => 0,
+};

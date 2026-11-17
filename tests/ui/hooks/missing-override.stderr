@@ -1,0 +1,15 @@
+error[E0539]: class 'Admin' inherits a 'set' hook from 'Session'
+ --> $DIR/missing-override.nra:9:7
+  |
+3 |     | set: value;
+  |     ------------- the inherited 'set' hook
+...
+9 |     | set: value;
+  |       ^^^ this clause replaces the inherited one
+  |
+help: mark the clause as replacing it
+  |
+9 |     | set.override: value;
+  |          +++++++++
+
+For more information about this error, try `neura explain E0539`.

@@ -32,6 +32,8 @@ constexpr auto keywords = std::to_array<std::string_view>({
 constexpr auto compound_symbols = std::to_array<std::string_view>({
     "===", "<<=", ">>=",
     "->", "=>", "==", "!=", "<=", ">=", "&&", "||",
+    // docs/design/Matching030.md: optional access and coalescing.
+    "?.", "??",
     "++", "--", "+=", "-=", "*=", "/=", "%=", "&=", "^=", "|=",
 });
 
@@ -494,6 +496,24 @@ private:
         unterminated(start);
     }
 
+    static bool begins_expression(const Token& token) {
+        switch (token.kind) {
+        case TokenKind::Identifier:
+        case TokenKind::Integer:
+        case TokenKind::Float:
+        case TokenKind::String:
+            return true;
+        case TokenKind::Keyword:
+            return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
+                   token.text == "true" || token.text == "false" || token.text == "nil";
+        case TokenKind::Symbol:
+            return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
+                   token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";
+        default:
+            return false;
+        }
+    }
+
     // A hole from its '{' through its '}'. A nested hole, in a
     // specification, has no specification of its own.
     InterpolationPart hole(Span literal, bool nested) {
@@ -501,6 +521,7 @@ private:
         advance();
         std::vector<char> brackets;
         std::optional<Span> conditional;
+        std::optional<Span> question;
         while (true) {
             while (peek() == ' ' || peek() == '\t') advance();
             if (line_end()) unterminated(literal);
@@ -516,7 +537,14 @@ private:
             Token token{kind, std::string(source_.substr(start.offset, width)),
                         {file_, start.line, start.column, start.offset, width}, nullptr,
                         std::exchange(parts_, nullptr)};
-            if (kind == TokenKind::Symbol && token.text.size() == 1) {
+            // A top-level '?' is a conditional's when the next token can
+            // begin an expression, and otherwise a postfix propagation,
+            // which ends no hole (docs/design/Matching030.md).
+            if (question && !conditional && begins_expression(token)) conditional = question;
+            question.reset();
+            if (kind == TokenKind::Symbol && token.text == "?" && brackets.empty()) {
+                question = token.span;
+            } else if (kind == TokenKind::Symbol && token.text.size() == 1) {
                 const char c = token.text.front();
                 if (c == '(' || c == '[' || c == '{') {
                     brackets.push_back(c);
@@ -528,8 +556,6 @@ private:
                                                             : "this bracket does not close the '" +
                                                                   std::string(1, brackets.back()) + "' before it");
                     brackets.pop_back();
-                } else if (c == '?' && brackets.empty() && !conditional) {
-                    conditional = token.span;
                 }
             }
             part.tokens.push_back(std::move(token));

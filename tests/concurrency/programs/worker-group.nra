@@ -47,7 +47,7 @@ let drain_on_close = func -> void {
 
 // A job that waits at a gate nobody opens, so cancellation finds the worker parked in the job.
 let blocked = func(gate: channels.Receiver<int>) -> func(int) -> void {
-    return func(job: int) -> void {
+    return new func(job: int) -> void {
         console.print_line("job " + job.to_string() + " starts");
         gate.receive();
         console.print_line("job " + job.to_string() + " ends");

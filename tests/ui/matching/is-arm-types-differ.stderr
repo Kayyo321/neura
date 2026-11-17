@@ -1,0 +1,7 @@
+error[E0403]: expected int32, got string
+  --> $DIR/is-arm-types-differ.nra:17:14
+   |
+17 |         _ => "other",
+   |              ^^^^^^^ expected int32, found string
+
+For more information about this error, try `neura explain E0403`.

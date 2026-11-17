@@ -1,0 +1,30 @@
+// Edge cases 24, 26, 27, 28 and 33: guards, nested variants, the field shorthand, tuple subjects.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let length = func(shape: Shape) -> int => match (shape) {
+    Shape.Line(length) if length < 0 => 0,
+    Shape.Line(length) => length,
+    Shape.Box { size: [width, height], label } => width * height,
+    _ => 0,
+};
+let leftmost = func(tree: Tree) -> int => match (tree) {
+    Tree.Leaf(value) => value,
+    Tree.Node(Tree.Leaf(a), b) => a,
+    Tree.Node(Tree.Node(inner, _), _) => 0,
+};
+let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+    [Light.Red, _] => 1,
+    [_, Light.Red] => 2,
+    _ => 3,
+};
+let inner = func(value: Optional<Optional<int>>) -> int => match (value) {
+    Optional.Some(Optional.Some(found)) => found,
+    Optional.Some(Optional.None) => -1,
+    Optional.None => -2,
+};
+let guarded = func(ready: bool) -> int => match (Light.Red) {
+    _ if ready => 1,
+    _ => 2,
+};

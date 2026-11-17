@@ -1,0 +1,29 @@
+// Case 62: a startup block is written at file or module level only.
+let run = func() -> void {
+    static scope { }
+};
+
+let Service = class (
+    static scope { }
+);
+
+let Shape = interface (
+    static scope { }
+);
+
+let Holder = class<T> (
+    static scope { }
+);
+
+let Color = enum (
+    static scope { }
+    Red
+);
+
+{
+    static scope { }
+}
+
+static scope {
+    static scope { }
+}

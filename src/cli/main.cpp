@@ -1,6 +1,7 @@
 #include "argument_lists.hpp"
 #include "diagnostic_render.hpp"
 #include "explain.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/tags.hpp"
 #include "util/diagnostic_codes.hpp"
 #include "util/suggest.hpp"
@@ -13,11 +14,13 @@
 #include "launcher/container.hpp"
 #include "lifecycle.hpp"
 #include "lift/hints.hpp"
+#include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/ir.hpp"
 #include "neura-ir/nir_format.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/task_analysis.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/fleet.hpp"
@@ -357,6 +360,8 @@ bool parse_policy_option(Options& options, std::string_view arg, Next next) {
         options.limits.max_frames = static_cast<std::uint32_t>(value);
     } else if (arg == "--max-heap-cells") {
         options.limits.max_heap_cells = parse_limit(arg, next());
+    } else if (arg == "--max-stack-cells") {
+        options.limits.max_stack_cells = parse_limit(arg, next());
     } else if (arg == "--allow-fs") {
         // Every path, replacing any earlier prefix list.
         options.capabilities.fs = true;
@@ -677,10 +682,6 @@ Options read_options(int argc, char** argv) {
                 throw std::runtime_error("--no-lift-hints applies only to build");
             }
             options.lift_hints = false;
-        } else if (arg == "--max-stack-cells") {
-            // Not part of a native policy: the container records no stack limit.
-            if (!runs) throw std::runtime_error("--max-stack-cells applies only to run and test");
-            options.limits.max_stack_cells = parse_limit(arg, next());
         } else if (arg == "--tier=0" || arg == "--tier=1" || arg == "--tier=2") {
             if (!runs) throw std::runtime_error("--tier applies only to run and test");
             options.limits.tier = static_cast<std::uint8_t>(arg.back() - '0');
@@ -1000,8 +1001,10 @@ int emit_ir(const Options& options) {
     // default listing is what conversion receives: specialized and optimized.
     if (options.optimize) {
         neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
         neura::specialize(program);
+        neura::check_storage(program, neura::StorageStage::Specialized);
+        neura::materialize_reference_storage(program);
+        neura::elaborate_class_hooks(program);
         neura::optimize(program);
     }
     neura::print_ir(std::cout, program);
@@ -1176,7 +1179,10 @@ int inspect(const Options& options) {
     if (caps.entropy) std::cout << ", entropy";
     if (caps.native) std::cout << ", native";
     std::cout << "\nlimits: steps " << policy.limits.max_steps << ", frames " << policy.limits.max_frames
-              << ", heap cells " << policy.limits.max_heap_cells
+              << ", heap cells " << policy.limits.max_heap_cells << ", stack cells " << policy.limits.max_stack_cells
+              << (executable.version < 3
+                      ? " (default: container version " + std::to_string(executable.version) + " records none)"
+                      : "")
               << "\ntasks: at most " << policy.limits.max_tasks << ", quantum " << policy.limits.task_quantum
               << ", queued messages " << policy.limits.max_queued_messages << ", pending requests "
               << policy.limits.max_pending_requests << ", parallel workers " << policy.limits.parallel_workers
@@ -1474,9 +1480,12 @@ int run_tests(const Options& options) {
         throw std::runtime_error("no tests found: a test is an exported, zero-argument void function named "
                                  "test_* in a module of the listed files");
     }
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
+    neura::check_containment(program);
     neura::check_inline_limit(program);
+    neura::elaborate_class_hooks(program);
     if (options.optimize) {
         neura::optimize(program);
     } else {
@@ -1756,8 +1765,10 @@ int run_tests(const Options& options) {
 // listed once for each specialization the program uses.
 int task_safety_report(neura::IrProgram program) {
     neura::require_valid_ir(program, "before specialization");
-    neura::materialize_reference_storage(program);
     neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
+    neura::elaborate_class_hooks(program);
     const neura::TaskAnalysis analysis(program);
     const auto file_of = [&](neura::SymbolId id) {
         for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
@@ -1823,17 +1834,11 @@ int task_safety_report(neura::IrProgram program) {
 namespace {
 
 int check_program(neura::IrProgram program) {
-    const bool thread_safe_tags = std::any_of(program.symbols.begin(), program.symbols.end(), [](const auto& item) {
-        return neura::has_tag(item, neura::TagId::ThreadSafe);
-    });
-    if (neura::uses_tasks(program) || thread_safe_tags) {
-        // The isolation rules of a spawn, and the #ThreadSafe check, need
-        // concrete types, which exist after specialization (Concurrency.md
-        // section 5).
-        neura::require_valid_ir(program, "before specialization");
-        neura::materialize_reference_storage(program);
-        neura::specialize(program);
-    }
+    neura::require_valid_ir(program, "before specialization");
+    neura::specialize(program);
+    neura::check_storage(program, neura::StorageStage::Specialized);
+    neura::materialize_reference_storage(program);
+    neura::elaborate_class_hooks(program);
     return 0;
 }
 

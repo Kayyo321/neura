@@ -1,0 +1,9 @@
+error[E0411]: match.is cannot test a value of type T
+  --> $DIR/is-type-parameter.nra:14:54
+   |
+14 | let classify = func<T>(value: T) -> int => match.is (value) {
+   |                                                      ^^^^^ the subject has type T
+   |
+   = help: convert it with 'as any' to test the type of its value
+
+For more information about this error, try `neura explain E0411`.

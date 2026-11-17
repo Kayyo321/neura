@@ -1,0 +1,17 @@
+// Edge cases 22, 52 and 15: match.is and is on an any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+let describe = func(value: any) -> string => match.is (value) {
+    count: int64 if count > 0 => "a positive int64",
+    int64 => "an int64",
+    byte: uint8 => "uint8",
+    small: int8 => "int8",
+    float64 => "a float",
+    text: string => "string " + text,
+    circle: Circle => "a circle",
+    shape: Shape => "a shape",
+    nil => "nothing",
+    _ => "something else",
+};
+let tests = func(v: any) -> bool => v is int64 || v is Shape || v is string;

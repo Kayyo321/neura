@@ -1,0 +1,7 @@
+error[E0226]: parameter 'v' takes no default
+ --> $DIR/any-default.nra:4:24
+  |
+4 | let show = func(v: any = 1) => 1;
+  |                        ^^^ a parameter of type any takes no default
+
+For more information about this error, try `neura explain E0226`.

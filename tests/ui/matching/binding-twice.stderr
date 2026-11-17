@@ -1,0 +1,8 @@
+error[E0301]: duplicate match binding 'length'
+ --> $DIR/binding-twice.nra:8:22
+  |
+8 |     Pair.Two(length, length) => length,
+  |                      ^^^^^^ bound again here
+  |              ------ first bound here
+
+For more information about this error, try `neura explain E0301`.

@@ -5,10 +5,19 @@ let test = import:Std.Test;
 let [default_code, default_weight] = [4, 1.5 as float];
 
 let Aggregates = module:program.Entry (
+    // A payload enum is stored inline, so a Tree holds its subtrees through a class (E0448).
+    let TreeLink = class (
+        export last tree: Tree;
+
+        export let init = func(value: Tree) {
+            tree = value;
+        };
+    );
+
     let Tree = enum (
         Empty,
         Leaf(int),
-        Node { left: Tree, right: Tree, label: string },
+        Node { left: TreeLink, right: TreeLink, label: string },
     );
 
     let calls: int = 0;
@@ -28,7 +37,7 @@ let Aggregates = module:program.Entry (
             Tree.Empty => { return 0; },
             Tree.Leaf(value) => { return value; },
             Tree.Node { right, label: _, left } => {
-                return sum(left) + sum(right);
+                return sum(left.tree) + sum(right.tree);
             },
         }
     };
@@ -48,14 +57,14 @@ let Aggregates = module:program.Entry (
         test.assert(x == 5 && !y);
 
         calls = 0;
-        let tree = Tree.Node { right: leaf(2), label: "tree", left: leaf(3) };
+        let tree = Tree.Node { right: new TreeLink(leaf(2)), label: "tree", left: new TreeLink(leaf(3)) };
         test.assert_equal_int32(23, calls);
         test.assert_equal_int32(5, sum(tree));
         test.assert_equal_int32(0, sum(Tree.Empty));
         let value = match (tree) {
             Tree.Empty => 1 / 0,
             Tree.Leaf(n) => n,
-            Tree.Node { left, right, label: _ } => sum(left) * sum(right),
+            Tree.Node { left, right, label: _ } => sum(left.tree) * sum(right.tree),
         };
         test.assert_equal_int32(6, value);
 

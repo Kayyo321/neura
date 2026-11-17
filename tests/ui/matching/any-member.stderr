@@ -1,0 +1,9 @@
+error[E0493]: operation is not defined for any
+ --> $DIR/any-member.nra:4:28
+  |
+4 | let read = func(v: any) => v.name;
+  |                            ^^^^^^ member access is not defined for any
+  |
+  = help: match the value first, with 'match.is'
+
+For more information about this error, try `neura explain E0493`.

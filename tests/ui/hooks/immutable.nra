@@ -1,0 +1,7 @@
+// Case 34: `value` and `instance` are immutable in a clause.
+let Session = class (
+    | set: {
+        value = instance;
+        return value;
+    };
+);

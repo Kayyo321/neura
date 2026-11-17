@@ -1,0 +1,9 @@
+error[E0311]: 'any' is a reserved type name
+ --> $DIR/any-type-parameter.nra:4:18
+  |
+4 | let first = func<any>(value: any) => value;
+  |                  ^^^ 'any' is the built-in type, so no type parameter takes its name
+  |
+  = help: choose another name
+
+For more information about this error, try `neura explain E0311`.

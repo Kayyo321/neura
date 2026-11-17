@@ -1,0 +1,12 @@
+error[E0541]: a hook would read a 'Savings' outside its guard
+  --> $DIR/synchronized-inherited.nra:11:16
+   |
+ 4 |     | get: instance;
+   |     ---------------- the inherited 'get' hook
+...
+11 |     export let deposit = func(amount: int32) {
+   |                ^^^^^^^ a #Synchronized method of a class with a 'get' hook
+   |
+   = help: validate in the synchronized methods instead of a class hook
+
+For more information about this error, try `neura explain E0541`.

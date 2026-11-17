@@ -1,0 +1,11 @@
+error[E0403]: expected int32, got Session
+ --> $DIR/after-field.nra:4:12
+  |
+3 |     export let x: int32 = 0;
+  |                - 'x' has type int32, which its getter returns
+4 |     | get: instance;
+  |            ^^^^^^^^ expected int32, found Session
+  |
+  = note: a '|' clause after a member is an accessor clause of that member; class hooks are written after the class's '(', before its first member
+
+For more information about this error, try `neura explain E0403`.

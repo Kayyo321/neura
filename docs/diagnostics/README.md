@@ -38,6 +38,10 @@ Errors about the grammar.
 | [E0212](E0212.md) | braces that do not enclose a range |
 | [E0213](E0213.md) | malformed binding clause |
 | [E0214](E0214.md) | parameter without a type |
+| [E0215](E0215.md) | malformed class hook clause |
+| [E0216](E0216.md) | class hook outside a declared class |
+| [E0217](E0217.md) | malformed startup block |
+| [E0218](E0218.md) | misplaced startup block |
 | [E0225](E0225.md) | positional argument after a named argument |
 | [E0226](E0226.md) | default value on a parameter that takes none |
 | [E0227](E0227.md) | malformed interpolated string |
@@ -49,6 +53,10 @@ Errors about declarations, scopes, and name resolution.
 
 | Code | Error |
 | --- | --- |
+| [E0230](E0230.md) | malformed match.is |
+| [E0231](E0231.md) | pattern form that is not supported |
+| [E0232](E0232.md) | postfix ? that needs parentheses |
+| [E0233](E0233.md) | malformed optional access |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |
@@ -117,6 +125,10 @@ Errors about types, values, calls, and statements.
 | [E0448](E0448.md) | a value type that contains itself |
 | [E0449](E0449.md) | a value type larger than its inline limit |
 | [E0450](E0450.md) | a list literal without new |
+| [E0451](E0451.md) | an array escapes its owner |
+| [E0452](E0452.md) | a primitive borrow escapes its owner |
+| [E0453](E0453.md) | an escaping closure requires explicit construction |
+| [E0470](E0470.md) | return in a startup block |
 | [E0480](E0480.md) | conflicting inferred type arguments |
 | [E0481](E0481.md) | lambda does not fit its callable context |
 | [E0482](E0482.md) | unknown argument label |
@@ -133,6 +145,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 
 | Code | Error |
 | --- | --- |
+| [E0490](E0490.md) | pattern that cannot match |
+| [E0491](E0491.md) | unreachable match arm |
+| [E0492](E0492.md) | value cannot be held in any |
+| [E0493](E0493.md) | operation is not defined for any |
+| [E0494](E0494.md) | optional access on a receiver that is never absent |
+| [E0495](E0495.md) | invalid operands of ?? |
+| [E0496](E0496.md) | ? on a value that is not a Result |
+| [E0497](E0497.md) | ? outside a function that returns a Result |
+| [E0498](E0498.md) | any at a boundary that would box it |
 | [E0501](E0501.md) | invalid static member |
 | [E0502](E0502.md) | invalid override |
 | [E0503](E0503.md) | invalid inheritance |
@@ -164,6 +185,15 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0534](E0534.md) | untyped field in a fields-only anonymous class |
 | [E0536](E0536.md) | destructuring declared with last |
 | [E0537](E0537.md) | constructor shorthand names no instance field |
+| [E0538](E0538.md) | duplicate class hook clause |
+| [E0539](E0539.md) | class hook replaces an inherited one without `.override` |
+| [E0540](E0540.md) | `.override` on a class hook that overrides nothing |
+| [E0541](E0541.md) | class hook on a class with synchronized methods |
+| [E0542](E0542.md) | class hook that does not yield its class |
+| [E0543](E0543.md) | class hook that returns a new object |
+| [E0544](E0544.md) | class hook that may suspend |
+| [E0545](E0545.md) | hooked class storage without an initializer |
+| [E0546](E0546.md) | hooked class reference at a bodyless function |
 | [E0560](E0560.md) | parameter names differ from the overridden method |
 | [E0561](E0561.md) | defaults differ from the overridden method |
 | [E0570](E0570.md) | invalid record declaration |

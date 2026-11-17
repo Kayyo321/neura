@@ -97,6 +97,12 @@ struct Expr {
         // `nameof(path)`: operand 0, when written, is the path, which is
         // not evaluated.
         NameOf,
+        // docs/design/Matching030.md. `receiver?.member`: operand 0 is the
+        // receiver and `text` the member; a call `receiver?.m(arguments)`
+        // is a Call whose callee is an OptionalMember. `left ?? right` has
+        // its two operands. `operand?` is a Propagate. `operator_span` is
+        // the `?.`, `??` or `?` token.
+        OptionalMember, Coalesce, Propagate,
         // `new with(source) { name: value, ... }` (docs/design/Records030.md,
         // Copy construction): operand 0 is the source and each later operand
         // a replacement, whose field name is in `labels` and `label_spans`
@@ -130,6 +136,7 @@ struct Expr {
     std::vector<std::string> labels{};
     std::vector<Span> label_spans{};
     std::shared_ptr<const struct InterpolationSyntax> interpolation{};
+    std::optional<Span> operator_span{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the
@@ -187,19 +194,61 @@ struct Statement {
     std::string assignment_operator{};
     // Documentation shared by all bindings in a destructuring declaration.
     std::shared_ptr<const DocComment> documentation{};
+    // `match.is (subject) { arms }` (docs/design/Matching030.md).
+    bool match_is{};
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};
+    // A Block written `static scope { ... }` (Modules.md, Startup blocks).
+    // `keyword` spans the two words `static scope`.
+    bool startup{};
+};
+
+// The pattern of a match arm (docs/design/Matching030.md). In a `match`,
+// a whole pattern is `_`, a variant pattern or a tuple pattern, and a
+// payload or element position holds a sub-pattern: `_`, a binding, a
+// variant pattern or a tuple pattern. In a `match.is`, a pattern is `_`,
+// `nil`, a type, or a binding with a type.
+struct PatternSyntax {
+    enum class Kind { Wildcard, Binding, Variant, Tuple, Type, Nil };
+
+    Kind kind = Kind::Wildcard;
+    Span span;
+    // A binding's name, or a variant pattern's qualified name.
+    std::string name;
+    // A binding's name as written.
+    Span name_span{};
+    // A variant pattern's payload, or a tuple pattern's elements.
+    std::vector<PatternSyntax> elements{};
+    // Whether a variant pattern has a payload list, and whether it is the
+    // braced form, where `fields` names each element's field.
+    bool payload{};
+    bool named{};
+    std::vector<std::string> fields{};
+    std::vector<Span> field_spans{};
+    // The type of a Type pattern, or of a binding `name: Type` in a `match.is`.
+    std::optional<TypeSyntax> type{};
 };
 
 struct MatchArm {
     Span span;
+    // An arm in the form of 0.2 (one level of bindings, no guard) also
+    // keeps that form here: the variant's qualified name or "_", one token
+    // per payload position, and the field names of the braced form. Other
+    // arms set `general`; their `variant` is the whole pattern's variant
+    // name, "_", or empty, and `bindings` lists every name they bind, in
+    // written order, so that walkers that only scope names stay correct.
     std::string variant;
     std::vector<Token> bindings;
     std::vector<std::string> fields;
     bool named{};
     std::vector<Statement> body;
     std::optional<Expr> value;
+    // The whole pattern, set for every arm.
+    std::shared_ptr<const PatternSyntax> pattern{};
+    // `pattern if guard => result`.
+    std::optional<Expr> guard{};
+    bool general{};
 };
 
 // One arm of a select statement: `[let name =] operation => { body }`, or
@@ -249,6 +298,27 @@ struct RecordSyntax {
     std::vector<std::pair<Span, std::string>> problems{};
 };
 
+// A class hook clause, written after the '(' of a declared class and before
+// its first member (docs/design/Hooks030.md, Class hook clauses):
+// `| get: expression;`, `| set.override: { block };`. `get`, `set`, and
+// `value` are contextual words; `override` after the '.' is the keyword.
+struct HookClause {
+    bool setter{};
+    // From the '|' through the clause's ';'.
+    Span span;
+    // The word `get` or `set`.
+    Span keyword;
+    // The word `override` of `.override`, when written.
+    std::optional<Span> override_word{};
+    // The expression form. Empty for a block body.
+    std::optional<Expr> expression{};
+    // The statements of a block body.
+    std::vector<Statement> body{};
+    bool block{};
+    // The block's closing '}', where a path that falls through ends.
+    Span close{};
+};
+
 struct Declaration {
     // An enum's variants are its members. Their parameters describe the payload.
     enum class Kind { Binding, Function, Class, Module, Enum, Interface };
@@ -294,6 +364,11 @@ struct Declaration {
     std::optional<Span> name_span{};
     // Accessor clauses after the member's ';', in source order.
     std::vector<AccessorClause> accessors{};
+    // The class hook clauses after a declared class's '(', in source order.
+    std::vector<HookClause> hooks{};
+    // The startup blocks written among a module's members, in source order
+    // (Modules.md, Startup blocks). Each is a Block statement with `startup`.
+    std::vector<Statement> startup_blocks{};
     // The tags written before the declaration, in source order. They apply
     // to every branch of an `or func` group.
     std::vector<TagSyntax> tags{};

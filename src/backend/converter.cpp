@@ -9,15 +9,20 @@
 #include "lift/proof.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "neura-ir/aggregate.hpp"
+#include "neura-ir/any.hpp"
+#include "neura-ir/class_hooks.hpp"
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
+#include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/scheduler_ops.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/task_analysis.hpp"
+#include "neura-ir/value_layout.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvr/format.hpp"
 #include "nvr/names.hpp"
@@ -27,6 +32,7 @@
 #include <array>
 #include <deque>
 #include <filesystem>
+#include <functional>
 #include <limits>
 #include <map>
 #include <optional>
@@ -99,13 +105,11 @@ bool is_comparison(const std::string& op) {
     return op == "==" || op == "!=" || op == "<" || op == "<=" || op == ">" || op == ">=";
 }
 
-// True when `type` is, or holds in a tuple, an array or list whose elements are tuples. The runtime builds and
-// reads such a collection element by element as objects, so it cannot cross a host call or a callback unconverted.
-bool holds_collection_of_tuples(const IrType& type) {
-    if (type.kind == TypeKind::Tuple)
-        return std::ranges::any_of(type.arguments, [](const IrType& part) { return holds_collection_of_tuples(part); });
-    if (type.kind != TypeKind::Array && type.kind != TypeKind::List) return false;
-    return type.arguments.front().kind == TypeKind::Tuple || holds_collection_of_tuples(type.arguments.front());
+// The positions 0 to count - 1: every word of a value of `count` words.
+std::vector<std::size_t> every_word(std::size_t count) {
+    std::vector<std::size_t> positions(count);
+    for (std::size_t i = 0; i < count; ++i) positions[i] = i;
+    return positions;
 }
 
 class Converter;
@@ -169,38 +173,68 @@ private:
     // The result words of a value of `type`: its words, or the type for a
     // type that is not a tuple.
     std::vector<std::uint32_t> result_types(const IrType& type, const Span& span);
-    // One state exit for each of `count` words from `first`, reading a
-    // field, global or component at `base` plus the word's position.
+    // One state exit for each word at `positions`, reading a field, global
+    // or component at `base` plus the word's position; `types` are the
+    // types of all the value's words.
     Values read_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> arguments,
-                      const std::vector<std::uint32_t>& types, std::size_t first, std::size_t count,
+                      const std::vector<std::uint32_t>& types, const std::vector<std::size_t>& positions,
                       const Span& span);
     void write_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> prefix, Values words,
-                     const Span& span);
-    // A tuple at a one-word runtime boundary: allocated into its heap layout,
-    // and read back from it.
-    Operand box(const IrType& tuple, Values words, const Span& span);
-    Values unbox(const IrType& tuple, Operand handle, const Span& span);
-    Operand box_words(const IrType& tuple, const Values& words, std::size_t& cursor, const Span& span);
+                     const Span& span, bool atomic = false);
+    // An inline value at a one-word runtime boundary: allocated into its
+    // heap layout, and read back from it.
+    Operand box(const IrType& value, Values words, const Span& span);
+    Values unbox(const IrType& value, Operand handle, const Span& span);
+    Operand box_words(const IrType& value, const Values& words, std::size_t& cursor, const Span& span);
     // A scheduler operation (NVR 1.5). `target` is the function of a spawn.
     Operand scheduler(nvr::SchedulerOp operation, std::uint32_t target, std::vector<Operand> arguments,
                       std::uint32_t result_type, const Span& span);
-    // Scope exits for every task scope opened inside `depth` enclosing ones,
-    // innermost first, for a return, break, or continue that leaves them.
-    void leave_task_scopes(std::size_t depth, const Span& span);
+    struct ScopeExit {
+        std::optional<Operand> token;
+        bool joins_tasks;
+    };
+    void leave_scopes(std::size_t depth, const Span& span);
+    bool needs_region(const IrNode& node);
+    void enter_scope(bool allocate_region, bool joins_tasks, const Span& span);
+    void end_scope(const Span& span);
+    void lexical_region(const std::vector<IrNode>& statements, const Span& span);
+    Operand region_token();
+    bool has_array_word(const std::vector<std::uint32_t>& types) const;
+    bool owns_result(const FunctionOrigin& origin, const std::vector<std::uint32_t>& types) const;
 
     // Statements and expressions.
     void region(const std::vector<IrNode>& statements);
     void statement(const IrNode& node);
     void store(const IrNode& node);
+    void store_hook(const IrNode& destination, const IrNode& admission);
+    Values previous_words(nvr::StateOp op, std::uint32_t base, const Values& place,
+                          const IrType& type, const Span& span);
     void branch_statement(const IrNode& node);
     void loop(const IrNode& node);
     void destroy(const IrNode& node);
     Operand expression(const IrNode& node);
-    // The words of a node: `expression` for a node that is not a tuple.
+    // The words of a node: `expression` for a node that is not inline.
     Values values(const IrNode& node);
-    // The words [first, first + count) of a tuple node. Reading a field,
-    // element or global reads only those words.
-    Values range(const IrNode& node, std::size_t first, std::size_t count);
+    Values pack_any(const IrNode& node);
+    Values unpack_any(const IrNode& node);
+    Values reference_cast(const IrNode& node);
+    Values fit_reference(Values words, const IrType& destination);
+    Operand repeat_hooked(const IrNode& node);
+    Values hook_event(const IrNode& node, Values incoming, Values previous = {});
+    Operand policy_of(const Values& reference, const Operand& fallback, const Span& span);
+    Operand present(const Operand& value);
+    Operand same_word(const Operand& left, const Operand& right);
+    Operand choose(const Operand& condition, const Operand& yes, const Operand& no);
+    Values snapshot(Values words, const Span& span);
+    Values normalize_hook_result(Values value, const IrNode& source, const Span& span);
+    std::vector<std::pair<std::uint32_t, SymbolId>> policies(const IrType& view, HookKind kind, const Span& span);
+    std::set<SymbolId> deferred_;
+
+    // The words of an inline node at `positions`, in that order. Reading a
+    // field, element or global reads only those words.
+    Values select(const IrNode& node, const std::vector<std::size_t>& positions);
+    // The slots `first` plus each position.
+    Values slots_at(std::uint32_t first, const std::vector<std::size_t>& positions);
     std::vector<Values> groups_of(const std::vector<const IrNode*>& nodes);
     std::vector<Values> groups(const std::vector<IrNode>& nodes, std::size_t first = 0);
     static Values flatten(const std::vector<Values>& groups);
@@ -224,14 +258,25 @@ private:
                          const std::vector<std::uint32_t>& result_types, const Span& span, bool poll = false);
     Operand spawn(const IrNode& node, bool handle = true);
     Values scheduler_call(const IrNode& node);
+    // The operands of a node that carries one word for each value, evaluated
+    // left to right, an inline value boxed.
+    std::vector<Operand> boxed_operands(const IrNode& node);
     Operand value_member(IrOp op, const IrType& type, std::vector<Operand> operands, const Span& span);
     Values external_call(const IrNode& node);
     Values bound_host_call(const IrNode& node);
     Values kernel_call(const IrNode& node);
     Operand allocate(const IrNode& node);
-    // An enum value: an object with the variant's tag and payload words.
-    Operand aggregate_value(const IrType& type, SymbolId variant, std::vector<Values> fields,
-                            std::string_view order, const Span& span);
+    bool local_object(const IrNode& node) const;
+    bool closure_object(const IrNode& node) const;
+    void check_borrow_owner(const IrNode& field, const Operand& box);
+    void set_borrow_owner(SymbolId box, Operand handle, std::optional<Operand> owner, const Span& span);
+    // The words of an enum value: the variant's tag, then its payload words at
+    // their pooled positions, and zero or nil in every word it does not use.
+    Values aggregate_value(const IrType& type, SymbolId variant, std::vector<Values> fields,
+                           std::string_view order, const Span& span);
+    // The value of a word that a variant does not use: zero, nil, or the
+    // empty text (a text word always names a live entry).
+    Operand zero_word(std::uint32_t type, const Span& span);
     Values select_values(const IrNode& node);
     Operand to_index(const Operand& index, const IrType& type, const Span& span);
     Operand receiver_value(const IrNode& node);
@@ -250,7 +295,8 @@ private:
     void compile_unbox_collection();
     void append_text_bytes(const Operand& buffer, const Operand& text, const Span& span);
     void compile_start();
-    void return_standard_status(const Operand& value, const ExitVariants& variants, const Span& span);
+    void return_standard_status(const IrType& type, const Values& value, const ExitVariants& variants,
+                                const Span& span);
     void field_initializers(SymbolId cls);
     void self_parameter(SymbolId cls);
     void parameters(SymbolId function);
@@ -272,12 +318,13 @@ private:
         std::uint32_t exit;
         // `continue` takes the back edge itself and the loop polls there.
         bool poll_on_continue;
-        // Task scopes open where the loop began.
-        std::size_t task_scopes;
+        // Lexical and task scopes open where the loop began.
+        std::size_t scopes;
     };
     std::vector<LoopTargets> loops_;
-    // Task scopes open at the statement being converted.
-    std::size_t task_scopes_ = 0;
+    std::vector<ScopeExit> scopes_;
+    std::uint32_t result_region_slot_ = absent;
+    bool static_initializer_ = false;
     std::vector<std::uint32_t> placeholders_;
 
     friend class Converter;
@@ -285,7 +332,8 @@ private:
 
 class Converter : public BlockTables {
 public:
-    Converter(const IrProgram& program, const ConversionOptions& options) : program_(program), options_(options) {}
+    Converter(const IrProgram& program, const ConversionOptions& options)
+        : program_(program), options_(options), value_layouts_(program) {}
 
     Conversion run();
 
@@ -302,27 +350,41 @@ public:
     std::uint32_t constant(std::uint32_t type, std::vector<std::uint8_t> payload) override;
     std::uint32_t text_constant(const std::string& text, const Span& where);
     std::uint32_t layout(SymbolId cls, const Span& where);
-    // The heap layout of a tuple that crosses a one-word runtime boundary: a
-    // channel message, a task result, a host call, a kernel result. A tuple
-    // is otherwise a run of value words (word_types), never an object.
-    std::uint32_t tuple_layout(const IrType& type, const Span& where);
-    // The object type of a boxed tuple, and the type that a value of `type`
-    // has where the runtime carries one word: boxed for a tuple.
-    std::uint32_t boxed_type(const IrType& tuple, const Span& where);
+
+    // How a value is stored: the one place that decides it
+    // (neura-ir/value_layout.hpp). An inline value is a run of value words
+    // wherever it is stored and is boxed where the runtime carries one word;
+    // every other value is one word. Every load, store, copy, argument,
+    // result, box, comparison and name of a value asks these two functions
+    // or the helpers below, which ask them, and never tests the type's kind.
+    bool inline_value(const IrType& type) const;
+    const ValueLayout& value_layout(const IrType& type, const Span& where);
+    // True when `type` is, or holds in an inline value, an array or list
+    // whose elements are inline. The runtime builds and reads such a
+    // collection element by element as objects, so it cannot cross a host
+    // call or a callback unconverted.
+    bool holds_collection_of_inline(const IrType& type, const Span& where);
+    // The heap layout of an inline value that crosses a one-word runtime
+    // boundary: a channel message, a task result, a host call, a kernel
+    // result. The value is otherwise a run of value words (word_types),
+    // never an object.
+    std::uint32_t box_layout(const IrType& type, const Span& where);
+    // The object type of a boxed inline value, and the type that a value of
+    // `type` has where the runtime carries one word: boxed when inline.
+    std::uint32_t boxed_type(const IrType& value, const Span& where);
     std::uint32_t wire_type(const IrType& type, const Span& where);
-    // The types of the value words of `type`: one for any type but a tuple,
-    // and a tuple's elements' words in order, nested tuples flattened.
-    std::vector<IrType> word_irtypes(const IrType& type, const Span& where) const;
+    // The NVR types of the value words of `type`.
     std::vector<std::uint32_t> word_types(const IrType& type, const Span& where);
     // The element type of an array or list of `element`s: the element's type,
-    // or an aggregate of its words for a tuple of two or more.
+    // or an aggregate of its words for an inline value of two or more.
     std::uint32_t element_type(const IrType& element, const Span& where);
-    std::uint32_t aggregate_type(const std::vector<std::uint32_t>& components);
-    // Position of an element of a tuple among the tuple's words.
-    std::size_t word_offset(const IrType& tuple, std::size_t element, const Span& where) const;
-    std::uint32_t payload_start(SymbolId variant, const Span& where);
-    // The first field of payload `position` of a variant.
-    std::uint32_t payload_field(SymbolId variant, std::size_t position, const Span& where);
+    std::uint32_t aggregate_type(const std::vector<std::uint32_t>& components, bool class_reference);
+    // The positions among an enum's words of payload `position` of `variant`.
+    const std::vector<std::size_t>& payload_words(const IrType& enumeration, SymbolId variant, std::size_t position,
+                                                  const Span& where);
+    // The fields of an inline value's box: a tuple's elements, an element
+    // that is inline being a box of its own, or an enum's words.
+    std::vector<IrType> box_fields(const IrType& type, const Span& where);
     std::uint32_t field_index(SymbolId field, const Span& where);
     // Names a function that moves collections of boxed tuples into aggregates.
     FunctionOrigin collection_function(const IrType& collection, const Span& span);
@@ -338,11 +400,11 @@ public:
     FunctionOrigin constructor(SymbolId cls, SymbolId selected = no_symbol) const;
     FunctionOrigin value_function(IrOp op, const IrType& type, const Span& span);
     // The function that a one-word boundary calls for `origin`: itself, or a
-    // boundary function when it takes or returns a tuple.
-    FunctionOrigin boundary_origin(const FunctionOrigin& origin) const;
+    // boundary function when it takes or returns an inline value.
+    FunctionOrigin boundary_origin(const FunctionOrigin& origin);
     // The names of the value words of a binding named `name`: the name, or for
     // a tuple `name.0`, `name.1.0`, and so on.
-    std::vector<std::string> word_names(const std::string& name, const IrType& type) const;
+    std::vector<std::string> word_names(const std::string& name, const IrType& type);
     std::pair<IrType, Span> value_type(SymbolId id) const { return value_types_.at(id); }
 
     SymbolId member(SymbolId owner, const std::string& name) const;
@@ -399,6 +461,7 @@ private:
 
     const IrProgram& program_;
     ConversionOptions options_;
+    ValueLayouts value_layouts_;
     std::vector<std::pair<IrType, Span>> value_types_;
     nvr::Image image_;
     std::map<nvr::Type, std::uint32_t, decltype([](const nvr::Type& a, const nvr::Type& b) {
@@ -408,10 +471,15 @@ private:
     // -Wstringop-overread for ordered comparisons of std::vector<uint8_t>.
     std::map<std::pair<std::uint32_t, std::string>, std::uint32_t> constants_;
     std::map<SymbolId, std::uint32_t> layouts_;
-    std::vector<std::pair<IrType, std::uint32_t>> tuple_layouts_;
+    std::optional<std::uint32_t> empty_root_layout_;
+    std::vector<std::pair<IrType, std::uint32_t>> box_layouts_;
     std::map<std::vector<std::uint32_t>, std::uint32_t> aggregates_;
-    std::map<SymbolId, std::uint32_t> payload_starts_;
-    std::map<SymbolId, std::vector<std::uint32_t>> payload_offsets_;
+    std::map<std::vector<std::uint32_t>, std::uint32_t> reference_aggregates_;
+    // The aggregate element type of each inline element type, and those whose
+    // components are being computed or were named before them.
+    std::map<std::string, std::uint32_t> element_types_;
+    std::set<std::string> building_elements_;
+    std::map<std::string, std::uint32_t> reserved_elements_;
     std::map<SymbolId, std::uint32_t> fields_;
     std::map<SymbolId, std::uint32_t> globals_;
     std::map<std::string, std::uint32_t> graphs_;
@@ -500,6 +568,8 @@ std::optional<ExitVariants> Converter::standard_exit_variants(SymbolId enumerati
 }
 
 std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
+    // An inline value is a run of value words, never one value.
+    if (type.kind != TypeKind::Object && inline_value(type)) throw std::logic_error(describe_shape(program_, type) + " has no single type");
     switch (type.kind) {
     case TypeKind::Void:
         return scalar(nvr::TypeKind::Void);
@@ -530,24 +600,31 @@ std::uint32_t Converter::type_of(const IrType& type, const Span& where) {
         return type_index({type.kind == TypeKind::Array ? nvr::TypeKind::Array : nvr::TypeKind::List, 0, element});
     }
     case TypeKind::Object:
+        // A scalar-only module can have an any without declaring a class.
+        // Its inactive reference still has an object type in the image.
+        if (type.symbol == no_symbol && type.name == "class") {
+            if (!empty_root_layout_) {
+                empty_root_layout_ = static_cast<std::uint32_t>(image_.layouts.size());
+                image_.layouts.push_back({absent, {}, {}});
+            }
+            return type_index({nvr::TypeKind::Object, 0, *empty_root_layout_});
+        }
         if (!type.arguments.empty() || !symbol(type.symbol).generics.empty()) {
             throw Diagnostic(where, "generic class '" + symbol(type.symbol).name +
                                         "' is not supported: IRtoNeuronConversion does not specialize generics")
                 .with_code("E0801");
         }
         return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
-    case TypeKind::Tuple:
-        // A tuple is a run of value words, never one value.
-        throw std::logic_error("the tuple " + describe_shape(program_, type) + " has no single type");
     case TypeKind::Enum:
-        // A fieldless enum is its variant ordinal (Types.md, Enums).
-        if (has_enum_payload(program_, type.symbol))
-            return type_index({nvr::TypeKind::Object, 0, layout(type.symbol, where)});
+        // A fieldless enum is its variant ordinal (Types.md, Enums); one
+        // with payloads is inline.
         return scalar(nvr::TypeKind::Unsigned, 32);
     case TypeKind::TypeParameter:
         throw Diagnostic(where, "type parameter '" + type.name +
                                     "' is not supported: IRtoNeuronConversion does not specialize generics")
             .with_code("E0801");
+    case TypeKind::Any:
+    case TypeKind::Tuple:
     case TypeKind::Module:
     case TypeKind::Callable:
         break;
@@ -586,22 +663,9 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
     layouts_.emplace(cls, index);
     image_.layouts.emplace_back();
     nvr::Layout result;
-    if (item.kind == SymbolKind::Enum) {
-        result.fields.push_back(scalar(nvr::TypeKind::Unsigned, 32));
-        for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
-            const auto& variant = symbol(id);
-            if (variant.owner != cls || variant.kind != SymbolKind::Variant) continue;
-            payload_starts_[id] = static_cast<std::uint32_t>(result.fields.size());
-            // A payload that is a tuple is several consecutive fields.
-            auto& offsets = payload_offsets_[id];
-            for (const auto& field : variant.payload_types) {
-                offsets.push_back(static_cast<std::uint32_t>(result.fields.size()) - payload_starts_[id]);
-                for (const auto word : word_types(field, variant.span)) result.fields.push_back(word);
-            }
-        }
-        image_.layouts[index] = std::move(result);
-        return index;
-    }
+    // A payload enum is its words, boxed by box_layout; a fieldless one is
+    // its ordinal.
+    if (item.kind == SymbolKind::Enum) throw std::logic_error("an enum has no object layout: " + item.name);
     if (item.base != no_symbol) {
         result.parent = layout(item.base, where);
         result.fields = image_.layouts[result.parent].fields;
@@ -622,30 +686,66 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
     return index;
 }
 
-std::uint32_t Converter::tuple_layout(const IrType& type, const Span& where) {
-    const auto existing = std::ranges::find(tuple_layouts_, type,
-                                            &std::pair<IrType, std::uint32_t>::first);
-    if (existing != tuple_layouts_.end()) return existing->second;
-    if (value_words(type) > max_inline_words) throw inline_limit_diagnostic(program_, type, where);
+bool Converter::inline_value(const IrType& type) const {
+    return value_layouts_.inline_value(type);
+}
+
+const ValueLayout& Converter::value_layout(const IrType& type, const Span& where) {
+    // A conversion route that does not run check_inline_limit still never
+    // builds a layout over the limit.
+    if (inline_value(type) && value_layouts_.value_words(type) > max_inline_words)
+        throw inline_limit_diagnostic(program_, type, where);
+    return value_layouts_.layout(type, where);
+}
+
+std::vector<IrType> Converter::box_fields(const IrType& type, const Span& where) {
+    const auto& layout = value_layout(type, where);
+    return layout.form == ValueLayout::Form::Tuple ? layout.parts : layout.words;
+}
+
+const std::vector<std::size_t>& Converter::payload_words(const IrType& enumeration, SymbolId variant,
+                                                         std::size_t position, const Span& where) {
+    const auto& layout = value_layout(enumeration, where);
+    const auto found = std::ranges::find(layout.variants, variant);
+    if (layout.form != ValueLayout::Form::Enum || found == layout.variants.end())
+        throw std::logic_error("a payload of a variant that is not the enum's");
+    return layout.payloads.at(static_cast<std::size_t>(found - layout.variants.begin())).at(position);
+}
+
+bool Converter::holds_collection_of_inline(const IrType& type, const Span& where) {
+    if (inline_value(type)) {
+        const auto parts = value_layout(type, where).parts;
+        return std::ranges::any_of(parts, [&](const IrType& part) { return holds_collection_of_inline(part, where); });
+    }
+    if (type.kind != TypeKind::Array && type.kind != TypeKind::List) return false;
+    const auto& element = type.arguments.front();
+    return inline_value(element) || holds_collection_of_inline(element, where);
+}
+
+std::uint32_t Converter::box_layout(const IrType& type, const Span& where) {
+    const auto existing = std::ranges::find(box_layouts_, type, &std::pair<IrType, std::uint32_t>::first);
+    if (existing != box_layouts_.end()) return existing->second;
+    const auto parts = box_fields(type, where);
     const auto index = static_cast<std::uint32_t>(image_.layouts.size());
-    tuple_layouts_.emplace_back(type, index);
+    box_layouts_.emplace_back(type, index);
     image_.layouts.emplace_back();
     nvr::Layout result;
-    // One field for each element; an element that is a tuple is a box of its own.
-    for (const auto& field : type.arguments)
-        result.fields.push_back(field.kind == TypeKind::Tuple ? boxed_type(field, where) : type_of(field, where));
+    // One field for each element, an element that is inline being a box of
+    // its own, or for each word of an enum.
+    for (const auto& field : parts)
+        result.fields.push_back(type.kind == TypeKind::Tuple && inline_value(field) ? boxed_type(field, where) : type_of(field, where));
     image_.layouts[index] = std::move(result);
     return index;
 }
 
-std::uint32_t Converter::boxed_type(const IrType& tuple, const Span& where) {
-    return type_index({nvr::TypeKind::Object, 0, tuple_layout(tuple, where)});
+std::uint32_t Converter::boxed_type(const IrType& value, const Span& where) {
+    return type_index({nvr::TypeKind::Object, 0, box_layout(value, where)});
 }
 
 std::uint32_t Converter::wire_type(const IrType& type, const Span& where) {
-    if (type.kind == TypeKind::Tuple) return boxed_type(type, where);
-    // The runtime builds a collection of tuples with each element boxed.
-    if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.front().kind == TypeKind::Tuple)
+    if (inline_value(type)) return boxed_type(type, where);
+    // The runtime builds a collection of inline values with each element boxed.
+    if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && inline_value(type.arguments.front()))
         return type_index({type.kind == TypeKind::Array ? nvr::TypeKind::Array : nvr::TypeKind::List, 0,
                            boxed_type(type.arguments.front(), where)});
     return type_of(type, where);
@@ -659,37 +759,22 @@ FunctionOrigin Converter::collection_function(const IrType& collection, const Sp
     return {Role::UnboxCollection, id, no_symbol};
 }
 
-std::vector<IrType> Converter::word_irtypes(const IrType& type, const Span& where) const {
-    if (type.kind != TypeKind::Tuple) return {type};
-    if (value_words(type) > max_inline_words) throw inline_limit_diagnostic(program_, type, where);
-    std::vector<IrType> words;
-    for (const auto& element : type.arguments) {
-        const auto inner = word_irtypes(element, where);
-        words.insert(words.end(), inner.begin(), inner.end());
-    }
-    if (words.empty()) throw Diagnostic(where, "a tuple without elements has no value").with_code("E0802");
-    return words;
-}
-
 std::vector<std::uint32_t> Converter::word_types(const IrType& type, const Span& where) {
     std::vector<std::uint32_t> result;
-    for (const auto& word : word_irtypes(type, where)) result.push_back(type_of(word, where));
+    for (const auto& word : value_layout(type, where).words) result.push_back(type_of(word, where));
     return result;
 }
 
-std::size_t Converter::word_offset(const IrType& tuple, std::size_t element, const Span& where) const {
-    std::size_t offset = 0;
-    for (std::size_t i = 0; i < element; ++i) offset += word_irtypes(tuple.arguments[i], where).size();
-    return offset;
-}
-
-std::uint32_t Converter::aggregate_type(const std::vector<std::uint32_t>& components) {
-    const auto found = aggregates_.find(components);
+std::uint32_t Converter::aggregate_type(const std::vector<std::uint32_t>& components, bool class_reference) {
+    // Keep the debugger name of a stored reference separate from a tuple of
+    // the same physical shape. Both use the same inline operations.
+    auto& aggregates = class_reference ? reference_aggregates_ : aggregates_;
+    const auto found = aggregates.find(components);
     std::uint32_t layout_index = 0;
-    if (found == aggregates_.end()) {
+    if (found == aggregates.end()) {
         layout_index = static_cast<std::uint32_t>(image_.layouts.size());
         image_.layouts.push_back({absent, components, {}});
-        aggregates_.emplace(components, layout_index);
+        aggregates.emplace(components, layout_index);
     } else {
         layout_index = found->second;
     }
@@ -697,20 +782,32 @@ std::uint32_t Converter::aggregate_type(const std::vector<std::uint32_t>& compon
 }
 
 std::uint32_t Converter::element_type(const IrType& element, const Span& where) {
-    if (element.kind != TypeKind::Tuple) return type_of(element, where);
-    // A tuple of one word is that word; two or more are an aggregate.
-    const auto words = word_types(element, where);
-    return words.size() == 1 ? words.front() : aggregate_type(words);
-}
-
-std::uint32_t Converter::payload_start(SymbolId variant, const Span& where) {
-    layout(symbol(variant).owner, where);
-    return payload_starts_.at(variant);
-}
-
-std::uint32_t Converter::payload_field(SymbolId variant, std::size_t position, const Span& where) {
-    const auto start = payload_start(variant, where);
-    return start + payload_offsets_.at(variant).at(position);
+    if (!inline_value(element)) return type_of(element, where);
+    // An inline value of one word is that word; two or more are an aggregate.
+    if (value_layout(element, where).size() == 1) return type_of(value_layout(element, where).words.front(), where);
+    auto key = type_identity(element);
+    if (const auto found = element_types_.find(key); found != element_types_.end()) return found->second;
+    if (!building_elements_.insert(key).second) {
+        // A component is a collection of this element, as in an enum with a
+        // payload Node[list]: the aggregate is named before its components
+        // are known, and they are filled in below.
+        const auto layout_index = static_cast<std::uint32_t>(image_.layouts.size());
+        image_.layouts.push_back({absent, {}, {}});
+        const auto type = type_index({nvr::TypeKind::Aggregate, 0, layout_index});
+        reserved_elements_.emplace(key, layout_index);
+        element_types_.emplace(std::move(key), type);
+        return type;
+    }
+    const auto components = word_types(element, where);
+    building_elements_.erase(key);
+    if (const auto reserved = reserved_elements_.find(key); reserved != reserved_elements_.end()) {
+        image_.layouts[reserved->second].fields = components;
+        aggregates_.emplace(components, reserved->second);
+        return element_types_.at(key);
+    }
+    const auto type = aggregate_type(components, element.kind == TypeKind::Object);
+    element_types_.emplace(std::move(key), type);
+    return type;
 }
 
 std::uint32_t Converter::field_index(SymbolId field, const Span& where) {
@@ -826,9 +923,9 @@ std::optional<std::uint32_t> Converter::external_import(SymbolId function, const
     // The runtime builds and reads a host collection element by element, as
     // objects; a collection of tuples would need its elements converted.
     if (std::ranges::any_of(item.parameters, [&](SymbolId parameter) {
-            return holds_collection_of_tuples(symbol(parameter).type);
+            return holds_collection_of_inline(symbol(parameter).type, where);
         }) || std::ranges::any_of(symbol(host_variants(program_, item.type).value().success).payload_types,
-                                  [](const IrType& type) { return holds_collection_of_tuples(type); }))
+                                  [&](const IrType& type) { return holds_collection_of_inline(type, where); }))
         throw Diagnostic(where, "a collection of tuples cannot cross the host call '" + item.host_binding->name +
                                     "': IRtoNeuronConversion does not convert its elements")
             .with_code("E0801");
@@ -890,22 +987,17 @@ FunctionOrigin Converter::value_function(IrOp op, const IrType& type, const Span
     return {role, id, no_symbol};
 }
 
-FunctionOrigin Converter::boundary_origin(const FunctionOrigin& origin) const {
+FunctionOrigin Converter::boundary_origin(const FunctionOrigin& origin) {
     if (origin.role != Role::Function || origin.symbol >= program_.symbols.size()) return origin;
     const auto& item = symbol(origin.symbol);
-    const auto is_tuple = [](const IrType& type) { return type.kind == TypeKind::Tuple; };
-    const bool tuples = is_tuple(item.type) ||
-        std::ranges::any_of(item.parameters, [&](SymbolId parameter) { return is_tuple(symbol(parameter).type); });
-    return tuples ? FunctionOrigin{Role::Boundary, origin.symbol, origin.receiver} : origin;
+    const bool boxed = inline_value(item.type) ||
+        std::ranges::any_of(item.parameters, [&](SymbolId parameter) { return inline_value(symbol(parameter).type); });
+    return boxed ? FunctionOrigin{Role::Boundary, origin.symbol, origin.receiver} : origin;
 }
 
-std::vector<std::string> Converter::word_names(const std::string& name, const IrType& type) const {
-    if (type.kind != TypeKind::Tuple) return {name};
+std::vector<std::string> Converter::word_names(const std::string& name, const IrType& type) {
     std::vector<std::string> names;
-    for (std::size_t i = 0; i < type.arguments.size(); ++i) {
-        const auto inner = word_names(name + "." + std::to_string(i), type.arguments[i]);
-        names.insert(names.end(), inner.begin(), inner.end());
-    }
+    for (const auto& suffix : value_layout(type, Span{}).suffixes) names.push_back(name + suffix);
     return names;
 }
 
@@ -1067,7 +1159,7 @@ void Converter::index_program() {
 
 bool Converter::constant_initializer(const IrNode& node) const {
     return node.op == IrOp::Integer || node.op == IrOp::Boolean || node.op == IrOp::String || node.op == IrOp::Float ||
-           node.op == IrOp::Nil ||
+           (node.op == IrOp::Nil && !inline_value(node.type)) ||
            (node.op == IrOp::Reference && node.symbol != no_symbol && symbol(node.symbol).kind == SymbolKind::Variant);
 }
 
@@ -1319,7 +1411,7 @@ void Converter::mark_transferable_layouts() {
             marked.insert(index);
         }
     }
-    for (const auto& [type, index] : tuple_layouts_) {
+    for (const auto& [type, index] : box_layouts_) {
         if (analysis.transferable(type)) marked.insert(index);
     }
     std::vector<std::uint32_t> pending(marked.begin(), marked.end());
@@ -1707,6 +1799,14 @@ void Converter::names() {
             }
         }
     }
+    for (const auto& [components, layout] : reference_aggregates_) names.layouts[layout] = "$reference";
+    // A boxed enum's fields are its words, named as the words of a binding.
+    for (const auto& [type, layout] : box_layouts_) {
+        if (type.kind != TypeKind::Enum) continue;
+        names.layouts[layout] = qualified(type.symbol);
+        names.fields[layout] = word_names("", type);
+        for (auto& field : names.fields[layout]) field.erase(0, 1);
+    }
     names.globals.resize(image_.globals.size());
     for (const auto& [global, index] : globals_) {
         const auto words = word_names(qualified(global), symbol(global).type);
@@ -2057,6 +2157,7 @@ Values FunctionCompiler::invoke_values(const FunctionOrigin& callee, std::vector
                                        const std::vector<std::uint32_t>& result_types, const Span& span,
                                        bool poll) {
     const auto target = c_.function(callee);
+    if (owns_result(callee, result_types)) arguments.push_back(region_token());
     const bool nothing = c_.type_at(result_types.front()).kind == nvr::TypeKind::Void;
     // The words of a tuple result land in consecutive slots.
     const auto result_slot = nothing ? absent : new_slots(result_types);
@@ -2076,14 +2177,14 @@ Values FunctionCompiler::invoke_values(const FunctionOrigin& callee, std::vector
 }
 
 Values FunctionCompiler::read_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> arguments,
-                                    const std::vector<std::uint32_t>& types, std::size_t first, std::size_t count,
+                                    const std::vector<std::uint32_t>& types, const std::vector<std::size_t>& positions,
                                     const Span& span) {
     // Each read closes the block, so what several reads share is committed first.
-    if (count > 1) {
+    if (positions.size() > 1) {
         for (auto& argument : arguments) spill(argument);
     }
     Values result;
-    for (std::size_t i = first; i < first + count; ++i) {
+    for (const auto i : positions) {
         std::vector<Operand> each;
         for (const auto& argument : arguments) each.push_back(resolve(argument));
         result.push_back(state(operation, base + static_cast<std::uint32_t>(i), std::move(each), types[i], span));
@@ -2091,8 +2192,19 @@ Values FunctionCompiler::read_words(nvr::StateOp operation, std::uint32_t base, 
     return result;
 }
 
+Values FunctionCompiler::slots_at(std::uint32_t first, const std::vector<std::size_t>& positions) {
+    Values result;
+    for (const auto i : positions) result.push_back(slot_operand(first + static_cast<std::uint32_t>(i)));
+    return result;
+}
+
 void FunctionCompiler::write_words(nvr::StateOp operation, std::uint32_t base, std::vector<Operand> prefix,
-                                   Values words, const Span& span) {
+                                   Values words, const Span& span, bool atomic) {
+    if (atomic && words.size() > 1) {
+        prefix.insert(prefix.end(), words.begin(), words.end());
+        state(operation, base, std::move(prefix), c_.scalar(nvr::TypeKind::Void), span);
+        return;
+    }
     if (words.size() > 1) {
         for (auto& operand : prefix) spill(operand);
         for (auto& word : words) spill(word);
@@ -2106,13 +2218,14 @@ void FunctionCompiler::write_words(nvr::StateOp operation, std::uint32_t base, s
     }
 }
 
-Operand FunctionCompiler::box_words(const IrType& tuple, const Values& words, std::size_t& cursor, const Span& span) {
+Operand FunctionCompiler::box_words(const IrType& value, const Values& words, std::size_t& cursor, const Span& span) {
     std::vector<Operand> fields;
-    for (const auto& element : tuple.arguments) {
-        if (element.kind == TypeKind::Tuple) fields.push_back(box_words(element, words, cursor, span));
+    const auto parts = c_.box_fields(value, span);
+    for (const auto& part : parts) {
+        if (value.kind == TypeKind::Tuple && c_.inline_value(part)) fields.push_back(box_words(part, words, cursor, span));
         else fields.push_back(words[cursor++]);
     }
-    const auto type = c_.boxed_type(tuple, span);
+    const auto type = c_.boxed_type(value, span);
     const auto handle = state(nvr::StateOp::AllocateObject, c_.type_at(type).reference, {}, type, span);
     const auto nothing = c_.scalar(nvr::TypeKind::Void);
     for (std::size_t i = 0; i < fields.size(); ++i)
@@ -2120,21 +2233,23 @@ Operand FunctionCompiler::box_words(const IrType& tuple, const Values& words, st
     return handle;
 }
 
-Operand FunctionCompiler::box(const IrType& tuple, Values words, const Span& span) {
+Operand FunctionCompiler::box(const IrType& value, Values words, const Span& span) {
     for (auto& word : words) spill(word);
     std::size_t cursor = 0;
-    return box_words(tuple, words, cursor, span);
+    return box_words(value, words, cursor, span);
 }
 
-Values FunctionCompiler::unbox(const IrType& tuple, Operand handle, const Span& span) {
+Values FunctionCompiler::unbox(const IrType& value, Operand handle, const Span& span) {
     spill(handle);
     Values result;
-    for (std::size_t i = 0; i < tuple.arguments.size(); ++i) {
-        const auto& element = tuple.arguments[i];
-        const auto type = element.kind == TypeKind::Tuple ? c_.boxed_type(element, span) : c_.type_of(element, span);
+    const auto parts = c_.box_fields(value, span);
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        const auto& part = parts[i];
+        const bool nested = value.kind == TypeKind::Tuple && c_.inline_value(part);
+        const auto type = nested ? c_.boxed_type(part, span) : c_.type_of(part, span);
         const auto field = state(nvr::StateOp::ReadField, static_cast<std::uint32_t>(i), {resolve(handle)}, type, span);
-        if (element.kind == TypeKind::Tuple) {
-            const auto inner = unbox(element, field, span);
+        if (nested) {
+            const auto inner = unbox(part, field, span);
             result.insert(result.end(), inner.begin(), inner.end());
         } else {
             result.push_back(field);
@@ -2161,10 +2276,61 @@ Operand FunctionCompiler::scheduler(nvr::SchedulerOp operation, std::uint32_t ta
     return result_slot == absent ? Operand{} : slot_operand(result_slot);
 }
 
-void FunctionCompiler::leave_task_scopes(std::size_t depth, const Span& span) {
-    for (auto open_scopes = task_scopes_; open_scopes > depth; --open_scopes) {
-        scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, c_.scalar(nvr::TypeKind::Void), span);
+void FunctionCompiler::leave_scopes(std::size_t depth, const Span& span) {
+    const auto nothing = c_.scalar(nvr::TypeKind::Void);
+    for (auto i = scopes_.size(); i > depth; --i) {
+        const auto& scope = scopes_[i - 1];
+        if (scope.joins_tasks) scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, span);
+        if (scope.token) state(nvr::StateOp::ReleaseRegion, 0, {*scope.token}, nothing, span);
     }
+}
+
+void FunctionCompiler::enter_scope(bool allocate_region, bool joins_tasks, const Span& span) {
+    ScopeExit scope{std::nullopt, joins_tasks};
+    if (allocate_region && !static_initializer_) {
+        scope.token = state(nvr::StateOp::EnterRegion, 0, {}, c_.scalar(nvr::TypeKind::Unsigned, 64), span);
+    }
+    scopes_.push_back(scope);
+}
+
+void FunctionCompiler::end_scope(const Span& span) {
+    if (open()) leave_scopes(scopes_.size() - 1, span);
+    scopes_.pop_back();
+}
+
+Operand FunctionCompiler::region_token() {
+    if (static_initializer_) return immediate(c_.scalar(nvr::TypeKind::Unsigned, 64), nvr::static_region_token);
+    for (auto scope = scopes_.rbegin(); scope != scopes_.rend(); ++scope) {
+        if (scope->token) return *scope->token;
+    }
+    throw std::logic_error("an activation allocation has no region");
+}
+
+bool FunctionCompiler::has_array_word(const std::vector<std::uint32_t>& types) const {
+    return std::ranges::any_of(types, [&](std::uint32_t type) { return c_.type_at(type).kind == nvr::TypeKind::Array; });
+}
+
+bool FunctionCompiler::owns_result(const FunctionOrigin& origin, const std::vector<std::uint32_t>& types) const {
+    return (origin.role == Role::Function || origin.role == Role::UnboxCollection) && has_array_word(types);
+}
+
+bool FunctionCompiler::needs_region(const IrNode& node) {
+    if (node.op == IrOp::Allocate && local_object(node)) return true;
+    if (node.op == IrOp::Block || node.op == IrOp::TaskScope || node.op == IrOp::Loop) return false;
+    if ((node.type.kind == TypeKind::Array || node.type.kind == TypeKind::Tuple || node.type.kind == TypeKind::Enum) &&
+        (node.op == IrOp::Collection || node.op == IrOp::RepeatCollection || node.op == IrOp::Call ||
+         node.op == IrOp::VirtualCall || node.op == IrOp::SchedulerCall) &&
+        has_array_word(result_types(node.type, node.span))) return true;
+    if (std::ranges::any_of(node.operands, [&](const auto& operand) { return needs_region(operand); })) return true;
+    if (node.op == IrOp::Branch) return false;
+    const auto needs = [&](const auto& child) { return needs_region(child); };
+    return std::ranges::any_of(node.body, needs) || std::ranges::any_of(node.alternative, needs);
+}
+
+void FunctionCompiler::lexical_region(const std::vector<IrNode>& statements, const Span& span) {
+    enter_scope(std::ranges::any_of(statements, [&](const auto& item) { return needs_region(item); }), false, span);
+    region(statements);
+    end_scope(span);
 }
 
 // ---------------------------------------------------------------------------
@@ -2195,8 +2361,9 @@ void FunctionCompiler::statement(const IrNode& node) {
     switch (node.op) {
     case IrOp::Initialize: {
         if (c_.symbol(node.symbol).kind == SymbolKind::Global && origin_.role == Role::Start) {
-            auto value = values(node.operands.front());
-            write_words(nvr::StateOp::WriteGlobal, c_.global(node.symbol, node.span), {}, std::move(value), node.span);
+            auto value = fit_reference(values(node.operands.front()), c_.symbol(node.symbol).type);
+            write_words(nvr::StateOp::WriteGlobal, c_.global(node.symbol, node.span), {}, std::move(value), node.span,
+                        c_.value_layout(c_.symbol(node.symbol).type, node.span).carries_policy);
             return;
         }
         if (c_.symbol(node.symbol).kind != SymbolKind::Local) {
@@ -2210,9 +2377,12 @@ void FunctionCompiler::statement(const IrNode& node) {
         }
         // A deferred declaration (NIR 1.10) only creates the slots. They stay
         // uninitialized, so a read before the first store traps.
-        if (is_deferred_initialize(node)) return;
+        if (is_deferred_initialize(node)) {
+            deferred_.insert(node.symbol);
+            return;
+        }
         const auto slot = it->second;
-        auto value = values(node.operands.front());
+        auto value = fit_reference(values(node.operands.front()), c_.symbol(node.symbol).type);
         for (std::size_t i = 0; i < value.size(); ++i) assign(slot + static_cast<std::uint32_t>(i), value[i]);
         return;
     }
@@ -2228,7 +2398,7 @@ void FunctionCompiler::statement(const IrNode& node) {
         values(node.operands.front());
         return;
     case IrOp::Block:
-        region(node.body);
+        lexical_region(node.body, node.span);
         return;
     case IrOp::Branch:
         branch_statement(node);
@@ -2237,6 +2407,8 @@ void FunctionCompiler::statement(const IrNode& node) {
         loop(node);
         return;
     case IrOp::TaskScope: {
+        enter_scope(std::ranges::any_of(node.body, [&](const auto& item) { return needs_region(item); }), true,
+                    node.span);
         const auto nothing = c_.scalar(nvr::TypeKind::Void);
         if (node.symbol != no_symbol) {
             // The scope's identity, for its handle.
@@ -2250,14 +2422,8 @@ void FunctionCompiler::statement(const IrNode& node) {
         } else {
             scheduler(nvr::SchedulerOp::ScopeEnter, 0, {}, nothing, node.span);
         }
-        ++task_scopes_;
         region(node.body);
-        // Falling off the end waits for the scope's tasks. A return, break,
-        // or continue inside the body has already left it.
-        if (open()) {
-            scheduler(nvr::SchedulerOp::ScopeExit, 0, {}, nothing, node.span);
-        }
-        --task_scopes_;
+        end_scope(node.span);
         return;
     }
     case IrOp::Return: {
@@ -2265,28 +2431,42 @@ void FunctionCompiler::statement(const IrNode& node) {
         exit.kind = nvr::ExitKind::Return;
         if (!node.operands.empty()) {
             auto value = values(node.operands.front());
-            if (task_scopes_ != 0) {
-                // The value is computed first, then each scope waits for its
-                // tasks, then the function returns it (Concurrency.md 4.1).
-                const auto slot = new_slots(c_.word_types(node.operands.front().type, node.span));
-                for (std::size_t i = 0; i < value.size(); ++i) assign(slot + static_cast<std::uint32_t>(i), value[i]);
-                leave_task_scopes(0, node.span);
-                value = slot_values(slot, value.size());
+            if (origin_.role == Role::Function) {
+                value = fit_reference(std::move(value), c_.symbol(origin_.symbol).type);
+                if (hook_owner(c_.symbol(origin_.symbol)) != no_symbol)
+                    value = normalize_hook_result(std::move(value), node.operands.front(), node.span);
+            }
+            if (result_region_slot_ != absent) {
+                for (auto& word : value) spill(word);
+                const auto nothing = c_.scalar(nvr::TypeKind::Void);
+                for (const auto& word : value) {
+                    if (c_.type_at(word.type).kind == nvr::TypeKind::Array) {
+                        state(nvr::StateOp::MoveToRegion, 1, {resolve(word), slot_operand(result_region_slot_)},
+                              nothing, node.span);
+                    }
+                }
+            }
+            if (std::ranges::any_of(scopes_, [](const auto& scope) { return scope.token || scope.joins_tasks; })) {
+                // Commit the return value before leaving the scopes. Any
+                // array result has already moved to the caller's region.
+                for (auto& word : value) spill(word);
+                leave_scopes(0, node.span);
+                for (auto& word : value) word = resolve(word);
             }
             exit.arguments = std::move(value);
         } else {
-            leave_task_scopes(0, node.span);
+            leave_scopes(0, node.span);
         }
         operation_at(node.span);
         close({exit});
         return;
     }
     case IrOp::Break:
-        leave_task_scopes(loops_.back().task_scopes, node.span);
+        leave_scopes(loops_.back().scopes, node.span);
         jump(loops_.back().exit);
         return;
     case IrOp::Continue:
-        leave_task_scopes(loops_.back().task_scopes, node.span);
+        leave_scopes(loops_.back().scopes, node.span);
         jump(loops_.back().next, loops_.back().poll_on_continue);
         return;
     case IrOp::Fail: {
@@ -2315,9 +2495,66 @@ void FunctionCompiler::statement(const IrNode& node) {
     }
 }
 
+Values FunctionCompiler::previous_words(nvr::StateOp op, std::uint32_t base, const Values& place,
+                                        const IrType& type, const Span& span) {
+    const auto words = c_.word_types(type, span);
+    Values previous;
+    for (std::size_t i = 0; i < words.size(); ++i) {
+        auto arguments = place;
+        if (op != nvr::StateOp::ReadComponent) arguments.push_back(immediate(words[i], 0));
+        previous.push_back(state(op, base + static_cast<std::uint32_t>(i), std::move(arguments), words[i], span));
+    }
+    return previous;
+}
+
+void FunctionCompiler::store_hook(const IrNode& destination, const IrNode& admission) {
+    const auto& span = destination.span;
+    const auto& type = destination.type;
+    if (destination.op == IrOp::Load && c_.symbol(destination.symbol).kind != SymbolKind::Global) {
+        const auto slot = slots_.at(destination.symbol);
+        auto incoming = snapshot(values(admission.operands.front()), span);
+        auto previous = deferred_.contains(destination.symbol) ? Values{} : slot_values(slot, 2);
+        auto result = hook_event(admission, std::move(incoming), std::move(previous));
+        assign(slot, result[0]);
+        assign(slot + 1, result[1]);
+        return;
+    }
+    nvr::StateOp read, write;
+    std::uint32_t base = 0;
+    Values place;
+    if (destination.op == IrOp::Field) {
+        read = nvr::StateOp::ReadField;
+        write = nvr::StateOp::WriteField;
+        base = c_.field_index(destination.symbol, span);
+        place = snapshot({expression(destination.operands.front())}, span);
+    } else if (destination.op == IrOp::Index) {
+        read = nvr::StateOp::ReadComponent;
+        write = nvr::StateOp::WriteComponent;
+        place = snapshot({expression(destination.operands[0])}, span);
+        auto index = expression(destination.operands[1]);
+        place.push_back(to_index(index, destination.operands[1].type, span));
+        place = snapshot(std::move(place), span);
+    } else if (destination.op == IrOp::Load) {
+        read = nvr::StateOp::ReadGlobal;
+        write = nvr::StateOp::WriteGlobal;
+        base = c_.global(resolve_global(destination), span);
+    } else {
+        throw Diagnostic(span, "unsupported class reference assignment destination").with_code("E0801");
+    }
+    auto incoming = snapshot(values(admission.operands.front()), span);
+    auto previous = previous_words(read, base, place, type, span);
+    auto result = hook_event(admission, std::move(incoming), std::move(previous));
+    write_words(write, base, std::move(place), std::move(result), span, true);
+}
+
 void FunctionCompiler::store(const IrNode& node) {
     const auto& destination = node.operands[0];
     const auto& source = node.operands[1];
+    if (source.op == IrOp::HookAdmit) {
+        store_hook(destination, source);
+        return;
+    }
+    const bool atomic = c_.value_layout(destination.type, node.span).carries_policy;
     switch (destination.op) {
     case IrOp::Load: {
         const auto kind = c_.symbol(destination.symbol).kind;
@@ -2328,13 +2565,19 @@ void FunctionCompiler::store(const IrNode& node) {
             return;
         }
         const auto global = c_.global(resolve_global(destination), destination.span);
-        write_words(nvr::StateOp::WriteGlobal, global, {}, values(source), node.span);
+        write_words(nvr::StateOp::WriteGlobal, global, {}, values(source), node.span, atomic);
         return;
     }
     case IrOp::Field: {
         auto parts = groups_of({&destination.operands.front(), &source});
+        auto& object = parts[0].front();
+        if (is_primitive_reference(destination.operands.front().type) && c_.symbol(destination.symbol).name == "$value") {
+            spill(object);
+            for (auto& word : parts[1]) spill(word);
+            check_borrow_owner(destination, object);
+        }
         write_words(nvr::StateOp::WriteField, c_.field_index(destination.symbol, destination.span),
-                    {parts[0].front()}, std::move(parts[1]), node.span);
+                    {resolve(object)}, std::move(parts[1]), node.span, atomic);
         return;
     }
     case IrOp::Index: {
@@ -2342,7 +2585,7 @@ void FunctionCompiler::store(const IrNode& node) {
         auto index = to_index(parts[1].front(), destination.operands[1].type, destination.span);
         // A tuple of several words is one aggregate element: each word is a component.
         if (parts[2].size() > 1) {
-            write_words(nvr::StateOp::WriteComponent, 0, {parts[0].front(), index}, std::move(parts[2]), node.span);
+            write_words(nvr::StateOp::WriteComponent, 0, {parts[0].front(), index}, std::move(parts[2]), node.span, atomic);
         } else {
             state(nvr::StateOp::WriteElement, 0, {parts[0].front(), index, parts[2].front()},
                   c_.scalar(nvr::TypeKind::Void), node.span);
@@ -2361,13 +2604,13 @@ void FunctionCompiler::branch_statement(const IrNode& node) {
     const auto else_block = node.alternative.empty() ? join : new_block();
     branch(condition, then_block, else_block);
     begin(then_block, node.body.empty() ? node.span : node.body.front().span);
-    region(node.body);
+    lexical_region(node.body, node.span);
     if (open()) {
         jump(join);
     }
     if (else_block != join) {
         begin(else_block, node.alternative.front().span);
-        region(node.alternative);
+        lexical_region(node.alternative, node.span);
         if (open()) {
             jump(join);
         }
@@ -2379,7 +2622,11 @@ void FunctionCompiler::loop(const IrNode& node) {
     const auto head = new_block();
     jump(head);
     begin(head, node.span);
-    const auto condition = expression(node.operands.front());
+    enter_scope(needs_region(node.operands.front()), false, node.span);
+    auto condition = expression(node.operands.front());
+    if (scopes_.back().token) spill(condition);
+    end_scope(node.span);
+    condition = resolve(condition);
     const auto body = new_block();
     const auto exit = new_block();
     branch(condition, body, exit);
@@ -2389,16 +2636,16 @@ void FunctionCompiler::loop(const IrNode& node) {
     // The poll of a loop rides on the exit that takes the back edge: the
     // jump from the latch, or without a latch every jump back to the head.
     const bool poll_at_head = node.poll && latch == head;
-    loops_.push_back({latch, exit, poll_at_head, task_scopes_});
+    loops_.push_back({latch, exit, poll_at_head, scopes_.size()});
     begin(body, node.body.empty() ? node.span : node.body.front().span);
-    region(node.body);
+    lexical_region(node.body, node.span);
     if (open()) {
         jump(latch, poll_at_head);
     }
     loops_.pop_back();
     if (latch != head) {
         begin(latch, node.alternative.front().span);
-        region(node.alternative);
+        lexical_region(node.alternative, node.span);
         if (open()) {
             jump(head, node.poll);
         }
@@ -2449,7 +2696,11 @@ bool FunctionCompiler::graph_only(const IrNode& node) const {
         return graph_only(node.operands.front());
     case IrOp::Tuple:
     case IrOp::Project:
-        // Words of a tuple are operands; selecting and gathering them touches no state.
+    case IrOp::EnumConstruct:
+    case IrOp::EnumTag:
+    case IrOp::EnumProject:
+        // Words of a tuple or an enum are operands; selecting and gathering
+        // them touches no state.
         return std::all_of(node.operands.begin(), node.operands.end(),
                            [this](const IrNode& operand) { return graph_only(operand); });
     case IrOp::Binary:
@@ -2539,17 +2790,278 @@ Operand FunctionCompiler::integer_literal(const IrNode& node) {
     return immediate(type, c_.literal(node, type).value());
 }
 
+// The policy word is zero on a live reference and layout + 1 on a typed nil.
+Operand FunctionCompiler::present(const Operand& value) {
+    return bits(c_.scalar(nvr::TypeKind::Bool), {current().synth.circuit().any(lanes(value))});
+}
+
+Operand FunctionCompiler::same_word(const Operand& left, const Operand& right) {
+    return bits(c_.scalar(nvr::TypeKind::Bool), {equal(current().synth.circuit(), lanes(left), lanes(right))});
+}
+
+Operand FunctionCompiler::choose(const Operand& condition, const Operand& yes, const Operand& no) {
+    const auto test = lanes(condition).front();
+    auto word = lanes(yes);
+    const auto other = lanes(no);
+    for (std::size_t i = 0; i < word.size(); ++i)
+        word[i] = current().synth.circuit().choose(test, word[i], other[i]);
+    return bits(yes.type, std::move(word));
+}
+
+Values FunctionCompiler::snapshot(Values words, const Span& span) {
+    // Capture mutable slots as well as graph values before another operand
+    // can change their source. The fresh slots are initialized on one exit.
+    if (std::ranges::all_of(words, [](const auto& word) {
+            return word.kind == Operand::Kind::Immediate || word.kind == Operand::Kind::Constant;
+        })) return words;
+    std::vector<std::uint32_t> slots;
+    for (const auto& word : words) {
+        slots.push_back(new_slot(word.type));
+        assign(slots.back(), word);
+    }
+    const auto next = new_block();
+    jump(next);
+    begin(next, span);
+    for (std::size_t i = 0; i < words.size(); ++i) words[i] = slot_operand(slots[i]);
+    return words;
+}
+
+Operand FunctionCompiler::policy_of(const Values& reference, const Operand& fallback, const Span& span) {
+    if (reference.front().kind == Operand::Kind::Immediate && reference.front().bits == 0)
+        return reference.size() == 1 ? fallback : choose(present(reference[1]), reference[1], fallback);
+    const auto result = new_slot(fallback.type);
+    const auto live = new_block(), nil = new_block(), done = new_block();
+    branch(present(reference.front()), live, nil);
+    begin(live, span);
+    const auto tag = state(nvr::StateOp::ReadTag, 0, {reference.front()}, fallback.type, span);
+    assign(result, bits(fallback.type, add(current().synth.circuit(), lanes(tag), constant_word(1, 32), false).value));
+    jump(done);
+    begin(nil, span);
+    assign(result, reference.size() == 1 ? fallback : choose(present(reference[1]), reference[1], fallback));
+    jump(done);
+    begin(done, span);
+    return slot_operand(result);
+}
+
+std::vector<std::pair<std::uint32_t, SymbolId>> FunctionCompiler::policies(const IrType& view, HookKind kind,
+                                                                         const Span& span) {
+    std::vector<std::pair<std::uint32_t, SymbolId>> result;
+    for (SymbolId cls = 0; cls < c_.program().symbols.size(); ++cls) {
+        const auto& item = c_.symbol(cls);
+        if (item.kind == SymbolKind::Class && item.generics.empty() && effective_hook(c_.program(), cls, kind) != no_symbol &&
+            c_.derives(cls, view.symbol))
+            result.emplace_back(c_.layout(cls, span) + 1, cls);
+    }
+    std::ranges::sort(result);
+    return result;
+}
+
+Operand FunctionCompiler::repeat_hooked(const IrNode& node) {
+    const auto& span = node.span;
+    const auto& admission = node.operands[1];
+    const auto length = snapshot(values(node.operands[0]), span).front();
+    const auto fill = snapshot(values(admission.operands.front()), span);
+    const auto words = c_.word_types(admission.type, span);
+    const auto type = c_.type_of(node.type, span);
+    const bool region = node.type.kind == TypeKind::Array;
+    Values arguments{length, immediate(words[0], 0), immediate(words[1], 0)};
+    if (region) arguments.insert(arguments.begin(), region_token());
+    const auto collection = state(region ? nvr::StateOp::RegionRepeat : nvr::StateOp::RepeatCollection,
+                                  type, std::move(arguments), type, span);
+    const auto position = new_slot(length.type);
+    assign(position, immediate(length.type, 0));
+    const auto head = new_block(), body = new_block(), done = new_block();
+    jump(head);
+    begin(head, span);
+    branch(same_word(slot_operand(position), length), done, body);
+    begin(body, span);
+    auto value = hook_event(admission, fill);
+    write_words(nvr::StateOp::WriteComponent, 0, {collection, slot_operand(position)}, std::move(value), span, true);
+    assign(position, bits(length.type, add(current().synth.circuit(), lanes(slot_operand(position)), constant_word(1, 64), false).value));
+    jump(head);
+    begin(done, span);
+    return collection;
+}
+
+Values FunctionCompiler::fit_reference(Values words, const IrType& destination) {
+    if (destination.kind == TypeKind::Object) {
+        if (c_.inline_value(destination) && words.size() == 1)
+            words.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0));
+        else if (!c_.inline_value(destination) && words.size() == 2) words.resize(1);
+    }
+    return words;
+}
+
+Values FunctionCompiler::reference_cast(const IrNode& node) {
+    auto inputs = values(node.operands.front());
+    if (inputs.size() == 2) spill(inputs[1]);
+    const auto type = c_.type_of(node.type, node.span);
+    auto result = state(nvr::StateOp::ClassCast, c_.layout(node.type.symbol, node.span), inputs, type, node.span);
+    if (!c_.inline_value(node.type)) return {result};
+    return {result, inputs.size() == 2 ? resolve(inputs[1]) : immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0)};
+}
+
+Values FunctionCompiler::hook_event(const IrNode& node, Values incoming, Values previous) {
+    const auto& span = node.span;
+    const auto kind = node.op == IrOp::HookRead ? HookKind::Get : HookKind::Set;
+    const auto words = c_.word_types(node.type, span);
+    const auto zero = immediate(words[1], 0);
+    incoming = snapshot(std::move(incoming), span);
+    if (incoming.size() == 1) incoming.push_back(zero);
+    const bool has_previous = !previous.empty();
+    if (!has_previous) previous = {immediate(words[0], 0), zero};
+    previous = snapshot(std::move(previous), span);
+    const auto& declared = c_.symbol(node.type.symbol);
+    auto fallback = immediate(words[1], declared.kind == SymbolKind::Class && declared.name != "$class" ?
+                                         c_.layout(node.type.symbol, span) + 1 : 0);
+    auto selected = policy_of(incoming, zero, span);
+    // Read the previous object's header only if the incoming value supplies
+    // no policy. A getter has no previous destination.
+    const auto selected_slot = new_slot(words[1]);
+    const auto use_previous = new_block(), ready = new_block();
+    assign(selected_slot, selected);
+    branch(present(selected), ready, use_previous);
+    begin(use_previous, span);
+    assign(selected_slot, kind == HookKind::Set ? policy_of(previous, fallback, span) : fallback);
+    jump(ready);
+    begin(ready, span);
+    selected = slot_operand(selected_slot);
+    const auto result = new_slots(words);
+    const auto done = new_block();
+    for (const auto& [policy, cls] : policies(node.type, kind, span)) {
+        const auto target = effective_hook(c_.program(), cls, kind);
+        const auto owner = hook_owner(c_.symbol(target));
+        const auto type = c_.type_of(c_.symbol(owner).type, span);
+        const auto layout = c_.layout(owner, span);
+        const auto call_block = new_block(), next = new_block();
+        branch(same_word(selected, immediate(words[1], policy)), call_block, next);
+        begin(call_block, span);
+        Values arguments{type == incoming[0].type ? incoming[0] :
+                         state(nvr::StateOp::ClassCast, layout, {incoming[0]}, type, span)};
+        arguments.push_back(choose(present(arguments[0]), zero, selected));
+        if (kind == HookKind::Set && !has_previous) {
+            arguments.push_back(immediate(type, 0));
+            arguments.push_back(selected);
+        } else if (kind == HookKind::Set) {
+            spill(arguments[1]);
+            const auto matches = state(nvr::StateOp::ClassIs, layout, {previous[0]}, c_.scalar(nvr::TypeKind::Bool), span);
+            const auto compatible = choose(matches, previous[0], immediate(previous[0].type, 0));
+            auto old = state(nvr::StateOp::ClassCast, layout, {compatible}, type, span);
+            arguments.push_back(old);
+            arguments.push_back(choose(present(old), zero, selected));
+        }
+        for (auto& arg : arguments) arg = resolve(arg);
+        arguments.push_back(selected);
+        auto returned = invoke_values({Role::Function, target, cls}, std::move(arguments),
+                                      {type, words[1]}, span);
+        auto handle = returned.front();
+        if (handle.type != words[0]) handle = state(nvr::StateOp::ClassCast, c_.layout(node.type.symbol, span),
+                                                    {handle}, words[0], span);
+        assign(result, handle);
+        assign(result + 1, returned[1]);
+        jump(done);
+        begin(next, span);
+    }
+    assign(result, incoming[0]);
+    assign(result + 1, choose(present(incoming[0]), zero, selected));
+    jump(done);
+    begin(done, span);
+    return slot_values(result, 2);
+}
+
+Values FunctionCompiler::normalize_hook_result(Values value, const IrNode& source, const Span& span) {
+    const auto& function = c_.symbol(origin_.symbol);
+    const auto selected = slot_operand(slots_.at(function.parameters.back()));
+    const auto zero = immediate(selected.type, 0);
+    value = snapshot(std::move(value), span);
+    // The incoming handle has the selected policy by construction. A setter's
+    // previous instance may be a sibling with the same inherited clause.
+    if (source.op != IrOp::Nil && !(source.op == IrOp::Load && source.symbol == function.parameters.front())) {
+        const auto live = new_block(), success = new_block(), bad = new_block();
+        branch(present(value.front()), live, success);
+        begin(live, span);
+        const auto tag = state(nvr::StateOp::ReadTag, 0, {value.front()}, selected.type, span);
+        const auto actual = bits(selected.type, add(current().synth.circuit(), lanes(tag), constant_word(1, 32), false).value);
+        branch(same_word(actual, selected), success, bad);
+        begin(bad, span);
+        ExitSpec trap;
+        trap.kind = nvr::ExitKind::MessageTrap;
+        const auto text = c_.scalar(nvr::TypeKind::Text);
+        const auto name = c_.symbol(origin_.receiver).name;
+        trap.arguments = {{Operand::Kind::Constant, text, c_.text_constant("class hook result is not a " + name, span), 0, {}}};
+        close({trap});
+        begin(success, span);
+    }
+    state(nvr::StateOp::HookLeave, 0, {}, c_.scalar(nvr::TypeKind::Void), span);
+    return {value.front(), choose(present(value.front()), zero, selected)};
+}
+
+// Every inactive handle is overwritten. The collector sees precisely the
+// text and object words of this layout, never scalar bits as a handle.
+Values FunctionCompiler::pack_any(const IrNode& node) {
+    const auto& operand = node.operands.front();
+    const auto tag = any_tag(operand.type).value();
+    auto source = values(operand);
+    const auto types = c_.word_types(node.type, node.span);
+    Values packed;
+    for (auto type : types) packed.push_back(zero_word(type, node.span));
+    packed[0] = immediate(types[0], tag);
+    if (operand.type.kind == TypeKind::Object) {
+        packed[3] = source.front();
+        if (source.size() == 2) packed[4] = source[1];
+    } else if (operand.type.kind == TypeKind::String) {
+        packed[2] = source.front();
+    } else {
+        auto word = lanes(source.front());
+        word.resize(64, Signal::of(0));
+        packed[1] = bits(types[1], std::move(word));
+    }
+    return packed;
+}
+
+Values FunctionCompiler::unpack_any(const IrNode& node) {
+    auto packed = values(node.operands.front());
+    if (node.type.kind == TypeKind::Object) return {packed.begin() + 3, packed.end()};
+    if (node.type.kind == TypeKind::String) return {packed[2]};
+    auto word = lanes(packed[1]);
+    const auto type = c_.type_of(node.type, node.span);
+    const auto& scalar = c_.type_at(type);
+    word.resize(scalar.kind == nvr::TypeKind::Bool ? 1 : scalar.width);
+    return {bits(type, std::move(word))};
+}
+
 Values FunctionCompiler::values(const IrNode& node) {
-    if (node.type.kind != TypeKind::Tuple) return {expression(node)};
+    if (!c_.inline_value(node.type)) return {expression(node)};
     switch (node.op) {
-    case IrOp::Tuple:
-        return flatten(groups(node.operands));
+    case IrOp::AnyPack: return pack_any(node);
+    case IrOp::AnyUnpack: return unpack_any(node);
+    case IrOp::HookAdmit:
+    case IrOp::HookRead:
+        return hook_event(node, values(node.operands.front()));
+    case IrOp::ClassCast:
+        return reference_cast(node);
+    case IrOp::Allocate:
+    case IrOp::Receiver:
+    case IrOp::Nil: {
+        const auto type = c_.type_of(node.type, node.span);
+        const auto handle = node.op == IrOp::Allocate ? allocate(node) :
+                            node.op == IrOp::Receiver ? receiver_value(node) : immediate(type, 0);
+        return {handle, immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0)};
+    }
+    case IrOp::Tuple: {
+        auto fields = groups(node.operands);
+        for (std::size_t i = 0; i < fields.size(); ++i)
+            fields[i] = fit_reference(std::move(fields[i]), node.type.arguments[i]);
+        return flatten(fields);
+    }
+    case IrOp::EnumConstruct:
+        return aggregate_value(node.type, node.symbol, groups(node.operands), node.text, node.span);
     case IrOp::Load:
     case IrOp::Field:
     case IrOp::Index:
     case IrOp::Project:
     case IrOp::EnumProject:
-        return range(node, 0, c_.word_irtypes(node.type, node.span).size());
+        return select(node, every_word(c_.value_layout(node.type, node.span).size()));
     case IrOp::Call:
     case IrOp::VirtualCall:
     case IrOp::ExternalCall:
@@ -2577,57 +3089,66 @@ Values FunctionCompiler::values(const IrNode& node) {
     throw Diagnostic(node.span, "this operation is not supported by IRtoNeuronConversion").with_code("E0801");
 }
 
-Values FunctionCompiler::range(const IrNode& node, std::size_t first, std::size_t count) {
+Values FunctionCompiler::select(const IrNode& node, const std::vector<std::size_t>& positions) {
     const auto types = c_.word_types(node.type, node.span);
     switch (node.op) {
     case IrOp::Project: {
+        // The element's words are at the element's positions in the base.
         const auto& base = node.operands.front();
-        const auto index = aggregate_index(node.text).value();
-        return range(base, c_.word_offset(base.type, index, node.span) + first, count);
+        const auto& element = c_.value_layout(base.type, node.span).elements.at(aggregate_index(node.text).value());
+        std::vector<std::size_t> inner;
+        for (const auto position : positions) inner.push_back(element.at(position));
+        return select(base, inner);
     }
     case IrOp::Load: {
         const auto kind = c_.symbol(node.symbol).kind;
         if (kind == SymbolKind::Local || kind == SymbolKind::Parameter)
-            return slot_values(slots_.at(node.symbol) + static_cast<std::uint32_t>(first), count);
+            return slots_at(slots_.at(node.symbol), positions);
         if (kind == SymbolKind::Global) {
             const auto global = c_.global(resolve_global(node), node.span);
-            return read_words(nvr::StateOp::ReadGlobal, global, {}, types, first, count, node.span);
+            return read_words(nvr::StateOp::ReadGlobal, global, {}, types, positions, node.span);
         }
         throw Diagnostic(node.span, "unsupported load").with_code("E0801");
     }
     case IrOp::Field: {
         auto object = expression(node.operands.front());
-        return read_words(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {object}, types, first,
-                          count, node.span);
+        return read_words(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {object}, types, positions,
+                          node.span);
     }
     case IrOp::EnumProject: {
-        auto object = expression(node.operands.front());
-        const auto position = aggregate_index(node.text).value();
-        return read_words(nvr::StateOp::ReadField, c_.payload_field(node.symbol, position, node.span), {object}, types,
-                          first, count, node.span);
+        // The payload's words are at their pooled positions in the enum.
+        const auto& base = node.operands.front();
+        const auto& payload = c_.payload_words(base.type, node.symbol, aggregate_index(node.text).value(), node.span);
+        std::vector<std::size_t> inner;
+        for (const auto position : positions) inner.push_back(payload.at(position));
+        return select(base, inner);
     }
     case IrOp::Index: {
         auto operands = sequence(node.operands);
         auto index = to_index(operands[1], node.operands[1].type, node.span);
-        // A tuple of several words is one aggregate element, and each word
-        // is a component of it; a tuple of one word is a plain element.
+        // An inline value of several words is one aggregate element, and
+        // each word is a component of it; one of one word is a plain element.
         if (types.size() == 1)
             return {state(nvr::StateOp::ReadElement, 0, {operands[0], index}, types.front(), node.span)};
-        return read_words(nvr::StateOp::ReadComponent, 0, {operands[0], index}, types, first, count, node.span);
+        return read_words(nvr::StateOp::ReadComponent, 0, {operands[0], index}, types, positions, node.span);
     }
     default: {
-        auto all = values(node);
-        return Values(all.begin() + static_cast<std::ptrdiff_t>(first),
-                      all.begin() + static_cast<std::ptrdiff_t>(first + count));
+        const auto all = values(node);
+        Values result;
+        for (const auto position : positions) result.push_back(all.at(position));
+        return result;
     }
     }
 }
 
 Operand FunctionCompiler::expression(const IrNode& node) {
-    if (node.type.kind == TypeKind::Tuple)
-        throw std::logic_error("a tuple reached the one-word path at " + node.span.file + ":" +
+    if (node.type.kind == TypeKind::Object && c_.inline_value(node.type)) return values(node).front();
+    if (c_.inline_value(node.type))
+        throw std::logic_error("an inline value reached the one-word path at " + node.span.file + ":" +
                                std::to_string(node.span.line));
     switch (node.op) {
+    case IrOp::AnyTag: return values(node.operands.front())[0];
+    case IrOp::AnyUnpack: return unpack_any(node).front();
     case IrOp::ValueEquals:
     case IrOp::ValueHash:
     case IrOp::ValueText:
@@ -2646,8 +3167,9 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         name.index = c_.text_constant(c_.qualified(cls), node.span);
         return state(nvr::StateOp::ClassText, 0, {object, name}, name.type, node.span);
     }
-    case IrOp::ClassIs:
-    case IrOp::ClassCast: {
+    case IrOp::ClassCast:
+        return reference_cast(node).front();
+    case IrOp::ClassIs: {
         const auto object = expression(node.operands.front());
         const bool test = node.op == IrOp::ClassIs;
         const auto& target = test ? node.type_arguments.front() : node.type;
@@ -2674,7 +3196,11 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return load(node);
     case IrOp::Field: {
         auto object = expression(node.operands.front());
-        return state(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {object},
+        if (is_primitive_reference(node.operands.front().type) && c_.symbol(node.symbol).name == "$value") {
+            spill(object);
+            check_borrow_owner(node, object);
+        }
+        return state(nvr::StateOp::ReadField, c_.field_index(node.symbol, node.span), {resolve(object)},
                      c_.type_of(node.type, node.span), node.span);
     }
     case IrOp::Reference: {
@@ -2718,27 +3244,31 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return scheduler_call(node).front();
     case IrOp::Allocate:
         return allocate(node);
-    case IrOp::EnumConstruct:
-        return aggregate_value(node.type, node.symbol, groups(node.operands), node.text, node.span);
     case IrOp::Project:
-        // One element of a tuple: its word, read without the others.
-        return range(node, 0, 1).front();
+    case IrOp::EnumProject:
+        // One element of a tuple or one payload of an enum: its word, read
+        // without the others.
+        return select(node, {0}).front();
     case IrOp::EnumTag:
-    case IrOp::EnumProject: {
-        const auto object = expression(node.operands.front());
-        std::uint32_t field = 0;
-        if (node.op == IrOp::EnumProject)
-            field = c_.payload_field(node.symbol, aggregate_index(node.text).value(), node.span);
-        return state(nvr::StateOp::ReadField, field, {object}, c_.type_of(node.type, node.span), node.span);
-    }
+        // The tag is an enum's first word.
+        return select(node.operands.front(), {0}).front();
     case IrOp::Collection: {
         auto elements = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
+        if (node.type.kind == TypeKind::Array) {
+            elements.insert(elements.begin(), region_token());
+            return state(nvr::StateOp::RegionCollection, type, std::move(elements), type, node.span);
+        }
         return state(nvr::StateOp::AllocateCollection, type, std::move(elements), type, node.span);
     }
     case IrOp::RepeatCollection: {
+        if (node.operands[1].op == IrOp::HookAdmit) return repeat_hooked(node);
         auto arguments = sequence(node.operands);
         const auto type = c_.type_of(node.type, node.span);
+        if (node.type.kind == TypeKind::Array) {
+            arguments.insert(arguments.begin(), region_token());
+            return state(nvr::StateOp::RegionRepeat, type, std::move(arguments), type, node.span);
+        }
         return state(nvr::StateOp::RepeatCollection, type, std::move(arguments), type, node.span);
     }
     case IrOp::Index: {
@@ -2800,7 +3330,9 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         return state(nvr::StateOp::RemoveElement, 0, {operands[0], index}, c_.scalar(nvr::TypeKind::Void), node.span);
     }
     case IrOp::BaseInitialize: {
-        auto operands = sequence(node.operands);
+        auto parts = groups(node.operands);
+        parts.front().resize(1);
+        auto operands = flatten(parts);
         return invoke(c_.constructor(c_.symbol(self_class_).base, node.symbol), std::move(operands),
                       c_.scalar(nvr::TypeKind::Void), node.span);
     }
@@ -2887,7 +3419,8 @@ Operand FunctionCompiler::binary(const IrNode& node) {
     const auto& op = node.text;
     const auto& operand_type = node.operands.front().type;
     if (operand_type.kind == TypeKind::Object) {
-        auto operands = sequence(node.operands);
+        const auto parts = groups(node.operands);
+        const Values operands{parts[0].front(), parts[1].front()};
         const auto left = lanes(operands[0]);
         const auto right = lanes(operands[1]);
         const auto same = equal(current().synth.circuit(), left, right);
@@ -3238,6 +3771,23 @@ Operand FunctionCompiler::spawn(const IrNode& node, bool handle) {
     return scheduler(nvr::SchedulerOp::Spawn, target, {resolve(object)}, result, node.span);
 }
 
+std::vector<Operand> FunctionCompiler::boxed_operands(const IrNode& node) {
+    auto parts = groups(node.operands);
+    // Boxing closes blocks, so the other operands are committed first.
+    if (std::ranges::any_of(node.operands, [&](const IrNode& operand) { return c_.inline_value(operand.type); }))
+        for (auto& part : parts)
+            for (auto& word : part) spill(word);
+    std::vector<Operand> arguments;
+    for (std::size_t i = 0; i < parts.size(); ++i) {
+        if (c_.inline_value(node.operands[i].type)) {
+            arguments.push_back(box(node.operands[i].type, parts[i], node.span));
+        } else {
+            arguments.push_back(parts[i].front());
+        }
+    }
+    return arguments;
+}
+
 Values FunctionCompiler::scheduler_call(const IrNode& node) {
     const bool is_select = node.text == select_operation || node.text == select_with_default;
     const auto operation = scheduler_operation(node.text);
@@ -3250,19 +3800,8 @@ Values FunctionCompiler::scheduler_call(const IrNode& node) {
     }
     // A select's arm kinds are uint32 literals and stay constants in the
     // image; every other operand is evaluated left to right. The scheduler
-    // carries one word for each value, so a tuple is boxed.
-    auto parts = groups(node.operands);
-    if (std::ranges::any_of(node.operands, [](const IrNode& operand) { return operand.type.kind == TypeKind::Tuple; }))
-        for (auto& part : parts)
-            for (auto& word : part) spill(word);
-    std::vector<Operand> arguments;
-    for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (node.operands[i].type.kind == TypeKind::Tuple) {
-            arguments.push_back(box(node.operands[i].type, parts[i], node.span));
-        } else {
-            arguments.push_back(parts[i].front());
-        }
-    }
+    // carries one word for each value, so an inline value is boxed.
+    auto arguments = boxed_operands(node);
     for (std::size_t i = 0; i < arguments.size(); ++i) {
         if (is_select && node.operands[i].op == IrOp::Integer && arguments[i].kind == Operand::Kind::Immediate) {
             const auto type = arguments[i].type;
@@ -3295,21 +3834,24 @@ Values FunctionCompiler::scheduler_call(const IrNode& node) {
         }
         target = c_.function(c_.boundary_origin({Role::Function, method, no_symbol}));
     }
-    const auto code = is_select ? select_code : operation->code;
+    const auto code = static_cast<nvr::SchedulerOp>(is_select ? select_code : operation->code);
+    if (code == nvr::SchedulerOp::ParallelFinish && node.type.kind == TypeKind::Array) {
+        arguments.push_back(region_token());
+    }
     if ((node.type.kind == TypeKind::Array || node.type.kind == TypeKind::List) &&
-        node.type.arguments.front().kind == TypeKind::Tuple) {
-        // The runtime builds the array of results from boxed tuples; the
+        c_.inline_value(node.type.arguments.front())) {
+        // The runtime builds the array of results from boxed values; the
         // program's array holds the words inline.
-        const auto built = scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
+        const auto built = scheduler(code, target, std::move(arguments),
                                      c_.wire_type(node.type, node.span), node.span);
         return {invoke(c_.collection_function(node.type, node.span), {built}, c_.type_of(node.type, node.span),
                        node.span)};
     }
-    if (node.type.kind != TypeKind::Tuple)
-        return {scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
+    if (!c_.inline_value(node.type))
+        return {scheduler(code, target, std::move(arguments),
                           c_.type_of(node.type, node.span), node.span)};
-    // The scheduler yields the boxed tuple.
-    const auto handle = scheduler(static_cast<nvr::SchedulerOp>(code), target, std::move(arguments),
+    // The scheduler yields the boxed value.
+    const auto handle = scheduler(code, target, std::move(arguments),
                                   c_.boxed_type(node.type, node.span), node.span);
     return unbox(node.type, handle, node.span);
 }
@@ -3334,12 +3876,25 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
     if (receiver.type.kind != TypeKind::Object) {
         throw Diagnostic(receiver.span, "unsupported method receiver").with_code("E0801");
     }
-    return dispatch_call(receiver.type.symbol, node.symbol, sequence(node.operands), results, node.span,
+    const auto& last = node.operands.back();
+    if (last.op == IrOp::HookAdmit && last.symbol != no_symbol && c_.symbol(last.symbol).kind == SymbolKind::Field) {
+        auto place = snapshot({expression(receiver)}, node.span);
+        auto incoming = snapshot(values(last.operands.front()), node.span);
+        auto previous = previous_words(nvr::StateOp::ReadField, c_.field_index(last.symbol, node.span), place,
+                                       last.type, node.span);
+        auto admitted = hook_event(last, std::move(incoming), std::move(previous));
+        place.insert(place.end(), admitted.begin(), admitted.end());
+        return dispatch_call(receiver.type.symbol, node.symbol, std::move(place), results, node.span, node.poll);
+    }
+    auto parts = groups(node.operands);
+    parts.front().resize(1);
+    return dispatch_call(receiver.type.symbol, node.symbol, flatten(parts), results, node.span,
                          node.poll);
 }
 
 Values FunctionCompiler::dispatch_call(SymbolId cls, SymbolId method, std::vector<Operand> operands,
                                        const std::vector<std::uint32_t>& results, const Span& span, bool poll) {
+    if (has_array_word(results)) operands.push_back(region_token());
     for (auto& operand : operands) {
         spill(operand);
     }
@@ -3408,10 +3963,13 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     }
     const auto result_type = equality ? c_.scalar(nvr::TypeKind::Bool) :
         op == IrOp::ValueHash ? c_.scalar(nvr::TypeKind::Unsigned, 32) : c_.scalar(nvr::TypeKind::Text);
-    if (type.kind == TypeKind::Tuple || type.kind == TypeKind::Array || type.kind == TypeKind::List)
+    // An inline value or a collection is compared, hashed and printed by a
+    // function over its words or elements.
+    if ((type.kind != TypeKind::Object && c_.inline_value(type)) || type.kind == TypeKind::Array || type.kind == TypeKind::List)
         return invoke(c_.value_function(op, type, span), std::move(operands), result_type, span);
     if (type.kind != TypeKind::Object) return scalar_member(op, type, std::move(operands), span);
 
+    if (c_.inline_value(type)) operands.erase(operands.begin() + 1);
     const auto cls = type.symbol;
     if (c_.symbol(cls).name.starts_with("$signature"))
         throw Diagnostic(span, "function values do not support equality, hashing, or text members").with_code("E0801");
@@ -3420,6 +3978,8 @@ Operand FunctionCompiler::value_member(IrOp op, const IrType& type, std::vector<
     const auto method = c_.member(root, equality ? "equals" : op == IrOp::ValueHash ? "hash_code" : "to_string");
     if (method == no_symbol) throw Diagnostic(span, "this class reference has no value member contract")
         .with_code("E0899");
+    if (equality && operands.size() == 2 && c_.inline_value(c_.symbol(root).type))
+        operands.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0));
     for (auto& operand : operands) spill(operand);
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
     // No lane of a nil handle is set: the test is a comparison with nil.
@@ -3478,7 +4038,7 @@ Values FunctionCompiler::kernel_call(const IrNode& node) {
     const auto entry = c_.kernel_entry(node.symbol, node.span);
     const auto result = c_.wire_type(node.type, node.span);
     const auto value = state(nvr::StateOp::Kernel, entry, std::move(arguments), result, node.span);
-    if (node.type.kind != TypeKind::Tuple) return {value};
+    if (!c_.inline_value(node.type)) return {value};
     return unbox(node.type, value, node.span);
 }
 
@@ -3486,19 +4046,7 @@ Values FunctionCompiler::kernel_call(const IrNode& node) {
 // a tuple argument is boxed first, and a tuple result is unboxed into the
 // words of the result enum's payload.
 Values FunctionCompiler::bound_host_call(const IrNode& node) {
-    auto parts = groups(node.operands);
-    // Boxing a tuple closes blocks, so the other arguments are committed first.
-    if (std::ranges::any_of(node.operands, [](const IrNode& operand) { return operand.type.kind == TypeKind::Tuple; }))
-        for (auto& part : parts)
-            for (auto& word : part) spill(word);
-    std::vector<Operand> arguments;
-    for (std::size_t i = 0; i < parts.size(); ++i) {
-        if (node.operands[i].type.kind == TypeKind::Tuple) {
-            arguments.push_back(box(node.operands[i].type, parts[i], node.span));
-        } else {
-            arguments.push_back(parts[i].front());
-        }
-    }
+    auto arguments = boxed_operands(node);
     for (auto& argument : arguments) argument = resolve(argument);
     const auto import_index = c_.external_import(node.symbol, node.span).value();
     const auto& import = c_.import_at(import_index);
@@ -3528,16 +4076,17 @@ Values FunctionCompiler::bound_host_call(const IrNode& node) {
         std::vector<Values> fields;
         if (slot != absent) {
             const auto& payload = c_.symbol(variant).payload_types.front();
-            if (payload.kind == TypeKind::Tuple) fields.push_back(unbox(payload, slot_operand(slot), node.span));
+            if (c_.inline_value(payload)) fields.push_back(unbox(payload, slot_operand(slot), node.span));
             else fields.push_back({slot_operand(slot)});
         }
-        assign(result, aggregate_value(node.type, variant, std::move(fields), {}, node.span));
+        const auto words = aggregate_value(node.type, variant, std::move(fields), {}, node.span);
+        for (std::size_t i = 0; i < words.size(); ++i) assign(result + static_cast<std::uint32_t>(i), words[i]);
         jump(join);
     };
     emit_result(success, variants.success, value);
     emit_result(failure, variants.error, error);
     begin(join, node.span);
-    return {slot_operand(result)};
+    return slot_values(result, c_.value_layout(node.type, node.span).size());
 }
 
 Values FunctionCompiler::select_values(const IrNode& node) {
@@ -3550,7 +4099,7 @@ Values FunctionCompiler::select_values(const IrNode& node) {
     branch(condition, when_true, when_false);
     const auto emit_arm = [&](std::uint32_t block, const IrNode& arm) {
         begin(block, arm.span);
-        auto value = values(arm);
+        auto value = fit_reference(values(arm), node.type);
         for (std::size_t i = 0; i < value.size(); ++i) assign(result + static_cast<std::uint32_t>(i), value[i]);
         jump(join);
     };
@@ -3560,39 +4109,99 @@ Values FunctionCompiler::select_values(const IrNode& node) {
     return slot_values(result, types.size());
 }
 
-// An enum value is one object: the variant's tag, then its payload words.
-// `fields` holds the words of each payload in the order the operands were
-// written; `order` names each one's position among the variant's payloads.
-Operand FunctionCompiler::aggregate_value(const IrType& value_type, SymbolId variant, std::vector<Values> fields,
-                                          std::string_view field_order, const Span& span) {
-    for (auto& field : fields)
-        for (auto& word : field) spill(word);
-    const auto type = c_.type_of(value_type, span);
-    const auto layout = c_.type_at(type).reference;
-    const auto handle = state(nvr::StateOp::AllocateObject, layout, {}, type, span);
-    const auto nothing = c_.scalar(nvr::TypeKind::Void);
-    const auto tag_type = c_.scalar(nvr::TypeKind::Unsigned, 32);
-    const auto tag = immediate(tag_type, c_.ordinal(variant));
-    state(nvr::StateOp::WriteField, 0, {handle, tag}, nothing, span);
+// An enum value is its words: the variant's tag, then the words of each
+// payload at their pooled positions. `fields` holds the words of each payload
+// in the order the operands were written; `order` names each one's position
+// among the variant's payloads.
+Values FunctionCompiler::aggregate_value(const IrType& value_type, SymbolId variant, std::vector<Values> fields,
+                                         std::string_view field_order, const Span& span) {
+    const auto types = c_.word_types(value_type, span);
+    std::vector<std::optional<Operand>> words(types.size());
+    words[0] = immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), c_.ordinal(variant));
     const auto order = enum_field_order(field_order, fields.size()).value();
     for (std::size_t i = 0; i < fields.size(); ++i) {
-        const auto index = c_.payload_field(variant, order[i], span);
-        for (std::size_t word = 0; word < fields[i].size(); ++word)
-            state(nvr::StateOp::WriteField, index + static_cast<std::uint32_t>(word),
-                  {handle, resolve(fields[i][word])}, nothing, span);
+        const auto& positions = c_.payload_words(value_type, variant, order[i], span);
+        for (std::size_t word = 0; word < fields[i].size(); ++word) words[positions.at(word)] = fields[i][word];
     }
-    return handle;
+    Values result;
+    for (std::size_t i = 0; i < words.size(); ++i) result.push_back(words[i] ? *words[i] : zero_word(types[i], span));
+    return result;
+}
+
+Operand FunctionCompiler::zero_word(std::uint32_t type, const Span& span) {
+    const auto kind = c_.type_at(type).kind;
+    if (kind == nvr::TypeKind::Text) {
+        Operand empty;
+        empty.kind = Operand::Kind::Constant;
+        empty.type = type;
+        empty.index = c_.text_constant("", span);
+        return empty;
+    }
+    if (kind == nvr::TypeKind::Array || kind == nvr::TypeKind::List) {
+        // The nil collection constant (NVR 1.7).
+        Operand nil;
+        nil.kind = Operand::Kind::Constant;
+        nil.type = type;
+        nil.index = c_.constant(type, {});
+        return nil;
+    }
+    // Zero for a number or a Boolean, and the nil constant for an object.
+    return immediate(type, 0);
+}
+
+bool FunctionCompiler::closure_object(const IrNode& node) const {
+    return node.symbol != no_symbol && c_.symbol(c_.symbol(node.symbol).owner).name.starts_with("$closure");
+}
+
+bool FunctionCompiler::local_object(const IrNode& node) const {
+    return (node.text == region_reference && is_primitive_reference(node.type)) ||
+           (closure_object(node) && !node.operands.empty() && !explicitly_owned_closure(node));
+}
+
+void FunctionCompiler::set_borrow_owner(SymbolId box, Operand handle, std::optional<Operand> owner, const Span& span) {
+    const auto field = c_.member(box, "$owner");
+    if (field == no_symbol) return;
+    const auto type = c_.type_of(c_.symbol(field).type, span);
+    Values words{owner ? *owner : zero_word(type, span)};
+    if (c_.inline_value(c_.symbol(field).type)) words.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 32), 0));
+    write_words(nvr::StateOp::WriteField, c_.field_index(field, span), {handle}, std::move(words), span, true);
+}
+
+void FunctionCompiler::check_borrow_owner(const IrNode& field, const Operand& box) {
+    const auto owner_field = c_.member(field.operands.front().type.symbol, "$owner");
+    if (owner_field == no_symbol) return;
+    const auto type = c_.type_of(c_.symbol(owner_field).type, field.span);
+    const auto owner = state(nvr::StateOp::ReadField, c_.field_index(owner_field, field.span),
+                             {resolve(box)}, type, field.span);
+    // ClassIs accepts a nil owner and checks the liveness of any real
+    // owner. The result is immaterial since the field's owner derives from class.
+    state(nvr::StateOp::ClassIs, c_.type_at(type).reference, {owner}, c_.scalar(nvr::TypeKind::Bool), field.span);
 }
 
 Operand FunctionCompiler::allocate(const IrNode& node) {
     const auto cls = node.symbol == no_symbol ? node.type.symbol : c_.symbol(node.symbol).owner;
     const auto type = c_.type_of(c_.symbol(cls).type, node.span);
-    auto arguments = sequence(node.operands);
-    for (auto& argument : arguments) {
-        spill(argument);
-    }
     c_.instantiate(cls);
-    auto handle = state(nvr::StateOp::AllocateObject, c_.layout(cls, node.span), {}, type, node.span);
+    const auto layout = c_.layout(cls, node.span);
+    if (closure_object(node) && node.operands.empty() && !explicitly_owned_closure(node)) {
+        Operand descriptor;
+        descriptor.kind = Operand::Kind::Constant;
+        descriptor.type = type;
+        descriptor.index = c_.constant(type, {1});
+        return descriptor;
+    }
+    auto arguments = sequence(node.operands);
+    for (auto& argument : arguments) spill(argument);
+    const bool static_box = node.text == static_reference && is_primitive_reference(node.type);
+    const bool region = local_object(node) || static_box;
+    Values destination;
+    if (static_box)
+        destination.push_back(immediate(c_.scalar(nvr::TypeKind::Unsigned, 64), nvr::static_region_token));
+    else if (region)
+        destination.push_back(region_token());
+    auto handle = state(region ? nvr::StateOp::RegionObject : nvr::StateOp::AllocateObject,
+                        layout, std::move(destination), type, node.span);
+    if (is_primitive_reference(node.type)) set_borrow_owner(cls, handle, std::nullopt, node.span);
     const auto nothing = c_.scalar(nvr::TypeKind::Void);
     if (c_.has_reference_fields()) {
         std::vector<SymbolId> lineage;
@@ -3600,7 +4209,9 @@ Operand FunctionCompiler::allocate(const IrNode& node) {
             lineage.push_back(scope);
         for (auto scope = lineage.rbegin(); scope != lineage.rend(); ++scope) {
             for (const auto* preparation : c_.reference_fields(*scope)) {
-                auto value = expression(preparation->operands.front());
+                const auto& box = preparation->operands.front();
+                auto value = expression(box);
+                set_borrow_owner(box.type.symbol, value, resolve(handle), preparation->span);
                 state(nvr::StateOp::WriteField, c_.field_index(preparation->symbol, preparation->span),
                       {resolve(handle), value}, nothing, preparation->span);
             }
@@ -3650,7 +4261,8 @@ void FunctionCompiler::field_initializers(SymbolId cls) {
         }
         auto value = values(initializer->operands.front());
         write_words(nvr::StateOp::WriteField, c_.field_index(initializer->symbol, initializer->span),
-                    {slot_operand(self_slot_)}, std::move(value), initializer->span);
+                    {slot_operand(self_slot_)}, std::move(value), initializer->span,
+                    c_.value_layout(c_.symbol(initializer->symbol).type, initializer->span).carries_policy);
     }
 }
 
@@ -3666,16 +4278,28 @@ void FunctionCompiler::compile_function() {
                                c_.symbol(owner).kind == SymbolKind::Interface)) {
         self_parameter(owner);
     } else if (owner != no_symbol && c_.symbol(owner).kind == SymbolKind::Module) {
-        receiver_module_ = origin_.receiver;
+        // An inherited clause is compiled for the concrete event policy, but
+        // its static names still belong to the declaring class.
+        receiver_module_ = hook_owner(function) == no_symbol ? origin_.receiver : owner;
     }
     parameters(origin_.symbol);
-    function_.parameter_count = static_cast<std::uint32_t>(function_.frame_types.size());
     // A tuple result is several words (NVR 1.7): the first is the result type.
     const auto results = c_.word_types(function.type, function.span);
+    if (owns_result(origin_, results)) result_region_slot_ = new_slot(c_.scalar(nvr::TypeKind::Unsigned, 64));
+    function_.parameter_count = static_cast<std::uint32_t>(function_.frame_types.size());
     function_.result_type = results.front();
     function_.more_results.assign(results.begin() + 1, results.end());
     begin(new_block(), function.span);
-    region(c_.body(origin_.symbol));
+    if (hook_owner(function) != no_symbol) {
+        const auto kind = function.parameters.size() == 3 ? HookKind::Set : HookKind::Get;
+        const auto text = c_.scalar(nvr::TypeKind::Text);
+        Operand name{Operand::Kind::Constant, text, c_.text_constant(c_.symbol(origin_.receiver).name, function.span), 0, {}};
+        state(nvr::StateOp::HookEnter, static_cast<std::uint32_t>(kind),
+              {slot_operand(slots_.at(function.parameters.back())), slot_operand(slots_.at(function.parameters.front())), name},
+              c_.scalar(nvr::TypeKind::Void), function.span);
+    }
+    static_initializer_ = is_static_initializer(function);
+    lexical_region(c_.body(origin_.symbol), function.span);
     finish();
 }
 
@@ -3693,6 +4317,11 @@ void FunctionCompiler::compile_constructor() {
     function_.parameter_count = static_cast<std::uint32_t>(function_.frame_types.size());
     function_.result_type = c_.scalar(nvr::TypeKind::Void);
     begin(new_block(), item.span);
+    const bool has_field_region = std::ranges::any_of(c_.field_initializers(cls),
+        [&](const auto* node) { return needs_region(*node); });
+    const bool has_body_region = init != no_symbol && std::ranges::any_of(c_.body(init),
+        [&](const auto& node) { return needs_region(node); });
+    enter_scope(has_field_region || has_body_region, false, item.span);
     if (init != no_symbol) {
         const auto& body = c_.body(init);
         std::size_t start = 0;
@@ -3718,6 +4347,7 @@ void FunctionCompiler::compile_constructor() {
         }
         field_initializers(cls);
     }
+    end_scope(item.span);
     finish();
 }
 
@@ -3791,10 +4421,10 @@ void FunctionCompiler::compile_value_member(IrOp op) {
     const auto [type, span] = c_.value_type(origin_.symbol);
     const bool equality = op == IrOp::ValueEquals;
     const bool hashing = op == IrOp::ValueHash;
-    const bool tuple = type.kind == TypeKind::Tuple;
-    // A tuple arrives as its words, and an equality takes the words of both
-    // operands; a collection arrives as one handle.
-    const auto input = tuple ? c_.word_types(type, span) : std::vector<std::uint32_t>{c_.type_of(type, span)};
+    const bool inline_value = c_.inline_value(type);
+    // An inline value arrives as its words, and an equality takes the words
+    // of both operands; a collection arrives as one handle.
+    const auto input = inline_value ? c_.word_types(type, span) : std::vector<std::uint32_t>{c_.type_of(type, span)};
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
     const auto hash_type = c_.scalar(nvr::TypeKind::Unsigned, 32);
     const auto text = c_.scalar(nvr::TypeKind::Text);
@@ -3840,22 +4470,20 @@ void FunctionCompiler::compile_value_member(IrOp op) {
             append_text_bytes(buffer, value, span);
         }
     };
-    if (tuple) {
-        std::size_t offset = 0;
-        for (std::uint32_t i = 0; i < type.arguments.size(); ++i) {
+    if (inline_value) {
+        const auto layout = c_.value_layout(type, span);
+        for (std::uint32_t i = 0; i < layout.parts.size(); ++i) {
             if (!equality && !hashing && i != 0) {
                 append(',');
                 append(' ');
             }
             // Each element is a member of its own type, over its own words.
-            const auto words = c_.word_irtypes(type.arguments[i], span).size();
-            auto operands = slot_values(left + static_cast<std::uint32_t>(offset), words);
+            auto operands = slots_at(left, layout.elements[i]);
             if (equality) {
-                const auto other = slot_values(right + static_cast<std::uint32_t>(offset), words);
+                const auto other = slots_at(right, layout.elements[i]);
                 operands.insert(operands.end(), other.begin(), other.end());
             }
-            process(type.arguments[i], std::move(operands));
-            offset += words;
+            process(layout.parts[i], std::move(operands));
         }
     } else {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
@@ -3893,7 +4521,7 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto read = [&](std::uint32_t slot) -> Values {
             if (element_words.size() > 1)
                 return read_words(nvr::StateOp::ReadComponent, 0, {slot_operand(slot), slot_operand(position)},
-                                  element_words, 0, element_words.size(), span);
+                                  element_words, every_word(element_words.size()), span);
             return {state(nvr::StateOp::ReadElement, 0, {slot_operand(slot), slot_operand(position)},
                           element_words.front(), span)};
         };
@@ -3937,9 +4565,9 @@ void FunctionCompiler::compile_boundary() {
     const auto& function = c_.symbol(origin_.symbol);
     const auto& span = function.span;
     const auto owner = function.owner;
-    if (holds_collection_of_tuples(function.type) ||
+    if (c_.holds_collection_of_inline(function.type, span) ||
         std::ranges::any_of(function.parameters, [&](SymbolId parameter) {
-            return holds_collection_of_tuples(c_.symbol(parameter).type);
+            return c_.holds_collection_of_inline(c_.symbol(parameter).type, span);
         }))
         throw Diagnostic(span, "a collection of tuples cannot cross the boundary of '" + function.name +
                                    "': IRtoNeuronConversion does not convert its elements")
@@ -3959,7 +4587,7 @@ void FunctionCompiler::compile_boundary() {
     begin(new_block(), span);
     if (self_slot_ != absent) arguments.push_back(slot_operand(self_slot_));
     for (const auto& [type, slot] : parameters) {
-        if (type.kind == TypeKind::Tuple) {
+        if (c_.inline_value(type)) {
             const auto words = unbox(type, slot_operand(slot), span);
             arguments.insert(arguments.end(), words.begin(), words.end());
         } else {
@@ -3970,7 +4598,7 @@ void FunctionCompiler::compile_boundary() {
                                  result_types(function.type, span), span);
     ExitSpec exit;
     exit.kind = nvr::ExitKind::Return;
-    if (function.type.kind == TypeKind::Tuple) exit.arguments = {box(function.type, std::move(results), span)};
+    if (c_.inline_value(function.type)) exit.arguments = {box(function.type, std::move(results), span)};
     else if (function.type.kind != TypeKind::Void) exit.arguments = std::move(results);
     close({exit});
     finish();
@@ -3989,7 +4617,9 @@ void FunctionCompiler::compile_unbox_collection() {
     const auto none = c_.scalar(nvr::TypeKind::Void);
     const auto boxed = c_.boxed_type(element, span);
     const auto input = new_slot(source_type);
-    function_.parameter_count = 1;
+    const bool array = c_.type_at(target_type).kind == nvr::TypeKind::Array;
+    const auto destination = array ? new_slot(u64) : absent;
+    function_.parameter_count = array ? 2 : 1;
     function_.result_type = target_type;
     begin(new_block(), span);
     const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(input)}, u64, span);
@@ -4002,7 +4632,9 @@ void FunctionCompiler::compile_unbox_collection() {
     {
         ExitSpec exit;
         exit.kind = nvr::ExitKind::Return;
-        exit.arguments = {state(nvr::StateOp::AllocateCollection, target_type, {}, target_type, span)};
+        exit.arguments = {array ? state(nvr::StateOp::RegionCollection, target_type, {slot_operand(destination)},
+                                        target_type, span)
+                                : state(nvr::StateOp::AllocateCollection, target_type, {}, target_type, span)};
         close({exit});
     }
     begin(filled, span);
@@ -4010,7 +4642,9 @@ void FunctionCompiler::compile_unbox_collection() {
     auto seed = unbox(element, first, span);
     std::vector<Operand> repeated{length};
     repeated.insert(repeated.end(), seed.begin(), seed.end());
-    const auto out = state(nvr::StateOp::RepeatCollection, target_type, std::move(repeated), target_type, span);
+    if (array) repeated.insert(repeated.begin(), slot_operand(destination));
+    const auto out = state(array ? nvr::StateOp::RegionRepeat : nvr::StateOp::RepeatCollection,
+                           target_type, std::move(repeated), target_type, span);
     const auto position = new_slot(u64);
     assign(position, immediate(u64, 1));
     const auto head = new_block();
@@ -4098,7 +4732,9 @@ void FunctionCompiler::compile_start() {
     function_.parameter_count = 1;
     function_.result_type = test || standard ? c_.scalar(nvr::TypeKind::Signed, 32) : c_.type_of(main.type, main.span);
     const auto& items = c_.startup();
-    begin(new_block(), items.empty() ? main.span : items.front().node->span);
+    const auto& start = items.empty() ? main.span : items.front().node->span;
+    begin(new_block(), start);
+    enter_scope(std::ranges::any_of(items, [&](const auto& item) { return needs_region(*item.node); }), false, start);
     for (const auto& item : items) {
         if (!open()) {
             break;
@@ -4112,26 +4748,25 @@ void FunctionCompiler::compile_start() {
         if (!test) {
             passed.push_back(slot_operand(arguments));
         }
-        const auto result_type = c_.type_of(main.type, main.span);
-        const auto status = invoke({Role::Function, origin_.symbol, origin_.receiver}, std::move(passed),
-                                   result_type, main.span);
+        const auto status = invoke_values({Role::Function, origin_.symbol, origin_.receiver}, std::move(passed),
+                                          result_types(main.type, main.span), main.span);
         if (standard) {
-            return_standard_status(status, *standard, main.span);
+            return_standard_status(main.type, status, *standard, main.span);
         } else {
             ExitSpec exit;
             exit.kind = nvr::ExitKind::Return;
-            exit.arguments = {test ? immediate(function_.result_type, 0) : status};
+            exit.arguments = {test ? immediate(function_.result_type, 0) : status.front()};
             close({exit});
         }
     }
     finish();
 }
 
-void FunctionCompiler::return_standard_status(const Operand& value, const ExitVariants& variants,
+void FunctionCompiler::return_standard_status(const IrType& type, const Values& value, const ExitVariants& variants,
                                                const Span& span) {
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
-    const auto tag_type = c_.scalar(nvr::TypeKind::Unsigned, 32);
-    const auto tag = state(nvr::StateOp::ReadField, 0, {value}, tag_type, span);
+    // The tag is the ExitCode's first word.
+    const auto tag = value.front();
     const auto matches = [&](SymbolId variant) {
         const auto input = lanes(tag);
         return bits(boolean, {equal(current().synth.circuit(), input, constant_word(c_.ordinal(variant), 32))});
@@ -4151,8 +4786,7 @@ void FunctionCompiler::return_standard_status(const Operand& value, const ExitVa
         complete(immediate(function_.result_type, static_cast<std::uint64_t>(fixed_status)));
         begin(other, span);
     }
-    const auto status = state(nvr::StateOp::ReadField, c_.payload_start(variants.status, span),
-                              {value}, function_.result_type, span);
+    const auto status = value.at(c_.payload_words(type, variants.status, 0, span).front());
     // status < 0, then status > 255: each block compares the status with one
     // constant, as a source comparison does, so the decompiler lifts both.
     const auto invalid = new_block();
@@ -4200,10 +4834,14 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     // Specialization needs verified IR, and the result is verified again:
     // by the optimizer, or directly when optimization is off.
     require_valid_ir(program, "before specialization");
-    materialize_reference_storage(program);
     specialize(program);
-    // A tuple stays stored inline: its shape has a limit (E0449).
+    check_storage(program, StorageStage::Specialized);
+    materialize_reference_storage(program);
+    // Tuples and payload enums are stored inline: a value type may not
+    // contain itself (E0448), and its shape has a limit (E0449).
+    check_containment(program);
     check_inline_limit(program);
+    elaborate_class_hooks(program);
     if (options.optimize) {
         optimize(program);
     } else {

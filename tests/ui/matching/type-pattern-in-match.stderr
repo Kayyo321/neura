@@ -1,0 +1,9 @@
+error[E0231]: a type pattern is not supported inside a match pattern
+ --> $DIR/type-pattern-in-match.nra:7:16
+  |
+7 |     Shape.Line(n: int) => n,
+  |                ^^^^^^ type patterns are whole patterns of a 'match.is' arm
+  |
+  = help: bind the value and test it in a guard
+
+For more information about this error, try `neura explain E0231`.

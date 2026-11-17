@@ -58,6 +58,9 @@ std::string type_text(const IrType &type) {
         case TypeKind::Tuple:
             name = "tuple";
             break;
+        case TypeKind::Any:
+            name = "any";
+            break;
         default:
             name = "?";
         }
@@ -694,6 +697,8 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
         for (const auto &arm : s.arms) {
             for (const auto &token : arm.bindings)
                 add(token.text, token.span, token.span, arm.span, parent, 13, 7, modifier("readonly"));
+            if (arm.guard)
+                expression(*arm.guard, parent, arm.span);
             for (const auto &child : arm.body)
                 statement(child, parent, arm.span);
             if (arm.value)
@@ -775,6 +780,21 @@ void AnalysisSession::index_syntax(EditorDocument &doc) {
             declaration(overload, parent, scope, false);
         for (const auto &s : d.body)
             statement(s, id, d.span);
+        for (const auto &s : d.startup_blocks)
+            statement(s, id, d.span);
+        for (const auto &hook : d.hooks) {
+            // `value` and `instance` are the clause's immutable parameters;
+            // their selection is the clause's word, so the outline hides them.
+            if (hook.setter)
+                add("value", hook.keyword, hook.span, hook.span, id, 13, 6, modifier("readonly"),
+                    "value: " + d.name, d.name);
+            add("instance", hook.keyword, hook.span, hook.span, id, 13, 6, modifier("readonly"),
+                "instance: " + d.name, d.name);
+            for (const auto &s : hook.body)
+                statement(s, id, hook.span);
+            if (hook.expression)
+                expression(*hook.expression, id, hook.span);
+        }
         for (const auto &accessor : d.accessors) {
             if (accessor.setter)
                 add("value", accessor.keyword, accessor.span, accessor.span, id, 13, 6, 0,
@@ -1241,6 +1261,8 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
             for (const auto &child : *body)
                 statement(child);
         for (const auto &arm : s.arms) {
+            if (arm.guard)
+                expression(*arm.guard);
             for (const auto &child : arm.body)
                 statement(child);
             if (arm.value)
@@ -1284,6 +1306,15 @@ Json AnalysisSession::semantic_tokens(const EditorDocument &doc) const {
             declaration(child);
         for (const auto &s : d.body)
             statement(s);
+        for (const auto &s : d.startup_blocks)
+            statement(s);
+        for (const auto &hook : d.hooks) {
+            put(hook.keyword, hook.setter ? 23 : 22, modifier("declaration"), 5);
+            for (const auto &s : hook.body)
+                statement(s);
+            if (hook.expression)
+                expression(*hook.expression);
+        }
         if (d.initializer)
             expression(*d.initializer);
     };
@@ -1388,6 +1419,13 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
                 comment < token.span.offset + token.span.length) in_string = true;
         if (!in_string) return Json{{"isIncomplete", false}, {"items", items}};
         comment = doc.source.find("//", comment + 2);
+    }
+    // After a leading '|' of a class hook or accessor clause, offer the
+    // clause words (docs/design/Hooks030.md); `||` is an operator.
+    if (before != std::string::npos && doc.source[before] == '|' && (before == 0 || doc.source[before - 1] != '|')) {
+        add("get", 14, "class hook or accessor clause", "`| get: instance;` runs when a reference is read.");
+        add("set", 14, "class hook or accessor clause", "`| set: value;` runs when a reference is stored or passed.");
+        return Json{{"isIncomplete", false}, {"items", items}};
     }
     if (before != std::string::npos && doc.source[before] == '#') {
         for (const auto &tag : tag_registry()) {
@@ -1715,13 +1753,18 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         return Json{{"isIncomplete", false}, {"items", items}};
     }
     const bool member = before != std::string::npos && doc.source[before] == '.';
+    // After `?.` (docs/design/Matching030.md) the receiver ends before the '?'.
+    const auto receiver_end = [&](std::size_t dot) {
+        if (dot && doc.source[dot - 1] == '?') --dot;
+        while (dot && std::isspace(static_cast<unsigned char>(doc.source[dot - 1]))) --dot;
+        return dot;
+    };
     // The extension functions this file enables whose receiver parameter
     // takes the value's type, with the set that enables them
     // (docs/design/Calls030.md, Extension sets).
     const auto add_extensions = [&] {
         if (!member || !program) return;
-        std::size_t begin = before;
-        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1]))) --begin;
+        std::size_t begin = receiver_end(before);
         while (begin && identifier(doc.source[begin - 1])) --begin;
         const auto *receiver = symbol_at(doc, begin);
         const auto value_kind = receiver && receiver->compiler_id != no_symbol
@@ -1809,8 +1852,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
         }
     }
     if (member) {
-        std::size_t end = before;
-        while (end && std::isspace(static_cast<unsigned char>(doc.source[end - 1]))) --end;
+        std::size_t end = receiver_end(before);
         std::size_t begin = end;
         while (begin && (identifier(doc.source[begin - 1]) || doc.source[begin - 1] == '.')) --begin;
         const auto receiver_name = std::string_view(doc.source).substr(begin, end - begin);
@@ -1968,8 +2010,7 @@ Json AnalysisSession::completion(const EditorDocument &doc, std::size_t offset, 
     }
     std::optional<SymbolId> owner;
     if (member && program) {
-        std::size_t begin = before;
-        while (begin && std::isspace(static_cast<unsigned char>(doc.source[begin - 1]))) --begin;
+        std::size_t begin = receiver_end(before);
         while (begin && identifier(doc.source[begin - 1])) --begin;
         if (const auto *receiver = symbol_at(doc, begin); receiver && receiver->compiler_id != no_symbol) {
             const auto &target = program->symbols[receiver->compiler_id];
@@ -2055,7 +2096,8 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
     std::map<std::size_t, std::vector<std::size_t>> children;
     const auto visible = [&](const EditorSymbol &symbol) {
         return symbol.file == doc.path && !symbol.name.empty() && !symbol.name.starts_with('$') &&
-               !(symbol.name == "value" && symbol.selection.length != 5);
+               !(symbol.name == "value" && symbol.selection.length != 5) &&
+               !(symbol.name == "instance" && symbol.selection.length != 8);
     };
     for (std::size_t i = 0; i < symbols.size(); ++i) {
         const auto &s = symbols[i];
@@ -2066,11 +2108,40 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
         while (parent != none && !visible(symbols[parent])) parent = symbols[parent].parent;
         children[parent].push_back(i);
     }
+    // Startup blocks (Modules.md, Startup blocks) have no symbol of their
+    // own: the outline lists each as `static scope`, under its module or at
+    // the top of the file, in source order with the declarations.
+    std::map<std::size_t, std::vector<const Statement *>> startup;
+    for (const auto &statement : doc.syntax.statements)
+        if (statement.startup)
+            startup[none].push_back(&statement);
+    for (std::size_t i = 0; i < symbols.size(); ++i)
+        if (symbols[i].file == doc.path && symbols[i].declaration)
+            for (const auto &block : symbols[i].declaration->startup_blocks)
+                startup[i].push_back(&block);
+    const auto startup_item = [&](const Statement &block) {
+        return Json{{"name", "static scope"},
+                    {"detail", ""},
+                    {"kind", 12},
+                    {"range", doc.range(block.span)},
+                    {"selectionRange", doc.range(block.keyword)}};
+    };
+    const auto with_startup = [&](std::size_t parent, std::vector<std::pair<std::size_t, Json>> entries) {
+        for (const auto *block : startup[parent])
+            entries.emplace_back(block->span.offset, startup_item(*block));
+        std::stable_sort(entries.begin(), entries.end(),
+                         [](const auto &a, const auto &b) { return a.first < b.first; });
+        Json::Array result;
+        for (auto &entry : entries)
+            result.push_back(std::move(entry.second));
+        return result;
+    };
     std::function<Json(std::size_t)> item = [&](std::size_t index) {
         const auto &s = symbols[index];
-        Json::Array nested;
+        std::vector<std::pair<std::size_t, Json>> entries;
         for (auto child : children[index])
-            nested.push_back(item(child));
+            entries.emplace_back(std::min(symbols[child].span.offset, symbols[child].selection.offset), item(child));
+        auto nested = with_startup(index, std::move(entries));
         auto full = s.span;
         const auto begin = std::min(full.offset, s.selection.offset);
         const auto end = std::max(full.offset + full.length, s.selection.offset + s.selection.length);
@@ -2087,10 +2158,10 @@ Json AnalysisSession::document_symbols(const EditorDocument &doc) const {
             result["tags"] = Json::Array{1};
         return result;
     };
-    Json::Array result;
+    std::vector<std::pair<std::size_t, Json>> entries;
     for (auto index : children[none])
-        result.push_back(item(index));
-    return result;
+        entries.emplace_back(std::min(symbols[index].span.offset, symbols[index].selection.offset), item(index));
+    return with_startup(none, std::move(entries));
 }
 Json AnalysisSession::entries() const {
     Json::Array result;
@@ -2218,6 +2289,8 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 for (const auto &child : *body)
                     statement(child);
             for (const auto &arm : item.arms) {
+                if (arm.guard)
+                    expression(*arm.guard);
                 for (const auto &child : arm.body)
                     statement(child);
                 if (arm.value)
@@ -2237,6 +2310,14 @@ Json AnalysisSession::inlay_hints(const EditorDocument &doc, const Json &range, 
                 declaration(child);
             for (const auto &child : item.body)
                 statement(child);
+            for (const auto &child : item.startup_blocks)
+                statement(child);
+            for (const auto &hook : item.hooks) {
+                for (const auto &child : hook.body)
+                    statement(child);
+                if (hook.expression)
+                    expression(*hook.expression);
+            }
             for (const auto &accessor : item.accessors) {
                 for (const auto &child : accessor.body)
                     statement(child);

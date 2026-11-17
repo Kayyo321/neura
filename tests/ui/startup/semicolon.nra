@@ -1,0 +1,4 @@
+// Case 58: a startup block has no ';' after its '}'.
+static scope {
+    let ready = true;
+};

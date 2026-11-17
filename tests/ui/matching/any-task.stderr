@@ -1,0 +1,10 @@
+error[E0605]: a value of type Task<int32> cannot leave its scope: it cannot be converted to any
+ --> $DIR/any-task.nra:8:22
+  |
+8 |         let v: any = task;
+  |                      ^^^^ this value is bound to its task scope
+  |
+  = note: converted to any, it would no longer be known to be scope-bound
+  = help: compare task handles with '==' rather than passing them as 'class'
+
+For more information about this error, try `neura explain E0605`.

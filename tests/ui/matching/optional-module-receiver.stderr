@@ -1,0 +1,9 @@
+error[E0494]: optional access on a receiver that is never absent
+  --> $DIR/optional-module-receiver.nra:15:22
+   |
+15 | let read = func() => Tools?.answer;
+   |                      ^^^^^ this names a module, not a value
+   |
+   = help: use '.' to read a member of a module
+
+For more information about this error, try `neura explain E0494`.

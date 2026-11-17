@@ -26,9 +26,9 @@ NEURA = pathlib.Path(sys.argv[1]).resolve()
 DIRECTORY = pathlib.Path(sys.argv[2]).resolve()
 
 
-def run(*arguments):
+def run(*arguments, env=None):
     return subprocess.run([str(NEURA), *arguments], capture_output=True, text=True, timeout=120,
-                          env={'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin'})
+                          env={'NEURA_GPU': 'off', 'PATH': '/usr/bin:/bin', **(env or {})})
 
 
 class EquivalenceTests(unittest.TestCase):
@@ -61,19 +61,38 @@ class EquivalenceTests(unittest.TestCase):
                 module = pathlib.Path(scratch) / (source.name + '.nir')
                 result = run('emit-ir', str(source), '-o', str(module))
                 self.assertEqual(result.returncode, 0, result.stderr)
+                trap_file = expected.with_suffix('.trap')
+                status, trap = 0, ''
+                if trap_file.exists():
+                    first, message = trap_file.read_text().split('\n', 1)
+                    status, trap = int(first), message.rstrip('\n')
                 builds = {'source': [str(source)], 'unoptimized': ['--no-optimize', str(source)],
-                          'nir': [str(module)], 'stripped': ['--no-source-map', str(source)]}
+                          'nir': [str(module)], 'nir-unoptimized': ['--no-optimize', str(module)], 'stripped': ['--no-source-map', str(source)]}
                 for build, arguments in builds.items():
                     image = pathlib.Path(scratch) / (source.name + '.' + build + '.nvr')
                     result = run('build', *arguments, '-o', str(image))
                     self.assertEqual(result.returncode, 0, result.stderr)
+                    if build in ('nir', 'nir-unoptimized'):
+                        source_build = 'source' if build == 'nir' else 'unoptimized'
+                        source_image = image.with_name(source.name + '.' + source_build + '.nvr')
+                        self.assertEqual(source_image.read_bytes(), image.read_bytes(), source.name)
                     if build == 'stripped':
                         listing = run('disassemble', str(image), '-o', str(image) + '.nvra')
                         self.assertEqual(listing.returncode, 0, listing.stderr)
                         self.assertNotIn('section "NAME"', pathlib.Path(str(image) + '.nvra').read_text())
-                    for tier in ([], ['--tier=0']):
-                        with self.subTest(program=source.name, build=build, tier=tier):
-                            self.assertEqual(run('run', *tier, str(image)).stdout, expected.read_text())
+                    modes = [([], {}), (['--tier=0'], {})]
+                    if source.name.startswith('hook-'):
+                        modes += [(['--tier=1'], {}), (['--tier=2'], {}), (['--jit=off'], {}), (['--jit=on'], {}),
+                                  ([], {'NEURA_TIER3': 'interp', 'NEURA_TIER_EAGER': '1'}),
+                                  (['--jit=on'], {'NEURA_TIER_CHECK': '2', 'NEURA_TIER_EAGER': '1'})]
+                        modes = [(tier, {**env, 'NEURA_TIER3_VERIFY': '1'}) for tier, env in modes]
+                    for tier, env in modes:
+                        with self.subTest(program=source.name, build=build, tier=tier, env=env):
+                            result = run('run', *tier, str(image), env=env)
+                            self.assertEqual(result.returncode, status, result.stderr)
+                            self.assertEqual(result.stdout, expected.read_text())
+                            if trap:
+                                self.assertIn(trap, result.stderr)
 
     def test_default_images_differ_only_in_what_records_the_source(self):
         # The grouped spelling is a different text, so the default image,

@@ -1,0 +1,8 @@
+error[E0301]: duplicate match binding 'a'
+ --> $DIR/tuple-binding-twice.nra:7:9
+  |
+7 |     [a, a] => a,
+  |         ^ bound again here
+  |      - first bound here
+
+For more information about this error, try `neura explain E0301`.

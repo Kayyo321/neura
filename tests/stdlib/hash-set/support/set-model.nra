@@ -42,7 +42,7 @@ export let SetModel = module (
                 let divisor = 2 + generator.next_int_below(6);
                 let calls = cell.of<int>(0);
                 let retain = generator.next_int_below(2) == 0;
-                let test_element = func(e: T) -> bool {
+                let test_element = new func(e: T) -> bool {
                     calls.value = calls.value + 1;
                     return position_of<T>(e, ids, element_of) % divisor == 0;
                 };

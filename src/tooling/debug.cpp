@@ -5,9 +5,12 @@
 #include "test_protocol.hpp"
 #include "backend/converter.hpp"
 #include "cli/source_loader.hpp"
+#include "neura-ir/class_hooks.hpp"
+#include "neura-ir/containment.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/reference_storage.hpp"
 #include "neura-ir/specialize.hpp"
+#include "neura-ir/storage.hpp"
 #include "neura-ir/verifier.hpp"
 #include "nvm/driver.hpp"
 #include "nvm/machine.hpp"
@@ -225,6 +228,8 @@ private:
     Json source(const nvr::SourceLocation& location) const;
     std::string function_name(std::uint32_t function) const;
     std::string type_name(const nvm::DebugValue& value) const;
+    nvm::DebugValue policy_value(const nvm::DebugValue& value, const nvm::DebugValue* policy,
+                                 std::string_view name, std::string_view policy_name) const;
     Json variable(std::string name, const nvm::DebugValue& value);
     Json variables(const Json& arguments);
     Json evaluate(const Json& arguments);
@@ -329,6 +334,22 @@ std::string Adapter::type_name(const nvm::DebugValue& value) const {
     return "value";
 }
 
+// NAME describes the adjacent policy word; it is optional provenance, so
+// missing or inconsistent metadata must leave the raw value unchanged.
+nvm::DebugValue Adapter::policy_value(const nvm::DebugValue& value, const nvm::DebugValue* policy,
+                                      std::string_view name, std::string_view policy_name) const {
+    auto result = value;
+    if (!image_ || !names_ || !policy || policy_name != std::string(name) + ".policy" ||
+        !value.initialized || value.bits != 0 || value.text != "nil" || value.type >= image_->types.size() ||
+        image_->types[value.type].kind != nvr::TypeKind::Object || !policy->initialized ||
+        policy->type >= image_->types.size() || image_->types[policy->type].kind != nvr::TypeKind::Unsigned ||
+        image_->types[policy->type].width != 32 || policy->bits == 0 || policy->bits > names_->layouts.size())
+        return result;
+    const auto& layout = names_->layouts[static_cast<std::size_t>(policy->bits - 1)];
+    if (!layout.empty()) result.text = "nil (policy " + layout + ")";
+    return result;
+}
+
 Json Adapter::variable(std::string name, const nvm::DebugValue& value) {
     int reference = 0;
     if (value.initialized && value.children != 0) {
@@ -339,8 +360,15 @@ Json Adapter::variable(std::string name, const nvm::DebugValue& value) {
                 {"variablesReference", reference},
                 {"presentationHint", Json{{"attributes", Json::Array{"readOnly"}}}}};
     if (reference != 0) {
-        if (value.layout != nvr::absent) result["namedVariables"] = value.children;
-        else result["indexedVariables"] = value.children;
+        if (value.layout != nvr::absent) {
+            auto children = value.children;
+            if (names_ && value.layout < names_->fields.size()) {
+                const auto& fields = names_->fields[value.layout];
+                for (std::size_t i = 1; i < fields.size() && i < value.children; ++i)
+                    if (fields[i] == fields[i - 1] + ".policy") --children;
+            }
+            result["namedVariables"] = children;
+        } else result["indexedVariables"] = value.children;
     }
     return result;
 }
@@ -400,9 +428,12 @@ void Adapter::launch(const Json& arguments) {
             if (test == tests.end()) throw std::runtime_error("selected test no longer exists: " + test_filter);
             const auto symbol = test->symbol;
             require_valid_ir(program, "before debug specialization");
-            materialize_reference_storage(program);
             specialize(program);
+            check_storage(program, StorageStage::Specialized);
+            materialize_reference_storage(program);
+            check_containment(program);
             check_inline_limit(program);
+            elaborate_class_hooks(program);
             require_valid_ir(program, "before debug conversion");
             backend::ConversionOptions conversion;
             conversion.entries = {symbol};
@@ -805,27 +836,61 @@ Json Adapter::variables(const Json& arguments) {
         for (std::size_t i = 0; i < frame.slots.size(); ++i) {
             if (!names_ || frame.function >= names_->slots.size() || i >= names_->slots[frame.function].size()) continue;
             const auto& name = names_->slots[frame.function][i];
-            if (name.empty() || name.starts_with('$')) continue;
-            values.emplace_back(name, frame.slots[i]);
+            if (name.empty() || name.starts_with('$') ||
+                (i > 0 && name == names_->slots[frame.function][i - 1] + ".policy")) continue;
+            const auto& slot_names = names_->slots[frame.function];
+            const auto value = i + 1 < frame.slots.size() && i + 1 < slot_names.size()
+                ? policy_value(frame.slots[i], &frame.slots[i + 1], name, slot_names[i + 1]) : frame.slots[i];
+            values.emplace_back(name, value);
         }
         for (auto i = start; i < values.size() && i - start < count; ++i)
             result.push_back(variable(values[i].first, values[i].second));
     } else if (reference.kind == Variables::Kind::Globals) {
-        for (auto i = start; i < snapshot_.globals.size() && i - start < count; ++i) {
+        std::vector<std::pair<std::string, nvm::DebugValue>> values;
+        for (std::size_t i = 0; i < snapshot_.globals.size(); ++i) {
             const auto name = names_ && i < names_->globals.size() && !names_->globals[i].empty()
                 ? names_->globals[i] : "global " + std::to_string(i);
-            if (name.starts_with('$')) continue;
-            result.push_back(variable(name, snapshot_.globals[i]));
+            if (name.starts_with('$') || (names_ && i > 0 && i < names_->globals.size() &&
+                name == names_->globals[i - 1] + ".policy")) continue;
+            const auto value = names_ && i + 1 < names_->globals.size() && i + 1 < snapshot_.globals.size()
+                ? policy_value(snapshot_.globals[i], &snapshot_.globals[i + 1], name, names_->globals[i + 1])
+                : snapshot_.globals[i];
+            values.emplace_back(name, value);
         }
+        for (auto i = start; i < values.size() && i - start < count; ++i)
+            result.push_back(variable(values[i].first, values[i].second));
     } else {
-        const auto values = execution_->debug_children(reference.value.type, reference.value.bits, start, count);
-        for (std::size_t i = 0; i < values.size(); ++i) {
-            std::string name = "[" + std::to_string(start + i) + "]";
-            if (reference.value.layout != nvr::absent && names_ && reference.value.layout < names_->fields.size() &&
-                start + i < names_->fields[reference.value.layout].size() && !names_->fields[reference.value.layout][start + i].empty())
-                name = names_->fields[reference.value.layout][start + i];
-            result.push_back(variable(std::move(name), values[i]));
+        // Named object fields can occupy two words; fetch their raw neighbors
+        // together before applying source-level pagination.
+        const bool named = reference.value.layout != nvr::absent && names_ && reference.value.layout < names_->fields.size();
+        std::vector<nvm::DebugValue> raw;
+        if (named) {
+            // The runtime caps each request at 1000 raw fields. Fetch all
+            // chunks so source-level pages can cross a companion word.
+            for (std::size_t offset = 0; offset < reference.value.children; offset += 1000) {
+                auto chunk = execution_->debug_children(reference.value.type, reference.value.bits, offset, 1000);
+                if (chunk.empty()) break;
+                raw.insert(raw.end(), chunk.begin(), chunk.end());
+            }
+        } else {
+            raw = execution_->debug_children(reference.value.type, reference.value.bits, start, count);
         }
+        std::vector<std::pair<std::string, nvm::DebugValue>> values;
+        for (std::size_t i = 0; i < raw.size(); ++i) {
+            std::string name = "[" + std::to_string(start + i) + "]";
+            auto value = raw[i];
+            if (named) {
+                const auto& field_names = names_->fields[reference.value.layout];
+                if (i < field_names.size() && !field_names[i].empty()) name = field_names[i];
+                if (i > 0 && i < field_names.size() && name == field_names[i - 1] + ".policy") continue;
+                if (i + 1 < raw.size() && i + 1 < field_names.size())
+                    value = policy_value(value, &raw[i + 1], name, field_names[i + 1]);
+            }
+            values.emplace_back(std::move(name), value);
+        }
+        const auto first = named ? start : 0;
+        for (auto i = first; i < values.size() && i - first < count; ++i)
+            result.push_back(variable(values[i].first, values[i].second));
     }
     return Json{{"variables", result}};
 }
@@ -880,7 +945,10 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                 for (std::size_t i = 0; i < names.size() && i < f.slots.size(); ++i) {
                     if (names[i] == identifier) {
                         // A later assigned shadow occupies a later slot.
-                        if (!found || f.slots[i].initialized) found = f.slots[i];
+                        if (!found || f.slots[i].initialized) {
+                            found = i + 1 < f.slots.size() && i + 1 < names.size()
+                                ? adapter.policy_value(f.slots[i], &f.slots[i + 1], names[i], names[i + 1]) : f.slots[i];
+                        }
                     }
                 }
             }
@@ -893,7 +961,9 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                     const auto& global = adapter.names_->globals[i];
                     if (global == identifier || global.ends_with("." + identifier)) {
                         if (found) throw std::runtime_error("global name is ambiguous: " + identifier);
-                        found = adapter.snapshot_.globals[i];
+                        found = i + 1 < adapter.snapshot_.globals.size() && i + 1 < adapter.names_->globals.size()
+                            ? adapter.policy_value(adapter.snapshot_.globals[i], &adapter.snapshot_.globals[i + 1],
+                                                   global, adapter.names_->globals[i + 1]) : adapter.snapshot_.globals[i];
                     }
                 }
             }
@@ -947,9 +1017,10 @@ nvm::DebugValue Adapter::expression(std::string_view text, const FrameRef& selec
                     const auto found = std::find(names.begin(), names.end(), field);
                     if (found == names.end()) throw std::runtime_error("unknown stored field: " + field);
                     const auto index = static_cast<std::size_t>(found - names.begin());
-                    const auto values = adapter.execution_->debug_children(result.type, result.bits, index, 1);
+                    const auto values = adapter.execution_->debug_children(result.type, result.bits, index, 2);
                     if (values.empty() || !values.front().initialized) throw std::runtime_error("field is not initialized");
-                    result = values.front();
+                    result = values.size() > 1 && index + 1 < names.size()
+                        ? adapter.policy_value(values[0], &values[1], field, names[index + 1]) : values.front();
                 } else if (take("[")) {
                     const auto index_value = logical_or();
                     if (!take("]")) throw std::runtime_error("expected ']'");

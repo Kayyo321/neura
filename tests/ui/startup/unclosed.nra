@@ -1,0 +1,5 @@
+// Case 73: an unclosed startup block.
+let ready = true;
+
+static scope {
+    let count = 1;

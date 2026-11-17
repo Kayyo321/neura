@@ -26,11 +26,11 @@ let StreamChunkingTests = module (
         let listener = listen();
         let client = connect(listener.local_port);
         let server = test.assert_ok<tcp_stream.TcpStream>(listener.accept());
-        let writer = utf8_writer.create(client.write);
+        let writer = utf8_writer.create(new bound(client.write));
         test.assert_ok<unit.Unit>(writer.write_line("first"));
         test.assert_ok<unit.Unit>(writer.write_line("second"));
         test.assert_ok<unit.Unit>(client.close());
-        let reader = utf8_reader.create(server.read);
+        let reader = utf8_reader.create(new bound(server.read));
         test.assert_equal_string("first", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
         test.assert_equal_string("second", test.assert_some<string>(test.assert_ok<optional.Optional<string>>(reader.read_line())));
         test.assert_none<string>(test.assert_ok<optional.Optional<string>>(reader.read_line()));

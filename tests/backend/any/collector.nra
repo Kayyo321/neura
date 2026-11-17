@@ -1,0 +1,27 @@
+let program = import:Std.Program;
+let console = import:Std.Io.Console;
+
+let Payload = class (export let value: int = 39;);
+let Garbage = class (export let value: int = 0;);
+let stored: any = nil;
+
+let place = func { stored = new Payload(); };
+let score = func -> int => match.is (stored) { p: Payload => p.value, _ => 0, };
+let churn = func {
+    for (let i in 0..2500) {
+        let unused: Garbage = new;
+    }
+};
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        place();
+        churn();
+        if (score() != 39) { return program.ExitCode.Failure; }
+        console.print_line("kept");
+        stored = 123456 as uint64;
+        churn();
+        console.print_line("released");
+        return program.ExitCode.Ok;
+    };
+);

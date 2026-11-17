@@ -1,0 +1,9 @@
+// Edge case 87: '? -' is a conditional.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote errors = import:Std.Core.Error;
+let parse = func(text: string) -> Result<int> => Result<int>.Ok(1);
+let read = func(text: string) -> Result<int> {
+    let value = parse(text)? - 1;
+    return Result<int>.Ok(value);
+};

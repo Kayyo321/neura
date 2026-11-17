@@ -1,0 +1,11 @@
+error[E0497]: '?' outside a function that returns a Result
+ --> $DIR/propagate-main.nra:9:31
+  |
+8 |     export let.override main = func(args: string[]) -> program.ExitCode {
+  |                                                        ---------------- declared here
+9 |         let value = parse("1")?;
+  |                               ^ the enclosing function returns ExitCode
+  |
+  = help: handle the result with 'match'
+
+For more information about this error, try `neura explain E0497`.

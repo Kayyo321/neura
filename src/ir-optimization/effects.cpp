@@ -248,6 +248,9 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
     case IrOp::Reference:
     case IrOp::Receiver:
     case IrOp::ReinterpretFloat:
+    case IrOp::AnyPack:
+    case IrOp::AnyTag:
+    case IrOp::AnyUnpack:
     case IrOp::ShortCircuit:
     case IrOp::ComparisonChain:
     case IrOp::ScopedValue:
@@ -414,6 +417,18 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
         effects.merge(unknown_);
         effects.scheduler = true;
         break;
+    case IrOp::HookRead:
+    case IrOp::HookAdmit: {
+        // A class hook event is a call with effects, whatever its clause
+        // does (docs/design/Hooks030.md, Optimization and tiers): it is
+        // never repeated, merged, hoisted or removed. A hook cannot use the
+        // scheduler (E0544) and makes no host request of its own.
+        auto event = unknown_;
+        event.scheduler = false;
+        event.host = false;
+        effects.merge(event);
+        break;
+    }
     case IrOp::ReferencePlace:
         // The local escapes as a mutable reference.
         effects.local_reads.insert(node.symbol);

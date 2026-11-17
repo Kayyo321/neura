@@ -1,0 +1,4 @@
+// Edge case 53: '&any'.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let read = func(v: &any) => 1;

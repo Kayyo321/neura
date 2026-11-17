@@ -1,0 +1,9 @@
+error[E0495]: invalid fallback of '??'
+  --> $DIR/coalesce-float-fallback.nra:12:64
+   |
+12 | let pick = func(amount: Optional<int64>) -> int64 => amount ?? 0.5;
+   |                                                                ^^^ expected int64, the type of the left operand's value
+   |
+   = note: the fallback is not converted; it must be assignable to int64
+
+For more information about this error, try `neura explain E0495`.

@@ -37,6 +37,45 @@ class FormatterTests(unittest.TestCase):
         self.assertEqual(self.formatted("let count=1;"), "let count = 1;\n")
         self.assertEqual(self.formatted(""), "")
 
+    def test_matching_operators_patterns_and_match_is(self):
+        # docs/design/Matching030.md, Grammar: `a?.b` and `r?` without
+        # spaces, `a ?? b` with spaces, single spaces around a guard, and
+        # `match.is (x) {` written as `match (x) {` is.
+        source = '''let read=func(pet:Pet)->string=>pet  ?.  owner?.name??"x";
+let run=func(text:string)->Result<int>{
+let x=parse(text) ? ;
+let y=ready?1:2;
+return Result<int>.Ok(x+y);
+};
+let area=func(shape:Shape)->int=>match(shape){
+Shape.Line(n)  if  n>0=>n,
+Shape.Box{size:[w,h],label}=>w*h,
+_=>0,
+};
+let kind=func(v:class)->int=>match . is(v){
+shape:Shape if shape.sides>4=>1,
+_=>0,
+};
+'''
+        expected = '''let read = func(pet: Pet) -> string => pet?.owner?.name ?? "x";
+let run = func(text: string) -> Result<int> {
+    let x = parse(text)?;
+    let y = ready ? 1 : 2;
+    return Result<int>.Ok(x + y);
+};
+let area = func(shape: Shape) -> int => match (shape) {
+    Shape.Line(n) if n > 0 => n,
+    Shape.Box { size: [w, h], label } => w * h,
+    _ => 0,
+};
+let kind = func(v: class) -> int => match.is (v) {
+    shape: Shape if shape.sides > 4 => 1,
+    _ => 0,
+};
+'''
+        self.assertEqual(self.formatted(source), expected)
+        self.assertEqual(self.formatted(expected), expected)
+
     def test_comments_and_documentation_attachment(self):
         source = '''// ordinary comment: https://example.test/a//b
 /// Documentation has @param [in] name and \\return text.

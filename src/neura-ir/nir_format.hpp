@@ -18,9 +18,19 @@ inline constexpr std::uint16_t nir_major_version = 1;
 // lowest minor version that can represent the program, so a program that
 // uses no newer feature is written as 1.0.
 // ConformanceCall (docs/design/Records030.md) is written under this minor
-// version, which the lead assigns when the milestone merges.
+// version, assigned to static interface requirements.
 inline constexpr std::uint16_t nir_records_minor = 13;
 inline constexpr std::uint16_t nir_minor_version = nir_records_minor;
+// NeuraIR 1.12, the matching milestone (docs/design/Matching030.md): a
+// return inside a scoped value, which the postfix `?` lowers to, and the
+// type `any` with its operations. A file uses it only when its program
+// does.
+inline constexpr std::uint16_t nir_any_minor = 12;
+
+// The minor version that adds class hooks (docs/design/Hooks030.md): the
+// attributes hook.get, hook.set and hook.of. A module that declares a clause
+// is written with it, so that an older reader refuses the module.
+inline constexpr std::uint16_t nir_hooks_minor = 11;
 
 std::vector<std::uint8_t> write_nir(const IrProgram& program);
 

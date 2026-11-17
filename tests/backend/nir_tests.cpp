@@ -272,7 +272,12 @@ NEURA_TEST(nir, corrupt_files_are_rejected) {
     IrNode node{};
     node.op = static_cast<IrOp>(200);
     bad_op.bodies.push_back({0, {node}});
-    expect_nir_error(write_nir(bad_op), "invalid operation tag 200");
+    try {
+        write_nir(bad_op);
+        fail("the writer accepted a nonexistent operation");
+    } catch (const NirError& error) {
+        check(std::string(error.what()).find("invalid operation tag 200") != std::string::npos, error.what());
+    }
 
     IrProgram deep = bad_op;
     IrNode nested{};
@@ -452,36 +457,56 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     clean.bodies.front().instructions.front().poll = false;
     check_equal(read_nir(write_nir(clean), "clean").bodies.size(), std::size_t{1}, "a plain node reads");
 
-    // The minor version after this reader's newest is newer than it.
+    // The minor version after the newest is newer than this reader.
     auto newer = bytes;
-    newer[6] = nir_minor_version + 1;
-    const auto accepted = "this reader accepts 1.0 through 1." + std::to_string(nir_minor_version);
-    expect_nir_error(newer, "NeuraIR format 1." + std::to_string(nir_minor_version + 1) + " is not supported; " +
-                                accepted);
+    const auto newest_minor = std::to_string(nir_minor_version);
+    newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
+    expect_nir_error(newer, "NeuraIR format 1." + std::to_string(nir_minor_version + 1) +
+                                " is not supported; this reader accepts 1.0 through 1." + newest_minor);
     newer[6] = 200;
-    expect_nir_error(newer, accepted);
+    expect_nir_error(newer, "this reader accepts 1.0 through 1." + newest_minor);
 
-    // An operation tag above the newest one, in a 1.9 file.
+    // An operation tag above the newest one. Operations after the 1.9 set
+    // are those of 1.12 (docs/design/Matching030.md).
     IrProgram above;
     above.symbols = misplaced.symbols;
     IrNode tagged{};
-    tagged.op = static_cast<IrOp>(static_cast<std::uint8_t>(IrOp::ConformanceCall) + 1);
+    tagged.op = IrOp::AnyPack;
     above.bodies.push_back({0, {tagged}});
     const auto above_bytes = write_nir(above);
-    check_equal(static_cast<int>(above_bytes[6]), 9, "an operation above the 1.7 set is written as 1.9");
-    expect_nir_error(above_bytes, "invalid operation tag " + std::to_string(static_cast<int>(tagged.op)));
-    // The newest operation itself is accepted.
+    check_equal(static_cast<int>(above_bytes[6]), static_cast<int>(nir_any_minor), "AnyPack requires 1.12");
+    above.bodies.front().instructions.front().op = IrOp::AnyTag;
+    const auto other = write_nir(above);
+    const auto difference = std::mismatch(above_bytes.begin(), above_bytes.end(), other.begin());
+    check(difference.first != above_bytes.end() && *difference.first == 66 && *difference.second == 67,
+          "the raw tags of AnyPack and AnyTag");
+    for (const auto forbidden : {64, 65, 69, 70, 127}) {
+        auto invalid = above_bytes;
+        invalid[static_cast<std::size_t>(difference.first - above_bytes.begin())] = static_cast<std::uint8_t>(forbidden);
+        expect_nir_error(invalid, "invalid operation tag " + std::to_string(forbidden));
+    }
+    // The newest operation of 1.9 is accepted in 1.9, and the first of
+    // 1.12 is not.
     IrProgram newest = above;
     newest.bodies.front().instructions.front().op = IrOp::SchedulerCall;
-    check_equal(read_nir(write_nir(newest), "newest").bodies.size(), std::size_t{1}, "SchedulerCall reads");
+    const auto newest_bytes = write_nir(newest);
+    check_equal(static_cast<int>(newest_bytes[6]), 9, "SchedulerCall is written as 1.9");
+    check_equal(read_nir(newest_bytes, "newest").bodies.size(), std::size_t{1}, "SchedulerCall reads");
+    IrProgram packed = above;
+    packed.bodies.front().instructions.front().op = IrOp::AnyPack;
+    auto packed_bytes = write_nir(packed);
+    packed_bytes[6] = 9;
+    expect_nir_error(packed_bytes, "invalid operation tag " + std::to_string(static_cast<int>(IrOp::AnyPack)));
     // A conformance call (docs/design/Records030.md) needs its own minor
-    // version: a file that claims 1.10 cannot hold one.
+    // version: a file that claims 1.12 cannot hold one.
     IrProgram conformance = above;
     conformance.bodies.front().instructions.front().op = IrOp::ConformanceCall;
     auto conformance_bytes = write_nir(conformance);
     check_equal(static_cast<int>(conformance_bytes[6]), static_cast<int>(nir_records_minor),
                 "a conformance call is written under its minor version");
-    conformance_bytes[6] = 10;
+    check_equal(static_cast<int>(conformance_bytes[static_cast<std::size_t>(difference.first - above_bytes.begin())]),
+                69, "the serialized ConformanceCall ordinal");
+    conformance_bytes[6] = 12;
     expect_nir_error(conformance_bytes,
                      "invalid operation tag " + std::to_string(static_cast<int>(IrOp::ConformanceCall)));
 
@@ -797,6 +822,33 @@ IrProgram attributed_function(std::vector<IrAttribute> attributes) {
 
 } // namespace
 
+// Before hooked admissions were executable, omitted nil defaults already
+// carried the call span and the formal's recorded default in the artifact.
+NEURA_TEST(nir, calls_with_older_nil_defaults_keep_hook_order) {
+    const auto directory = environment.source_dir / "tests" / "parameters" / "equivalence";
+    for (const auto name : {"hook-order", "hook-spawn"}) {
+        const auto source = directory / (std::string(name) + ".nra");
+        auto program = lower_files({source});
+        std::size_t omitted = 0;
+        const std::function<void(IrNode&)> legacy = [&](IrNode& node) {
+            if (node.op == IrOp::Nil && node.text == "$default_nil") {
+                node.text.clear();
+                ++omitted;
+            }
+            for (auto* region : {&node.operands, &node.body, &node.alternative})
+                for (auto& child : *region) legacy(child);
+        };
+        for (auto& body : program.bodies) for (auto& instruction : body.instructions) legacy(instruction);
+        check(omitted > 0, "the program omits nil defaults");
+        const auto restored = read_nir(write_nir(program), source.string());
+        const auto image = nvr::load(nvr::encode(backend::build(restored).image));
+        const auto run = run_captured(image);
+        check(run.result.completed, describe_trap(run.result, image));
+        const auto expected = read_bytes(directory / (std::string(name) + ".expected"));
+        check_equal(run.output, std::string(expected.begin(), expected.end()), name);
+    }
+}
+
 NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
     struct Row {
         AttributeId id;
@@ -822,6 +874,9 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
         {AttributeId::ParameterDefault, 12, "parameter.default", on_parameter, false, "[u5 a]"},
         {AttributeId::ParameterDefaultVariant, 13, "parameter.default.variant", on_parameter, false, "s"},
         {AttributeId::FunctionExtension, 14, "function.extension", on_function, false, "b"},
+        {AttributeId::HookGet, 15, "hook.get", on_class, false, "s"},
+        {AttributeId::HookSet, 16, "hook.set", on_class, false, "s"},
+        {AttributeId::HookOf, 17, "hook.of", on_function, false, "[s u1]"},
         // docs/design/Records030.md; the milestone's identifiers are
         // renumbered when it merges.
         {AttributeId::ClassRecord, 18, "class.record", on_class, false, "s"},
@@ -838,7 +893,7 @@ NEURA_TEST(nir, attribute_registry_matches_its_documentation) {
                   info->repeats == row.repeats && info->schema == row.schema,
               std::string(row.name) + " differs from the documented registry");
     }
-    check(find_attribute_info(0) == nullptr && find_attribute_info(15) == nullptr, "ids 0 and 15 are unregistered");
+    check(find_attribute_info(0) == nullptr && find_attribute_info(23) == nullptr, "ids 0 and 23 are unregistered");
     check((on_declarations & symbol_kind_bit(SymbolKind::File)) == 0, "files carry no tags");
 
     // Schemas accept the payloads of the helpers and reject other shapes.
@@ -897,10 +952,9 @@ NEURA_TEST(nir, symbol_attributes_and_deferred_initialization_round_trip_in_1_10
     const auto& program = fixture.program;
     const auto issues = verify_ir(program);
     check(issues.empty(), issues.empty() ? "" : issues.front().message);
-    // Every pre-registered attribute is exercised; those of the records
-    // milestone by records_attributes_and_conformance_calls_round_trip.
+    // Later milestones exercise their own attributes.
     for (const auto& info : attribute_registry()) {
-        if (static_cast<std::uint16_t>(info.id) >= static_cast<std::uint16_t>(AttributeId::ClassRecord)) continue;
+        if (static_cast<std::uint16_t>(info.id) >= static_cast<std::uint16_t>(AttributeId::HookGet)) continue;
         check(std::ranges::any_of(program.symbols, [&](const IrSymbol& item) { return has_attribute(item, info.id); }),
               std::string(info.name) + " is not attached by the fixture");
     }
@@ -1222,6 +1276,86 @@ NEURA_TEST(nir, attribute_files_are_rejected_when_malformed) {
           "a deferred initialization reads back");
     deferred_bytes[6] = 9;
     expect_nir_error(deferred_bytes, "deferred initialization requires NeuraIR format 1.10");
+}
+
+
+namespace {
+
+// The first node of `op` in a region, depth first.
+IrNode* find_node(std::vector<IrNode>& region, IrOp op) {
+    for (auto& node : region) {
+        if (node.op == op) return &node;
+        for (auto* nested : {&node.operands, &node.body, &node.alternative})
+            if (auto* found = find_node(*nested, op)) return found;
+    }
+    return nullptr;
+}
+
+} // namespace
+
+NEURA_TEST(nir, any_round_trips_as_version_1_12_and_its_unpack_needs_a_tag_test) {
+    // docs/design/Matching030.md, "Lowering and artifacts" and edge case 66.
+    auto program = lower_files({backend_dir(environment) / "nir-versions" / "any.nra"});
+    check(verify_ir(program).empty(), "the any fixture verifies");
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6] | (bytes[7] << 8)), static_cast<int>(nir_any_minor),
+                "a program with any is written as NeuraIR 1.12");
+    check(write_nir(read_nir(bytes, "any")) == bytes, "any round-trips through .nir");
+    auto older = bytes;
+    older[6] = 10;
+    older[7] = 0;
+    expect_nir_error(older, "invalid type kind tag " + std::to_string(static_cast<int>(TypeKind::Any)));
+
+    // An unpack outside the region its tag test selects.
+    auto outside = program;
+    auto& describe = body_of(outside, "Values.describe");
+    auto* unpack = find_node(describe, IrOp::AnyUnpack);
+    check(unpack != nullptr, "describe unpacks its subject");
+    auto copy = *unpack;
+    auto discard = IrNode{IrOp::Discard, {}, copy.span};
+    discard.operands.push_back(std::move(copy));
+    describe.insert(describe.begin() + 1, std::move(discard));
+    expect_issue(outside, "is not inside a region selected by a test of its tag");
+
+    // An unpack whose test names another tag.
+    auto wrong = program;
+    auto& tested = body_of(wrong, "Values.describe");
+    auto* found = find_node(tested, IrOp::AnyUnpack);
+    found->type = IrType{TypeKind::Float, "float64", no_symbol, {}};
+    expect_issue(wrong, "is not inside a region selected by a test of its tag 13");
+
+    // A pack of a value an any cannot hold.
+    auto packed = program;
+    auto* pack = find_node(body_of(packed, "Values.main"), IrOp::AnyPack);
+    check(pack != nullptr, "main packs a value");
+    pack->operands.front().type = IrType{TypeKind::Array, "", no_symbol, {IrType{TypeKind::Integer, "int32", no_symbol, {}}}};
+    expect_issue(packed, "any pack requires a value that an any can hold");
+}
+
+// ---- Class hooks (docs/design/Hooks030.md) --------------------------------
+//
+// A module that declares a class hook clause is written with the hooks minor
+// version and reads back equal; a reader of an older minor version refuses
+// it, and a hook-free program keeps its version.
+NEURA_TEST(nir, class_hooks_are_written_with_their_minor_version) {
+    const auto program = lower_files({backend_dir(environment) / "nir-versions" / "hooks.nra"});
+    const auto bytes = write_nir(program);
+    check_equal(static_cast<int>(bytes[6]), static_cast<int>(nir_hooks_minor), "a class hook needs its minor version");
+    const auto read = read_nir(bytes, "hooks.nir");
+    check(write_nir(read) == bytes, "a module with class hooks round-trips");
+    std::size_t hooks = 0;
+    for (const auto& item : read.symbols) {
+        if (has_attribute(item, AttributeId::HookOf)) ++hooks;
+    }
+    check_equal(hooks, std::size_t{3}, "hook functions that read back");
+    auto older = bytes;
+    older[6] = static_cast<std::uint8_t>(nir_hooks_minor - 1);
+    expect_nir_error(older, "class hooks require NeuraIR format 1." + std::to_string(nir_hooks_minor));
+    auto newer = bytes;
+    newer[6] = static_cast<std::uint8_t>(nir_minor_version + 1);
+    expect_nir_error(newer, "is not supported");
+    const auto plain = write_nir(lower_files({backend_dir(environment) / "nir-versions" / "attributes.nra"}));
+    check(static_cast<int>(plain[6]) < static_cast<int>(nir_hooks_minor), "a program without hooks keeps its version");
 }
 
 } // namespace neura::testing

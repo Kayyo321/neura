@@ -24,6 +24,8 @@ inline bool supports_value_members(const IrProgram& program, const IrType& type)
     case TypeKind::Void:
     case TypeKind::Module:
     case TypeKind::Callable:
+    // An `any` has no equals, hash_code or to_string: match it first.
+    case TypeKind::Any:
         return false;
     case TypeKind::Enum:
         return !has_enum_payload(program, type.symbol);

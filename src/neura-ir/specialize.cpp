@@ -1,10 +1,11 @@
 #include "specialize.hpp"
+#include "any.hpp"
 
 #include "attributes.hpp"
+#include "class_hooks.hpp"
 
 #include "monitors.hpp"
 #include "purity.hpp"
-#include "tags.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
 
@@ -56,6 +57,20 @@ struct Context {
     // found while copying continue the chain that created the instance.
     bool copying = false;
 };
+
+std::string type_text(const IrType& type) {
+    if ((type.kind == TypeKind::Array || type.kind == TypeKind::List) && type.arguments.size() == 1)
+        return type_text(type.arguments.front()) + (type.kind == TypeKind::Array ? "[]" : "[list]");
+    if (type.kind == TypeKind::Tuple) {
+        std::string text = "[";
+        for (std::size_t i = 0; i < type.arguments.size(); ++i) text += (i ? ", " : "") + type_text(type.arguments[i]);
+        return text + "]";
+    }
+    if (type.arguments.empty()) return type.name;
+    std::string text = type.name + "<";
+    for (std::size_t i = 0; i < type.arguments.size(); ++i) text += (i ? ", " : "") + type_text(type.arguments[i]);
+    return text + ">";
+}
 
 bool concrete(const IrType& type) {
     if (type.kind == TypeKind::TypeParameter) {
@@ -193,19 +208,41 @@ private:
     }
 
     bool in_template(SymbolId id) const {
+        bool hook = false;
         for (auto scope = id; scope != no_symbol && scope < original_symbols_;
              scope = program_.symbols[scope].owner) {
             const auto& item = program_.symbols[scope];
             if (!item.generics.empty() || item.kind == SymbolKind::TypeParameter) {
                 return true;
             }
+            hook = hook || has_attribute(item, AttributeId::HookOf);
             // Class static members are shared across all instances and
-            // cannot refer to the containing class's type parameters, except
-            // the static requirements of an interface, bodyless signatures
-            // that are never called directly (docs/design/Records030.md).
-            if (is_static_scope(item) && !requirement_signature(id, item)) return false;
+            // Static interface requirements and hook functions specialize
+            // with their declaring type.
+            if (is_static_scope(item) && !hook && !requirement_signature(id, item)) return false;
         }
         return false;
+    }
+
+    // The hook function of `generic`'s class hook clause, cloned for
+    // `instance` with the instance as its class.
+    void clone_hooks(SymbolId generic, SymbolId instance, const Substitution& substitution, const Context& context) {
+        for (const auto kind : {HookKind::Get, HookKind::Set}) {
+            const auto function = declared_hook(program_.symbols[generic], kind);
+            if (function == no_symbol || function >= original_symbols_) continue;
+            const auto copy = clone_function(function, program_.symbols[function].owner, substitution,
+                                             program_.symbols[function].name, context);
+            set_attribute(symbol(copy), AttributeId::HookOf,
+                          attribute_list({attribute_symbol(instance),
+                                          attribute_unsigned(kind == HookKind::Set ? 1 : 0)}));
+            member_map_[instance][function] = copy;
+        }
+    }
+
+    bool generic_hook(SymbolId id) const {
+        if (id == no_symbol || id >= original_symbols_) return false;
+        const auto cls = hook_owner(program_.symbols[id]);
+        return cls != no_symbol && cls < original_symbols_ && !program_.symbols[cls].generics.empty();
     }
 
     std::size_t depth(const IrType& type) const {
@@ -291,7 +328,8 @@ private:
                     return;
                 }
             }
-            if (context.instance != no_symbol && owned_by_generic_class(item)) item = member_of(item, context.instance);
+            if (context.instance != no_symbol && (owned_by_generic_class(item) || generic_hook(item)))
+                item = member_of(item, context.instance);
         });
         return attributes;
     }
@@ -417,6 +455,7 @@ private:
                 }
             }
         }
+        if (symbol(generic).kind == SymbolKind::Class) clone_hooks(generic, instance, substitution, inner);
         // Every eager member exists now, so links between members resolve.
         specialize_attributes(instance, inner);
         std::vector<SymbolId> copies;
@@ -603,6 +642,26 @@ private:
         result.type = type(node.type, context, node.span);
         for (const auto& argument : node.type_arguments) {
             result.type_arguments.push_back(type(argument, context, node.span));
+        }
+        // A function value has become an object layout of a callable type,
+        // which an any does not take for a reference.
+        const auto function_layout = [&](const IrType& item) {
+            if (item.kind != TypeKind::Object) return false;
+            for (auto scope = item.symbol; scope != no_symbol && scope < program_.symbols.size();
+                 scope = program_.symbols[scope].base)
+                if (callable_methods_.contains(scope)) return true;
+            return false;
+        };
+        if (node.op == IrOp::AnyPack && !result.operands.empty() &&
+            (!any_holdable(result.operands.front().type) || function_layout(result.operands.front().type))) {
+            // What an `any` holds is checked on the specialized program
+            // (docs/design/Matching030.md, E0492).
+            auto error = Diagnostic(node.span, "a value of type " + type_text(result.operands.front().type) +
+                                                   " cannot be held in any")
+                .with_code("E0492").label("packed here in a generic body");
+            if (!context.origin.span.file.empty()) error.label(context.origin.span, "instantiated here");
+            error.help("hold it in a class and pack the reference");
+            throw error;
         }
         if (node.op == IrOp::CallClosure) {
             result.op = IrOp::VirtualCall;
@@ -828,14 +887,8 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // spawns; the guard operations are then part of what the isolation
     // checks see.
     lower_synchronized(program);
-    const bool thread_safe_tags = std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
-        return has_tag(item, TagId::ThreadSafe);
-    });
-    if (uses_tasks(program) || thread_safe_tags) {
-        const TaskAnalysis analysis(program);
-        analysis.check_tags();
-        if (uses_tasks(program)) analysis.check();
-    }
+    // Hooked programs get their implicit calls during hook elaboration.
+    if (!has_class_hooks(program)) check_task_safety(program);
 }
 
 } // namespace neura

@@ -1,0 +1,23 @@
+// sizes: 1000 2000
+// scaling: 2.1
+// Observe one getter call per iteration on the same object.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let reads: int = 0;
+let Counted = class (
+    | get: { reads++; return instance; };
+);
+
+let HookRead = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int>(int32s.parse(args[0]), 0);
+        let value: Counted = new;
+        for (let i: int = 0; i < n; i++) { value; }
+        if (reads != n) { return program.ExitCode.Failure; }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

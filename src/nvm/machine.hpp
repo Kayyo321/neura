@@ -57,6 +57,12 @@ struct TierShadowHooks {
         LiveCells,
         // The live stack cells (NVR 1.7): one more.
         StackCells,
+        // The innermost open storage region of the running task (NVR 1.7):
+        // owned by the next frame depth.
+        RegionDepth,
+        // The released handles (NVR 1.7): one more, the next handle to be
+        // assigned.
+        ReleasedHandles,
         // The step count: one more.
         Steps,
         // The first channel, by handle, holding a value: the lowest bit of
@@ -287,6 +293,12 @@ enum class TrapKind {
     StackLimit,
     ReleasedStorage,
     InvalidRegion,
+    // Class hooks (docs/design/Hooks030.md, Recursion): an event equal to an
+    // open one; more than nvr::max_hook_events open; a HookLeave with no event
+    // of its frame open, or a frame that returns or suspends with one open.
+    HookRecursion,
+    HookLimit,
+    InvalidHook,
 };
 
 struct Trap {

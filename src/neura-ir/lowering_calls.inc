@@ -316,6 +316,7 @@ void Lowering::record_defaults(SymbolId function, const Declaration& decl, Conte
         };
         if (symbol(function).variadic != VariadicKind::None)
             reject("no parameter of a function with a variadic parameter takes a default");
+        if (type.kind == TypeKind::Any) reject("a parameter of type any takes no default");
         if (decl.host_binding || decl.kernel_binding || decl.scheduler_binding || decl.host_callback)
             reject("a host, kernel, scheduler or callback binding takes no default");
         if (is_primitive_reference(type)) reject("a primitive reference parameter is bound to a caller's place");
@@ -417,8 +418,11 @@ IrNode Lowering::default_value(SymbolId parameter, const IrType& type, const Spa
         result.text = literal.text;
         return result;
     }
-    default:
-        return node(IrOp::Nil, span, type);
+    default: {
+        auto result = node(IrOp::Nil, span, type);
+        result.text = default_argument_nil;
+        return result;
+    }
     }
 }
 
@@ -777,6 +781,7 @@ IrNode Lowering::argument_value(const Expr& expr, std::size_t index, const IrTyp
             if (const auto method = cast_method(lowered.type, expected, context); method != no_symbol)
                 return cast_call(method, std::move(lowered), expected, expr.operands[index].span);
         }
+        if (expected.kind == TypeKind::Any) return pack_any(std::move(lowered), expr.operands[index].span);
         require_type(lowered.type, expected, expr.operands[index].span);
         return lowered;
     }
@@ -1383,6 +1388,8 @@ IrNode Lowering::interpolation(const Expr& expr, Context& context) {
                    (input.type.kind == TypeKind::Callable && !is_function_value(input.type))) {
             throw Diagnostic(hole.span, "expected a value").with_code("E0422");
         }
+        if (input.type.kind == TypeKind::Any)
+            throw any_operation(hole.span, "formatting").note("an any is not formatted; match it first");
         types.push_back(input.type);
         std::string variant = "Text";
         std::optional<FormatKind> kind = FormatKind::Text;

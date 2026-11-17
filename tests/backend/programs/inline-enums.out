@@ -1,0 +1,35 @@
+empty
+number 10
+wide 5000000000 2
+real 4598175219545276416
+flag true
+word five
+words six6
+bytes 3
+at 8
+maybe 9
+range ten 1..10
+words ab3
+number 4
+bytes 3
+words yes!2 number -3
+real 9221120237041090561 real 9223372036854775808
+range ten 1..10 / real 9221120237041090561 3
+10
+words six6 / number 1
+word captured! empty
+number 42
+wide 7 8
+word zero; at 8; range ten 1..10; 3 3
+number 10
+flag false
+maybe 9
+maybe -1 words six6 1
+word five 2
+number 1 number 2
+words wv2 words wv2
+3 false
+ok 7
+parse error at 0: eight
+2
+one|2|3.5|

@@ -42,7 +42,7 @@ export let Closures = module:program.Entry (
     };
 
     let make_step = func(factor: int64, offset: int64) -> func(int64) -> int64 {
-        return func(value: int64) -> int64 => (value * factor + offset) & Mask;
+        return new func(value: int64) -> int64 => (value * factor + offset) & Mask;
     };
 
     export let.override main = func(args: string[]) -> program.ExitCode {

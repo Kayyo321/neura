@@ -1,0 +1,9 @@
+// Case 60: a startup block is `static scope` and a block; the parse goes on
+// after each malformed one.
+static scope (handle) { }
+
+static scope;
+
+let after: int32 = 1;
+
+static scope

@@ -1,0 +1,7 @@
+error[E0233]: malformed optional access: '?.' takes no '++'
+  --> $DIR/optional-increment.nra:13:8
+   |
+13 |     pet?.age++;
+   |        ^^ an optional access gives a value, not a place
+
+For more information about this error, try `neura explain E0233`.

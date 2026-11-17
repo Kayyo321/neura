@@ -1,0 +1,17 @@
+// Edge case 4: an arm after '_'.
+let Named = interface (
+    let name = func -> string;
+);
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let classify = func(value: Shape) -> int => match.is (value) {
+    _ => 1,
+    Circle => 2,
+};

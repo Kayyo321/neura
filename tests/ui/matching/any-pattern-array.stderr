@@ -1,0 +1,7 @@
+error[E0490]: a value of type any is never an int32[]
+ --> $DIR/any-pattern-array.nra:5:5
+  |
+5 |     int[] => 1,
+  |     ^^^^^ an any never holds a value of type int32[]
+
+For more information about this error, try `neura explain E0490`.

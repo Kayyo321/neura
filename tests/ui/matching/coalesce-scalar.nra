@@ -1,0 +1,12 @@
+// Edge case 79: an int32 on the left of '??'.
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Error;
+let Owner = class (
+    export let name: string = "";
+);
+let Pet = class (
+    export let owner: Owner = nil;
+    export let age: int = 0;
+);
+let pick = func(count: int32) -> int32 => count ?? 0;

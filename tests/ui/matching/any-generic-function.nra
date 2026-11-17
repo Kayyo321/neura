@@ -1,0 +1,11 @@
+// Edge case 59 with a function value: the instantiation is checked before function values become objects.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let wrap = func<T>(value: T) -> any => value as any;
+let program = import:Std.Program;
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let v = wrap(func(x: int) -> int => x);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,5 @@
+// Case 12: after a member, a clause is an accessor clause of that member.
+let Session = class (
+    export let x: int32 = 0;
+    | get: instance;
+);

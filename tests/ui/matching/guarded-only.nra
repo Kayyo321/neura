@@ -1,0 +1,10 @@
+// Edge case 25: a guarded arm covers nothing.
+let.promote _ = import:Std.Core.Optional;
+let Shape = enum (Dot, Line(int), Box { size: [int, int], label: Optional<string> });
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+let Light = enum (Red, Yellow, Green);
+let length = func(shape: Shape) -> int => match (shape) {
+    Shape.Dot => 0,
+    Shape.Line(length) if length < 0 => 0,
+    Shape.Box { size, label } => 1,
+};

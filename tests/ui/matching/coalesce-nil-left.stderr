@@ -1,0 +1,9 @@
+error[E0495]: invalid left operand of '??'
+  --> $DIR/coalesce-nil-left.nra:12:43
+   |
+12 | let pick = func(owner: Owner) -> Owner => nil ?? owner;
+   |                                           ^^^ nil has no type of its own here
+   |
+   = help: write the fallback alone
+
+For more information about this error, try `neura explain E0495`.

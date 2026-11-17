@@ -1,0 +1,10 @@
+error[E0493]: operation is not defined for any
+ --> $DIR/any-println.nra:6:27
+  |
+6 |     console.println("{}", v);
+  |                           ^ formatting is not defined for any
+  |
+  = note: an untyped variadic parameter formats its arguments; an any is not formatted
+  = help: match the value first, with 'match.is'
+
+For more information about this error, try `neura explain E0493`.

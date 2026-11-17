@@ -1,0 +1,68 @@
+let program = import:Std.Program;
+let test = import:Std.Test;
+
+let Holder = class (
+    export static last seed: int[] = [17];
+);
+
+let Outcome = enum (
+    Empty,
+    Grid(int[][]),
+);
+
+let grid = func(size: int) -> int[][] {
+    last row = 0 .. size;
+    {
+        last middle = [9];
+        return [row, middle, row];
+    }
+};
+
+let maybe_grid = func(present: bool) -> Outcome {
+    if (!present) {
+        return Outcome.Empty;
+    }
+    return Outcome.Grid(grid(4));
+};
+
+let pair_of_arrays = func() -> [int[], int[]] {
+    last row = [3, 4];
+    return [row, row];
+};
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let make: func(int) -> int[][] = grid;
+        last rows = make(6);
+        rows[2][0] = 23;
+        test.assert_equal_int32(23, rows[0][0]);
+        test.assert_equal_int32(1, rows[1].length);
+        test.assert_equal_int32(17, Holder.seed[0]);
+
+        test.assert(match (maybe_grid(false)) { Outcome.Empty => true, _ => false });
+        test.assert(match (maybe_grid(true)) { Outcome.Grid(value) => value[2][3] == 3, _ => false });
+
+        last pair = pair_of_arrays();
+        let [left, right]: [int[], int[]] = pair;
+        left[0] = 11;
+        test.assert_equal_int32(11, right[0]);
+
+        last borrow = [5, 6];
+        last read = func -> int => borrow[1];
+        test.assert_equal_int32(6, read());
+
+        let total = 0;
+        for (let i = 0; i < 160; i++) {
+            last temporary = grid(9);
+            if (i < 100) {
+                continue;
+            }
+            total += temporary[1][0];
+            if (i == 150) {
+                break;
+            }
+        }
+        test.assert_equal_int32(459, total);
+        return program.ExitCode.Ok;
+    };
+);

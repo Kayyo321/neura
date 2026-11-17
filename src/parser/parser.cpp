@@ -1,6 +1,9 @@
 #include "syntax.hpp"
+#include "util/source_map.hpp"
 
+#include <algorithm>
 #include <charconv>
+#include <functional>
 #include <cstddef>
 #include <string_view>
 #include <utility>
@@ -199,6 +202,19 @@ private:
         skipped_to_end_ = true;
     }
 
+    // Records an error that leaves the parse in a known state, so nothing
+    // needs to be skipped, up to error_limit() errors.
+    void record(const Diagnostic& error) {
+        if (stopped_) return;
+        errors_.push_back(error);
+        if (errors_.size() >= error_limit()) {
+            auto first = errors_.front();
+            for (std::size_t i = 1; i < errors_.size(); ++i) first.also(errors_[i]);
+            stopped_ = true;
+            throw first;
+        }
+    }
+
     static bool statement_keyword(std::string_view text) {
         return text == "let" || text == "const" || text == "export" || text == "static" || text == "return" ||
                text == "if" || text == "while" || text == "for" || text == "do" || text == "break" ||
@@ -320,7 +336,11 @@ private:
     // A class member declaration starts at `offset`: the same words that
     // begin a declaration anywhere, including a contextual `last` binding,
     // or the '#' of its tags, which no expression starts with.
-    bool at_class_member(std::size_t offset) const { return at_declaration(offset) || next_is(offset, "#"); }
+    // A '|' there begins a class hook clause, which an anonymous class cannot
+    // have (E0216), and no expression begins with '|' either.
+    bool at_class_member(std::size_t offset) const {
+        return at_declaration(offset) || next_is(offset, "#") || next_is(offset, "|");
+    }
 
     bool next_keyword(std::size_t offset, std::string_view text) const {
         if (cursor_ + offset >= tokens_.size()) return false;
@@ -370,7 +390,9 @@ private:
             unsigned saved;
             ~Restore() { depth = saved; }
         } restore{block_depth_, depth};
+        hook_clauses(*body, "an anonymous class");
         while (!at_end() && !at(")")) {
+            if (startup_member(*body)) continue;
             auto member = tagged_declaration(Declaration::Kind::Class);
             if (member.cast_target) {
                 auto more_casts = std::exchange(member.overloads, {});
@@ -785,6 +807,10 @@ private:
         auto tags = tag_list();
         const auto documentation = tag_documentation(first);
         const auto tags_span = span_from(first);
+        if (at_startup_block())
+            throw Diagnostic(tags_span, "a startup block takes no tags (no 'export')").with_code("E0217")
+                .label("a startup block takes no tags")
+                .help("remove the tags; a startup block is 'static scope { ... }'");
         if (!at_declaration() || ((at("let") || at("const")) && next_is(1, "["))) {
             const bool destructure = at_declaration();
             auto error = Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
@@ -816,6 +842,13 @@ private:
         result.kind = Declaration::Kind::Binding;
         result.documentation = current().documentation;
         result.exported = match("export");
+        if (result.exported && at_startup_block())
+            throw Diagnostic(tokens_[cursor_ - 1].span, "a startup block takes no tags (no 'export')")
+                .with_code("E0217").label("a startup block is not exported")
+                .suggest("remove 'export'", Span{tokens_[cursor_ - 1].span.file, tokens_[cursor_ - 1].span.line,
+                         tokens_[cursor_ - 1].span.column, tokens_[cursor_ - 1].span.offset,
+                         current().span.offset - tokens_[cursor_ - 1].span.offset}, "",
+                         Applicability::MachineApplicable);
         result.static_member = match("static");
         result.constant = match("const");
         if (!result.constant && at_last_declaration()) {
@@ -927,7 +960,9 @@ private:
                 result.kind = Declaration::Kind::Enum;
                 result.generics = generic_parameters();
                 expect("(");
+                hook_clauses(result, "an enum");
                 while (!at(")")) {
+                    if (startup_member(result)) continue;
                     const auto tags_start = cursor_;
                     auto variant_tags = tag_list();
                     const auto variant_documentation = tag_documentation(tags_start);
@@ -1001,8 +1036,11 @@ private:
                     } while (match(","));
                 }
                 expect("(");
+                hook_clauses(result, result.kind == Declaration::Kind::Class ? nullptr
+                                     : result.kind == Declaration::Kind::Interface ? "an interface" : "a module");
                 while (!at_end() && !at(")")) {
                     const auto member_start = cursor_;
+                    if (startup_member(result)) continue;
                     Declaration member;
                     try {
                         member = tagged_declaration(result.kind);
@@ -1114,6 +1152,230 @@ private:
                      Applicability::MachineApplicable);
     }
 
+    // `static scope { ... }` (Modules.md, Startup blocks). `scope` after
+    // `static` is a contextual word; `static let` and every other use of
+    // either word keep their meaning.
+    bool at_startup_block() const {
+        return at("static") && cursor_ + 1 < tokens_.size() &&
+               tokens_[cursor_ + 1].kind == TokenKind::Identifier && tokens_[cursor_ + 1].text == "scope";
+    }
+
+    static Diagnostic misplaced_startup_block(const Span& keyword) {
+        return Diagnostic(keyword, "a startup block is written at file or module level").with_code("E0218")
+            .label("not at file or module level")
+            .help("move it to the top level of the file or into a module, or call a function from a file-level "
+                  "block");
+    }
+
+    // Skips one balanced group that starts at the current '(' or '{'.
+    void skip_group() {
+        std::size_t depth = 0;
+        while (!at_end()) {
+            const auto& text = current().text;
+            if (current().kind == TokenKind::Symbol && (text == "(" || text == "[" || text == "{")) ++depth;
+            else if (current().kind == TokenKind::Symbol && (text == ")" || text == "]" || text == "}")) --depth;
+            advance();
+            if (depth == 0) return;
+        }
+    }
+
+    // A Block with `startup` set. A malformed block is recorded as E0217,
+    // and the parse goes on after the group the block would have been:
+    // a parenthesized group and a braced body, or a ';'.
+    Statement startup_block() {
+        const auto start = cursor_;
+        Statement result{};
+        result.kind = Statement::Kind::Block;
+        result.startup = true;
+        advance();
+        advance();
+        result.keyword = span_from(start);
+        if (!at("{")) {
+            const auto& next = current();
+            const bool later_line = next.kind == TokenKind::End || next.span.line > tokens_[cursor_ - 1].span.line;
+            auto error = Diagnostic(later_line && !next_is(0, ";") ? after_previous() : next.span,
+                                    "expected '{' after 'static scope'").with_code("E0217")
+                .label(next.kind == TokenKind::End ? "expected '{' before the end of the file"
+                                                   : "expected '{', " + found_text(next))
+                .help("a startup block is 'static scope { ... }'");
+            if (at("(")) error.note("a startup block names no scope handle");
+            record(error);
+            if (at("(")) skip_group();
+            if (at("{")) skip_group();
+            else match(";");
+            result.span = span_from(start);
+            return result;
+        }
+        result.body = block();
+        result.span = span_from(start);
+        if (at(";")) {
+            const auto semicolon = current().span;
+            record(Diagnostic(semicolon, "a startup block has no ';' after its '}'").with_code("E0217")
+                       .label("remove this ';'")
+                       .suggest("remove the ';'", semicolon, "", Applicability::MachineApplicable));
+            advance();
+        }
+        return result;
+    }
+
+    // A startup block among the members of `owner`: kept for a module, and
+    // E0218 in a class, an interface or an enum. False when none is next.
+    bool startup_member(Declaration& owner) {
+        if (!at_startup_block()) return false;
+        auto block = startup_block();
+        if (owner.kind == Declaration::Kind::Module && block_depth_ == 0) owner.startup_blocks.push_back(std::move(block));
+        else record(misplaced_startup_block(block.keyword));
+        return true;
+    }
+
+    // Class hook clauses (docs/design/Hooks030.md, Class hook clauses):
+    //   hook-clause = "|" ("get" | "set") [ "." "override" ] ":" (expression | block) ";"
+    // written after the '(' of a declared class and before its first member.
+    // A clause there in an interface, a module, an enum or an anonymous class
+    // is E0216 and is dropped. Tags or `export` before a clause are E0215.
+    bool at_hook_clause() const {
+        if (at("|")) return true;
+        if (at("export")) return next_is(1, "|");
+        if (!at("#")) return false;
+        auto i = cursor_;
+        const auto skip = [&](std::string_view open, std::string_view close) {
+            std::size_t depth = 0;
+            for (; i < tokens_.size() && tokens_[i].kind != TokenKind::End; ++i) {
+                if (tokens_[i].kind != TokenKind::Symbol) continue;
+                if (tokens_[i].text == open) ++depth;
+                else if (tokens_[i].text == close && --depth == 0) {
+                    ++i;
+                    return;
+                }
+            }
+        };
+        while (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "#") {
+            ++i;
+            if (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "[") {
+                skip("[", "]");
+                continue;
+            }
+            if (i >= tokens_.size() || tokens_[i].kind != TokenKind::Identifier) return false;
+            ++i;
+            if (i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "(") skip("(", ")");
+        }
+        return i < tokens_.size() && tokens_[i].kind == TokenKind::Symbol && tokens_[i].text == "|";
+    }
+
+    static Diagnostic malformed_hook(const Span& at, std::string message) {
+        return Diagnostic(at, std::move(message)).with_code("E0215")
+            .help("a class hook clause is '| get: <expression>;' or '| set: { ... };'");
+    }
+
+    // `outside` names what the clauses are written in when it cannot have
+    // hooks, such as "an interface"; null for a declared class.
+    void hook_clauses(Declaration& owner, const char* outside) {
+        while (at_hook_clause()) {
+            try {
+                auto clause = hook_clause();
+                if (!outside) {
+                    owner.hooks.push_back(std::move(clause));
+                    continue;
+                }
+                std::string kind = outside;
+                const Span bar{clause.span.file, clause.span.line, clause.span.column, clause.span.offset, 1};
+                record(Diagnostic(bar, kind + " cannot declare class hooks").with_code("E0216")
+                           .label("class hook clause in " + kind)
+                           .help("declare the hooks on a named class"));
+            } catch (const Diagnostic& error) {
+                if (stopped_) throw;
+                record(error);
+                skip_hook_clause();
+            }
+        }
+    }
+
+    HookClause hook_clause() {
+        if (at("#")) {
+            const auto first = cursor_;
+            tag_list();
+            record(malformed_hook(span_from(first), "a class hook clause takes no tags")
+                       .label("tags before a class hook clause")
+                       .note("a tag of the class is written before 'let'"));
+        } else if (at("export")) {
+            const auto word = advance().span;
+            record(malformed_hook(word, "a class hook clause takes no tags")
+                       .label("'export' does not apply to a class hook clause")
+                       .suggest("remove 'export'", Span{word.file, word.line, word.column, word.offset,
+                                                        current().span.offset - word.offset},
+                                "", Applicability::MachineApplicable));
+        }
+        const auto start = cursor_;
+        advance();
+        const auto& keyword = current();
+        if (keyword.kind != TokenKind::Identifier || (keyword.text != "get" && keyword.text != "set"))
+            throw malformed_hook(keyword.span, "expected 'get' or 'set' after '|'")
+                .label(keyword.kind == TokenKind::End ? "expected 'get' or 'set' before the end of the file"
+                                                      : "expected 'get' or 'set', " + found_text(keyword));
+        advance();
+        HookClause clause;
+        clause.setter = keyword.text == "set";
+        clause.keyword = keyword.span;
+        if (match(".")) {
+            if (!at("override"))
+                throw malformed_hook(current().span, "only '.override' may follow 'get' or 'set'")
+                    .label("expected 'override', " + found_text(current()));
+            clause.override_word = advance().span;
+        }
+        if (!at(":"))
+            throw malformed_hook(current().kind == TokenKind::End ? after_previous() : current().span,
+                                 "expected ':'")
+                .label(current().kind == TokenKind::End ? "expected ':' before the end of the file"
+                                                        : "expected ':', " + found_text(current()));
+        advance();
+        if (at("{")) {
+            clause.block = true;
+            clause.body = block();
+            clause.close = tokens_[cursor_ - 1].span;
+        } else {
+            if (at(")") || at(";") || at_end() || at_declaration())
+                throw malformed_hook(current().kind == TokenKind::End ? after_previous() : current().span,
+                                     "a class hook clause needs an expression or a block after ':'")
+                    .label(current().kind == TokenKind::End ? "expected an expression before the end of the file"
+                                                            : "expected an expression, " + found_text(current()));
+            clause.expression = expression();
+        }
+        if (!at(";")) {
+            const auto after = after_previous();
+            record(malformed_hook(current().kind == TokenKind::End ? after : current().span,
+                                  "a class hook clause ends with ';'")
+                       .label(current().kind == TokenKind::End ? "expected ';' before the end of the file"
+                                                               : "expected ';', " + found_text(current()))
+                       .suggest("add the missing ';'", after, ";", Applicability::MachineApplicable));
+        } else {
+            advance();
+        }
+        clause.span = span_from(start);
+        return clause;
+    }
+
+    // After an error in a clause: skips to its ';', or to the ')' or '}'
+    // that closes the enclosing body, which is left for the caller.
+    void skip_hook_clause() {
+        std::size_t depth = 0;
+        while (!at_end()) {
+            const auto& token = current();
+            if (token.kind == TokenKind::Symbol) {
+                const auto& text = token.text;
+                if (text == "(" || text == "[" || text == "{") {
+                    ++depth;
+                } else if (text == ")" || text == "]" || text == "}") {
+                    if (depth == 0) return;
+                    --depth;
+                } else if (text == ";" && depth == 0) {
+                    advance();
+                    return;
+                }
+            }
+            advance();
+        }
+    }
+
     // Accessor clauses after a member's ';' (Types.md, Accessors). No member
     // begins with '|', so the position is unambiguous, and `get`, `set`, and
     // `value` stay ordinary identifiers everywhere else. Lowering checks
@@ -1221,6 +1483,11 @@ private:
     Statement statement() {
         const auto start = cursor_;
         Statement result{};
+        if (at_startup_block()) {
+            result = startup_block();
+            if (block_depth_ > 0) record(misplaced_startup_block(result.keyword));
+            return result;
+        }
         if (at("#")) {
             result.kind = Statement::Kind::Binding;
             result.declaration = std::make_unique<Declaration>(tagged_declaration());
@@ -1381,10 +1648,22 @@ private:
     Statement parse_match(bool produces_value, std::size_t start) {
         Statement result{};
         result.kind = Statement::Kind::Match;
+        // `match.is (subject)` (docs/design/Matching030.md): `match`
+        // directly followed by `.` and `is`.
+        if (at(".") && next_is_keyword(1, "is")) {
+            advance();
+            advance();
+            result.match_is = true;
+            if (!at("("))
+                throw Diagnostic(current().span, "malformed match.is: expected '(' before the subject")
+                    .with_code("E0230").label(current().kind == TokenKind::End ? std::string("expected '('")
+                                                                               : "expected '(', " + found_text(current()))
+                    .help("write the subject in parentheses, as in 'match.is (value) { ... }'");
+        }
         result.expressions.push_back(condition());
         expect("{");
         while (!at("}")) {
-            result.arms.push_back(match_arm(produces_value));
+            result.arms.push_back(result.match_is ? is_arm(produces_value) : match_arm(produces_value));
             if (!match(",")) break;
         }
         expect("}");
@@ -1395,22 +1674,10 @@ private:
     MatchArm match_arm(bool produces_value) {
         const auto start = cursor_;
         MatchArm result{};
-        result.variant = qualified_name();
-        const bool positional = match("(");
-        result.named = !positional && match("{");
-        if (positional || result.named) {
-            const auto close = positional ? ")" : "}";
-            while (!at(close)) {
-                auto binding = declared_name();
-                if (result.named) {
-                    result.fields.push_back(binding.text);
-                    if (match(":")) binding = identifier();
-                }
-                result.bindings.push_back(std::move(binding));
-                if (!match(",")) break;
-            }
-            expect(close);
-        }
+        auto pattern = std::make_shared<PatternSyntax>(whole_pattern());
+        if (match("if")) result.guard = expression();
+        flatten_arm(result, *pattern);
+        result.pattern = std::move(pattern);
         expect("=>");
         if (produces_value) {
             result.value = expression();
@@ -1419,6 +1686,205 @@ private:
         }
         result.span = span_from(start);
         return result;
+    }
+
+    // An arm of a `match.is`: `_`, `nil`, `name: Type` or a type, with an
+    // optional guard. An identifier directly followed by ':' is a binding;
+    // anything else is read by the type parser.
+    MatchArm is_arm(bool produces_value) {
+        const auto start = cursor_;
+        MatchArm result{};
+        auto pattern = std::make_shared<PatternSyntax>();
+        if (current().kind == TokenKind::Identifier && current().text == "_") {
+            pattern->span = advance().span;
+        } else if (at("nil")) {
+            pattern->kind = PatternSyntax::Kind::Nil;
+            pattern->span = advance().span;
+        } else {
+            if (current().kind == TokenKind::Identifier && next_is(1, ":")) {
+                const auto& name = declared_name();
+                advance();
+                pattern->kind = PatternSyntax::Kind::Binding;
+                pattern->name = name.text;
+                pattern->name_span = name.span;
+                result.bindings.push_back(name);
+            } else {
+                pattern->kind = PatternSyntax::Kind::Type;
+                if (current().kind != TokenKind::Identifier && !at("[") && !at("&") && !at("func") && !at("class"))
+                    throw Diagnostic(current().span, "malformed match.is pattern").with_code("E0230")
+                        .label("expected a type, 'name: Type', 'nil' or '_'")
+                        .help("a 'match.is' arm tests the type of the subject's value");
+            }
+            pattern->type = type();
+            pattern->span = span_from(start);
+            if (at("(") || at("{"))
+                throw Diagnostic(current().span, "a variant pattern is not a 'match.is' pattern").with_code("E0230")
+                    .label("'match.is' arms test types")
+                    .help("use 'match' for an enum");
+        }
+        if (match("if")) result.guard = expression();
+        result.general = true;
+        result.variant = pattern->kind == PatternSyntax::Kind::Wildcard ? "_" : "";
+        result.pattern = std::move(pattern);
+        expect("=>");
+        if (produces_value) {
+            result.value = expression();
+        } else {
+            result.body = block();
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    bool next_is_keyword(std::size_t offset, std::string_view word) const {
+        if (cursor_ + offset >= tokens_.size()) return false;
+        const auto& token = tokens_[cursor_ + offset];
+        return token.kind == TokenKind::Keyword && token.text == word;
+    }
+
+    // The whole pattern of a `match` arm (docs/design/Matching030.md): `_`,
+    // a tuple pattern, or a name read as a variant, with or without a
+    // payload. A single name stays a variant here, as in 0.2.
+    PatternSyntax whole_pattern() {
+        if (at("[")) return tuple_pattern();
+        if (current().kind == TokenKind::Identifier && current().text == "_") {
+            PatternSyntax result{};
+            result.span = advance().span;
+            return result;
+        }
+        if (current().kind != TokenKind::Identifier) unsupported_pattern();
+        return variant_pattern();
+    }
+
+    // A payload or element position: `_`, a binding, a variant pattern
+    // (a dotted name), or a tuple pattern.
+    PatternSyntax sub_pattern(bool positional) {
+        if (at("[")) return tuple_pattern();
+        if (current().kind != TokenKind::Identifier) unsupported_pattern();
+        if (current().text == "_") {
+            PatternSyntax result{};
+            result.span = advance().span;
+            return result;
+        }
+        if (next_is(1, ".")) return variant_pattern();
+        if (positional && next_is(1, ":")) {
+            // `name: Type` is a type pattern, which only a `match.is` arm has.
+            const auto start = cursor_;
+            advance();
+            advance();
+            type();
+            throw Diagnostic(span_from(start), "a type pattern is not supported inside a match pattern")
+                .with_code("E0231").label("type patterns are whole patterns of a 'match.is' arm")
+                .help("bind the value and test it in a guard");
+        }
+        PatternSyntax result{};
+        result.kind = PatternSyntax::Kind::Binding;
+        const auto& name = declared_name();
+        result.span = name.span;
+        result.name_span = name.span;
+        result.name = name.text;
+        return result;
+    }
+
+    PatternSyntax variant_pattern() {
+        const auto start = cursor_;
+        PatternSyntax result{};
+        result.kind = PatternSyntax::Kind::Variant;
+        result.name = qualified_name();
+        const bool positional = match("(");
+        result.named = !positional && match("{");
+        result.payload = positional || result.named;
+        if (result.payload) {
+            const auto close = positional ? ")" : "}";
+            while (!at(close)) {
+                if (result.named) {
+                    const auto& field = identifier();
+                    result.fields.push_back(field.text);
+                    result.field_spans.push_back(field.span);
+                    if (match(":")) {
+                        result.elements.push_back(sub_pattern(false));
+                    } else {
+                        // `{ label }` binds the field to its own name.
+                        PatternSyntax binding{};
+                        binding.kind = PatternSyntax::Kind::Binding;
+                        binding.span = field.span;
+                        binding.name_span = field.span;
+                        binding.name = field.text;
+                        if (field.text == "_") binding.kind = PatternSyntax::Kind::Wildcard;
+                        result.elements.push_back(std::move(binding));
+                    }
+                } else {
+                    result.elements.push_back(sub_pattern(true));
+                }
+                if (!match(",")) break;
+            }
+            expect(close);
+        }
+        result.span = span_from(start);
+        return result;
+    }
+
+    PatternSyntax tuple_pattern() {
+        const auto start = cursor_;
+        expect("[");
+        PatternSyntax result{};
+        result.kind = PatternSyntax::Kind::Tuple;
+        while (!at("]")) {
+            result.elements.push_back(sub_pattern(true));
+            if (!match(",")) break;
+        }
+        expect("]");
+        result.span = span_from(start);
+        return result;
+    }
+
+    // A literal, a range, a rest element or another form that is not a
+    // pattern of 0.3.0 (E0231). The form is read as an expression, or as
+    // `...name`, so that the error covers all of it.
+    [[noreturn]] void unsupported_pattern() {
+        const auto start = cursor_;
+        const auto& token = current();
+        const bool literal = token.kind == TokenKind::Integer || token.kind == TokenKind::Float ||
+                             token.kind == TokenKind::String || at("true") || at("false") || at("nil") ||
+                             at("-");
+        if (match("...")) {
+            if (current().kind == TokenKind::Identifier) advance();
+            throw Diagnostic(span_from(start), "a rest pattern is not supported").with_code("E0231")
+                .label("rest and list patterns are not part of 0.3.0")
+                .help("match a tuple with one sub-pattern per element");
+        }
+        if (!literal) expected("a pattern");
+        const auto form = expression();
+        const bool range = form.kind == Expr::Kind::Range;
+        throw Diagnostic(form.span, range ? "a range pattern is not supported" : "a literal pattern is not supported")
+            .with_code("E0231").label(range ? "range patterns are not part of 0.3.0" : "literal patterns are not part of 0.3.0")
+            .help("bind the value and test it in a guard");
+    }
+
+    // Keeps an arm in the form of 0.2 in that form as well (syntax.hpp,
+    // MatchArm), and lists every name a general arm binds.
+    static void flatten_arm(MatchArm& arm, const PatternSyntax& pattern) {
+        using Kind = PatternSyntax::Kind;
+        const auto simple_element = [](const PatternSyntax& element) {
+            return element.kind == Kind::Wildcard || element.kind == Kind::Binding;
+        };
+        arm.general = arm.guard.has_value() || pattern.kind == Kind::Tuple ||
+                      !std::ranges::all_of(pattern.elements, simple_element);
+        arm.variant = pattern.kind == Kind::Variant ? pattern.name : pattern.kind == Kind::Wildcard ? "_" : "";
+        if (!arm.general) {
+            arm.named = pattern.named;
+            arm.fields = pattern.fields;
+            for (const auto& element : pattern.elements)
+                arm.bindings.push_back(Token{TokenKind::Identifier, element.kind == Kind::Wildcard ? "_" : element.name,
+                                             element.span});
+            return;
+        }
+        const std::function<void(const PatternSyntax&)> collect = [&](const PatternSyntax& item) {
+            if (item.kind == Kind::Binding)
+                arm.bindings.push_back(Token{TokenKind::Identifier, item.name, item.name_span});
+            for (const auto& element : item.elements) collect(element);
+        };
+        collect(pattern);
     }
 
     // After `for`. A header of the form `(let name [: Type] in collection)`
@@ -1502,6 +1968,10 @@ private:
             result.expressions.push_back(expression());
             if (at("=") || at("+=") || at("-=") || at("*=") || at("/=") || at("%=") ||
                 at("&=") || at("^=") || at("|=") || at("<<=") || at(">>=")) {
+                if (const auto* access = optional_access(result.expressions.front()))
+                    throw Diagnostic(*access->operator_span, "malformed optional access: '?.' is not an assignment target")
+                        .with_code("E0233").label("an optional access gives a value, not a place")
+                        .help("test the receiver for nil and assign through '.'");
                 result.kind = Statement::Kind::Assignment;
                 result.assignment_operator = advance().text;
                 result.expressions.push_back(expression());
@@ -1543,7 +2013,7 @@ private:
     }
 
     Expr expression_tail(std::size_t start, Expr left, int minimum_precedence, bool range_step = true,
-                         std::string_view branch_keyword = {}) {
+                         std::string_view branch_keyword = {}, bool binary_only = false) {
         while (precedence() >= minimum_precedence) {
             const auto priority = precedence();
             const bool shift = at_shift();
@@ -1562,16 +2032,36 @@ private:
             binary.operands.push_back(std::move(right));
             left = std::move(binary);
         }
+        if (binary_only) return left;
+        if (minimum_precedence == 1 && at("??")) left = coalesce(start, std::move(left), branch_keyword);
         if (minimum_precedence == 1 && match("..")) {
             auto range = make_expression(Expr::Kind::Range, left.span);
             range.operands.push_back(std::move(left));
-            range.operands.push_back(expression(2, true, branch_keyword));
-            if (range_step && match(":")) range.operands.push_back(expression(2, true, branch_keyword));
+            range.operands.push_back(range_bound(branch_keyword));
+            if (range_step && match(":")) range.operands.push_back(range_bound(branch_keyword));
             range.span = span_from(start);
             left = std::move(range);
         }
-        if (minimum_precedence == 1 && match("?")) {
+        if (minimum_precedence == 1 && at("?")) {
+            const auto after = tokens_[cursor_ + 1];
+            advance();
             auto when_true = expression(1, false);
+            if (!at(":")) {
+                try {
+                    expect(":");
+                } catch (Diagnostic& error) {
+                    // `r? - 1` is a conditional (docs/design/Matching030.md).
+                    if (after.kind == TokenKind::Symbol &&
+                        (after.text == "-" || after.text == "(" || after.text == "[" || after.text == "{" ||
+                         after.text == "++" || after.text == "--" || after.text == "!" || after.text == "~")) {
+                        const auto operand = source_text(left.span);
+                        const auto rest = source_text(when_true.span);
+                        error.help("to return an error here, write '(" + operand.value_or("r") + "?) " +
+                                   rest.value_or("") + "'");
+                    }
+                    throw;
+                }
+            }
             expect(":");
             auto when_false = expression(1, range_step, branch_keyword);
             auto conditional = make_expression(Expr::Kind::Conditional, span_from(start));
@@ -1581,6 +2071,29 @@ private:
             return conditional;
         }
         return left;
+    }
+
+    // A range's end or step: `??` is tighter than `..`, so `a .. b ?? c`
+    // ends at `b ?? c`.
+    Expr range_bound(std::string_view branch_keyword) {
+        const auto start = cursor_;
+        auto bound = expression(2, true, branch_keyword);
+        if (at("??")) bound = coalesce(start, std::move(bound), branch_keyword);
+        return bound;
+    }
+
+    // `left ?? right` (docs/design/Matching030.md): looser than '||',
+    // tighter than '..' and '? :', and right-associative.
+    Expr coalesce(std::size_t start, Expr left, std::string_view branch_keyword) {
+        const auto token = advance().span;
+        const auto right_start = cursor_;
+        auto right = expression_tail(right_start, cast(branch_keyword), 1, true, branch_keyword, true);
+        if (at("??")) right = coalesce(right_start, std::move(right), branch_keyword);
+        auto result = make_expression(Expr::Kind::Coalesce, span_from(start), "??");
+        result.operator_span = token;
+        result.operands.push_back(std::move(left));
+        result.operands.push_back(std::move(right));
+        return result;
     }
 
     bool at_comparison_connector(std::string_view branch_keyword) const {
@@ -1634,6 +2147,9 @@ private:
         if (at("++") || at("--")) {
             const auto op = advance().text;
             auto operand = unary(branch_keyword);
+            if (const auto* access = optional_access(operand))
+                throw Diagnostic(*access->operator_span, "malformed optional access: '?.' takes no '" + op + "'")
+                    .with_code("E0233").label("an optional access gives a value, not a place");
             auto result = make_expression(Expr::Kind::PrefixUpdate, span_from(start), op);
             result.operands.push_back(std::move(operand));
             return result;
@@ -1647,12 +2163,20 @@ private:
         }
         auto operand = postfix(branch_keyword);
         if (at("++") || at("--")) {
+            if (const auto* access = optional_access(operand))
+                throw Diagnostic(*access->operator_span, "malformed optional access: '?.' takes no '" + current().text + "'")
+                    .with_code("E0233").label("an optional access gives a value, not a place");
             const auto op = advance().text;
             auto result = make_expression(Expr::Kind::PostfixUpdate, span_from(start), op);
             result.operands.push_back(std::move(operand));
             return result;
         }
         return operand;
+    }
+
+    // The optional access that `expr` ends in, `a?.b`, if any.
+    static const Expr* optional_access(const Expr& expr) {
+        return expr.kind == Expr::Kind::OptionalMember ? &expr : nullptr;
     }
 
     std::vector<Expr> expression_list(std::string_view close) {
@@ -1717,11 +2241,65 @@ private:
 
     Expr postfix(std::string_view branch_keyword) {
         const auto start = cursor_;
-        return postfix_tail(start, primary(branch_keyword));
+        return propagation(start, postfix_tail(start, primary(branch_keyword)));
+    }
+
+    // A postfix `?` (docs/design/Matching030.md) is decided by the next
+    // token alone: one that can begin an expression makes the `?` the
+    // conditional operator's, `.` is an error, and anything else makes it
+    // propagation.
+    Expr propagation(std::size_t start, Expr result) {
+        while (at("?")) {
+            const auto& next = tokens_[cursor_ + 1];
+            if (begins_expression(next)) break;
+            if (next.kind == TokenKind::Symbol && next.text == ".")
+                throw Diagnostic(current().span, "'?' is followed by '.'").with_code("E0232")
+                    .label("a postfix '?' cannot take a member")
+                    .help("to read a member of the success value, write '(r?).name'; for optional access, write 'r?.name'");
+            const auto token = advance().span;
+            auto propagate = make_expression(Expr::Kind::Propagate, span_from(start), "?");
+            propagate.operator_span = token;
+            propagate.operands.push_back(std::move(result));
+            result = std::move(propagate);
+        }
+        return result;
+    }
+
+    static bool begins_expression(const Token& token) {
+        switch (token.kind) {
+        case TokenKind::Identifier:
+        case TokenKind::Integer:
+        case TokenKind::Float:
+        case TokenKind::String:
+            return true;
+        case TokenKind::Keyword:
+            return token.text == "new" || token.text == "func" || token.text == "match" || token.text == "import" ||
+                   token.text == "true" || token.text == "false" || token.text == "nil";
+        case TokenKind::Symbol:
+            return token.text == "(" || token.text == "[" || token.text == "{" || token.text == "-" ||
+                   token.text == "!" || token.text == "~" || token.text == "++" || token.text == "--";
+        default:
+            return false;
+        }
     }
 
     Expr postfix_tail(std::size_t start, Expr result) {
         while (true) {
+            if (at("?.")) {
+                // `receiver?.member` (docs/design/Matching030.md).
+                const auto token = advance().span;
+                if (current().kind != TokenKind::Identifier)
+                    throw Diagnostic(token, "malformed optional access: '?.' must be followed by a member name")
+                        .with_code("E0233").label(current().kind == TokenKind::End
+                                                      ? std::string("expected a member name before the end of the file")
+                                                      : "expected a member name, " + found_text(current()));
+                const auto name = advance().text;
+                auto member = make_expression(Expr::Kind::OptionalMember, span_from(start), name);
+                member.operator_span = token;
+                member.operands.push_back(std::move(result));
+                result = std::move(member);
+                continue;
+            }
             if (match(".")) {
                 const auto name = identifier().text;
                 auto member = make_expression(Expr::Kind::Member, span_from(start), name);
@@ -1797,17 +2375,7 @@ private:
             result.match = std::make_shared<Statement>(std::move(statement));
             return result;
         }
-        if (match("func")) {
-            auto lambda = std::make_shared<Declaration>();
-            lambda->kind = Declaration::Kind::Function;
-            function_body(*lambda, branch_keyword, true);
-            if (!lambda->has_body)
-                throw Diagnostic(current().span, "expected a function body").with_code("E0202");
-            lambda->span = span_from(start);
-            auto result = make_expression(Expr::Kind::Lambda, lambda->span);
-            result.lambda = std::move(lambda);
-            return result;
-        }
+        if (match("func")) return lambda_expression(start, branch_keyword);
         if (match("(")) {
             auto result = expression();
             expect(")");
@@ -1828,7 +2396,7 @@ private:
             result.span = span_from(start);
             return result;
         }
-        if (match("new")) return new_expression(start);
+        if (match("new")) return new_expression(start, branch_keyword);
         if (match("import")) {
             expect(":");
             if (current().kind == TokenKind::Identifier && current().text == "c" &&
@@ -1894,6 +2462,18 @@ private:
                                                 : "expected an expression, found '" + token.text + "'");
     }
 
+    Expr lambda_expression(std::size_t start, std::string_view branch_keyword, bool owned = false) {
+        auto lambda = std::make_shared<Declaration>();
+        lambda->kind = Declaration::Kind::Function;
+        function_body(*lambda, branch_keyword, true);
+        if (!lambda->has_body)
+            throw Diagnostic(current().span, "expected a function body").with_code("E0202");
+        lambda->span = span_from(start);
+        auto result = make_expression(Expr::Kind::Lambda, lambda->span, owned ? "new" : "");
+        result.lambda = std::move(lambda);
+        return result;
+    }
+
     // After `new` (ObjectLifecycle.md, Construction):
     //   new T(arguments)     the class T
     //   new(arguments)       target-typed: `(` always begins arguments
@@ -1901,10 +2481,20 @@ private:
     //                        anything that cannot begin a type, such as
     //                        `;`, `,`, `)`, `]`, or `}`
     // A target-typed `new` has no type; lowering takes the expected type.
-    Expr new_expression(std::size_t start) {
+    Expr new_expression(std::size_t start, std::string_view branch_keyword) {
         if (at_contextual("with")) return copy_expression(start);
+        if (match("func")) return lambda_expression(start, branch_keyword, true);
+        if (at_contextual("bound") && next_is(1, "(")) {
+            advance();
+            expect("(");
+            auto target = expression();
+            expect(")");
+            auto result = make_expression(Expr::Kind::New, span_from(start), "bound");
+            result.operands.push_back(std::move(target));
+            return result;
+        }
         const bool type_start = current().kind == TokenKind::Identifier || at("&") || at("[") ||
-                                at("func") || at("class");
+                                at("class");
         if (!at("(") && !type_start) return make_expression(Expr::Kind::New, span_from(start));
         std::optional<TypeSyntax> object_type;
         if (at("class") && next_is(1, "(") && next_is(2, ")") && !next_is(3, "(")) {

@@ -1,0 +1,43 @@
+// Class hook clauses (docs/design/Hooks030.md, Class hook clauses): a rule
+// about every reference of a class, where an accessor is a rule about one
+// field. The administrator's nil keeps its policy when stored in Desk.current.
+let console = import:Std.Io.Console;
+let failure = import:Std.Core.Failure;
+let program = import:Std.Program;
+
+let Session = class (
+    | get: instance;
+    | set: {
+        if (value == nil) {
+            failure.trap("a Session reference is never nil");
+        }
+        return value;
+    };
+
+    export last user: string;
+    export let init = func(user: string) => set;
+);
+
+// An administrator's references accept nil; the getter is inherited.
+let Admin = class:Session (
+    | set.override: value;
+
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+
+let Desk = class (
+    export let current: Session = new Session("guest");
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let desk: Desk = new;
+        console.print_line(desk.current.user);
+        let admin: Admin = nil;
+        desk.current = admin;
+        if (desk.current == nil) { console.print_line("no administrator"); }
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,6 @@
+// Case 66: spawn needs a scope block in a function body.
+let work = func() -> void { };
+
+static scope {
+    spawn work();
+}

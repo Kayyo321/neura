@@ -1,0 +1,9 @@
+error[E0497]: '?' outside a function that returns a Result
+ --> $DIR/propagate-untyped-lambda.nra:8:48
+  |
+8 |     let value = apply(func(text) => parse(text)?);
+  |                                                ^ the enclosing function returns no result
+  |
+  = help: handle the result with 'match'
+
+For more information about this error, try `neura explain E0497`.

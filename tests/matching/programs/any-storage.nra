@@ -1,0 +1,43 @@
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Named = interface (let number = func -> int;);
+let Item = class implements Named (
+    export let number = func -> int => 17;
+);
+let Box = class (
+    export let item: any = nil;
+);
+let Choice = enum (Empty, Saved(any));
+let original: string = "";
+let erased: any = nil;
+let first = func(xs: ...any) -> any => xs[0];
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let item: Item = new;
+        let named: Named = item;
+        let wide: class = named;
+        let list: any[list] = new([named, wide, nil]);
+        let values: any[] = [first(list[0]), list[1]];
+        let box: Box = new;
+        box.item = values[0];
+        let saved = Choice.Saved(box.item);
+        let copy = match (saved) { Choice.Saved(v) => v, Choice.Empty => nil as any, };
+        let same = match.is (copy) { found: Item => found === item, _ => false, };
+        if (!same || !(values[1] is Named)) { return program.ExitCode.Failure; }
+        let absent = match.is (list[2]) { nil => true, _ => false, };
+        if (!absent) { return program.ExitCode.Failure; }
+        let long_text = args.length == 0 ? "abcdefgh" : args[0];
+        original = long_text;
+        erased = long_text;
+        list[0] = long_text;
+        box.item = list[0];
+        let equal = match.is (box.item) { text: string => text == long_text, _ => false, };
+        if (!equal) { return program.ExitCode.Failure; }
+        list[0] = "";
+        let empty = match.is (list[0]) { text: string => text == "", _ => false, };
+        if (!empty) { return program.ExitCode.Failure; }
+        console.print_line("identity and text survive storage");
+        return program.ExitCode.Ok;
+    };
+);

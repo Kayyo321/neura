@@ -1,0 +1,11 @@
+error[E0452]: reference to a local captured by a closure
+ --> $DIR/borrow-captured-by-owned-closure.nra:4:12
+  |
+3 |     let alias: &int = value;
+  |     ------------------------ borrow starts here
+4 |     return new func -> int => alias;
+  |            ^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = help: keep the borrow within the binding's lifetime or use a field of a long-lived owner
+
+For more information about this error, try `neura explain E0452`.

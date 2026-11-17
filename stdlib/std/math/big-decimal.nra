@@ -227,7 +227,7 @@ export let BigDecimal = module (
         };
 
         /// @brief Numeric equality: 2.0 equals 2.00.
-        #Pure
+        /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
             if (!(other is BigDecimal)) {
                 return false;

@@ -64,7 +64,7 @@ export let Main = module : program.Entry (
         }
 
         let offset = 100;
-        let shifted = parallel.map<int, int>([1, 2, 3], func(x: int) -> int => x + offset, parallel.limits(100000, 100000));
+        let shifted = parallel.map<int, int>([1, 2, 3], new func(x: int) -> int => x + offset, parallel.limits(100000, 100000));
         console.print_line((shifted[0] + shifted[1] + shifted[2]).to_string());
 
         let words: string[] = ["ab", "", "xyz"];

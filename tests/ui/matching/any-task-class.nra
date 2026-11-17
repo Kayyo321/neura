@@ -1,0 +1,10 @@
+// Edge case 49: a task cannot be converted to class.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let work = func() -> int => 1;
+let run = func() {
+    scope {
+        let task = spawn work();
+        let c: class = task;
+    }
+};

@@ -1,0 +1,9 @@
+error[E0497]: '?' outside a function that returns a Result
+ --> $DIR/propagate-constructor.nra:9:28
+  |
+9 |         value = parse(text)?;
+  |                            ^ a constructor returns no result
+  |
+  = help: handle the result with 'match'
+
+For more information about this error, try `neura explain E0497`.

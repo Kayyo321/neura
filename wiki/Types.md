@@ -76,7 +76,7 @@ Local and global reference declarations require initializers. Static reference f
 
 A constructor can bind a field in separate branches. Binding for the first time inside a loop body or step is rejected, as is an assignment reached with the field bound on only some paths. Direct reads of a field before binding are errors.
 
-A reference keeps its storage alive after the original binding leaves scope. A function declared to return `&T` can return a reference to a mutable local. A caller can keep that alias in a reference binding. The storage of a referenced field also survives destruction of its containing object. Reading a referent before a primitive value has been stored still traps. Primitive references are unavailable as generic type arguments. See [primitive-references.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/primitive-references.nra).
+A borrow of a local or value parameter is valid within the binding's activation region. A call can use that borrow if its parameter does not retain it. Returning the borrow, storing it in a heap field, or capturing it in an escaping closure is [E0452](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0452.md). A function returning `&T` can return a borrow of a global, static field, or field of an explicitly constructed owner. A field borrow keeps its owner reachable for collection. After explicit destruction of that owner, accessing the borrow traps with `invalid reference handle`. Reading an uninitialized referent also traps. Primitive references are unavailable as generic type arguments. See [primitive-references.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/primitive-references.nra).
 
 ## Tuples
 
@@ -112,7 +112,7 @@ captured variable, or an element of an array or list, and a nested tuple is
 flattened into the run. A tuple of more than 64 value words is
 [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md). Copying a tuple copies its words, so a
 reference stored in it keeps the identity of the object it names. See
-[Backend](Backend#tuples-are-words).
+[Backend](Backend#tuples-and-enums-are-words).
 
 ### Typed and listed destructuring
 
@@ -377,6 +377,24 @@ let implicit = accept(reading);
 
 Function arguments can use one visible conversion when their type is otherwise incompatible with the parameter. Assignments and returns require ordinary assignability or an explicit `as`. A conversion from `Reading` to `int64` therefore cannot satisfy an `int32` parameter. An unexported cast is only available within its declaring class.
 
+### match.is
+
+`match.is (subject) { arms }` selects an arm by the type of the subject's value ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented, proposed). An arm's pattern is a type, `name: Type`, `nil`, or `_`, with an optional guard; `name: Type` binds a constant of that type, made by the checked refinement of the subject, never by a source `as`. The subject is evaluated once, and the arms are tried in written order. The subject is a class or interface reference, `class`, [`any`](#the-type-any), a scalar or a string; a bare type parameter is [E0411](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0411.md), and `as any` states the intent. A class or interface pattern matches a live reference of that type or a type derived from it, and is a passive test that runs no initializer. A scalar or string pattern matches a value of exactly that resolved type: `int32` never matches an `int64`, and no conversion takes part. `nil` matches an absent reference, and a type pattern never does. A pattern the subject's type can never have is [E0490](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0490.md), and an arm an earlier unguarded arm covers is [E0491](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0491.md). A class, interface, `class` or `any` subject ends with an unguarded `_`; a scalar or string subject needs an unguarded arm of its type, or `_` ([E0410](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0410.md)). A malformed `match.is` is [E0230](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0230.md).
+
+<!-- example: check -->
+```neura
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+
+let describe = func(value: class) -> string => match.is (value) {
+    Circle => "a circle",
+    shape: Shape if shape.sides > 4 => "a large shape",
+    Shape => "a shape",
+    nil => "nothing",
+    _ => "something else",
+};
+```
+
 ### Accessors
 
 An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.
@@ -434,6 +452,48 @@ A field with only `get` is read-only outside its class: assigning it there, or u
 **Places.** A primitive reference cannot alias a field that is reached through its accessors. Passing `my_data.non_zero` to an `&int` parameter, or binding it to a reference, is error `E0524`. Copy the value into a local, pass the local, and assign the result back.
 
 **Limits in this release.** An unmarked accessor resolves statically to the declaring class: it is not virtual and cannot be overridden, and a subclass cannot redeclare the field. An interface requires a property with bodyless clauses ([Interface properties](Polymorphism#interface-properties)), which a field, with or without accessors, satisfies. Accessors are allowed only on exported instance fields (`E0516`, `E0517`, `E0518`, `E0519`). A `const` or `last` field can have a getter but not a setter (`E0521`). A field named `value` cannot have a setter (`E0522`). A primitive reference field cannot have accessors (`E0523`). Calling an accessor through a nil reference traps like any instance method. A getter or setter call is an ordinary method call to the [task-safety](#task-safe-calls) analysis and the optimizer. In NeuraIR the clauses are the hidden methods `$get_<field>` and `$set_<field>`, linked from the field by the [1.10 attributes](NirFormat#revision-110-symbol-attributes-and-deferred-initialization) `accessor.get`, `accessor.set`, and `accessor.of`, so a program that imports the class from a `.nir` file uses the same accessors. See [accessors.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/accessors.nra).
+
+### Class hooks
+
+A class hook clause is a rule about every reference of a class: a `get` clause runs when a reference is read from storage, and a `set` clause when one is admitted to storage, a parameter or a result. It is written after the `(` of a declared class and before its first member; a `|` clause after a member's `;` stays an [accessor](#accessors) of that member.
+
+<!-- example: check -->
+```neura
+let failure = import:Std.Core.Failure;
+
+let Session = class (
+    | get: instance;
+    | set: {
+        if (value == nil) {
+            failure.trap("a Session reference is never nil");
+        }
+        return value;
+    };
+
+    export last user: string;
+    export let init = func(user: string) => set;
+);
+
+let Admin = class:Session (
+    | set.override: value;
+
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+```
+
+- A class has at most one `get` and one `set` clause, in either order, each ending with `;` (`E0538`, `E0215`). A clause takes no tags and no `export`.
+- Both clauses yield a reference of the class: an expression of the class's type, or a block that returns one on every path or traps (`E0542`). In a getter `instance` is the reference being read; in a setter `value` is the incoming reference and `instance` what the destination held. Both are immutable.
+- A class without a clause of a kind inherits the nearest base class's. Replacing an inherited clause is written `| get.override:` or `| set.override:` (`E0539`); `.override` with nothing to replace is `E0540`.
+- Interfaces, modules, enums and anonymous classes cannot declare clauses (`E0216`), nor can a class with `#Synchronized` methods or whose base has one (`E0541`). A clause of a class that is not `#Final` cannot return a `new` object (`E0543`), and a hook cannot use the scheduler (`E0544`).
+- A field or static field of a class type that has a `set` clause needs an initializer (`E0545`); `= nil` is one, which the setter then admits.
+
+A live object's dynamic class selects its hook. A nil keeps the class policy of the admission or getter that produced it. If an incoming nil has no policy, a setter uses the previous stored value's policy, then the declared class. A getter of a plain nil also falls back to the declared class. An empty interface or umbrella `class` binding supplies no fallback class of its own. All nils compare equal and fail a type test. A checked cast of a typed nil uses its policy to decide whether that cast is valid.
+
+The setter receives nil as its previous instance on a first initialization, parameter or result admission, or if the previous object is outside the clause's declaring class. Its result must be nil or an object of exactly the selected class. A trap preserves the previous destination. The right-hand side and the hook keep any effects they already performed. Each written argument is admitted before the next one is evaluated, and a result is admitted before the function leaves its scopes. A debugger can show `nil (policy Admin)` from raw storage.
+
+The compiler records clauses in NeuraIR 1.11 and derives events after linking. A library can therefore acquire a hooked subclass from its importer. The compiled NVR 1.8 image runs independently of either source file. [Hook event rules](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md#events) · [Runnable class hook example](https://github.com/Kayyo321/neura/blob/main/examples/types/class-hooks.nra)
 
 ### Anonymous classes
 
@@ -591,18 +651,36 @@ a match. An enum with payloads has no built-in equality or numeric cast.
 
 <!-- example: check -->
 ```neura
-let Tree = enum (Empty, Leaf(int), Branch { left: Tree, right: Tree });
+let TreeLink = class (
+    export last tree: Tree;
+
+    export let init = func(value: Tree) {
+        tree = value;
+    };
+);
+
+let Tree = enum (Empty, Leaf(int), Branch { left: TreeLink, right: TreeLink });
 
 let sum = func(tree: Tree) -> int {
     return match (tree) {
         Tree.Empty => 0,
         Tree.Leaf(value) => value,
-        Tree.Branch { left, right } => sum(left) + sum(right),
+        Tree.Branch { left, right } => sum(left.tree) + sum(right.tree),
     };
 };
 
-let tree = Tree.Branch { right: Tree.Leaf(2), left: Tree.Leaf(1) };
+let tree = Tree.Branch { right: new TreeLink(Tree.Leaf(2)), left: new TreeLink(Tree.Leaf(1)) };
 ```
+
+A payload enum is stored inline, as a tuple is: a value is a `uint32` tag
+and the words of its payloads, wherever it lives, and copying it copies those
+words. An enum therefore cannot contain itself, directly or through tuples and
+other enums; that is [E0448](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0448.md), reported at the
+variant whose payload closes the cycle. Hold the link in a class, which is a
+reference, as `TreeLink` does above, or in a list. An enum's payload words
+are shared among its variants by type, and an enum of more than 64 value
+words is [E0449](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0449.md). See
+[Backend](Backend#tuples-and-enums-are-words).
 
 `match (value)` evaluates the subject once and evaluates only the selected arm.
 Each arm names a different variant, or a final `_` arm covers the remaining
@@ -613,10 +691,54 @@ visible only in their arm. A match expression uses expression arms with a
 common type. When no surrounding type is available, the first arm establishes
 the result type. A match statement uses a statement block in each arm.
 
-Patterns match one variant level. A pattern inside a pattern is a syntax
-error (`expected ')'`), and a guard written as `pattern if condition =>` is a
-syntax error (`expected '=>'`). To test a nested value, bind it and `match`
-again.
+An arm is `pattern if condition => result` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented, proposed). The guard is a `bool` expression that sees the arm's bindings; it runs after the whole pattern has matched, and when it is false the next arm is tried, with its effects kept. A payload position, or an element of a tuple pattern `[p, q]`, holds a sub-pattern: `_`, a name, a variant pattern written with its enum, or a tuple pattern. A single name is always a binding, and a whole pattern that is a name must name a variant ([E0412](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0412.md)). The subject of a `match` may be a tuple, `match ([a, b])`, whose arms are tuple patterns or `_`. Within an arm, payloads are projected, tested and bound in written order, and each arm projects for itself. A name is bound at most once in a pattern ([E0301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0301.md)). Literal, range, rest and type patterns are not patterns of 0.3.0 ([E0231](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0231.md)); bind the value and test it in a guard.
+
+Coverage is computed over variants and tuples. A guarded arm covers nothing, so a match without `_` needs an unguarded arm for every value, and the error shows one value that no arm covers as a pattern ([E0410](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0410.md)). An arm that the unguarded arms before it already cover is [E0491](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0491.md). A match whose arms all have one level of bindings and no guard keeps the lowering and the errors of 0.2.
+
+<!-- example: check -->
+```neura
+let Light = enum (Red, Yellow, Green);
+let Tree = enum (Leaf(int), Node(Tree, Tree));
+
+let leftmost = func(tree: Tree) -> int => match (tree) {
+    Tree.Leaf(value) => value,
+    Tree.Node(Tree.Leaf(value), _) if value >= 0 => value,
+    Tree.Node(left, _) => leftmost(left),
+};
+
+let pair = func(a: Light, b: Light) -> int => match ([a, b]) {
+    [Light.Red, _] => 1,
+    [_, Light.Red] => 2,
+    _ => 3,
+};
+```
+
+## The type any
+
+`any` is a built-in value type that holds one value of a fixed set of types together with which type it is ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md), implemented on the milestone branch, proposed). It holds a `bool`, each sized integer, `float16`, `bfloat16`, `float32` and `float64`, a `string`, a class or interface reference including `class`, and nil. It does not hold an array, a list, a tuple, an enum (`Optional` and `Result` included), a function value, a primitive reference or a [scope-bound](#scope-bound-types) value ([E0492](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0492.md)); a class that wraps such a value can be held as a reference.
+
+A value is packed where an `any` is expected: a binding, field or parameter of type `any`, an assignment to one, a `return` from a function that returns `any`, an element of a collection of `any`, each argument of a variadic `...any`, and each result of a conditional or `match` whose expected type is `any`. `value as any` packs anywhere. Nothing else produces an `any`: inference never solves a type parameter to `any` unless an argument is one, and packing ranks below every other match in overload selection. Packing an `any` gives the same `any`, and packing keeps a scalar's bits, width and signedness, a string's text and a reference's identity.
+
+A class type test inspects the saved reference without calling its getter. A binding such as `item: Session` in `match.is` reads the reference and admits it to `item` before the guard runs. If a hook produces nil, the pattern has already matched. Using `item` in the guard or result performs its own ordinary read.
+
+The only operations on an `any` are to copy, pass, return and store it, `is`, and [`match.is`](#matchis). Arithmetic, `==`, member access, `as`, `equals`, `hash_code`, `to_string` and formatting are [E0493](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0493.md): match first. An `any` is not [transferable](#transferable-types), and it is not the result of a spawned call ([E0498](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0498.md)). A parameter of type `any` takes no default. No type, module, alias or type parameter is named `any` ([E0311](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0311.md)); a function, field, parameter or local named `any` keeps its meaning.
+
+<!-- example: check -->
+```neura
+let count_integers = func(values: ...any) -> int {
+    let integers = 0;
+    for (let value: any in values) {
+        if (value is int64) {
+            integers += 1;
+        }
+    }
+    return integers;
+};
+
+let count = count_integers(7 as int64, "seven", 7.0, nil);
+```
+
+An `any` uses a `uint32` tag, a `uint64` for the scalar bits, a text handle and a root class reference. If a linked class can carry a hook policy, the reference also has its nil-policy word. Packing preserves text and object handles and clears the inactive words. Source and NeuraIR 1.12 modules compile to independently executable images. [Class hook representation](https://github.com/Kayyo321/neura/blob/main/docs/design/Hooks030.md#representation)
 
 ## Scope-bound and transferable types
 
@@ -633,6 +755,7 @@ again.
 | Be an element of an array, list, or tuple held in such a local | Be captured by a lambda |
 | | Be passed to `spawn`, or sent on a channel |
 | | Be a type argument, as in `Optional<Task<int>>` or a channel of tasks |
+| | Be converted to `class`, to an interface or to [`any`](#the-type-any), by assignment, an argument, `as`, or an argument of an untyped variadic parameter: the result would no longer be known to be scope-bound. From 0.3.0 ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Matching030.md)); compare task handles with `==` |
 | | Be assigned to a binding declared outside the innermost enclosing scope. A parameter is not a local of the scope, so a function cannot `append` a task it received to a list it received. |
 
 Each violation is reported with the form `a value of type Task<int32> cannot leave its scope: it cannot be returned from a function`, naming the rule that applies.

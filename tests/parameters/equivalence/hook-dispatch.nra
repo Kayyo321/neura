@@ -1,0 +1,38 @@
+// Object casts, constructor shorthand and a virtual method use written order.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let log: string = "";
+
+let Session = class (
+    | get: { log += "g"; return instance; };
+    | set: { log += "s"; return value; };
+
+    export let init = func { log += "n"; };
+);
+let Converts = class (
+    export let.as Session = func -> Session {
+        log += "k";
+        return new Session();
+    };
+);
+let Pair = class (
+    export last left: Session;
+    export last right: Session;
+    export let init = func(left, right: Session) => set;
+);
+let Base = class (
+    export let accept = func(left, right: Session) { log += "b"; };
+);
+let Derived = class:Base (
+    export let.override accept = func(left, right: Session) { log += "d"; };
+);
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let pair = new Pair(right: new Session(), left: new Session());
+        let target: Base = new Derived();
+        target.accept(right: new Session(), left: new Session());
+        target.accept(right: new Converts(), left: new Session());
+        console.print_line(log);
+        return program.ExitCode.Ok;
+    };
+);

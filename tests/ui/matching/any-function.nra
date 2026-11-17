@@ -1,0 +1,4 @@
+// Edge case 48: a function value cannot be held in any.
+let.promote _ = import:Std.Core.Optional;
+let Shape = class ( export let sides: int = 0; );
+let v: any = func(x: int) -> int => x;

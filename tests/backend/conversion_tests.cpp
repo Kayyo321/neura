@@ -13,6 +13,10 @@
 #include "neura-ir/float.hpp"
 #include "nvr/names.hpp"
 #include "neura-ir/integer.hpp"
+#include "neura-ir/specialize.hpp"
+#include "neura-ir/reference_storage.hpp"
+#include "neura-ir/inline_limit.hpp"
+#include "neura-ir/containment.hpp"
 
 #include <filesystem>
 #include <fstream>
@@ -387,6 +391,176 @@ NEURA_TEST(conversion, initialization_order_matches_the_evaluator) {
     check_equal(captured.output, recorded, "stdout matches main.out");
 }
 
+NEURA_TEST(conversion, any_preserves_a_typed_nil_policy_through_collections_and_calls) {
+    const auto image = build_program({backend_dir(environment) / "any" / "nil-policy.nra"});
+    const auto names = nvr::decode_names(image).value();
+    nvm::Execution execution(image, {});
+    const auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::HostRequest, "the program reached its inspection point");
+    const auto globals = execution.debug_snapshot().globals;
+    const auto word = [&](const std::string& name) {
+        const auto found = std::ranges::find(names.globals, name);
+        check(found != names.globals.end(), "missing any storage word: " + name);
+        return globals[found - names.globals.begin()].bits;
+    };
+    const auto layout = std::ranges::find(names.layouts, "Session");
+    check(layout != names.layouts.end(), "the admitted class has a layout");
+    const auto policy = static_cast<std::uint64_t>(layout - names.layouts.begin()) + 1;
+    check_equal(word("result.$any.tag"), std::uint64_t{0}, "the typed nil has the reference tag");
+    check_equal(word("result.reference"), std::uint64_t{0}, "the admitted object became nil");
+    check_equal(word("result.reference.policy"), policy, "the selected class policy survived transport");
+    check_equal(word("raw.reference.policy"), std::uint64_t{0}, "a bare nil has no policy");
+}
+
+NEURA_TEST(conversion, any_keeps_the_same_mebibyte_text_handle) {
+    const auto path = environment.source_dir / "tests" / "matching" / "programs" / "any-storage.nra";
+    const auto image = build_program({path});
+    const auto names = nvr::decode_names(image).value();
+    const auto original = std::ranges::find(names.globals, "original");
+    const auto packed = std::ranges::find(names.globals, "erased.text");
+    check(original != names.globals.end() && packed != names.globals.end(), "the original and packed text storage");
+    const std::vector<std::string> inputs{std::string(1U << 20, 'q')};
+    nvm::Execution execution(image, inputs);
+    const auto event = execution.advance();
+    check(event.kind == nvm::Event::Kind::HostRequest, "the packed text compared equal");
+    const auto globals = execution.debug_snapshot().globals;
+    const auto handle = globals[original - names.globals.begin()].bits;
+    check(handle != 0, "the source text is a live entry");
+    check_equal(globals[packed - names.globals.begin()].bits, handle, "packing retained precisely the same handle");
+    CapturingConsole console;
+    execution.complete(console.invoke(event.request));
+    const auto finish = execution.advance();
+    check(finish.kind == nvm::Event::Kind::Completed && finish.status == 0, "collection and field round trip");
+}
+
+NEURA_TEST(conversion, any_marks_only_its_active_reference) {
+    const auto path = backend_dir(environment) / "any" / "collector.nra";
+    // The first run finds the real handle. In the second image an integer
+    // with exactly those bits replaces that same object in the global any.
+    std::uint64_t handle = 0;
+    for (const bool overwrite : {false, true}) {
+        auto program = lower_files({path});
+        if (overwrite) {
+            bool replaced = false;
+            const std::function<void(IrNode&)> set_bits = [&](IrNode& node) {
+                if (node.op == IrOp::Integer && node.text == "123456") {
+                    node.text = std::to_string(handle);
+                    replaced = true;
+                }
+                for (auto* region : {&node.operands, &node.body, &node.alternative})
+                    for (auto& child : *region) set_bits(child);
+            };
+            for (auto& body : program.bodies)
+                for (auto& instruction : body.instructions) set_bits(instruction);
+            check(replaced, "the scalar overwrite uses the observed handle bits");
+        }
+        const auto image = nvr::load(nvr::encode(backend::build(std::move(program)).image));
+        const auto names = nvr::decode_names(image).value();
+        const auto raw = std::ranges::find(names.globals, "stored.reference");
+        const auto scalar = std::ranges::find(names.globals, "stored.bits");
+        check(raw != names.globals.end() && scalar != names.globals.end(), "the carrier has distinct typed roots");
+        nvm::RunLimits limits;
+        limits.max_heap_cells = 768;
+        nvm::Execution execution(image, std::span<const std::string>{}, limits);
+        CapturingConsole console;
+        auto event = execution.advance();
+        check(event.kind == nvm::Event::Kind::HostRequest, "the object survived bounded allocation");
+        const auto stored = execution.debug_snapshot().globals[raw - names.globals.begin()].bits;
+        check(stored > 0, "the reference word contains a live handle");
+        if (!overwrite) {
+            handle = stored;
+            continue;
+        }
+        check_equal(stored, handle, "both runs reached the same object");
+        execution.complete(console.invoke(event.request));
+        event = execution.advance();
+        check(event.kind == nvm::Event::Kind::HostRequest, "the scalar overwrite completed");
+        const auto globals = execution.debug_snapshot().globals;
+        check_equal(globals[raw - names.globals.begin()].bits, std::uint64_t{0}, "the inactive reference was cleared");
+        check_equal(globals[scalar - names.globals.begin()].bits, handle, "the scalar equals the old handle");
+        const auto entries = execution.heap_entry_widths();
+        check(std::ranges::none_of(entries, [&](const auto& entry) { return entry.handle == handle; }),
+              "the scalar word did not keep the old object alive");
+        execution.complete(console.invoke(event.request));
+        check(execution.advance().kind == nvm::Event::Kind::Completed, "the run completed");
+        check_equal(console.output(), std::string("kept\nreleased\n"), "both collection checkpoints");
+    }
+}
+
+NEURA_TEST(conversion, inspection_preserves_hook_execution) {
+    const auto image = build_program({backend_dir(environment) / "hooks" / "references.nra"});
+    const auto oracle = run_captured(image);
+    check(oracle.result.completed, describe_trap(oracle.result, image));
+    nvm::Execution execution(image, std::span<const std::string>{});
+    CapturingConsole console;
+    std::vector<std::int64_t> scratch, outputs;
+    auto inspected = std::size_t{0};
+    const auto inspect = [&](const std::vector<nvm::DebugValue>& values) {
+        for (const auto& value : values) {
+            if (value.children > 0) inspected += execution.debug_children(value.type, value.bits).size();
+        }
+    };
+    for (;;) {
+        nvm::Execution::GraphStep step;
+        auto event = execution.begin_step(step);
+        if (!event) {
+            const auto snapshot = execution.debug_snapshot();
+            inspect(snapshot.globals);
+            for (const auto& thread : snapshot.threads) {
+                for (const auto& frame : thread.frames) inspect(frame.slots);
+            }
+            outputs.resize(step.output_count);
+            const auto overflow = nvm::evaluate_outputs(image.graphs[step.graph], step.inputs, scratch, outputs);
+            check(!overflow, "the fixture graphs evaluate successfully");
+            event = execution.finish_step(outputs);
+        }
+        if (!event) continue;
+        if (event->kind == nvm::Event::Kind::HostRequest) {
+            execution.complete(console.invoke(event->request));
+            continue;
+        }
+        check(event->kind == nvm::Event::Kind::Completed, "the inspected hook program completes");
+        check_equal(event->status, oracle.result.status, "status");
+        break;
+    }
+    check(inspected > 0, "inspected object or collection children");
+    check_equal(console.output(), oracle.output, "hook trace while inspecting every block");
+    check_equal(console.requests.size(), oracle.requests.size(), "host requests");
+    check_equal(execution.steps(), oracle.result.steps, "steps");
+    check_equal(execution.peak_heap_cells(), oracle.result.peak_heap_cells, "peak heap cells");
+    check_equal(execution.peak_stack_cells(), oracle.result.peak_stack_cells, "peak stack cells");
+}
+
+// The source range producer only repeats numbers. NeuraIR also permits a
+// class reference as a repeat fill. Evaluate its getter once even for length
+// zero, then admit the saved value once for each element.
+NEURA_TEST(conversion, repeated_class_reference_admission) {
+    for (const auto length : {0, 3}) {
+        auto program = lower_files({backend_dir(environment) / "hooks" / "repeat.nra"});
+        bool replaced = false;
+        for (auto& body : program.bodies) {
+            for (auto& node : body.instructions) {
+                if (node.op != IrOp::Initialize || program.symbols[node.symbol].name != "batch") continue;
+                auto& collection = node.operands.front();
+                check(collection.op == IrOp::Collection && collection.operands.size() == 1, "the single fill");
+                IrNode count{};
+                count.op = IrOp::Integer;
+                count.span = collection.span;
+                count.type = {TypeKind::Integer, "uint64", no_symbol, {}};
+                count.text = std::to_string(length);
+                collection.op = IrOp::RepeatCollection;
+                collection.operands.insert(collection.operands.begin(), std::move(count));
+                replaced = true;
+            }
+        }
+        check(replaced, "the fixture includes the batch initializer");
+        const auto image = nvr::load(nvr::encode(backend::build(std::move(program)).image));
+        const auto run = run_captured(image);
+        check(run.result.completed, describe_trap(run.result, image));
+        check_equal(run.result.status, 1 + length * 10, "a getter once and a setter per repeated element");
+    }
+}
+
 NEURA_TEST(conversion, optimized_and_unoptimized_images_agree) {
     for (const auto& entry : fs::directory_iterator(backend_dir(environment) / "programs")) {
         if (entry.path().extension() != ".nra") {
@@ -555,6 +729,73 @@ NEURA_TEST(conversion, source_map_is_optional) {
               "source map label " + location.path + " is relative");
     }
     check(program_label, "the program's own blocks are labeled computation.nra");
+}
+
+// A payload enum is a run of value words: a uint32 tag, then its payload words pooled by type. Optional and Result
+// over a payload that needs no allocation allocate nothing, a function returns an enum's words, a word that the
+// variant does not use is zero, empty text or the nil collection, and the words carry the binding's name.
+NEURA_TEST(conversion, payload_enums_are_value_words) {
+    using Kind = nvr::TypeKind;
+    // The functions use generic library enums, so the program is specialized as `neura build` does.
+    Compiled compiled;
+    compiled.program = lower_files({fixture(environment, "enum-words")});
+    auto specialized = compiled.program;
+    materialize_reference_storage(specialized);
+    specialize(specialized);
+    check_containment(specialized);
+    check_inline_limit(specialized);
+    optimize(specialized);
+    backend::ConversionOptions options;
+    const auto module = find_symbol(specialized, "Words");
+    for (SymbolId id = 0; id < specialized.symbols.size(); ++id) {
+        const auto& symbol = specialized.symbols[id];
+        if (symbol.owner == module && symbol.kind == SymbolKind::Function) options.extra_functions.push_back(id);
+    }
+    compiled.conversion = backend::convert(specialized, options);
+    compiled.image = nvr::load(nvr::encode(compiled.conversion.image));
+    const auto names = nvr::decode_names(compiled.image).value();
+    const auto index_of = [&](std::string_view name) {
+        return function_index(compiled, find_symbol(compiled.program, "Words." + std::string(name)));
+    };
+    const auto words_of = [&](std::string_view name) {
+        return compiled.image.functions[index_of(name)].more_results.size() + 1;
+    };
+    check_equal(words_of("some"), std::size_t{2}, "Optional<int> is a tag and an int32");
+    // Ok(int) and Err(Error) share the int32 word: the tag, then int32, then Error's words but its int32.
+    check_equal(words_of("ok"), std::size_t{8}, "Result<int> is 1 + 7 words");
+    check_equal(words_of("count"), std::size_t{4}, "Token is a tag, an int32, a text and a list");
+    for (const auto* name : {"some", "unwrap", "ok", "count", "tag"}) {
+        for (const auto& block : compiled.image.functions[index_of(name)].blocks) {
+            for (const auto& exit : block.exits) {
+                check(exit.kind != nvr::ExitKind::State || (exit.operation != nvr::StateOp::AllocateObject &&
+                                                            exit.operation != nvr::StateOp::ReadField),
+                      std::string(name) + " allocates no object and reads no field");
+            }
+        }
+    }
+    // Token.Count leaves its text word empty and its list word nil.
+    const auto count = index_of("count");
+    bool empty_text = false;
+    bool nil_list = false;
+    for (const auto& block : compiled.image.functions[count].blocks) {
+        for (const auto& exit : block.exits) {
+            if (exit.kind != nvr::ExitKind::Return) continue;
+            for (const auto& value : exit.arguments) {
+                if (value.kind != nvr::ValueKind::Constant) continue;
+                const auto& constant = compiled.image.constants[value.index];
+                const auto kind = compiled.image.types[constant.type].kind;
+                empty_text = empty_text || (kind == Kind::Text && constant.payload.empty());
+                nil_list = nil_list || (kind == Kind::List && constant.payload.empty());
+            }
+        }
+    }
+    check(empty_text, "an unused text word is the empty text");
+    check(nil_list, "an unused list word is the nil collection constant");
+    check_equal(compiled.image.minor_version, std::uint16_t{7}, "enum results make the image NVR 1.7");
+    const auto& slots = names.slots[index_of("tag")];
+    check(slots.size() >= 4 && slots[0] == "token.tag" && slots[1] == "token.Count.0" && slots[2] == "token.Name.0" &&
+              slots[3] == "token.Items.0",
+          "an enum parameter's words are named by tag and payload");
 }
 
 #ifndef _WIN32

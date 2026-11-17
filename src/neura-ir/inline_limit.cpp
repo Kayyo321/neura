@@ -7,8 +7,6 @@ namespace neura {
 
 namespace {
 
-constexpr std::size_t saturated_words = std::size_t{1} << 32;
-
 bool in_template(const IrProgram& program, SymbolId id) {
     for (auto scope = id; scope != no_symbol && scope < program.symbols.size(); scope = program.symbols[scope].owner) {
         const auto& item = program.symbols[scope];
@@ -18,41 +16,38 @@ bool in_template(const IrProgram& program, SymbolId id) {
     return false;
 }
 
-// The first tuple, in a pre-order walk of `type`, whose own word count is over
-// the limit. A tuple that holds an oversized tuple is not itself reported: the
-// inner one names the shape that is too large.
-const IrType* oversized(const IrType& type) {
+// The first inline value, in a pre-order walk of `type`, whose own word count
+// is over the limit. A tuple or enum that holds an oversized one is not itself
+// reported: the inner one names the shape that is too large.
+const IrType* oversized(ValueLayouts& layouts, const IrProgram& program, const IrType& type) {
     for (const auto& part : type.arguments) {
-        if (const auto* inner = oversized(part)) return inner;
+        if (const auto* inner = oversized(layouts, program, part)) return inner;
     }
-    if (type.kind == TypeKind::Tuple && value_words(type) > max_inline_words) return &type;
-    return nullptr;
+    if (!layouts.inline_value(type) || layouts.value_words(type) <= max_inline_words) return nullptr;
+    if (type.kind == TypeKind::Enum) {
+        for (const auto variant : layouts.variants(type.symbol)) {
+            for (const auto& payload : program.symbols[variant].payload_types) {
+                if (const auto* inner = oversized(layouts, program, payload)) return inner;
+            }
+        }
+    }
+    return &type;
 }
 
-void check_type(const IrProgram& program, const IrType& type, const Span& span) {
+void check_type(ValueLayouts& layouts, const IrProgram& program, const IrType& type, const Span& span) {
     if (type.kind == TypeKind::Void) return;
-    if (const auto* big = oversized(type)) throw inline_limit_diagnostic(program, *big, span);
+    if (const auto* big = oversized(layouts, program, type)) throw inline_limit_diagnostic(program, *big, span);
 }
 
-void check_node(const IrProgram& program, const IrNode& node) {
-    check_type(program, node.type, node.span);
-    for (const auto& argument : node.type_arguments) check_type(program, argument, node.span);
+void check_node(ValueLayouts& layouts, const IrProgram& program, const IrNode& node) {
+    check_type(layouts, program, node.type, node.span);
+    for (const auto& argument : node.type_arguments) check_type(layouts, program, argument, node.span);
     for (const auto* region : {&node.operands, &node.body, &node.alternative}) {
-        for (const auto& child : *region) check_node(program, child);
+        for (const auto& child : *region) check_node(layouts, program, child);
     }
 }
 
 } // namespace
-
-std::size_t value_words(const IrType& type) {
-    if (type.kind != TypeKind::Tuple) return 1;
-    std::size_t total = 0;
-    for (const auto& element : type.arguments) {
-        total += value_words(element);
-        if (total > saturated_words) return saturated_words;
-    }
-    return total;
-}
 
 std::string describe_shape(const IrProgram& program, const IrType& type) {
     switch (type.kind) {
@@ -87,16 +82,23 @@ std::string describe_shape(const IrProgram& program, const IrType& type) {
 
 Diagnostic inline_limit_diagnostic(const IrProgram& program, const IrType& type, const Span& span) {
     const auto shape = describe_shape(program, type);
-    const auto words = value_words(type);
-    auto error = Diagnostic(span, "the tuple " + shape + " has " + std::to_string(words) +
+    const auto words = ValueLayouts(program).value_words(type);
+    const auto kind = type.kind == TypeKind::Enum ? "the enum " : "the tuple ";
+    auto error = Diagnostic(span, kind + shape + " has " + std::to_string(words) +
                                       " value words, more than the inline limit of " + std::to_string(max_inline_words))
                      .with_code("E0449");
     error.label("this type is stored inline");
-    error.help("hold the elements in a class, which is a reference, or group them in smaller tuples held by a class");
+    if (HookIndex(program).contains_reference(program, type))
+        error.note("each policy-carrying reference contributes a handle and a uint32 policy word");
+    if (type.kind == TypeKind::Enum)
+        error.help("hold the payloads of the largest variants in a class, which is a reference");
+    else
+        error.help("hold the elements in a class, which is a reference, or group them in smaller tuples held by a class");
     return error;
 }
 
 void check_inline_limit(const IrProgram& program) {
+    ValueLayouts layouts(program);
     for (SymbolId id = 0; id < program.symbols.size(); ++id) {
         const auto& item = program.symbols[id];
         switch (item.kind) {
@@ -111,12 +113,12 @@ void check_inline_limit(const IrProgram& program) {
             continue;
         }
         if (in_template(program, id)) continue;
-        check_type(program, item.type, item.span);
-        for (const auto& payload : item.payload_types) check_type(program, payload, item.span);
+        check_type(layouts, program, item.type, item.span);
+        for (const auto& payload : item.payload_types) check_type(layouts, program, payload, item.span);
     }
     for (const auto& body : program.bodies) {
         if (in_template(program, body.owner)) continue;
-        for (const auto& node : body.instructions) check_node(program, node);
+        for (const auto& node : body.instructions) check_node(layouts, program, node);
     }
 }
 
