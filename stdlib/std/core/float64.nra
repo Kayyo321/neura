@@ -8,7 +8,7 @@ let.promote _ = import:Std.Core.Result;
 /// encoding (N1); text conversion follows section 7.5.
 /// @see [Std.Core.Float64](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Float64)
 #Since("0.1.0")
-export let Float64 = module (
+export let Float64 = module implements Parseable<float64> (
     /// @brief The largest finite value.
     export const Max: float64 = float64.from_bits(9218868437227405311);
     /// @brief The smallest positive (subnormal) value.

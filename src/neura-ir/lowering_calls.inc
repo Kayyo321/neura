@@ -748,7 +748,7 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
         const auto& parameter = symbol(generic);
         const auto check = [&](const IrType& declared) {
             const auto bound = substitute(declared, result);
-            if (!assignable(actual, bound))
+            if (!assignable(actual, bound) && !satisfies_by_conformance(actual, bound, solution.source, context))
                 throw Diagnostic(solution.source, "type argument " + describe(actual) + " does not satisfy the bound " +
                                                       describe(bound) + " of type parameter '" + parameter.name + "'")
                     .with_code("E0418")

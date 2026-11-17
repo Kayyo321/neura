@@ -174,6 +174,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0575](E0575.md) | invalid accessor override |
 | [E0576](E0576.md) | invalid static requirement or call of one |
 | [E0577](E0577.md) | ambiguous static requirement |
+| [E0578](E0578.md) | conformance declared by a module |
 
 ## E06xx: Concurrency
 

@@ -177,6 +177,7 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0575](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0575.md) | invalid accessor override |
 | [E0576](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0576.md) | invalid static requirement or call of one |
 | [E0577](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0577.md) | ambiguous static requirement |
+| [E0578](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0578.md) | conformance declared by a module |
 
 ## E06xx: Concurrency
 

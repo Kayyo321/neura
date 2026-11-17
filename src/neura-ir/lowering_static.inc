@@ -187,3 +187,143 @@ std::optional<IrNode> Lowering::conformance_call(const Expr& expr, Context& cont
         .help("call it as 'T." + name + "(...)' in a function with a type parameter 'T' bounded by the interface, or "
               "through the name of a class that implements it");
 }
+
+// Primitive conformance (Records030.md, Primitive conformance and the
+// contracts): `module implements I<...>, ... (` declares that a primitive's
+// companion in the trusted standard library implements static contracts.
+
+// The primitive whose companion module `module` is, or none.
+std::optional<IrType> Lowering::companion_primitive(SymbolId module) const {
+    const auto file = source_file(program_, module);
+    if (file == no_symbol || symbol(file).library_path.empty()) return std::nullopt;
+    for (const auto* name : {"bool", "string", "int8", "int16", "int32", "int64", "uint8", "uint16", "uint32",
+                             "uint64", "float16", "bfloat16", "float32", "float64"}) {
+        const auto type = primitive(name);
+        if (!type) continue;
+        const auto wrapper = primitive_wrapper(*type);
+        if (wrapper && wrapper->module == symbol(module).name && wrapper->path == symbol(file).library_path)
+            return type;
+    }
+    return std::nullopt;
+}
+
+// Checks a module's conformance list (E0578, E0504) and marks each
+// implementation static.implements for the companion's primitive.
+void Lowering::check_module_conformance(SymbolId id) {
+    if (!conformance_checked_.insert(id).second) return;
+    const auto& decl = *entries_[id].declaration;
+    if (decl.interfaces.empty()) return;
+    const auto at = decl.implements_span.value_or(decl.name_span.value_or(decl.span));
+    const auto primitive = companion_primitive(id);
+    if (!primitive)
+        throw Diagnostic(at, "conformance declared by a module").with_code("E0578")
+            .label("only a primitive's companion in the standard library declares 'implements'")
+            .note("a class conforms to an interface by listing it after 'implements'; a primitive conforms only "
+                  "through its companion")
+            .help("declare a class that implements the interface");
+    auto ctx = context(symbol(id).owner);
+    for (const auto& syntax : decl.interfaces) {
+        // A companion names the contracts of Std.Core.Arithmetic without
+        // importing them, so that a program that checks no conformance never
+        // loads that file and its image is unchanged.
+        IrType interface;
+        const auto arithmetic = library_module("std/core/arithmetic.nra", "Arithmetic", syntax.span, ctx,
+                                               "the contracts of Std.Core.Arithmetic are needed here");
+        if (const auto contract = own_member(arithmetic, syntax.name);
+            contract != no_symbol && symbol(contract).kind == SymbolKind::Interface) {
+            resolve(contract);
+            interface = symbol(contract).type;
+            interface.arguments.clear();
+            for (const auto& argument : syntax.arguments) interface.arguments.push_back(type(argument, ctx));
+        } else {
+            interface = type(syntax, ctx);
+        }
+        if (interface.kind != TypeKind::Object || symbol(interface.symbol).kind != SymbolKind::Interface)
+            throw Diagnostic(syntax.span, "an interface is required here").with_code("E0421");
+        for (const auto& view : nominal_views(program_, interface)) {
+            // The umbrella class every interface extends adds nothing a
+            // conformance must supply.
+            if (symbol(view.symbol).kind != SymbolKind::Interface) continue;
+            const auto names = entries_[view.symbol].names;
+            for (const auto& [name, member] : names) {
+                if (static_requirement(member) || static_member(member) ||
+                    symbol(member).kind == SymbolKind::TypeParameter)
+                    continue;
+                throw Diagnostic(syntax.span, "conformance declared by a module").with_code("E0578")
+                    .label("'" + describe(view) + "' has instance members, so a primitive cannot conform to it")
+                    .label(name_span(member), "'" + name + "' is an instance member");
+            }
+            for (const auto& [name, requirement] : names) {
+                if (!static_requirement(requirement)) continue;
+                resolve(requirement);
+                const auto replacements = receiver_arguments(view, view.symbol);
+                std::vector<IrType> required;
+                for (const auto parameter : symbol(requirement).parameters)
+                    required.push_back(substitute(symbol(parameter).type, replacements));
+                const auto result = substitute(symbol(requirement).type, replacements);
+                const auto own = own_member(id, name);
+                bool matches = own != no_symbol;
+                if (matches) {
+                    resolve(own);
+                    const auto& candidate = symbol(own);
+                    std::vector<IrType> actual;
+                    for (const auto parameter : candidate.parameters) actual.push_back(symbol(parameter).type);
+                    matches = candidate.kind == SymbolKind::Function && candidate.exported &&
+                              candidate.generics.empty() && entries_[own].overloads.empty() &&
+                              candidate.variadic == VariadicKind::None && actual == required && candidate.type == result;
+                }
+                if (!matches) {
+                    std::string signature = "let " + name + " = func(";
+                    for (std::size_t i = 0; i < required.size(); ++i)
+                        signature += (i ? ", " : "") + symbol(symbol(requirement).parameters[i]).name + ": " +
+                                     describe(required[i]);
+                    throw Diagnostic(syntax.span, "'" + symbol(id).name + "' must declare 'export " + signature + ") -> " +
+                                                      describe(result) + "'")
+                        .with_code("E0504")
+                        .label("'" + symbol(id).name + "' implements '" + describe(view) + "'")
+                        .label(name_span(requirement), "'" + name + "' is required here");
+                }
+                check_parameter_names(own, requirement);
+                bool attached = false;
+                for (const auto* existing : find_attributes(symbol(own), AttributeId::StaticImplements))
+                    attached = attached || existing->value.items[0].symbol == requirement;
+                if (!attached)
+                    add_attribute(symbol(own), AttributeId::StaticImplements,
+                                  attribute_list({attribute_symbol(requirement), attribute_type(*primitive)}));
+            }
+        }
+    }
+}
+
+// Whether primitive `actual` satisfies interface bound `bound` through its
+// companion, which lowering loads for the purpose as it does for a
+// primitive-qualified call.
+bool Lowering::satisfies_by_conformance(const IrType& actual, const IrType& bound, const Span& span,
+                                        const Context& context) {
+    if (!primitive_type(actual) || bound.kind != TypeKind::Object || bound.symbol >= program_.symbols.size() ||
+        symbol(bound.symbol).kind != SymbolKind::Interface)
+        return false;
+    const auto wrapper = primitive_wrapper(actual);
+    if (!wrapper) return false;
+    const auto file = library_files_.find(wrapper->path);
+    if (file == library_files_.end()) {
+        MissingPrimitiveWrapper missing(span, "type argument " + describe(actual) + " does not satisfy the bound " +
+                                                  describe(bound) + " until its companion is loaded",
+                                        std::string(wrapper->path));
+        missing.with_code("E0418");
+        throw missing;
+    }
+    const auto module = own_member(file->second, wrapper->module);
+    if (module == no_symbol || symbol(module).kind != SymbolKind::Module) return false;
+    resolve(module);
+    check_module_conformance(module);
+    if (!primitive_conforms(program_, actual, bound)) return false;
+    // The using file depends on the companion, as a primitive-qualified call
+    // makes it (wrapped_member).
+    const auto from = source_file(program_, lexical_owner(context));
+    if (from != no_symbol && from != file->second && wrapper_imports_.emplace(from, module).second) {
+        const auto dependency = add(SymbolKind::Import, "$primitive", span, from);
+        symbol(dependency).type = symbol(module).type;
+    }
+    return true;
+}

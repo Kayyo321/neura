@@ -1,5 +1,6 @@
 #include "aggregate.hpp"
 #include "attributes.hpp"
+#include "conformance.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
 #include "float.hpp"
@@ -601,6 +602,11 @@ private:
                                                                        const Span& at);
     std::optional<IrNode> conformance_call(const Expr& expr, Context& context);
     [[noreturn]] void requirement_misuse(const Span& at, const std::string& name, bool value) const;
+    // Primitive conformance through companions.
+    std::set<SymbolId> conformance_checked_;
+    std::optional<IrType> companion_primitive(SymbolId module) const;
+    void check_module_conformance(SymbolId id);
+    bool satisfies_by_conformance(const IrType& actual, const IrType& bound, const Span& span, const Context& context);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -1207,7 +1213,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         const auto check = [&](const IrType& declared) {
             const auto bound = substitute(declared, result);
             const auto& actual = result.at(params[i]);
-            if (!assignable(actual, bound)) {
+            if (!assignable(actual, bound) && !satisfies_by_conformance(actual, bound, args[i].span, context)) {
                 throw Diagnostic(args[i].span, "type argument " + describe(actual) + " does not satisfy the bound " +
                                                describe(bound) + " of type parameter '" + parameter.name + "'")
                     .with_code("E0418");
@@ -1800,7 +1806,8 @@ void Lowering::resolve(SymbolId id) {
         } else if (decl.base) {
             throw Diagnostic(decl.base->span, "a module cannot inherit from class").with_code("E0503");
         }
-        for (const auto& syntax : decl.interfaces) {
+        // A module's list is a companion's conformance (lowering_static.inc).
+        for (const auto& syntax : decl.kind == DeclKind::Module ? std::vector<TypeSyntax>{} : decl.interfaces) {
             auto interface = type(syntax, ctx);
             if (interface.kind != TypeKind::Object || symbol(interface.symbol).kind != SymbolKind::Interface) {
                 throw Diagnostic(syntax.span, "an interface is required here").with_code("E0421");
@@ -4933,6 +4940,9 @@ void Lowering::lower_declaration(SymbolId id) {
         for (const auto branch : branches) lower_declaration(branch);
     } else if (declaration.kind == DeclKind::Module || class_or_interface(symbol(id).kind)) {
         if (declaration.record) check_record(id);
+        // A companion's conformance is checked when a bound needs it
+        // (satisfies_by_conformance); any other module's is rejected here.
+        if (declaration.kind == DeclKind::Module && !companion_primitive(id)) check_module_conformance(id);
         if (symbol(id).kind == SymbolKind::Class) {
             const auto fields = reference_fields(declaration);
             if (!fields.empty()) {

@@ -991,7 +991,11 @@ private:
                 } else if (!result.singleton && match(":")) {
                     result.base = type();
                 }
-                if (result.kind == Declaration::Kind::Class && match("implements")) {
+                if ((result.kind == Declaration::Kind::Class || result.kind == Declaration::Kind::Module) &&
+                    at("implements")) {
+                    // A module's list is a primitive companion's conformance
+                    // (docs/design/Records030.md), which lowering checks.
+                    result.implements_span = advance().span;
                     do {
                         result.interfaces.push_back(type());
                     } while (match(","));

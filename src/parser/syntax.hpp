@@ -321,6 +321,9 @@ struct Declaration {
     // A record (docs/design/Records030.md): a class whose members the parser
     // built from its components. Lowering adds its value members.
     std::shared_ptr<const RecordSyntax> record{};
+    // The word `implements` of a class or of a module's conformance list
+    // (`module implements I<T> (`, trusted companions only).
+    std::optional<Span> implements_span{};
     // A member that lowering generated and no source spells, such as a
     // record's value members. Tools skip it where they show written source.
     bool generated{};

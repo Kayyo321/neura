@@ -11,7 +11,7 @@ let.promote _ = import:Std.Core.Result;
 /// intermediate value leaves its type.
 /// @see [Std.Core.UInt16](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-UInt16)
 #Since("0.1.0")
-export let UInt16 = module (
+export let UInt16 = module implements Ordered<uint16>, Parseable<uint16> (
     /// @brief The smallest value representable by this integer type.
     export const Min: uint16 = 0;
     /// @brief The largest value representable by this integer type.

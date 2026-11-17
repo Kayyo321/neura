@@ -2,6 +2,7 @@
 
 #include "aggregate.hpp"
 #include "attributes.hpp"
+#include "conformance.hpp"
 #include "control_flow.hpp"
 #include "float.hpp"
 #include "host_binding.hpp"
@@ -1451,7 +1452,8 @@ private:
             const auto& parameter = symbol(generics[i]);
             const auto check = [&](const IrType& declared) {
                 const auto bound = substitute_type(declared, generics, node.type_arguments);
-                if (!assignable(node.type_arguments[i], bound)) {
+                if (!assignable(node.type_arguments[i], bound) &&
+                    !primitive_conforms(program_, node.type_arguments[i], bound)) {
                     report(node.span, "type argument " + describe(node.type_arguments[i]) + " does not satisfy the bound " +
                                       describe(bound) + " of " + name(generics[i]));
                 }

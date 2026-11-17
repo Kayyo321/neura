@@ -162,6 +162,7 @@ NEURA_DIAGNOSTIC(E0574, "invalid virtual accessor")
 NEURA_DIAGNOSTIC(E0575, "invalid accessor override")
 NEURA_DIAGNOSTIC(E0576, "invalid static requirement or call of one")
 NEURA_DIAGNOSTIC(E0577, "ambiguous static requirement")
+NEURA_DIAGNOSTIC(E0578, "conformance declared by a module")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

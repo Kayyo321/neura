@@ -1,0 +1,7 @@
+// Only a primitive's companion in the standard library declares a
+// conformance (edge case 112).
+let.promote _ = import:Std.Core.Arithmetic;
+let Numbers = module implements Additive<int> (
+    export let zero = func() -> int => 0;
+    export let add = func(left: int, right: int) -> int => left + right;
+);

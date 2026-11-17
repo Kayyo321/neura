@@ -5,7 +5,7 @@ let.promote _ = import:Std.Core.Result;
 /// @brief Companion functions for bool (Stdlib.md section 7.4).
 /// @see [Std.Core.Bool](https://github.com/Kayyo321/neura/wiki/Stdlib-Core-Bool)
 #Since("0.1.0")
-export let Bool = module (
+export let Bool = module implements Ordered<bool>, Parseable<bool> (
     /// @brief 1 for true, 0 for false.
     #[Inline, Pure, ThreadSafe]
     export let to_int = func(v: bool) -> int => v ? 1 : 0;
