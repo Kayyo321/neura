@@ -1434,6 +1434,290 @@ def suite_doctor(kit: Kit) -> None:
         check(not (home.root / "update-check.txt").exists(), f"case 64: {name}: no update state")
 
 
+class ServiceStandIn:
+    """What the service leaves on a machine, made by hand at the paths of
+    docs/design/Service030.md: a supervisor (a process that holds the
+    supervisor's lock), the login unit, the state directory, and a stand-in
+    systemctl and control command that log their calls."""
+
+    def __init__(self, kit: Kit, home: Home):
+        self.home = home
+        self.run_dir = home.path / "run"
+        self.run_dir.mkdir(mode=0o700, exist_ok=True)
+        self.tools = home.path / "service-tools"
+        self.tools.mkdir(exist_ok=True)
+        self.log = home.path / "service.log"
+        self.holders: list[subprocess.Popen] = []
+        (self.tools / "systemctl").write_text(f"#!/bin/sh\necho \"systemctl $*\" >> '{self.log}'\nexit 0\n")
+        (self.tools / "systemctl").chmod(0o755)
+        # The control command that --terminate runs (NEURA_TEST_SERVICE_CONTROL):
+        # it ends the supervisors, as `neura runtime shutdown --terminate` would.
+        (self.tools / "control").write_text(f"#!/bin/sh\necho \"control $*\" >> '{self.log}'\n"
+                                            f"for pid in $(cat '{home.path}/supervisors' 2> /dev/null); do kill \"$pid\" 2> /dev/null; done\n"
+                                            "sleep 0.2\nexit 0\n")
+        (self.tools / "control").chmod(0o755)
+
+    def env(self) -> dict:
+        return {"XDG_RUNTIME_DIR": str(self.run_dir), "PATH": f"{self.home.bin}:{self.tools}:{SYSTEM_PATH}",
+                "NEURA_TEST_SERVICE_CONTROL": str(self.tools / "control")}
+
+    def id(self) -> str:
+        return hashlib.sha256(str(self.home.real_root()).encode()).hexdigest()[:16]
+
+    def unit(self) -> Path:
+        return self.home.path / ".config/systemd/user" / f"neurad-{self.id()}.service"
+
+    def state(self) -> Path:
+        return self.home.path / ".local/state/neura" / self.id()
+
+    def register(self) -> None:
+        self.unit().parent.mkdir(parents=True, exist_ok=True)
+        self.unit().write_text("[Service]\n")
+        (self.state() / self.home.current() / "records").mkdir(parents=True, exist_ok=True)
+        (self.state() / self.home.current() / "log").write_text("")
+
+    def supervise(self, generation: str) -> None:
+        key = str(self.home.real_root()).encode() + b"\0" + generation.encode()
+        directory = self.run_dir / "neura" / hashlib.sha256(key).hexdigest()[:16]
+        directory.mkdir(parents=True, exist_ok=True)
+        holder = subprocess.Popen([sys.executable, "-c", "import fcntl, sys, time\n"
+                                   "f = open(sys.argv[1], 'w')\nfcntl.flock(f, fcntl.LOCK_EX)\nprint('held', flush=True)\ntime.sleep(600)\n",
+                                   str(directory / "lock")], stdout=subprocess.PIPE, text=True)
+        holder.stdout.readline()
+        self.holders.append(holder)
+        with open(self.home.path / "supervisors", "a") as file:
+            file.write(f"{holder.pid}\n")
+
+    def end(self) -> None:
+        for holder in self.holders:
+            holder.kill()
+            holder.wait()
+
+
+def suite_components(kit: Kit) -> None:
+    """--components and uninstall --component (step 7): cases 38 to 43 and
+    59. The service is a stand-in (ServiceStandIn); a real neurad belongs to
+    the service milestone."""
+    v, t = kit.version, kit.triple
+    release = kit.release(kit.work / "release", kit.variant("service", neurad=True))
+    tops = {p: unpack(release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
+    every = set(CORE_TOOLS) | set(SDK_TOOLS)
+
+    # Case 38: add the service to an SDK installation.
+    home = Home(kit, "add")
+    check(home.install(tops["sdk"]).returncode == 0, "the SDK install")
+    service = ServiceStandIn(kit, home)
+    sdk_generation = home.current()
+
+    def update(target: Home, *arguments, env: dict | None = None) -> subprocess.CompletedProcess:
+        return run([target.bin / "neura-update", "update", *arguments], env=target.env(env))
+
+    result = update(home, "--components", "sdk,service", "--source", release, env=service.env())
+    check(result.returncode == 0 and f"neura-runtime-{v}-{t}.tar.gz" in result.stdout, f"case 38: {result.stdout}{result.stderr}")
+    check(home.current() != sdk_generation and "components core sdk service" in home.marker(), "case 38: a new generation with the service")
+    expect_links(home, every | {"neurad"}, "case 38: the neurad link appears")
+    check(not service.unit().exists() and not service.log.exists() and not (service.run_dir / "neura").exists(),
+          "case 38: nothing is started or registered")
+    again = update(home, "--components", "sdk,service", "--source", release)
+    check(again.returncode == 0 and "nothing to change" in again.stdout, "the same set again changes nothing")
+
+    # Case 39: the archive comes from the installed version's own release.
+    mock_tools = kit.work / "mock-tools"
+    mock_tools.mkdir()
+    for name in ("tar", "gzip", "cp"):
+        os.symlink(shutil.which(name, path=SYSTEM_PATH), mock_tools / name)
+    requests = kit.work / "requests"
+    (mock_tools / "curl").write_text(f"""#!/bin/sh
+while [ "$#" -gt 0 ]; do
+    case "$1" in --output) shift; output=$1 ;; --url) shift; url=$1 ;; esac
+    shift
+done
+printf '%s\\n' "$url" >> '{requests}'
+case "$url" in
+    'https://github.com/Kayyo321/neura/releases/download/v{v}/'*) source='{release}'/"${{url##*/}}" ;;
+    *) exit 22 ;;
+esac
+cp "$source" "$output"
+""")
+    (mock_tools / "curl").chmod(0o755)
+    candidate = Home(kit, "candidate")
+    check(candidate.install(tops["sdk"]).returncode == 0, "the install for case 39")
+    result = update(candidate, "--components", "sdk,service", env={"PATH": f"{mock_tools}:{SYSTEM_PATH}"})
+    check(result.returncode == 0 and "neurad" in candidate.links(), f"case 39: from the installed version's release: {result.stderr}")
+    check(requests.read_text().splitlines()[0] == f"https://github.com/Kayyo321/neura/releases/download/v{v}/neura-components.txt",
+          f"case 39: the URL of the installed version: {requests.read_text()}")
+    newer = kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9", neurad=True), version="9.9.9")
+    rebuilt = kit.release(kit.work / "rebuilt", kit.variant("rebuilt", neurad=True, change="share/neura/stdlib/std/core/version.nra"),
+                          build="rebuilt")
+    other = Home(kit, "other-build")
+    check(other.install(tops["sdk"]).returncode == 0, "the install for case 39's refusals")
+    before = snapshot(other.root)
+    for source in (newer, rebuilt):
+        result = update(other, "--components", "sdk,service", "--source", source)
+        check(result.returncode == 1 and "Update first, then add the component" in result.stderr and snapshot(other.root) == before,
+              f"case 39: a release of another build: {result.stderr}")
+    check(update(other, "--components", "everything").returncode == 1, "an unknown set")
+
+    # Case 40: remove the service with no application running.
+    service.register()
+    (service.log).unlink(missing_ok=True)
+    result = update(home, "--components", "sdk", env=service.env())
+    check(result.returncode == 0 and "neurad" not in home.links() and "components core sdk\n" in home.marker(), f"case 40: {result.stderr}")
+    check(not service.unit().exists() and not service.state().exists(), "case 40: the unit and the state are removed")
+    check("systemctl --user disable" in service.log.read_text(), "case 40: login start is disabled")
+    image = hello(kit, home)
+    check(home.neura("run", image).stdout == "Hello, World!\n", "case 40: neura run still works")
+
+    # Case 41: the same with an application running.
+    check(update(home, "--components", "sdk,service", "--source", release).returncode == 0, "the service again")
+    service.supervise(home.current())
+    before, links = snapshot(home.root), home.links()
+    result = update(home, "--components", "sdk", env=service.env())
+    check(result.returncode == 1 and "pass --terminate" in result.stderr and snapshot(home.root) == before and home.links() == links,
+          f"case 41: refused while the service runs: {result.stderr}")
+    result = update(home, "--components", "sdk", "--terminate", env=service.env())
+    check(result.returncode == 0 and "control shutdown --terminate" in service.log.read_text() and "neurad" not in home.links(),
+          f"case 41: --terminate stops the applications first: {result.stdout}{result.stderr}")
+    service.end()
+
+    # Case 42: removing the only product component.
+    runtime = Home(kit, "runtime")
+    check(runtime.install(tops["runtime"]).returncode == 0, "the runtime install")
+    result = run([runtime.bin / "neura-uninstall", "uninstall", "--component", "service"], env=runtime.env())
+    check(result.returncode == 1 and 'removing service would leave no product; use "neura uninstall"' in result.stderr, f"case 42: {result.stderr}")
+    sdk_only = Home(kit, "sdk-only")
+    check(sdk_only.install(tops["sdk"]).returncode == 0, "the SDK install for case 42")
+    result = run([sdk_only.bin / "neura-uninstall", "uninstall", "--component", "sdk"], env=sdk_only.env())
+    check(result.returncode == 1 and 'removing sdk would leave no product' in result.stderr, f"case 42: {result.stderr}")
+    result = update(sdk_only, "--components", "runtime", "--source", release)
+    check(result.returncode == 0 and "components core service" in sdk_only.marker(), "an SDK installation becomes a runtime one")
+    check(run([sdk_only.bin / "neura-uninstall", "uninstall", "--component", "bogus"], env=sdk_only.env()).returncode == 1, "an unknown component")
+
+    # Case 43: remove the SDK while a long command of it runs.
+    both = Home(kit, "both")
+    check(both.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "the combined install")
+    first = both.current()
+    busy = Session(both, "neura-lsp")
+    result = run([both.bin / "neura-uninstall", "uninstall", "--component", "sdk"], env=both.env())
+    check(result.returncode == 0 and "neurac" not in both.links() and "components core service" in both.marker(), f"case 43: {result.stderr}")
+    check(busy.alive() and lease_held(both, first) and first in both.generations(), "case 43: the running tool keeps its generation")
+    build = both.neura("build", REPOSITORY / "examples/hello-world/hello-world.nra", "-o", both.path / "x.nvr")
+    check(build.returncode == 1 and "needs Neura-sdk" in build.stderr, f"case 43: new commands find no neurac: {build.stderr}")
+    busy.end()
+    check(both.neura("run", image).stdout == "Hello, World!\n", "case 43: the runtime still runs images")
+
+    # Case 59: a tool copied out of its generation runs alone.
+    copy = kit.work / "copied"
+    (copy / "bin").mkdir(parents=True)
+    shutil.copytree(home.root / "versions" / home.current() / "lib", copy / "lib")
+    for name in ("neura", "neura-update"):
+        shutil.copy(home.root / "versions" / home.current() / "bin" / name, copy / "bin" / name)
+    result = run([copy / "bin/neura", "update", "--source", release], env=home.env())
+    check(result.returncode == 3 and "not an archive install" in result.stderr, f"case 59: unmanaged: {result.stderr}")
+    result = run([copy / "bin/neura", "build", "x.nra"], env=home.env())
+    check(result.returncode == 1 and f"needs neurac, which is not in {copy / 'bin'}" in result.stderr, f"case 59: no sibling: {result.stderr}")
+
+
+def suite_uninstall(kit: Kit) -> None:
+    """neura uninstall (step 7): cases 44 to 48, and the rules of the 0.2
+    uninstall tests that still hold."""
+    v, t = kit.version, kit.triple
+    release = kit.release(kit.work / "release", kit.variant("service", neurad=True))
+    tops = {p: unpack(release / f"neura-{p}-{v}-{t}.tar.gz", kit.work / "unpacked" / p) for p in ("sdk", "runtime")}
+
+    def uninstall(home: Home, *arguments, env: dict | None = None, program: Path | None = None) -> subprocess.CompletedProcess:
+        return run([program or home.bin / "neura-uninstall", "uninstall", *arguments], env=home.env(env))
+
+    # Cases 44 to 46 and 48 on a combined installation with login start.
+    home = Home(kit, "combined")
+    check(home.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "the combined install")
+    service = ServiceStandIn(kit, home)
+    service.register()
+    second = Home(kit, "second")
+    check(second.install(tops["runtime"]).returncode == 0, "a second installation")
+    second_service = ServiceStandIn(kit, second)
+    second_service.register()
+    second_service.supervise(second.current())
+    (home.root / "keep.txt").write_text("not neura's\n")
+    (home.bin / "other-tool").write_text("not neura's\n")
+    (home.root / "update-check.txt").write_text("neura-update-check 1\nchecked 1\nlatest 0.1.0\n")
+    (home.root / ".staging-1-old").mkdir()
+    service.supervise(home.current())
+    before, bin_before = snapshot(home.root), snapshot(home.bin)
+    # Case 44: --dry-run.
+    result = uninstall(home, "--dry-run", env=service.env())
+    out = result.stdout
+    check(result.returncode == 0 and f"would remove {home.real_root()}/versions/{home.current()}" in out
+          and f"would remove {home.bin.resolve()}/neurac" in out and f"would remove {service.unit()} (the service's)" in out
+          and f"would remove {service.state()} (the service's)" in out and "a supervisor of this installation is running" in out
+          and "keep.txt" in out and "nothing was removed (--dry-run)" in out, f"case 44: --dry-run\n{out}")
+    check(snapshot(home.root) == before and snapshot(home.bin) == bin_before and service.unit().exists(), "case 44: nothing removed")
+    # Without --yes and without a terminal, nothing is removed.
+    result = uninstall(home, env=service.env())
+    check(result.returncode == 1 and snapshot(home.root) == before, "a running service refuses before the prompt")
+    result = uninstall(home, "--yes", env=service.env())
+    check(result.returncode == 1 and "pass --terminate" in result.stderr and snapshot(home.root) == before, f"refused while the service runs: {result.stderr}")
+    service.end()
+    result = uninstall(home, env=service.env())
+    check(result.returncode == 1 and "pass --yes" in result.stderr and snapshot(home.root) == before, "uninstall without --yes")
+    check(uninstall(home, "--everything").returncode == 1, "an unknown option")
+    # Case 45: an editor session holds the generation.
+    session = Session(home, "neura-lsp")
+    result = uninstall(home, "--yes", env=service.env())
+    check(result.returncode == 1 and f"generation {home.current()} is in use by a running neura process" in result.stderr
+          and snapshot(home.root) == before, f"case 45: {result.stderr}")
+    session.end()
+    # Case 46: the full uninstall.
+    result = uninstall(home, "--yes", env=service.env())
+    check(result.returncode == 0, f"case 46: {result.stderr}")
+    check(not home.links() and (home.bin / "other-tool").read_text() == "not neura's\n", "case 46: every link, and only the links")
+    check(not service.unit().exists() and not service.state().exists(), "case 46: the unit and the state directory")
+    check(sorted(p.name for p in home.root.iterdir()) == ["keep.txt"] and f"left {home.real_root()}, which still holds" in result.stdout
+          and "keep.txt" in result.stdout, f"case 46: the user's files are left and listed: {list(home.root.iterdir())}")
+    # Case 48: the other installation is untouched.
+    check(second_service.unit().exists() and second_service.state().exists() and second.neura("--version").returncode == 0,
+          "case 48: another installation's unit, state and supervisor")
+    check(run([sys.executable, "-c", "import fcntl,sys\nf=open(sys.argv[1])\ntry:\n fcntl.flock(f, fcntl.LOCK_EX|fcntl.LOCK_NB)\nexcept OSError:\n sys.exit(0)\nsys.exit(1)",
+               str(next((second_service.run_dir / "neura").iterdir()) / "lock")]).returncode == 0, "case 48: its supervisor still holds its lock")
+    second_service.end()
+
+    # Case 47: one owned link replaced by a regular file.
+    replaced = Home(kit, "replaced")
+    check(replaced.install(tops["sdk"]).returncode == 0, "the install for case 47")
+    (replaced.bin / "neura-fmt").unlink()
+    (replaced.bin / "neura-fmt").write_text("a program of the user\n")
+    result = uninstall(replaced, "--yes")
+    check(result.returncode == 0 and f"left {replaced.bin.resolve()}/neura-fmt: it is not a symbolic link" in result.stdout,
+          f"case 47: {result.stdout}{result.stderr}")
+    check((replaced.bin / "neura-fmt").read_text() == "a program of the user\n" and not replaced.links() and not replaced.root.exists(),
+          "case 47: the file is left; the rest is removed")
+
+    # A link elsewhere, a dangling current, and a link inside the root that
+    # points outside it.
+    elsewhere = Home(kit, "elsewhere")
+    check(elsewhere.install(tops["sdk"]).returncode == 0, "the install for a link elsewhere")
+    target = elsewhere.path / "elsewhere.txt"
+    target.write_text("elsewhere\n")
+    (elsewhere.bin / "neura").unlink()
+    os.symlink(target, elsewhere.bin / "neura")
+    result = uninstall(elsewhere, "--yes")
+    check(result.returncode == 0 and os.readlink(elsewhere.bin / "neura") == str(target) and target.exists(), "a link elsewhere is left")
+    dangling = Home(kit, "dangling")
+    check(dangling.install(tops["sdk"]).returncode == 0, "the install for a dangling current")
+    generation = dangling.current()
+    (dangling.root / "current").unlink()
+    result = uninstall(dangling, "--yes", program=dangling.root / "versions" / generation / "bin/neura-uninstall")
+    check(result.returncode == 0 and not dangling.links() and not dangling.root.exists(), f"a dangling current: {result.stderr}")
+    escape = Home(kit, "escape")
+    check(escape.install(tops["sdk"]).returncode == 0, "the install for an escaping link")
+    outside = escape.path / "outside"
+    outside.mkdir()
+    (outside / "precious").write_text("do not delete\n")
+    os.symlink(outside, escape.root / "versions" / escape.current() / "share/outside-link")
+    result = uninstall(escape, "--yes")
+    check(result.returncode == 0 and (outside / "precious").read_text() == "do not delete\n", "a link inside the root is not followed")
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
@@ -1441,6 +1725,8 @@ SUITES = {
     "update": suite_update,
     "migrate": suite_migrate,
     "doctor": suite_doctor,
+    "components": suite_components,
+    "uninstall": suite_uninstall,
 }
 
 
