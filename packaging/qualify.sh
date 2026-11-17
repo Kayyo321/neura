@@ -352,16 +352,28 @@ else
     fail 10 "uninstall and reinstall" "$(tail -n 5 "$work/uninstall.log" | tr '\n' ' ') (files remain under $home/.local)"
 fi
 
+# service_runs HOME: one launch of hello-world through the installed
+# runtime service, then the service's shutdown.
+service_runs() {
+    out=$(clean "$1" NEURA_GPU=off neura run --runtime=required "$work/hello/hello.nvr" 2>> "$work/service.log") || true
+    clean "$1" neura runtime shutdown >> "$work/service.log" 2>&1 || true
+    [ "$out" = "Hello, World!" ]
+}
+
 # 11. The runtime archive installs alone: no compiler or standard library,
-# images run, source commands name Neura-sdk, and doctor is healthy.
+# the service neurad, images run directly and (on Linux) through the
+# service, source commands name Neura-sdk, and doctor is healthy.
 runtime_home=$work/runtime-home
 reason=""
-top=$work/list-runtime/$runtime_name
+# install_archive sets top, so the runtime archive's listing has a name
+# of its own.
+runtime_top=$work/list-runtime/$runtime_name
 for tool in $sdk_tools; do
-    [ ! -e "$top/bin/$tool" ] || reason="$reason bin/$tool is an SDK tool;"
+    [ ! -e "$runtime_top/bin/$tool" ] || reason="$reason bin/$tool is an SDK tool;"
 done
-[ ! -e "$top/share/neura/stdlib" ] || reason="$reason it holds the standard library;"
-! ls "$top"/lib/neura/libneura-sdk-* > /dev/null 2>&1 || reason="$reason it holds the SDK library;"
+[ ! -e "$runtime_top/share/neura/stdlib" ] || reason="$reason it holds the standard library;"
+! ls "$runtime_top"/lib/neura/libneura-sdk-* > /dev/null 2>&1 || reason="$reason it holds the SDK library;"
+[ -x "$runtime_top/bin/neurad" ] || reason="$reason it does not hold the service, bin/neurad;"
 if [ -z "$reason" ]; then
     mkdir -p "$runtime_home"
     if ! install_archive "$runtime_home" "$runtime_archive"; then
@@ -376,6 +388,10 @@ if [ -z "$reason" ]; then
         reason="neura build did not name Neura-sdk: $(tr '\n' ' ' < "$work/runtime-build.log")"
     elif ! clean "$runtime_home" neura doctor > "$work/runtime-doctor.log" 2>&1; then
         reason="doctor failed: $(grep FAIL "$work/runtime-doctor.log" | tr '\n' ' ')"
+    elif [ ! -L "$runtime_home/.local/bin/neurad" ]; then
+        reason="no neurad link"
+    elif [ "$(uname -s)" = Linux ] && ! service_runs "$runtime_home"; then
+        reason="the service did not run the image: $(tail -n 3 "$work/service.log" | tr '\n' ' ')"
     fi
 fi
 if [ -z "$reason" ]; then
@@ -391,7 +407,7 @@ if install_archive "$both" "$sdk_archive" "$runtime_archive" \
     && [ "$(ls "$both/.local/share/neura/versions" | wc -l | tr -d ' ')" = 1 ] \
     && grep -q '^components core sdk service$' "$both/.local/share/neura/neura-install.txt" \
     && clean "$both" neura doctor > "$work/both-doctor.log" 2>&1 \
-    && { [ ! -e "$top/bin/neurad" ] || [ -L "$both/.local/bin/neurad" ]; }; then
+    && [ -L "$both/.local/bin/neurad" ]; then
     pass 12 "SDK and runtime together"
 else
     fail 12 "SDK and runtime together" "$(tail -n 3 "$both/install.log" 2> /dev/null | tr '\n' ' ') $(grep FAIL "$work/both-doctor.log" 2> /dev/null | tr '\n' ' ')"
