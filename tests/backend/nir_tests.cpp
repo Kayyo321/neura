@@ -582,6 +582,55 @@ NEURA_TEST(nir, linking_coalesces_shared_definitions_and_preserves_metadata) {
           "linked metadata must survive a NeuraIR round trip");
 }
 
+NEURA_TEST(nir, closure_names_are_local_to_their_lexical_owner) {
+    const std::string source = R"(
+        let increment: func(int) -> int = func(value: int) -> int => value + 1;
+        let calculate = func(seed: int) -> int {
+            let outer = func(value: int) -> int {
+                let inner = func(delta: int) -> int => seed + value + delta;
+                return inner(3);
+            };
+            return outer(2);
+        } or func(seed: string) -> int {
+            let length = seed.byte_length;
+            let inner = func(value: int) -> int => length + value;
+            return inner(5);
+        };
+    )";
+    const std::string prior = R"(
+        let double: func(int) -> int = func(value: int) -> int => value * 2;
+        let unrelated = func(seed: int) -> int {
+            let other = func(value: int) -> int => seed + value;
+            return other(1);
+        };
+    )";
+    const auto names = [&](std::string_view text, const char* path) {
+        std::vector<ParsedFile> files;
+        files.push_back(parse(lex(text, path)));
+        auto program = lower(files);
+        require_valid_ir(program, "before closure-name serialization");
+        program = read_nir(write_nir(program), "closure names");
+        std::vector<std::string> result;
+        for (const auto& symbol : program.symbols)
+            if (symbol.kind == SymbolKind::Class && symbol.name.starts_with(stable_closure_prefix))
+                result.push_back(symbol.name);
+        return result;
+    };
+    const auto before = names(source, "/first/closure-fixture.nra");
+    const auto after = names(prior + source, "/relocated/subdir/closure-fixture.nra");
+    const std::string prefix = "$closure@closure-fixture.nra::";
+    const std::vector<std::string> expected{
+        prefix + "increment$1", prefix + "calculate$1", prefix + "calculate$1$1", prefix + "calculate#1$1",
+    };
+    check(before == expected, "overload branches, nested closures and initializers get distinct names");
+    check_equal(after.size(), before.size() + 2, "two closures in the preceding owners");
+    for (const auto& name : before)
+        check(std::ranges::count(after, name) == 1, "preceding owners and source relocation preserve " + name);
+    const auto escaped = names(source, "/first/closure fixture %.nra");
+    check_equal(escaped.front(), std::string("$closure@closure%20fixture%20%25.nra::increment$1"),
+                "source names escape separator bytes");
+}
+
 NEURA_TEST(nir, linking_rejects_conflicting_embedded_code) {
     const auto unit = [](std::string_view text, std::string path) {
         std::vector<ParsedFile> files;

@@ -7,6 +7,9 @@
 
 namespace neura {
 
+// A closure class name that the linker preserves independently of symbol IDs.
+inline constexpr std::string_view stable_closure_prefix = "$closure@";
+
 struct LinkedImports {
     IrProgram program;
     std::map<std::pair<std::string, std::string>, SymbolId> modules;

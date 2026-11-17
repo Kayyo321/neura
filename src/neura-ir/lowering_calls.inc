@@ -857,7 +857,7 @@ IrNode Lowering::untyped_lambda(const Declaration& declaration, Context& context
             .label("the call's type parameters wait for this result")
             .help("write the lambda's result type, as in 'func(...) -> T { ... }'");
     }
-    ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(span, context), context, {}, {}};
     auto provisional = signature;
     provisional.push_back(result ? *result : void_type);
     const auto method = closure_method(environment.layout, callable_type(provisional, span), span, names);

@@ -192,6 +192,9 @@ struct Context {
     std::size_t task_scope_base = 0;
     // Inside a startup block (Modules.md, Startup blocks).
     bool startup_block = false;
+    // A field or global initializer resolves names in its enclosing scope,
+    // but owns the closures it creates.
+    SymbolId initializer = no_symbol;
 };
 
 struct ClosureEnvironment {
@@ -203,6 +206,11 @@ struct ClosureEnvironment {
 
 SymbolId lexical_owner(const Context& context) {
     return context.closure ? lexical_owner(context.closure->enclosing) : context.owner;
+}
+
+SymbolId closure_owner(const Context& context) {
+    if (context.closure) return context.closure->layout;
+    return context.initializer == no_symbol ? context.owner : context.initializer;
 }
 
 class Lowering {
@@ -291,10 +299,13 @@ private:
     std::map<const Declaration*, SymbolId> occurrence_classes_;
     std::set<const Declaration*> binding_bodies_;
     std::vector<SymbolId> pending_anonymous_;
+    std::map<SymbolId, std::size_t> anonymous_ordinals_;
+    std::map<SymbolId, std::string> anonymous_owners_;
+    std::map<SymbolId, std::size_t> closure_ordinals_;
     void mark_binding_annotation(const TypeSyntax& syntax);
     IrType anonymous_class(const TypeSyntax& syntax, const Context& context);
     std::string structural_key(SymbolId cls) const;
-    std::string canonical_type(const IrType& type) const;
+    std::string canonical_type(const IrType& type, bool lexical = false) const;
     bool structural_class(const IrType& type) const;
     IrNode construct(const Expr& expr, Context& context, const IrType* expected);
     IrNode construct_structural(const Expr& expr, Context& context, const IrType& object,
@@ -352,7 +363,8 @@ private:
     bool can_bind_reference(const IrNode& place, const IrType& type) const;
     IrNode bind_reference(IrNode place, const IrType& type);
     IrType callable_type(std::vector<IrType> signature, const Span& span);
-    SymbolId closure_layout(const Span& span, SymbolId scope);
+    std::string closure_owner_name(SymbolId owner) const;
+    SymbolId closure_layout(const Span& span, const Context& context);
     SymbolId closure_method(SymbolId layout, const IrType& type, const Span& span,
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
@@ -1497,9 +1509,55 @@ IrType Lowering::callable_type(std::vector<IrType> signature, const Span& span) 
     return {TypeKind::Callable, "func", no_symbol, std::move(signature)};
 }
 
-SymbolId Lowering::closure_layout(const Span& span, SymbolId scope) {
+std::string closure_name_component(std::string_view name, bool library_path = false) {
+    constexpr std::string_view hex = "0123456789ABCDEF";
+    std::string escaped;
+    for (const unsigned char byte : name) {
+        if ((byte >= 'a' && byte <= 'z') || (byte >= 'A' && byte <= 'Z') || (byte >= '0' && byte <= '9') ||
+            byte == '_' || byte == '-' || byte == '.' || (library_path && byte == '/')) {
+            escaped += static_cast<char>(byte);
+        } else {
+            escaped += '%';
+            escaped += hex[byte >> 4];
+            escaped += hex[byte & 15];
+        }
+    }
+    return escaped;
+}
+
+std::string Lowering::closure_owner_name(SymbolId owner) const {
+    const auto& item = symbol(owner);
+    if (item.kind == SymbolKind::File) {
+        if (!item.library_path.empty()) return closure_name_component(item.library_path, true);
+        const auto name = std::string_view(item.name);
+        const auto separator = name.find_last_of("/\\");
+        return closure_name_component(separator == std::string_view::npos ? name : name.substr(separator + 1));
+    }
+    if (item.kind == SymbolKind::Class && item.name.starts_with(stable_closure_prefix))
+        return item.name.substr(stable_closure_prefix.size());
+    if (const auto found = anonymous_owners_.find(owner); found != anonymous_owners_.end())
+        return found->second;
+
+    auto name = closure_name_component(item.name);
+    if (item.overload_group != no_symbol) {
+        const auto& branches = entries_[item.overload_group].overloads;
+        const auto index = std::ranges::find(branches, owner) - branches.begin();
+        name = closure_name_component(symbol(item.overload_group).name) + "#" + std::to_string(index + 1);
+    } else if (item.user_cast) {
+        name = "$as#" + closure_name_component(canonical_type(item.type, true));
+    }
+    if (item.owner == no_symbol) return name;
+    const auto separator = symbol(item.owner).kind == SymbolKind::File ? "::" : "/";
+    return closure_owner_name(item.owner) + separator + name;
+}
+
+SymbolId Lowering::closure_layout(const Span& span, const Context& context) {
+    const auto owner = closure_owner(context);
+    const auto ordinal = ++closure_ordinals_[owner];
+    const auto scope = lexical_owner(context);
     const auto file = owner_kind(scope, SymbolKind::File);
-    const auto layout = add(SymbolKind::Class, "$closure" + std::to_string(program_.symbols.size()), span, file);
+    const auto layout = add(SymbolKind::Class, std::string(stable_closure_prefix) + closure_owner_name(owner) +
+                                               "$" + std::to_string(ordinal), span, file);
     symbol(layout).type = {TypeKind::Object, symbol(layout).name, layout, {}};
     // A closure body may use any type parameter in lexical scope, including
     // one that appears only in a local annotation or another generic call.
@@ -1637,7 +1695,7 @@ IrNode Lowering::lambda(const Declaration& declaration, Context& context, const 
     }
     signature.push_back(type(*declaration.type, context));
     const auto callable = callable_type(std::move(signature), span);
-    ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(span, context), context, {}, {}};
     const auto method = closure_method(environment.layout, callable, span, names);
     if (declaration.type && symbol(method).type.kind != TypeKind::Void) result_spans_.emplace(method, declaration.type->span);
     Context inner{method, method, context.receiver, 0, {entries_[method].names}, &environment};
@@ -1674,7 +1732,7 @@ IrNode Lowering::bind_function(IrNode callee, Context& context, bool owned) {
     }
     signature.push_back(substitute(symbol(target).type, replacements));
     const auto callable = callable_type(std::move(signature), span);
-    ClosureEnvironment environment{closure_layout(span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(span, context), context, {}, {}};
     const auto method = closure_method(environment.layout, callable, span, names);
     auto invocation = node(IrOp::Call, span, symbol(method).type);
     invocation.symbol = target;
@@ -1744,6 +1802,7 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
 
 void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     auto ctx = context(symbol(id).owner);
+    ctx.initializer = id;
     if (decl.initializer && decl.initializer->kind == ExprKind::Import) {
         if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation").with_code("E0704");
         auto target = resolve_import(*decl.initializer);
@@ -4191,7 +4250,7 @@ IrNode Lowering::spawn(const Expr& expr, Context& context, bool handle) {
             .with_code("E0603");
     if (invocation.type.kind == TypeKind::Any) throw any_boundary(operand.span, "the result of a spawned call");
 
-    ClosureEnvironment environment{closure_layout(expr.span, lexical_owner(context)), context, {}, {}};
+    ClosureEnvironment environment{closure_layout(expr.span, context), context, {}, {}};
     for (std::size_t i = 0; i < invocation.operands.size(); ++i) {
         auto& input = invocation.operands[i];
         if (i == 0 && invocation.op == IrOp::VirtualCall && input.type.kind == TypeKind::Module) {
@@ -4823,6 +4882,8 @@ void Lowering::resolve_destructure(const Statement& stmt, SymbolId file) {
         if (id != no_symbol) entries_[id].resolution = Resolution::Resolving;
     }
     auto scope = context(file);
+    if (const auto first = std::ranges::find_if(group.bindings, [](SymbolId id) { return id != no_symbol; });
+        first != group.bindings.end()) scope.initializer = *first;
     destructure(group.instructions, stmt, scope, &group.bindings);
     for (const auto id : group.bindings) {
         if (id != no_symbol) entries_[id].resolution = Resolution::Resolved;
@@ -5486,27 +5547,42 @@ bool Lowering::structural_class(const IrType& type) const {
            found->value.items.front().kind == AttributeValueKind::Bool && found->value.items.front().integer != 0;
 }
 
-std::string Lowering::canonical_type(const IrType& type) const {
+std::string Lowering::canonical_type(const IrType& type, bool lexical) const {
     // A type as every compilation spells it: a declared type by the identity
     // of its file and its qualified name, never by a symbol number.
     std::string result = std::to_string(static_cast<int>(type.kind)) + ":";
     if (type.symbol != no_symbol && type.symbol < program_.symbols.size() &&
         (type.kind == TypeKind::Object || type.kind == TypeKind::Enum)) {
-        std::string qualified = symbol(type.symbol).name;
-        auto owner = symbol(type.symbol).owner;
-        for (; owner != no_symbol && symbol(owner).kind != SymbolKind::File; owner = symbol(owner).owner)
-            qualified = symbol(owner).name + "." + qualified;
-        if (owner != no_symbol) {
-            const auto& file = symbol(owner);
-            result += (file.library_path.empty() ? "file " + file.name : "library " + file.library_path) + "::";
+        if (lexical && structural_class(type)) {
+            // The generated file for a structural class can encode absolute
+            // source identities in its hash. Use its fields for closure names.
+            result += "class(";
+            for (const auto& field : program_.symbols) {
+                if (field.owner == type.symbol && field.kind == SymbolKind::Field) {
+                    result += field.constant ? "const " : "let ";
+                    result += field.name + ":" + canonical_type(field.type, true) + ";";
+                }
+            }
+            result += ")";
+        } else if (lexical) {
+            result += closure_owner_name(type.symbol);
+        } else {
+            std::string qualified = symbol(type.symbol).name;
+            auto owner = symbol(type.symbol).owner;
+            for (; owner != no_symbol && symbol(owner).kind != SymbolKind::File; owner = symbol(owner).owner)
+                qualified = symbol(owner).name + "." + qualified;
+            if (owner != no_symbol) {
+                const auto& file = symbol(owner);
+                result += (file.library_path.empty() ? "file " + file.name : "library " + file.library_path) + "::";
+            }
+            result += qualified;
         }
-        result += qualified;
     } else {
         result += type.name;
     }
     if (!type.arguments.empty()) {
         result += "<";
-        for (const auto& argument : type.arguments) result += canonical_type(argument) + ",";
+        for (const auto& argument : type.arguments) result += canonical_type(argument, lexical) + ",";
         result += ">";
     }
     return result;
@@ -5646,6 +5722,9 @@ IrType Lowering::anonymous_class(const TypeSyntax& syntax, const Context& contex
     const auto id = declare(body, owner, SymbolKind::Class);
     entries_[owner].names.erase(name);
     occurrence_classes_.emplace(&body, id);
+    const auto lexical = closure_owner(context);
+    const auto ordinal = ++anonymous_ordinals_[lexical];
+    anonymous_owners_.emplace(id, closure_owner_name(lexical) + "/$class" + std::to_string(ordinal));
     add_attribute(symbol(id), AttributeId::ClassAnonymous, anonymous_class_payload(false, name, body.span));
     for (const auto& member : body.members) {
         if (!member.cast_target) prepare_promotions(member, id);

@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <charconv>
 #include <map>
+#include <numeric>
 #include <tuple>
 
 namespace neura {
@@ -14,6 +15,7 @@ namespace {
 
 using FileKey = std::pair<bool, std::string>;
 using ChildKey = std::tuple<SymbolKind, std::string, std::size_t, std::size_t, std::size_t, std::size_t>;
+using RenamedSymbols = std::map<SymbolId, std::string>;
 
 SymbolId index_number(std::string_view text) {
     SymbolId result = no_symbol;
@@ -28,9 +30,13 @@ std::string branch_name(std::string_view name, std::string_view group) {
     return std::string(name.substr(0, prefix + 1)) + std::string(group) + std::string(name.substr(suffix));
 }
 
-bool closure_name(const IrSymbol& symbol) {
+bool numbered_closure_name(const IrSymbol& symbol) {
     return symbol.kind == SymbolKind::Class && symbol.name.starts_with("$closure") &&
         index_number(std::string_view(symbol.name).substr(8)) != no_symbol;
+}
+
+bool lexical_closure_name(const IrSymbol& symbol) {
+    return symbol.kind == SymbolKind::Class && symbol.name.starts_with(stable_closure_prefix);
 }
 
 bool cast_name(const IrSymbol& symbol) {
@@ -39,7 +45,7 @@ bool cast_name(const IrSymbol& symbol) {
 }
 
 std::string stable_name(const IrSymbol& symbol) {
-    if (closure_name(symbol)) return "$closure";
+    if (numbered_closure_name(symbol) || lexical_closure_name(symbol)) return "$closure";
     if (cast_name(symbol)) return "$as";
     if (symbol.kind == SymbolKind::Function && legacy_overload_group(symbol.name) != no_symbol)
         return branch_name(symbol.name, "");
@@ -183,6 +189,9 @@ void pair_symbols(const IrProgram& destination, const Index& indexed, const IrPr
             if (matches.empty()) conflict(site, file, symbol.name);
             const auto match = matches.back();
             matches.pop_back();
+            const auto& existing = destination.symbols[match];
+            if (lexical_closure_name(existing) && lexical_closure_name(symbol) && existing.name != symbol.name)
+                conflict(site, file, symbol.name);
             pending.emplace_back(match, child);
             if (symbol.kind == SymbolKind::Field || symbol.kind == SymbolKind::Variant)
                 incoming_layout.push_back(match);
@@ -236,7 +245,8 @@ bool same_symbol(const IrSymbol& a, const IrSymbol& b, bool legacy_signatures) {
 class Remapping {
 public:
     Remapping(const IrProgram& destination, const IrProgram& incoming,
-              const std::vector<SymbolId>& mapping);
+              const std::vector<SymbolId>& mapping,
+              const RenamedSymbols& renamed = {});
 
     void symbol(IrSymbol& value, SymbolId id) const;
     void node(IrNode& value) const;
@@ -253,15 +263,18 @@ private:
 };
 
 Remapping::Remapping(const IrProgram& destination, const IrProgram& incoming,
-                     const std::vector<SymbolId>& mapping)
+                     const std::vector<SymbolId>& mapping,
+                     const RenamedSymbols& renamed)
     : mapping_(mapping) {
     for (SymbolId id = 0; id < incoming.symbols.size(); ++id) {
         const auto& symbol = incoming.symbols[id];
         const auto mapped = reference(id);
         auto name = symbol.name;
-        if (mapped < destination.symbols.size()) {
+        if (const auto rename = renamed.find(mapped); rename != renamed.end()) {
+            name = rename->second;
+        } else if (mapped < destination.symbols.size()) {
             name = destination.symbols[mapped].name;
-        } else if (closure_name(symbol)) {
+        } else if (numbered_closure_name(symbol)) {
             name = "$closure" + std::to_string(mapped);
         } else if (cast_name(symbol)) {
             name = "$as$" + std::to_string(mapped);
@@ -313,6 +326,35 @@ void Remapping::node(IrNode& value) const {
     for (auto& argument : value.type_arguments) type(argument);
     for (auto* region : {&value.operands, &value.body, &value.alternative})
         for (auto& child : *region) node(child);
+}
+
+RenamedSymbols lexical_names(const IrProgram& destination, const IrProgram& incoming,
+                             const std::vector<SymbolId>& mapping) {
+    RenamedSymbols renamed;
+    for (SymbolId id = 0; id < incoming.symbols.size(); ++id) {
+        const auto mapped = mapping[id];
+        if (mapped < destination.symbols.size() && lexical_closure_name(incoming.symbols[id]) &&
+            numbered_closure_name(destination.symbols[mapped])) {
+            renamed.emplace(mapped, incoming.symbols[id].name);
+        }
+    }
+    return renamed;
+}
+
+void apply_lexical_names(IrProgram& destination, const RenamedSymbols& renamed) {
+    if (renamed.empty()) return;
+
+    // Old and new artifacts can contain the same source file. Keep its new
+    // names in either import order, including every existing type use and
+    // attribute that has already copied the old class name.
+    std::vector<SymbolId> identity(destination.symbols.size());
+    std::iota(identity.begin(), identity.end(), SymbolId{0});
+    const Remapping names(destination, destination, identity, renamed);
+    for (SymbolId id = 0; id < destination.symbols.size(); ++id)
+        names.symbol(destination.symbols[id], id);
+    for (auto& body : destination.bodies)
+        for (auto& node : body.instructions) names.node(node);
+    for (auto& constant : destination.static_constants) names.node(constant.value);
 }
 
 } // namespace
@@ -367,6 +409,7 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
     for (auto& id : mapping)
         if (id == no_symbol) id = next++;
 
+    const auto renamed = lexical_names(destination, incoming, mapping);
     const Remapping remapping(destination, incoming, mapping);
     for (SymbolId id = 0; id < incoming.symbols.size(); ++id) {
         auto& symbol = incoming.symbols[id];
@@ -427,6 +470,7 @@ std::vector<SymbolId> link_ir(IrProgram& destination, IrProgram incoming, const 
         if (body.owner >= existing) destination.bodies.push_back(std::move(body));
     for (auto& entry : incoming.static_constants)
         if (entry.field >= existing) destination.static_constants.push_back(std::move(entry));
+    apply_lexical_names(destination, renamed);
     return mapping;
 }
 
