@@ -921,15 +921,37 @@ NEURA_TEST(tier3, aggregate_components_are_inline_heap_accesses_in_native_progra
         check(helpers > 0, "collections of aggregates are built and changed by helpers");
         check_equal(state_calls, std::uint64_t{0}, "no component access is a reference state call");
     }
+    {
+        // The shadow oracle compares frames and the heap, which it reads word by
+        // word for collections of aggregates, on the warmed cache.
+        nvm::TierShadowHooks hooks;
+        std::vector<std::string> reports;
+        hooks.report = [&](const std::string& text) { reports.push_back(text); };
+        hooks.notice = [&](const std::string& text) { reports.push_back(text); };
+        auto limits = limits_at(2, &cache);
+        limits.tier_shadow = &hooks;
+        check_same(run_captured(image, limits), reference, "under the oracle");
+        check(reports.empty(), "the oracle saw no difference" + (reports.empty() ? "" : ": " + reports[0]));
+    }
     sweep_limits(image, cache, "aggregates", reference.result.steps, 53);
     for (const auto count : {1, 2, 3, 4}) {
         const std::vector<std::string> arguments(count, "x");
         const auto expected = run_captured(image, limits_at(0), std::nullopt, arguments);
         check(!expected.result.completed, "case " + std::to_string(count) + " traps at tier 0");
         nvm::TierCache trapping(image, inline_options(1));
-        for (int run = 0; run < 3; ++run) {
+        for (int run = 0; run < 40; ++run) {
             check_same(run_captured(image, limits_at(2, &trapping), std::nullopt, arguments), expected,
                        "case " + std::to_string(count) + " run " + std::to_string(run));
+        }
+        // Case 1 reads and case 3 writes a component past the end: the
+        // check is against the length in elements, so index 1 of one element
+        // traps, as it does at tier 0, and it trapped in machine code (tier 3
+        // counts the deoptimization of a failed check as a state trap, and
+        // tier 1 then raises the trap).
+        if (thresholds_kept() && jit::native::supported() && (count == 1 || count == 3)) {
+            const auto counts = trapping.statistics();
+            check(counts.native.state_traps >= 40,
+                  "case " + std::to_string(count) + ": the bounds check failed in machine code");
         }
     }
     // Heap limits land inside the aggregate allocations and appends.

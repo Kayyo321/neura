@@ -631,6 +631,12 @@ struct ProgramOps {
     std::uint64_t components = 0;
     // Allocate, repeat, append and remove on aggregate collections as helpers.
     std::uint64_t aggregate_helpers = 0;
+    // The same kinds of exit in the image's functions that formed a program: a
+    // program takes every one of them (none is a deoptimization).
+    std::uint64_t image_multi_returns = 0;
+    std::uint64_t image_multi_calls = 0;
+    std::uint64_t image_components = 0;
+    std::uint64_t image_aggregate_helpers = 0;
 };
 
 ProgramOps program_ops(const nvr::Image& image, nvm::TierCache& cache) {
@@ -656,6 +662,24 @@ ProgramOps program_ops(const nvr::Image& image, nvm::TierCache& cache) {
         if (!formation.region) continue;
         ++ops.programs;
         const auto& program = *formation.region;
+        for (const auto& block : image.functions[function].blocks) {
+            for (const auto& exit : block.exits) {
+                if (exit.kind == nvr::ExitKind::Return && exit.arguments.size() > 1) ++ops.image_multi_returns;
+                if (exit.kind == nvr::ExitKind::Call && !image.functions[exit.target].more_results.empty()) {
+                    ++ops.image_multi_calls;
+                }
+                if (exit.kind != nvr::ExitKind::State) continue;
+                if (exit.operation == nvr::StateOp::ReadComponent || exit.operation == nvr::StateOp::WriteComponent) {
+                    ++ops.image_components;
+                } else if (exit.operation == nvr::StateOp::AllocateCollection ||
+                           exit.operation == nvr::StateOp::RepeatCollection) {
+                    ops.image_aggregate_helpers += nvr::collection_components(image, exit.immediate) != nullptr;
+                } else if (exit.operation == nvr::StateOp::AppendElement || exit.operation == nvr::StateOp::RemoveElement) {
+                    ops.image_aggregate_helpers +=
+                        !exit.arguments.empty() && nvr::collection_components(image, exit.arguments[0].type) != nullptr;
+                }
+            }
+        }
         for (const auto& op : program.code) {
             using Code = nvm::tier2::Code;
             if (op.code == Code::Return && op.width > 1) ++ops.multi_returns;
@@ -715,9 +739,9 @@ NEURA_TEST(tier, multi_word_results_run_in_every_tier) {
                 // and this fixture's calls are not counted in programs there;
                 // the identical runs above are the evidence on those platforms.
                 const auto ops = program_ops(image, cache);
-                check(ops.multi_returns >= 3 && ops.multi_calls >= 3,
-                      label + ": programs hold multi-word returns and calls: " + std::to_string(ops.multi_returns) + ", " +
-                          std::to_string(ops.multi_calls));
+                check(ops.image_multi_returns >= 3 && ops.image_multi_calls >= 3, label + ": the image has them");
+                check_equal(ops.multi_returns, ops.image_multi_returns, label + ": every multi-word return is an op");
+                check_equal(ops.multi_calls, ops.image_multi_calls, label + ": every multi-word call is an op");
                 if (jit::native::supported()) {
                     check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
                           label + ": calls and returns run in programs");
@@ -796,9 +820,10 @@ NEURA_TEST(tier, aggregate_collections_run_in_every_tier) {
                 // 3 native code is supported; elsewhere NEURA_JIT=on compiles
                 // tier 2 code and the identical runs above are the evidence.
                 const auto ops = program_ops(image, cache);
-                check(ops.components >= 4 && ops.aggregate_helpers >= 4,
-                      label + ": programs hold the aggregate operations: " + std::to_string(ops.components) + ", " +
-                          std::to_string(ops.aggregate_helpers));
+                check(ops.image_components >= 4 && ops.image_aggregate_helpers >= 4, label + ": the image has them");
+                check_equal(ops.components, ops.image_components, label + ": every component access is an op");
+                check_equal(ops.aggregate_helpers, ops.image_aggregate_helpers,
+                            label + ": every aggregate allocation, append and removal is a helper");
                 if (jit::native::supported()) {
                     check(counts.region_counts.calls > 0 && counts.region_counts.returns > 0,
                           label + ": calls and returns run in programs");
@@ -895,7 +920,9 @@ NEURA_TEST(tier, aggregate_collections_cost_one_cell_per_word_in_every_tier) {
         compare_with_tier_0(image, cache, programs ? "programs again" : "regions again", {});
         if (programs && programs_run()) {
             const auto counts = cache.statistics();
-            check(program_ops(image, cache).aggregate_helpers >= 4, "the programs hold the aggregate operations");
+            const auto ops = program_ops(image, cache);
+            check(ops.image_aggregate_helpers >= 4, "the image has aggregate operations");
+            check_equal(ops.aggregate_helpers, ops.image_aggregate_helpers, "the programs hold every one of them");
             // Every state operation of this image is on an aggregate collection
             // and the program forms with all of them (nothing is declined);
             // the entry function runs once, so the run itself stays at tier 0.
