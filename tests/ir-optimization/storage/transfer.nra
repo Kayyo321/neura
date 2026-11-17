@@ -1,0 +1,44 @@
+// What a function hands back: a fresh array, or a borrow with an origin.
+let Transfer = module (
+    let shared: int[] = [1, 2];
+
+    export let Box = class (
+        export let items: int[];
+
+        export let init = func() {
+            instance.items = [0];
+        };
+
+        export let get = func() -> int[] {
+            return instance.items;
+        };
+    );
+
+    export let fresh = func() -> int[] {
+        let made: int[] = [1];
+        return made;
+    };
+
+    export let from_parameter = func(source: int[]) -> int[] {
+        return source;
+    };
+
+    export let from_global = func() -> int[] {
+        return shared;
+    };
+
+    export let from_either = func(first: int[], second: int[], pick: bool) -> int[] {
+        if (pick) {
+            return first;
+        }
+        return second;
+    };
+
+    export let forwarded = func(source: int[]) -> int[] {
+        return from_parameter(source);
+    };
+
+    export let scalar = func() -> int {
+        return 1;
+    };
+);

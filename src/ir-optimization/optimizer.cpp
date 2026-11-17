@@ -1,5 +1,7 @@
 #include "optimizer.hpp"
 
+#include "analysis_cache.hpp"
+
 #include "neura-ir/tags.hpp"
 #include "neura-ir/verifier.hpp"
 #include "passes.hpp"
@@ -163,6 +165,8 @@ OptimizationReport optimize(IrProgram& program, const OptimizationOptions& optio
     // but removes at least one call per rewrite and never adds one, so the
     // alternation of rounds and inlining ends too.
     auto size = measure(program);
+    // Passes share the analyses of the program until one of them rewrites it.
+    optimization::AnalysisCache analyses;
     for (bool inlined = true; inlined;) {
         for (bool changed = true; changed;) {
             changed = false;
@@ -173,6 +177,7 @@ OptimizationReport optimize(IrProgram& program, const OptimizationOptions& optio
                 if (rewrites == 0) {
                     continue;
                 }
+                analyses.clear();
                 const auto stage = "after pass '" + report.passes[i].name + "' in round " +
                                    std::to_string(report.rounds);
                 require_valid_ir(program, stage);
@@ -192,6 +197,7 @@ OptimizationReport optimize(IrProgram& program, const OptimizationOptions& optio
             if (rewrites == 0) {
                 continue;
             }
+            analyses.clear();
             const auto stage = "after pass '" + report.passes[i].name + "' following round " +
                                std::to_string(report.rounds);
             require_valid_ir(program, stage);

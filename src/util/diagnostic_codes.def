@@ -176,7 +176,7 @@ NEURA_DIAGNOSTIC(E0807, "literal not representable in the circuit")
 NEURA_DIAGNOSTIC(E0808, "generic specialization limit exceeded")
 NEURA_DIAGNOSTIC(E0899, "internal compiler error")
 
-// Tags (docs/lang/Tags.md); E0923-E0929 stay free for later tags.
+// Tags (docs/lang/Tags.md); E0924-E0929 stay free for later tags.
 NEURA_DIAGNOSTIC(E0900, "unknown tag")
 NEURA_DIAGNOSTIC(E0901, "tag on a declaration it does not apply to")
 NEURA_DIAGNOSTIC(E0902, "unknown or misplaced tag argument")
@@ -200,6 +200,7 @@ NEURA_DIAGNOSTIC(E0919, "field of a mutable type in an #Immutable class")
 NEURA_DIAGNOSTIC(E0920, "#Immutable class with a base or subclass that is not #Immutable")
 NEURA_DIAGNOSTIC(E0921, "#Synchronized on a method without a body to guard")
 NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchronized")
+NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding without a body")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

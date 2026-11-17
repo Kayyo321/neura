@@ -1,0 +1,11 @@
+error[E0923]: #HostEffects on 'double', which is not a host binding without a body
+ --> $DIR/host-effects-on-function.nra:4:5
+  |
+4 |     #HostEffects(allocates: false)
+  |     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ #HostEffects given here
+5 |     export let double = func(x: int32) -> int32 {
+  |                ------ declared here
+  |
+  = help: a function with a body is summarized from its body; remove #HostEffects
+
+For more information about this error, try `neura explain E0923`.

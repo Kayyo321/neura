@@ -1,0 +1,8 @@
+// #HostEffects on a function with a body (E0923): the compiler summarizes the
+// body, so a declared contract would only contradict it.
+let Effects = module (
+    #HostEffects(allocates: false)
+    export let double = func(x: int32) -> int32 {
+        return x + x;
+    };
+);

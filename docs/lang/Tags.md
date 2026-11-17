@@ -20,7 +20,7 @@ let Shapes = module (
 );
 ```
 
-`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 85 tags: 16 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
+`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 86 tags: 17 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
 
 ## Syntax
 
@@ -209,6 +209,10 @@ let Tally = class (
 );
 ```
 
+### HostEffects
+
+`#HostEffects(allocates: bool = true, traps: bool = true, scheduler: bool = true, retains: bool = true)` declares what a call of a host binding may do. The standard library writes it on a function that is bound to a host service and has no body, which has nothing for the compiler to summarize: the compiler records the four answers as the function's `host.effects` attribute ([NeuraIR format](../NirFormat.md#revision-110-symbol-attributes-and-deferred-initialization)), and the [effect summary](../IrOptimization.md#effect-summaries) of the binding, and of every function that calls it, reads them. A call of a host binding is always a host request, so there is no argument for that. An argument that is left out says the effect may happen, so no omission asserts a guarantee. A binding without the tag is unknown in every fact. The tag is a promise that nothing checks: the host implements the service. On a function that has a body, a function bound to a kernel, or any function that is not a host binding it is error `E0923`, because a function with a body is summarized from its body and a kernel from its signature.
+
 ### Inline and NoInline
 
 `#Inline(always: bool = false)` and `#NoInline` give a function or method the inlining directive that the `inline-calls` optimization pass reads ([IR optimization](../IrOptimization.md)). `#NoInline` sets the directive to never: the pass leaves every call of the function in place. `#Inline(always: true)` sets it to always, which lifts the pass's size budget. The pass still refuses a function that may trap, calls another function, is recursive, allocates, touches the heap or module state, or is part of a program that uses tasks, because inlining would change a trap's location, the frames, or the task schedule. When it refuses an `always` function, the optimizer warns once with `W0004` and the reason. `#Inline` without `always: true` records the request and leaves the decision to the pass's ordinary rules. The directive changes no output or trap: an optimized and an unoptimized build of the same program print the same thing, and only `--stats` step counts differ.
@@ -375,6 +379,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | `#Resource` | classes | reserved | Instances must be destroyed before they become unreachable. Instead: destroy the instance explicitly or bind it in a scope block. |
 | `#NoAlloc` | functions, methods | reserved | Never allocates heap cells. Instead: measure peak_heap_cells with `neura run --stats`. |
 | `#MaxSteps(steps: integer)` | functions, methods | reserved | A step budget for each call. Instead: bound the whole run with --max-steps. |
+| `#HostEffects(allocates: bool = true, traps: bool = true, scheduler: bool = true, retains: bool = true)` | functions | implemented | What a call of this host binding may do; an omitted argument says it may (E0923). |
 
 ### Numerics
 

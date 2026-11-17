@@ -100,6 +100,7 @@ bool PurityAnalysis::Roots::join(const Roots& other) {
     bool changed = false;
     if (other.fresh && !fresh) changed = fresh = true;
     if (other.unknown && !unknown) changed = unknown = true;
+    if (other.opaque && !opaque) changed = opaque = true;
     for (const auto slot : other.slots) changed = slots.insert(slot).second || changed;
     for (const auto slot : other.inside) changed = inside.insert(slot).second || changed;
     return changed;
@@ -107,7 +108,13 @@ bool PurityAnalysis::Roots::join(const Roots& other) {
 
 bool PurityAnalysis::Summary::same(const Summary& other) const {
     if (reason.has_value() != other.reason.has_value() || links != other.links || !(result == other.result) ||
-        !(fresh_graph == other.fresh_graph) || deep != other.deep || writes.size() != other.writes.size()) {
+        !(fresh_graph == other.fresh_graph) || deep != other.deep || writes.size() != other.writes.size() ||
+        allocates.has_value() != other.allocates.has_value() || allocation_unknown != other.allocation_unknown ||
+        traps.has_value() != other.traps.has_value() || host.has_value() != other.host.has_value() ||
+        scheduler.has_value() != other.scheduler.has_value() ||
+        class_init.has_value() != other.class_init.has_value() || hooks.has_value() != other.hooks.has_value() ||
+        !(optimizer == other.optimizer) || !(escapes == other.escapes) || !(leaks == other.leaks) ||
+        !(shared_graph == other.shared_graph)) {
         return false;
     }
     for (const auto& [slot, why] : writes) {
@@ -125,6 +132,7 @@ public:
     using Roots = PurityAnalysis::Roots;
     using Reason = PurityAnalysis::Reason;
     using Summary = PurityAnalysis::Summary;
+    using Cause = PurityAnalysis::Cause;
 
     PurityWalker(const PurityAnalysis& analysis, SymbolId owner) : a_(analysis) {
         if (a_.valid(owner) && a_.symbol(owner).kind == SymbolKind::Function) {
@@ -137,6 +145,8 @@ public:
         for (;;) {
             grew_ = false;
             out_ = Summary{};
+            fresh_cause_.reset();
+            result_cause_.reset();
             for (const auto* body : bodies) {
                 for (const auto& node : body->instructions) eval(node);
             }
@@ -144,6 +154,16 @@ public:
         }
         out_.fresh_graph = fresh_graph_;
         out_.fresh_graph.fresh = false;
+        out_.shared_graph = shared_graph_;
+        out_.shared_graph.fresh = false;
+        // What the objects that escape hold is retained with them.
+        if (fresh_cause_) {
+            for (const auto* graph : {&out_.fresh_graph, &out_.shared_graph}) {
+                for (const auto slot : graph->slots) out_.retained_at.emplace(slot, *fresh_cause_);
+                for (const auto slot : graph->inside) out_.retained_at.emplace(slot, *fresh_cause_);
+            }
+        }
+        out_.ownership_cause = result_cause_;
         return std::move(out_);
     }
 
@@ -151,10 +171,22 @@ private:
     const PurityAnalysis& a_;
     std::map<SymbolId, Roots> locals_;
     Roots fresh_graph_;
+    // Like fresh_graph_, for the objects of a callee that escape by a route
+    // that purity does not follow; only retention reads it.
+    Roots shared_graph_;
     Summary out_;
     bool grew_ = false;
+    std::optional<Cause> fresh_cause_;
+    std::optional<Cause> result_cause_;
 
     static Roots unknown() {
+        Roots roots;
+        roots.unknown = true;
+        roots.opaque = true;
+        return roots;
+    }
+    // A program global: unknown to purity, but a known place to ownership.
+    static Roots global() {
         Roots roots;
         roots.unknown = true;
         return roots;
@@ -168,6 +200,7 @@ private:
     Roots step(const Roots& roots) const {
         Roots next;
         next.unknown = roots.unknown;
+        next.opaque = roots.opaque;
         next.inside = roots.inside;
         next.inside.insert(roots.slots.begin(), roots.slots.end());
         if (roots.fresh) {
@@ -201,13 +234,120 @@ private:
         }
     }
     // `value` becomes reachable from the objects `target` names.
-    void link(const Roots& target, const Roots& value) {
+    void link(const Roots& target, const Roots& value, const Span& at = {}, const std::string& what = {}) {
         if (value.empty()) return;
+        // A place that no slot names outlives the call.
+        if (target.unknown) retain(out_.escapes, value, what.empty() ? "stores it where the caller cannot see" : what, at);
         if (target.fresh && fresh_graph_.join(value)) grew_ = true;
         for (const auto slot : target.slots) out_.links[slot].join(value);
         for (const auto slot : target.inside) out_.links[slot].join(value);
     }
     std::string name(SymbolId id) const { return a_.valid(id) ? a_.symbol(id).name : std::string("?"); }
+
+    // `roots` is kept past the call by `what`, into the escapes or the leaks.
+    void retain(Roots& into, const Roots& roots, std::string what, const Span& at, SymbolId callee = no_symbol) {
+        if (roots.empty()) return;
+        into.join(roots);
+        Cause cause{std::move(what), at, callee};
+        for (const auto slot : roots.slots) out_.retained_at.emplace(slot, cause);
+        for (const auto slot : roots.inside) out_.retained_at.emplace(slot, cause);
+        if (roots.fresh && !fresh_cause_) fresh_cause_ = std::move(cause);
+    }
+    // Handed to code that may keep it anywhere.
+    void leak(const Roots& roots, const std::string& what, const Span& at, SymbolId callee = no_symbol) {
+        retain(out_.leaks, graph(roots), what, at, callee);
+    }
+
+    // The facts. `may` records the first operation that causes one.
+    // The first operation that causes a fact, a direct one in preference to a
+    // call: a chain of calls through a cycle then ends at an operation.
+    static void may(std::optional<Cause>& fact, const std::string& what, const Span& at, SymbolId callee = no_symbol) {
+        if (!fact || (fact->callee != no_symbol && callee == no_symbol)) fact = Cause{what, at, callee};
+    }
+    void allocate(const IrNode& node, const std::string& what) {
+        may(out_.allocates, what, node.span);
+        out_.optimizer.allocates = true;
+    }
+    void trap(const IrNode& node, const std::string& what) {
+        may(out_.traps, what, node.span);
+        out_.optimizer.traps = true;
+    }
+    void precise_unknown(const std::string& what, const Span& at, SymbolId callee = no_symbol) {
+        out_.allocation_unknown = true;
+        may(out_.allocates, what, at, callee);
+        may(out_.traps, what, at, callee);
+        may(out_.host, what, at, callee);
+        may(out_.scheduler, what, at, callee);
+        may(out_.class_init, what, at, callee);
+    }
+    void legacy_unknown() {
+        out_.optimizer = {true, true, true, true};
+    }
+    void unknown_operation(const IrNode& node, const std::string& what) {
+        precise_unknown(what, node.span);
+        legacy_unknown();
+    }
+    // What a call of `target` may do, as its summary says; a function with no
+    // summary is unknown.
+    void merge_facts(SymbolId target, const Span& at) {
+        const auto* callee = a_.valid(target) ? a_.summary(target) : nullptr;
+        if (!callee) {
+            precise_unknown("calls '" + name(target) + "', which has no body or contract", at, target);
+            return;
+        }
+        const auto take = [&](std::optional<Cause>& mine, const std::optional<Cause>& theirs) {
+            if (theirs) may(mine, "", at, target);
+        };
+        take(out_.allocates, callee->allocates);
+        out_.allocation_unknown = out_.allocation_unknown || callee->allocation_unknown;
+        take(out_.traps, callee->traps);
+        take(out_.host, callee->host);
+        take(out_.scheduler, callee->scheduler);
+        take(out_.class_init, callee->class_init);
+        take(out_.hooks, callee->hooks);
+    }
+    // The optimizer's view of a call: only a function with a body is known.
+    void merge_optimizer(SymbolId target) {
+        const auto* callee = a_.valid(target) ? a_.summary(target) : nullptr;
+        const bool body = callee && a_.symbol(target).kind == SymbolKind::Function && a_.bodies_.contains(target) &&
+                          !(a_.opaque_ && a_.opaque_(target));
+        if (!body) {
+            legacy_unknown();
+            return;
+        }
+        out_.optimizer.allocates = out_.optimizer.allocates || callee->optimizer.allocates;
+        out_.optimizer.traps = out_.optimizer.traps || callee->optimizer.traps;
+        out_.optimizer.host = out_.optimizer.host || callee->optimizer.host;
+        out_.optimizer.scheduler = out_.optimizer.scheduler || callee->optimizer.scheduler;
+    }
+
+    // A callee's roots in the caller's terms, for a call whose slot k holds
+    // `slots[k]`.
+    Roots mapped(const Roots& roots, const std::vector<Roots>& slots) const {
+        Roots result;
+        result.fresh = roots.fresh;
+        result.unknown = roots.unknown;
+        result.opaque = roots.opaque;
+        for (const auto k : roots.slots) result.join(k < slots.size() ? slots[k] : Roots{});
+        for (const auto k : roots.inside) result.join(step(graph(k < slots.size() ? slots[k] : Roots{})));
+        return result;
+    }
+    // What a callee keeps of its arguments, as the caller keeps it.
+    void flow(const Summary& callee, SymbolId target, const std::vector<Roots>& slots, const Span& at) {
+        retain(out_.escapes, mapped(callee.escapes, slots), "passes it to '" + name(target) + "', which keeps it", at,
+               target);
+        retain(out_.leaks, mapped(callee.leaks, slots), "passes it to '" + name(target) + "', which hands it on", at,
+               target);
+        if (callee.escapes.fresh || callee.leaks.fresh) {
+            Roots held = callee.fresh_graph;
+            held.join(callee.shared_graph);
+            shared_graph_.join(mapped(held, slots));
+        }
+    }
+    void leak_arguments(const std::vector<Roots>& slots, const std::string& what, const Span& at,
+                        SymbolId callee = no_symbol) {
+        for (const auto& value : slots) leak(value, what, at, callee);
+    }
 
     Roots receiver(const IrNode& node) const {
         if (node.type.kind == TypeKind::Module) return unknown();
@@ -234,6 +374,7 @@ private:
             if (!a_.valid(target)) continue;
             const auto* summary = a_.summary(target);
             if (!summary) {
+                leak_arguments(slots, "passes it to '" + name(target) + "', which has no body or contract", span, target);
                 // A function without a body runs nothing, unless it is bound
                 // to something outside the program.
                 if (a_.symbol(target).external) {
@@ -242,6 +383,11 @@ private:
                 }
                 continue;
             }
+            flow(*summary, target, slots, span);
+            // A host binding or other external function that a call reaches
+            // returns something no one here knows.
+            if (!a_.bodies_.contains(target) && !kernel_bound(a_.symbol(target)) && a_.symbol(target).external)
+                result.join(unknown());
             if (summary->reason) impure(Reason{{}, span, target, std::nullopt});
             for (const auto& [k, why] : summary->writes) {
                 write(summary->deep.contains(k) ? graph(slot(k)) : slot(k), Reason{{}, span, target, k});
@@ -253,7 +399,10 @@ private:
                 link(graph(slot(k)), map(roots));
                 escapes = escapes || roots.fresh;
             }
-            if (escapes) link(fresh(), map(summary->fresh_graph));
+            if (escapes) {
+                link(fresh(), map(summary->fresh_graph));
+                shared_graph_.join(map(summary->shared_graph));
+            }
             result.join(map(summary->result));
         }
         return result;
@@ -293,7 +442,7 @@ private:
             impure(Reason{"reads the binding '" + item.name + "', whose type " + display(item.type) + " is mutable",
                           node.span});
         }
-        return typed(node.type, unknown());
+        return typed(node.type, global());
     }
 
     // The destination's own reason comes first: it is what the check
@@ -301,7 +450,7 @@ private:
     void store(const IrNode& node) {
         if (node.operands.size() != 2) {
             impure(Reason{"stores to an unknown place", node.span});
-            children(node);
+            leak_arguments(operands(node, 0), "stores it to an unknown place", node.span);
             return;
         }
         const auto& destination = node.operands.front();
@@ -320,7 +469,11 @@ private:
             }
             for (const auto& qualifier : destination.operands) eval(qualifier);
             const auto value = eval(node.operands.back());
-            if (local) assign(destination.symbol, value);
+            if (local) {
+                assign(destination.symbol, value);
+            } else {
+                retain(out_.escapes, value, "stores it in the binding '" + name(destination.symbol) + "'", node.span);
+            }
             return;
         }
         if ((destination.op == IrOp::Field || destination.op == IrOp::Index) && !destination.operands.empty()) {
@@ -330,11 +483,13 @@ private:
                                   : std::string("assigns an element of a collection it did not allocate");
             write(object, Reason{text, destination.span});
             for (std::size_t i = 1; i < destination.operands.size(); ++i) eval(destination.operands[i]);
-            link(object, eval(node.operands.back()));
+            link(object, eval(node.operands.back()), node.span,
+                 destination.op == IrOp::Field ? "stores it in the field '" + name(destination.symbol) + "'"
+                                               : std::string("stores it in a collection"));
             return;
         }
         impure(Reason{"assigns through a reference", destination.span});
-        children(node);
+        leak_arguments(operands(node, 0), "assigns it through a reference", destination.span);
     }
 
     Roots kernel_call(const IrNode& node) {
@@ -353,8 +508,148 @@ private:
         return typed(node.type, fresh());
     }
 
+    // What the operation itself may do, for the facts and for the optimizer's
+    // flags. The table follows EffectAnalysis::add, which the optimizer's
+    // images depend on; the differential test of summaries_tests.cpp holds the
+    // two together. The effects of what a call runs are merged where the call
+    // is evaluated.
+    void effects(const IrNode& node) {
+        const auto local = [&](SymbolId id) { return is_local(a_.program_, id); };
+        switch (node.op) {
+        case IrOp::Boolean:
+        case IrOp::Integer:
+        case IrOp::Float:
+        case IrOp::Nil:
+        case IrOp::Reference:
+        case IrOp::Receiver:
+        case IrOp::ReinterpretFloat:
+        case IrOp::ShortCircuit:
+        case IrOp::ComparisonChain:
+        case IrOp::ScopedValue:
+        case IrOp::SelectValue:
+        case IrOp::Block:
+        case IrOp::Branch:
+        case IrOp::Loop:
+        case IrOp::Break:
+        case IrOp::Continue:
+        case IrOp::Return:
+        case IrOp::Discard:
+            break;
+        case IrOp::Load:
+            // A global that has not been initialized faults when read.
+            if (!local(node.symbol)) trap(node, "reads a binding that may be uninitialized");
+            break;
+        case IrOp::Store:
+            if (node.operands.size() != 2) {
+                unknown_operation(node, "stores to an unknown place");
+            } else if (node.operands.front().op != IrOp::Load) {
+                trap(node, "stores to a field or an element");
+            }
+            break;
+        case IrOp::Initialize:
+            if (!local(node.symbol) && (!a_.valid(node.symbol) || a_.symbol(node.symbol).kind != SymbolKind::Global)) {
+                trap(node, "sets a field");
+            }
+            break;
+        case IrOp::Unary:
+            if (node.text != "!" && node.text != "~") trap(node, "applies '" + node.text + "'");
+            break;
+        case IrOp::Binary: {
+            const auto operand = node.operands.empty() ? TypeKind::Void : node.operands.front().type.kind;
+            const bool scalar = operand == TypeKind::Bool || operand == TypeKind::Integer;
+            const bool safe = scalar && (comparison(node.text) || (is_bitwise_binary(node.text) && !is_shift(node.text)));
+            if (!safe) trap(node, "applies '" + node.text + "'");
+            if (operand == TypeKind::String) allocate(node, "builds a string");
+            break;
+        }
+        case IrOp::Convert:
+        case IrOp::Fail:
+        case IrOp::TrapMessage:
+            trap(node, "converts a number or fails");
+            break;
+        case IrOp::Field:
+        case IrOp::Index:
+        case IrOp::Length:
+        case IrOp::CollectionVersion:
+        case IrOp::TextLength:
+        case IrOp::TextByteAt:
+        case IrOp::TextEqual:
+        case IrOp::Project:
+        case IrOp::EnumTag:
+        case IrOp::EnumProject:
+            trap(node, "reads a field or an element");
+            break;
+        case IrOp::TextSlice:
+        case IrOp::TextFromUtf8:
+            allocate(node, "builds a string");
+            trap(node, "builds a string");
+            break;
+        case IrOp::Append:
+        case IrOp::RemoveAt:
+            allocate(node, "changes a list");
+            trap(node, "changes a list");
+            break;
+        case IrOp::String:
+        case IrOp::Allocate:
+        case IrOp::Collection:
+        case IrOp::RepeatCollection:
+        case IrOp::Tuple:
+        case IrOp::EnumConstruct:
+        case IrOp::MakeClosure:
+            allocate(node, "allocates");
+            trap(node, "allocates");
+            break;
+        case IrOp::Call:
+            // Every call can reach the frame-depth limit.
+            trap(node, "calls a function, which may reach the frame-depth limit");
+            if (a_.valid(node.symbol) && is_static_initializer(a_.symbol(node.symbol))) {
+                const auto& guard = a_.symbol(node.symbol);
+                const auto cls = a_.valid(guard.owner) ? a_.symbol(guard.owner).owner : no_symbol;
+                may(out_.class_init, "runs the static initialization of '" + name(cls) + "'", node.span);
+            }
+            break;
+        case IrOp::VirtualCall:
+            if (const auto fixed = a_.modules_.target(node); fixed != no_symbol) {
+                trap(node, "calls a function, which may reach the frame-depth limit");
+                merge_optimizer(fixed);
+            } else {
+                legacy_unknown();
+            }
+            break;
+        case IrOp::CallClosure:
+            unknown_operation(node, "calls a function value");
+            break;
+        case IrOp::ExternalCall:
+            if (a_.valid(node.symbol) && kernel_bound(a_.symbol(node.symbol))) {
+                out_.optimizer.allocates = out_.optimizer.traps = true;
+            } else {
+                legacy_unknown();
+                may(out_.host, "makes a host request", node.span);
+            }
+            break;
+        case IrOp::TaskScope:
+            may(out_.scheduler, "scopes tasks", node.span);
+            out_.optimizer.scheduler = true;
+            trap(node, "scopes tasks");
+            break;
+        case IrOp::Spawn:
+        case IrOp::SchedulerCall:
+            unknown_operation(node, node.op == IrOp::Spawn ? "starts a task" : "uses the scheduler");
+            break;
+        case IrOp::ReferencePlace:
+            unknown_operation(node, "lets a local escape as a reference");
+            break;
+        default:
+            // Destroy and BaseInitialize run class code; class and value
+            // members may dispatch.
+            unknown_operation(node, "runs code the analysis does not follow");
+            break;
+        }
+    }
+
 public:
     Roots eval(const IrNode& node) {
+        effects(node);
         switch (node.op) {
         case IrOp::Load:
             return load(node);
@@ -366,13 +661,14 @@ public:
                 assign(node.symbol, value);
             } else if (kind == SymbolKind::Global) {
                 impure(Reason{"initializes the binding '" + name(node.symbol) + "'", node.span});
+                retain(out_.escapes, value, "stores it in the binding '" + name(node.symbol) + "'", node.span);
             } else {
                 // A field initializer sets a field of the object being built.
                 Roots object;
                 object.slots.insert(0);
                 write(object, Reason{"assigns the field '" + name(node.symbol) + "' of an object it did not allocate",
                                      node.span});
-                link(object, value);
+                link(object, value, node.span, "stores it in the field '" + name(node.symbol) + "'");
             }
             return {};
         }
@@ -386,7 +682,7 @@ public:
             Roots value;
             for (std::size_t i = 1; i < node.operands.size(); ++i) value.join(eval(node.operands[i]));
             write(list, Reason{"changes a list it did not allocate", node.span});
-            if (node.op == IrOp::Append) link(list, value);
+            if (node.op == IrOp::Append) link(list, value, node.span, "appends it to a list");
             return {};
         }
         case IrOp::Receiver:
@@ -433,7 +729,14 @@ public:
             auto slots = operands(node, 1);
             slots[0] = fresh();
             const auto cls = a_.valid(node.symbol) ? a_.symbol(node.symbol).owner : node.type.symbol;
-            apply(a_.construction(cls, node.symbol), slots, node.span);
+            const auto constructors = a_.construction(cls, node.symbol);
+            apply(constructors, slots, node.span);
+            // The constructors run too, which the optimizer has never counted.
+            for (const auto target : constructors) {
+                if (a_.valid(target) && (a_.summary(target) || a_.symbol(target).kind == SymbolKind::Function)) {
+                    merge_facts(target, node.span);
+                }
+            }
             return fresh();
         }
         case IrOp::BaseInitialize: {
@@ -446,25 +749,56 @@ public:
         }
         case IrOp::Call: {
             const auto slots = operands(node, 1);
-            return typed(node.type, apply({node.symbol}, slots, node.span));
+            const auto result = typed(node.type, apply({node.symbol}, slots, node.span));
+            merge_facts(node.symbol, node.span);
+            merge_optimizer(node.symbol);
+            return result;
         }
         case IrOp::VirtualCall: {
             const auto slots = operands(node, 0);
             if (a_.function_value_call(node)) {
+                precise_unknown("calls a function value", node.span);
+                leak_arguments(slots, "passes it to a function value", node.span);
                 impure(Reason{"calls a function value", node.span});
                 return typed(node.type, unknown());
             }
             if (!node.operands.empty() && node.operands.front().type.kind == TypeKind::TypeParameter) {
                 // Known only in a specialization, where it is checked.
+                precise_unknown("calls through a type parameter", node.span);
+                leak_arguments(slots, "passes it through a type parameter", node.span);
                 Roots result = fresh();
                 for (const auto& value : slots) result.join(graph(value));
                 return typed(node.type, result);
             }
-            return typed(node.type, apply(a_.targets(node), slots, node.span));
+            const auto targets = a_.targets(node);
+            if (targets.empty()) {
+                precise_unknown("calls a method with no known target", node.span);
+                leak_arguments(slots, "passes it to a call with no known target", node.span);
+            } else {
+                may(out_.traps, "calls a method, which may reach the frame-depth limit", node.span);
+            }
+            const auto result = typed(node.type, apply(targets, slots, node.span));
+            for (const auto target : targets) merge_facts(target, node.span);
+            return result;
         }
         case IrOp::ExternalCall:
-            if (a_.valid(node.symbol) && kernel_bound(a_.symbol(node.symbol))) return kernel_call(node);
-            children(node);
+            if (a_.valid(node.symbol) && kernel_bound(a_.symbol(node.symbol))) {
+                const auto result = kernel_call(node);
+                merge_facts(node.symbol, node.span);
+                return result;
+            }
+            {
+                const auto slots = operands(node, 1);
+                // The binding's contract, or what an absent one leaves unknown.
+                if (const auto* contract = a_.valid(node.symbol) ? a_.summary(node.symbol) : nullptr) {
+                    flow(*contract, node.symbol, slots, node.span);
+                    merge_facts(node.symbol, node.span);
+                } else {
+                    precise_unknown("makes a host request that has no contract", node.span);
+                    leak_arguments(slots, "passes it to a host request that has no contract", node.span);
+                }
+            }
+            may(out_.host, "makes a host request", node.span);
             if (a_.valid(node.symbol) && a_.symbol(node.symbol).host_binding) {
                 impure(Reason{"makes the host request " + a_.symbol(node.symbol).host_binding->name, node.span});
             } else {
@@ -486,19 +820,26 @@ public:
             return {};
         }
         case IrOp::Spawn:
-        case IrOp::TaskScope:
-            children(node);
+        case IrOp::TaskScope: {
+            // A task keeps the function value it starts.
+            leak_arguments(operands(node, 0), "starts a task with it", node.span);
+            for (const auto& child : node.body) eval(child);
+            for (const auto& child : node.alternative) eval(child);
             impure(Reason{"starts or scopes tasks", node.span});
             return typed(node.type, unknown());
+        }
         case IrOp::SchedulerCall: {
             Roots value;
             for (const auto& child : node.operands) value.join(eval(child));
             if (node.text == "transfer.check") return typed(node.type, value);
+            leak(value, "hands it to the scheduler operation '" + node.text + "'", node.span);
             impure(Reason{"uses the scheduler operation '" + node.text + "'", node.span});
             return typed(node.type, unknown());
         }
         case IrOp::CallClosure:
-            children(node);
+            leak_arguments(operands(node, 0), "passes it to a function value", node.span);
+            for (const auto& child : node.body) eval(child);
+            for (const auto& child : node.alternative) eval(child);
             impure(Reason{"calls a function value", node.span});
             return typed(node.type, unknown());
         case IrOp::ClassHash:
@@ -507,13 +848,19 @@ public:
             impure(Reason{"uses an object's identity", node.span});
             return {};
         case IrOp::Destroy:
-            children(node);
+            // A destructor may keep its receiver.
+            leak_arguments(operands(node, 0), "runs a destructor on it", node.span);
+            for (const auto& child : node.body) eval(child);
+            for (const auto& child : node.alternative) eval(child);
             impure(Reason{"destroys an object", node.span});
             return {};
         case IrOp::ReferencePlace:
             // The local escapes as a mutable reference.
             children(node);
-            if (a_.valid(node.symbol)) assign(node.symbol, unknown());
+            if (a_.valid(node.symbol)) {
+                leak(locals_[node.symbol], "takes a reference to the local that holds it", node.span);
+                assign(node.symbol, unknown());
+            }
             return unknown();
         case IrOp::ScopedValue: {
             Roots value;
@@ -531,7 +878,11 @@ public:
             return typed(node.type, value);
         }
         case IrOp::Return:
-            for (const auto& child : node.operands) out_.result.join(eval(child));
+            for (const auto& child : node.operands) {
+                const auto value = eval(child);
+                retain(out_.result, value, "returns it", node.span);
+                if (!value.empty() && !result_cause_) result_cause_ = Cause{"returns it", node.span, no_symbol};
+            }
             return {};
         case IrOp::Nil:
         case IrOp::Reference:
@@ -544,7 +895,7 @@ public:
 };
 
 PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(SymbolId)> opaque)
-    : program_(program), opaque_(std::move(opaque)), dispatch_(program) {
+    : program_(program), opaque_(std::move(opaque)), dispatch_(program), modules_(program) {
     for (const auto& body : program.bodies) bodies_[body.owner].push_back(&body);
     const auto is_opaque = [&](SymbolId id) {
         return opaque_ && valid(id) && symbol(id).kind == SymbolKind::Function && opaque_(id);
@@ -563,6 +914,16 @@ PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(Symb
         } else {
             summary.reason = Reason{"is declared in a prebuilt module without #Pure", symbol(id).span};
         }
+        // Whatever a prebuilt module's tag says, its effects are not recorded.
+        const Cause why{"is declared in a prebuilt module", symbol(id).span, no_symbol};
+        summary.allocation_unknown = true;
+        for (auto* fact : {&summary.allocates, &summary.traps, &summary.host, &summary.scheduler, &summary.class_init})
+            *fact = why;
+        summary.optimizer = {true, true, true, true};
+        for (std::size_t k = 1; k <= symbol(id).parameters.size(); ++k) {
+            summary.leaks.slots.insert(k);
+            summary.leaks.inside.insert(k);
+        }
         summaries_.emplace(id, std::move(summary));
     }
     // A function bound to a kernel writes the lists its writable-view and
@@ -571,7 +932,19 @@ PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(Symb
         const auto& item = symbol(id);
         if (item.kind != SymbolKind::Function || item.has_body || !item.external || summaries_.contains(id)) continue;
         Summary summary;
+        const auto all_slots = [&](Roots& roots) {
+            for (std::size_t k = 1; k <= item.parameters.size(); ++k) {
+                roots.slots.insert(k);
+                roots.inside.insert(k);
+            }
+        };
         if (kernel_bound(item)) {
+            // Nothing in a call but its own work: it reads its arguments,
+            // allocates its result and may trap, and it calls nothing back
+            // (the rule EffectAnalysis has always applied to a kernel).
+            summary.allocates = Cause{"is bound to a kernel, which allocates its result", item.span, no_symbol};
+            summary.traps = Cause{"is bound to a kernel, which may trap", item.span, no_symbol};
+            summary.optimizer = {true, true, true, true};
             const auto writes = kernel_writes(item);
             const auto binding = kernel_binding(item);
             const auto kernel = binding ? binding->first : item.name;
@@ -584,9 +957,28 @@ PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(Symb
             }
             summary.result.fresh = true;
         } else if (item.host_binding) {
-            summary.reason = Reason{"makes the host request " + item.host_binding->name, item.span};
+            const Cause request{"makes the host request " + item.host_binding->name, item.span, no_symbol};
+            summary.reason = Reason{request.operation, item.span};
+            summary.host = request;
+            summary.optimizer = {true, true, true, true};
+            if (const auto contract = host_effects(item)) {
+                if (contract->allocates) summary.allocates = request;
+                if (contract->traps) summary.traps = request;
+                if (contract->scheduler) summary.scheduler = request;
+                if (contract->retains) all_slots(summary.escapes);
+            } else {
+                summary.allocation_unknown = true;
+                for (auto* fact : {&summary.allocates, &summary.traps, &summary.scheduler, &summary.class_init})
+                    *fact = Cause{"has no #HostEffects contract", item.span, no_symbol};
+                all_slots(summary.leaks);
+            }
         } else {
             summary.reason = Reason{"is an external function", item.span};
+            summary.allocation_unknown = true;
+            for (auto* fact : {&summary.allocates, &summary.traps, &summary.host, &summary.scheduler, &summary.class_init})
+                *fact = Cause{"is an external function with no contract", item.span, no_symbol};
+            summary.optimizer = {true, true, true, true};
+            all_slots(summary.leaks);
         }
         summaries_.emplace(id, std::move(summary));
     }
@@ -610,6 +1002,12 @@ PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(Symb
         pending.pop_back();
         queued.erase(owner);
         auto summary = PurityWalker(*this, owner).run(bodies_.at(owner));
+        if (is_static_initializer(symbol(owner)) && !summary.class_init) {
+            const auto cls = valid(symbol(owner).owner) ? symbol(symbol(owner).owner).owner : no_symbol;
+            summary.class_init =
+                Cause{"is the static initializer of '" + (valid(cls) ? symbol(cls).name : std::string("?")) + "'",
+                      symbol(owner).span, no_symbol};
+        }
         auto& current = summaries_.at(owner);
         const bool changed = !summary.same(current);
         // Summaries only grow, so this reaches a fixed point; the reasons of
@@ -622,6 +1020,112 @@ PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(Symb
             }
         }
     }
+    for (auto& [id, summary] : summaries_) finish(id, summary);
+}
+
+void PurityAnalysis::finish(SymbolId function, Summary& summary) const {
+    const auto& item = symbol(function);
+    const bool function_kind = item.kind == SymbolKind::Function;
+    const std::size_t slots = function_kind ? item.parameters.size() + 1 : 0;
+    const auto scalar = [](const IrType& type) {
+        return type.kind == TypeKind::Bool || type.kind == TypeKind::Integer || type.kind == TypeKind::Float ||
+               type.kind == TypeKind::Void;
+    };
+    Roots held = summary.fresh_graph;
+    held.join(summary.shared_graph);
+    const auto within = [&](const Roots& roots, std::size_t k) {
+        const auto has = [&](const Roots& from) { return from.slots.contains(k) || from.inside.contains(k); };
+        return has(roots) || (roots.fresh && has(held));
+    };
+    summary.retention.assign(slots, Retention::NotRetained);
+    for (std::size_t k = 0; k < slots; ++k) {
+        auto& kind = summary.retention[k];
+        if (k == 0 && function_kind && valid(item.owner) && symbol(item.owner).kind == SymbolKind::Class &&
+            immutable(IrType{TypeKind::Object, symbol(item.owner).name, item.owner, {}})) {
+            // The receiver of an #Immutable class is not tracked either.
+            kind = Retention::Unknown;
+            summary.retained_at.emplace(0, Cause{"is the receiver of an immutable class, which is not tracked",
+                                                 item.span, no_symbol});
+            continue;
+        }
+        if (k > 0) {
+            const auto& type = symbol(item.parameters[k - 1]).type;
+            if (scalar(type)) continue;
+            // The tracking leaves out immutable values, which may still be
+            // kept: they are not described.
+            if (immutable(type)) {
+                kind = Retention::Unknown;
+                summary.retained_at.emplace(k, Cause{"is a value of an immutable reference type, which is not tracked",
+                                                     symbol(item.parameters[k - 1]).span, no_symbol});
+                continue;
+            }
+        }
+        bool elsewhere = within(summary.escapes, k);
+        for (const auto& [slot, linked] : summary.links) elsewhere = elsewhere || within(linked, k);
+        if (within(summary.leaks, k)) {
+            kind = Retention::Unknown;
+        } else if (elsewhere) {
+            kind = Retention::Elsewhere;
+        } else if (within(summary.result, k)) {
+            kind = Retention::ByResult;
+        }
+    }
+    // The result.
+    const bool bodyless = !bodies_.contains(function);
+    if (!function_kind || (bodyless && !kernel_bound(item)) || (opaque_ && opaque_(function))) {
+        summary.ownership = Ownership::Unknown;
+        summary.ownership_cause = Cause{"has no body to read the result from", item.span, no_symbol};
+        return;
+    }
+    if (scalar(item.type)) {
+        summary.ownership = Ownership::Fresh;
+        return;
+    }
+    if (immutable(item.type)) {
+        summary.ownership = Ownership::Unknown;
+        summary.ownership_cause = Cause{"returns an immutable reference type, which is not tracked", item.span, no_symbol};
+        return;
+    }
+    const auto& result = summary.result;
+    bool stored = summary.escapes.fresh || summary.leaks.fresh;
+    for (const auto& [slot, linked] : summary.links) stored = stored || linked.fresh;
+    std::set<std::size_t> parameters = result.slots;
+    parameters.insert(result.inside.begin(), result.inside.end());
+    const bool global = result.unknown && !result.opaque;
+    const int sources = (result.fresh ? 1 : 0) + static_cast<int>(parameters.size()) + (global ? 1 : 0);
+    if (result.opaque || sources > 1 || (result.fresh && stored)) {
+        summary.ownership = Ownership::Unknown;
+    } else if (parameters.size() == 1) {
+        summary.ownership = Ownership::Borrowed;
+        summary.borrowed_slot = *parameters.begin();
+    } else if (global) {
+        summary.ownership = Ownership::Static;
+    } else {
+        summary.ownership = Ownership::Fresh;
+    }
+}
+
+std::optional<PurityAnalysis::Cause> PurityAnalysis::origin(SymbolId function, Fact fact) const {
+    std::set<SymbolId> seen;
+    const auto* current = summary(function);
+    const Cause* last = nullptr;
+    while (current && seen.insert(function).second) {
+        const std::optional<Cause>* found = nullptr;
+        switch (fact) {
+        case Fact::Allocation: found = &current->allocates; break;
+        case Fact::Traps: found = &current->traps; break;
+        case Fact::Host: found = &current->host; break;
+        case Fact::Scheduler: found = &current->scheduler; break;
+        case Fact::ClassInit: found = &current->class_init; break;
+        case Fact::Hooks: found = &current->hooks; break;
+        }
+        if (!found || !*found) break;
+        last = &**found;
+        if (last->callee == no_symbol) break;
+        function = last->callee;
+        current = summary(function);
+    }
+    return last ? std::optional<Cause>(*last) : std::nullopt;
 }
 
 const PurityAnalysis::Summary* PurityAnalysis::summary(SymbolId function) const {

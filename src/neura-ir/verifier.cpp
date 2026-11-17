@@ -411,6 +411,13 @@ private:
                 if (!valid(entry.owner) || symbol(entry.owner).kind != SymbolKind::Class)
                     report(entry.span, "synchronized marks a method of a class, not " + name(id));
                 break;
+            case AttributeId::HostEffects:
+                // A function with a body is summarized from its body; a
+                // contract on one would be trusted by nobody.
+                if (entry.has_body || !entry.external || !entry.host_binding)
+                    report(entry.span, "a host-effects contract belongs to a host binding without a body, not " +
+                                           name(id));
+                break;
             case AttributeId::KernelBinding:
                 if (attribute.value.items[0].text.empty())
                     report(entry.span, "a kernel binding of " + name(id) + " needs a kernel name");

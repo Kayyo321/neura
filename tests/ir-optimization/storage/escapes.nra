@@ -1,0 +1,113 @@
+// One function for each way that an array or a reference escapes the storage
+// that holds it (docs/design/Storage030.md, "Regions").
+let Escapes = module (
+    let table: int[] = [0];
+
+    export let Holder = class (
+        export let items: int[];
+
+        export let init = func(source: int[]) {
+            instance.items = source;
+        };
+    );
+
+    export let View = class (
+        export let total: &int;
+
+        export let init = func() {
+            let local: int = 1;
+            instance.total = local;
+        };
+    );
+
+    export let to_global = func(source: int[]) {
+        table = source;
+    };
+
+    export let stored_in_list = func(source: int[], rows: int[][list]) {
+        rows[0] = source;
+    };
+
+    export let Cache = class (
+        export static let latest: int[] = [0];
+    );
+
+    export let to_static = func(source: int[]) {
+        Cache.latest = source;
+    };
+
+    export let appended = func(source: int[]) -> int {
+        let rows: int[][list] = [];
+        rows.append(source);
+        return rows.length;
+    };
+
+    export let listed = func(source: int[]) -> int {
+        let rows: int[][list] = [source];
+        return rows.length;
+    };
+
+    export let captured = func(source: int[]) -> int {
+        let read = func -> int {
+            return source[0];
+        };
+        return read();
+    };
+
+    export let outer_binding = func() -> int {
+        let keep: int[] = [0];
+        {
+            let inner: int[] = [1];
+            keep = inner;
+        }
+        return keep[0];
+    };
+
+    export let outer_literal = func(count: int) -> int {
+        let keep: int[] = [0];
+        for (let i = 0; i < count; i += 1) {
+            keep = [i];
+        }
+        return keep[0];
+    };
+
+    export let returns_parameter = func(source: int[]) -> int[] {
+        return source;
+    };
+
+    export let returns_global = func() -> int[] {
+        return table;
+    };
+
+    export let returns_field = func(holder: Holder) -> int[] {
+        return holder.items;
+    };
+
+    export let returns_reference = func(start: int) -> &int {
+        let cell: int = start;
+        return cell;
+    };
+
+    export let captures_reference = func() -> int {
+        let cell: int = 1;
+        let alias: &int = cell;
+        let read = func -> int {
+            return alias;
+        };
+        return read();
+    };
+
+    export let retained_reference = func() -> int {
+        let cell: int = 1;
+        last view: View2 = new(cell);
+        return cell;
+    };
+
+    export let View2 = class (
+        export let total: &int;
+
+        export let init = func(value: &int) {
+            instance.total = value;
+        };
+    );
+);

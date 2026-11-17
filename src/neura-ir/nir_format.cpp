@@ -628,6 +628,9 @@ private:
                 }
                 if (const auto problem = attribute_problem(value.kind, value.attributes))
                     fail("symbol '" + value.name + "': " + *problem);
+                if (has_attribute(value, AttributeId::HostEffects) &&
+                    (value.has_body || !value.external || !value.host_binding))
+                    fail("symbol '" + value.name + "': a host-effects contract belongs to a host binding without a body");
             }
         }
         return value;

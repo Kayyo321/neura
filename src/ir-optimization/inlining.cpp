@@ -1,6 +1,7 @@
 // Inlining of direct calls (docs/IrOptimization.md, inline-calls).
 #include "passes.hpp"
 
+#include "analysis_cache.hpp"
 #include "effects.hpp"
 #include "locals.hpp"
 
@@ -71,14 +72,15 @@ bool return_in_loop(const std::vector<IrNode>& nodes, bool in_loop) {
 
 class Inliner {
 public:
-    explicit Inliner(IrProgram& program) : program_(program), analysis_(program) {}
+    explicit Inliner(IrProgram& program) : program_(program), analyses_(program), analysis_(analyses_.effects()) {}
 
     std::size_t run();
     std::vector<InlineRefusal> refusals() const;
 
 private:
     IrProgram& program_;
-    EffectAnalysis analysis_;
+    Analyses analyses_;
+    const EffectAnalysis& analysis_;
     std::map<SymbolId, Callee> callees_;
     SymbolId caller_ = no_symbol;
     std::size_t count_ = 0;
