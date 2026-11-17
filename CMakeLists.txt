@@ -425,6 +425,12 @@ add_library(neura_cli_tool STATIC src/cli/tool.cpp)
 target_link_libraries(neura_cli_tool PUBLIC neura_cli_registry)
 neura_target_defaults(neura_cli_tool)
 
+# The protocol of the runtime service (docs/design/Service030.md): pure
+# data handling, shared by the client in neura-run and by neurad.
+add_library(neura_service_protocol STATIC src/service/protocol.cpp)
+target_include_directories(neura_service_protocol PUBLIC src)
+neura_target_defaults(neura_service_protocol)
+
 # The option reader and the commands of the execution core: run, inspect,
 # inspect-image, doctor, update and uninstall, and the update notice.
 add_library(neura_cli_core STATIC
@@ -542,7 +548,7 @@ function(neura_add_shared target name component first)
 endfunction()
 
 set(neura_core_archives neura_cli_core neura_cli_tool neura_cli_registry neura_runner neura_nvm neura_lift neura_circuit
-    neura_nvr neura_kernels neura_lifecycle)
+    neura_nvr neura_kernels neura_lifecycle neura_service_protocol)
 if(NEURA_HAS_GPU)
     list(APPEND neura_core_archives neura_gpu)
 endif()
@@ -1194,6 +1200,12 @@ if(BUILD_TESTING AND NEURA_SDK)
         "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/ir-optimization-tests"
         -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/ir-optimization/cli.cmake"
     )
+
+    # The runtime service (docs/design/Service030.md): the protocol codec.
+    add_executable(neura_service_protocol_tests tests/service/protocol_tests.cpp)
+    target_link_libraries(neura_service_protocol_tests PRIVATE neura_service_protocol)
+    neura_target_defaults(neura_service_protocol_tests)
+    add_test(NAME service-unit-protocol COMMAND neura_service_protocol_tests)
 
     # The install lifecycle (docs/Install.md): version source, the data
     # formats, and the commands against an install made from a release
