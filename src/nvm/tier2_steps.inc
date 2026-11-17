@@ -164,7 +164,13 @@
     // the allowance is spent: the next block runs at tier 1.
     std::uint64_t run_regions(std::uint64_t allowance) {
         std::uint64_t total = 0;
-        while (total < allowance) {
+#ifdef NEURA_WASM_RUNTIME
+        const auto initial_steps = steps_;
+        const auto charged = [&] { return steps_ - initial_steps; };
+#else
+        const auto charged = [&] { return total; };
+#endif
+        while (charged() < allowance) {
             if (finished_ || pending_ || active_block_ || !started_ || frames_.empty()) break;
             if (scheduler_ && scheduler_->deciding) break;
             auto frame = frames_.back();
@@ -173,8 +179,8 @@
             if (!region) break;
 #ifdef NEURA_WASM_RUNTIME
             time_as(TierTimes::Category::Regions);
-            const auto outcome = region->program ? run_program(*region, plan.program_entry, allowance - total)
-                                                : run_region(*region, allowance - total);
+            const auto outcome = region->program ? run_program(*region, plan.program_entry, allowance - charged())
+                                                : run_region(*region, allowance - charged());
 #else
             // Function programs run as native programs (tier 3) when they
             // have one, else on the interpreter.
@@ -525,6 +531,9 @@
         std::uint32_t pc = entered.entries[entry_index].label;
         std::uint64_t done = 0;
         std::uint64_t blocks = 0;
+#ifdef NEURA_WASM_RUNTIME
+        const auto initial_steps = steps_;
+#endif
         std::uint64_t* slots = nullptr;
         std::uint8_t* init = nullptr;
         std::uint64_t* temps = nullptr;
@@ -582,7 +591,14 @@
                 const auto& checkpoint = program->checkpoints[op.a];
                 const auto used = steps_ + done;
                 const bool steps_fit = used <= limits_.max_steps && limits_.max_steps - used >= checkpoint.steps;
+#ifdef NEURA_WASM_RUNTIME
+                // A kernel can charge additional steps in a helper. Its
+                // resume is a checkpoint, so stop here if it used the slice.
+                const auto charged = used - initial_steps;
+                const bool allowed = charged <= allowance && allowance - charged >= checkpoint.steps;
+#else
                 const bool allowed = allowance - blocks >= checkpoint.steps;
+#endif
                 const bool polls_fit = !scheduler_ || checkpoint.polls == 0 ||
                                        scheduler_->polls + checkpoint.polls < limits_.task_quantum;
                 if (!steps_fit || !allowed || !polls_fit) return end(op.block, true, region_counts_.budget);

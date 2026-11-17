@@ -181,6 +181,24 @@ if(NEURA_WASM_RUNTIME)
     target_link_options(neura_nvm INTERFACE -fwasm-exceptions -sALLOW_MEMORY_GROWTH=1 -sFILESYSTEM=0)
     neura_target_defaults(neura_nvm)
 
+    option(NEURA_WASM_HOST "Link the portable browser NVM and its ES module loader" OFF)
+    if(NEURA_WASM_HOST)
+        add_executable(neura_wasm src/wasm/entry.cpp)
+        set_target_properties(neura_wasm PROPERTIES OUTPUT_NAME nvm SUFFIX .mjs)
+        target_link_libraries(neura_wasm PRIVATE neura_nvm)
+        set(neura_wasm_exports
+            _malloc _free _neura_wasm_open _neura_wasm_close _neura_wasm_error
+            _neura_wasm_advance _neura_wasm_respond _neura_wasm_clock
+            _neura_wasm_has_proof _neura_wasm_prove_idle)
+        list(JOIN neura_wasm_exports "','" neura_wasm_exports)
+        target_link_options(neura_wasm PRIVATE
+            --no-entry -sENVIRONMENT=web,node -sSTACK_SIZE=1048576 -sDYNAMIC_EXECUTION=0
+            -sMODULARIZE=1 -sEXPORT_ES6=1
+            "-sEXPORTED_FUNCTIONS=['${neura_wasm_exports}']"
+            "-sEXPORTED_RUNTIME_METHODS=['HEAPU8','UTF8ToString']")
+        neura_target_defaults(neura_wasm)
+    endif()
+
     option(NEURA_WASM_SMOKE "Link the portable runtime into a Node smoke fixture" OFF)
     if(NEURA_WASM_SMOKE)
         add_executable(neura_wasm_smoke tests/wasm/smoke.cpp)

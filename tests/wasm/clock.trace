@@ -1,0 +1,14 @@
+neura-trace 1
+request neura.console.write_line 1 ["h\xC3\xA9llo"]
+ok 0
+request neura.clock.wall 1 []
+ok [1794252615, 250000000]
+request neura.console.write_line 1 ["2026-11-09T19:30:15.250Z"]
+ok 0
+request neura.clock.monotonic 1 []
+ok 9007199254740992
+request neura.clock.monotonic 1 []
+ok 9007199254740993
+request neura.console.write_line 1 ["PT0.000000001S"]
+ok 0
+outcome completed 0

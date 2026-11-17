@@ -538,6 +538,10 @@ public:
         while (steps_ - initial_steps < budget) {
             if (tier2_) {
                 run_regions(budget - (steps_ - initial_steps));
+                if (finished_) {
+                    time_as(TierTimes::Category::Other);
+                    return *finished_;
+                }
                 if (steps_ - initial_steps >= budget) break;
             }
             if (auto event = step(wires_)) {
@@ -4353,9 +4357,24 @@ private:
         std::array<Cell, max_kernel_params> cells{};
         std::array<std::uint64_t, max_kernel_params> results{};
         std::array<void*, max_kernel_params> pointers{};
+        // The C ABI can pad between a pointer and a uint64_t, as on wasm32.
+        // The view declarations all use the same pointer/length layout.
         const auto view = [](Cell& cell, const void* data, std::uint64_t length) {
-            std::memcpy(cell.bytes, &data, sizeof data);
-            std::memcpy(cell.bytes + sizeof data, &length, sizeof length);
+            const neura_bytes record{static_cast<const std::uint8_t*>(data), length};
+            std::memcpy(cell.bytes, &record, sizeof record);
+        };
+        constexpr auto output_offset = alignof(neura_out_bytes);
+        constexpr auto state_offset = alignof(neura_state);
+        static_assert(sizeof(neura_bytes) <= sizeof(Cell));
+        static_assert(output_offset >= sizeof(void*) && output_offset + sizeof(neura_out_bytes) <= sizeof(Cell));
+        static_assert(state_offset >= sizeof(void*) && state_offset + sizeof(neura_state) <= sizeof(Cell));
+        static_assert(sizeof(neura_out_bytes) == sizeof(neura_out_text) &&
+                      alignof(neura_out_bytes) == alignof(neura_out_text) &&
+                      offsetof(neura_out_bytes, len) == offsetof(neura_out_text, len) &&
+                      offsetof(neura_out_bytes, cap) == offsetof(neura_out_text, cap));
+        const auto buffer_bytes = [](std::uint64_t count, std::size_t width = 1) {
+            if (count > detail::addressable_bytes) throw std::bad_array_new_length();
+            return detail::allocation_bytes(static_cast<std::size_t>(count), width);
         };
         const auto pack = [&](std::size_t p, Heap::Ref item, Kind element) {
             auto& buffer = kernel_buffers_[p];
@@ -4399,26 +4418,19 @@ private:
                 pack(p, item, element);
                 auto& buffer = kernel_buffers_[p];
                 if (kind == Kind::State) {
-                    const auto length = static_cast<std::uint64_t>(buffer.size());
-                    view(cell, buffer.data(), length);
+                    const neura_state record{buffer.data(), buffer.size()};
+                    void* state = cell.bytes + state_offset;
+                    std::memcpy(state, &record, sizeof record);
+                    std::memcpy(cell.bytes, &state, sizeof state);
                 } else {
                     view(cell, buffer.data(), buffer.size() / element_bytes(element));
-                }
-                if (kind == Kind::State) {
-                    // neura_state holds a writable pointer, as neura_mut_T does.
-                    auto* data = buffer.data();
-                    const auto length = static_cast<std::uint64_t>(buffer.size());
-                    std::memcpy(cell.bytes + 16, &data, sizeof data);
-                    std::memcpy(cell.bytes + 16 + sizeof data, &length, sizeof length);
-                    void* state = cell.bytes + 16;
-                    std::memcpy(cell.bytes, &state, sizeof state);
                 }
                 break;
             }
             case Role::Scratch: {
                 const auto element = kernels::element_kind(kind);
                 auto& buffer = kernel_buffers_[p];
-                buffer.assign(static_cast<std::size_t>(sizes[p]) * element_bytes(element), 0);
+                buffer.assign(buffer_bytes(sizes[p], element_bytes(element)), 0);
                 view(cell, buffer.data(), sizes[p]);
                 break;
             }
@@ -4426,14 +4438,10 @@ private:
             case Role::ErrorOffset:
                 if (kind == Kind::OutText || kind == Kind::OutBytes) {
                     auto& buffer = kernel_buffers_[p];
-                    buffer.assign(static_cast<std::size_t>(sizes[p]), 0);
-                    auto* data = buffer.data();
-                    const std::uint64_t zero = 0;
-                    const std::uint64_t capacity = sizes[p];
-                    std::memcpy(cell.bytes + 8, &data, sizeof data);
-                    std::memcpy(cell.bytes + 8 + sizeof data, &zero, sizeof zero);
-                    std::memcpy(cell.bytes + 16 + sizeof data, &capacity, sizeof capacity);
-                    void* out = cell.bytes + 8;
+                    buffer.assign(buffer_bytes(sizes[p]), 0);
+                    const neura_out_bytes record{buffer.data(), 0, sizes[p]};
+                    void* out = cell.bytes + output_offset;
+                    std::memcpy(out, &record, sizeof record);
                     std::memcpy(cell.bytes, &out, sizeof out);
                 } else {
                     void* result = &results[p];
@@ -4455,14 +4463,14 @@ private:
             if (status != NEURA_NEED_CAPACITY || attempt == 1 || binding.value_param == kernels::Binding::none) break;
             auto& cell = cells[binding.value_param];
             neura_out_bytes out{};
-            std::memcpy(&out, cell.bytes + 8, sizeof out);
+            std::memcpy(&out, cell.bytes + output_offset, sizeof out);
             if (out.len <= out.cap) break;
             auto& buffer = kernel_buffers_[binding.value_param];
-            buffer.assign(static_cast<std::size_t>(out.len), 0);
+            buffer.assign(buffer_bytes(out.len), 0);
             out.data = buffer.data();
             out.cap = out.len;
             out.len = 0;
-            std::memcpy(cell.bytes + 8, &out, sizeof out);
+            std::memcpy(cell.bytes + output_offset, &out, sizeof out);
         }
         const bool error = status >= NEURA_ERR_INVALID_START_BYTE && status < NEURA_TRAP_OFFSET_OUT_OF_RANGE;
         if (status != NEURA_OK && !(error && binding.result == kernels::ResultShape::Outcome)) {
@@ -4497,7 +4505,7 @@ private:
                 return value_bits() & mask(kernels::scalar_width(kind));
             }
             neura_out_bytes out{};
-            std::memcpy(&out, cells[binding.value_param].bytes + 8, sizeof out);
+            std::memcpy(&out, cells[binding.value_param].bytes + output_offset, sizeof out);
             const auto length = empty ? 0 : static_cast<std::size_t>(std::min(out.len, out.cap));
             if (kind == Kind::OutText) {
                 const std::string_view bytes(reinterpret_cast<const char*>(out.data), length);

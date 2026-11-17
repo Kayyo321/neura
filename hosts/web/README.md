@@ -29,3 +29,19 @@ The provider's binary encoding, service handles, and event queue sit outside thi
 ## Verification
 
 Run `python3 tests/apps/ui-ops/browser.py` using local Chromium and Firefox. The tests exercise native DOM mutation, user-facing selection state, event modifiers, listener identity, rejected batches, fault and reset behavior, and injected composition events. Physical IME behavior requires a manual platform run.
+
+## NVM execution
+
+Configure the `wasm-runtime` preset with `-DNEURA_WASM_HOST=ON`. The `neura_wasm` target produces `nvm.mjs` and `nvm.wasm` in the preset's build directory. Instantiate the generated module, then pass it and the NVR bytes to `new NvmExecution(module, image, { args, host, tier })` from `nvm.js`. The constructor verifies the image and binds the exact service versions and signatures before execution starts. Each instance owns its frames, heap, scheduler, and proof queue. Call `close()` when finished.
+
+The controlled host supplies synchronous callbacks. The sequence argument is a `BigInt` starting at zero in each execution. Clock readings enter the run only through the supplied callbacks.
+
+| Callback | Reply |
+| --- | --- |
+| `console(line, sequence)` | The supplied line includes its LF. Return `false` for a failed write, or `true` or `undefined` for success. |
+| `clockWall(sequence)` | `{ seconds, nanos }` with `seconds` a signed 64-bit `BigInt` and `nanos` an integer in `[0, 1000000000)`, or `{ error }` with a positive uint32. |
+| `clockMonotonic(sequence)` | A signed 64-bit `BigInt` in nanoseconds, or `{ error }` with a positive uint32. |
+
+`run()` serves those requests and checks the browser's work budget after each 4,096-step slice or intervening event. It defaults to 8 ms with a configurable ceiling of 50 ms. A charged kernel or a parallel join runs atomically, so that operation can pass the next step sample. An idle callback may attempt one queued proof after the page has had an event turn. Pass `hasPendingEvents` when a host has queued events of its own. `onProof` receives the duration of an idle attempt in milliseconds. Applications can also drive the instance through `advanceSlice()`, `serveRequest()`, and `proveOneIdle()`, with the caller responsible for running proofs only while idle. `run()` returns a wait to its caller so the embedder can supply a task clock reading with `advanceClock()` before resuming. Browser timer and UI providers are later integration steps.
+
+Run `python3 tests/wasm/check-host.py --neura /path/to/neura --browser chromium --browser firefox` after building `neura_wasm`. The check builds the fixtures once, records native tier-0 output and counters, and compares the same images under Node and the selected local browsers.

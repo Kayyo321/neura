@@ -129,6 +129,8 @@ cmake --build --preset wasm-runtime
 
 For the standalone Node smoke test, configure the preset with `-DNEURA_WASM_SMOKE=ON`. Run `node tests/wasm/smoke.cjs build/wasm-runtime/neura_wasm_smoke.js /path/to/image.nvr 2` with a smoke image that uses only `neura.console.write_line`. The modes `0`, `1` and `2` exercise tier 0, normal tier 2 and eager portable function programs respectively.
 
+Configure with `-DNEURA_WASM_HOST=ON` to link `nvm.wasm` and its ES module loader. The [browser adapter](../../hosts/web/README.md#nvm-execution) verifies and binds an image before starting it, then resumes the same execution across step slices. Its initial host binds console line writes and wall and monotonic clock reads. A due proof remains queued while the embedder processes events. The embedder can attempt one proof on an idle callback.
+
 ## Version axes
 
 Each is independent of the language version, of NeuraIR and of NVR, starts at 1, and is negotiated or checked before anything that depends on it runs.
