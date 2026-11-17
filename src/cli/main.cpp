@@ -1768,6 +1768,7 @@ int task_safety_report(neura::IrProgram program) {
     neura::specialize(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
+    neura::elaborate_class_hooks(program);
     const neura::TaskAnalysis analysis(program);
     const auto file_of = [&](neura::SymbolId id) {
         for (std::size_t hops = 0; id < program.symbols.size() && hops < program.symbols.size(); ++hops) {
@@ -1837,7 +1838,7 @@ int check_program(neura::IrProgram program) {
     neura::specialize(program);
     neura::check_storage(program, neura::StorageStage::Specialized);
     neura::materialize_reference_storage(program);
-    if (neura::has_class_hooks(program)) neura::elaborate_class_hooks(program);
+    neura::elaborate_class_hooks(program);
     return 0;
 }
 

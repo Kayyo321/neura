@@ -922,9 +922,7 @@ public:
 };
 
 std::vector<SymbolId> PurityAnalysis::hook_targets(const IrNode& node) const {
-    if (!hooks_ || node.operands.size() != 1) return {};
-    return hooks_->targets(node.op == IrOp::HookRead ? node.operands.front().type : node.type,
-                           node.op == IrOp::HookRead ? HookKind::Get : HookKind::Set);
+    return hooks_ ? hooks_->targets(node) : std::vector<SymbolId>{};
 }
 
 PurityAnalysis::PurityAnalysis(const IrProgram& program, std::function<bool(SymbolId)> opaque)

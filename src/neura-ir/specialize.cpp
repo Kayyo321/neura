@@ -5,7 +5,6 @@
 
 #include "monitors.hpp"
 #include "purity.hpp"
-#include "tags.hpp"
 #include "task_analysis.hpp"
 #include "nominal.hpp"
 
@@ -795,14 +794,8 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // spawns; the guard operations are then part of what the isolation
     // checks see.
     lower_synchronized(program);
-    const bool thread_safe_tags = std::ranges::any_of(program.symbols, [](const IrSymbol& item) {
-        return has_tag(item, TagId::ThreadSafe);
-    });
-    if (uses_tasks(program) || thread_safe_tags) {
-        const TaskAnalysis analysis(program);
-        analysis.check_tags();
-        if (uses_tasks(program)) analysis.check();
-    }
+    // Hooked programs get their implicit calls during hook elaboration.
+    if (!has_class_hooks(program)) check_task_safety(program);
 }
 
 } // namespace neura
