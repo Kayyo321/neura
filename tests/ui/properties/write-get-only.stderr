@@ -1,0 +1,12 @@
+error[E0510]: 'name' is read-only through 'Named'
+ --> $DIR/write-get-only.nra:7:5
+  |
+3 |     let name: string;
+  |         ---- 'name' requires only '| get;'
+...
+7 |     value.name = "x";
+  |     ^^^^^^^^^^ cannot assign to 'name' here
+  |
+  = help: add '| set;' to the property of 'Named', or assign it through the class
+
+For more information about this error, try `neura explain E0510`.

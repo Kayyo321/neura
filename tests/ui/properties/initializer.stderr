@@ -1,0 +1,10 @@
+error[E0573]: invalid interface property
+ --> $DIR/initializer.nra:3:24
+  |
+3 |     let name: string = "x";
+  |                        ^^^ an interface property has no initializer
+  |         ---- 'name' declares no storage
+  |
+  = help: remove the initializer; the class that implements the interface holds the value
+
+For more information about this error, try `neura explain E0573`.

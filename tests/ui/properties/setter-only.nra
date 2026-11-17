@@ -1,0 +1,9 @@
+// A field with only a setter cannot be read (edge case 67).
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Hidden = class implements Named (
+    export let name: string = "";
+        | set: name = value;
+);

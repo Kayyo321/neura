@@ -1,0 +1,10 @@
+error[E0573]: invalid interface property
+ --> $DIR/no-clause.nra:3:9
+  |
+3 |     let name: string;
+  |         ^^^^ an interface property needs '| get;'
+  |
+  = help: a member of an interface is a method, or a property followed by '| get;' and optionally '| set;'
+help: require a getter
+
+For more information about this error, try `neura explain E0573`.

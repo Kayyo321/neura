@@ -1,0 +1,21 @@
+plain
+get name
+traced
+get name
+get name
+traced traced
+receiver
+get count
+operand
+set count 5
+receiver
+operand
+41
+get name
+plain traced
+boxed
+6000
+set count 2147483647
+before the overflow
+get count
+operand

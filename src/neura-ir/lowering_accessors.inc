@@ -41,14 +41,12 @@ void Lowering::check_accessor_member(const Declaration& decl, SymbolId owner) co
     const auto& first = decl.accessors.front();
     const auto name = decl.name_span.value_or(decl.span);
     const auto owner_kind = symbol(owner).kind;
-    if (owner_kind == SymbolKind::Interface)
-        throw Diagnostic(first.span, "an interface cannot declare accessors").with_code("E0519")
-            .label("accessor clause in an interface")
-            .label(name, "'" + decl.name + "' is an interface member")
-            .note("interfaces cannot require accessors in this release")
-            .help("declare the accessors on the field of a class that implements the interface, "
-                  "or require a method instead");
-    if (owner_kind != SymbolKind::Class)
+    if (owner_kind == SymbolKind::Interface) {
+        // A property requirement (lowering_properties.inc).
+        check_property_requirement(decl);
+        if (decl.kind == DeclKind::Binding && !decl.cast_target && decl.overloads.empty()) return;
+    }
+    if (owner_kind != SymbolKind::Class && owner_kind != SymbolKind::Interface)
         throw Diagnostic(first.span, "accessors are only allowed on class fields").with_code("E0519")
             .label("accessor clause outside a class")
             .label(name, "'" + decl.name + "' is a member of a " +
@@ -159,6 +157,7 @@ void Lowering::lower_accessors(SymbolId field) {
             .label(name_span(field), "'" + symbol(field).name + "' is an alias of a type")
             .help("remove the clause; only an exported instance field can have 'get' and 'set' accessors");
     }
+    if (property_requirement(field)) return type_requirement_accessors(field);
     const auto field_type = symbol(field).type;
     // A copy: lowering the accessor bodies adds symbols.
     const auto name = symbol(field).name;
@@ -219,7 +218,10 @@ IrNode Lowering::route_field(IrNode field, const Expr& expr, Context& context) {
     const auto set = accessor(target, AccessorKind::Set);
     if (get == no_symbol && set == no_symbol) return field;
     const auto owner = symbol(target).owner;
-    const bool inside_class = inside(lexical_owner(context), owner);
+    // A property of an interface has no storage, so every access, also one in
+    // an interface default, calls its accessor.
+    const bool requirement = property_requirement(target);
+    const bool inside_class = !requirement && inside(lexical_owner(context), owner);
     const auto& receiver = expr.kind == ExprKind::Member ? expr.operands.front() : expr;
     const bool own_receiver = expr.kind == ExprKind::Name ||
         (receiver.kind == ExprKind::Name && receiver.text == "instance" &&
@@ -233,6 +235,11 @@ IrNode Lowering::route_field(IrNode field, const Expr& expr, Context& context) {
             return field;
         }
         if (inside_class) return field;
+        if (requirement)
+            throw Diagnostic(expr.span, "'" + name + "' is read-only through " + declaring).with_code("E0510")
+                .label("cannot assign to '" + name + "' here")
+                .label(name_span(target), "'" + name + "' requires only '| get;'")
+                .help("add '| set;' to the property of " + declaring + ", or assign it through the class");
         auto error = Diagnostic(expr.span, "'" + name + "' is read-only outside its class").with_code("E0510")
             .label("cannot assign to '" + name + "' here");
         if (user_source(symbol(get).span.file)) error.label(symbol(get).span, "'" + name + "' declares only a getter");

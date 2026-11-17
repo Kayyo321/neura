@@ -265,3 +265,36 @@ Expr copy_expression(std::size_t start) {
     result.span = span_from(start);
     return result;
 }
+
+// After the word of an accessor clause (Records030.md, Interface properties
+// and Virtual accessors): the dispatch words `.virtual` and `.override`, which
+// may be separated by spaces or comments, and the bodyless form `| get;` of
+// an interface property. Returns true when the clause ended with its ';'.
+bool accessor_clause_form(AccessorClause& clause, Declaration::Kind owner) {
+    while (at(".")) {
+        advance();
+        if (current().kind != TokenKind::Identifier || (current().text != "virtual" && current().text != "override")) {
+            throw Diagnostic(current().kind == TokenKind::End ? after_previous() : current().span,
+                             "expected 'virtual' or 'override' after '.'").with_code("E0202")
+                .label(current().kind == TokenKind::End ? "expected 'virtual' or 'override' before the end of the file"
+                                                        : "expected 'virtual' or 'override', " + found_text(current()))
+                .help("an accessor clause is '| get:', '| get.virtual:' or '| get.override:'");
+        }
+        const auto& word = advance();
+        clause.dispatch_words.emplace_back(word.text, word.span);
+        if (clause.dispatch == AccessorClause::Dispatch::None)
+            clause.dispatch = word.text == "virtual" ? AccessorClause::Dispatch::Virtual
+                                                     : AccessorClause::Dispatch::Override;
+    }
+    if (!at(";")) return false;
+    if (owner != Declaration::Kind::Interface) {
+        throw Diagnostic(current().span, "expected ':' after '" + std::string(clause.setter ? "set" : "get") + "'")
+            .with_code("E0202")
+            .label("expected ':' and a body, found ';'")
+            .help("a clause without a body, '| get;', declares an interface property; in a class write "
+                  "'| get: <expression>;'");
+    }
+    clause.bodyless = true;
+    advance();
+    return true;
+}

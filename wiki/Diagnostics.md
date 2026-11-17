@@ -172,6 +172,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0570](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0570.md) | invalid record declaration |
 | [E0571](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0571.md) | record field of a type a record cannot hold |
 | [E0572](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0572.md) | copy construction of a value that is not a record |
+| [E0573](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0573.md) | invalid interface property |
+| [E0574](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0574.md) | invalid virtual accessor |
 
 ## E06xx: Concurrency
 

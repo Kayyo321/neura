@@ -1,0 +1,5 @@
+// '.virtual' has no meaning in an interface (edge case 85).
+let Named = interface (
+    let name: string;
+        | get.virtual;
+);

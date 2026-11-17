@@ -226,6 +226,15 @@ struct AccessorClause {
     // A setter's single statement, or the statements of a block body.
     std::vector<Statement> body;
     bool block{};
+    // `| get;` and `| set;` without a body: a clause of an interface property
+    // (docs/design/Records030.md, Interface properties).
+    bool bodyless{};
+    // The words written after the clause's word, `.virtual` or `.override`
+    // (Records030.md, Virtual accessors), each with its span. More than one
+    // is an error that lowering reports.
+    enum class Dispatch { None, Virtual, Override };
+    Dispatch dispatch{Dispatch::None};
+    std::vector<std::pair<std::string, Span>> dispatch_words{};
 };
 
 // A record class (docs/design/Records030.md, Records). The parser has built

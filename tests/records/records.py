@@ -102,6 +102,76 @@ class RecordBoundaryTests(unittest.TestCase):
         self.assertEqual(len(generated), 8)
 
 
+PROPERTIES = '''
+export let Library = module (
+    export let Named = interface (
+        let name: string;
+            | get;
+    );
+    export let Plain = class implements Named (
+        export let name: string = "plain";
+    );
+    export let Unrelated = class (
+        export let name: string = "unrelated";
+    );
+);
+'''
+
+PROPERTIES_APP = '''
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let library = import:{source};
+
+let Local = class implements library.Named (
+    export let name: string = "local";
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {{
+        let items: library.Named[] = [new library.Plain(), new Local()];
+        for (let item in items) {{
+            console.print_line(item.name);
+        }}
+        console.print_line(new library.Unrelated().name);
+        return program.ExitCode.Ok;
+    }};
+);
+'''
+
+
+class PropertyBoundaryTests(unittest.TestCase):
+    def test_requirements_and_adapters_across_the_boundary(self):
+        with tempfile.TemporaryDirectory() as scratch:
+            directory = pathlib.Path(scratch)
+            (directory / 'library.nra').write_text(PROPERTIES)
+            result = run('emit-ir', 'library.nra', '-o', 'library.nir', cwd=directory)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            listing = run('emit-ir', 'library.nir', cwd=directory).stdout.splitlines()
+            requirement = [line for line in listing if 'function "$get_name"' in line and 'property.requirement' in line]
+            self.assertEqual(len(requirement), 1, listing)
+            self.assertIn('@property.requirement(["name", 0u])', requirement[0])
+            # An adapter only in the class that implements the interface.
+            adapters = [line for line in listing if '@generated(["property.adapter"' in line]
+            self.assertEqual(len(adapters), 1)
+            self.assertIn('function "$get_name"', adapters[0])
+            self.assertIn('@accessor.of(', adapters[0])
+            self.assertEqual(sum('function "$get_name"' in line for line in listing), 2)
+            outputs = []
+            for source, files in (('"library.nir".Library', []), ('Library', ['library.nra'])):
+                (directory / 'app.nra').write_text(PROPERTIES_APP.format(source=source))
+                result = run('build', 'app.nra', *files, '-o', 'app.nvr', cwd=directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs.append(run('run', 'app.nvr', cwd=directory).stdout)
+                # The linked program keeps the attributes.
+                result = run('emit-ir', 'app.nra', *files, '-o', 'linked.nir', cwd=directory)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                linked = run('emit-ir', 'linked.nir', cwd=directory).stdout
+                self.assertEqual(linked.count('@generated(["property.adapter"'), 2)
+                self.assertEqual(linked.count('@property.requirement('), 1)
+            self.assertEqual(outputs[0], 'plain\nlocal\nunrelated\n')
+            self.assertEqual(outputs[0], outputs[1])
+
+
 if __name__ == '__main__':
     sys.argv = sys.argv[:1]
     unittest.main()

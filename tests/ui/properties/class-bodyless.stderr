@@ -1,0 +1,9 @@
+error[E0202]: expected ':' after 'get'
+ --> $DIR/class-bodyless.nra:4:14
+  |
+4 |         | get;
+  |              ^ expected ':' and a body, found ';'
+  |
+  = help: a clause without a body, '| get;', declares an interface property; in a class write '| get: <expression>;'
+
+For more information about this error, try `neura explain E0202`.

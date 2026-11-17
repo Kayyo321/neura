@@ -604,7 +604,7 @@ let Sized = interface (
     let size = func -> int;
         | get: 0;
 );
-]=] "4:9" "E0519.*an interface cannot declare accessors")
+]=] "4:9" "E0518.*'size' is a function")
 check_rejection(accessor-duplicate [=[
 let Counter = class (
     export let count = 0;

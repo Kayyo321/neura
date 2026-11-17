@@ -1,0 +1,9 @@
+// A 'last' field cannot be assigned (edge case 66).
+let Counter = interface (
+    let count: int;
+        | get;
+        | set;
+);
+let Fixed = class implements Counter (
+    export last count: int = 0;
+);

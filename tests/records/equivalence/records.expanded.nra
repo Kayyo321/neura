@@ -18,7 +18,7 @@ let Node = class (
     export let.override hash_code = func() -> uint32 {
         let hash: uint32 = 1;
         hash = ((hash as uint64 * 31 + instance.value.hash_code() as uint64) & 4294967295) as uint32;
-        hash = ((hash as uint64 * 31 + (instance.next == nil ? 0 as uint64 : instance.next.hash_code() as uint64))
+        hash = ((hash as uint64 * 31 + (instance.next == nil ? 0 : instance.next.hash_code() as uint64))
             & 4294967295) as uint32;
         return hash;
     };
@@ -50,7 +50,7 @@ let User = class (
         hash = ((hash as uint64 * 31 + instance.name.hash_code() as uint64) & 4294967295) as uint32;
         hash = ((hash as uint64 * 31 + instance.score.hash_code() as uint64) & 4294967295) as uint32;
         hash = ((hash as uint64 * 31 + instance.pair.hash_code() as uint64) & 4294967295) as uint32;
-        hash = ((hash as uint64 * 31 + (instance.owner == nil ? 0 as uint64 : instance.owner.hash_code() as uint64))
+        hash = ((hash as uint64 * 31 + (instance.owner == nil ? 0 : instance.owner.hash_code() as uint64))
             & 4294967295) as uint32;
         return hash;
     };

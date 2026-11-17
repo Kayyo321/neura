@@ -1,0 +1,6 @@
+// A clause is written once (edge case 62).
+let Named = interface (
+    let name: string;
+        | get;
+        | get;
+);

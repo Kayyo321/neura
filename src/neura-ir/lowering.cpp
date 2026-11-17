@@ -541,6 +541,17 @@ private:
     void reject_record_destroy(const IrNode& object) const;
     static void record_call_help(const Expr& initializer, Diagnostic& error);
     IrNode copy(const Expr& expr, Context& context);
+
+    // Interface properties (docs/design/Records030.md). The implementation is
+    // in lowering_properties.inc.
+    static bool property_requirement_syntax(const Declaration& decl);
+    bool property_requirement(SymbolId field) const;
+    void check_property_requirement(const Declaration& decl) const;
+    void reject_clauseless_property(const Declaration& member) const;
+    void declare_requirement_accessors(const Declaration& decl, SymbolId field);
+    void type_requirement_accessors(SymbolId field);
+    SymbolId hidden_method(SymbolId cls, const std::string& name) const;
+    void check_property_requirements(SymbolId id);
 };
 
 static std::string plural(std::size_t count, std::string_view noun) {
@@ -828,13 +839,20 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         symbol(id).singleton_instance = instance;
         symbol(instance).constant = true;
     }
-    if (!decl.accessors.empty()) declare_accessors(decl, id);
+    if (!decl.accessors.empty()) {
+        if (symbol(owner).kind == SymbolKind::Interface) declare_requirement_accessors(decl, id);
+        else declare_accessors(decl, id);
+    }
     attach_tags(program_, id, tag_target(program_, id), decl.record ? record_tags(decl) : decl.tags,
                 decl.name_span.value_or(decl.span), entries_[id].overloads);
     auto member_kind = kind == SymbolKind::Class ? SymbolKind::Field
                      : kind == SymbolKind::Enum ? SymbolKind::Variant
                                                 : SymbolKind::Global;
-    for (const auto& child : decl.members) declare(child, id, member_kind);
+    for (const auto& child : decl.members) {
+        // A property requirement is a field of its interface, without storage.
+        const bool property = kind == SymbolKind::Interface && !child.static_member && property_requirement_syntax(child);
+        declare(child, id, property ? SymbolKind::Field : member_kind);
+    }
     if (decl.record) declare_record(id, decl);
     return id;
 }
@@ -4855,14 +4873,18 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (symbol(id).kind == SymbolKind::Interface) {
             for (const auto& member : declaration.members) {
-                if (member.static_member) continue;
+                if (member.static_member || property_requirement_syntax(member)) continue;
+                if (member.kind == DeclKind::Binding && !member.cast_target) reject_clauseless_property(member);
                 if (member.kind != DeclKind::Function || !member.generics.empty() ||
                     member.name == "init" || member.name == "deinit") {
                     throw Diagnostic(member.span, "interfaces may declare only non-generic methods").with_code("E0504");
                 }
             }
         }
-        if (class_or_interface(symbol(id).kind)) check_interfaces(id);
+        if (class_or_interface(symbol(id).kind)) {
+            check_interfaces(id);
+            check_property_requirements(id);
+        }
         const auto casts = entries_[id].casts;
         std::vector<IrType> cast_types;
         for (const auto cast : casts) {
@@ -5114,6 +5136,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 
 #include "lowering_accessors.inc"
 #include "lowering_records.inc"
+#include "lowering_properties.inc"
 #include "lowering_calls.inc"
 
 // Anonymous classes and target-typed `new` (Types.md, Anonymous classes;

@@ -1044,7 +1044,7 @@ private:
                               "module body");
         expect(";");
         if (result.overloads.empty()) result.span = span_from(start);
-        if (owner) accessor_clauses(result);
+        if (owner) accessor_clauses(result, *owner);
         return result;
     }
 
@@ -1114,7 +1114,7 @@ private:
     // begins with '|', so the position is unambiguous, and `get`, `set`, and
     // `value` stay ordinary identifiers everywhere else. Lowering checks
     // which members may have them.
-    void accessor_clauses(Declaration& member) {
+    void accessor_clauses(Declaration& member, Declaration::Kind owner = Declaration::Kind::Class) {
         while (at("|")) {
             const auto start = cursor_;
             advance();
@@ -1128,6 +1128,13 @@ private:
             AccessorClause clause;
             clause.setter = keyword.text == "set";
             clause.keyword = keyword.span;
+            // `.virtual` and `.override` (parser_records.inc), and the
+            // bodyless clause of an interface property.
+            if (accessor_clause_form(clause, owner)) {
+                clause.span = span_from(start);
+                member.accessors.push_back(std::move(clause));
+                continue;
+            }
             expect(":");
             if (at("{")) {
                 clause.block = true;

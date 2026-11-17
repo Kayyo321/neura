@@ -132,3 +132,38 @@ let Rank = class implements Comparable<Rank> (
 ```
 
 Interfaces can be used in bindings, parameters, return types, and bounds. A call on an interface reference dispatches using the receiver's concrete class. Interface requirements with identical signatures are shared. A class method with a matching signature takes precedence over interface defaults. A more specific declaration takes precedence over its ancestor, and independent inherited defaults for the same method require an explicit override. A class must declare a method for each remaining requirement, and can leave that declaration bodyless to make the class abstract.
+
+### Interface properties
+
+*Status: proposed in [the 0.3.0 records note](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md); implemented.*
+
+An interface member `let name: T;` followed by `| get;`, or by `| get;` and `| set;` in either order, is a property requirement. It declares no storage: it takes no initializer, its clauses have no body, and it is declared with `let` and needs `| get;` ([E0573](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0573.md)). A property of a generic interface may use the interface's type parameters.
+
+A class satisfies a `get` requirement with an exported instance field of the same name and exactly the same type, its own or inherited, that code outside the class may read: a field without accessors, or one with a `get` clause. It satisfies `set` with a field that outside code may write: a `let` field without accessors, or one with a `set` clause. Anything else is [E0504](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0504.md), naming the property and what is missing. Requirements of one name from several interfaces must have the same type and are joined, so the class must supply `set` when any of them asks for it. A record satisfies a requirement that needs only `get`.
+
+Reading `value.name` through an interface-typed receiver, or one whose type is a type parameter bounded by the interface, evaluates the receiver once and calls the getter of the receiver's class; writing calls its setter, and writing a property that has no `set` is [E0510](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0510.md). A compound assignment, `++` and `--` evaluate the receiver once, call the getter, evaluate the right operand, compute with the property's type (a checked-arithmetic trap comes before the setter), and call the setter. A property has no addressable storage, so `&value.name` is [E0524](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0524.md). A property read through the interface promises neither purity nor equal results on two reads, and a nil receiver traps as for any method call. Access through a class-typed receiver is unchanged.
+
+<!-- example: check -->
+```neura
+let Named = interface (
+    let name: string;
+        | get;
+);
+let Counter = interface (
+    let count: int;
+        | get;
+        | set;
+);
+
+let Rank = class implements Named, Counter (
+    export let name: string = "rank";
+    export let count: int = 0;
+);
+
+let bump = func(counter: Counter) {
+    counter.count += 1;
+};
+let label = func<T: Named>(value: T) -> string => value.name;
+```
+
+A property requirement is a pair of hidden bodyless functions of the interface, `$get_name` and `$set_name`, marked `property.requirement` ([NeuraIR format](NirFormat#symbol-attributes)). The read is a virtual call that reaches the getter of the receiver's class by the runtime's usual rule. For a field without clauses, lowering generates a hidden *adapter* that reads or stores the field, marked `accessor.of` and `generated`, in each class that implements the interface and has no method of that name; a class that implements no such interface gains no function.

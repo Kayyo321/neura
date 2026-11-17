@@ -1,0 +1,7 @@
+// A record's fields cannot be assigned (edge case 77).
+let Renamable = interface (
+    let name: string;
+        | get;
+        | set;
+);
+let User = record implements Renamable (name: string);

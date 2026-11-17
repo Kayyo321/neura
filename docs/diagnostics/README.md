@@ -169,6 +169,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0570](E0570.md) | invalid record declaration |
 | [E0571](E0571.md) | record field of a type a record cannot hold |
 | [E0572](E0572.md) | copy construction of a value that is not a record |
+| [E0573](E0573.md) | invalid interface property |
+| [E0574](E0574.md) | invalid virtual accessor |
 
 ## E06xx: Concurrency
 

@@ -1,0 +1,14 @@
+error[E0504]: 'Both' must have an exported field 'name: string' that can be assigned
+  --> $DIR/needs-set.nra:11:1
+   |
+ 3 |     let name: string;
+   |         ---- 'name' is required here
+...
+11 | let Both = class implements Named, Renamable (
+   | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^... 'Both' does not satisfy the property 'name' of 'Renamable'
+12 |     export last name: string = "both";
+   |                 ---- 'name' is declared here
+   |
+   = note: 'name' cannot be assigned after construction
+
+For more information about this error, try `neura explain E0504`.

@@ -339,7 +339,7 @@ void Lowering::check_record(SymbolId id) {
                 auto hash = rs::call(rs::member(self(item.name), "hash_code"));
                 auto wide = rs::cast(std::move(hash), rs::type(at, "uint64"));
                 if (item.reference)
-                    wide = rs::conditional(nil_test(self(item.name)), rs::cast(rs::integer(at, "0"), rs::type(at, "uint64")), std::move(wide));
+                    wide = rs::conditional(nil_test(self(item.name)), rs::integer(at, "0"), std::move(wide));
                 auto product = rs::binary("*", rs::cast(rs::name(at, "$hash"), rs::type(at, "uint64")), rs::integer(at, "31"));
                 auto sum = rs::binary("+", std::move(product), std::move(wide));
                 auto masked = rs::binary("&", std::move(sum), rs::integer(at, "4294967295"));

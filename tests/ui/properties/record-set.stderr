@@ -1,0 +1,13 @@
+error[E0504]: 'User' must have an exported field 'name: string' that can be assigned
+ --> $DIR/record-set.nra:7:1
+  |
+3 |     let name: string;
+  |         ---- 'name' is required here
+...
+7 | let User = record implements Renamable (name: string);
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ 'User' does not satisfy the property 'name' of 'Renamable'
+  |                                         ---- 'name' is declared here
+  |
+  = note: 'name' cannot be assigned after construction
+
+For more information about this error, try `neura explain E0504`.

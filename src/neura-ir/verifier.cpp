@@ -402,6 +402,16 @@ private:
                                                                         : AttributeId::AccessorSet;
                 const auto* back = symbol(field).kind == SymbolKind::Field ? find_attribute(symbol(field), link)
                                                                             : nullptr;
+                // A property adapter (docs/design/Records030.md) serves a field
+                // without clauses, its class's own or inherited, which does not
+                // name it, so outside access to the field stays direct.
+                const auto* made = find_attribute(entry, AttributeId::Generated);
+                if (made && made->value.items[0].text == "property.adapter") {
+                    if (symbol(field).kind != SymbolKind::Field || back || !entry.has_body)
+                        report(entry.span, "adapter " + name(id) + " serves " + name(field) +
+                                           ", which is not a field without accessors");
+                    break;
+                }
                 if (!back || back->value.symbol != id || symbol(field).owner != entry.owner) {
                     report(entry.span, "accessor " + name(id) + " serves " + name(field) +
                                        ", which does not name it");
@@ -443,6 +453,16 @@ private:
             case AttributeId::ClassRecord:
                 check_record(id, entry, attribute.value.symbol);
                 break;
+            case AttributeId::PropertyRequirement: {
+                const auto setter = attribute.value.items[1].integer == 1;
+                const auto expected = std::string(setter ? "$set_" : "$get_") + attribute.value.items[0].text;
+                if (entry.has_body || entry.name != expected || !valid(entry.owner) ||
+                    symbol(entry.owner).kind != SymbolKind::Interface ||
+                    entry.parameters.size() != (setter ? 1U : 0U))
+                    report(entry.span, "property requirement " + name(id) + " is not a bodyless '" + expected +
+                                           "' of an interface");
+                break;
+            }
             case AttributeId::Generated: {
                 const auto& generator = attribute.value.items[0].text;
                 if (generator != "record" && generator != "property.adapter" && generator != "derive:json.codec")

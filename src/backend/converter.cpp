@@ -610,7 +610,9 @@ std::uint32_t Converter::layout(SymbolId cls, const Span& where) {
         result.interfaces.push_back(layout(interface.symbol, where));
     for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
         const auto& field = program_.symbols[id];
-        if (field.owner == cls && field.kind == SymbolKind::Field) {
+        // An interface's fields are property requirements, without storage
+        // (docs/design/Records030.md).
+        if (field.owner == cls && field.kind == SymbolKind::Field && item.kind != SymbolKind::Interface) {
             fields_[id] = static_cast<std::uint32_t>(result.fields.size());
             // A field that is a tuple is several consecutive fields.
             for (const auto word : word_types(field.type, field.span)) result.fields.push_back(word);
