@@ -1304,12 +1304,141 @@ def suite_migrate(kit: Kit) -> None:
               f"case 58: a 0.2 install.sh on a schema 2 root: {result.stderr}")
 
 
+def strict_snapshot(root: Path) -> dict[str, tuple]:
+    """Every path below root with its digest or link target and its times."""
+    entries = {}
+    if not root.exists():
+        return entries
+    for directory, names, files in os.walk(root):
+        for name in names + files:
+            path = Path(directory) / name
+            info = path.lstat()
+            content = os.readlink(path) if path.is_symlink() else ("dir" if path.is_dir() else sha256(path))
+            entries[str(path.relative_to(root))] = (content, info.st_mtime_ns, info.st_mode)
+    return entries
+
+
+def suite_doctor(kit: Kit) -> None:
+    """neura doctor (step 8) on the states of the other cases, and cases 60,
+    63 and 64."""
+    v, t = kit.version, kit.triple
+    release = kit.release(kit.work / "release", kit.variant("service", neurad=True))
+    tops = {p: unpack(release / (f"neura-{p}-{v}-{t}.tar.gz" if p != "legacy" else f"neura-{v}-{t}.tar.gz"), kit.work / "unpacked" / p)
+            for p in ("sdk", "runtime", "legacy")}
+    newer = kit.release(kit.work / "newer", kit.variant("newer", version="9.9.9"), version="9.9.9")
+
+    def doctor(home: Home) -> subprocess.CompletedProcess:
+        return run([home.root / "current/bin/neura-doctor"], env=home.env())
+
+    def lines(result: subprocess.CompletedProcess, name: str) -> list[str]:
+        return [line for line in result.stdout.splitlines() if re.match(rf"(ok|warn|FAIL)  {re.escape(name)}: ", line)]
+
+    states: dict[str, Home] = {}
+    # Complete: SDK, runtime, combined.
+    sdk = Home(kit, "sdk")
+    check(sdk.install(tops["sdk"]).returncode == 0, "the SDK install")
+    states["sdk"] = sdk
+    result = doctor(sdk)
+    check(result.returncode == 0, f"case 1: doctor exits 0\n{result.stdout}")
+    check(lines(result, "components") == [f"ok  components: core, sdk (version {v}, build {kit.commit})"], "the components line")
+    check(lines(result, "service") == ["ok  service: not installed (optional)"], "case 1: the service is not installed")
+    check(lines(result, "integrity")[0].startswith("ok  ") and lines(result, "transaction") == ["ok  transaction: none interrupted"]
+          and lines(result, "migration") == ["ok  migration: not needed"], "the state lines")
+    check(lines(result, "generations") == [f"ok  generations: active {sdk.current()}, no previous"], "the generations line")
+    check(f"state complete" in lines(result, "install")[0], "the state is named")
+    check(lines(result, "links")[0].startswith(f"ok  links: {len(CORE_TOOLS) + len(SDK_TOOLS)} in "), "the links line")
+    check(lines(result, "stdlib") and lines(result, "launchers"), "the SDK checks of 0.2")
+    runtime = Home(kit, "runtime")
+    check(runtime.install(tops["runtime"]).returncode == 0, "the runtime install")
+    states["runtime"] = runtime
+    result = doctor(runtime)
+    check(result.returncode == 0 and lines(result, "sdk") == ["ok  sdk: not installed; source commands need Neura-sdk"]
+          and not lines(result, "libclang") and not lines(result, "c-compiler") and not lines(result, "gpu"),
+          f"case 2: doctor of a runtime installation\n{result.stdout}")
+    check(lines(result, "service") == ["ok  service: installed, protocol 1.0; no supervisor is running; login start is not registered"],
+          f"the service line: {lines(result, 'service')}")
+    both = Home(kit, "both")
+    check(both.install(tops["sdk"], "--add", tops["runtime"]).returncode == 0, "the combined install")
+    states["combined"] = both
+    check(doctor(both).returncode == 0, "case 3: doctor exits 0")
+
+    # Unmigrated (case 49).
+    bridge = Home(kit, "unmigrated")
+    legacy_state(kit, bridge, tops["legacy"], v)
+    states["unmigrated"] = bridge
+    result = run([bridge.bin / "neura", "doctor"], env=bridge.env())
+    check(result.returncode == 1 and 'FAIL  migration: run "neura update --migrate-install" to finish the install' in result.stdout
+          and "state unmigrated" in result.stdout, f"case 49: doctor fails on migration\n{result.stdout}")
+
+    # Interrupted: a crash after the journal of a change.
+    crashed = Home(kit, "interrupted")
+    check(crashed.install(tops["sdk"]).returncode == 0, "the install for the interrupted state")
+    result = run([crashed.bin / "neura-update", "update", "--source", newer], env=crashed.env({"NEURA_TEST_UPDATE_CRASH": "links-remove"}))
+    check(result.returncode == 70, "a crash during an update")
+    states["interrupted"] = crashed
+    result = doctor(crashed)
+    check(result.returncode == 1 and "FAIL  transaction: an interrupted update left" in result.stdout and "neura update --repair" in result.stdout
+          and "state interrupted" in result.stdout, f"case 19: doctor reports the interrupted change\n{result.stdout}")
+
+    # Damaged (case 60): neurac replaced by a file of another build.
+    damaged = Home(kit, "damaged")
+    check(damaged.install(tops["sdk"]).returncode == 0, "the install for the damaged state")
+    neurac = damaged.root / "versions" / damaged.current() / "bin/neurac"
+    neurac.write_bytes(neurac.read_bytes()[:-1] + bytes([neurac.read_bytes()[-1] ^ 1]))
+    states["damaged"] = damaged
+    result = doctor(damaged)
+    check(result.returncode == 1 and lines(result, "integrity")[0].startswith("FAIL  integrity: ") and f"{neurac}: expected sha256" in result.stdout
+          and "state damaged" in result.stdout, f"case 60: doctor fails on integrity\n{result.stdout}")
+
+    # A generation kept in use beside the active and previous ones.
+    kept = Home(kit, "kept")
+    check(kept.install(tops["sdk"]).returncode == 0, "the install for the kept state")
+    first = kept.current()
+    session = Session(kept, "neura-lsp")
+    for directory in (newer, kit.release(kit.work / "newest", kit.variant("newest", version="9.9.10"), version="9.9.10")):
+        check(run([kept.bin / "neura-update", "update", "--source", directory], env=kept.env()).returncode == 0, "updates for the kept state")
+    states["kept"] = kept
+    result = doctor(kept)
+    check(f"warn  generations: {first} is on disk and in use by a running neura process" in result.stdout, f"case 30: doctor shows the generation in use\n{result.stdout}")
+    session.end()
+    result = doctor(kept)
+    check(f"warn  generations: {first} is on disk and not in use" in result.stdout, "doctor says a generation can be removed")
+
+    # Case 61: a file system that cannot lock.
+    compiler = shutil.which("cc") or shutil.which("gcc")
+    if compiler:
+        shim = kit.work / "noflock.c"
+        shim.write_text("#include <errno.h>\nint flock(int fd, int operation) { (void)fd; (void)operation; errno = ENOLCK; return -1; }\n")
+        library = kit.work / "libnoflock.so"
+        if run([compiler, "-shared", "-fPIC", "-o", library, shim]).returncode == 0:
+            result = run([sdk.bin / "neura-doctor"], env=sdk.env({"LD_PRELOAD": str(library)}))
+            check("warn  leases: the file system of" in result.stdout and result.returncode == 0, f"case 61: doctor warns\n{result.stdout}")
+    else:
+        print("NOT RUN: case 61 in doctor: no C compiler for the flock stand-in")
+
+    # Cases 63 and 64: the read-only commands change nothing under the root,
+    # and without terminals print no notice and write no state.
+    for name, home in states.items():
+        before = strict_snapshot(home.root)
+        for arguments in (["neura", "doctor"], ["neura", "--version"], ["neura", "capabilities", "--json"],
+                          ["neura-doctor"], ["neura-update", "update", "--check", "--source", newer]):
+            program = home.bin / arguments[0]
+            if not program.exists():
+                program = home.root / "current/bin" / arguments[0]
+            result = run([program, *arguments[1:]], env=home.env())
+            check("is available; run" not in result.stderr and "--migrate-install\" first" not in result.stderr or arguments[0] == "neura-update",
+                  f"case 64: {name}: no notice from {arguments}")
+        check(strict_snapshot(home.root) == before, f"case 63: {name}: the read-only commands changed files under the root")
+        check(not (home.root / "update-check.txt").exists(), f"case 64: {name}: no update state")
+
+
 SUITES = {
     "archives": suite_archives,
     "install": suite_install,
     "bootstrap": suite_bootstrap,
     "update": suite_update,
     "migrate": suite_migrate,
+    "doctor": suite_doctor,
 }
 
 

@@ -2582,6 +2582,28 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
     }
 
     const auto detection = detect_install(executable);
+    const auto& root = detection.root;
+    const bool archive = detection.archive();
+    const bool not_migrated = archive && unmigrated(detection);
+    const bool interrupted = archive && exists_no_follow(journal_path(root));
+    // The generation this executable is in, read from its manifests.
+    std::optional<Generation> generation;
+    std::vector<std::string> unknown;
+    std::string manifest_problem;
+    if (detection.kind == Detection::Kind::Installed) {
+        try {
+            generation = read_generation(root / "versions" / detection.running_generation, &unknown);
+        } catch (const Failure& failure) {
+            // A generation that a 0.2 client placed has no manifests.
+            if (exists_no_follow(root / "versions" / detection.running_generation / components_directory)) manifest_problem = failure.message;
+        }
+    }
+    std::vector<std::string> damage;
+    if (generation) damage = quick_check(root / "versions" / detection.running_generation, *generation, 3);
+    std::string state = "complete";
+    if (not_migrated) state = "unmigrated";
+    else if (interrupted) state = "interrupted";
+    else if (!damage.empty() || !manifest_problem.empty()) state = "damaged";
     switch (detection.kind) {
     case Detection::Kind::Unmanaged:
         report.ok("install", "unmanaged (a source build or a copy; \"neura update\" and \"neura uninstall\" do not apply)");
@@ -2590,16 +2612,29 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         report.fail("install", "the install marker is not valid: " + detection.problem);
         break;
     case Detection::Kind::Installed:
-        report.ok("install", "method " + detection.marker.method + ", root " + detection.root.string());
+        report.ok("install", "method " + detection.marker.method + ", root " + root.string() + ", marker schema " +
+                                 std::to_string(detection.marker.schema) + (archive ? ", state " + state : std::string()));
         break;
     }
 
-    // The components whose executables are next to this one
-    // (docs/design/Products030.md, "Doctor and components"). Without the
-    // SDK, the compiler's standard library, launchers, libclang and C
-    // compiler are not needed.
+    // The components: from the manifests of an installed generation, else
+    // the executables next to this one (docs/design/Products030.md).
     bool sdk = true;
-    if (!executable.empty()) {
+    bool service = false;
+    if (generation) {
+        const auto names = generation->components();
+        sdk = std::ranges::find(names, "sdk") != names.end();
+        service = std::ranges::find(names, "service") != names.end();
+        report.ok("components", join_names(names, ", ") + " (version " + generation->version() + ", build " + generation->build() + ")");
+        for (const auto& name : unknown) report.warn("components", "the component " + name + " is not one this neura knows; it is ignored");
+        if (damage.empty()) {
+            report.ok("integrity", "every file of the manifests has its size, and every executable and library its digest");
+        } else {
+            report.fail("integrity", join_names(damage, "; ") + ". Reinstall this version with install.sh --force");
+        }
+    } else if (!manifest_problem.empty()) {
+        report.fail("integrity", manifest_problem);
+    } else if (!executable.empty()) {
         const auto directory = executable.parent_path();
         std::vector<std::string> missing_core;
         std::vector<std::string> missing_sdk;
@@ -2613,35 +2648,27 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
             if (found) ++sdk_found;
             else missing_sdk.emplace_back(each.name);
         }
-        const auto list = [](const std::vector<std::string>& names) {
-            std::string text;
-            for (const auto& name : names) text += (text.empty() ? "" : ", ") + name;
-            return text;
-        };
         sdk = sdk_found > 0;
+        service = fs::is_regular_file(directory / tool::executable_file(tool::service_executable), error);
         if (!missing_core.empty()) {
-            report.fail("components", "the Neura core is incomplete: " + list(missing_core) + " missing from " + directory.string() +
+            report.fail("components", "the Neura core is incomplete: " + join_names(missing_core, ", ") + " missing from " + directory.string() +
                                           ". Reinstall Neura");
         } else if (sdk && !missing_sdk.empty()) {
-            report.fail("components", "the Neura-sdk component is incomplete: " + list(missing_sdk) + " missing from " +
+            report.fail("components", "the Neura-sdk component is incomplete: " + join_names(missing_sdk, ", ") + " missing from " +
                                           directory.string() + ". Reinstall Neura");
         } else {
             report.ok("components", sdk ? "core, sdk" : "core (runtime only: the Neura-sdk component is not installed)");
         }
     }
-    const std::string no_sdk = "not needed: the Neura-sdk component is not installed";
 
     if (!sdk) {
-        report.ok("stdlib", no_sdk);
-    } else if (options.library.empty()) {
-        report.fail("stdlib", "the standard library directory (share/neura/stdlib/std) was not found next to this executable");
+        report.ok("sdk", "not installed; source commands need Neura-sdk");
     } else {
-        report.ok("stdlib", options.library.string());
-    }
-
-    if (!sdk) {
-        report.ok("launchers", no_sdk);
-    } else {
+        if (options.library.empty()) {
+            report.fail("stdlib", "the standard library directory (share/neura/stdlib/std) was not found next to this executable");
+        } else {
+            report.ok("stdlib", options.library.string());
+        }
         auto prefix = executable.parent_path();
         if (prefix.filename() == "bin") prefix = prefix.parent_path();
         const auto triple = nvm::native_target_triple();
@@ -2652,44 +2679,35 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         } else {
             report.warn("launchers", "no native launchers for " + triple + " in " + directory.string() + "; build --native is unavailable");
         }
-    }
-
-    if (!sdk) {
-        report.ok("libclang", no_sdk);
-        report.ok("clang-headers", no_sdk);
-    } else if (!options.probe_libclang) {
-        report.warn("libclang", "not checked: this doctor was built without the Neura-sdk component");
-        report.warn("clang-headers", "not checked: libclang was not loaded");
-    } else {
-        const auto status = options.probe_libclang();
-        if (status.loaded) {
-            report.ok("libclang", status.path + (status.major != 0 ? " (LLVM " + std::to_string(status.major) + ")" : ""));
-            if (status.resource_dir.empty()) {
-#ifdef __APPLE__
-                report.warn("clang-headers", "libclang's builtin headers (stddef.h) were not found; C imports are unavailable. "
-                                             "Install the Xcode Command Line Tools (xcode-select --install) or Xcode");
-#else
-                report.warn("clang-headers", "libclang's builtin headers (stddef.h) were not found; C imports are unavailable. On Debian and Ubuntu install libclang-common-" +
-                                                 std::to_string(status.major != 0 ? status.major : 19) + "-dev");
-#endif
-            } else {
-                report.ok("clang-headers", status.resource_dir);
-            }
+        if (!options.probe_libclang) {
+            report.warn("libclang", "not checked: this doctor was built without the Neura-sdk component");
+            report.warn("clang-headers", "not checked: libclang was not loaded");
         } else {
+            const auto status = options.probe_libclang();
+            if (status.loaded) {
+                report.ok("libclang", status.path + (status.major != 0 ? " (LLVM " + std::to_string(status.major) + ")" : ""));
+                if (status.resource_dir.empty()) {
 #ifdef __APPLE__
-            report.warn("libclang", "C imports are unavailable: " + first_line(status.error) +
-                                        ". Install the Xcode Command Line Tools (xcode-select --install) or Xcode, or name a libclang.dylib with NEURA_LIBCLANG");
+                    report.warn("clang-headers", "libclang's builtin headers (stddef.h) were not found; C imports are unavailable. "
+                                                 "Install the Xcode Command Line Tools (xcode-select --install) or Xcode");
 #else
-            report.warn("libclang", "C imports are unavailable: " + first_line(status.error) +
-                                        ". On Debian and Ubuntu install libclang1-19 libclang-common-19-dev");
+                    report.warn("clang-headers", "libclang's builtin headers (stddef.h) were not found; C imports are unavailable. On Debian and Ubuntu install libclang-common-" +
+                                                     std::to_string(status.major != 0 ? status.major : 19) + "-dev");
 #endif
-            report.warn("clang-headers", "not checked: libclang did not load");
+                } else {
+                    report.ok("clang-headers", status.resource_dir);
+                }
+            } else {
+#ifdef __APPLE__
+                report.warn("libclang", "C imports are unavailable: " + first_line(status.error) +
+                                            ". Install the Xcode Command Line Tools (xcode-select --install) or Xcode, or name a libclang.dylib with NEURA_LIBCLANG");
+#else
+                report.warn("libclang", "C imports are unavailable: " + first_line(status.error) +
+                                            ". On Debian and Ubuntu install libclang1-19 libclang-common-19-dev");
+#endif
+                report.warn("clang-headers", "not checked: libclang did not load");
+            }
         }
-    }
-
-    if (!sdk) {
-        report.ok("c-compiler", no_sdk);
-    } else {
         const char* cc = std::getenv("CC");
         const std::string compiler = cc != nullptr && *cc != '\0' ? cc : "cc";
         if (find_in_path(compiler).empty()) {
@@ -2697,17 +2715,39 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         } else {
             report.ok("c-compiler", find_in_path(compiler).string());
         }
+#ifdef NEURA_HAS_GPU
+        if (gpu::vulkan_loader_available()) {
+            report.ok("gpu", "compiled in; the Vulkan loader opens");
+        } else {
+            report.warn("gpu", "compiled in; the Vulkan loader (libvulkan) cannot be opened, so graphs run on the CPU");
+        }
+#else
+        report.ok("gpu", "not compiled in; graphs run on the CPU");
+#endif
     }
 
-#ifdef NEURA_HAS_GPU
-    if (gpu::vulkan_loader_available()) {
-        report.ok("gpu", "compiled in; the Vulkan loader opens");
+    if (!service) {
+        report.ok("service", "not installed (optional)");
     } else {
-        report.warn("gpu", "compiled in; the Vulkan loader (libvulkan) cannot be opened, so graphs run on the CPU");
+        // Offline and read-only: the supervisor is found by the lock it
+        // holds, and login start by its file; nothing is started.
+        std::string detail = "installed, protocol 1.0";
+        if (generation) {
+            if (const auto* manifest = generation->find("service"); manifest && manifest->protocol.starts_with("service ")) {
+                detail = "installed, protocol " + manifest->protocol.substr(8);
+            }
+        }
+        const bool daemon = !executable.empty() && fs::exists(executable.parent_path() / tool::executable_file(tool::service_executable));
+        if (!daemon) detail += "; neurad is not in this build";
+        if (archive) {
+            const auto supervisors = running_supervisors(root);
+            detail += supervisors.empty() ? "; no supervisor is running" : "; a supervisor runs for " + join_names(supervisors, ", ");
+            bool registered = false;
+            for (const auto& unit : service_unit_files(root)) registered = registered || exists_no_follow(unit);
+            detail += registered ? "; login start is registered" : "; login start is not registered";
+        }
+        report.ok("service", detail);
     }
-#else
-    report.ok("gpu", "not compiled in; graphs run on the CPU");
-#endif
 
     const std::array<std::pair<const char*, const char*>, 3> tools{{
         {"curl", "needed by \"neura update\""},
@@ -2723,11 +2763,11 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
         }
     }
 
-    if (detection.archive()) {
+    if (archive) {
         std::size_t good = 0;
         for (const auto& name : detection.marker.links) {
             const auto link = fs::path(detection.marker.bin) / name;
-            switch (link_state(link, detection.root)) {
+            switch (link_state(link, root)) {
             case LinkState::Correct:
                 ++good;
                 break;
@@ -2735,21 +2775,62 @@ int doctor(const fs::path& executable, const DoctorOptions& options) {
                 report.warn("links", link.string() + " does not exist; run \"neura update --repair\"");
                 break;
             case LinkState::OursOther:
-                report.warn("links", link.string() + " does not point through " + (detection.root / "current").string());
+                report.warn("links", link.string() + " does not point through " + (root / "current").string());
                 break;
             case LinkState::Conflict:
-                report.warn("links", link.string() + (is_symlink_no_follow(link) ? " does not point into " + detection.root.string()
+                report.warn("links", link.string() + (is_symlink_no_follow(link) ? " does not point into " + root.string()
                                                                                 : std::string(" is not a symbolic link")));
                 break;
             }
         }
         if (good == detection.marker.links.size()) {
-            report.ok("links", std::to_string(good) + " in " + detection.marker.bin + ", each through " + (detection.root / "current").string());
+            report.ok("links", std::to_string(good) + " in " + detection.marker.bin + ", each through " + (root / "current").string());
         }
         if (path_lists(detection.marker.bin)) {
             report.ok("path", detection.marker.bin + " is on PATH");
         } else {
             report.warn("path", detection.marker.bin + " is not on PATH");
+        }
+        if (not_migrated) {
+            report.fail("migration", "run \"neura update --migrate-install\" to finish the install");
+        } else {
+            report.ok("migration", detection.marker.schema == 2 ? "not needed" : "not needed: a 0.2 installation");
+        }
+        if (interrupted) {
+            std::string operation = "change";
+            try {
+                std::string problem;
+                if (const auto journal = parse_journal(read_small_file(journal_path(root), "the journal"), problem)) operation = journal->operation;
+            } catch (const Failure&) {
+            }
+            report.fail("transaction", "an interrupted " + operation + " left " + journal_path(root).string() +
+                                           "; run \"neura update --repair\" to complete or undo it");
+        } else {
+            report.ok("transaction", "none interrupted");
+        }
+        // Generations: the active and the previous one, and any other that
+        // a running process keeps.
+        const auto active = current_generation(root);
+        const auto previous = previous_generation(root, active, false);
+        report.ok("generations", "active " + (active.empty() ? std::string("none") : active) +
+                                     (previous.empty() ? std::string(", no previous") : ", previous " + previous));
+        for (const auto& name : generations_on_disk(root)) {
+            if (name == active || name == previous) continue;
+            const bool used = exists_no_follow(lease_path(root, name)) && generation_in_use(root, name, detection.running_generation);
+            report.warn("generations", name + " is on disk and " + (used ? "in use by a running neura process" :
+                                                                         "not in use; \"neura update --repair\" removes it"));
+        }
+        if (detection.marker.schema == 2 && !active.empty()) {
+            const int descriptor = ::open(lease_path(root, active).c_str(), O_RDONLY | O_CLOEXEC);
+            if (descriptor >= 0) {
+                if (::flock(descriptor, LOCK_SH | LOCK_NB) != 0 && lock_unsupported(errno)) {
+                    report.warn("leases", "the file system of " + root.string() +
+                                              " cannot lock, so tools run without leases and no generation is removed automatically");
+                } else {
+                    report.ok("leases", "each tool holds the lease of its generation while it runs");
+                }
+                ::close(descriptor);
+            }
         }
     }
 
