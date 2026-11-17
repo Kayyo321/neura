@@ -1677,10 +1677,7 @@ struct State {
     std::string own_generation;
 };
 
-bool unmigrated(const Detection& detection) {
-    return detection.marker.schema == 1 &&
-           exists_no_follow(detection.root / "versions" / detection.running_generation / components_directory / "core.txt");
-}
+bool unmigrated(const Detection& detection) { return needs_migration(detection); }
 
 constexpr const char* migrate_instruction =
     "this installation was updated by a 0.2 client; run \"neura update --migrate-install\" first";

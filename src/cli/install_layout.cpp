@@ -690,4 +690,11 @@ Detection detect_install(const fs::path& executable) {
     return detection;
 }
 
+bool needs_migration(const Detection& detection) {
+    if (detection.kind != Detection::Kind::Installed || detection.marker.schema != 1) return false;
+    std::error_code error;
+    const auto core = detection.root / "versions" / detection.running_generation / components_directory / "core.txt";
+    return fs::symlink_status(core, error).type() != fs::file_type::not_found && !error;
+}
+
 } // namespace neura::lifecycle

@@ -233,6 +233,13 @@ struct Detection {
 // generation name and both marker schemas are accepted.
 Detection detect_install(const std::filesystem::path& executable);
 
+// Whether an installed `detection` is a 0.3 generation that a 0.2 updater
+// placed and that `neura update --migrate-install` has not finished: a
+// schema 1 marker and a core manifest in the running generation
+// (docs/Install.md, "From 0.2"). The lifecycle and the service both refuse
+// on it.
+bool needs_migration(const Detection& detection);
+
 // Names under the root that this layout creates and owns.
 inline constexpr std::string_view marker_name = "neura-install.txt";
 inline constexpr std::string_view update_check_name = "update-check.txt";

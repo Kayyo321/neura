@@ -154,7 +154,7 @@ fs::path state_directory(const Installation& installation, std::string_view gene
 void write_atomically(const fs::path& path, std::string_view text);
 std::optional<std::string> read_text(const fs::path& path);
 
-// The generations an installation lists: its marker's versions, or the
+// The generations an installation lists: its marker's generations, or the
 // running one.
 std::vector<std::string> live_generations(const Installation& installation);
 // Every generation that has a state directory.

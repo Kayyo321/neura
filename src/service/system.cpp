@@ -307,14 +307,12 @@ Installation installation_of(const fs::path& executable) {
     if (detection.kind == lifecycle::Detection::Kind::Installed) {
         installation.root = fs::canonical(detection.root, error);
         if (error) installation.root = detection.root;
-        installation.generation = detection.running_version;
+        installation.generation = detection.running_generation;
         installation.installed = true;
-        // The lifecycle note's definition: a schema 1 marker (the only
-        // schema this build reads) and a core component manifest in the
-        // running generation, which only a 0.3 archive placed by a 0.2
-        // updater has.
-        installation.unmigrated =
-            fs::is_regular_file(installation.bin.parent_path() / "share/neura/components/core.txt", error);
+        // The lifecycle's own rule (docs/design/Lifecycle030.md): a schema
+        // 1 marker and a core component manifest in the running generation,
+        // which only a 0.3 archive placed by a 0.2 updater has.
+        installation.unmigrated = lifecycle::needs_migration(detection);
     } else {
         installation.root = installation.bin;
         installation.generation = "dev";
@@ -423,7 +421,7 @@ std::vector<std::string> live_generations(const Installation& installation) {
     std::vector<std::string> generations;
     if (installation.installed) {
         const auto detection = lifecycle::detect_install(installation.bin / "neura");
-        if (detection.kind == lifecycle::Detection::Kind::Installed) generations = detection.marker.versions;
+        if (detection.kind == lifecycle::Detection::Kind::Installed) generations = detection.marker.generations;
     }
     if (std::ranges::find(generations, installation.generation) == generations.end()) {
         generations.push_back(installation.generation);
