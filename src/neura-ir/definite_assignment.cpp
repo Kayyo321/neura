@@ -268,6 +268,8 @@ private:
             // Its operand names a declaration and is not evaluated.
             return;
         case ExprKind::Lambda:
+        // A generator captures as a lambda does (docs/design/Lifetime030.md).
+        case ExprKind::Generator:
             capture(*expr.lambda, expr.span, flow);
             return;
         case ExprKind::Conditional: {
@@ -318,7 +320,7 @@ private:
             const bool maybe = state.state == State::MaybeAssigned;
             auto error = Diagnostic(expr.span, "closure captures " + quoted(*index) + " before it is assigned")
                 .with_code("E0443").label(quoted(*index) + " is captured here")
-                .label(head(at, 4), maybe ? "the closure is created here, where " + quoted(*index) +
+                .label(head(at, lambda.generator ? 8 : 4), maybe ? "the closure is created here, where " + quoted(*index) +
                                                 " may not be assigned yet"
                                           : "the closure is created here, before " + quoted(*index) +
                                                 " is assigned");
@@ -339,7 +341,7 @@ private:
     // Visits every name reference in a nested lambda body, with its scopes.
     void scan(const Expr& expr, const Visit& visit) {
         visit(expr);
-        if (expr.kind == ExprKind::Lambda) {
+        if (expr.kind == ExprKind::Lambda || expr.kind == ExprKind::Generator) {
             scopes_.emplace_back();
             for (const auto& parameter : expr.lambda->parameters) hide(parameter.name);
             scan_body(expr.lambda->body, visit);

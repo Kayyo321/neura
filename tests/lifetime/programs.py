@@ -12,7 +12,9 @@ off, interpreted and native, with programs formed without tier 3
 tier 1 (NEURA_TIER_CHECK=2), with native tier 3 checked by its verifier
 (NEURA_TIER3_VERIFY=1), and with native code off (NEURA_JIT=off).
 
-Every run of one image must print the expected output and give the same
+Every image round-trips through disassemble and assemble byte for byte,
+and decompiles with and without provenance. Every run of one image must
+print the expected output and give the same
 exit status, trap text, steps and peak heap cells, and the builds from
 source, from `.nir` and without names give the same steps and peak heap
 cells as each other. A program that traps
@@ -105,6 +107,19 @@ def main():
                 if result.returncode != 0:
                     failures.append(f'{source.name} {build}: build failed\n{result.stderr}')
                     continue
+                listing = scratch / (image.name + '.nvra')
+                again = scratch / (image.name + '.again.nvr')
+                for command in (['disassemble', str(image), '-o', str(listing)],
+                                ['assemble', str(listing), '-o', str(again)]):
+                    result = run(command)
+                    if result.returncode != 0:
+                        failures.append(f'{source.name} {build}: {command[0]} failed\n{result.stderr}')
+                if again.exists() and again.read_bytes() != image.read_bytes():
+                    failures.append(f'{source.name} {build}: assemble did not give back the image')
+                for flags in ([], ['--no-provenance']):
+                    result = run(['decompile', *flags, str(image)])
+                    if result.returncode != 0 or not result.stdout:
+                        failures.append(f'{source.name} {build}: decompile {flags} failed\n{result.stderr}')
                 observed = {}
                 for mode, environment, options in MODES:
                     if mode in skipped:
@@ -116,6 +131,8 @@ def main():
                                         f'--- stderr\n{result.stderr}')
                     if result.returncode != status:
                         failures.append(f'{where}: exit status {result.returncode}, expected {status}\n{result.stderr}')
+                    if 'is not applied' in result.stderr:
+                        failures.append(f'{where}: the shadow oracle was not applied\n{result.stderr}')
                     stats = STATS.search(result.stderr)
                     traps = sorted(set(TRAP.findall(result.stderr)) - {line for line in TRAP.findall(result.stderr)
                                                                         if line.startswith('tier:')})

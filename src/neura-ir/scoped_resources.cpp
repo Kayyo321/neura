@@ -25,7 +25,11 @@ bool is_token(const IrProgram& program, const IrNode& node) {
 class ScopeCheck {
 public:
     ScopeCheck(const IrProgram& program, const PurityAnalysis& purity)
-        : program_(program), purity_(purity), dispatch_(program) {}
+        : program_(program), purity_(purity), dispatch_(program) {
+        for (SymbolId id = 0; id < program.symbols.size(); ++id)
+            if (program.symbols[id].kind == SymbolKind::Function && program.symbols[id].name == "$invoke")
+                invokes_.emplace(program.symbols[id].owner, id);
+    }
 
     // Finds the `using` blocks of a statement list and of the statement
     // regions nested in it.
@@ -45,6 +49,8 @@ private:
     const IrProgram& program_;
     const PurityAnalysis& purity_;
     DispatchTargets dispatch_;
+    // Each closure layout's `$invoke`.
+    std::map<SymbolId, SymbolId> invokes_;
     // The block being checked: its binding's name and `using` keyword, the
     // locals that may hold the resource or a value retaining it, the locals
     // declared inside the block, and the task scopes entered inside it.
@@ -293,7 +299,21 @@ private:
             }
             return held;
         }
-        case IrOp::MakeClosure:
+        case IrOp::MakeClosure: {
+            // A function value that captured the resource holds it, and its
+            // body must not keep it: its receiver is what it captured.
+            bool held = false;
+            for (const auto& operand : node.operands) held = expression(operand) || held;
+            if (!held || node.symbol >= program_.symbols.size()) return held;
+            const auto invoke = invokes_.find(program_.symbols[node.symbol].owner);
+            if (invoke == invokes_.end()) return held;
+            IrNode call;
+            call.symbol = invoke->second;
+            const auto kind = retention(call, 0, false);
+            if (kind == Retention::Elsewhere || kind == Retention::Unknown)
+                escape(node.span, "captured by a function value whose body keeps it");
+            return held;
+        }
         case IrOp::EnumConstruct:
         case IrOp::Tuple:
         case IrOp::Collection:
