@@ -111,6 +111,8 @@ A refusal changes nothing. Installing a different version beside an existing one
 <root>/versions/<version>/      a normal prefix
     bin/neura                   the dispatcher
     bin/neurac, bin/neura-run, ...        the tools it starts
+    lib/neura/libneura-core-<version>.so  the code the tools share (.dylib on macOS)
+    lib/neura/libneura-sdk-<version>.so   the compiler's part of it
     share/neura/stdlib/...
     share/doc/neura/LICENSE
     lib/neura/launchers/<target>/...      where the platform has launchers
@@ -305,7 +307,7 @@ These are not tested: `neura update` downloading over HTTPS (the release workflo
 
 ## Runtime-only archive
 
-`packaging/make-archive.sh --runtime <prefix> <output directory> <version> <target>` packs a prefix made by `cmake --install build --component core` as `neura-runtime-<version>-<target>.tar.gz`: `neura` and the core tools, `LICENSE`, and `VERSION`, with no standard library, compiler, or `install.sh`. Unpacked, `bin/neura run` and `bin/neura-run` run images, and source commands report that the SDK is missing. The release workflow builds and qualifies it but does not publish it yet: release metadata for separate components, its installer, and a link for each tool come in a later release.
+`packaging/make-archive.sh --runtime <prefix> <output directory> <version> <target>` packs a prefix made by `cmake --install build --component core` as `neura-runtime-<version>-<target>.tar.gz`: `neura`, the core tools and `lib/neura/libneura-core-<version>`, `LICENSE`, and `VERSION`, with no standard library, compiler, or `install.sh`. Unpacked, `bin/neura run` and `bin/neura-run` run images, and source commands report that the SDK is missing. The release workflow builds and qualifies it but does not publish it yet: release metadata for separate components, its installer, and a link for each tool come in a later release.
 
 ## Build from source
 

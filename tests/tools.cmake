@@ -7,8 +7,8 @@ set(NEURA_TOOL_NAMES
     neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm
     neura-explain neura-tags neura-debug neura-lsp neura-fmt)
 
-# neura_copy_tools(<neura> <directory>): copies <neura> and every tool next to
-# it into <directory>.
+# neura_copy_tools(<neura> <directory>): copies <neura>, every tool next to it
+# and their shared libraries into <directory>.
 function(neura_copy_tools neura directory)
     get_filename_component(source "${neura}" DIRECTORY)
     get_filename_component(suffix "${neura}" EXT)
@@ -19,4 +19,10 @@ function(neura_copy_tools neura directory)
         endif()
     endforeach()
     file(COPY ${files} DESTINATION "${directory}")
+    # The shared libraries of the tools, which a build-tree tool finds in
+    # lib/neura beside itself.
+    file(GLOB libraries "${source}/lib/neura/libneura-*")
+    if(libraries)
+        file(COPY ${libraries} DESTINATION "${directory}/lib/neura")
+    endif()
 endfunction()

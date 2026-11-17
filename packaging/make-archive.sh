@@ -42,7 +42,7 @@ printf '%s\n' "$version" | grep -Eq '^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9]
 printf '%s\n' "$triple" | grep -Eq '^[0-9A-Za-z_.-]+$' || die "not a target triple: $triple"
 [ -d "$prefix" ] || die "$prefix is not a directory"
 [ -x "$prefix/bin/neura" ] || die "$prefix/bin/neura is missing; install into the prefix first"
-# The tools of each component, as src/cli/tool.cpp lists them.
+# The tools of each component, as src/cli/tool_registry.cpp lists them.
 core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall"
 sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
 for tool in $core_tools; do
@@ -53,12 +53,21 @@ if [ "$runtime" -eq 1 ]; then
         [ ! -e "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is an SDK tool; a runtime prefix holds only the core component"
     done
     [ ! -e "$prefix/share/neura/stdlib" ] || die "$prefix holds the standard library; a runtime prefix holds only the core component"
-    [ ! -e "$prefix/lib/neura" ] || die "$prefix holds the native launchers; a runtime prefix holds only the core component"
+    [ ! -e "$prefix/lib/neura/launchers" ] || die "$prefix holds the native launchers; a runtime prefix holds only the core component"
+    for library in "$prefix"/lib/neura/libneura-sdk-*; do
+        [ ! -e "$library" ] || die "$library is the SDK library; a runtime prefix holds only the core component"
+    done
 else
     for tool in $sdk_tools; do
         [ -x "$prefix/bin/$tool" ] || die "$prefix/bin/$tool is missing; install the SDK component into the prefix"
     done
+    ls "$prefix"/lib/neura/libneura-sdk-* > /dev/null 2>&1 ||
+        die "the SDK library lib/neura/libneura-sdk-<version> is missing; install the SDK component into the prefix"
 fi
+# The shared library of the core, named with the full version of the build,
+# which every tool but neura loads.
+ls "$prefix"/lib/neura/libneura-core-* > /dev/null 2>&1 ||
+    die "the core library lib/neura/libneura-core-<version> is missing; install the core component into the prefix"
 here=$(cd "$(dirname "$0")" && pwd -P)
 [ -f "$here/install.sh" ] || die "$here/install.sh is missing"
 

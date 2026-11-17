@@ -4,13 +4,17 @@
     scripts/check-core-closure.py BUILD_DIR
 
 The core component (docs/design/Products030.md) holds `neura`, `neura-run`,
-`neura-inspect`, `neura-doctor`, `neura-update` and `neura-uninstall`. A
-static library contributes an object file to an executable only to define a
-global symbol the executable needs, so an object of a compiler library is in
-an executable exactly when one of its global definitions is. This script
-lists the global definitions (not weak ones, which header code shares) of
-every object of the SDK libraries of BUILD_DIR, and fails when a core tool
-defines any of them.
+`neura-inspect`, `neura-doctor`, `neura-update`, `neura-uninstall` and the
+shared library `lib/neura/libneura-core-<version>`. A static library
+contributes an object file to a binary only to define a global symbol the
+binary needs, so an object of a compiler library is in a binary exactly when
+one of its global definitions is. This script lists the global definitions
+(not weak ones, which header code shares) of every object of the SDK's
+static libraries in BUILD_DIR, and fails when a core binary defines any of
+them, or when one needs (DT_NEEDED, or a load command on macOS) the SDK's
+shared library. It also fails when `libneura-sdk` holds an object of the
+core's static libraries, which would give the two libraries separate copies
+of the core's state.
 
 `neura-doctor` may hold the C import stage's object (`c_import.cpp`), whose
 libclang probe it calls; the script reports it. A build configured with
@@ -33,6 +37,11 @@ SDK_LIBRARIES = [
     "libneura_cli_explain.a",
     "libneura_cli_tags.a",
     "third_party/neura-libclang/libneura_libclang.a",
+]
+CORE_LIBRARIES = [
+    "libneura_cli_core.a", "libneura_cli_tool.a", "libneura_cli_registry.a", "libneura_runner.a", "libneura_nvm.a",
+    "libneura_lift.a", "libneura_circuit.a", "libneura_nvr.a", "libneura_kernels.a", "libneura_lifecycle.a",
+    "libneura_gpu.a",
 ]
 # Objects a core tool may hold, with the reason.
 ALLOWED = {
@@ -67,38 +76,76 @@ def symbols(path: Path, defined_only: bool = True) -> list[tuple[str, str, str]]
     return found
 
 
+def needed(path: Path) -> list[str]:
+    """The shared libraries a binary loads by name."""
+    if sys.platform == "darwin":
+        result = subprocess.run(["otool", "-L", str(path)], capture_output=True, text=True)
+        return [Path(line.split()[0]).name for line in result.stdout.splitlines()[1:] if line.strip()]
+    result = subprocess.run(["readelf", "-d", str(path)], capture_output=True, text=True)
+    return [line.split("[", 1)[1].rstrip("]") for line in result.stdout.splitlines() if "(NEEDED)" in line]
+
+
+def owners_of(build: Path, libraries: list[str]) -> tuple[dict[str, str], list[str]]:
+    owners: dict[str, str] = {}
+    present = [library for library in libraries if (build / library).exists()]
+    for library in present:
+        for member, _, name in symbols(build / library):
+            owners.setdefault(name, f"{Path(library).name}({member})")
+    return owners, present
+
+
+def held(path: Path, owners: dict[str, str]) -> dict[str, int]:
+    linked: dict[str, int] = {}
+    for _, _, name in symbols(path):
+        if name in owners:
+            linked[owners[name]] = linked.get(owners[name], 0) + 1
+    return linked
+
+
 def main() -> int:
     if len(sys.argv) != 2:
         sys.exit(__doc__)
     build = Path(sys.argv[1])
-    owners: dict[str, str] = {}
-    present = [library for library in SDK_LIBRARIES if (build / library).exists()]
-    for library in present:
-        for member, _, name in symbols(build / library):
-            owners.setdefault(name, f"{Path(library).name}({member})")
+    owners, present = owners_of(build, SDK_LIBRARIES)
+    libraries = sorted((build / "lib/neura").glob("libneura-*"))
+    core_shared = [library for library in libraries if library.name.startswith("libneura-core")]
+    sdk_shared = [library for library in libraries if library.name.startswith("libneura-sdk")]
     failed = False
-    for tool in CORE_TOOLS:
-        path = build / tool
+    if not core_shared:
+        print(f"FAIL {build}/lib/neura holds no libneura-core")
+        failed = True
+    for path in [build / tool for tool in CORE_TOOLS] + core_shared:
+        name = path.name
         if not path.exists():
-            print(f"FAIL {tool}: not built in {build}")
+            print(f"FAIL {name}: not built in {build}")
             failed = True
             continue
-        linked: dict[str, int] = {}
-        for _, _, name in symbols(path):
-            if name in owners:
-                linked[owners[name]] = linked.get(owners[name], 0) + 1
-        allowed = ALLOWED.get(tool, {})
+        linked = held(path, owners)
+        allowed = ALLOWED.get(name, {})
         bad = {owner: count for owner, count in linked.items()
                if not any(owner.endswith(f"({member})") for member in allowed)}
+        loads = needed(path)
+        sdk_loads = [library for library in loads if library.startswith("libneura-sdk")]
         size = path.stat().st_size
-        if bad:
+        if bad or sdk_loads:
             failed = True
-            print(f"FAIL {tool} ({size} bytes): holds SDK objects " +
-                  ", ".join(f"{owner} ({count} symbols)" for owner, count in sorted(bad.items())))
+            print(f"FAIL {name} ({size} bytes): " + "; ".join(
+                ([f"holds SDK objects " + ", ".join(f"{owner} ({count} symbols)" for owner, count in sorted(bad.items()))]
+                 if bad else []) + ([f"loads {', '.join(sdk_loads)}"] if sdk_loads else [])))
         else:
             notes = [f"{owner}: {reason}" for owner in sorted(linked)
                      for member, reason in allowed.items() if owner.endswith(f"({member})")]
-            print(f"ok   {tool} ({size} bytes): no SDK object" + (f"; holds {'; '.join(notes)}" if notes else ""))
+            print(f"ok   {name} ({size} bytes): no SDK object; loads {', '.join(loads) or 'nothing'}" +
+                  (f"; holds {'; '.join(notes)}" if notes else ""))
+    core_owners, _ = owners_of(build, CORE_LIBRARIES)
+    for path in sdk_shared:
+        duplicated = held(path, core_owners)
+        if duplicated:
+            failed = True
+            print(f"FAIL {path.name}: holds core objects " +
+                  ", ".join(f"{owner} ({count} symbols)" for owner, count in sorted(duplicated.items())))
+        else:
+            print(f"ok   {path.name} ({path.stat().st_size} bytes): no core object; loads {', '.join(needed(path))}")
     if not present:
         print(f"ok   {build} defines no SDK library (configured with NEURA_SDK=OFF)")
     else:

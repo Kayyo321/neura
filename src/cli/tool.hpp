@@ -56,6 +56,7 @@ inline constexpr const char* command_list =
 std::string version_line();
 
 // The usage text of `neura help`.
+const char* usage_text();
 void usage(std::ostream& out);
 
 // The file name of an executable on this platform (".exe" on Windows).

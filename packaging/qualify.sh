@@ -58,7 +58,7 @@ if [ -n "$runtime_archive" ]; then
     runtime_archive=$(cd "$(dirname "$runtime_archive")" && pwd)/$(basename "$runtime_archive")
 fi
 # The tools of each component (docs/design/Products030.md), as
-# src/cli/tool.cpp lists them.
+# src/cli/tool_registry.cpp lists them.
 core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall"
 sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt"
 
@@ -100,10 +100,13 @@ if tar -xzf "$archive" -C "$work/list" 2> "$work/tar.log" \
     for tool in $core_tools $sdk_tools; do
         [ -x "$work/list/$name/bin/$tool" ] || missing="$missing $tool"
     done
+    for library in core sdk; do
+        ls "$work/list/$name/lib/neura/libneura-$library-$version".* > /dev/null 2>&1 || missing="$missing libneura-$library-$version"
+    done
     if [ -z "$missing" ]; then
         pass 1 "archive contents"
     else
-        fail 1 "archive contents" "bin/ lacks the tools$missing"
+        fail 1 "archive contents" "the archive lacks$missing"
     fi
 else
     fail 1 "archive contents" "expected one directory $name with bin/neura, install.sh, LICENSE, the standard library, and VERSION"
@@ -241,6 +244,8 @@ if [ -n "$runtime_archive" ]; then
             [ ! -e "$top/bin/$tool" ] || reason="$reason bin/$tool is an SDK tool;"
         done
         [ ! -e "$top/share/neura/stdlib" ] || reason="$reason it holds the standard library;"
+        ls "$top"/lib/neura/libneura-core-"$version".* > /dev/null 2>&1 || reason="$reason it lacks the core library;"
+        ! ls "$top"/lib/neura/libneura-sdk-* > /dev/null 2>&1 || reason="$reason it holds the SDK library;"
         if [ -z "$reason" ]; then
             if ! [ "$(clean "$home" "$top/bin/neura-run" "$work/hello/hello.nvr" 2>> "$work/runtime.log")" = "Hello, World!" ] \
                 || ! [ "$(clean "$home" "$top/bin/neura" run "$work/hello/hello.nvr" 2>> "$work/runtime.log")" = "Hello, World!" ]; then

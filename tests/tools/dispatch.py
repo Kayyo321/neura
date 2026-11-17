@@ -6,7 +6,7 @@
         arguments, as `neura <command> ...`, as `<tool> <command> ...` and,
         where the command is the tool's default, as `<tool> ...`, and compares
         the exit status, standard output, standard error and written files.
-        Also checks that the registry in src/cli/tool.cpp, tests/tools.cmake
+        Also checks that the registry in src/cli/tool_registry.cpp, tests/tools.cmake
         and the packaging scripts list the same tools.
 
     dispatch.py components BIN_DIR MIXED_NEURA
@@ -53,7 +53,7 @@ def check(condition: bool, message: str) -> None:
 # The registry, read from its source.
 
 def registry() -> tuple[dict[str, tuple[str, str, str]], dict[str, tuple[str, list[str]]]]:
-    source = (REPOSITORY / "src/cli/tool.cpp").read_text()
+    source = (REPOSITORY / "src/cli/tool_registry.cpp").read_text()
     words = {name: re.findall(r'"([^"]+)"', body)
              for name, body in re.findall(r'constexpr std::array<std::string_view, \d+> (\w+)\{([^}]*)\};', source)}
     tools = {name: (component, words[array])
@@ -292,6 +292,13 @@ def copy_tools(bin_dir: Path, destination: Path, names: list[str], neura: Path |
     shutil.copy2(neura or bin_dir / f"neura{SUFFIX}", destination / f"neura{SUFFIX}")
     for name in names:
         shutil.copy2(bin_dir / f"{name}{SUFFIX}", destination / f"{name}{SUFFIX}")
+    # The shared libraries the tools find in lib/neura beside them; a copy
+    # without the SDK tools gets no SDK library either.
+    (destination / "lib/neura").mkdir(parents=True)
+    sdk = any(tool in names for tool in ("neurac", "neura-test"))
+    for library in (bin_dir / "lib/neura").glob("libneura-*"):
+        if sdk or library.name.startswith("libneura-core"):
+            shutil.copy2(library, destination / "lib/neura" / library.name)
     return destination / f"neura{SUFFIX}"
 
 

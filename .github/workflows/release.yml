@@ -190,7 +190,7 @@ jobs:
         if: ${{ runner.os == 'Linux' }}
         run: |
           status=0
-          for file in stage/bin/* stage/lib/neura/launchers/*/*; do
+          for file in stage/bin/* stage/lib/neura/*.so stage/lib/neura/launchers/*/*; do
             # A static executable has no dynamic section: readelf prints
             # nothing for it and objdump fails. Both mean it needs nothing.
             needed=$(readelf -d "$file" 2> /dev/null | sed -n 's/.*(NEEDED).*\[\(.*\)\]/\1/p' | sort | tr '\n' ' ' || true)
@@ -199,6 +199,8 @@ jobs:
             for library in $needed; do
               case "$library" in
                 libc.so.6|libm.so.6|ld-linux-x86-64.so.2|ld-linux-aarch64.so.1) ;;
+                # The tools' own libraries, shipped in lib/neura.
+                "libneura-core-$FULL.so"|"libneura-sdk-$FULL.so") ;;
                 *) echo "::error::$file needs $library"; status=1 ;;
               esac
             done
@@ -215,11 +217,13 @@ jobs:
         if: ${{ runner.os == 'macOS' }}
         run: |
           status=0
-          for file in stage/bin/*; do
+          for file in stage/bin/* stage/lib/neura/*.dylib; do
             otool -L "$file"
             for library in $(otool -L "$file" | tail -n +2 | awk '{ print $1 }'); do
               case "$library" in
                 /usr/lib/*|/System/*) ;;
+                # The tools' own libraries, found through their RPATH.
+                "@rpath/libneura-core-$FULL.dylib"|"@rpath/libneura-sdk-$FULL.dylib") ;;
                 *) echo "::error::$file needs $library"; status=1 ;;
               esac
             done
