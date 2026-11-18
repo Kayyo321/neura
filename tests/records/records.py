@@ -216,7 +216,10 @@ export let Envelope = module (
         module = self.directory / 'envelope.nir'
         result = run('emit-ir', library, '-o', module, cwd=self.directory)
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(module.read_bytes()[6:8], bytes([13, 0]))
+        # 1.13 (records), or 1.15 when the library links a string chain (concat text), as the
+        # standard library's error messages are since the 0.3.0 modernization.
+        chained = 'concat_text' in run('emit-ir', module, cwd=self.directory).stdout
+        self.assertEqual(module.read_bytes()[6:8], bytes([15 if chained else 13, 0]))
         app = self.directory / 'wrapper-app.nra'
         app.write_text("""let wrap = import:"envelope.nir".Envelope;
 let console = import:Std.Io.Console;
