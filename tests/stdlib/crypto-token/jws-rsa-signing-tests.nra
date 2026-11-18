@@ -1,0 +1,99 @@
+// test-options: --gpu=off --deny-entropy --max-steps 15000000000
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let test = import:Std.Test;
+let cases = import:JwsSigningTestCases;
+let vectors = import:JwsSigningVectors;
+
+let JwsRsaSigningTests = module (
+    let algorithm = func(name: string) -> jwk.RsaAlgorithm {
+        if (name == "RS256") {
+            return jwk.RsaAlgorithm.Rs256;
+        }
+        if (name == "RS384") {
+            return jwk.RsaAlgorithm.Rs384;
+        }
+        if (name == "RS512") {
+            return jwk.RsaAlgorithm.Rs512;
+        }
+        if (name == "PS256") {
+            return jwk.RsaAlgorithm.Ps256;
+        }
+        if (name == "PS384") {
+            return jwk.RsaAlgorithm.Ps384;
+        }
+        return jwk.RsaAlgorithm.Ps512;
+    };
+
+    let check = func(index: int, proof: bool) {
+        let key = cases.rsa_key(index);
+        defer key.wipe();
+        last factor = cases.factor(key, 2);
+        last rows = vectors.rsa_cases;
+        for (let i = 0; i < rows.length; i += 7) {
+            if (rows[i + 1] != index.to_string() || (rows[i + 5] != "") != proof) {
+                continue;
+            }
+            last alg = algorithm(rows[i + 2]);
+            last payload = cases.bytes(rows[i + 4]);
+            last header = cases.text(rows[i + 3]);
+            last signed = proof
+                ? test.assert_ok(jws.sign_rsa_with_salt(payload, key, alg, cases.bytes(rows[i + 5]), factor, header))
+                : test.assert_ok(jws.sign_rsa_with_factor(payload, key, alg, factor, header));
+            test.assert_equal_string(rows[i + 6], signed);
+            last verifier = cases.rsa_public(index, alg);
+            test.assert_equal_string(rows[i + 4], hex.encode(test.assert_ok(jws.verify<jwk.RsaKey>(signed, verifier))));
+        }
+    };
+
+    export let test_pkcs1_signatures_match_the_rfc_and_openssl = func {
+        check(0, false);
+        check(1, false);
+    };
+
+    export let test_pss_signatures_match_the_rfc_and_independent_encoding = func {
+        check(0, true);
+        check(1, true);
+    };
+
+    export let test_rsa_invalid_factor_wrong_algorithm_and_entropy_denial = func {
+        let key = cases.rsa_key(0);
+        defer key.wipe();
+        last alg = jwk.RsaAlgorithm.Rs256;
+        for (let bad in new uint8[list][list]([cases.factor(key, 0), cases.factor(key, 1), key.public_key.modulus()])) {
+            let _ = test.assert_err(jws.sign_rsa_with_factor(new, key, alg, bad));
+        }
+        last prime = cases.bytes(vectors.rsa_keys[3]);
+        let noninvertible: uint8[list] = new;
+        for (let i in 0 .. (key.public_key.modulus().length - prime.length)) {
+            noninvertible.append(0);
+        }
+        for (let byte in prime) {
+            noninvertible.append(byte);
+        }
+        let _ = test.assert_err(jws.sign_rsa_with_factor(new, key, alg, noninvertible));
+        let _ = test.assert_err(jws.sign_rsa_with_factor(new, key, alg, cases.factor(key, 2), "{\"alg\":\"PS256\"}"));
+
+        last malformed_header = test.assert_err(jws.sign_rsa(new, key, alg, "{\"alg\":\"RSA1_5\"}"));
+        match (malformed_header) {
+            errors.Error.Custom(detail) => {
+                test.assert_equal_string("jws.header", detail.code());
+            },
+            _ => {
+                test.fail("protected header should fail before requesting entropy");
+            },
+        }
+        for (let candidate in [jwk.RsaAlgorithm.Rs256, jwk.RsaAlgorithm.Ps256]) {
+            match (test.assert_err(jws.sign_rsa(new, key, candidate))) {
+                errors.Error.Io { kind, message: _, path: _ } => {
+                    test.assert(kind == errors.IoErrorKind.CapabilityDenied);
+                },
+                _ => {
+                    test.fail("signing should fail when OS entropy is denied");
+                },
+            }
+        }
+    };
+);

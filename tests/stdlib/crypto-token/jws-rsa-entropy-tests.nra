@@ -1,0 +1,22 @@
+// test-options: --gpu=off --max-steps 5000000000
+// host-dependent-counts: OS bytes determine RSA blinding rejection sampling
+let hex = import:Std.Encoding.Hex;
+let jwk = import:Std.Crypto.Token.Jwk;
+let jws = import:Std.Crypto.Token.Jws;
+let test = import:Std.Test;
+let cases = import:JwsSigningTestCases;
+let vectors = import:JwsSigningVectors;
+
+let JwsRsaEntropyTests = module (
+    export let test_os_blinding_and_pss_salt = func {
+        let key = cases.rsa_key(0);
+        defer key.wipe();
+        last rows = vectors.rsa_cases;
+        last payload = cases.bytes(rows[4]);
+        last deterministic = test.assert_ok(jws.sign_rsa(payload, key, jwk.RsaAlgorithm.Rs256, cases.text(rows[3])));
+        test.assert_equal_string(rows[6], deterministic);
+        last signed = test.assert_ok(jws.sign_rsa(payload, key, jwk.RsaAlgorithm.Ps256));
+        last verifier = cases.rsa_public(0, jwk.RsaAlgorithm.Ps256);
+        test.assert_equal_string(rows[4], hex.encode(test.assert_ok(jws.verify<jwk.RsaKey>(signed, verifier))));
+    };
+);
