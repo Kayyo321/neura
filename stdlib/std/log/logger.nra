@@ -72,13 +72,16 @@ export let Logger = module (
 
         /// @brief Formats and sends one already-enabled record to the sink.
         let emit = func(level: LogLevel, message: string) {
-            let line = level_name(level) + " " + logger_name + ": " + message;
+            let line = level_name(level) .. " " .. logger_name .. ": " .. message;
             if (source != nil) {
-                line = timestamp(source) + " " + line;
+                line = timestamp(source) .. " " .. line;
             }
             last write = sink;
             write(line);
         };
+
+        /// @brief Names the logger.
+        export let.override to_string = func -> string => "Logger(" .. logger_name .. ")";
     );
 
     /// @brief A logger without timestamps.

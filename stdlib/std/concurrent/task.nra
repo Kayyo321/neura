@@ -26,6 +26,9 @@ export let Task = module (
         /// @brief The result of a join that a select committed. Used by the select statement.
         #Hidden
         export let join_selected = func(code: uint32) -> T => take<T>();
+
+        /// @brief Names the task and its identifier.
+        export let.override to_string = func -> string => "Task(" .. id.to_string() .. ")";
     );
 
     let join_task = func<T>(task: uint64) -> T scheduler("join");
