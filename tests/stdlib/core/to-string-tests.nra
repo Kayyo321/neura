@@ -1,0 +1,47 @@
+let cell = import:Std.Core.Cell;
+let character = import:Std.Core.Character;
+let error = import:Std.Core.Error;
+let int_range = import:Std.Core.IntRange;
+let test = import:Std.Test;
+
+let ToStringTests = module (
+    let Declined = class:error.ErrorDetail (
+        export let.override code = func() -> string => "billing.card_declined";
+        export let.override message = func() -> string => "card declined";
+    );
+
+    export let test_cell_shows_its_value = func() -> void {
+        test.assert_equal_string("Cell(7)", new cell.Cell<int>(7).to_string());
+    };
+
+    export let test_error_detail_formats_code_and_message = func() -> void {
+        last detail = new Declined();
+        test.assert_equal_string("billing.card_declined: card declined", detail.to_string());
+        test.assert_equal_string("Custom(a.b: c)", error.custom("a.b", "c").to_string());
+    };
+
+    export let test_int_range_equals_and_hash_agree = func() -> void {
+        last a = new int_range.IntRange(0, 10, 2);
+        last b = new int_range.IntRange(0, 10, 2);
+        last c = new int_range.IntRange(0, 10, 3);
+        test.assert(a.equals(b));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        test.assert(not a.equals(c));
+        test.assert(not a.equals(new cell.Cell<int>(1)));
+        test.assert_equal_string("0..10:2", a.to_string());
+    };
+
+    export let test_int_range_iterator_names_its_position = func() -> void {
+        last it = new int_range.IntRange(5, 9, 1).iterator();
+        test.assert_equal_string("IntRangeIterator(next 5)", it.to_string());
+    };
+
+    export let test_character_equals_and_hash_agree = func() -> void {
+        last a = character.of(128512);
+        last b = character.of(128512);
+        test.assert(a.equals(b));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+        test.assert(not a.equals(character.of(65)));
+        test.assert(not a.equals(new cell.Cell<int>(1)));
+    };
+);

@@ -13,7 +13,7 @@ export let Test = module (
     /// @brief Traps with the default assertion diagnostic when the condition is false.
     #[Pure, ThreadSafe]
     export let assert = func(condition: bool) {
-        if (!condition) {
+        if (not condition) {
             failure.trap("assertion failed");
         }
     };
@@ -21,7 +21,7 @@ export let Test = module (
     /// @brief Traps with the supplied diagnostic when the condition is false.
     #[Pure, ThreadSafe]
     export let assert_with = func(condition: bool, message: string) {
-        if (!condition) {
+        if (not condition) {
             failure.trap(message);
         }
     };
@@ -32,7 +32,7 @@ export let Test = module (
 
     /// @brief Formats the expected and actual values for an equality failure.
     let mismatch = func(expected: string, actual: string) =>
-        failure.trap("expected <" + expected + ">, got <" + actual + ">");
+        failure.trap("expected <" .. expected .. ">, got <" .. actual .. ">");
 
     /// @brief Checks exact signed 32-bit equality.
     #[Pure, ThreadSafe]
@@ -78,7 +78,7 @@ export let Test = module (
     /// section 5.2).
     #[Pure, ThreadSafe]
     export let assert_equal_float64 = func(expected: float64, actual: float64) {
-        if (!(expected === actual)) {
+        if (not (expected === actual)) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
@@ -90,14 +90,14 @@ export let Test = module (
         if (difference < 0.0) {
             difference = -difference;
         }
-        if (!(difference <= tolerance)) {
+        if (not (difference <= tolerance)) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
 
     /// @brief Checks equality with the type's equals operation.
     export let assert_equal = func<T>(expected: T, actual: T) {
-        if (!(expected === actual)) {
+        if (not (expected === actual)) {
             mismatch(expected.to_string(), actual.to_string());
         }
     };
@@ -105,7 +105,7 @@ export let Test = module (
     /// @brief Fails when the type's equals operation reports equality.
     export let assert_not_equal = func<T>(unexpected: T, actual: T) {
         if (unexpected === actual) {
-            failure.trap("expected a value other than <" + unexpected.to_string() + ">");
+            failure.trap("expected a value other than <" .. unexpected.to_string() .. ">");
         }
     };
 
@@ -135,7 +135,7 @@ export let Test = module (
                 return value;
             },
             Result.Err(e) => {
-                trap_with_message("expected Ok, got Err: " + error.message(e));
+                trap_with_message("expected Ok, got Err: " .. error.message(e));
             },
         }
     };

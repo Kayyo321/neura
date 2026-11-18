@@ -18,7 +18,7 @@ export let String = module:strings (
 
     /// @brief Returns the text with suffix appended.
     #[Pure, ThreadSafe]
-    export let concat = func(s: string, suffix: string) -> string => s + suffix;
+    export let concat = func(s: string, suffix: string) -> string => s .. suffix;
 
     /// @brief Returns the suffix beginning at a UTF-8 byte boundary.
     #[Pure, ThreadSafe]
