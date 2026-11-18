@@ -126,9 +126,34 @@ export let Web = module (
     };
 
     /// @brief The `ui.Host` of a browser page. Each instance serves the roots it opened; `mount` makes one per root.
+    /// It is also the page's `ui.HistoryHost` over `neura.history.*`, with hash routing (`#/parts/7`), the
+    /// routing of a bundle built without `--routing history`.
     #[Final, NotThreadSafe]
-    export let Host = class implements ui.Host (
+    export let Host = class implements ui.Host, ui.HistoryHost (
         let roots: Mounted[list] = new;
+
+        let path_of = func(outcome: host.PathOutcome, fallback: string) -> string {
+            match (outcome) {
+                host.PathOutcome.Ok(path) => {
+                    return path;
+                },
+                host.PathOutcome.Error(_) => {
+                    return fallback;
+                },
+            }
+        };
+
+        /// @brief The page's current path, or `/` when the page keeps no history.
+        export let location = func -> string => path_of(host.current_path(), "/");
+
+        /// @brief Adds a history entry for `path` without loading a page; returns the current path.
+        export let push_location = func(path: string) -> string => path_of(host.push_path(path), path);
+
+        /// @brief Replaces the current history entry with `path`; returns the current path.
+        export let replace_location = func(path: string) -> string => path_of(host.replace_path(path), path);
+
+        /// @brief The `href` of a link to `path` in hash routing.
+        export let link = func(path: string) -> string => "#" + path;
 
         let entry = func(root: uint64) -> Mounted {
             last index = (root as int) - 1;

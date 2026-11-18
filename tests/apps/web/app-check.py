@@ -1,5 +1,6 @@
 """Run a Neura web application in headless browsers: tests/apps/web/app/app.nra, mounted with Std.Web.mount on
-the browser runtime, driven by app-test.mjs. Checks the native refusal first: without a browser page the image
+the browser runtime, driven by app-test.mjs, and the portfolio of tests/apps/web/portfolio/portfolio.nra (router, deep
+link, contact form with validation over Std.Ui.Controls), driven by portfolio-test.mjs. Checks the native refusal first: without a browser page the image
 reports that the ui services are not granted. Then bundles the walkthrough's example
 (examples/apps/web-counter/app.nra, which docs/apps/WebApp.md shows verbatim) with scripts/build-web-bundle.py
 and checks that the bundle mounts it, with its stylesheet, in headless Chromium.
@@ -28,7 +29,7 @@ bundle_check = import_module('bundle-check')
 SKIP = 77
 
 
-def page(work, image):
+def page(work, image, module):
     """index.html links the image's stylesheets in the order of its .styles.json, as a bundle's page does."""
     links = ''
     listing = Path(f'{image}.styles.json')
@@ -36,7 +37,7 @@ def page(work, image):
         for path in json.loads(listing.read_text())['stylesheets']:
             links += f'<link rel="stylesheet" href="{html.escape(path)}">'
     (work / 'index.html').write_text('<!doctype html><meta charset="utf-8"><title>Neura web app check</title>'
-                                     f'{links}<div id="app"></div><script type="module" src="/app-test.mjs"></script>')
+                                     f'{links}<div id="app"></div><script type="module" src="/{module}"></script>')
     return links.count('<link')
 
 
@@ -52,26 +53,31 @@ def main():
         return SKIP
     with TemporaryDirectory(prefix='neura-web-app-') as path:
         work = Path(path)
-        image = work / 'app.nvr'
-        subprocess.run([args.neura, 'build', HERE / 'app/app.nra', '-o', image], cwd=ROOT, check=True, timeout=120)
-        native = subprocess.run([args.neura, 'run', image], capture_output=True, text=True, timeout=60)
-        if native.returncode == 0 or 'the ui capability is not granted' not in native.stdout:
-            raise SystemExit(f'native run: expected a refused mount, got {native.returncode}: {native.stdout}'
-                             f'{native.stderr}')
-        print(f'native: {native.stdout.strip().splitlines()[-1]}')
-        for source in (args.wasm / 'nvm.wasm', args.wasm / 'nvm.mjs', HERE / 'app-test.mjs',
-                       *(ROOT / 'hosts/web' / name for name in ('nvm.js', 'dom.mjs', 'ui.mjs', 'ui-wire.mjs'))):
-            shutil.copy(source, work / source.name)
-        sheets = page(work, image)
-        if sheets != 1:
-            raise SystemExit(f'expected one linked stylesheet, found {sheets}')
-        for browser in browsers:
-            version = subprocess.check_output([browser, '--version'], text=True, timeout=10).strip()
-            report = host_check.run_browser(browser, work)
-            if 'error' in report:
-                raise SystemExit(f'{version}: {report["error"]}')
-            steps = '; '.join(f'{step["name"]}' for step in report['steps'])
-            print(f'{version}: {len(report["steps"])} steps passed ({steps}); {report["commits"]} commits')
+        journeys = (('app', HERE / 'app/app.nra', 'app-test.mjs', 1),
+                    ('portfolio', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0))
+        for name, source, module, linked in journeys:
+            directory = work / name
+            directory.mkdir()
+            image = directory / 'app.nvr'
+            subprocess.run([args.neura, 'build', source, '-o', image], cwd=ROOT, check=True, timeout=120)
+            native = subprocess.run([args.neura, 'run', image], capture_output=True, text=True, timeout=60)
+            if native.returncode == 0 or 'the ui capability is not granted' not in native.stdout:
+                raise SystemExit(f'{name}: native run: expected a refused mount, got {native.returncode}: '
+                                 f'{native.stdout}{native.stderr}')
+            print(f'{name}: native: {native.stdout.strip().splitlines()[-1]}')
+            for copied in (args.wasm / 'nvm.wasm', args.wasm / 'nvm.mjs', HERE / module,
+                           *(ROOT / 'hosts/web' / file for file in ('nvm.js', 'dom.mjs', 'ui.mjs', 'ui-wire.mjs'))):
+                shutil.copy(copied, directory / copied.name)
+            sheets = page(directory, image, module)
+            if sheets != linked:
+                raise SystemExit(f'{name}: expected {linked} linked stylesheets, found {sheets}')
+            for browser in browsers:
+                version = subprocess.check_output([browser, '--version'], text=True, timeout=10).strip()
+                report = host_check.run_browser(browser, directory)
+                if 'error' in report:
+                    raise SystemExit(f'{name}: {version}: {report["error"]}')
+                steps = '; '.join(f'{step["name"]}' for step in report['steps'])
+                print(f'{name}: {version}: {len(report["steps"])} steps passed ({steps})')
         walkthrough(args, work, browsers)
     return 0
 
