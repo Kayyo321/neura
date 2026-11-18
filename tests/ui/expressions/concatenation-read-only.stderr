@@ -1,0 +1,14 @@
+error[E0401]: cannot assign to const 'result'
+ --> $DIR/concatenation-read-only.nra:5:5
+  |
+4 |     const result = text;
+  |           ------ declared constant here
+5 |     result ..= "!";
+  |     ^^^^^^ cannot assign to a constant binding
+  |
+help: consider declaring it with 'let'
+  |
+4 |     let result = text;
+  |     ~~~
+
+For more information about this error, try `neura explain E0401`.

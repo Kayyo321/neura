@@ -1,0 +1,13 @@
+abcdab!!
+next 1
+xy12z 1
+set t
+receiver
+get t
+set tuv
+receiver
+get tuv
+tuv pq
+###
+get tuv
+fail

@@ -131,6 +131,9 @@ let reference=func(value:&int)->&int=>value;'''
         self.assertIn('let w = 1 !== (2);', formatted)
         formatted = self.formatted('let s=func(a:string)->string=>a.."b"..("c"..a);')
         self.assertIn('=> a .. "b" .. ("c" .. a);', formatted)
+        formatted = self.formatted('let f=func(a:string){let s="";s..=a.."!";s..=(a);};')
+        self.assertIn('s ..= a .. "!";', formatted)
+        self.assertIn('s ..= (a);', formatted)
 
     def test_negation_words_keep_their_spelling(self):
         # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.

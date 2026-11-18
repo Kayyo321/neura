@@ -78,7 +78,7 @@ The table replaces the list in [Expressions](../lang/CoreLanguage.md#expressions
 | 15 | `??` | right | existing |
 | 16 | `..` (range or chain), `..=` (inclusive range, new), optional `: step` | a chain is flat and n-ary; a range takes exactly two bounds | implemented, proposed (the chain's single allocation is pending the runtime commit) |
 | 17 | `? :` | right | existing |
-| statement | `=`, compound assignments, `..=` after a place (new) | not an expression | proposed |
+| statement | `=`, compound assignments, `..=` after a place (new) | not an expression | implemented, proposed |
 
 `not` is `!` spelled as a word, so it binds as tightly as `!`: `not a && b` is `(not a) && b`, and `not x == y` is `(not x) == y`. Write `not (x == y)` for the other reading.
 
@@ -156,7 +156,7 @@ A character literal folds like any integer literal and adds no NeuraIR or NVR op
 | Counting. | The element count is computed from the bound ranks as for `..`, with three differences: the range is nonempty when `low <= high` (so `3 ..= 3` has one element), the last offset is `high - low` instead of `high - low - 1`, and the quotient of the last offset by the stride is limited to the `int32` maximum before one is added, so that the count of a range over a whole type's domain (`0 ..= 4294967295` as `uint32`, `int32` or `int64` minimum to maximum) never overflows the distance type and fails with the length failure of an over-long `..` range, never with an arithmetic overflow trap. A range that ends at the type's largest or smallest value (`250 ..= 255` as `uint8`, `int64` maximum) never computes `stop + 1`; construction does not advance past the last element. | implemented, proposed |
 | `??`. | `a ..= b ?? c` is `a ..= (b ?? c)`, as for `..`. | implemented, proposed |
 | Shape. | Exactly two bounds and an optional step. `a ..= b .. c`, `a .. b ..= c` and a string operand are E0263. | implemented, proposed |
-| Statement position. | See [`..=` as a statement](#-as-a-statement). | proposed |
+| Statement position. | See [`..=` as a statement](#-as-a-statement). | implemented, proposed |
 
 Inclusive ranges lower to the operations of the existing range lowering, so they add no operation.
 
@@ -182,10 +182,10 @@ A statement that is exactly `place ..= expression;`, with nothing else at the to
 
 | Rule | Detail | Status |
 | --- | --- | --- |
-| Meaning. | `s ..= t;` stores `s .. t` into `s`. When the right side is an unparenthesized chain, its operands join the chain after the old value: `s ..= name .. "!";` is one chain of three operands and one allocation. A parenthesized right side is one operand. | proposed |
-| Evaluation. | As every compound assignment: the destination's receiver and index are evaluated once, the old value is read once (a getter runs once), then the right operands are evaluated in order, then the chain is materialized, then the value is stored (a setter runs once). A trap in any of these skips the store; earlier effects remain. | proposed |
-| Destination. | A readable and writable `string` binding, field, element or property. A read-only destination has the existing assignment diagnostics. An integer destination, `n ..= 5;`, is E0262, which explains both forms: an inclusive range is an expression (`let r = n ..= 5;`), and `..=` as a statement appends text to a string. Any other destination type, and a stepped right side (`s ..= a : 2;`), is E0262. | proposed |
-| Right operands. | Each must be a `string` (E1100). | proposed |
+| Meaning. | `s ..= t;` stores `s .. t` into `s`. When the right side is an unparenthesized chain, its operands join the chain after the old value: `s ..= name .. "!";` is one chain of three operands and one allocation. A parenthesized right side is one operand. | implemented, proposed (one allocation pending the runtime commit) |
+| Evaluation. | As every compound assignment: the destination's receiver and index are evaluated once, the old value is read once (a getter runs once), then the right operands are evaluated in order, then the chain is materialized, then the value is stored (a setter runs once). A trap in any of these skips the store; earlier effects remain. | implemented, proposed |
+| Destination. | A readable and writable `string` binding, field, element or property. A read-only destination has the existing assignment diagnostics. An integer destination, `n ..= 5;`, is E0262, which explains both forms: an inclusive range is an expression (`let r = n ..= 5;`), and `..=` as a statement appends text to a string. Any other destination type, and a stepped right side (`s ..= a : 2;`), is E0262. | implemented, proposed |
+| Right operands. | Each must be a `string` (E1100). | implemented, proposed |
 
 ### Lowering and artifacts
 
@@ -339,3 +339,4 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 - **Step 5: interim chain lowering.** The frontend half of step 5 lowers a chain, after folding, as the left fold of the string `+` that already exists, through one function (`concatenate_text`) that the runtime commit switches to `concat text`. Results, operand order and traps are those of the note, but each `+` allocates: a chain of *k* operands allocates *k* − 1 times and a trap in a later operand can follow an earlier allocation, until op 73 lands. Folding joins adjacent `String` constants after lowering, so a parenthesized chain of literals folds into its neighbours and one that encloses any other operand does not.
 - **Step 5: E1100 for an integer first operand.** The role rule sends `3 .. "turn"` down the range path, where the stop fails to type as an integer. On that failing path only, the compiler lowers the stop again without an expected type, with its diagnostics discarded; a `string` result turns the error into E1100 at the integer first operand, as edge case 36 asks. A chain of three operands whose first is an integer and second a string is E1100 the same way, otherwise E0263.
 - **Step 5: formatter spacing before `(`.** The formatter wrote no space between a binary operator and a following `(` (`0 ..(n)`, and `1 +(2)` for every binary operator). For the operators of this note it now writes one, `0 .. (n)`, `0 ..= (n)`, `a !== (b)`, as the Tooling paragraph asks; the other operators keep their existing output, since `-` and `!` are also prefix operators and changing them is a separate formatter change.
+- **Step 5: the `..=` statement.** The parser turns a statement whose whole expression is an unparenthesized range starting with `..=` into an assignment with the operator `..=`, the place and the right side (a chain of the remaining operands when more follow); the operator's span is kept for E0262. Lowering uses the compound-assignment place functions (`capture_place`, `read_place`, `store_place`), reads the old value first, lowers each right operand as a chain operand, and joins them through the same `concatenate_text` as a chain, so the runtime commit changes both at once. A `..=` in the right side is E0263 at that operator.

@@ -3637,8 +3637,21 @@ IrNode Lowering::concatenation_assignment(const Statement& stmt, Context& contex
                   "in an expression, 'start ..= stop' is an inclusive range")
             .help("to make an inclusive range, use it as a value: 'let r = start ..= stop;'");
     }
-    throw Diagnostic(stmt.keyword, "appending with '..=' is not implemented yet").with_code("E0262")
-        .label("'..=' as a statement");
+    // As a compound assignment: the place's receiver and index once, the old
+    // value once, then the right operands in order (an unparenthesized chain
+    // joins after the old value), then the text, then one store.
+    std::vector<IrNode> operands;
+    operands.push_back(read_place(destination, context));
+    const auto& right = stmt.expressions[1];
+    if (right.kind == ExprKind::Range && !right.grouped && !right.braced) {
+        chain_operators(right);
+        for (const auto& operand : right.operands) operands.push_back(text_operand(operand, context));
+    } else {
+        operands.push_back(text_operand(right, context));
+    }
+    auto text = concatenate_text(std::move(operands), stmt.span);
+    result.body.push_back(store_place(std::move(destination), std::move(text), stmt.span));
+    return result;
 }
 
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {

@@ -525,6 +525,18 @@ Arithmetic operands must have the same type. Remainder applies to integers. Bool
 
 Assignments are statements. `=` stores a value and `+=`, `-=`, `*=`, `/=`, `%=`, `&=`, `^=`, `|=`, `<<=`, and `>>=` apply the corresponding binary operator before storing its result. Each compound assignment evaluates the destination's receiver and index once, reads the old value, then evaluates the right operand and stores the result. An operation that traps leaves the final store unexecuted.
 
+A statement that is exactly `place ..= text;` appends text to a `string` place ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#-as-a-statement), implemented, proposed): it stores `place .. text` into the place, as a compound assignment does, so the receiver and index are evaluated once, a getter and a setter each run once, and a trap skips the store. An unparenthesized [chain](#string-chains) on the right joins after the old value, so `line ..= name .. "!";` is one chain of three operands. Each right operand must be a `string` (`E1100`). An integer destination is `E0262`, because `..=` in an expression is an [inclusive range](Collections#ranges): write `let r = n ..= 5;` for the range.
+
+<!-- example: check -->
+```neura
+let banner = func(name: string) -> string {
+    let line = "Hello";
+    line ..= ", " .. name;
+    line ..= "!";
+    return line;
+};
+```
+
 Prefix and postfix increment and decrement require a mutable numeric binding, field, or element. They evaluate the destination once and add or subtract a one of its type. `++x` and `--x` yield the updated value. `x++` and `x--` yield the previous value. The usual arithmetic rules apply, including checked integer overflow. [Numbers](Numbers) specifies integer and floating-point arithmetic. `+` and `+=` can also concatenate strings.
 
 `not` is `!` spelled as a word ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#negation-words), implemented, proposed). It is a reserved word and a prefix operator at the level of `!`, with the same `bool` operand and the same result, so `not a && b` is `(not a) && b` and `not x == y` is `(not x) == y`; write `not (x == y)` for the other reading. `x is not T` is `!(x is T)`, with the type rules of `is`. Both build the same program as the `!` forms, and the formatter keeps the spelling that was written.

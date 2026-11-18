@@ -1,0 +1,13 @@
+error[E1100]: a string chain joins only strings, but this operand is int32
+ --> $DIR/concatenation-chain-right.nra:6:23
+  |
+6 |     result ..= "a" .. 1 .. 2;
+  |                       ^ this is int32
+  |
+  = note: '..' converts nothing to text; call 'to_string()' to join a value
+help: convert it to text
+  |
+6 |     result ..= "a" .. (1).to_string() .. 2;
+  |                       + +++++++++++++
+
+For more information about this error, try `neura explain E1100`.

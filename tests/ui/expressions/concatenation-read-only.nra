@@ -1,0 +1,7 @@
+// Edge case 45 of docs/design/Expressions030.md: a read-only destination of
+// `..=` has the existing assignment error.
+let append = func(text: string) -> string {
+    const result = text;
+    result ..= "!";
+    return result;
+};
