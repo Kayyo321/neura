@@ -339,7 +339,7 @@ The standard console service is `neura.console.write_line` version 1. It takes a
 | `neura.net.udp.bind` | text host, int32 port | int64 ID | A UDP socket on a numeric IPv4 or IPv6 address, `localhost`, or the empty host (any IPv4 address). A name fails with 4: resolve it first |
 | `neura.net.udp.send_to` | int64 ID, text host, int32 port, uint8 list | int32 | One datagram to a numeric address; the count sent |
 | `neura.net.udp.receive_from` | int64 ID, int32 maximum, int64 timeout nanoseconds | [uint8 list, text address, int32 port] | One datagram, truncated to the maximum (at most 1 MiB); 0 waits without limit; 12 on timeout |
-| `neura.net.unix.connect` | text path | int64 ID | A Unix-domain stream. On Linux a path that starts with `@` names the abstract namespace |
+| `neura.net.unix.connect` | text path | int64 ID | A Unix-domain stream. On Linux a path that starts with `@` names the abstract namespace; elsewhere such a name is unsupported (13) |
 | `neura.net.unix.listen` | text path | int64 ID | A Unix-domain stream listener; the path must not exist (3) |
 | `neura.net.unix.datagram` | text path | int64 ID | A Unix datagram socket, bound to the path unless it is empty |
 | `neura.net.unix.send_to`, `neura.net.unix.receive_from` | as for UDP, with a path in place of host and port | int32, or [uint8 list, text path, int32 0] | |
