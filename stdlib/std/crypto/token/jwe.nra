@@ -18,18 +18,20 @@ let hmac = import:Std.Crypto.Mac.Hmac;
 let json = import:Std.Encoding.Json;
 let jose = import:Std.Crypto.Internal.JoseJson;
 let jwe_ecdh = import:Std.Crypto.Internal.JweEcdh;
+let jwe_json = import:Std.Crypto.Internal.JweJson;
 let pbkdf2 = import:Std.Crypto.Kdf.Pbkdf2;
 let rsa = import:Std.Crypto.Asymmetric.Rsa;
 let rsa_oaep = import:Std.Crypto.Asymmetric.RsaOaep;
 let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Compact JSON Web Encryption (RFC 7516 and RFC 7518).
+/// @brief Compact JSON Web Encryption and authenticated opening of JWE JSON (RFC 7516 and RFC 7518).
 ///
 /// A caller supplies a key bound to direct encryption, AES Key Wrap, AES-GCM wrapping, PBES2, RSA-OAEP-256, or ECDH-ES. The protected
 /// header must agree with that key's algorithms. The original compact protected-header segment is authenticated
 /// as received. This module accepts no critical extensions or compression and ignores noncritical metadata
 /// when selecting keys. The CBC-HMAC modes verify the full wire tag before attempting decryption.
+/// For JSON opening a caller supplies the recipient index and expected external authenticated data.
 /// The tag and key-wrap-integrity comparisons are branch-free in source. The runtime does not guarantee
 /// constant time.
 /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
@@ -466,10 +468,23 @@ export let Jwe = module (
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
         #[NoDiscard, Since("0.3.0")]
         export let open = func(compact: string) -> Result<uint8[list]> {
+            require_live();
+            return open_fields(parse(compact, RsaOaep256, encryption, (key.bits() + 7) / 8)?);
+        };
+
+        #[Internal, Hidden]
+        export let open_json = func(serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> {
+            require_live();
+            return open_fields(parse_json(serialized, recipient_index, aad, RsaOaep256, encryption, (key.bits() + 7) / 8)?);
+        };
+
+        let require_live = func {
             if (key.is_wiped()) {
                 trap_with_message("invalid state: JWE RSA key is wiped");
             }
-            last fields = parse(compact, RsaOaep256, encryption, (key.bits() + 7) / 8)?;
+        };
+
+        let open_fields = func(fields: OpenFields) -> Result<uint8[list]> {
             last oaep = new rsa_oaep.RsaOaep();
             last size = cek_length(encryption);
             let seed_input = words.utf8("Neura JWE RSA-OAEP-256 substitute key");
@@ -621,12 +636,27 @@ export let Jwe = module (
         /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
         #[NoDiscard, Since("0.3.0")]
         export let open = func(compact: string) -> Result<uint8[list]> {
+            require_live();
+            last fields = parse(compact, ecdh_name(algorithm), encryption, wrapped_length())?;
+            return open_fields(fields, jwe_ecdh.parse(fields.protected_bytes, key.curve)?);
+        };
+
+        #[Internal, Hidden]
+        export let open_json = func(serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> {
+            require_live();
+            last fields = parse_json(serialized, recipient_index, aad, ecdh_name(algorithm), encryption, wrapped_length())?;
+            return open_fields(fields, jwe_ecdh.parse_members(fields.members, key.curve)?);
+        };
+
+        let require_live = func {
             if (key.is_wiped()) {
                 trap_with_message("invalid state: JWE ECDH key is wiped");
             }
-            last wrapped_length = algorithm == EcdhAlgorithm.Es ? 0 : cek_length(encryption) + 8;
-            last fields = parse(compact, ecdh_name(algorithm), encryption, wrapped_length)?;
-            last parameters = jwe_ecdh.parse(fields.protected_bytes, key.curve)?;
+        };
+
+        let wrapped_length = func -> int => algorithm == EcdhAlgorithm.Es ? 0 : cek_length(encryption) + 8;
+
+        let open_fields = func(fields: OpenFields, parameters: jwe_ecdh.Parameters) -> Result<uint8[list]> {
             let agreed = jwe_ecdh.derive(key, parameters.public_key, ecdh_id(algorithm, encryption),
                 parameters.apu, parameters.apv, ecdh_key_length(algorithm, encryption))?;
             let cek = agreed;
@@ -759,8 +789,10 @@ export let Jwe = module (
     };
 
     let validate_header = func(bytes: uint8[list], expected_alg: string, expected_enc: ContentEncryption)
-        -> Result<Unit> {
-        last members = jose.parse_object_bytes(bytes, InvalidJwe)?;
+        -> Result<Unit> => validate_header_members(jose.parse_object_bytes(bytes, InvalidJwe)?, expected_alg, expected_enc);
+
+    let validate_header_members = func(members: [string, json.JsonValue][list], expected_alg: string,
+        expected_enc: ContentEncryption) -> Result<Unit> {
         last alg = jose.required_text(members, "alg", InvalidJwe)?;
         last enc = jose.required_text(members, "enc", InvalidJwe)?;
         if (alg != expected_alg || enc != content_name(expected_enc)) {
@@ -787,24 +819,27 @@ export let Jwe = module (
             .. jose.encode(words.slice(sealed, 0, split)) .. "." .. jose.encode(words.slice(sealed, split, sealed.length));
     };
 
-    let CompactFields = class (
+    let OpenFields = class (
         export last protected_bytes: uint8[list];
+        export last members: [string, json.JsonValue][list];
         export last aad: uint8[list];
         export last wrapped: uint8[list];
         export last iv: uint8[list];
         export last ciphertext: uint8[list];
         export last tag: uint8[list];
 
-        export let init = func(protected, protected_segment, encrypted_key, nonce, body, authentication_tag: uint8[list]) {
+        export let init = func(protected: uint8[list], header_members: [string, json.JsonValue][list],
+            content_aad, encrypted_key, nonce, body, authentication_tag: uint8[list]) {
             protected_bytes = protected;
-            aad = protected_segment;
+            members = header_members;
+            aad = content_aad;
             wrapped = encrypted_key;
             iv = nonce;
             ciphertext = body;
             tag = authentication_tag;
         };
 
-        export let.override to_string = func -> string => "Jwe.CompactFields";
+        export let.override to_string = func -> string => "Jwe.OpenFields";
     );
 
     let decode_part = func(part: string, message: string) -> Result<uint8[list]> =>
@@ -823,24 +858,43 @@ export let Jwe = module (
     };
 
     let parse = func(compact: string, expected_alg: string, expected_enc: ContentEncryption, wrapped_length: int)
-        -> Result<CompactFields> {
+        -> Result<OpenFields> {
         last parts = jose.split_dots(compact);
         if (parts.length != 5) {
-            return jose.fail<CompactFields>(InvalidJwe, "compact JWE must have five segments");
+            return jose.fail<OpenFields>(InvalidJwe, "compact JWE must have five segments");
         }
         last protected = decode_part(parts[0], "invalid protected header")?;
-        validate_header(protected, expected_alg, expected_enc)?;
-        last wrapped = decode_encrypted_key(parts[1], wrapped_length)?;
-        last iv = decode_part(parts[2], "invalid initialization vector")?;
-        last ciphertext = decode_part(parts[3], "invalid ciphertext")?;
-        last tag = decode_part(parts[4], "invalid authentication tag")?;
+        last members = jose.parse_object_bytes(protected, InvalidJwe)?;
+        validate_header_members(members, expected_alg, expected_enc)?;
+        return decode_fields(protected, members, words.utf8(parts[0]), parts[1], parts[2], parts[3], parts[4],
+            expected_enc, wrapped_length);
+    };
+
+    let parse_json = func(serialized: string, recipient_index: int, aad: uint8[list], expected_alg: string,
+        expected_enc: ContentEncryption, wrapped_length: int) -> Result<OpenFields> {
+        last envelope = jwe_json.parse(serialized, recipient_index, content_name(expected_enc))?;
+        validate_header_members(envelope.members, expected_alg, expected_enc)?;
+        if (not constant_time.ct_eq(envelope.external_aad, aad)) {
+            return auth_error<OpenFields>();
+        }
+        return decode_fields(new, envelope.members, envelope.aad, envelope.encrypted_key, envelope.iv, envelope.ciphertext,
+            envelope.tag, expected_enc, wrapped_length);
+    };
+
+    let decode_fields = func(protected: uint8[list], members: [string, json.JsonValue][list], aad: uint8[list],
+        key_segment, iv_segment, body_segment, tag_segment: string, expected_enc: ContentEncryption, wrapped_length: int)
+        -> Result<OpenFields> {
+        last wrapped = decode_encrypted_key(key_segment, wrapped_length)?;
+        last iv = decode_part(iv_segment, "invalid initialization vector")?;
+        last ciphertext = decode_part(body_segment, "invalid ciphertext")?;
+        last tag = decode_part(tag_segment, "invalid authentication tag")?;
         if (iv.length != iv_length(expected_enc) || tag.length != tag_length(expected_enc)) {
-            return jose.fail<CompactFields>(InvalidJwe, "incorrect JWE segment length");
+            return jose.fail<OpenFields>(InvalidJwe, "incorrect JWE segment length");
         }
         if (cbc_mode(expected_enc) && (ciphertext.length == 0 || ciphertext.length % 16 != 0)) {
-            return jose.fail<CompactFields>(InvalidJwe, "invalid JWE CBC ciphertext length");
+            return jose.fail<OpenFields>(InvalidJwe, "invalid JWE CBC ciphertext length");
         }
-        return Result<CompactFields>.Ok(new CompactFields(protected, words.utf8(parts[0]), wrapped, iv, ciphertext, tag));
+        return Result<OpenFields>.Ok(new OpenFields(protected, members, aad, wrapped, iv, ciphertext, tag));
     };
 
     let check_content_material = func(enc: ContentEncryption, cek, iv: uint8[list]) {
@@ -850,8 +904,7 @@ export let Jwe = module (
         }
     };
 
-    let gcm_parameters = func(protected: uint8[list]) -> Result<[uint8[list], uint8[list]]> {
-        last members = jose.parse_object_bytes(protected, InvalidJwe)?;
+    let gcm_parameters = func(members: [string, json.JsonValue][list]) -> Result<[uint8[list], uint8[list]]> {
         last iv = jose.required_bytes(members, "iv", InvalidJwe)?;
         last tag = jose.required_bytes(members, "tag", InvalidJwe)?;
         if (iv.length != 12 || tag.length != 16) {
@@ -892,7 +945,7 @@ export let Jwe = module (
         check_gcm_material(key.encryption, cek, content_iv, wrapping_iv);
         last protected = words.utf8(header_text);
         validate_header(protected, gcm_wrap_name(key.algorithm), key.encryption)?;
-        let [header_iv, header_tag] = gcm_parameters(protected)?;
+        let [header_iv, header_tag] = gcm_parameters(jose.parse_object_bytes(protected, InvalidJwe)?)?;
         if (not constant_time.ct_eq(wrapping_iv, header_iv)) {
             return jose.fail<string>(InvalidJwe, "protected JWE AES-GCM wrapping IV differs from the supplied IV");
         }
@@ -914,9 +967,8 @@ export let Jwe = module (
         return seal_gcm(key, plaintext, cek, iv, wrapping_iv);
     };
 
-    let open_gcm = func(key: GcmWrappingKey, compact: string) -> Result<uint8[list]> {
-        last fields = parse(compact, gcm_wrap_name(key.algorithm), key.encryption, cek_length(key.encryption))?;
-        let [wrapping_iv, wrapping_tag] = gcm_parameters(fields.protected_bytes)?;
+    let open_gcm = func(key: GcmWrappingKey, fields: OpenFields) -> Result<uint8[list]> {
+        let [wrapping_iv, wrapping_tag] = gcm_parameters(fields.members)?;
         let kek = key.expose();
         defer words.wipe(kek);
         last unwrapped = new aes_gcm.AesGcm(kek).open(wrapping_iv, words.concat(fields.wrapped, wrapping_tag), new);
@@ -949,8 +1001,7 @@ export let Jwe = module (
         return jose.fail<int>(InvalidJwe, "JWE PBES2 p2c must be a positive JSON integer");
     };
 
-    let pbes2_parameters = func(protected: uint8[list], limit: int) -> Result<[uint8[list], int]> {
-        last members = jose.parse_object_bytes(protected, InvalidJwe)?;
+    let pbes2_parameters = func(members: [string, json.JsonValue][list], limit: int) -> Result<[uint8[list], int]> {
         last iterations = pbes2_iterations(members, limit)?;
         last salt = jose.required_bytes(members, "p2s", InvalidJwe)?;
         if (salt.length < 8) {
@@ -987,7 +1038,7 @@ export let Jwe = module (
         }
         last protected = words.utf8(header_text);
         validate_header(protected, pbes2_name(key.algorithm), key.encryption)?;
-        let [header_salt, header_count] = pbes2_parameters(protected, key.iteration_limit)?;
+        let [header_salt, header_count] = pbes2_parameters(jose.parse_object_bytes(protected, InvalidJwe)?, key.iteration_limit)?;
         if (iterations != header_count || not constant_time.ct_eq(salt, header_salt)) {
             return jose.fail<string>(InvalidJwe, "protected JWE PBES2 parameters differ from the supplied parameters");
         }
@@ -1017,9 +1068,8 @@ export let Jwe = module (
         return seal_pbes2(key, plaintext, cek, iv, salt, iterations);
     };
 
-    let open_pbes2 = func(key: Pbes2Key, compact: string) -> Result<uint8[list]> {
-        last fields = parse(compact, pbes2_name(key.algorithm), key.encryption, cek_length(key.encryption) + 8)?;
-        let [salt, iterations] = pbes2_parameters(fields.protected_bytes, key.iteration_limit)?;
+    let open_pbes2 = func(key: Pbes2Key, fields: OpenFields) -> Result<uint8[list]> {
+        let [salt, iterations] = pbes2_parameters(fields.members, key.iteration_limit)?;
         let kek = derive_pbes2(key, salt, iterations);
         defer words.wipe(kek);
         let cek = unwrap(new aes_block.AesBlock(kek), fields.wrapped)?;
@@ -1244,19 +1294,14 @@ export let Jwe = module (
                 return seal_pbes2_random(key, plaintext, iterations, random.fill(length));
             };
 
-    /// @brief Authenticates and decrypts a compact JWE using the caller's expected algorithms.
-    /// Malformed input and an algorithm mismatch return crypto.invalid_jwe. Integrity and decryption failures
-    /// return crypto.authentication_failed, with no unauthenticated plaintext.
-    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
-    #[NoDiscard, Since("0.3.0")]
-    export let open = func(key: DirectKey, compact: string) -> Result<uint8[list]> {
-        last fields = parse(compact, "dir", key.encryption, 0)?;
+    let open_direct = func(key: DirectKey, fields: OpenFields) -> Result<uint8[list]> {
         let cek = key.expose();
         last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
         words.wipe(cek);
         return result;
-    } or func(key: WrappingKey, compact: string) -> Result<uint8[list]> {
-        last fields = parse(compact, wrap_name(key.algorithm), key.encryption, cek_length(key.encryption) + 8)?;
+    };
+
+    let open_wrapped = func(key: WrappingKey, fields: OpenFields) -> Result<uint8[list]> {
         let kek = key.expose();
         last unwrapped = unwrap(new aes_block.AesBlock(kek), fields.wrapped);
         words.wipe(kek);
@@ -1264,8 +1309,58 @@ export let Jwe = module (
         last result = open_content(key.encryption, cek, fields.iv, fields.ciphertext, fields.tag, fields.aad);
         words.wipe(cek);
         return result;
-    } or func(key: RsaUnwrappingKey, compact: string) -> Result<uint8[list]> => key.open(compact)
+    };
+
+    /// @brief Authenticates and decrypts a compact JWE using the caller's expected algorithms.
+    /// Malformed input and an algorithm mismatch return crypto.invalid_jwe. Integrity and decryption failures
+    /// return crypto.authentication_failed, with no unauthenticated plaintext.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[NoDiscard, Since("0.3.0")]
+    export let open = func(key: DirectKey, compact: string) -> Result<uint8[list]> =>
+        open_direct(key, parse(compact, "dir", key.encryption, 0)?)
+        or func(key: WrappingKey, compact: string) -> Result<uint8[list]> =>
+            open_wrapped(key, parse(compact, wrap_name(key.algorithm), key.encryption, cek_length(key.encryption) + 8)?)
+        or func(key: RsaUnwrappingKey, compact: string) -> Result<uint8[list]> => key.open(compact)
         or func(key: EcdhDecryptionKey, compact: string) -> Result<uint8[list]> => key.open(compact)
-        or func(key: GcmWrappingKey, compact: string) -> Result<uint8[list]> => open_gcm(key, compact)
-        or func(key: Pbes2Key, compact: string) -> Result<uint8[list]> => open_pbes2(key, compact);
+        or func(key: GcmWrappingKey, compact: string) -> Result<uint8[list]> =>
+            open_gcm(key, parse(compact, gcm_wrap_name(key.algorithm), key.encryption, cek_length(key.encryption))?)
+        or func(key: Pbes2Key, compact: string) -> Result<uint8[list]> =>
+            open_pbes2(key, parse(compact, pbes2_name(key.algorithm), key.encryption, cek_length(key.encryption) + 8)?);
+
+    /// @brief Authenticates and decrypts one explicitly selected recipient in flattened or general JWE JSON.
+    /// The recipient index is zero-based and must be zero for flattened JWE. Supply the expected external AAD
+    /// as bytes, or omit it when the expected AAD is empty. Mismatching AAD returns crypto.authentication_failed.
+    /// The caller's key fixes both algorithms. Header key identifiers and locators do not choose keys or grant
+    /// trust. The encoded protected and external AAD segments are authenticated as received.
+    /// The profile accepts up to 4 MiB of serialized JSON, 64 recipients and 64 members per combined JOSE header.
+    /// The protected segment may contain up to 64 KiB, and each JSON parse accepts up to 16,384 structural tokens.
+    /// @see [Std.Crypto.Token.Jwe](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Jwe)
+    #[NoDiscard, Since("0.3.0")]
+    export let open_json = func(key: DirectKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+        open_direct(key, parse_json(serialized, recipient_index, aad, "dir", key.encryption, 0)?)
+        or func(key: WrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            open_wrapped(key, parse_json(serialized, recipient_index, aad, wrap_name(key.algorithm), key.encryption,
+                cek_length(key.encryption) + 8)?)
+        or func(key: RsaUnwrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            key.open_json(serialized, recipient_index, aad)
+        or func(key: EcdhDecryptionKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            key.open_json(serialized, recipient_index, aad)
+        or func(key: GcmWrappingKey, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            open_gcm(key, parse_json(serialized, recipient_index, aad, gcm_wrap_name(key.algorithm), key.encryption,
+                cek_length(key.encryption))?)
+        or func(key: Pbes2Key, serialized: string, recipient_index: int, aad: uint8[list]) -> Result<uint8[list]> =>
+            open_pbes2(key, parse_json(serialized, recipient_index, aad, pbes2_name(key.algorithm), key.encryption,
+                cek_length(key.encryption) + 8)?)
+        or func(key: DirectKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: WrappingKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: RsaUnwrappingKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: EcdhDecryptionKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: GcmWrappingKey, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new)
+        or func(key: Pbes2Key, serialized: string, recipient_index: int) -> Result<uint8[list]> =>
+            open_json(key, serialized, recipient_index, new);
 );

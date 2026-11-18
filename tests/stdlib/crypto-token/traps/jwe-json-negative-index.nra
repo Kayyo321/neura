@@ -1,0 +1,14 @@
+// run-options: --gpu=off --deny-all
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: JWE recipient index must be nonnegative
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last material: uint8[list] = new([0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15]);
+        last key = new jwe.DirectKey(jwe.ContentEncryption.A128Gcm, material);
+        let _ = jwe.open_json(key, "", -1);
+        return program.ExitCode.Ok;
+    };
+);

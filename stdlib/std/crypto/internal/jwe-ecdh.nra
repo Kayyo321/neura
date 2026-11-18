@@ -111,6 +111,11 @@ export let JweEcdh = module (
         if (not unique_members(bytes, members)) {
             return jose.fail<Parameters>(InvalidJwe, "repeated member name in the JWE protected header");
         }
+        return parse_members(members, curve);
+    };
+
+    // The JSON opening path has already rejected repeated names at every depth and across headers.
+    export let parse_members = func(members: [string, json.JsonValue][list], curve: ecdsa.Curve) -> Result<Parameters> {
         last ephemeral = match (json.member(members, "epk")) {
             Optional.Some(json.JsonValue.Object(key)) => parse_ephemeral(key, curve),
             _ => jose.fail<ecdsa.EcPublicKey>(InvalidJwe, "JWE epk must be a public JWK object"),

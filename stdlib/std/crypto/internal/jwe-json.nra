@@ -1,0 +1,210 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let json = import:Std.Encoding.Json;
+let utf8 = import:Std.Encoding.Utf8;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Parses a flattened or general JWE for one explicitly selected recipient. Internal.
+#Since("0.3.0")
+export let JweJson = module (
+    const InvalidJwe = "crypto.invalid_jwe";
+    const MaxSerializedBytes = 4194304;
+    const MaxProtectedSegmentBytes = 65536;
+    const MaxStructureTokens = 16384;
+    const MaxRecipients = 64;
+    const MaxHeaderMembers = 64;
+
+    let Recipient = class (
+        export last members: [string, json.JsonValue][list];
+        export last encrypted_key: string;
+
+        export let init = func(header: [string, json.JsonValue][list], encoded_key: string) {
+            members = header;
+            encrypted_key = encoded_key;
+        };
+
+        export let.override to_string = func -> string => "JweJson.Recipient";
+    );
+
+    export let Envelope = class (
+        export last members: [string, json.JsonValue][list];
+        export last encrypted_key: string;
+        export last iv: string;
+        export last ciphertext: string;
+        export last tag: string;
+        export last aad: uint8[list];
+        export last external_aad: uint8[list];
+
+        export let init = func(header: [string, json.JsonValue][list], key_segment, iv_segment, body_segment, tag_segment: string,
+            content_aad, context: uint8[list]) {
+            members = header;
+            encrypted_key = key_segment;
+            iv = iv_segment;
+            ciphertext = body_segment;
+            tag = tag_segment;
+            aad = content_aad;
+            external_aad = context;
+        };
+
+        export let.override to_string = func -> string => "JweJson.Envelope";
+    );
+
+    // Limit work before the JSON parser compares object member names and allocates the value tree.
+    let structure_within_limit = func(text: string) -> bool {
+        let count = 0;
+        let in_string = false;
+        let escaped = false;
+        for (let i = 0; i < text.byte_length; i++) {
+            last byte = text.byte_at(i);
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (byte == '\\') {
+                    escaped = true;
+                } else if (byte == '"') {
+                    in_string = false;
+                }
+            } else if (byte == '"') {
+                in_string = true;
+            } else if (byte == '{' || byte == '[' || byte == ':' || byte == ',') {
+                count++;
+                if (count > MaxStructureTokens) {
+                    return false;
+                }
+            }
+        }
+        return true;
+    };
+
+    let object_member = func(members: [string, json.JsonValue][list], name: string) -> Result<[string, json.JsonValue][list]> =>
+        match (json.member(members, name)) {
+            Optional.None => Result<[string, json.JsonValue][list]>.Ok(new),
+            Optional.Some(json.JsonValue.Object(object)) => Result<[string, json.JsonValue][list]>.Ok(object),
+            _ => jose.fail<[string, json.JsonValue][list]>(InvalidJwe, "JWE " .. name .. " must be a JSON object"),
+        };
+
+    let protected_members = func(encoded: string) -> Result<[string, json.JsonValue][list]> {
+        if (encoded.byte_length > MaxProtectedSegmentBytes) {
+            return jose.fail<[string, json.JsonValue][list]>(InvalidJwe, "JWE protected header exceeds the byte limit");
+        }
+        last bytes = jose.decode(encoded, InvalidJwe, "invalid protected header")?;
+        match (utf8.decode(bytes)) {
+            Result.Ok(text) => {
+                if (not structure_within_limit(text)) {
+                    return jose.fail<[string, json.JsonValue][list]>(InvalidJwe, "JWE protected header exceeds the structure limit");
+                }
+                return jose.parse_object(text, InvalidJwe, true);
+            },
+            Result.Err(_) => {
+                return jose.fail<[string, json.JsonValue][list]>(InvalidJwe, "not UTF-8");
+            },
+        }
+    };
+
+    let combine = func(first, second: [string, json.JsonValue][list]) -> Result<[string, json.JsonValue][list]> {
+        if (first.length + second.length > MaxHeaderMembers) {
+            return jose.fail<[string, json.JsonValue][list]>(InvalidJwe, "JWE header has too many members");
+        }
+        last second_index = json.index(second);
+        let combined: [string, json.JsonValue][list] = new;
+        for (let entry in first) {
+            if (second_index.contains_key(entry[0])) {
+                return jose.fail<[string, json.JsonValue][list]>(InvalidJwe, "repeated member name across JWE headers");
+            }
+            combined.append(entry);
+        }
+        for (let entry in second) {
+            combined.append(entry);
+        }
+        return Result<[string, json.JsonValue][list]>.Ok(combined);
+    };
+
+    let read_recipient = func(object, shared: [string, json.JsonValue][list], expected_enc: string) -> Result<Recipient> {
+        last header = object_member(object, "header")?;
+        last members = combine(shared, header)?;
+        last enc = jose.required_text(members, "enc", InvalidJwe)?;
+        let _ = jose.required_text(members, "alg", InvalidJwe)?;
+        if (enc != expected_enc) {
+            return jose.fail<Recipient>(InvalidJwe, "JWE recipients must use the expected content algorithm");
+        }
+        if (jose.has(members, "crit") || jose.has(members, "zip")) {
+            return jose.fail<Recipient>(InvalidJwe, "JWE critical extensions and compression are unsupported");
+        }
+        last encrypted_key = jose.text_member(object, "encrypted_key", InvalidJwe)?;
+        return Result<Recipient>.Ok(new Recipient(members, encrypted_key));
+    };
+
+    let select_recipient = func(object, shared: [string, json.JsonValue][list], index: int, expected_enc: string)
+        -> Result<Recipient> {
+        match (json.member(object, "recipients")) {
+            Optional.None => {
+                if (index != 0) {
+                    return jose.fail<Recipient>(InvalidJwe, "JWE recipient index is out of range");
+                }
+                return read_recipient(object, shared, expected_enc);
+            },
+            Optional.Some(json.JsonValue.Array(items)) => {
+                if (jose.has(object, "header") || jose.has(object, "encrypted_key")) {
+                    return jose.fail<Recipient>(InvalidJwe, "JWE mixes flattened and general serialization");
+                }
+                if (items.length > MaxRecipients || index >= items.length) {
+                    return jose.fail<Recipient>(InvalidJwe, "JWE recipient count or index is out of range");
+                }
+                let selected: Optional<Recipient> = Optional<Recipient>.None;
+                for (let i = 0; i < items.length; i++) {
+                    match (items[i]) {
+                        json.JsonValue.Object(members) => {
+                            last recipient = read_recipient(members, shared, expected_enc)?;
+                            if (i == index) {
+                                selected = Optional<Recipient>.Some(recipient);
+                            }
+                        },
+                        _ => {
+                            return jose.fail<Recipient>(InvalidJwe, "JWE recipient must be a JSON object");
+                        },
+                    }
+                }
+                return match (selected) {
+                    Optional.Some(recipient) => Result<Recipient>.Ok(recipient),
+                    Optional.None => jose.fail<Recipient>(InvalidJwe, "JWE recipient index is out of range"),
+                };
+            },
+            _ => {
+                return jose.fail<Recipient>(InvalidJwe, "JWE recipients must be a JSON array");
+            },
+        }
+    };
+
+    export let parse = func(serialized: string, recipient_index: int, expected_enc: string) -> Result<Envelope> {
+        if (recipient_index < 0) {
+            trap_with_message("invalid argument: JWE recipient index must be nonnegative");
+        }
+        if (serialized.byte_length > MaxSerializedBytes || not structure_within_limit(serialized)) {
+            return jose.fail<Envelope>(InvalidJwe, "JWE JSON exceeds the byte or structure limit");
+        }
+        last object = jose.parse_object(serialized, InvalidJwe, true)?;
+        last protected_segment = jose.text_member(object, "protected", InvalidJwe)?;
+        let protected: [string, json.JsonValue][list] = new;
+        if (jose.has(object, "protected")) {
+            protected = protected_members(protected_segment)?;
+        }
+        last shared = combine(protected, object_member(object, "unprotected")?)?;
+        last recipient = select_recipient(object, shared, recipient_index, expected_enc)?;
+        last iv = jose.required_text(object, "iv", InvalidJwe)?;
+        last ciphertext = jose.required_text(object, "ciphertext", InvalidJwe)?;
+        last tag = jose.required_text(object, "tag", InvalidJwe)?;
+        last aad_segment = jose.string_member(object, "aad", InvalidJwe)?;
+        match (aad_segment) {
+            Optional.None => {
+                return Result<Envelope>.Ok(new Envelope(recipient.members, recipient.encrypted_key, iv, ciphertext, tag,
+                    words.utf8(protected_segment), new));
+            },
+            Optional.Some(encoded) => {
+                last external_aad = jose.decode(encoded, InvalidJwe, "invalid external JWE AAD")?;
+                return Result<Envelope>.Ok(new Envelope(recipient.members, recipient.encrypted_key, iv, ciphertext, tag,
+                    words.utf8(protected_segment .. "." .. encoded), external_aad));
+            },
+        }
+    };
+);
