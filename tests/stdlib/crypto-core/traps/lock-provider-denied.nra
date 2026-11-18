@@ -1,5 +1,7 @@
+// test-options: --gpu=off
 // status: 134
-// stderr: explicit program failure \(trap reason 3\): unsupported: Std.Crypto.Core.SecretBytes.lock is not implemented in Neura 0.3.0
+// run-options: --gpu=off --deny-entropy
+// stderr: explicit program failure \(trap reason 3\): secret lock failed: .*host code 14
 let.promote _ = import:Std.Crypto.Core.SecretBytes;
 let program = import:Std.Program;
 

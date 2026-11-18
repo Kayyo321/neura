@@ -53,7 +53,7 @@ let CoreTests = module (
         let secret = new SecretBytes(source);
         source[0] = 0;
         test.assert_equal_int32(9, secret.expose()[0] as int);
-        test.assert_equal_string("SecretBytes(3 bytes, <redacted>)", secret.to_string());
+        test.assert_equal_string("SecretBytes(<redacted>)", secret.to_string());
         test.assert(secret.ct_equals(new SecretBytes(new([9, 8, 7]))));
         test.assert(!secret.ct_equals(new SecretBytes(new([9, 8, 6]))));
         // Equality is identity: two objects with the same bytes are not equal.
