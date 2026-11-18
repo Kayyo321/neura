@@ -52,7 +52,7 @@ export let DohTransport = module (
 
         /// @brief Text such as "DohTransport(POST https://dns.example/dns-query)".
         export let.override to_string = func -> string =>
-            "DohTransport(" + (use_get ? "GET " : "POST ") + url + ")";
+            "DohTransport(" .. (use_get ? "GET " : "POST ") .. url .. ")";
     );
 
     /// @brief The query's wire form with DNS ID 0 (RFC 8484 section 4.1).
@@ -69,7 +69,7 @@ export let DohTransport = module (
     export let get_url = func(endpoint: string, query: messages.Message) -> Result<string> {
         last text = base64.encode_url_unpadded(wire_query(query)?);
         last separator = strings.contains(endpoint, "?") ? "&" : "?";
-        return Result<string>.Ok(endpoint + separator + "dns=" + text);
+        return Result<string>.Ok(endpoint .. separator .. "dns=" .. text);
     };
 
     /// @brief The GET request.
@@ -96,12 +96,12 @@ export let DohTransport = module (
     export let decode_response = func(response: http.Response) -> Result<messages.Message> {
         if (response.status < 200 || response.status > 299) {
             return Result<messages.Message>.Err(errors.custom("dns.doh_status", "DoH server answered status "
-                + response.status.to_string()));
+                .. response.status.to_string()));
         }
         last kind = strings.to_ascii_lower(strings.trim(content_type(response)));
-        if (kind != MediaType && !strings.starts_with(kind, MediaType + ";")) {
+        if (kind != MediaType && not strings.starts_with(kind, MediaType .. ";")) {
             return Result<messages.Message>.Err(errors.custom("dns.doh_media_type", "DoH response is not "
-                + MediaType));
+                .. MediaType));
         }
         return messages.decode(response.body());
     };

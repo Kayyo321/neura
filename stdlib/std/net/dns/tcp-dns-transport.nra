@@ -56,7 +56,7 @@ export let TcpDnsTransport = module (
         };
 
         /// @brief Text such as "TcpDnsTransport(192.0.2.53:53)".
-        export let.override to_string = func -> string => "TcpDnsTransport(" + server.to_string() + ")";
+        export let.override to_string = func -> string => "TcpDnsTransport(" .. server.to_string() .. ")";
     );
 
     /// @brief Encodes `query`, writes it framed, and reads and decodes one framed response.

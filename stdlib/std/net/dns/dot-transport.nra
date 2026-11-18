@@ -45,6 +45,6 @@ export let DotTransport = module (
         };
 
         /// @brief Text such as "DotTransport(192.0.2.53:853)".
-        export let.override to_string = func -> string => "DotTransport(" + server.to_string() + ")";
+        export let.override to_string = func -> string => "DotTransport(" .. server.to_string() .. ")";
     );
 );

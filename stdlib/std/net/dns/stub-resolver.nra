@@ -67,7 +67,7 @@ export let StubResolver = module (
         };
 
         /// @brief Text such as "Upstream(MemoryTransport(a, 2 records))".
-        export let.override to_string = func -> string => "Upstream(" + primary.to_string() + ")";
+        export let.override to_string = func -> string => "Upstream(" .. primary.to_string() .. ")";
     );
 
     /// @brief Where an answer came from.
@@ -128,8 +128,8 @@ export let StubResolver = module (
         };
 
         /// @brief Text such as "Answer(www.example.com. IN A, 2 records, Network)".
-        export let.override to_string = func -> string => "Answer(" + question.to_string() + ", "
-            + records.length.to_string() + " records, rcode " + rcode.to_string() + ", " + source.to_string() + ")";
+        export let.override to_string = func -> string => "Answer(" .. question.to_string() .. ", "
+            .. records.length.to_string() .. " records, rcode " .. rcode.to_string() .. ", " .. source.to_string() .. ")";
     );
 
     /// @brief A split-horizon route: a suffix and its servers.
@@ -147,7 +147,7 @@ export let StubResolver = module (
         };
 
         /// @brief Text such as "Route(corp.example.)".
-        export let.override to_string = func -> string => "Route(" + suffix.to_string() + ")";
+        export let.override to_string = func -> string => "Route(" .. suffix.to_string() .. ")";
     );
 
     /// @brief The resolver.
@@ -234,7 +234,7 @@ export let StubResolver = module (
                     },
                 }
             }
-            if (!as_is_first) {
+            if (not as_is_first) {
                 out.append(absolute);
             }
             return Result<names.DnsName[list]>.Ok(out);
@@ -260,7 +260,7 @@ export let StubResolver = module (
                 if (answer.records.length > 0) {
                     return Result<Answer>.Ok(answer);
                 }
-                if (answer.is_no_data() && !is_some<Answer>(no_data)) {
+                if (answer.is_no_data() && not is_some<Answer>(no_data)) {
                     no_data = Optional<Answer>.Some(answer);
                 }
                 last_answer = Optional<Answer>.Some(answer);
@@ -337,8 +337,8 @@ export let StubResolver = module (
         };
 
         /// @brief Text such as "StubResolver(2 servers, 1 routes)".
-        export let.override to_string = func -> string => "StubResolver(" + servers.length.to_string() + " servers, "
-            + routes.length.to_string() + " routes)";
+        export let.override to_string = func -> string => "StubResolver(" .. servers.length.to_string() .. " servers, "
+            .. routes.length.to_string() .. " routes)";
 
         /// @brief The hosts-table answer to an A or AAAA question.
         let from_hosts = func(question: messages.Question) -> Optional<Answer> {
@@ -394,7 +394,7 @@ export let StubResolver = module (
                                     links++;
                                     if (links > MaxCnameChain || contains_name(seen, target)) {
                                         return Result<Answer>.Err(errors.custom("dns.cname_chain",
-                                            "CNAME loop or chain longer than " + MaxCnameChain.to_string()));
+                                            "CNAME loop or chain longer than " .. MaxCnameChain.to_string()));
                                     }
                                     collected.append(record);
                                     seen.append(target);
@@ -451,7 +451,7 @@ export let StubResolver = module (
                                 return Result<messages.Message>.Ok(response);
                             }
                             last_error = errors.custom("dns.server_failure", "server answered RCODE "
-                                + code.to_string());
+                                .. code.to_string());
                         },
                         Result.Err(problem) => {
                             last_error = problem;
@@ -470,7 +470,7 @@ export let StubResolver = module (
             }
             last first = upstream.primary.exchange(query)?;
             check_match(query, first)?;
-            if (!first.header.truncated || upstream.primary.is_stream()) {
+            if (not first.header.truncated || upstream.primary.is_stream()) {
                 return Result<messages.Message>.Ok(first);
             }
             match (upstream.fallback) {
@@ -529,10 +529,10 @@ export let StubResolver = module (
     /// (Custom `dns.mismatch`) otherwise.
     #NoDiscard
     export let check_match = func(query: messages.Message, response: messages.Message) -> Result<int> {
-        if (!response.header.is_response || response.header.id != query.header.id) {
+        if (not response.header.is_response || response.header.id != query.header.id) {
             return Result<int>.Err(errors.custom("dns.mismatch", "response ID or QR does not match the query"));
         }
-        if (response.questions.length != 1 || !response.questions[0].equals(query.question())) {
+        if (response.questions.length != 1 || not response.questions[0].equals(query.question())) {
             return Result<int>.Err(errors.custom("dns.mismatch", "response question does not match the query"));
         }
         return Result<int>.Ok(0);

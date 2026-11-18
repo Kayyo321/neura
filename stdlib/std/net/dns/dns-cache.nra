@@ -58,7 +58,7 @@ export let DnsCache = module (
         };
 
         /// @brief Text such as "Entry(expires 300000000000)".
-        export let.override to_string = func -> string => "Entry(expires " + expires_at.to_string() + ")";
+        export let.override to_string = func -> string => "Entry(expires " .. expires_at.to_string() .. ")";
     );
 
     /// @brief The cache.
@@ -202,7 +202,7 @@ export let DnsCache = module (
 
         /// @brief Text such as "DnsCache(3 of 1024 entries)".
         export let.override to_string = func -> string =>
-            "DnsCache(" + entries.size().to_string() + " of " + capacity.to_string() + " entries)";
+            "DnsCache(" .. entries.size().to_string() .. " of " .. capacity.to_string() .. " entries)";
 
         /// @brief The monotonic time in nanoseconds, or -1 when the clock fails.
         let now_nanos = func -> int64 => match (clock.monotonic()) {
@@ -267,7 +267,7 @@ export let DnsCache = module (
 
         /// @brief Removes a key from the table and the recency list.
         let drop = func(key: string) {
-            if (!entries.delete(key)) {
+            if (not entries.delete(key)) {
                 return;
             }
             last kept: string[list] = new;
@@ -329,9 +329,9 @@ export let DnsCache = module (
 
     /// @brief The key of an answer or no-data entry.
     let answer_key = func(question: messages.Question) -> string =>
-        question.name.key() + " " + question.qtype.to_string() + " " + question.qclass.to_string();
+        question.name.key() .. " " .. question.qtype.to_string() .. " " .. question.qclass.to_string();
 
     /// @brief The key of a name-error entry.
     let name_error_key = func(question: messages.Question) -> string =>
-        question.name.key() + " NXDOMAIN " + question.qclass.to_string();
+        question.name.key() .. " NXDOMAIN " .. question.qclass.to_string();
 );

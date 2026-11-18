@@ -71,10 +71,9 @@ export let NaptrLookup = module (
 
         /// @brief Equal when every field is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is NaptrRule)) {
+            if (other is not that: NaptrRule) {
                 return false;
             }
-            last that = other as NaptrRule;
             return order == that.order && preference == that.preference && flags == that.flags
                 && services == that.services && regexp == that.regexp && replacement.equals(that.replacement);
         };
@@ -84,8 +83,8 @@ export let NaptrLookup = module (
             replacement.hash_code(), order as uint32), preference as uint32), strings.hash(flags + services + regexp));
 
         /// @brief Text such as "100 10 \"S\" \"SIP+D2U\" \"\" _sip._udp.example.com.".
-        export let.override to_string = func -> string => order.to_string() + " " + preference.to_string() + " \""
-            + flags + "\" \"" + services + "\" \"" + regexp + "\" " + replacement.to_string();
+        export let.override to_string = func -> string => order.to_string() .. " " .. preference.to_string() .. " \""
+            .. flags .. "\" \"" .. services .. "\" \"" .. regexp .. "\" " .. replacement.to_string();
     );
 
     /// @brief NAPTR lookups through a resolver.
@@ -115,7 +114,7 @@ export let NaptrLookup = module (
                 last chosen = select(lookup(current)?, service);
                 let used_regexp = false;
                 let next: Result<NaptrRule> = Result<NaptrRule>.Err(errors.custom("dns.naptr",
-                    "no NAPTR rule offers " + service + " at " + current));
+                    "no NAPTR rule offers " .. service .. " at " .. current));
                 for (let rule in chosen) {
                     if (rule.regexp != "" && rule.replacement.is_root()) {
                         used_regexp = true;
@@ -140,8 +139,8 @@ export let NaptrLookup = module (
                     },
                 }
             }
-            return Result<NaptrRule>.Err(errors.custom("dns.naptr", "more than " + MaxRewrites.to_string()
-                + " NAPTR rewrites"));
+            return Result<NaptrRule>.Err(errors.custom("dns.naptr", "more than " .. MaxRewrites.to_string()
+                .. " NAPTR rewrites"));
         };
 
         /// @brief Text "NaptrLookup".
@@ -190,7 +189,7 @@ export let NaptrLookup = module (
         last out: NaptrRule[list] = new;
         let order = -1;
         for (let rule in sorted) {
-            if (!rule.offers(service)) {
+            if (not rule.offers(service)) {
                 continue;
             }
             if (order < 0) {

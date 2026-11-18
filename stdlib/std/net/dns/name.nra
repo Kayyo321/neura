@@ -113,9 +113,7 @@ export let Name = module (
             }
             last skip = parts.length - count;
             for (let i = 0; i < count; i++) {
-                if (!same_label(parts[skip + i], other.label(i))) {
-                    return false;
-                }
+                return false unless same_label(parts[skip + i], other.label(i));
             }
             return true;
         };
@@ -136,17 +134,14 @@ export let Name = module (
 
         /// @brief Equal when the labels match ignoring ASCII case.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is DnsName)) {
+            if (other is not that: DnsName) {
                 return false;
             }
-            last that = other as DnsName;
             if (that.label_count() != parts.length) {
                 return false;
             }
             for (let i = 0; i < parts.length; i++) {
-                if (!same_label(parts[i], that.label(i))) {
-                    return false;
-                }
+                return false unless same_label(parts[i], that.label(i));
             }
             return true;
         };
@@ -170,7 +165,7 @@ export let Name = module (
             }
             let text = "";
             for (let part in parts) {
-                text = text + escape_label(part) + ".";
+                text ..= escape_label(part) .. ".";
             }
             return text;
         };

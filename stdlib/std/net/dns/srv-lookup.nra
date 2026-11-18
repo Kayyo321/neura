@@ -42,10 +42,9 @@ export let SrvLookup = module (
 
         /// @brief Equal when every field is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SrvTarget)) {
+            if (other is not that: SrvTarget) {
                 return false;
             }
-            last that = other as SrvTarget;
             return priority == that.priority && weight == that.weight && port == that.port
                 && target.equals(that.target);
         };
@@ -55,8 +54,8 @@ export let SrvLookup = module (
             target.hash_code(), priority as uint32), weight as uint32), port as uint32);
 
         /// @brief Text such as "10 60 5060 sip.example.com.".
-        export let.override to_string = func -> string => priority.to_string() + " " + weight.to_string() + " "
-            + port.to_string() + " " + target.to_string();
+        export let.override to_string = func -> string => priority.to_string() .. " " .. weight.to_string() .. " "
+            .. port.to_string() .. " " .. target.to_string();
     );
 
     /// @brief SRV lookups through a resolver.
@@ -118,7 +117,7 @@ export let SrvLookup = module (
         last head = service.byte_length > 0 && service.byte_at(0) == 95 ? service : "_" + service;
         last middle = proto.byte_length > 0 && proto.byte_at(0) == 95 ? proto : "_" + proto;
         last tail = domain.byte_length > 0 && domain.byte_at(domain.byte_length - 1) == 46 ? domain : domain + ".";
-        return head + "." + middle + "." + tail;
+        return head .. "." .. middle .. "." .. tail;
     };
 
     /// @brief The SRV targets among records.
@@ -149,7 +148,7 @@ export let SrvLookup = module (
                     known = true;
                 }
             }
-            if (!known) {
+            if (not known) {
                 priorities.append(target.priority);
             }
         }

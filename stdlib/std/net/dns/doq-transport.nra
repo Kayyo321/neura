@@ -50,7 +50,7 @@ export let DoqTransport = module (
         };
 
         /// @brief Text such as "DoqTransport(192.0.2.53:853)".
-        export let.override to_string = func -> string => "DoqTransport(" + server.to_string() + ")";
+        export let.override to_string = func -> string => "DoqTransport(" .. server.to_string() .. ")";
     );
 
     /// @brief Decodes a reply and gives it the query's ID back (it travelled as 0).
