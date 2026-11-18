@@ -1,0 +1,22 @@
+// The desktop child of the project build fixture: one window over the web bundle and one bridge operation.
+let desktop = import:Std.Desktop;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Main = module:program.Entry (
+    let rename = func(call: desktop.Call) -> Result<uint8[list]> => Result<uint8[list]>.Ok(call.request());
+
+    let start = func(context: desktop.Context) -> Result<Unit> {
+        match (context.open_window("Counter", 640, 480)) {
+            Result.Ok(_) => {},
+            Result.Err(problem) => { return Result<Unit>.Err(problem); },
+        }
+        last dispatcher = new desktop.Dispatcher(new desktop.Registry(new(["counter.rename"])));
+        dispatcher.add("counter.rename", rename);
+        return context.run(dispatcher);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode =>
+        desktop.run_application(new desktop.Registry(new(["counter.rename"])), start);
+);

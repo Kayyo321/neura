@@ -36,6 +36,10 @@ struct BundleManifest {
     std::optional<Sha256Digest> ui{};
     std::optional<std::string> csp{};
     std::optional<bool> dev{};
+    // Web bundles: the routing mode ("hash" or "history") and the URL path
+    // the page's references start at under history routing.
+    std::optional<std::string> routing{};
+    std::optional<std::string> base{};
 };
 
 // Canonical schema-1 JSON uses UTF-8, sorted keys and file paths, integer
@@ -50,6 +54,8 @@ struct BundleVerification {
     std::optional<Sha256Digest> manifest_digest{};
     std::optional<TargetKind> expected_kind{};
     std::optional<std::string> expected_id{};
+    // Only `neura dev` runs a bundle marked `dev`.
+    bool allow_dev = false;
 };
 
 class VerifiedBundle {

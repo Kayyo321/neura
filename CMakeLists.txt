@@ -999,6 +999,18 @@ install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura
 if(NEURA_SDK)
     install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL COMPONENT sdk
         FILES_MATCHING PATTERN "*.nra")
+    # What `neura build --target` puts in a web bundle and `neura run` starts a desktop bundle with
+    # (docs/design/Projects030.md): the page modules of the browser runtime, its nvm.wasm and nvm.mjs when
+    # this build has them, and the desktop host's main.js and preload.js.
+    set(NEURA_WEB_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/wasm-runtime" CACHE PATH
+        "Directory holding nvm.wasm and nvm.mjs for the browser checks")
+    install(FILES hosts/web/boot.mjs hosts/web/dom.mjs hosts/web/fetch.mjs hosts/web/nvm.js hosts/web/ui.mjs
+        hosts/web/ui-wire.mjs DESTINATION share/neura/web COMPONENT sdk)
+    if(EXISTS "${NEURA_WEB_RUNTIME_DIR}/nvm.wasm" AND EXISTS "${NEURA_WEB_RUNTIME_DIR}/nvm.mjs")
+        install(FILES "${NEURA_WEB_RUNTIME_DIR}/nvm.wasm" "${NEURA_WEB_RUNTIME_DIR}/nvm.mjs"
+            DESTINATION share/neura/web COMPONENT sdk)
+    endif()
+    install(FILES hosts/desktop/main.js hosts/desktop/preload.js DESTINATION share/neura/desktop COMPONENT sdk)
 endif()
 
 include(CTest)
@@ -1042,6 +1054,24 @@ add_library(neura_project STATIC EXCLUDE_FROM_ALL
 target_include_directories(neura_project PUBLIC src)
 target_link_libraries(neura_project PRIVATE neura_hash)
 neura_target_defaults(neura_project)
+
+# The project tools' shared layer (docs/design/Projects030.md): `neura build
+# --project`, `neura run <bundle>`, and the neura-new, neura-dev and
+# neura-package tools.
+add_library(neura_app STATIC EXCLUDE_FROM_ALL src/app/project.cpp src/app/run_bundle.cpp src/app/build_command.cpp)
+target_include_directories(neura_app PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(neura_app PUBLIC neura_project PRIVATE neura_hash)
+if(NEURA_ENABLE_POSTGRES)
+    target_compile_definitions(neura_app PRIVATE NEURA_HAS_POSTGRES_PROVIDER)
+endif()
+if(NEURA_ENABLE_SERVER_TLS)
+    target_compile_definitions(neura_app PRIVATE NEURA_HAS_TLS_PROVIDER)
+endif()
+neura_target_defaults(neura_app)
+target_link_libraries(neura-run PRIVATE neura_app)
+if(TARGET neurac)
+    target_link_libraries(neurac PRIVATE neura_app)
+endif()
 
 # The server host (docs/design/Backend030.md): listeners, TLS when
 # NEURA_ENABLE_SERVER_TLS is on, and one request-worker process per request.
@@ -1141,6 +1171,13 @@ if(BUILD_TESTING AND NEURA_SDK)
     target_link_libraries(neura_project_bundle_tests PRIVATE neura_project)
     neura_target_defaults(neura_project_bundle_tests)
     add_test(NAME project-bundle COMMAND neura_project_bundle_tests)
+
+    # Project builds end to end: every target kind, two paths compared, the refusals of
+    # docs/design/Projects030.md and `neura run` of a bundle (tests/project/build.py).
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME project-build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/build.py"
+        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-build-tests")
+    set_tests_properties(project-build PROPERTIES TIMEOUT 900)
 
     if(TARGET neura_launcher)
         add_executable(neura_native_container_tests tests/native/container_cases.cpp)

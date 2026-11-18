@@ -48,6 +48,7 @@
 - [Kernels](Kernels)
 - [Desktop host services](Providers)
 - [Desktop applications](Apps-Desktop)
+- [Projects and bundles](Apps-Projects)
 - [Wall-clock benchmarks](Benchmarks)
 - [Decompiler](Decompiler)
 - [Release checklist](Release)

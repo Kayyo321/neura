@@ -44,6 +44,7 @@ pages = [
   { source = "docs/apps/Components.md", label = "State and components" },
   { source = "docs/apps/Css.md", label = "Stylesheets" },
   { source = "docs/apps/WebApp.md", label = "Your first web app" },
+  { source = "docs/apps/Projects.md", label = "Projects and bundles" },
   { source = "docs/lang/Numbers.md", label = "Numbers" },
   { source = "docs/lang/Types.md", label = "Types" },
   { source = "docs/lang/Modules.md", label = "Modules and imports" },

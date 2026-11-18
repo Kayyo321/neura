@@ -360,9 +360,13 @@ Errors about projects and their artifacts.
 | [E1021](E1021.md) | unsupported manifest schema or language version |
 | [E1022](E1022.md) | lock file missing or out of date |
 | [E1023](E1023.md) | invalid target |
+| [E1024](E1024.md) | entry module without the required entry |
 | [E1025](E1025.md) | path outside the project |
 | [E1026](E1026.md) | content does not match its digest |
+| [E1027](E1027.md) | capability used but not declared |
 | [E1028](E1028.md) | limit out of range |
+| [E1029](E1029.md) | bundle cannot be written |
+| [E1031](E1031.md) | unknown or incompatible provider |
 | [E1032](E1032.md) | dependency not pinned or not found |
 
 ## Warnings

@@ -21,8 +21,20 @@ using tooling::Json;
 constexpr std::string_view manifest_name = "bundle.json";
 constexpr std::uint64_t default_file_limit = 64 * 1024 * 1024;
 
-[[noreturn]] void refuse(const Span& site, std::string detail, const char* code = "E1029") {
-    throw Diagnostic(site, std::move(detail)).with_code(code);
+[[noreturn]] void refuse(const Span& site, std::string detail) {
+    throw Diagnostic(site, std::move(detail)).with_code("E1029");
+}
+
+[[noreturn]] void refuse_limit(const Span& site, std::string detail) {
+    throw Diagnostic(site, std::move(detail)).with_code("E1028");
+}
+
+[[noreturn]] void refuse_version(const Span& site, std::string detail) {
+    throw Diagnostic(site, std::move(detail)).with_code("E1021");
+}
+
+[[noreturn]] void refuse_requirement(const Span& site, std::string detail) {
+    throw Diagnostic(site, std::move(detail)).with_code("E1031");
 }
 
 bool digit(char c) { return c >= '0' && c <= '9'; }
@@ -117,7 +129,7 @@ void validate_limits(const BundleManifest& bundle, const Span& site) {
         const auto* pair = std::get_if<std::array<std::uint32_t, 2>>(&value);
         if (!bounds || (bounds->second == 0 && (!scalar || !in_range(*scalar, bounds->first))) ||
             (bounds->second != 0 && (!pair || !in_range((*pair)[0], bounds->first) || !in_range((*pair)[1], bounds->second)))) {
-            refuse(site, "invalid or out-of-range bundle limit '" + name + "'", "E1028");
+            refuse_limit(site, "invalid or out-of-range bundle limit '" + name + "'");
         }
     }
 }
@@ -148,7 +160,9 @@ std::set<std::string, std::less<>> validate_files(const BundleManifest& bundle, 
         }
     }
     const auto image = bundle.files.find(bundle.image.path);
-    if (image == bundle.files.end() || image->second.sha256 != bundle.image.digest || extension(bundle.image.path) != ".nvr") {
+    // A desktop bundle's image is its native child executable (Desktop030.md).
+    const bool image_kind = bundle.kind == TargetKind::Desktop ? !bundle.image.path.empty() : extension(bundle.image.path) == ".nvr";
+    if (image == bundle.files.end() || image->second.sha256 != bundle.image.digest || !image_kind) {
         refuse(site, "bundle image path or digest disagrees with the file table: '" + bundle.image.path + "'");
     }
     if (bundle.kind == TargetKind::Web && !bundle.files.contains("index.html")) refuse(site, "missing index.html in web bundle");
@@ -159,15 +173,19 @@ void validate_metadata(const BundleManifest& bundle, const Span& site) {
     if (kind_name(bundle.kind).empty()) refuse(site, "unknown bundle kind");
     if (!valid_project_id(bundle.id) || !valid_project_name(bundle.name) || !valid_project_version(bundle.version))
         refuse(site, "invalid bundle project id, name or version");
-    if (bundle.language != "0.3") refuse(site, "bundle language '" + bundle.language + "', supported '0.3'", "E1021");
+    if (bundle.language != "0.3") refuse_version(site, "bundle language '" + bundle.language + "', supported '0.3'");
     if ((bundle.kind == TargetKind::Desktop) != bundle.ui.has_value()) refuse(site, "desktop bundles require the embedded web bundle digest in 'ui'");
-    if (bundle.dev.value_or(false)) refuse(site, "development bundles need the development host");
     if (bundle.kind == TargetKind::Web) {
         if (!bundle.csp || bundle.csp->find_first_not_of(' ') == std::string::npos ||
             !std::ranges::all_of(*bundle.csp, [](unsigned char c) { return c >= 32 && c <= 126; }))
             refuse(site, "missing or malformed web bundle content-security policy");
-    } else if (bundle.csp) {
-        refuse(site, "bundle content-security policy belongs to the web bundle");
+        if (bundle.routing && *bundle.routing != "hash" && *bundle.routing != "history")
+            refuse(site, "bundle routing must be \"hash\" or \"history\"");
+        if (bundle.base && (!bundle.base->starts_with('/') || !bundle.base->ends_with('/') ||
+                            bundle.base->find_first_of("\"<>\\?#") != std::string::npos))
+            refuse(site, "bundle base must be a URL path that starts and ends with '/'");
+    } else if (bundle.csp || bundle.routing || bundle.base) {
+        refuse(site, "bundle content-security policy, routing and base belong to the web bundle");
     }
     for (const auto& [axis, version] : bundle.requirements) {
         if (!identifier(axis) || version == 0) refuse(site, "invalid bundle requirement '" + axis + "'");
@@ -235,9 +253,9 @@ Sha256Digest digest(const Json& value, std::string_view what, const Span& site) 
 
 BundleManifest decode(const Json& doc, const Span& site) {
     keys(doc, {"schema", "kind", "id", "name", "version", "language", "image", "files", "requires",
-               "capabilities", "origins", "limits", "contracts", "ui", "csp", "dev"}, "bundle", site);
+               "capabilities", "origins", "limits", "contracts", "ui", "csp", "dev", "routing", "base"}, "bundle", site);
     const auto schema = number(doc["schema"], "schema", site, 0);
-    if (schema != 1) refuse(site, "unsupported bundle schema " + std::to_string(schema) + ", expected 1", "E1021");
+    if (schema != 1) refuse_version(site, "unsupported bundle schema " + std::to_string(schema) + ", expected 1");
     const auto& image = doc["image"];
     keys(image, {"path", "digest"}, "image", site);
     BundleManifest bundle{read_kind(text(doc["kind"], "kind", site), site), text(doc["id"], "id", site),
@@ -269,7 +287,7 @@ BundleManifest decode(const Json& doc, const Span& site) {
         if (!value.is_array()) {
             bundle.limits.emplace(limit, number(value, limit, site, 0));
         } else {
-            if (value.size() != 2) refuse(site, "expected two values for bundle limit '" + limit + "'", "E1028");
+            if (value.size() != 2) refuse_limit(site, "expected two values for bundle limit '" + limit + "'");
             bundle.limits.emplace(limit, std::array{number(value[0], limit, site, 0), number(value[1], limit, site, 0)});
         }
     }
@@ -282,6 +300,8 @@ BundleManifest decode(const Json& doc, const Span& site) {
     if (doc.contains("ui")) bundle.ui = digest(doc["ui"], "ui", site);
     if (doc.contains("csp")) bundle.csp = text(doc["csp"], "csp", site);
     if (doc.contains("dev")) bundle.dev = boolean(doc["dev"], "dev", site);
+    if (doc.contains("routing")) bundle.routing = text(doc["routing"], "routing", site);
+    if (doc.contains("base")) bundle.base = text(doc["base"], "base", site);
     return bundle;
 }
 
@@ -320,6 +340,8 @@ Json encode(const BundleManifest& bundle) {
     if (bundle.ui) doc["ui"] = bundle.ui->hex();
     if (bundle.csp) doc["csp"] = *bundle.csp;
     if (bundle.dev) doc["dev"] = *bundle.dev;
+    if (bundle.routing) doc["routing"] = *bundle.routing;
+    if (bundle.base) doc["base"] = *bundle.base;
     return doc;
 }
 
@@ -544,6 +566,9 @@ VerifiedBundle verify_bundle_directory(const fs::path& directory, const BundleVe
         refuse(site, "bundle kind '" + std::string(kind_name(manifest.kind)) + "', expected '" +
                      std::string(kind_name(*verification.expected_kind)) + "'");
     }
+    if (manifest.dev.value_or(false) && !verification.allow_dev) {
+        refuse(site, "bundle was built by `neura dev`; build it with `neura build` to run, package or ship it");
+    }
     if (verification.expected_id && *verification.expected_id != manifest.id) {
         refuse(site, "bundle id '" + manifest.id + "', expected '" + *verification.expected_id + "'");
     }
@@ -551,8 +576,8 @@ VerifiedBundle verify_bundle_directory(const fs::path& directory, const BundleVe
         const auto supported = verification.supported_requirements.find(axis);
         if (supported == verification.supported_requirements.end() || supported->second != required) {
             const auto found = supported == verification.supported_requirements.end() ? "unavailable" : std::to_string(supported->second);
-            refuse(site, "bundle requirement '" + axis + "' needs version " + std::to_string(required) +
-                         ", host has " + found, "E1031");
+            refuse_requirement(site, "bundle requirement '" + axis + "' needs version " + std::to_string(required) +
+                         ", host has " + found);
         }
     }
     verify_tree(root, manifest, site);

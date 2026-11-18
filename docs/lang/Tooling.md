@@ -139,6 +139,12 @@ A program that uses [tasks](Concurrency.md) builds like any other, into an NVR 1
 
 For an image with tasks, `--stats` adds the peak numbers of live tasks, queued messages, and pending requests, and `run --profile` adds, for each spawn site, the tasks started there, the steps they executed, and how long they waited for a turn, on a channel or timer, and on host I/O. [Concurrency, section 14](Concurrency.md#14-tooling) describes the dump, the events, and virtual time. A program that uses tasks cannot use `Std.DynamicForeign` or a C import ([Concurrency, section 16](Concurrency.md#16-limits)).
 
+### Build and run a project
+
+A directory with `neura.toml` is a project ([Projects and bundles](../apps/Projects.md)). `neura build --project <manifest> --target <name>` builds one target into its bundle, `dist/<name>` unless `--out <directory>`; without `--project` the manifest is `neura.toml` of the current directory. `--update-lock` writes `neura.lock`, which the build otherwise only compares (`E1022`). A desktop target builds its web target first and embeds it. The command prints the bundle directory and its identity, the SHA-256 of `bundle.json`. Two builds of the same sources, manifest, lock and components give the same bytes, from any directory.
+
+`neura run <bundle directory> [-- arguments]` verifies the bundle and then runs a server bundle under `neura-server-host` or a desktop bundle under the desktop host, passing the arguments after `--` to the host. A web bundle is refused with the ways to serve it. A single-file `neura build app.nra -o app.nvr` is unchanged, in a project directory too.
+
 ### Package a native executable
 
 ```sh
