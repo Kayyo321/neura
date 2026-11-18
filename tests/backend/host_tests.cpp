@@ -6,6 +6,7 @@
 #include "backend/converter.hpp"
 #include "cli/source_loader.hpp"
 #include "fixtures.hpp"
+#include "nvm/app_services.hpp"
 #include "nvm/providers.hpp"
 #include "nvm/trace.hpp"
 #include "nvm/trace_file.hpp"
@@ -869,6 +870,323 @@ export let All = module:program.Entry (
         check(image.callbacks.size() == 1 && image.callbacks[0].name == "neura.ffi.upcall",
               "the upcall dispatcher is the image's callback");
     }
+}
+
+
+// UDP, Unix-domain sockets, options, resolution and send_file
+// (src/nvm/socket_provider.cpp).
+NEURA_TEST(host, datagram_and_unix_socket_services) {
+    Host host(everything());
+    const auto a = host.call("neura.net.udp.bind", {text("127.0.0.1"), i32(0)});
+    const auto b = host.call("neura.net.udp.bind", {text("127.0.0.1"), i32(0)});
+    expect_ok(a, "udp bind");
+    expect_ok(b, "second udp bind");
+    const auto port = host.call("neura.net.local_port", {b.value});
+    expect_ok(port, "udp port");
+    check_equal(as_i32(host.call("neura.net.udp.send_to", {a.value, text("127.0.0.1"), port.value, bytes("datagram")})
+                           .value),
+                8, "udp send count");
+    const auto got = host.call("neura.net.udp.receive_from", {b.value, i32(64), i64(2'000'000'000)});
+    expect_ok(got, "udp receive");
+    check_equal(got.value.elements.at(0).bytes, std::string("datagram"), "udp payload");
+    check_equal(got.value.elements.at(1).bytes, std::string("127.0.0.1"), "udp sender");
+    check_equal(as_i32(host.call("neura.net.local_port", {a.value}).value), as_i32(got.value.elements.at(2)),
+                "udp sender port");
+    expect_error(host.call("neura.net.udp.receive_from", {b.value, i32(64), i64(20'000'000)}), host_error::timed_out,
+                 "udp receive timeout");
+    expect_error(host.call("neura.net.udp.send_to", {a.value, text("example.com"), port.value, bytes("x")}),
+                 host_error::invalid_input, "udp send to a name");
+    expect_error(host.call("neura.net.udp.bind", {text("127.0.0.1"), i32(70000)}), host_error::invalid_input,
+                 "udp port range");
+
+    TemporaryDirectory directory("unix");
+    const auto path = (directory.path() / "s.sock").string();
+    const auto listener = host.call("neura.net.unix.listen", {text(path)});
+    expect_ok(listener, "unix listen");
+    const auto client = host.call("neura.net.unix.connect", {text(path)});
+    expect_ok(client, "unix connect");
+    const auto server = host.call("neura.net.accept", {listener.value});
+    expect_ok(server, "unix accept");
+    check_equal(as_i32(host.call("neura.net.write", {client.value, bytes("over unix")}).value), 9, "unix write");
+    check_equal(host.call("neura.net.read", {server.value, i32(64), i64(0)}).value.bytes, std::string("over unix"),
+                "unix read");
+    expect_error(host.call("neura.net.unix.listen", {text(path)}), host_error::already_exists, "path in use");
+    expect_error(host.call("neura.net.unix.connect", {text((directory.path() / "none").string())}),
+                 host_error::not_found, "no such socket");
+    expect_error(host.call("neura.net.unix.connect", {text(std::string(200, 'x'))}), host_error::invalid_input,
+                 "path too long");
+#ifdef __linux__
+    const auto abstract_name = "@neura-host-test-" + std::to_string(::getpid());
+    const auto abstract = host.call("neura.net.unix.listen", {text(abstract_name)});
+    expect_ok(abstract, "abstract listen");
+    expect_ok(host.call("neura.net.unix.connect", {text(abstract_name)}), "abstract connect");
+    check(!fs::exists(abstract_name), "the abstract namespace makes no file");
+#endif
+
+    const auto receiver_path = (directory.path() / "d.sock").string();
+    const auto receiver = host.call("neura.net.unix.datagram", {text(receiver_path)});
+    const auto sender_path = (directory.path() / "e.sock").string();
+    const auto sender = host.call("neura.net.unix.datagram", {text(sender_path)});
+    expect_ok(receiver, "unix datagram");
+    expect_ok(sender, "unix datagram sender");
+    check_equal(as_i32(host.call("neura.net.unix.send_to", {sender.value, text(receiver_path), bytes("dg")}).value), 2,
+                "unix datagram send");
+    const auto datagram = host.call("neura.net.unix.receive_from", {receiver.value, i32(16), i64(2'000'000'000)});
+    expect_ok(datagram, "unix datagram receive");
+    check_equal(datagram.value.elements.at(0).bytes, std::string("dg"), "unix datagram payload");
+    check_equal(datagram.value.elements.at(1).bytes, sender_path, "unix datagram sender");
+    expect_error(host.call("neura.net.unix.receive_from", {client.value, i32(16), i64(0)}), host_error::invalid_input,
+                 "datagram receive on a stream");
+    host.services.end_run();
+    check_equal(host.services.open_sockets(), std::size_t{0}, "datagram and unix sockets closed with the run");
+}
+
+NEURA_TEST(host, socket_options_resolution_and_send_file) {
+    Host host(everything());
+    const auto [listener, client, server] = connected(host);
+    const auto set = [&](std::int64_t socket, std::int32_t option, std::int64_t value) {
+        return host.call("neura.net.option.set", {i64(socket), i32(option), i64(value)});
+    };
+    const auto get = [&](std::int64_t socket, std::int32_t option) {
+        return host.call("neura.net.option.get", {i64(socket), i32(option)});
+    };
+    expect_ok(set(client, 3, 1), "TCP_NODELAY");
+    check(as_i64(get(client, 3).value) != 0, "TCP_NODELAY reads back");
+    expect_ok(set(client, 6, 1), "SO_KEEPALIVE");
+    check(as_i64(get(client, 6).value) != 0, "SO_KEEPALIVE reads back");
+    expect_ok(set(listener, 1, 1), "SO_REUSEADDR");
+#ifdef __linux__
+    expect_ok(set(client, 5, 1500), "TCP_USER_TIMEOUT");
+    check_equal(as_i64(get(client, 5).value), std::int64_t{1500}, "TCP_USER_TIMEOUT reads back");
+    expect_ok(set(client, 7, 30), "TCP_KEEPIDLE");
+    expect_ok(set(client, 8, 5), "TCP_KEEPINTVL");
+    expect_ok(set(client, 9, 4), "TCP_KEEPCNT");
+    check_equal(as_i64(get(client, 9).value), std::int64_t{4}, "TCP_KEEPCNT reads back");
+    expect_ok(set(listener, 2, 1), "SO_REUSEPORT");
+    expect_ok(set(listener, 4, 16), "TCP_FASTOPEN");
+#endif
+    expect_error(set(client, 99, 1), host_error::invalid_input, "unknown option");
+    expect_error(set(client, 3, -1), host_error::invalid_input, "negative value");
+    expect_error(set(1234, 3, 1), host_error::invalid_input, "unknown socket");
+
+    const auto local = host.call("neura.net.resolve", {text("localhost"), i32(4)});
+    expect_ok(local, "resolve localhost");
+    check(!local.value.elements.empty() && local.value.elements[0].bytes == "127.0.0.1", "localhost is 127.0.0.1");
+    const auto numeric = host.call("neura.net.resolve", {text("::1"), i32(0)});
+    expect_ok(numeric, "resolve a numeric address");
+    check_equal(numeric.value.elements.at(0).bytes, std::string("::1"), "numeric address");
+    // NotFound with a working resolver; Other when the machine has none.
+    const auto invalid = host.call("neura.net.resolve", {text("name.invalid"), i32(0)});
+    check(!invalid.success && (invalid.value.bits == host_error::not_found || invalid.value.bits == host_error::other),
+          "the .invalid domain does not resolve");
+    expect_error(host.call("neura.net.resolve", {text("localhost"), i32(5)}), host_error::invalid_input, "family");
+
+    TemporaryDirectory directory("send-file");
+    const auto file_path = directory.path() / "payload";
+    {
+        std::ofstream out(file_path, std::ios::binary);
+        out << "0123456789abcdef";
+    }
+    const auto file = host.call("neura.fs.open", {text(file_path.string()), i32(0)});
+    expect_ok(file, "open the payload");
+    const auto sent = host.call("neura.net.send_file", {i64(server), file.value, i64(4), i64(8)});
+    expect_ok(sent, "send_file");
+    check_equal(as_i64(sent.value), std::int64_t{8}, "send_file count");
+    check_equal(host.call("neura.net.read", {i64(client), i32(64), i64(2'000'000'000)}).value.bytes,
+                std::string("456789ab"), "send_file bytes");
+    const auto past_end = host.call("neura.net.send_file", {i64(server), file.value, i64(12), i64(100)});
+    check_equal(as_i64(past_end.value), std::int64_t{4}, "send_file stops at the end of the file");
+    expect_error(host.call("neura.net.send_file", {i64(listener), file.value, i64(0), i64(1)}),
+                 host_error::invalid_input, "send_file to a listener");
+
+    nvm::Capabilities net_only;
+    net_only.net = true;
+    Host no_files(net_only);
+    expect_error(no_files.call("neura.net.send_file", {i64(1), i64(1), i64(0), i64(1)}),
+                 host_error::capability_denied, "send_file needs fs");
+    Host nothing({});
+    for (const auto* name : {"neura.net.udp.bind", "neura.net.unix.listen", "neura.net.unix.connect",
+                             "neura.net.unix.datagram", "neura.net.resolve"}) {
+        const bool udp = std::string_view(name) == "neura.net.udp.bind";
+        const bool resolve = std::string_view(name) == "neura.net.resolve";
+        std::vector<HostValue> arguments{text("127.0.0.1")};
+        if (udp || resolve) arguments.push_back(i32(0));
+        expect_error(nothing.call(name, std::move(arguments)), host_error::capability_denied, name);
+    }
+    expect_error(nothing.call("neura.net.option.set", {i64(1), i32(3), i64(1)}), host_error::capability_denied,
+                 "option denied");
+}
+
+NEURA_TEST(host, entropy_comes_from_the_system_generator) {
+    Host host(everything());
+    const auto first = host.call("neura.entropy.fill", {i32(32)});
+    const auto second = host.call("neura.entropy.fill", {i32(32)});
+    expect_ok(first, "entropy");
+    check_equal(first.value.bytes.size(), std::size_t{32}, "entropy length");
+    check(first.value.bytes != second.value.bytes, "two draws differ");
+    check_equal(host.call("neura.entropy.fill", {i32(0)}).value.bytes.size(), std::size_t{0}, "empty draw");
+    expect_error(host.call("neura.entropy.fill", {i32(-1)}), host_error::invalid_input, "negative count");
+    expect_error(host.call("neura.entropy.fill", {i32((1 << 20) + 1)}), host_error::invalid_input, "over 1 MiB");
+}
+
+
+// The application services of a server image (src/nvm/app_provider.cpp)
+// against a recording exchange.
+NEURA_TEST(host, application_services_check_order_and_limits) {
+    struct Recorder final : nvm::ServerExchange {
+        std::optional<nvm::ServerRequest> next() override {
+            nvm::ServerRequest request;
+            request.request_id = "r";
+            request.method = "POST";
+            request.target = "/x?y";
+            request.headers = {{"host", "h"}, {"content-type", "text/plain"}};
+            request.body_length = 5;
+            return request;
+        }
+        std::string read_body(std::size_t max) override {
+            auto chunk = body.substr(0, max);
+            body.erase(0, chunk.size());
+            return chunk;
+        }
+        std::uint32_t respond(std::uint32_t code, const nvm::HeaderPairs& fields, std::string_view content,
+                              bool complete) override {
+            status = code;
+            headers = fields;
+            sent += content;
+            ended = complete;
+            return 0;
+        }
+        std::uint32_t write_body(std::string_view bytes) override {
+            sent += bytes;
+            return 0;
+        }
+        std::uint32_t close_body() override {
+            ended = true;
+            return 0;
+        }
+        std::optional<std::string> config(std::string_view key) override {
+            if (key == "k") return std::string("v");
+            return std::nullopt;
+        }
+        void log(std::uint32_t, std::string_view message, const nvm::HeaderPairs&) override { logged = message; }
+        std::string body = "hello";
+        std::uint32_t status = 0;
+        nvm::HeaderPairs headers;
+        std::string sent;
+        bool ended = false;
+        std::string logged;
+    };
+    const auto flat = [](std::vector<std::string> values) {
+        HostValue list;
+        for (auto& value : values) list.elements.push_back(text(std::move(value)));
+        return list;
+    };
+    Recorder exchange;
+    nvm::ApplicationServices services(&exchange, true, true, 10);
+    nvm::HostRegistry registry;
+    services.register_all(registry);
+    const auto call = [&](std::string_view name, std::vector<HostValue> arguments) {
+        return registry.find(name, 1)->invoke(nvm::HostRequest{0, 0, std::move(arguments)});
+    };
+    expect_error(call("neura.http.server.respond", {i32(200), flat({}), bytes(""), boolean(true)}),
+                 host_error::invalid_input, "respond before next");
+    const auto request = call("neura.http.server.next", {});
+    expect_ok(request, "next");
+    check_equal(request.value.elements.at(2).bytes, std::string("POST"), "method");
+    check_equal(request.value.elements.at(4).elements.size(), std::size_t{4}, "flat header fields");
+    expect_error(call("neura.http.server.next", {}), host_error::invalid_input, "a second next");
+    check_equal(call("neura.http.server.body.read", {i32(3)}).value.bytes, std::string("hel"), "body read");
+    check_equal(call("neura.http.server.body.read", {i32(64)}).value.bytes, std::string("lo"), "body rest");
+    check_equal(call("neura.http.server.body.read", {i32(64)}).value.bytes, std::string(), "body end");
+    expect_error(call("neura.http.server.respond", {i32(99), flat({}), bytes(""), boolean(true)}),
+                 host_error::invalid_input, "status 99");
+    expect_error(call("neura.http.server.respond", {i32(200), flat({"Bad Name", "v"}), bytes(""), boolean(true)}),
+                 host_error::invalid_input, "header name with a space");
+    expect_error(call("neura.http.server.respond", {i32(200), flat({"X", "a\r\nb"}), bytes(""), boolean(true)}),
+                 host_error::invalid_input, "header value with CR LF");
+    expect_error(call("neura.http.server.respond", {i32(200), flat({"X"}), bytes(""), boolean(true)}),
+                 host_error::invalid_input, "odd field list");
+    expect_error(call("neura.http.server.respond", {i32(200), flat({}), bytes("01234567890"), boolean(true)}),
+                 host_error::too_large, "body over the limit");
+    expect_ok(call("neura.http.server.respond", {i32(201), flat({"X-A", "1"}), bytes("0123"), boolean(false)}),
+              "respond with an open body");
+    expect_ok(call("neura.http.server.body.write", {bytes("456789")}), "write up to the limit");
+    expect_error(call("neura.http.server.body.write", {bytes("x")}), host_error::too_large, "one byte over");
+    expect_ok(call("neura.http.server.body.close", {}), "close");
+    expect_error(call("neura.http.server.body.write", {bytes("")}), host_error::invalid_input, "write after close");
+    check_equal(exchange.status, std::uint32_t{201}, "status sent");
+    check_equal(exchange.sent, std::string("0123456789"), "body sent");
+    check(exchange.ended && exchange.headers.size() == 1, "ended with one field");
+    const auto found = call("neura.app.config", {text("k")});
+    check(found.success && found.value.elements.at(0).bits == 1 && found.value.elements.at(1).bytes == "v", "config");
+    check(call("neura.app.config", {text("none")}).value.elements.at(0).bits == 0, "config missing");
+    expect_ok(call("neura.app.log", {i32(2), text("note"), flat({"a", "b"})}), "log");
+    check_equal(exchange.logged, std::string("note"), "logged message");
+    expect_error(call("neura.app.log", {i32(9), text("x"), flat({})}), host_error::invalid_input, "log level");
+
+    nvm::ApplicationServices absent(nullptr, true, true);
+    nvm::HostRegistry other;
+    absent.register_all(other);
+    for (const auto* name : {"neura.http.server.next", "neura.http.server.body.close"}) {
+        expect_error(other.find(name, 1)->invoke(nvm::HostRequest{}), host_error::capability_denied, name);
+    }
+    expect_error(other.find("neura.app.config", 1)->invoke(nvm::HostRequest{0, 0, {text("k")}}),
+                 host_error::capability_denied, "config without a host");
+}
+
+
+// The internal bindings of Std.Net.Internal.Sockets and Std.Net.Internal.HttpServer
+// bind to the providers. Programs cannot import internal modules, so the
+// check module is added to a copy of the library.
+NEURA_TEST(host, internal_socket_and_server_bindings_match_the_providers) {
+    if (!fs::exists(environment.source_dir / "stdlib/std/net/internal/sockets.nra")) return;
+    TemporaryDirectory dir("internal-bindings");
+    const auto library = dir.path() / "stdlib";
+    fs::copy(environment.source_dir / "stdlib", library, fs::copy_options::recursive);
+    write_text_file(library / "std/binding-check.nra", R"(let server = import:Std.Net.Internal.HttpServer;
+let sockets = import:Std.Net.Internal.Sockets;
+
+export let BindingCheck = module (
+    export let run = func() {
+        last bytes: uint8[list] = new;
+        last fields: string[list] = new;
+        last results = [sockets.udp_bind("x", 1), sockets.unix_connect("x"), sockets.unix_listen("x"),
+                        sockets.unix_datagram("x"), sockets.accept(1 as int64)];
+        last counts = [sockets.udp_send_to(1 as int64, "x", 1, bytes), sockets.unix_send_to(1 as int64, "x", bytes),
+                       sockets.local_port(1 as int64), sockets.write(1 as int64, bytes)];
+        last datagrams = [sockets.udp_receive_from(1 as int64, 1, 0 as int64),
+                          sockets.unix_receive_from(1 as int64, 1, 0 as int64)];
+        last longs = [sockets.get_option(1 as int64, 1), sockets.send_file(1 as int64, 1 as int64, 0 as int64, 0 as int64)];
+        last done = [sockets.set_option(1 as int64, 1, 0 as int64), sockets.close(1 as int64)];
+        last resolved = sockets.resolve("x", 0);
+        last read = sockets.read(1 as int64, 1, 0 as int64);
+        last next = server.next_request();
+        last body = server.read_body(1);
+        last replies = [server.respond(200 as uint32, fields, bytes, true), server.write_body(bytes), server.close_body(),
+                        server.log(0 as uint32, "x", fields)];
+        last config = server.config("x");
+    };
+);
+)");
+    const auto source = dir.path() / "check.nra";
+    write_text_file(source, R"(let check = import:Std.BindingCheck;
+let program = import:Std.Program;
+
+export let Check = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        check.run();
+        return program.ExitCode.Ok;
+    };
+);
+)");
+    const auto canonical = fs::canonical(source);
+    auto lowered = neura::lower(neura::read_sources({canonical}, {canonical.parent_path()}, library));
+    const auto image = nvr::load(nvr::encode(backend::build(std::move(lowered), {}).image));
+    Host host({});
+    nvm::ApplicationServices application(nullptr, false, false);
+    application.register_all(host.registry);
+    nvm::bind(image, host.registry);
+    check(image.imports.size() >= 24, "every internal binding is reached: " + std::to_string(image.imports.size()));
 }
 
 #endif

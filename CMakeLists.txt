@@ -105,6 +105,7 @@ set(neura_nvm_sources
     src/nvm/placement.cpp
     src/nvm/providers.cpp
     src/nvm/scalar_text.cpp
+    src/nvm/socket_provider.cpp
     src/nvm/schedule.cpp
     src/nvm/tier1.cpp
     src/nvm/tier2.cpp
@@ -156,6 +157,10 @@ if(NOT WIN32)
     endif()
 endif()
 neura_target_defaults(neura_nvm)
+if(WIN32)
+    # neura.entropy.fill uses the system generator, BCryptGenRandom.
+    target_link_libraries(neura_nvm PRIVATE bcrypt)
+endif()
 
 set(neura_runner_sources src/runner/runner.cpp src/launcher/container.cpp)
 add_library(neura_runner STATIC ${neura_runner_sources})

@@ -8,7 +8,6 @@
 #include <climits>
 #include <cstdlib>
 #include <deque>
-#include <random>
 #include <thread>
 
 #ifndef _WIN32
@@ -18,6 +17,11 @@
 #endif
 #ifdef __linux__
 #include <sys/random.h>
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+#include <sys/random.h>
+#elif defined(_WIN32)
+#include <windows.h>
+#include <bcrypt.h>
 #endif
 
 namespace neura::nvm {
@@ -249,6 +253,37 @@ void replay_console_output(const std::string& import, std::uint32_t version, con
     }
 }
 
+namespace {
+
+// Fills `size` bytes from the operating system's cryptographic generator.
+bool fill_entropy(char* data, std::size_t size) {
+#if defined(__linux__)
+    std::size_t filled = 0;
+    while (filled < size) {
+        const auto got = ::getrandom(data + filled, size - filled, 0);
+        if (got < 0) {
+            if (errno == EINTR) continue;
+            return false;
+        }
+        filled += static_cast<std::size_t>(got);
+    }
+    return true;
+#elif defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__NetBSD__)
+    for (std::size_t filled = 0; filled < size; filled += 256) {
+        if (::getentropy(data + filled, std::min<std::size_t>(256, size - filled)) != 0) return false;
+    }
+    return true;
+#elif defined(_WIN32)
+    return BCryptGenRandom(nullptr, reinterpret_cast<PUCHAR>(data), static_cast<ULONG>(size),
+                           BCRYPT_USE_SYSTEM_PREFERRED_RNG) == 0;
+#else
+    (void)data;
+    return size == 0;
+#endif
+}
+
+} // namespace
+
 StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, ConsoleSource& input,
                                    Capabilities capabilities)
     : output_(output), error_(error), input_(input), capabilities_(std::move(capabilities)),
@@ -378,21 +413,11 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         const auto count = as_int32(request.arguments.at(0));
         if (count < 0 || count > max_entropy_bytes) return fail(host_error::invalid_input);
         std::string bytes(static_cast<std::size_t>(count), '\0');
-        std::size_t filled = 0;
-#ifdef __linux__
-        while (filled < bytes.size()) {
-            const auto got = ::getrandom(bytes.data() + filled, bytes.size() - filled, 0);
-            if (got < 0) {
-                if (errno == EINTR) continue;
-                break;
-            }
-            filled += static_cast<std::size_t>(got);
-        }
-#endif
-        if (filled < bytes.size()) {
-            std::random_device device;
-            for (; filled < bytes.size(); ++filled) bytes[filled] = static_cast<char>(device() & 0xff);
-        }
+        // Only the operating system's cryptographic generator: getrandom on
+        // Linux, getentropy on macOS and the BSDs, BCryptGenRandom on
+        // Windows. When it fails the request fails with code 100; there is
+        // no weaker fallback.
+        if (!fill_entropy(bytes.data(), bytes.size())) return fail(host_error::other);
         return HostCompletion::ok(bytes_value(std::move(bytes)));
     });
 
@@ -405,6 +430,7 @@ StandardServices::StandardServices(ConsoleSink& output, ConsoleSink& error, Cons
         add_overlapping(std::move(signature), std::move(handler), std::move(begin));
     };
     add_net_services(adder, overlap, *tables_, capabilities_);
+    add_socket_services(adder, *tables_, capabilities_);
     add_ffi_services(adder, *tables_, capabilities_);
 }
 

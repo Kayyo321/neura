@@ -30,6 +30,8 @@ struct StandardServices::Tables {
     struct Socket {
         int descriptor = -1;
         bool listener = false;
+        // A UDP or Unix datagram socket (socket_provider.cpp).
+        bool datagram = false;
     };
     std::map<std::int64_t, File> files;
     std::int64_t next_file = 1;
@@ -130,6 +132,9 @@ std::string native_triple();
 // Loads a shared object held in memory and returns its handle, or nullptr.
 void* load_embedded_object(const std::string& object);
 void close_sockets(StandardServices::Tables& tables);
+// UDP, Unix-domain sockets, options, resolution and send_file, over the same
+// socket table.
+void add_socket_services(const Adder& add, StandardServices::Tables& tables, const Capabilities& capabilities);
 
 } // namespace provider
 } // namespace neura::nvm
