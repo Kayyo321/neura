@@ -1,0 +1,374 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let console = import:Std.Io.Console;
+let errors = import:Std.Core.Error;
+let host_error = import:Std.Core.Internal.HostError;
+let program = import:Std.Program;
+let server = import:Std.Net.Internal.HttpServer;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The entry and context of a server image (docs/design/Backend030.md).
+///
+/// A server image handles exactly one request per execution: neura-server-host starts a fresh worker process
+/// for each request, the worker runs the whole program, `Context.serve` receives the request the host
+/// assigned, calls the handler, sends its response and returns. Nothing survives between requests.
+///
+/// The entry module calls `run` from `main`:
+///
+/// ```neura
+/// let app = import:Std.App;
+/// let program = import:Std.Program;
+/// let.promote _ = import:Std.Core.Result;
+/// let.promote _ = import:Std.Core.Unit;
+///
+/// let Api = module:program.Entry (
+///     export let.override main = func(args: string[]) -> program.ExitCode => app.run(serve);
+///
+///     let serve = func(context: app.Context) -> Result<Unit> =>
+///         context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+///             Result<app.Response>.Ok(app.text(200, "hello"))));
+/// );
+/// ```
+///
+/// Under `neura run` there is no assigned request: `serve` fails with CapabilityDenied and `run` returns
+/// Failure. Run the image with `neura-server-host`.
+/// @see [Std.App](https://github.com/Kayyo321/neura/wiki/Stdlib-App)
+#Since("0.3.0")
+export let App = module (
+    /// @brief The levels of `Context.log`, in increasing severity.
+    export let LogLevel = enum (Trace, Debug, Info, Warn, Error);
+
+    /// @brief One HTTP request as the host received it. The body is complete: the host reads it before it
+    /// starts the worker, within the host's body limit (S-6).
+    #Final
+    export let Request = class (
+        /// @brief The method token, such as GET or POST.
+        export last method: string;
+        /// @brief The request target as sent: the path and, after `?`, the query.
+        export last target: string;
+        /// @brief The target up to its first `?`.
+        export last path: string;
+        /// @brief The target after its first `?`, without it; empty when there is none.
+        export last query: string;
+        /// @brief Header fields in arrival order, with lowercase names.
+        export last headers: [string, string][list];
+        /// @brief The body bytes; empty when the request has no body.
+        export last body: uint8[list];
+        /// @brief The numeric address of the client, from the connection.
+        export last client: string;
+        /// @brief "http" or "https", from the listener that accepted the connection.
+        export last scheme: string;
+        /// @brief The host's identifier of this request, as in its log records.
+        export last request_id: string;
+
+        /// @brief Builds a request; the server host's values arrive through `Context.serve`.
+        export let init = func(method_value: string, target_value: string, header_list: [string, string][list],
+                               body_bytes: uint8[list], client_value: string, scheme_value: string,
+                               id: string) {
+            method = method_value;
+            target = target_value;
+            last mark = strings.index_of(target_value, "?");
+            if (mark < 0) {
+                path = target_value;
+                query = "";
+            } else {
+                path = target_value.slice(0, mark);
+                query = target_value.slice(mark + 1, target_value.byte_length);
+            }
+            headers = header_list;
+            body = body_bytes;
+            client = client_value;
+            scheme = scheme_value;
+            request_id = id;
+        };
+
+        /// @brief The value of the first field named `name`, compared without ASCII case.
+        #NoDiscard
+        export let header = func(name: string) -> Optional<string> {
+            last wanted = strings.to_ascii_lower(name);
+            for (let field in headers) {
+                if (field[0] == wanted) {
+                    return Optional<string>.Some(field[1]);
+                }
+            }
+            return Optional<string>.None;
+        };
+
+        /// @brief The body as UTF-8 text; invalid UTF-8 is an error.
+        #NoDiscard
+        export let body_text = func -> Result<string> => strings.from_bytes(body);
+
+        /// @brief The method and target, such as "GET /parts?page=2".
+        export let.override to_string = func -> string => method + " " + target;
+    );
+
+    /// @brief An HTTP response: a status from 100 through 599, header fields, and the body bytes. The host
+    /// writes Content-Length and Connection itself and ignores those fields here.
+    #Final
+    export let Response = class (
+        /// @brief The status code.
+        export last status: int;
+        /// @brief Header fields in the order they are sent.
+        export last headers: [string, string][list];
+        /// @brief The body bytes, within the host's response limit (S-7).
+        export last body: uint8[list];
+
+        /// @brief Builds a response from its parts.
+        export let init = func(code: int, fields: [string, string][list], content: uint8[list]) {
+            status = code;
+            headers = fields;
+            body = content;
+        };
+
+        /// @brief A copy with one more header field.
+        #NoDiscard
+        export let with_header = func(name: string, value: string) -> Response {
+            last fields: [string, string][list] = new;
+            for (let field in headers) {
+                fields.append(field);
+            }
+            fields.append([name, value]);
+            return new Response(status, fields, body);
+        };
+
+        /// @brief The status and the body size, such as "200 (5 bytes)".
+        export let.override to_string = func -> string =>
+            status.to_string() + " (" + body.length.to_string() + " bytes)";
+    );
+
+    /// @brief What `Context.serve` calls with the request. `Std.Net.Http.Router` implements it; `handler_of`
+    /// adapts a function.
+    export let Handler = interface (
+        /// @brief The response to `request`, or an error, which the context answers with status 500.
+        let handle = func(request: Request) -> Result<Response>;
+    );
+
+    /// @brief A handler that calls a function.
+    #Final
+    export let FunctionHandler = class implements Handler (
+        /// @brief The function that answers each request.
+        last answer: func(Request) -> Result<Response>;
+
+        /// @brief Wraps `function`.
+        export let init = func(function: func(Request) -> Result<Response>) {
+            answer = function;
+        };
+
+        /// @brief Calls the function.
+        export let handle = func(request: Request) -> Result<Response> => answer(request);
+
+        /// @brief A fixed description.
+        export let.override to_string = func -> string => "FunctionHandler";
+    );
+
+    /// @brief A handler that calls `function` for each request.
+    #NoDiscard
+    export let handler_of = func(function: func(Request) -> Result<Response>) -> Handler =>
+        new FunctionHandler(function);
+
+    /// @brief A response whose body is UTF-8 text, with Content-Type text/plain; charset=utf-8.
+    #NoDiscard
+    export let text = func(status: int, content: string) -> Response =>
+        typed(status, "text/plain; charset=utf-8", content);
+
+    /// @brief A response whose body is HTML, with Content-Type text/html; charset=utf-8.
+    #NoDiscard
+    export let html = func(status: int, content: string) -> Response =>
+        typed(status, "text/html; charset=utf-8", content);
+
+    /// @brief A response whose body is JSON text the caller encoded, with Content-Type application/json.
+    #NoDiscard
+    export let json = func(status: int, encoded: string) -> Response => typed(status, "application/json", encoded);
+
+    /// @brief A response with no body, such as 204 or a redirect with a Location field added.
+    #NoDiscard
+    export let empty = func(status: int) -> Response {
+        last fields: [string, string][list] = new;
+        last content: uint8[list] = new;
+        return new Response(status, fields, content);
+    };
+
+    /// @brief A response with the given content type and text body.
+    let typed = func(status: int, content_type: string, content: string) -> Response {
+        last fields: [string, string][list] = new;
+        fields.append(["Content-Type", content_type]);
+        return new Response(status, fields, strings.to_bytes(content));
+    };
+
+    /// @brief The execution's view of its host: the assigned request, configuration and the log.
+    #[Final, NotThreadSafe]
+    export let Context = class (
+        /// @brief Whether serve has been called.
+        let served: bool = false;
+
+        /// @brief Contexts come from `run`.
+        export let init = func() {
+        };
+
+        /// @brief The host configuration value of `key`: from the host's --config options, its configuration
+        /// file, or the environment under its prefix. None when it is not set or there is no host.
+        #NoDiscard
+        export let config = func(key: string) -> Optional<string> {
+            return match (server.config(key)) {
+                server.ConfigOutcome.Ok(found) => found[0] ? Optional<string>.Some(found[1]) : Optional<string>.None,
+                server.ConfigOutcome.Error(_) => Optional<string>.None,
+            };
+        };
+
+        /// @brief Writes a JSON log record through the host, with this request's identifier. Without a host
+        /// the record is dropped.
+        export let log = func(level: LogLevel, message: string) {
+            last fields: string[list] = new;
+            match (server.log(level_code(level), message, fields)) {
+                server.DoneOutcome.Ok => {},
+                server.DoneOutcome.Error(_) => {},
+            }
+        };
+
+        /// @brief Receives the request the host assigned, calls `handler` and sends its response.
+        ///
+        /// A startup check is answered with 204 without calling the handler. A handler error is answered with
+        /// status 500 and the body {"error":"internal"}, and the error is logged with the request identifier;
+        /// it does not make `serve` fail. `serve` fails when there is no assigned request (for example under
+        /// `neura run`), when it is called a second time, and when the response cannot be sent.
+        #NoDiscard
+        export let serve = func(handler: Handler) -> Result<Unit> {
+            if (served) {
+                return Result<Unit>.Err(errors.custom("app.serve", "serve was already called in this execution"));
+            }
+            served = true;
+            return match (server.next_request()) {
+                server.RequestOutcome.Error(code) => Result<Unit>.Err(host_error.io(code,
+                    "no request was assigned; run this image with neura-server-host", "")),
+                server.RequestOutcome.Ok(assigned) => dispatch(handler, assigned),
+            };
+        };
+
+        /// @brief Answers a startup check or reads the body, calls the handler and responds.
+        let dispatch = func(handler: Handler,
+                            assigned: [uint32, string, string, string, string[list], int64, string, string, int64])
+                            -> Result<Unit> {
+            if (assigned[0] == 2 as uint32) {
+                return send(empty(204));
+            }
+            last body = read_all(assigned[5]);
+            match (body) {
+                Result.Err(problem) => {
+                    return Result<Unit>.Err(problem);
+                },
+                Result.Ok(content) => {
+                    last request = new Request(assigned[2], assigned[3], pairs_of(assigned[4]), content, assigned[6],
+                                               assigned[7], assigned[1]);
+                    match (handler.handle(request)) {
+                        Result.Ok(response) => {
+                            return send(response);
+                        },
+                        Result.Err(problem) => {
+                            log(LogLevel.Error, "handler failed: " + errors.message(problem));
+                            return send(json(500, "{\"error\":\"internal\"}"));
+                        },
+                    }
+                },
+            }
+            return bytes.ok();
+        };
+
+        /// @brief The whole request body.
+        let read_all = func(length: int64) -> Result<uint8[list]> {
+            last collected: uint8[list] = new;
+            let wanted = 65536;
+            if (length > 0 && length <= 1048576) {
+                wanted = length as int;
+            }
+            while (true) {
+                match (server.read_body(wanted)) {
+                    server.BytesOutcome.Error(code) => {
+                        return Result<uint8[list]>.Err(host_error.io(code, "request body read failed", ""));
+                    },
+                    server.BytesOutcome.Ok(chunk) => {
+                        if (chunk.length == 0) {
+                            return Result<uint8[list]>.Ok(collected);
+                        }
+                        if (collected.length == 0 && chunk.length as int64 == length) {
+                            return Result<uint8[list]>.Ok(chunk);
+                        }
+                        bytes.append_range(collected, chunk, 0, chunk.length);
+                    },
+                }
+            }
+            return Result<uint8[list]>.Ok(collected);
+        };
+
+        /// @brief Sends a complete response.
+        let send = func(response: Response) -> Result<Unit> {
+            if (response.status < 100 || response.status > 599) {
+                return send(json(500, "{\"error\":\"internal\"}"));
+            }
+            return match (server.respond(response.status as uint32, flatten(response.headers), response.body, true)) {
+                server.DoneOutcome.Ok => bytes.ok(),
+                server.DoneOutcome.Error(code) => Result<Unit>.Err(host_error.io(code, "response failed", "")),
+            };
+        };
+
+        /// @brief A fixed description.
+        export let.override to_string = func -> string => "Context";
+    );
+
+    /// @brief Pairs of a flat list of alternating names and values.
+    let pairs_of = func(flat: string[list]) -> [string, string][list] {
+        last pairs: [string, string][list] = new;
+        for (let i = 0; i + 1 < flat.length; i += 2) {
+            pairs.append([flat[i], flat[i + 1]]);
+        }
+        return pairs;
+    };
+
+    /// @brief The flat list of alternating names and values of `pairs`.
+    let flatten = func(pairs: [string, string][list]) -> string[list] {
+        last flat: string[list] = new;
+        for (let pair in pairs) {
+            flat.append(pair[0]);
+            flat.append(pair[1]);
+        }
+        return flat;
+    };
+
+    /// @brief The host's level number for `level`.
+    let level_code = func(level: LogLevel) -> uint32 => match (level) {
+        LogLevel.Trace => 0 as uint32,
+        LogLevel.Debug => 1 as uint32,
+        LogLevel.Info => 2 as uint32,
+        LogLevel.Warn => 3 as uint32,
+        LogLevel.Error => 4 as uint32,
+    };
+
+    /// @brief Builds the context, calls `serve` and turns its result into the exit code: Ok for Ok; for an
+    /// error, Failure after the error's message is written to the log (or, without a host, to the console's
+    /// error stream).
+    #NoDiscard
+    export let run = func(serve: func(Context) -> Result<Unit>) -> program.ExitCode {
+        last context = new Context();
+        match (serve(context)) {
+            Result.Ok(_) => {
+                return program.ExitCode.Ok;
+            },
+            Result.Err(problem) => {
+                report(errors.message(problem));
+            },
+        }
+        return program.ExitCode.Failure;
+    };
+
+    /// @brief Logs a failure of serve through the host, or writes it to standard error without one.
+    let report = func(message: string) {
+        last fields: string[list] = new;
+        match (server.log(4 as uint32, "serve failed: " + message, fields)) {
+            server.DoneOutcome.Ok => {},
+            server.DoneOutcome.Error(_) => {
+                console.error_line("serve failed: " + message);
+            },
+        }
+    };
+);

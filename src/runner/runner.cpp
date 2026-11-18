@@ -154,10 +154,12 @@ TaskDumps::~TaskDumps() {
     signalled_request.store(nullptr, std::memory_order_relaxed);
 }
 
-Host::Host(const nvm::Capabilities& capabilities)
-    : services(output, error, input, capabilities) {
+Host::Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange, std::uint64_t response_bytes)
+    : services(output, error, input, capabilities),
+      application(exchange, capabilities.http_server, capabilities.app, response_bytes) {
     registry.add(console);
     services.register_all(registry);
+    application.register_all(registry);
 }
 
 std::vector<std::uint8_t> read_file(const fs::path& path) {

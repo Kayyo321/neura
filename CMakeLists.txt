@@ -92,6 +92,7 @@ neura_target_defaults(neura_nvr)
 # runtime-only distribution needs no compiler code.
 set(neura_nvm_sources
     src/nvm/driver.cpp
+    src/nvm/app_provider.cpp
     src/nvm/ffi_provider.cpp
     src/nvm/fleet.cpp
     src/nvm/fs_provider.cpp
@@ -526,6 +527,25 @@ if(NEURA_ENABLE_SERVER_TLS)
     neura_configure_server_tls()
 endif()
 
+# The server host (docs/design/Backend030.md): listeners, TLS when
+# NEURA_ENABLE_SERVER_TLS is on, and one request-worker process per request.
+# The same executable is the worker, in its --worker mode.
+if(UNIX AND NOT EMSCRIPTEN)
+    find_package(Threads REQUIRED)
+    add_library(neura_server_worker STATIC src/server/worker_messages.cpp src/server/request_worker.cpp)
+    target_include_directories(neura_server_worker PUBLIC src)
+    target_link_libraries(neura_server_worker PUBLIC neura_server_worker_wire neura_runner neura_lifecycle)
+    neura_target_defaults(neura_server_worker)
+    add_executable(neura-server-host src/server/server_host.cpp)
+    target_link_libraries(neura-server-host PRIVATE neura_server_worker neura_server_listeners neura_server_http
+        Threads::Threads)
+    if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        target_link_options(neura-server-host PRIVATE -static-libstdc++ -static-libgcc)
+    endif()
+    neura_target_defaults(neura-server-host)
+    install(TARGETS neura-server-host RUNTIME DESTINATION bin)
+endif()
+
 if(BUILD_TESTING)
     add_executable(neura_wait_source_tests
         src/nvm/pending_requests.cpp
@@ -650,6 +670,26 @@ if(BUILD_TESTING)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/http_listener_foreground.py"
             "$<TARGET_FILE:neura_http_listener_foreground>" ${NEURA_SERVER_LISTENER_TEST_OPTIONS})
         set_tests_properties(server-http-listeners PROPERTIES TIMEOUT 20)
+    endif()
+    if(TARGET neura-server-host)
+        # A Neura server image under the server host: HTTP, HTTPS when the
+        # build has TLS, malformed and oversized input, limits, traps,
+        # record and replay, the drain, and 1,000 requests of load.
+        set(NEURA_SERVER_HOST_TEST_OPTIONS)
+        if(NEURA_ENABLE_SERVER_TLS)
+            find_program(NEURA_SERVER_TEST_OPENSSL NAMES openssl REQUIRED)
+            list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --tls --openssl "${NEURA_SERVER_TEST_OPENSSL}")
+        endif()
+        find_program(NEURA_SERVER_TEST_CURL NAMES curl)
+        if(NEURA_SERVER_TEST_CURL)
+            list(APPEND NEURA_SERVER_HOST_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
+        endif()
+        add_test(NAME server-host COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/server_host_test.py"
+            --neura "$<TARGET_FILE:neura>" --host "$<TARGET_FILE:neura-server-host>"
+            --source "${CMAKE_CURRENT_SOURCE_DIR}" --work "${CMAKE_CURRENT_BINARY_DIR}/server-host-test"
+            ${NEURA_SERVER_HOST_TEST_OPTIONS})
+        set_tests_properties(server-host PROPERTIES TIMEOUT 300)
     endif()
     foreach(suite IN ITEMS formatter_tests lsp_format_regressions test_protocol lsp_protocol lsp_editor_regressions lsp_parameters lsp_scaling refactor_protocol debug_protocol coverage release_gate image_inspection)
         if(EXISTS "${CMAKE_CURRENT_SOURCE_DIR}/tests/tooling/${suite}.py")

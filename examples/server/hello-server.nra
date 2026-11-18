@@ -1,0 +1,46 @@
+// A server image: neura-server-host runs it once for each request (docs/apps/Server.md).
+//
+//   neura build examples/server/hello-server.nra -o hello-server.nvr
+//   neura-server-host --listen 127.0.0.1:8080 --config greeting=hello hello-server.nvr
+//   curl 'http://127.0.0.1:8080/hello?name=Ada'
+let app = import:Std.App;
+let errors = import:Std.Core.Error;
+let program = import:Std.Program;
+let strings = import:Std.Text.Strings;
+let optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let HelloServer = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode => app.run(serve);
+
+    /// @brief Hands the routing function to the host for this execution's one request.
+    let serve = func(context: app.Context) -> Result<Unit> {
+        last greeting = optional.value_or<string>(context.config("greeting"), "hello");
+        return context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> =>
+            route(greeting, request)));
+    };
+
+    /// @brief Answers GET /hello, POST /echo, /fail and /trap; everything else is 404.
+    let route = func(greeting: string, request: app.Request) -> Result<app.Response> {
+        if (request.path == "/hello" && (request.method == "GET" || request.method == "HEAD")) {
+            last name = strings.starts_with(request.query, "name=")
+                ? request.query.slice(5, request.query.byte_length) : "world";
+            return Result<app.Response>.Ok(app.text(200, greeting + ", " + name + "\n"));
+        }
+        if (request.path == "/echo" && request.method == "POST") {
+            last kind = optional.value_or<string>(request.header("Content-Type"), "application/octet-stream");
+            last fields: [string, string][list] = new;
+            fields.append(["Content-Type", kind]);
+            fields.append(["X-Request-Id", request.request_id]);
+            return Result<app.Response>.Ok(new app.Response(200, fields, request.body));
+        }
+        if (request.path == "/fail") {
+            return Result<app.Response>.Err(errors.custom("demo.fail", "the handler failed on purpose"));
+        }
+        if (request.path == "/trap") {
+            trap_with_message("the handler trapped on purpose");
+        }
+        return Result<app.Response>.Ok(app.text(404, "not found\n"));
+    };
+);

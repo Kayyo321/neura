@@ -1,5 +1,6 @@
 #pragma once
 
+#include "nvm/app_services.hpp"
 #include "nvm/host.hpp"
 #include "nvm/machine.hpp"
 #include "nvm/providers.hpp"
@@ -17,9 +18,12 @@ struct Host {
     nvm::DescriptorSource input{0};
     nvm::ConsoleWriteLine console{output};
     nvm::StandardServices services;
+    // Bound in every image; only a server-host worker passes an exchange.
+    nvm::ApplicationServices application;
     nvm::HostRegistry registry;
 
-    explicit Host(const nvm::Capabilities& capabilities);
+    explicit Host(const nvm::Capabilities& capabilities, nvm::ServerExchange* exchange = nullptr,
+                  std::uint64_t response_bytes = nvm::default_response_bytes);
 };
 
 struct RunOptions {

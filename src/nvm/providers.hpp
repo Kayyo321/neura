@@ -37,6 +37,15 @@ inline constexpr std::uint32_t capability_denied = 14;
 // neura.net.connect, accept, read, and write, neura.console.read, and
 // neura.clock.sleep) that was cancelled before it finished.
 inline constexpr std::uint32_t cancelled = 15;
+// The application provider codes (docs/design/Backend030.md, "Provider ABI").
+// The library maps them to Other until IoErrorKind gains their names.
+inline constexpr std::uint32_t too_large = 16;
+inline constexpr std::uint32_t busy = 17;
+inline constexpr std::uint32_t outcome_unknown = 18;
+inline constexpr std::uint32_t pool_exhausted = 19;
+inline constexpr std::uint32_t version_mismatch = 20;
+inline constexpr std::uint32_t constraint_violation = 21;
+inline constexpr std::uint32_t serialization = 22;
 // The one code the providers use for every failure without a kind of its
 // own, including an exhausted ID table.
 inline constexpr std::uint32_t other = 100;
@@ -74,6 +83,12 @@ struct Capabilities {
     // Native libraries, memory, and calls (Std.DynamicForeign). Native code
     // runs outside Neura's memory-safety and determinism guarantees.
     bool native = false;
+    // The application groups of docs/design/Apps030.md: the request a
+    // server-host worker was assigned (neura.http.server.*), and the host's
+    // configuration and log (neura.app.*). Only neura-server-host grants
+    // them, to its request workers; the command-line tools never do.
+    bool http_server = false;
+    bool app = false;
 };
 
 // The target triple of this runner, such as x86_64-linux-gnu; an image's

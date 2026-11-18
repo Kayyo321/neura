@@ -36,6 +36,11 @@ public:
 struct BufferedResponse {
     int status = 200;
     std::string body;
+    // Fields written after the status line. The connection owns framing:
+    // it writes Content-Length and Connection itself and ignores any
+    // Content-Length, Transfer-Encoding or Connection given here. A name
+    // that is not a token or a value with CR, LF or NUL is a 500.
+    std::vector<Header> headers{};
 };
 
 // Called once per complete request, in connection order. The request head
