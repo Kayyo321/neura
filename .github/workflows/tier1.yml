@@ -108,6 +108,7 @@ jobs:
           -DNEURA_ENABLE_POSTGRES=ON "-DNEURA_LIBPQ_SOURCE=$HOME/server-components/postgresql"
           "-DNEURA_LIBPQ_BUILD=$HOME/server-components/postgresql"
           "-DNEURA_COMPONENT_LICENSES=$HOME/server-components/licenses"
+          "-DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl"
 
       - name: Build
         run: cmake --build build --parallel "$(nproc)" 2>&1 | tee build/build.log

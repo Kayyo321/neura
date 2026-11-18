@@ -71,7 +71,14 @@ python3 scripts/generate-wiki.py --check
 python3 scripts/gen-kernels.py --check
 python3 scripts/build-site.py --check
 
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+sh packaging/build-server-components.sh ~/server-components
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNEURA_ENABLE_SERVER_TLS=ON -DOPENSSL_ROOT_DIR=$HOME/server-components/openssl \
+  -DNEURA_ENABLE_SERVER_HTTP2=ON -DNEURA_NGHTTP2_ROOT=$HOME/server-components/nghttp2 \
+  -DNEURA_ENABLE_POSTGRES=ON -DNEURA_LIBPQ_SOURCE=$HOME/server-components/postgresql \
+  -DNEURA_LIBPQ_BUILD=$HOME/server-components/postgresql \
+  -DNEURA_COMPONENT_LICENSES=$HOME/server-components/licenses \
+  -DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl
 cmake --build build --parallel
 scripts/check-kernels.sh build
 python3 scripts/check-core-closure.py build
@@ -79,7 +86,7 @@ NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --paral
 python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 258
 ```
 
-To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
+The first two commands build the configuration of the Tier 1 job; `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release` alone builds without TLS, HTTP/2 and the PostgreSQL provider, which leaves out their tests (`server-sql-postgres` also needs Docker). To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
 
 The scripts need Python 3 and Git, and use no packages outside the Python standard library. `check-docs.py` reads the Markdown files that Git tracks, so `git add` a new page before checking it. It does not use the network: links to other websites are listed with `--list-external` and are not fetched.
 
