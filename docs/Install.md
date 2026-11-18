@@ -57,6 +57,8 @@ A release has one archive for each supported target.
 
 The archives need nothing else from the system. On Linux, `neura` and the native launchers carry the C++ runtime and libffi, and the release workflow fails if either file needs a library other than the C library, or a C library newer than glibc 2.39. On macOS, `neura` carries libffi and needs only libraries that are part of macOS, which the workflow also checks. Distributions with an older glibc, such as Debian 12 and Ubuntu 22.04, and distributions with another C library, such as Alpine, are not supported by the archives.
 
+Every archive links the server components statically, so [`neura-server-host`](runtime/ServerHost.md#release-archives) serves HTTPS and HTTP/2 and [`Std.Data.Sql`](runtime/Sql.md) reaches PostgreSQL as well as SQLite on every target, with nothing more installed: OpenSSL 3.5.9 (TLS for the host, `Std.Net.Tls` and libpq), nghttp2 1.71.0 (HTTP/2) and libpq 18.7, built from the sources [the server component lock](../packaging/server-components.lock.toml) pins. Their licence texts are in `share/doc/neura/third-party`. Their C functions are not exported (on macOS some of OpenSSL's assembly routines still are), so a program that loads its own OpenSSL or libpq through a C import binds to its own copy. The archives' OpenSSL reads its configuration from `/etc/ssl/openssl.cnf` and its trust anchors from `/etc/ssl/cert.pem` and `/etc/ssl/certs`, where Debian and Ubuntu (`/etc/ssl/certs`) and macOS (`/etc/ssl/cert.pem`) keep them; on systems that keep them elsewhere, such as Fedora (`/etc/pki/tls`), set `SSL_CERT_FILE` or `SSL_CERT_DIR` for a client that verifies with the system's trust anchors. `OPENSSL_CONF` names another configuration file.
+
 Optional features need more, and `neura doctor` reports each one:
 
 | Feature | Needs |
@@ -139,6 +141,7 @@ A refusal changes nothing. A different version, or another build of the same ver
     share/neura/stdlib/...
     share/neura/components/<component>.txt the component manifests
     share/doc/neura/LICENSE
+    share/doc/neura/third-party/...        the licences of OpenSSL, nghttp2 and PostgreSQL
     bin/neurad                             the runtime service, only with the service component
 <root>/current                             symbolic link: versions/<generation>
 <root>/leases/<generation>                 an empty file that users of the generation lock
@@ -421,7 +424,7 @@ To turn the notice and the check off, set `NEURA_NO_UPDATE_CHECK=1` in your envi
 
 The CTest entries above run on Linux and macOS, on x86-64 and arm64. The release workflow then runs [the lifecycle checks](ReleaseProcess.md#what-the-release-workflow-checks) on the packed archives, including the update from the published `v0.2.1-rc.3` and `v0.2.0` with their own 0.2 clients, and for a release candidate runs the one-line install command against the published files, which covers a download over HTTPS and `gh attestation verify`.
 
-These are not tested: `neura update` downloading over HTTPS (the release workflow updates from a local copy of the published files), the update notice and its network refresh (they need a terminal, so only their absence without a terminal is tested), the interactive `uninstall` prompt, and any run on Windows outside WSL 2.
+The release workflow also runs the server host's HTTPS, HTTP/2 and h2c checks, through `curl`, on the installed archive of each target (check 15). These are not tested: `neura update` downloading over HTTPS (the release workflow updates from a local copy of the published files), the update notice and its network refresh (they need a terminal, so only their absence without a terminal is tested), the interactive `uninstall` prompt, and any run on Windows outside WSL 2.
 
 ## Build from source
 

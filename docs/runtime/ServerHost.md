@@ -2,7 +2,7 @@
 
 `neura-server-host` serves a Neura server image over HTTP/1.1, HTTPS and, in builds with it, HTTP/2 ([below](#http2)). It owns the listeners, TLS and the HTTP wire, and runs no application code: each request is executed by a fresh worker process that loads the image, runs the whole program once for that one request, and exits. Nothing a program holds survives between requests; data that must outlive a request belongs in a file or a database the program reaches through its host services. The contract is [the backend design note](../design/Backend030.md); this page describes what the 0.3.0 host does.
 
-The host is built with every build on POSIX systems; this release tests it on Linux x86-64 only, and macOS builds are unqualified. HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` with `-DNEURA_NGHTTP2_ROOT=<prefix>`, the install prefix of the static nghttp2 build the lock pins.
+The host is built with every build on POSIX systems. The [release archives](#release-archives) of every target have HTTPS, HTTP/2 and the PostgreSQL provider. A build from source has them only when it is configured with them: HTTPS needs a build configured with `-DNEURA_ENABLE_SERVER_TLS=ON` and the static OpenSSL 3.5 archives the [server component lock](../../packaging/server-components.lock.toml) pins; a build without it refuses `--tls-listen`. HTTP/2 also needs `-DNEURA_ENABLE_SERVER_HTTP2=ON` with `-DNEURA_NGHTTP2_ROOT=<prefix>`, the install prefix of the static nghttp2 build the lock pins.
 
 ## A server image
 
@@ -156,7 +156,7 @@ A ready worker whose process has ended is never given a request: the host discar
 | The program traps, or the worker ends without a response | 500 `{"error":"internal"}`; the trap is on standard error and the failure in the log with the request identifier |
 | A complete response body exceeds S-7 | 500 |
 | The execution passes `--max-steps` | 500; the step-limit trap is on standard error |
-| S-8 passes | The worker is killed, 504 `{"error":"timeout"}`, or, inside a streamed response, the connection is closed |
+| S-8 passes | The worker is killed, 504 `{"error":"timeout"}`, or, inside a streamed response, the connection is closed. A host call (an SQL statement) that the deadline interrupts ends the request the same way, even when the worker answers or exits first |
 | The program traps or a producer fails inside a streamed response | The connection is closed without the last chunk: the client sees a truncated body |
 | The host is draining | 503 |
 
@@ -173,10 +173,27 @@ In builds with `NEURA_ENABLE_SERVER_HTTP2` (the pinned nghttp2 1.71.0, linked st
 - Each stream is one request, served exactly as an HTTP/1.1 request is: the same admission (S-1, S-3; 503 as an HTTP/2 response), deadline, limits, worker and answers. Streams on one connection run at once, up to S-14 (`--max-streams`); a stream past it is refused with `RST_STREAM(REFUSED_STREAM)`, which a client may retry.
 - S-5 bounds the decoded header list (each field counts its name, its value and 32 bytes), advertised as `SETTINGS_MAX_HEADER_LIST_SIZE`; past it the answer is 431. The HPACK table is 4,096 bytes.
 - Flow control is the backpressure: a client that stops reading stops that stream's worker, within S-8, and not the other streams. The host reopens a stream's receive window only as its worker reads the body.
-- A client that resets a stream (`RST_STREAM`), or closes the connection, cancels the request: its worker is killed at once and the request is not retried.
+- A client that resets a stream (`RST_STREAM`), or closes the connection, before the stream's response has ended cancels the request: its worker is killed at once and the request is not retried. A connection that closes after a response has ended leaves that worker to finish, as under HTTP/1.1 (writing its `--record-dir` trace, for one).
 - On `SIGTERM` each connection sends `GOAWAY`; the streams already accepted finish within S-12, new ones are refused. An idle connection is closed with `GOAWAY` after the keep-alive time. `SIGHUP` reloads the certificate and keeps offering `h2`. The admin listener speaks HTTP/1.1 only.
 
 A build without the option speaks HTTP/1.1 only: TLS listeners select `http/1.1`, and `--h2c` fails the start.
+
+## Release archives
+
+The release archives of every target (Linux and macOS, x86-64 and arm64) link the three server components statically: OpenSSL 3.5.9 for TLS, nghttp2 1.71.0 for HTTP/2, and libpq 18.7 for the [PostgreSQL provider](Sql.md#building). [`packaging/build-server-components.sh`](../../packaging/build-server-components.sh) builds them from the sources [the server component lock](../../packaging/server-components.lock.toml) pins, after checking each archive and each licence text against the lock's SHA-256, as static, position-independent libraries with hidden visibility; the release workflow, the Tier 1 build and a local release build run the same script and the same configure options:
+
+```text
+sh packaging/build-server-components.sh <prefix>
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNEURA_ENABLE_SERVER_TLS=ON -DOPENSSL_ROOT_DIR=<prefix>/openssl \
+  -DNEURA_ENABLE_SERVER_HTTP2=ON -DNEURA_NGHTTP2_ROOT=<prefix>/nghttp2 \
+  -DNEURA_ENABLE_POSTGRES=ON -DNEURA_LIBPQ_SOURCE=<prefix>/postgresql -DNEURA_LIBPQ_BUILD=<prefix>/postgresql \
+  -DNEURA_COMPONENT_LICENSES=<prefix>/licenses
+```
+
+`NEURA_COMPONENT_LICENSES` installs the licence texts (OpenSSL's Apache License 2.0, nghttp2's MIT licence and the PostgreSQL licence) in `share/doc/neura/third-party` with the core component; a `NEURA_PORTABLE_RELEASE` build that links a component refuses to configure without its text. The release workflow fails when the build links an OpenSSL or nghttp2 from anywhere else, and when a tool or `libneura-core` exports a function of the components; it runs the host's tests (`server-host` with TLS and HTTP/2, `server-host-h2c`, `server-sql`) on every target and `server-sql-postgres` on Linux, whose runners have Docker. On macOS the TLS and HTTP/2 tests pass, the cases that need `/proc` or the Linux worker zygote are skipped, a streamed request body still times out there (`test_streamed_request_body`, an open gap), and the PostgreSQL provider is built but not tested, for want of Docker; and it serves the example over HTTPS with HTTP/2 and over h2c from each installed archive ([check 15](../ReleaseProcess.md#what-the-release-workflow-checks)).
+
+`neura-server-host` and `libneura-core` each hold a copy of OpenSSL: the host's TLS listeners use its own, and `Std.Net.Tls` and libpq, in `libneura-core`, use the library's. On Linux the native launcher holds a third, for `Std.Net.Tls` in executables that `neura build --native` makes, which accounts for most of the 6.8 MB by which a native Hello World on x86-64 outgrows 0.2.1-rc.3's (11,953,251 bytes against 5,127,992; the static OpenSSL libraries hold 6.5 MB of code and data). The copies are why the SDK archive outgrows the [size budget](../design/Release030.md) of 0.3.0. The OpenSSL of the archives reads `/etc/ssl/openssl.cnf` and takes its default trust anchors from `/etc/ssl` ([installation](../Install.md#supported-platforms)).
 
 ## Configuration, logs and signals
 

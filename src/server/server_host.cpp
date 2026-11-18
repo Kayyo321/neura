@@ -861,8 +861,15 @@ private:
                      http::ResponseWriter& writer, Clock::time_point deadline) {
         Outcome outcome;
         auto& channel = *worker.channel;
+        // A call answered at or past the deadline (a statement the deadline
+        // interrupted) ends the request as timed out, in either phase. So
+        // does a channel that fails once the deadline has passed: the worker,
+        // whose own wait for the call's Return ends at the same deadline, may
+        // have answered and exited before the interrupted statement returned.
+        bool deadline_ended = false;
         const auto failed = [&] {
-            outcome.timed_out = channel.status() == Channel::Status::TimedOut;
+            outcome.timed_out = deadline_ended || channel.status() == Channel::Status::TimedOut ||
+                                Clock::now() >= deadline;
             return outcome;
         };
         // The request's SQL leases; leaving this function, by any path,
@@ -886,6 +893,10 @@ private:
                 if (!frame) return channel.status() == Channel::Status::Ok;
                 if (frame->kind == FrameKind::Call) {
                     if (channel.send(FrameKind::Return, reply(frame->body), deadline) != Channel::Status::Ok) {
+                        return false;
+                    }
+                    if (Clock::now() >= deadline) {
+                        deadline_ended = true;
                         return false;
                     }
                     continue;
@@ -1149,6 +1160,7 @@ private:
             std::lock_guard lock(reap_mutex_);
             exiting_.push_back({pid, std::move(id), answered, slot, Clock::now() + options_.grace});
         }
+
         wake_reaper();
     }
 
@@ -1308,7 +1320,7 @@ extern "C" void on_signal(int signal) {
 void install_signals() {
     struct sigaction action{};
     action.sa_handler = on_signal;
-    ::sigemptyset(&action.sa_mask);
+    sigemptyset(&action.sa_mask);
     for (const int signal : {SIGHUP, SIGINT, SIGTERM}) ::sigaction(signal, &action, nullptr);
     struct sigaction ignore{};
     ignore.sa_handler = SIG_IGN;

@@ -34,6 +34,7 @@
 #include <poll.h>
 #include <signal.h>
 #include <sys/socket.h>
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <algorithm>
@@ -48,6 +49,12 @@
 #include <string>
 #include <string_view>
 #include <vector>
+
+#ifdef MSG_NOSIGNAL
+constexpr int send_flags = MSG_NOSIGNAL;
+#else
+constexpr int send_flags = 0; // SO_NOSIGPIPE is set on the socket instead.
+#endif
 
 namespace {
 
@@ -159,7 +166,7 @@ public:
             if (size == 0) return true;
             std::size_t sent = 0;
             while (sent < static_cast<std::size_t>(size)) {
-                const auto wrote = ::send(socket_, data + sent, static_cast<std::size_t>(size) - sent, MSG_NOSIGNAL);
+                const auto wrote = ::send(socket_, data + sent, static_cast<std::size_t>(size) - sent, send_flags);
                 if (wrote < 0) {
                     if (errno == EINTR) continue;
                     if (errno == EAGAIN) {
@@ -388,8 +395,17 @@ private:
 };
 
 int connect_to(int port) {
+#ifdef SOCK_CLOEXEC
     const int descriptor = ::socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
     if (descriptor < 0) return -1;
+#else
+    // macOS: no SOCK_CLOEXEC or MSG_NOSIGNAL; the flags are set apart.
+    const int descriptor = ::socket(AF_INET, SOCK_STREAM, 0);
+    if (descriptor < 0) return -1;
+    ::fcntl(descriptor, F_SETFD, FD_CLOEXEC);
+    const int no_sigpipe = 1;
+    ::setsockopt(descriptor, SOL_SOCKET, SO_NOSIGPIPE, &no_sigpipe, sizeof no_sigpipe);
+#endif
     sockaddr_in address{};
     address.sin_family = AF_INET;
     address.sin_port = htons(static_cast<std::uint16_t>(port));

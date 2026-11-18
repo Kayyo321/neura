@@ -99,6 +99,20 @@ set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 if(NOT EMSCRIPTEN AND (CMAKE_C_COMPILER_ID STREQUAL "GNU" OR (CMAKE_C_COMPILER_ID MATCHES "Clang" AND NOT APPLE)))
     add_compile_options(-fno-semantic-interposition -ftls-model=initial-exec)
 endif()
+# The server host and its tests use std::jthread and std::stop_token, which
+# the libc++ of Xcode 16 still marks experimental. -fexperimental-library
+# enables them there and links libc++'s static libc++experimental.a, so the
+# tools need no other system library.
+if(APPLE AND CMAKE_CXX_COMPILER_ID MATCHES "Clang")
+    include(CheckCXXSourceCompiles)
+    set(CMAKE_REQUIRED_FLAGS "-std=c++20")
+    check_cxx_source_compiles("#include <thread>\nint main() { std::jthread t([] {}); return 0; }" NEURA_HAS_JTHREAD)
+    unset(CMAKE_REQUIRED_FLAGS)
+    if(NOT NEURA_HAS_JTHREAD)
+        add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-fexperimental-library>)
+        add_link_options($<$<LINK_LANGUAGE:CXX>:-fexperimental-library>)
+    endif()
+endif()
 
 function(neura_target_defaults target)
     target_compile_features(${target} PUBLIC cxx_std_20)
@@ -553,23 +567,33 @@ if(NEURA_ENABLE_SERVER_TLS)
            OR NOT OPENSSL_CRYPTO_LIBRARY MATCHES "\\.a$")
             message(FATAL_ERROR "The Neura server TLS transport requires OpenSSL 3.5 static archives")
         endif()
+        # The OpenSSL found above, with its headers as an ordinary include
+        # directory (-I): the imported OpenSSL::SSL would give -isystem, which
+        # CPATH and the compiler's own directories can precede, so another
+        # OpenSSL on the search path (Homebrew's, in /usr/local/include on
+        # Intel macOS) was compiled against while the pinned one was linked.
+        find_package(Threads REQUIRED)
+        add_library(neura_openssl INTERFACE)
+        target_include_directories(neura_openssl INTERFACE "${OPENSSL_INCLUDE_DIR}")
+        target_link_libraries(neura_openssl INTERFACE "${OPENSSL_SSL_LIBRARY}" "${OPENSSL_CRYPTO_LIBRARY}"
+            Threads::Threads ${CMAKE_DL_LIBS})
 
         add_library(neura_server_tls STATIC src/server/http_tls.cpp)
         target_include_directories(neura_server_tls PUBLIC src)
-        target_link_libraries(neura_server_tls PRIVATE neura_server_http OpenSSL::SSL)
+        target_link_libraries(neura_server_tls PRIVATE neura_server_http neura_openssl)
         neura_target_defaults(neura_server_tls)
         target_compile_definitions(neura_server_listeners PRIVATE NEURA_SERVER_TLS_ENABLED)
         # TLS client and server streams of the standard providers
         # (src/nvm/tls_provider.cpp); without this build option they answer
         # Unsupported.
         target_compile_definitions(neura_nvm PRIVATE NEURA_NVM_TLS)
-        target_link_libraries(neura_nvm PRIVATE OpenSSL::SSL)
+        target_link_libraries(neura_nvm PRIVATE neura_openssl)
         target_link_libraries(neura_server_listeners PRIVATE neura_server_tls)
 
         if(BUILD_TESTING)
             find_package(Threads REQUIRED)
             add_executable(neura_http_tls_tests tests/server/http_tls_tests.cpp)
-            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls OpenSSL::SSL Threads::Threads)
+            target_link_libraries(neura_http_tls_tests PRIVATE neura_server_tls neura_openssl Threads::Threads)
             neura_target_defaults(neura_http_tls_tests)
             add_test(NAME server-http-tls COMMAND neura_http_tls_tests)
             set_tests_properties(server-http-tls PROPERTIES TIMEOUT 15)
@@ -645,14 +669,14 @@ if(NEURA_ENABLE_SQL AND NOT EMSCRIPTEN)
             message(FATAL_ERROR "NEURA_ENABLE_POSTGRES needs NEURA_LIBPQ_SOURCE (postgresql-18.7) and "
                 "NEURA_LIBPQ_BUILD (its build tree with libpq.a)")
         endif()
-        target_include_directories(neura_sql SYSTEM PRIVATE "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq"
+        # First, like the OpenSSL headers: a libpq elsewhere on the search
+        # path is never compiled against.
+        target_include_directories(neura_sql BEFORE PRIVATE "${NEURA_LIBPQ_SOURCE}/src/interfaces/libpq"
             "${NEURA_LIBPQ_SOURCE}/src/include")
         target_compile_definitions(neura_sql PRIVATE NEURA_SQL_POSTGRES)
-        set(OPENSSL_USE_STATIC_LIBS TRUE)
-        find_package(OpenSSL 3.5 REQUIRED)
         target_link_libraries(neura_sql PRIVATE "${NEURA_LIBPQ_BUILD}/src/interfaces/libpq/libpq.a"
             "${NEURA_LIBPQ_BUILD}/src/common/libpgcommon_shlib.a" "${NEURA_LIBPQ_BUILD}/src/port/libpgport_shlib.a"
-            OpenSSL::SSL OpenSSL::Crypto Threads::Threads)
+            neura_openssl Threads::Threads)
     endif()
 endif()
 
@@ -700,10 +724,11 @@ if(NEURA_ENABLE_SERVER_HTTP2)
     message(STATUS "Server HTTP/2: nghttp2 ${neura_nghttp2_version} (${NEURA_NGHTTP2_LIBRARY})")
 
     find_package(Threads REQUIRED)
-    add_library(neura_nghttp2 STATIC IMPORTED)
-    set_target_properties(neura_nghttp2 PROPERTIES
-        IMPORTED_LOCATION "${NEURA_NGHTTP2_LIBRARY}"
-        INTERFACE_INCLUDE_DIRECTORIES "${NEURA_NGHTTP2_INCLUDE_DIR}")
+    # An interface library, not an imported one, so the pinned headers are
+    # an ordinary -I directory ahead of any other nghttp2 (see neura_openssl).
+    add_library(neura_nghttp2 INTERFACE)
+    target_include_directories(neura_nghttp2 INTERFACE "${NEURA_NGHTTP2_INCLUDE_DIR}")
+    target_link_libraries(neura_nghttp2 INTERFACE "${NEURA_NGHTTP2_LIBRARY}")
     target_sources(neura_server_http PRIVATE src/server/http2_connection.cpp)
     target_link_libraries(neura_server_http PUBLIC neura_nghttp2 Threads::Threads)
     target_compile_definitions(neura_server_http PUBLIC NEURA_SERVER_HTTP2_ENABLED)
@@ -994,6 +1019,38 @@ neura_target_defaults(neura)
 
 install(TARGETS neura RUNTIME DESTINATION bin COMPONENT core)
 install(FILES LICENSE DESTINATION share/doc/neura COMPONENT core)
+# The licence texts of the server components this build links statically,
+# which packaging/build-server-components.sh copies out of the verified
+# sources: they ship with the core component, beside Neura's own. A release
+# build (NEURA_PORTABLE_RELEASE) that links one of them refuses to configure
+# without its text.
+set(NEURA_COMPONENT_LICENSES "" CACHE PATH
+    "The licenses directory that packaging/build-server-components.sh writes")
+set(neura_component_license_files)
+if(NEURA_ENABLE_SERVER_TLS)
+    list(APPEND neura_component_license_files openssl-LICENSE.txt)
+endif()
+if(NEURA_ENABLE_SERVER_HTTP2)
+    list(APPEND neura_component_license_files nghttp2-COPYING)
+endif()
+if(NEURA_ENABLE_POSTGRES)
+    list(APPEND neura_component_license_files postgresql-COPYRIGHT)
+endif()
+if(neura_component_license_files)
+    if(NEURA_COMPONENT_LICENSES)
+        set(neura_component_license_paths)
+        foreach(file IN LISTS neura_component_license_files)
+            if(NOT EXISTS "${NEURA_COMPONENT_LICENSES}/${file}")
+                message(FATAL_ERROR "${NEURA_COMPONENT_LICENSES}/${file} is missing")
+            endif()
+            list(APPEND neura_component_license_paths "${NEURA_COMPONENT_LICENSES}/${file}")
+        endforeach()
+        install(FILES ${neura_component_license_paths} DESTINATION share/doc/neura/third-party COMPONENT core)
+    elseif(NEURA_PORTABLE_RELEASE)
+        message(FATAL_ERROR "A release build that links ${neura_component_license_files} needs their texts: "
+            "pass -DNEURA_COMPONENT_LICENSES=<prefix>/licenses from packaging/build-server-components.sh")
+    endif()
+endif()
 # The WHATWG HTML entity table that the template lexer embeds (third_party/whatwg-html).
 install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura
     RENAME LICENSE-WHATWG-HTML COMPONENT sdk)

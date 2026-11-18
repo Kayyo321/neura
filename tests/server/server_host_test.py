@@ -564,7 +564,8 @@ def test_refused_assignment(args, image):
     # A worker whose channel refuses the Assign has run nothing: the request
     # goes to a new worker, once, and runs exactly once. The test hook
     # NEURA_SERVER_TEST_REFUSE_ASSIGN=N makes the first N workers refuse.
-    for start in ("zygote", "exec"):
+    # The zygote exists on Linux only.
+    for start in ("zygote", "exec") if sys.platform.startswith("linux") else ("exec",):
         for ready in ("0", "1"):
             env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="1")
             host = Host(args, image, "--worker-start", start, "--ready-workers", ready, "--no-startup-check",
@@ -978,9 +979,11 @@ def test_http2_reload(args, image):
         port = host.ports["https"]
 
         def handshake():
+            # s_client prints what the server sends after the handshake: the
+            # binary HTTP/2 SETTINGS frame, when it arrives before the input
+            # ends, which is not UTF-8.
             result = subprocess.run([args.openssl, "s_client", "-connect", f"127.0.0.1:{port}", "-alpn", "h2,http/1.1"],
                                     input="", capture_output=True, text=True, errors="replace", timeout=30)
-            # The server's first HTTP/2 frames (SETTINGS) reach stdout as raw bytes.
             return result.stdout
 
         before = handshake()
@@ -1034,8 +1037,14 @@ def main():
              test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_refused_assignment, test_zygote_restart,
              test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls,
              test_http2_curl, test_http2_streams, test_http2_reload]
+    # These read /proc or need the worker zygote, which exists on Linux only
+    # (docs/runtime/ServerHost.md, "Worker start").
+    linux_only = {"test_dead_ready_worker", "test_zygote_restart", "test_process_bound"}
     for test in tests:
         if args.only and args.only != test.__name__:
+            continue
+        if test.__name__ in linux_only and not sys.platform.startswith("linux"):
+            print("--", test.__name__, "skipped: needs Linux (/proc, the worker zygote)", flush=True)
             continue
         if PROTOCOL == "h2c" and test.__name__.startswith("test_http2"):
             continue  # They choose their protocols themselves.

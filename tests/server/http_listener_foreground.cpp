@@ -31,14 +31,14 @@ void signal_handler(int signal) {
 sigset_t install_handlers() {
     struct sigaction action{};
     action.sa_handler = signal_handler;
-    ::sigemptyset(&action.sa_mask);
+    sigemptyset(&action.sa_mask);
     sigset_t controls;
-    ::sigemptyset(&controls);
+    sigemptyset(&controls);
     for (int signal : {SIGHUP, SIGINT, SIGTERM}) {
         if (::sigaction(signal, &action, nullptr) != 0) {
             throw std::system_error(errno, std::generic_category(), "install fixture signal handler");
         }
-        ::sigaddset(&controls, signal);
+        sigaddset(&controls, signal);
     }
     return controls;
 }

@@ -201,7 +201,10 @@ private:
     }
 
     bool rewrite_one(IrNode& node) {
-        bool found = rewrite(node.operands) | rewrite(node.body) | rewrite(node.alternative);
+        // Every part is rewritten: no short circuit.
+        bool found = rewrite(node.operands);
+        found = rewrite(node.body) || found;
+        found = rewrite(node.alternative) || found;
         if ((node.op != IrOp::Call && node.op != IrOp::VirtualCall) || !intrinsics_.contains(node.symbol))
             return found;
         const auto& callee = symbol(node.symbol);

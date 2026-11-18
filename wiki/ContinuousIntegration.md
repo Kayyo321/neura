@@ -12,7 +12,7 @@ GitHub Actions checks every pull request before it is merged and publishes the [
 | Job | What it runs | Fails when |
 | --- | --- | --- |
 | Documentation and workflows | `scripts/test-checks.py`, `scripts/check-workflows.py`, `scripts/check-docs.py`, `scripts/update-stdlib-wiki-api.py --check`, `scripts/generate-wiki.py --check`, `scripts/gen-kernels.py --check`, and `scripts/build-site.py --check` | A check script misbehaves on its own test inputs; a workflow breaks a [workflow rule](#workflow-rules); a link in a tracked Markdown file names a missing file, wiki page, or heading; a standard library reference page is stale; a generated wiki page differs from the docs page it is generated from, or `wiki/` holds a page that is neither generated nor listed as hand-written; or the kernel table, the kernel reference, or the `Std.Internal.Kernels` declarations differ from what `src/kernels/` generates. |
-| Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04, `scripts/check-kernels.sh`, `scripts/check-core-closure.py`, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; the kernel archive calls a libm function or a libc function other than the memory builtins; a binary of the execution core holds an object of a compiler library or loads `libneura-sdk`, or `libneura-sdk` holds a copy of a core object ([tools](Tooling#tools-and-the-neura-dispatcher)); a test fails, including `doc-examples` when a documentation example does not compile or run as its directive says; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
+| Build and test (Linux x86-64) | A Release build with GCC 14 on Ubuntu 24.04 with the server components of the release archives (TLS, HTTP/2 and the PostgreSQL provider, built by `packaging/build-server-components.sh` and cached under a key of the component lock and that script; [server host](Server-Host#release-archives)), `scripts/check-kernels.sh`, `scripts/check-core-closure.py`, then every CTest entry | The build fails; the compiler reports a warning in a file outside `third_party/`; the kernel archive calls a libm function or a libc function other than the memory builtins; a binary of the execution core holds an object of a compiler library or loads `libneura-sdk`, or `libneura-sdk` holds a copy of a core object ([tools](Tooling#tools-and-the-neura-dispatcher)); a test fails, including `doc-examples` when a documentation example does not compile or run as its directive says; a test is skipped, disabled, or not run; or the run holds fewer tests than the workflow's `--minimum`. |
 | Runtime-only build (Linux x86-64) | A Release build with `-DNEURA_SDK=OFF` and no submodule, `scripts/check-core-closure.py`, an install of the `core` component, `neura --version`, `neura doctor`, and `neura build`, which must fail and name the missing SDK | The core does not build or install without the SDK; the build reports a warning; `doctor` fails; or `neura build` does not report the missing SDK. |
 | Tier 1 | Reads the results of the other three jobs | Any job ended as anything other than `success`, including `skipped` and `cancelled`. |
 
@@ -74,7 +74,14 @@ python3 scripts/generate-wiki.py --check
 python3 scripts/gen-kernels.py --check
 python3 scripts/build-site.py --check
 
-cmake -S . -B build -DCMAKE_BUILD_TYPE=Release
+sh packaging/build-server-components.sh ~/server-components
+cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
+  -DNEURA_ENABLE_SERVER_TLS=ON -DOPENSSL_ROOT_DIR=$HOME/server-components/openssl \
+  -DNEURA_ENABLE_SERVER_HTTP2=ON -DNEURA_NGHTTP2_ROOT=$HOME/server-components/nghttp2 \
+  -DNEURA_ENABLE_POSTGRES=ON -DNEURA_LIBPQ_SOURCE=$HOME/server-components/postgresql \
+  -DNEURA_LIBPQ_BUILD=$HOME/server-components/postgresql \
+  -DNEURA_COMPONENT_LICENSES=$HOME/server-components/licenses \
+  -DNEURA_SERVER_TEST_OPENSSL=$HOME/server-components/openssl/bin/openssl
 cmake --build build --parallel
 scripts/check-kernels.sh build
 python3 scripts/check-core-closure.py build
@@ -82,13 +89,13 @@ NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --paral
 python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 321
 ```
 
-To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
+The first two commands build the configuration of the Tier 1 job; `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release` alone builds without TLS, HTTP/2 and the PostgreSQL provider, which leaves out their tests (`server-sql-postgres` also needs Docker). To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.
 
 The scripts need Python 3 and Git, and use no packages outside the Python standard library. `check-docs.py` reads the Markdown files that Git tracks, so `git add` a new page before checking it. It does not use the network: links to other websites are listed with `--list-external` and are not fetched.
 
 ## Tier 3: release qualification
 
-[`release.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds and tests the tagged commit, packs the three archives of the target (Neura-sdk, Neura-runtime, and the legacy archive for 0.2 clients), and runs the lifecycle checks of [`packaging/qualify.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/qualify.sh) on them on a second runner, including the update from the published 0.2 releases with their own clients. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess) describes each job and check.
+[`release.yml`](https://github.com/Kayyo321/neura/blob/main/.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds the server components from their pinned, checksum-verified sources (a tag caches only the source archives; a trial started by hand may reuse the components an earlier trial built on the same runner image), builds and tests the tagged commit with them, packs the three archives of the target (Neura-sdk, Neura-runtime, and the legacy archive for 0.2 clients), and runs the lifecycle checks of [`packaging/qualify.sh`](https://github.com/Kayyo321/neura/blob/main/packaging/qualify.sh) on them on a second runner, including the update from the published 0.2 releases with their own clients. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess) describes each job and check.
 
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings).
 

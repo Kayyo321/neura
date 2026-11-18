@@ -13,6 +13,7 @@
 
 #if defined(__x86_64__) && (defined(__GNUC__) || defined(__clang__))
 #include <cpuid.h>
+#include <immintrin.h>
 #endif
 #ifndef _WIN32
 #include <poll.h>
@@ -301,11 +302,12 @@ bool fill_entropy(char* data, std::size_t size) {
 __attribute__((target("rdseed"))) bool hardware_word(std::uint64_t& word) {
     for (int attempt = 0; attempt < 1024; ++attempt) {
         unsigned long long value = 0;
-        if (__builtin_ia32_rdseed_di_step(&value)) {
+        // The intrinsics, not GCC's builtin names, which clang (macOS) lacks.
+        if (_rdseed64_step(&value)) {
             word = value;
             return true;
         }
-        __builtin_ia32_pause();
+        _mm_pause();
     }
     return false;
 }
