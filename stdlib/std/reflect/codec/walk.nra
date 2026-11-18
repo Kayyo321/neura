@@ -2,7 +2,7 @@ let model = import:Std.Reflect.Internal.Model;
 let kinds = import:Std.Reflect.Type.TypeKind;
 
 /// @brief Structural traversal (docs/design/Reflect030.md, The packages). `WalkEngine` walks a value depth first:
-/// the exported fields of a class or record, the elements of a list or tuple, and the payloads of an enum's active variant.
+/// the exported fields a Variant can hold of a class or record, the elements of a list or tuple, and the payloads of an enum's active variant.
 /// A visitor sees each value before its children and may skip them or stop the walk; an object reached again
 /// while it is being walked is reported as a cycle instead of being entered.
 /// @see [Std.Reflect.Codec.Walk](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Walk)
@@ -61,7 +61,7 @@ export let Walk = module (
                 if (object) {
                     open.append(value);
                     for (let field in type.fields) {
-                        if (!field.exported) {
+                        if (!field.exported || !field.dynamic) {
                             continue;
                         }
                         if (visit(path + "." + field.name, value.field(field.index), visitor, open) == WalkControl.Stop) {
@@ -93,7 +93,7 @@ export let Walk = module (
             }
             open.append(value);
             for (let field in type.fields) {
-                if (!field.exported) {
+                if (!field.exported || !field.dynamic) {
                     continue;
                 }
                 last current = value.field(field.index);

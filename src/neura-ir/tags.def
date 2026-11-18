@@ -214,8 +214,8 @@ NEURA_TAG(RequiresCapability, 73, Security, Callables | Module, reserved, true, 
           "callers need the named runtime capability",
           "capabilities are granted per run (`neura run --deny-*`); document the requirement")
 NEURA_TAG(Sensitive, 74, Security, Values | Local | Parameter | Class, informational, false, "", "0.2.0",
-          "a secret: Std.Reflect.Codec writes a placeholder instead of the value; to_string, traces and dumps "
-          "do not read the tag",
+          "a secret: on a field or class, Std.Reflect.Codec writes a placeholder instead of the value; on other "
+          "declarations it is only recorded, and to_string, traces and dumps do not read it",
           "")
 NEURA_TAG(Untrusted, 75, Security, Values | Parameter | Callables, reserved, false, "", "0.2.0",
           "data from outside the program that must be validated before use",
@@ -229,7 +229,8 @@ NEURA_TAG(Serializable, 77, Serialization, Class | Enum, reserved, false, "", "0
           "can be written and read by Std serializers",
           "write to_json and from_json with Std.Encoding.Json explicitly")
 NEURA_TAG(SerialName, 78, Serialization, Field | Class | Variant, informational, false, "name:t", "0.2.0",
-          "the name Std.Reflect.Codec uses when serializing; derive json.Codec does not read it", "")
+          "the name Std.Reflect.Codec uses for a field or variant, and for a class in schemas; derive json.Codec "
+          "does not read it", "")
 NEURA_TAG(Skip, 79, Serialization, Field, informational, false, "", "0.2.0",
           "left out when Std.Reflect.Codec serializes; derive json.Codec does not read it", "")
 NEURA_TAG(SerialDefault, 80, Serialization, Field, reserved, false, "value:a", "0.2.0",

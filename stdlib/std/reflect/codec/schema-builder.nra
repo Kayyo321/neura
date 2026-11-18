@@ -64,8 +64,11 @@ export let SchemaBuilder = module (
         let text = "CREATE TABLE " + table + " (";
         let first = true;
         for (let field in type.fields) {
-            if (attributes.skipped(field) || !field.exported) {
+            if (!attributes.written(field)) {
                 continue;
+            }
+            if (field.type_ordinal < 0) {
+                trap_with_message("invalid argument: field " + field.name + " of type any has no SQL column type");
             }
             let column = model.descriptor_of(field.type_ordinal);
             let nullable = false;
@@ -119,9 +122,10 @@ export let SchemaBuilder = module (
     };
 
     let proto_name = func(type: model.TypeDescriptor) -> string {
+        last name = attributes.type_serial_name(type);
         let text = "";
-        for (let i = 0; i < type.qualified_name.byte_length; i++) {
-            last c = type.qualified_name.slice(i, i + 1);
+        for (let i = 0; i < name.byte_length; i++) {
+            last c = name.slice(i, i + 1);
             text = text + (c == "." ? "_" : c);
         }
         return text;
@@ -169,8 +173,11 @@ export let SchemaBuilder = module (
         let text = "message " + proto_name(type) + " {\n";
         let number = 1;
         for (let field in type.fields) {
-            if (attributes.skipped(field) || !field.exported) {
+            if (!attributes.written(field)) {
                 continue;
+            }
+            if (field.type_ordinal < 0) {
+                trap_with_message("invalid argument: field " + field.name + " of type any has no proto3 type");
             }
             last field_type = model.descriptor_of(field.type_ordinal);
             let prefix = "";
@@ -222,7 +229,14 @@ export let SchemaBuilder = module (
         return false;
     };
 
+    // The schema of the type at an ordinal; an `any` takes any JSON value.
+    let schema_at = func(ordinal: int, definitions: [string, JsonValue][list]) -> JsonValue =>
+        ordinal < 0 ? JsonValue.Object(new) : schema_of(model.descriptor_of(ordinal), definitions);
+
     let schema_of = func(type: model.TypeDescriptor, definitions: [string, JsonValue][list]) -> JsonValue {
+        if (attributes.type_sensitive(type)) {
+            return simple("string");
+        }
         if (type.ordinal == 0) {
             return simple("null");
         }
@@ -241,13 +255,13 @@ export let SchemaBuilder = module (
         if (type.kind == kinds.TypeKind.List || type.kind == kinds.TypeKind.Array) {
             last members: [string, JsonValue][list] = new;
             members.append(["type", JsonValue.Text("array")]);
-            members.append(["items", schema_of(model.descriptor_of(type.elements[0]), definitions)]);
+            members.append(["items", schema_at(type.elements[0], definitions)]);
             return JsonValue.Object(members);
         }
         if (type.kind == kinds.TypeKind.Tuple) {
             last items: JsonValue[list] = new;
             for (let element in type.elements) {
-                items.append(schema_of(model.descriptor_of(element), definitions));
+                items.append(schema_at(element, definitions));
             }
             last members: [string, JsonValue][list] = new;
             members.append(["type", JsonValue.Text("array")]);
@@ -259,13 +273,13 @@ export let SchemaBuilder = module (
         if (type.kind == kinds.TypeKind.Enum && type.generic_origin == "Optional") {
             last choices: JsonValue[list] = new;
             choices.append(simple("null"));
-            choices.append(schema_of(model.descriptor_of(type.variants[1].payloads[0].type_ordinal), definitions));
+            choices.append(schema_at(type.variants[1].payloads[0].type_ordinal, definitions));
             last members: [string, JsonValue][list] = new;
             members.append(["anyOf", JsonValue.Array(choices)]);
             return JsonValue.Object(members);
         }
         if (type.kind == kinds.TypeKind.Enum || type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record) {
-            last name = type.qualified_name;
+            last name = attributes.type_serial_name(type);
             if (!defined(definitions, name)) {
                 // The name is reserved first, so that a type that reaches itself refers to its own definition.
                 definitions.append([name, JsonValue.Null]);
@@ -285,10 +299,16 @@ export let SchemaBuilder = module (
         last properties: [string, JsonValue][list] = new;
         last required: JsonValue[list] = new;
         for (let field in type.fields) {
-            if (attributes.skipped(field) || !field.exported) {
+            if (!attributes.written(field)) {
                 continue;
             }
             last wire = attributes.serial_name(field);
+            if (field.type_ordinal < 0) {
+                // An any field takes any JSON value.
+                properties.append([wire, JsonValue.Object(new)]);
+                required.append(JsonValue.Text(wire));
+                continue;
+            }
             last field_type = model.descriptor_of(field.type_ordinal);
             properties.append([wire, attributes.sensitive(field) ? simple("string") : schema_of(field_type, definitions)]);
             if (field_type.generic_origin != "Optional") {
@@ -307,14 +327,14 @@ export let SchemaBuilder = module (
         for (let variant in type.variants) {
             last properties: [string, JsonValue][list] = new;
             last constant: [string, JsonValue][list] = new;
-            constant.append(["const", JsonValue.Text(variant.name)]);
+            constant.append(["const", JsonValue.Text(attributes.variant_serial_name(variant))]);
             properties.append(["variant", JsonValue.Object(constant)]);
             last required: JsonValue[list] = new;
             required.append(JsonValue.Text("variant"));
             if (variant.payloads.length > 0) {
                 last items: JsonValue[list] = new;
                 for (let payload in variant.payloads) {
-                    items.append(schema_of(model.descriptor_of(payload.type_ordinal), definitions));
+                    items.append(schema_at(payload.type_ordinal, definitions));
                 }
                 last payload_schema: [string, JsonValue][list] = new;
                 payload_schema.append(["type", JsonValue.Text("array")]);

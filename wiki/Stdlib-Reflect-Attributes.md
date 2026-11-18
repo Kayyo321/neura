@@ -29,4 +29,12 @@ The following public declarations are taken from the module source; each links t
   Whether a field is tagged `#Skip`: serializers leave it out. Since 0.3.0.
 - **Attributes** · [`export let sensitive = func(field: model.FieldInfo) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/attribute/attributes.nra#L53)
   Whether a field is tagged `#Sensitive`: serializers write a placeholder instead of its value. Since 0.3.0.
+- **Attributes** · [`export let variant_serial_name = func(variant: model.VariantInfo) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/attribute/attributes.nra#L58)
+  The wire name of a variant: its `#SerialName` argument, or its declared name. Since 0.3.0.
+- **Attributes** · [`export let type_serial_name = func(type: model.TypeDescriptor) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/attribute/attributes.nra#L62)
+  The name of a type in a schema: its `#SerialName` argument, or its qualified name. Since 0.3.0.
+- **Attributes** · [`export let type_sensitive = func(type: model.TypeDescriptor) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/attribute/attributes.nra#L66)
+  Whether a type is tagged `#Sensitive`: serializers write a placeholder for every value of it. Since 0.3.0.
+- **Attributes** · [`export let written = func(field: model.FieldInfo) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/reflect/attribute/attributes.nra#L72)
+  Whether serializers write a field at all: it is exported, a Variant can hold its value, and it is not tagged `#Skip`. Since 0.3.0.
 <!-- END SOURCE API -->

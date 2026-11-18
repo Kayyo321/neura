@@ -52,4 +52,33 @@ export let Attributes = module (
     #Since("0.3.0")
     export let sensitive = func(field: model.FieldInfo) -> bool =>
         model.find_attribute(field.attributes, "Sensitive") != nil;
+
+    /// @brief The wire name of a variant: its `#SerialName` argument, or its declared name.
+    #Since("0.3.0")
+    export let variant_serial_name = func(variant: model.VariantInfo) -> string => named(variant.attributes, variant.name);
+
+    /// @brief The name of a type in a schema: its `#SerialName` argument, or its qualified name.
+    #Since("0.3.0")
+    export let type_serial_name = func(type: model.TypeDescriptor) -> string => named(type.attributes, type.qualified_name);
+
+    /// @brief Whether a type is tagged `#Sensitive`: serializers write a placeholder for every value of it.
+    #Since("0.3.0")
+    export let type_sensitive = func(type: model.TypeDescriptor) -> bool =>
+        model.find_attribute(type.attributes, "Sensitive") != nil;
+
+    /// @brief Whether serializers write a field at all: it is exported, a Variant can hold its value, and it is
+    /// not tagged `#Skip`.
+    #Since("0.3.0")
+    export let written = func(field: model.FieldInfo) -> bool => field.exported && field.dynamic && !skipped(field);
+
+    let named = func(items: Attribute[list], fallback: string) -> string {
+        last tag = model.find_attribute(items, "SerialName");
+        if (tag == nil) {
+            return fallback;
+        }
+        return match (tag.argument("name")) {
+            Optional.Some(name) => name,
+            Optional.None => fallback,
+        };
+    };
 );

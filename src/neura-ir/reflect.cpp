@@ -822,7 +822,9 @@ private:
         }
         result += "\t" + std::to_string(base) + "\t" + escape(origin) + "\n";
         if (type.kind == TypeKind::Object || type.kind == TypeKind::Enum) {
-            if (valid(type.symbol)) result += pol == Policy::Full ? tags(symbol(type.symbol)) : "";
+            // A type's own tags are kept under every policy: the codec reads #Sensitive
+            // and #SerialName from them.
+            if (valid(type.symbol)) result += tags(symbol(type.symbol));
         }
         if (!origin.empty()) {
             // The written type arguments of a generic instance.
@@ -865,6 +867,8 @@ private:
                     if (field.last) flags += 'l';
                     if (field.getter != no_symbol) flags += 'g';
                     if (field.setter != no_symbol) flags += 's';
+                    // The dynamic layer can read and write it (an any, or a type it can hold).
+                    if (usable(field.type)) flags += 'd';
                     result += "F\t" + escape(field.name) + "\t" + std::to_string(ord_or_any(field.type)) + "\t" + flags +
                               "\n" + tags(symbol(field.symbol));
                 }

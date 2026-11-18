@@ -63,6 +63,43 @@ let Vault = class implements policies.Layout (
 
 let Login = record (user: string, #Sensitive password: string);
 
+#Sensitive
+let Token = class (
+    export let raw: string = "t";
+    export let init = func { };
+);
+
+let Mode = enum (#SerialName("fast") Quick, Slow);
+
+let Session = class (
+    export let user: string = "u";
+    export let token: Token = new Token();
+    export let mode: Mode = Mode.Slow;
+    export let init = func { };
+);
+
+let Odd = class (
+    export let label: string = "o";
+    export let extra: any = 2 as int32;
+    export let pointer: &int32;
+    export let init = func(target: &int32) {
+        pointer = target;
+    };
+);
+
+let Loose = class (
+    export let label: string = "o";
+    export let extra: any = 2 as int32;
+    export let init = func { };
+);
+
+let shared_count: int32 = 4;
+
+let Sealed = class (
+    export let name: string = "";
+    let init = func { };
+);
+
 let Node = class (
     export let name: string = "";
     export let next: Node = nil;
@@ -207,4 +244,39 @@ let CodecTests = module (
         test.assert(problem.to_string().contains("reflect.json.missing"));
         test.assert(problem.to_string().contains("$.password"));
     };
+
+    export let test_type_and_variant_tags = func() -> void {
+        last session = new Session();
+        session.mode = Mode.Quick;
+        last text = bridge.encode(variants.of(session));
+        test.assert_equal_string("{\"user\":\"u\",\"token\":\"<redacted>\",\"mode\":{\"variant\":\"fast\"}}", text);
+        last back: Session = bridge.decode_as<Session>(text);
+        test.assert_equal_string("Quick", back.mode.to_string());
+        test.assert_equal_string("t", back.token.raw);
+        test.assert(schemas.json_schema_text(types.of<Mode>()).contains("\"const\":\"fast\""));
+    };
+
+    export let test_fields_reflection_cannot_hold_or_decode = func() -> void {
+        last odd = new Odd(shared_count);
+        // The any field is written; the primitive reference field is left out everywhere.
+        last text = bridge.encode(variants.of(odd));
+        test.assert_equal_string("{\"label\":\"o\",\"extra\":2}", text);
+        // Its only constructor takes a reference, which decoding cannot supply.
+        test.assert(test.assert_err(bridge.decode(text, types.of<Odd>())).to_string().contains("reflect.json.type"));
+        // An any field is written but not read back: the constructor's value stays.
+        last loose: Loose = bridge.decode_as<Loose>("{\"label\":\"x\",\"extra\":\"y\"}");
+        test.assert_equal_string("x", loose.label);
+        test.assert(match.is (loose.extra) {
+            v: int32 => v == 2,
+            _ => false,
+        });
+        last names = new Names();
+        new walks.WalkEngine().walk(variants.of(odd), names);
+        test.assert_equal_int32(3, names.seen.length);
+        test.assert_equal_string("$.extra", names.seen[2]);
+        test.assert(schemas.json_schema_text(types.of<Odd>()).contains("\"extra\":{}"));
+        last problem = test.assert_err(bridge.decode("{}", types.of<Sealed>()));
+        test.assert(problem.to_string().contains("reflect.json.type"));
+    };
 );
+

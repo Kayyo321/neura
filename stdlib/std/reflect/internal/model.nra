@@ -97,6 +97,9 @@ export let Model = module (
         export last is_last: bool;
         export last has_getter: bool;
         export last has_setter: bool;
+        /// @brief Whether a Variant can hold the field's value: false for an array, a scope-bound value or a
+        /// primitive reference, which `Variant.field` and the codec cannot read.
+        export last dynamic: bool;
         export last attributes: Attribute[list];
 
         export let init = func(owner_ordinal: int, position: int, label: string, ordinal: int, flags: string,
@@ -110,6 +113,7 @@ export let Model = module (
             is_last = has_flag(flags, "l");
             has_getter = has_flag(flags, "g");
             has_setter = has_flag(flags, "s");
+            dynamic = has_flag(flags, "d");
             attributes = tags;
         };
 
@@ -119,7 +123,7 @@ export let Model = module (
         /// @brief Whether `set` can write the field: exported, not `const` or `last`, not read-only through a
         /// getter, and its class keeps its layout.
         export let writable = func -> bool =>
-            exported && !is_const && !is_last && (!has_getter || has_setter) &&
+            exported && dynamic && !is_const && !is_last && (!has_getter || has_setter) &&
             descriptor(owner).policy != policies.Level.Strip;
 
         /// @brief Whether the field is a property: read and written through accessors rather than storage.
