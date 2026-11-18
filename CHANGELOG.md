@@ -166,6 +166,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- A range literal used directly as a for-each source, `for (let i in 0 .. n)` with `..` or `..=` and any step, is counted without building the range, so it allocates nothing and no longer needs stack cells for every element or fails for want of them; its elements, evaluation order and failures (a zero step, an over-long range) are unchanged ([Core language](docs/lang/CoreLanguage.md#loops)). Images of such loops change; other images are byte-identical.
 - A scope-bound value, a `Task<T>` or a `Scope`, is no longer converted to `class`, to an interface or to `any`, by assignment, an argument, `as`, or an untyped variadic argument: `E0605` ([Types](docs/lang/Types.md#scope-bound-types)). No source in the repository did so.
 - `any` is a reserved type name: no class, interface, enum, module, alias or type parameter takes it (`E0311`); functions, fields, parameters and locals named `any` keep their meaning.
 - A `.nir` file that uses `any` or a return inside a scoped value is NeuraIR 1.12; the reader accepts 1.0 through 1.12, and every other program is written as before.

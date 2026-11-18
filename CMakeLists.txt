@@ -1349,6 +1349,10 @@ if(BUILD_TESTING AND NEURA_SDK)
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/parameters/equivalence.py" "$<TARGET_FILE:neura>"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/equivalence")
     set_tests_properties(expressions-equivalence PROPERTIES TIMEOUT 300)
+    # A range literal as a for-each source is counted without a region.
+    add_test(NAME expressions-range-loop-stack COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/expressions/range-loop-stack.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(expressions-range-loop-stack PROPERTIES TIMEOUT 300)
     add_test(NAME records-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/records.py" "$<TARGET_FILE:neura>")
     set_tests_properties(records-boundary PROPERTIES TIMEOUT 300)

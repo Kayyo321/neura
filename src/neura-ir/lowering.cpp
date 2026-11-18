@@ -438,7 +438,7 @@ private:
     IrNode enum_construct(const IrNode& variant, const Expr& expr, Context& context);
     Substitution enum_arguments(const IrType& type) const;
     IrNode tuple(const Expr& expr, Context& context, const IrType* expected);
-    IrNode range(const Expr& expr, Context& context, const IrType* expected);
+    IrNode range(const Expr& expr, Context& context, const IrType* expected, const Statement* each = nullptr);
     IrNode string_chain(const Expr& expr, Context& context, IrNode first);
     void chain_operators(const Expr& chain);
     IrNode text_operand(const Expr& syntax, Context& context);
@@ -575,6 +575,8 @@ private:
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
     IrNode for_each_iterable(const Statement& stmt, Context& context, IrNode items);
+    IrNode for_each_range(const Statement& stmt, Context& context, std::vector<IrNode> prelude,
+                          const IrNode& current, const IrNode& step, const IrNode& length);
     std::vector<IrNode> body(const std::vector<Statement>& stmts, Context& context);
     SymbolId owner_kind(SymbolId id, SymbolKind kind) const;
 
@@ -3511,7 +3513,7 @@ IrNode Lowering::comparison_chain(const Expr& expr, Context& context) {
     return result;
 }
 
-IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expected) {
+IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expected, const Statement* each) {
     require_new_for_list(expr, expected);
     const auto& span = expr.span;
     const auto* expected_element = expected && collection(*expected) ? &expected->arguments.front() : nullptr;
@@ -3636,6 +3638,7 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
                        select(has_items, one, zero));
     }
     const auto length = save(convert(int32_type, std::move(count)), "$range_length");
+    if (each) return for_each_range(*each, context, std::move(result.body), current, step, length);
     auto allocation = node(IrOp::RepeatCollection, span, result.type);
     allocation.operands = {convert(uint64_type, length), current};
     const auto items = save(std::move(allocation), "$range_items");
@@ -4986,7 +4989,11 @@ IrNode Lowering::for_each(const Statement& stmt, Context& context) {
     const auto& declaration = *stmt.declaration;
     const auto& source = stmt.expressions.front();
     auto result = node(IrOp::Block, stmt.span);
-    auto items = value(source, context);
+    // A range literal source is counted, not built (for_each_range); only a
+    // string chain comes back as a value.
+    const bool counted = source.kind == ExprKind::Range;
+    auto items = counted ? range(source, context, nullptr, &stmt) : value(source, context);
+    if (counted && items.type.kind != TypeKind::String) return items;
     if (!collection(items.type))
         return for_each_iterable(stmt, context, std::move(items));
     const auto element = items.type.arguments.front();
@@ -5070,6 +5077,68 @@ IrNode Lowering::for_each(const Statement& stmt, Context& context) {
     auto advance = node(IrOp::Store, stmt.span);
     advance.operands.push_back(load(index_id));
     advance.operands.push_back(binary_node("+", int32_type, load(index_id), integer("1")));
+    loop.body.push_back(std::move(advance));
+    ++context.loops;
+    for (const auto& item : stmt.body) {
+        append_statement(loop.body, item, context);
+    }
+    --context.loops;
+    context.scopes.pop_back();
+    result.body.push_back(std::move(loop));
+    return result;
+}
+
+// `for (let i in a .. b : s)` and `..=`: `prelude` evaluates the bounds and
+// the step once and computes the length exactly as range construction does,
+// with the same failures (a zero step, an over-long range). The loop then
+// binds `current` instead of storing it into a collection, so nothing is
+// allocated. As in construction, `current` advances only while another
+// element remains, so it never passes the last element and cannot overflow.
+IrNode Lowering::for_each_range(const Statement& stmt, Context& context, std::vector<IrNode> prelude,
+                                const IrNode& current, const IrNode& step, const IrNode& length) {
+    const auto& declaration = *stmt.declaration;
+    const auto& range_span = stmt.expressions.front().span;
+    const auto element = current.type;
+    auto result = node(IrOp::Block, stmt.span);
+    result.body = std::move(prelude);
+    const auto binary = [&](std::string op, const IrType& type, IrNode left, IrNode right) {
+        auto operation = node(IrOp::Binary, range_span, type);
+        operation.text = std::move(op);
+        operation.operands = {std::move(left), std::move(right)};
+        return operation;
+    };
+    const auto store = [&](IrNode place, IrNode stored) {
+        auto operation = node(IrOp::Store, range_span);
+        operation.operands = {std::move(place), std::move(stored)};
+        return operation;
+    };
+    auto zero = node(IrOp::Integer, range_span, int32_type);
+    zero.text = "0";
+    auto one = zero;
+    one.text = "1";
+    const auto index = save_temporary(std::move(zero), result.body, context, "$range_index", false);
+
+    auto loop = node(IrOp::Loop, stmt.span);
+    const auto in_range = binary("<", bool_type, index, length);
+    loop.operands.push_back(in_range);
+    context.scopes.emplace_back();
+    IrType declared = element;
+    if (declaration.type) {
+        declared = type(*declaration.type, context);
+        require_type(element, declared, declaration.type->span);
+    }
+    auto element_id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
+    symbol(element_id).type = declared;
+    symbol(element_id).constant = declaration.constant;
+    context.scopes.back().emplace(declaration.name, element_id);
+    auto bind = node(IrOp::Initialize, stmt.span);
+    bind.symbol = element_id;
+    bind.operands.push_back(current);
+    loop.body.push_back(std::move(bind));
+    loop.body.push_back(store(index, binary("+", int32_type, index, std::move(one))));
+    auto advance = node(IrOp::Branch, range_span);
+    advance.operands.push_back(in_range);
+    advance.body.push_back(store(current, binary("+", element, current, step)));
     loop.body.push_back(std::move(advance));
     ++context.loops;
     for (const auto& item : stmt.body) {

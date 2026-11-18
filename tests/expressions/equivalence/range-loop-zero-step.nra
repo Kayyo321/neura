@@ -1,0 +1,17 @@
+// A zero step traps in a counted range loop as it does when the range is
+// built, even when the range is empty, before the body runs
+// (docs/lang/CoreLanguage.md, Loops).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let step = 0;
+        for (let value in 3 ..= 2 : step) {
+            console.print_line(value.to_string());
+        }
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);
