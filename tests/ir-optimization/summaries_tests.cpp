@@ -144,6 +144,9 @@ private:
         case IrOp::Receiver: case IrOp::ReinterpretFloat: case IrOp::ShortCircuit: case IrOp::ComparisonChain:
         case IrOp::ScopedValue: case IrOp::SelectValue: case IrOp::Block: case IrOp::Branch: case IrOp::Loop:
         case IrOp::Break: case IrOp::Continue: case IrOp::Return: case IrOp::Discard:
+        // Packing, reading the tag of, and unpacking an `any` have no effect of
+        // their own, as EffectAnalysis and the purity analysis agree.
+        case IrOp::AnyPack: case IrOp::AnyTag: case IrOp::AnyUnpack:
             break;
         case IrOp::Load:
             if (!local(node.symbol)) flags.traps = true;
