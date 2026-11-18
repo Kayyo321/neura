@@ -1,11 +1,21 @@
-"""Build the Linux .tar.gz package of the fixture application twice, compare it, install it and launch it.
+"""Build the packages of the fixture application twice, compare them, install them and launch them.
 
-The installed package runs under Xvfb with no SDK, no neura tool and no Node on
-its path. The page calls the bridge at load, and the native child renames the
-window, so the X window title shows that the bundle, the bridge and the child
-work from the package. The test then checks that no process of the application
-listens on a socket, ends it with SIGTERM, and checks that it exits 0 and that
-nothing it started survives.
+The Linux .tar.gz and .deb are each built twice and compared byte for byte.
+The .tar.gz is extracted under a path with spaces and non-ASCII characters;
+the .deb is checked with dpkg-deb (-I, -c) and extracted with dpkg-deb -x as an
+installation root, never installed into the system. Each installed tree runs
+under Xvfb with no SDK, no neura tool and no Node on its path. The page calls
+the bridge at load, and the native child renames the window, so the X window
+title shows that the bundle, the bridge and the child work from the package.
+The test then checks that no process of the application listens on a socket,
+ends it with SIGTERM, and checks that it exits 0 and that nothing it started
+survives.
+
+The Windows .zip is only built as a container, from a stand-in engine
+directory, because neither the Windows engine nor a Windows native child is
+available here: it is compared byte for byte and listed, not launched. The
+test also checks that .dmg, .msix and --sign are refused, and that test hooks
+reach only a package built with --test-hooks.
 """
 
 import argparse
@@ -21,6 +31,7 @@ import sys
 import tarfile
 import tempfile
 import time
+import zipfile
 
 from run_app_test import build_child
 from run_shell_test import ELECTRON_X11, isolated_environment, stop_children
@@ -28,7 +39,10 @@ from run_shell_test import ELECTRON_X11, isolated_environment, stop_children
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 APPLICATION_ID = "example.neura.fixture"
-OPERATIONS = ["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir", "fixture.echo", "fixture.fail", "fixture.focus", "fixture.menu", "fixture.menu_bad", "fixture.notify", "fixture.open", "fixture.open_many", "fixture.open_read", "fixture.quit", "fixture.save", "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved", "fixture.wait", "fixture.work"]
+OPERATIONS = ["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir",
+              "fixture.echo", "fixture.fail", "fixture.focus", "fixture.menu", "fixture.menu_bad", "fixture.notify",
+              "fixture.open", "fixture.open_many", "fixture.open_read", "fixture.quit", "fixture.save",
+              "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved", "fixture.wait", "fixture.work"]
 TITLE = "Packaged ✓"
 CSP = "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
 
@@ -71,12 +85,124 @@ def make_package(directory, child):
     }, sort_keys=True))
 
 
-def package(engine, directory, output):
-    result = subprocess.run([sys.executable, str(ROOT / "scripts" / "package-desktop.py"), "--engine", str(engine),
-                             "--package", str(directory), "--name", "fixture", "-o", str(output)],
-                            check=True, stdout=subprocess.PIPE, text=True, timeout=300)
+def make_icon(path):
+    from PIL import Image, ImageDraw
+    image = Image.new("RGBA", (1024, 1024), (32, 64, 160, 255))
+    ImageDraw.Draw(image).ellipse((192, 192, 832, 832), fill=(250, 200, 40, 255))
+    image.save(path, format="PNG")
+    return path
+
+
+def packager(engine, directory, output, icon, *extra, check=True):
+    return subprocess.run([sys.executable, str(ROOT / "scripts" / "package-desktop.py"), "--engine", str(engine),
+                           "--package", str(directory), "--name", "fixture", "--icon", str(icon), "-o", str(output),
+                           *extra], check=check, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, timeout=300)
+
+
+def package(engine, directory, output, icon, *extra):
+    result = packager(engine, directory, output, icon, *extra)
     print(result.stdout, end="")
     return output.read_bytes()
+
+
+def twice(engine, directory, scratch, icon, suffix, *extra):
+    first = package(engine, directory, scratch / f"first.{suffix}", icon, *extra)
+    second = package(engine, directory, scratch / f"second.{suffix}", icon, *extra)
+    if first != second:
+        raise RuntimeError(f"two builds of the .{suffix} package differ")
+    print(f"Verified reproducible .{suffix}: {len(first)} bytes, sha256 {digest(first)}")
+    return scratch / f"first.{suffix}"
+
+
+def check_deb(deb):
+    info = subprocess.run(["dpkg-deb", "-I", str(deb)], check=True, stdout=subprocess.PIPE, text=True).stdout
+    for field in ("Package: fixture", "Version: 0.1.0", "Architecture: amd64", "Depends: ", "Installed-Size: "):
+        if field not in info:
+            raise RuntimeError(f"dpkg-deb -I lacks {field!r}:\n{info}")
+    listing = subprocess.run(["dpkg-deb", "-c", str(deb)], check=True, stdout=subprocess.PIPE, text=True).stdout
+    lines = listing.splitlines()
+    wanted = ["./opt/fixture/fixture", "./opt/fixture/resources/app/desktop.json", "./opt/fixture/LICENSES/PROVIDERS.txt",
+              "./usr/share/applications/fixture.desktop", "./usr/share/icons/hicolor/256x256/apps/fixture.png",
+              "./usr/bin/fixture -> /opt/fixture/fixture"]
+    for path in wanted:
+        if not any(line.endswith(" " + path) for line in lines):
+            raise RuntimeError(f"dpkg-deb -c lacks {path}")
+    if any(line.endswith(".nra") for line in lines):
+        raise RuntimeError("the .deb holds Neura source")
+    if not_root := [line for line in lines if "root/root" not in line]:
+        raise RuntimeError(f"the .deb has entries not owned by root: {not_root[:3]}")
+    sandbox = next(line for line in lines if line.endswith(" ./opt/fixture/chrome-sandbox"))
+    if not sandbox.startswith("-rwsr-xr-x"):
+        raise RuntimeError(f"chrome-sandbox is not setuid root: {sandbox}")
+    print(f"Verified .deb metadata and listing ({len(lines)} entries)")
+
+
+def check_refusals(engine, directory, scratch, icon):
+    for extra, message in ((["--format", "dmg"], "built on macOS"), (["--format", "msix"], "built on Windows"),
+                           (["--sign"], "signing runs on the target system"),
+                           (["--format", "zip"], "needs the Windows x86-64 engine")):
+        result = packager(engine, directory, scratch / "refused", icon, *extra, check=False)
+        if result.returncode == 0 or message not in result.stderr or (scratch / "refused").exists():
+            raise RuntimeError(f"{extra} was not refused as expected: {result.stderr}")
+    hooked = scratch / "hooked"
+    shutil.copytree(directory, hooked)
+    manifest = json.loads((hooked / "desktop.json").read_text())
+    manifest["testHooks"] = {"dialogs": "test-dialogs.json"}
+    (hooked / "desktop.json").write_text(json.dumps(manifest))
+    result = packager(engine, hooked, scratch / "refused", icon, check=False)
+    if result.returncode == 0 or "--test-hooks" not in result.stderr:
+        raise RuntimeError("a release build of a desktop.json with test hooks was not refused")
+    print("Verified refusals: .dmg, .msix, --sign, a .zip without the Windows engine, test hooks in a release")
+
+
+def check_test_hooks(engine, directory, scratch, icon):
+    script = scratch / "dialogs.json"
+    script.write_text('[{"canceled": true}]')
+    release = package(engine, directory, scratch / "release.tar.gz", icon)
+    test = package(engine, directory, scratch / "test.tar.gz", icon, "--test-hooks", str(script))
+    with tarfile.open(scratch / "release.tar.gz") as archive:
+        if "fixture/resources/app/test-dialogs.json" in archive.getnames():
+            raise RuntimeError("a release package holds the dialog script")
+        if "testHooks" in json.loads(archive.extractfile("fixture/resources/app/desktop.json").read()):
+            raise RuntimeError("a release package names test hooks")
+    with tarfile.open(scratch / "test.tar.gz") as archive:
+        manifest = json.loads(archive.extractfile("fixture/resources/app/desktop.json").read())
+        if manifest.get("testHooks") != {"dialogs": "test-dialogs.json"}:
+            raise RuntimeError("a --test-hooks package does not name its dialog script")
+    if release == test:
+        raise RuntimeError("the test package equals the release package")
+    print("Verified test hooks: only a --test-hooks package carries the dialog driver")
+
+
+def check_zip(directory, scratch, icon):
+    # A stand-in for the Windows engine directory: the file names the packager handles, with placeholder bytes.
+    engine = scratch / "windows-engine"
+    (engine / "resources").mkdir(parents=True)
+    (engine / "version").write_text("45.3.3")
+    for name, data in (("electron.exe", b"MZ stand-in"), ("ffmpeg.dll", b"stand-in"), ("LICENSE", b"license"),
+                       ("LICENSES.chromium.html", b"notices"), ("resources/default_app.asar", b"excluded")):
+        (engine / name).write_bytes(data)
+    archive = twice(engine, directory, scratch, icon, "zip", "--format", "zip")
+    with zipfile.ZipFile(archive) as opened:
+        names = opened.namelist()
+        if opened.testzip() is not None:
+            raise RuntimeError("the .zip is corrupt")
+    for wanted in ("fixture/fixture.exe", "fixture/resources/icons/fixture.ico", "fixture/LICENSES/LICENSE.electron",
+                   "fixture/resources/app/main.js"):
+        if wanted not in names:
+            raise RuntimeError(f"the .zip lacks {wanted}")
+    if "fixture/resources/default_app.asar" in names:
+        raise RuntimeError("the .zip holds default_app.asar")
+    print(f"Verified the .zip container from a stand-in Windows engine ({len(names)} entries); not a Windows package")
+
+
+def launch(executable, scratch, label):
+    home = scratch / f"home {label} é"
+    home.mkdir()
+    environment = isolated_environment(HOME=str(home), XDG_DATA_HOME=str(home / "data"))
+    result = subprocess.run(["xvfb-run", "-a", sys.executable, str(Path(__file__).resolve()), "--inner", str(executable)],
+                            env=environment, timeout=90)
+    return result.returncode
 
 
 def descendants(pid):
@@ -174,27 +300,30 @@ def main():
     with tempfile.TemporaryDirectory(prefix="neura-desktop-package-") as scratch:
         scratch = Path(scratch)
         child = build_child(str(args.neura.resolve()), scratch)
-        make_package(scratch / "package", child)
+        directory = scratch / "package"
+        make_package(directory, child)
+        icon = make_icon(scratch / "icon.png")
         engine = args.electron.resolve().parent
-        first = package(engine, scratch / "package", scratch / "first.tar.gz")
-        second = package(engine, scratch / "package", scratch / "second.tar.gz")
-        if first != second:
-            raise RuntimeError("two builds of the package differ")
-        print(f"Verified reproducible package: {len(first)} bytes, sha256 {digest(first)}")
+        tarball = twice(engine, directory, scratch, icon, "tar.gz")
         install = scratch / "Install dir é"
         install.mkdir()
-        with tarfile.open(scratch / "first.tar.gz") as archive:
+        with tarfile.open(tarball) as archive:
             names = archive.getnames()
             if any(name.endswith(".nra") for name in names):
                 raise RuntimeError("the package holds Neura source")
+            if "fixture/resources/icons/512x512.png" not in names:
+                raise RuntimeError("the package has no icons")
             archive.extractall(install, filter="data")
-        executable = install / "fixture" / "fixture"
-        home = scratch / "home é"
-        home.mkdir()
-        environment = isolated_environment(HOME=str(home), XDG_DATA_HOME=str(home / "data"))
-        result = subprocess.run(["xvfb-run", "-a", sys.executable, str(Path(__file__).resolve()), "--inner", str(executable)],
-                                env=environment, timeout=90)
-        return result.returncode
+        failed = launch(install / "fixture" / "fixture", scratch, "tar")
+        deb = twice(engine, directory, scratch, icon, "deb", "--format", "deb")
+        check_deb(deb)
+        root = scratch / "Deb root é"
+        subprocess.run(["dpkg-deb", "-x", str(deb), str(root)], check=True)
+        failed |= launch(root / "opt" / "fixture" / "fixture", scratch, "deb")
+        check_zip(directory, scratch, icon)
+        check_refusals(engine, directory, scratch, icon)
+        check_test_hooks(engine, directory, scratch, icon)
+        return failed
 
 
 if __name__ == "__main__":
