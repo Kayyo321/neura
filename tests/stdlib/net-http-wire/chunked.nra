@@ -1,0 +1,125 @@
+let chunked = import:Std.Net.Http.Chunked;
+let http_headers = import:Std.Net.Http.Headers;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Std.Net.Http.Chunked: encoding, decoding and its errors. The messages are
+// built from the grammar of RFC 9112 section 7.1 (chunk, last-chunk,
+// trailer-section) and section 7.1.1 (chunk-ext); that RFC has no example
+// message to copy.
+let ChunkedTests = module (
+    // Chunks of 4, 5 (with extensions, one a quoted-string with a quoted-pair)
+    // and 14 bytes, a last-chunk of "000", one trailer field, then "NEXT".
+    const Sample: string = "4\r\nWiki\r\n5;name=val ; q = \"a\\\"b\"\r\npedia\r\nE\r\n in\r\n\r\nchunks.\r\n"
+        + "000\r\nExpires: never\r\n\r\nNEXT";
+
+    const SampleData: string = "Wikipedia in\r\n\r\nchunks.";
+
+    let text = func(bytes: uint8[list]) -> string => strings.from_bytes_lossy(bytes);
+
+    let decode_status = func(body: string, limits: wire.Limits) -> int =>
+        wire.rejection_status(test.assert_err<uint8[list]>(chunked.decode(strings.to_bytes(body), limits)));
+
+    let status = func(body: string) -> int => decode_status(body, new wire.Limits());
+
+    export let test_decode_sample = func {
+        last decoder = new chunked.ChunkedDecoder();
+        last data = test.assert_ok<uint8[list]>(decoder.feed(strings.to_bytes(Sample)));
+        test.assert_equal_string(SampleData, text(data));
+        test.assert(decoder.is_done());
+        test.assert_equal_int64(23, decoder.data_length());
+        test.assert_equal_string("never", test.assert_some<string>(decoder.trailers().get("expires")));
+        test.assert_equal_string("NEXT", text(decoder.remainder()));
+        // Bytes fed after the end join the remainder.
+        test.assert_equal<int>(0, test.assert_ok<uint8[list]>(decoder.feed(strings.to_bytes("!"))).length);
+        test.assert_equal_string("NEXT!", text(decoder.remainder()));
+        test.assert(strings.starts_with(decoder.to_string(), "ChunkedDecoder{"));
+    };
+
+    export let test_decode_forms = func {
+        test.assert_equal_string("", text(test.assert_ok<uint8[list]>(chunked.decode(strings.to_bytes("0\r\n\r\n"), new wire.Limits()))));
+        test.assert_equal_string("0123456789abcdefghijklmnop",
+            text(test.assert_ok<uint8[list]>(chunked.decode(strings.to_bytes("1A\r\n0123456789abcdefghijklmnop\r\n0\r\n\r\n"), new wire.Limits()))));
+        test.assert_equal_string("Wiki",
+            text(test.assert_ok<uint8[list]>(chunked.decode(strings.to_bytes("0004;a\r\nWiki\r\n0;b=c\r\n\r\n"), new wire.Limits()))));
+    };
+
+    export let test_framing_errors = func {
+        test.assert_equal<int>(400, status("x\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status(";a\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4\rWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4\r\nWikiX\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4\r\nWiki\rX0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4\r\nWiki\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("0\r\n\n"));
+        test.assert_equal<int>(400, status("0\r\nX: 1\n\r\n"));
+        test.assert_equal<int>(400, status("0\r\nX: 1\rY\r\n\r\n"));
+        test.assert_equal<int>(400, status("4\r\nWiki\r\n"));
+        test.assert_equal<int>(400, status("0\r\n\r\nextra"));
+        test.assert_equal<int>(400, status("-4\r\nWiki\r\n0\r\n\r\n"));
+    };
+
+    // RFC 9112 section 7.1.1 grammar: whitespace only before ";" and around
+    // "=", a token name, a token or quoted-string value.
+    export let test_extension_errors = func {
+        test.assert_equal<int>(400, status("4 \r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4;\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4;a=\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4;a=\"x\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4;a b\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4x\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal<int>(400, status("4;(a)\r\nWiki\r\n0\r\n\r\n"));
+        test.assert_equal_string("Wiki", text(test.assert_ok<uint8[list]>(chunked.decode(
+            strings.to_bytes("4 ;a\t=\t\"\"\r\nWiki\r\n0\r\n\r\n"), new wire.Limits()))));
+    };
+
+    // The body limit is cumulative and checked before data is read; a huge
+    // size is 413 and never overflows.
+    export let test_limits = func {
+        last small = new wire.Limits(16384, 2, 10, 8, 16, true, ["GET"]);
+        test.assert_equal_string("0123456789", text(test.assert_ok<uint8[list]>(chunked.decode(
+            strings.to_bytes("a\r\n0123456789\r\n0\r\n\r\n"), small))));
+        test.assert_equal<int>(413, decode_status("b\r\n0123456789a\r\n0\r\n\r\n", small));
+        test.assert_equal<int>(413, decode_status("6\r\nabcdef\r\n5\r\nabcde\r\n0\r\n\r\n", small));
+        test.assert_equal<int>(413, decode_status("ffffffffffffffffffffffffffffffff\r\n", new wire.Limits()));
+        test.assert_equal<int>(413, decode_status("8000000000000000\r\n", new wire.Limits(100, 10, 9223372036854775807)));
+        test.assert_equal<int>(400, decode_status("7fffffffffffffff\r\n", new wire.Limits(100, 10, 9223372036854775807)));
+        // The size line limit counts the digits and extensions (8 here).
+        test.assert_equal_string("Wiki", text(test.assert_ok<uint8[list]>(chunked.decode(
+            strings.to_bytes("4;abcdef\r\nWiki\r\n0\r\n\r\n"), small))));
+        test.assert_equal<int>(400, decode_status("4;abcdefg\r\nWiki\r\n0\r\n\r\n", small));
+        // The trailer limit (16 bytes here, empty line included) and the field limit (2).
+        test.assert_equal_string("", text(test.assert_ok<uint8[list]>(chunked.decode(
+            strings.to_bytes("0\r\nA: 123456789\r\n\r\n"), small))));
+        test.assert_equal<int>(431, decode_status("0\r\nA: 1234567890\r\n\r\n", small));
+        test.assert_equal<int>(431, decode_status("0\r\nA: 1\r\nB: 2\r\nC: 3\r\n\r\n", new wire.Limits(100, 2, 100)));
+        test.assert_equal<int>(400, decode_status("0\r\nBad Name: 1\r\n\r\n", small));
+        test.assert_equal<int>(400, decode_status("0\r\n folded\r\n\r\n", small));
+    };
+
+    export let test_error_is_sticky = func {
+        last decoder = new chunked.ChunkedDecoder();
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<uint8[list]>(decoder.feed(strings.to_bytes("z\r\n")))));
+        test.assert_equal<int>(400, wire.rejection_status(test.assert_err<uint8[list]>(decoder.feed(strings.to_bytes("0\r\n\r\n")))));
+        test.assert(!decoder.is_done());
+    };
+
+    export let test_encode = func {
+        test.assert_equal_string("4\r\nWiki\r\n", text(chunked.encode_chunk(strings.to_bytes("Wiki"))));
+        test.assert_equal<int>(0, chunked.encode_chunk(new uint8[list]()).length);
+        test.assert_equal_string("1a\r\n0123456789abcdefghijklmnop\r\n",
+            text(chunked.encode_chunk(strings.to_bytes("0123456789abcdefghijklmnop"))));
+        test.assert_equal_string("0\r\n\r\n", text(chunked.last_chunk(new http_headers.Headers())));
+        test.assert_equal_string("0\r\nExpires: never\r\nX: 1\r\n\r\n",
+            text(chunked.last_chunk(http_headers.of(new(["Expires", "X"]), new(["never", "1"])))));
+        test.assert_equal_string("4\r\nWiki\r\n4\r\npedi\r\n1\r\na\r\n0\r\n\r\n",
+            text(chunked.encode(strings.to_bytes("Wikipedia"), 4)));
+        test.assert_equal_string("0\r\n\r\n", text(chunked.encode(new uint8[list](), 4)));
+        last data = strings.to_bytes(strings.repeat("0123456789", 30));
+        last body = chunked.encode(data, 7);
+        test.assert_equal_string(text(data), text(test.assert_ok<uint8[list]>(chunked.decode(body, new wire.Limits()))));
+    };
+);

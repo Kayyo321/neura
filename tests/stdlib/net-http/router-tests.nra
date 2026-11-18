@@ -1,0 +1,274 @@
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let http = import:Std.Net.Http;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// Std.Net.Http routing and middleware: the Backend030 "HTTP" rules and the edge cases named in its list
+// (case numbers from docs/design/Backend030.md, "Edge cases").
+let RouterTests = module (
+    let ok_text = func(text: string) -> result.Result<http.Response> => result.Result<http.Response>.Ok(http.text(200, text));
+
+    let show_part = func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+        ok_text("part " + (params.value("id")?));
+
+    let new_part = func(request: http.Request, params: http.Params) -> result.Result<http.Response> => ok_text("new form");
+
+    let list_parts = func(request: http.Request, params: http.Params) -> result.Result<http.Response> => ok_text("list");
+
+    let create_part = func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+        result.Result<http.Response>.Ok(http.text(201, "created"));
+
+    let failing = func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+        result.Result<http.Response>.Err(errors.custom("db.down", "secret detail"));
+
+    let body_of = func(response: http.Response) -> string => response.body_text();
+
+    export let test_literal_beats_parameter = func {
+        // Case 4: /parts/new and /parts/{id} both registered; the literal wins.
+        last router = new http.Router();
+        router.get("/parts/{id}", show_part);
+        router.get("/parts/new", new_part);
+        test.assert_ok<unit.Unit>(router.check());
+        test.assert_equal_string("new form", body_of(router.dispatch(http.request("GET", "/parts/new"))));
+        test.assert_equal_string("part 7", body_of(router.dispatch(http.request("GET", "/parts/7"))));
+    };
+
+    export let test_literal_backtracks_to_parameter = func {
+        // /a/b/d is literal at depth 2 but only /a/{x}/c ends in c.
+        last router = new http.Router();
+        router.get("/a/{x}/c", show_x);
+        router.get("/a/b/d", new_part);
+        test.assert_equal_string("x=b", body_of(router.dispatch(http.request("GET", "/a/b/c"))));
+        test.assert_equal_string("new form", body_of(router.dispatch(http.request("GET", "/a/b/d"))));
+    };
+
+    let show_x = func(request: http.Request, params: http.Params) -> result.Result<http.Response> =>
+        ok_text("x=" + (params.value("x")?));
+
+    export let test_segment_count_is_exact = func {
+        last router = new http.Router();
+        router.get("/parts/{id}", show_part);
+        test.assert_equal<int>(404, router.dispatch(http.request("GET", "/parts")).status);
+        test.assert_equal<int>(404, router.dispatch(http.request("GET", "/parts/7/x")).status);
+        test.assert_equal<int>(404, router.dispatch(http.request("GET", "/parts/")).status);
+        test.assert_equal<int>(200, router.dispatch(http.request("GET", "/parts/7?full=1")).status);
+    };
+
+    export let test_root_and_parameter_decoding = func {
+        last router = new http.Router();
+        router.get("/", list_parts);
+        router.get("/parts/{id}", show_part);
+        test.assert_equal_string("list", body_of(router.dispatch(http.request("GET", "/"))));
+        test.assert_equal_string("part a b/c", body_of(router.dispatch(http.request("GET", "/parts/a%20b%2Fc"))));
+        // A malformed escape is kept as written.
+        test.assert_equal_string("part 100%", body_of(router.dispatch(http.request("GET", "/parts/100%"))));
+    };
+
+    export let test_not_found_and_method_not_allowed = func {
+        // Case 23: no route is 404; a route under another method is 405 with Allow.
+        last router = new http.Router();
+        router.get("/parts", list_parts);
+        router.post("/parts", create_part);
+        router.delete("/parts/{id}", show_part);
+        last missing = router.dispatch(http.request("GET", "/nothing"));
+        test.assert_equal<int>(404, missing.status);
+        test.assert_equal_string("{\"error\":{\"code\":\"not_found\",\"message\":\"no route matches\",\"request_id\":\"\"}}",
+            body_of(missing));
+        last wrong = router.dispatch(http.request("PUT", "/parts"));
+        test.assert_equal<int>(405, wrong.status);
+        test.assert_equal_string("GET, HEAD, POST", test.assert_some<string>(wrong.headers.get("Allow")));
+        last only_delete = router.dispatch(http.request("GET", "/parts/3"));
+        test.assert_equal<int>(405, only_delete.status);
+        test.assert_equal_string("DELETE", test.assert_some<string>(only_delete.headers.get("Allow")));
+        test.assert_equal<int>(201, router.dispatch(http.request("POST", "/parts")).status);
+    };
+
+    export let test_method_is_exact_before_literal = func {
+        // A literal route of another method does not hide a parameter route of this method.
+        last router = new http.Router();
+        router.get("/parts/{id}", show_part);
+        router.post("/parts/new", create_part);
+        test.assert_equal_string("part new", body_of(router.dispatch(http.request("GET", "/parts/new"))));
+    };
+
+    export let test_head_uses_get_without_body = func {
+        // Case 3: HEAD /parts/7 answered from the GET route, with Content-Length and no body.
+        last router = new http.Router();
+        router.get("/parts/{id}", show_part);
+        last head = router.dispatch(http.request("HEAD", "/parts/7"));
+        test.assert_equal<int>(200, head.status);
+        test.assert_equal<int>(0, head.body().length);
+        test.assert_equal_string("6", test.assert_some<string>(head.headers.get("Content-Length")));
+        test.assert_equal_string("text/plain; charset=utf-8", test.assert_some<string>(head.headers.get("Content-Type")));
+    };
+
+    export let test_duplicate_routes_fail_the_startup_check = func {
+        // Case 24: GET /parts/{id} and GET /parts/{code}: the startup check fails.
+        last router = new http.Router();
+        router.get("/parts/{id}", show_part);
+        router.get("/parts/{code}", show_part);
+        router.post("/parts/{code}", create_part);
+        last problem = test.assert_err<unit.Unit>(router.check());
+        test.assert(strings.contains(errors.message(problem), "GET /parts/{code}: duplicate of GET /parts/{id}"));
+        test.assert_equal<int>(1, router.problems_found().length);
+        last answer = router.startup_response();
+        test.assert_equal<int>(500, answer.status);
+        test.assert(strings.contains(body_of(answer), "startup_check_failed"));
+        // The first route still answers.
+        test.assert_equal_string("part 1", body_of(router.dispatch(http.request("GET", "/parts/1"))));
+    };
+
+    export let test_invalid_patterns_are_reported = func {
+        last router = new http.Router();
+        router.get("parts", list_parts);
+        router.get("/parts//x", list_parts);
+        router.get("/parts/{1d}", list_parts);
+        router.get("/parts/{id}/{id}", list_parts);
+        router.get("/parts/a{id}", list_parts);
+        last group = new http.Routes("bad host!");
+        group.get("/x", list_parts);
+        router.mount(group);
+        test.assert_equal<int>(6, router.problems_found().length);
+        test.assert_equal<int>(0, router.size());
+        test.assert_err<unit.Unit>(router.check());
+    };
+
+    export let test_startup_response_ok = func {
+        last router = new http.Router();
+        router.get("/parts", list_parts);
+        router.post("/parts", create_part);
+        last answer = router.startup_response();
+        test.assert_equal<int>(200, answer.status);
+        test.assert_equal_string("{\"status\":\"ok\",\"routes\":2}", body_of(answer));
+    };
+
+    export let test_error_becomes_envelope_without_detail = func {
+        // Case 25: a handler returns Err: 500 with the envelope and no message of the error; the error is logged
+        // with the request identifier.
+        last logged: string[list] = new;
+        last router = new http.Router();
+        router.on_error(new func(line: string) {
+            logged.append(line);
+        });
+        router.get("/fail", failing);
+        last fields = new http.Headers();
+        last request = new http.Request("GET", "/fail", fields, new http.MemoryBody(new uint8[list]()), 100, "10.0.0.1",
+            "https", "req-42");
+        last answer = router.dispatch(request);
+        test.assert_equal<int>(500, answer.status);
+        test.assert_equal_string(
+            "{\"error\":{\"code\":\"internal_error\",\"message\":\"internal server error\",\"request_id\":\"req-42\"}}",
+            body_of(answer));
+        test.assert(!strings.contains(body_of(answer), "secret"));
+        test.assert_equal<int>(1, logged.length);
+        test.assert_equal_string("request req-42 failed: secret detail", logged[0]);
+    };
+
+    // Appends its tag before and after the rest of the chain.
+    let tracer = func(trace: string[list], tag: string) -> func(http.Request, http.Next) -> result.Result<http.Response> =>
+        new func(request: http.Request, next: http.Next) -> result.Result<http.Response> {
+            trace.append(tag);
+            last response = next.call(request)?;
+            trace.append(tag);
+            return result.Result<http.Response>.Ok(response);
+        };
+
+    export let test_middleware_order = func {
+        // Case 8: three middlewares added in order: 1, 2, 3, handler, 3, 2, 1; then group and route middleware.
+        last trace: string[list] = new;
+        last router = new http.Router();
+        router.use(tracer(trace, "1"));
+        router.use(tracer(trace, "2"));
+        router.use(tracer(trace, "3"));
+        last group = new http.Routes();
+        group.use(tracer(trace, "g"));
+        last route = group.add("GET", "/t", new func(request: http.Request, params: http.Params) -> result.Result<http.Response> {
+            trace.append("h");
+            return result.Result<http.Response>.Ok(http.empty(204));
+        });
+        route.use(tracer(trace, "r"));
+        router.mount(group);
+        test.assert_equal<int>(204, router.dispatch(http.request("GET", "/t")).status);
+        test.assert_equal_string("1 2 3 g r h r g 3 2 1", strings.join(trace, " "));
+        // Router middleware also wraps a miss; route middleware does not.
+        while (trace.length > 0) {
+            trace.remove_at(0);
+        }
+        test.assert_equal<int>(404, router.dispatch(http.request("GET", "/none")).status);
+        test.assert_equal_string("1 2 3 3 2 1", strings.join(trace, " "));
+    };
+
+    export let test_middleware_may_answer_without_next = func {
+        // Case 9: a middleware that answers without calling next.
+        last router = new http.Router();
+        router.use(new func(request: http.Request, next: http.Next) -> result.Result<http.Response> =>
+            result.Result<http.Response>.Ok(http.text(503, "maintenance")));
+        router.get("/parts", failing);
+        last answer = router.dispatch(http.request("GET", "/parts"));
+        test.assert_equal<int>(503, answer.status);
+        test.assert_equal_string("maintenance", body_of(answer));
+    };
+
+    export let test_middleware_error_becomes_500 = func {
+        last router = new http.Router();
+        router.on_error(new func(line: string) {});
+        router.use(new func(request: http.Request, next: http.Next) -> result.Result<http.Response> =>
+            result.Result<http.Response>.Err(errors.custom("mw", "broken")));
+        router.get("/parts", list_parts);
+        test.assert_equal<int>(500, router.dispatch(http.request("GET", "/parts")).status);
+    };
+
+    export let test_host_bound_routes = func {
+        last router = new http.Router();
+        router.get("/", list_parts);
+        last api = new http.Routes("API.example.com");
+        api.get("/", new_part);
+        router.mount(api);
+        last tenants = new http.Routes("*.example.com");
+        tenants.get("/", create_part);
+        tenants.post("/only", create_part);
+        router.mount(tenants);
+        test.assert_ok<unit.Unit>(router.check());
+        test.assert_equal_string("new form", body_of(router.dispatch(with_host("GET", "/", "api.example.com:8080"))));
+        test.assert_equal<int>(201, router.dispatch(with_host("GET", "/", "acme.example.com")).status);
+        test.assert_equal_string("list", body_of(router.dispatch(with_host("GET", "/", "example.com"))));
+        test.assert_equal_string("list", body_of(router.dispatch(http.request("GET", "/"))));
+        // Allow covers the trees that apply to the host.
+        test.assert_equal<int>(405, router.dispatch(with_host("GET", "/only", "acme.example.com")).status);
+        test.assert_equal<int>(404, router.dispatch(with_host("GET", "/only", "other.org")).status);
+        // The same pattern under two hosts is not a duplicate.
+        test.assert_equal<int>(4, router.size());
+    };
+
+    let with_host = func(method: string, target: string, host: string) -> http.Request {
+        last fields = new http.Headers();
+        fields.add("Host", host);
+        return http.request_with(method, target, fields, new uint8[list]());
+    };
+
+    export let test_router_is_a_service_and_filters_adapt = func {
+        last router = new http.Router();
+        router.get("/parts/{id}", show_part);
+        last as_service: services.Service<http.Request, http.Response> = router;
+        last answer = test.assert_ok<http.Response>(as_service.call(http.request("GET", "/parts/9")));
+        test.assert_equal_string("part 9", body_of(answer));
+        // A middleware as a filter in a FilterChain, and back.
+        last trace: string[list] = new;
+        last chain = filters.chain<http.Request, http.Response>();
+        chain.add(http.as_filter(tracer(trace, "a")));
+        chain.add(http.as_filter(tracer(trace, "b")));
+        last wrapped = chain.then(router);
+        test.assert_equal<int>(200, test.assert_ok<http.Response>(wrapped.call(http.request("GET", "/parts/1"))).status);
+        test.assert_equal_string("a b b a", strings.join(trace, " "));
+        last again = new http.Router();
+        again.use(http.from_filter(http.as_filter(tracer(trace, "c"))));
+        again.get("/x", list_parts);
+        test.assert_equal<int>(200, again.dispatch(http.request("GET", "/x")).status);
+        test.assert_equal_string("a b b a c c", strings.join(trace, " "));
+    };
+);

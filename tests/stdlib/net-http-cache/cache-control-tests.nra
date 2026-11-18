@@ -1,0 +1,152 @@
+let cc = import:Std.Net.Http.CacheControl;
+let headers = import:Std.Net.Http.Headers;
+let optional = import:Std.Core.Optional;
+let test = import:Std.Test;
+
+// Std.Net.Http.CacheControl. The argument examples 'max-age=5', 'max-stale=10', 'min-fresh=20' and
+// 's-maxage=10' are RFC 9111 sections 5.2.1.1, 5.2.1.2, 5.2.1.3 and 5.2.2.10; the 2147483648 clamp is RFC 9111
+// section 1.2.2.
+let CacheControlTests = module (
+    let seconds = func(value: optional.Optional<int64>) -> int64 => test.assert_some<int64>(value);
+
+    export let test_request_directives = func {
+        last list = cc.parse("max-age=5, max-stale=10, min-fresh=20, no-cache, no-store, no-transform, only-if-cached");
+        test.assert_equal<int>(7, list.size());
+        test.assert_equal<int64>(5, seconds(list.max_age()));
+        test.assert_equal<int64>(10, seconds(list.max_stale()));
+        test.assert_equal<int64>(20, seconds(list.min_fresh()));
+        test.assert(list.no_cache());
+        test.assert(list.no_store());
+        test.assert(list.no_transform());
+        test.assert(list.only_if_cached());
+        test.assert(!list.is_malformed());
+        test.assert_equal<int>(0, list.extensions().length);
+    };
+
+    export let test_response_directives = func {
+        last list = cc.parse("public, s-maxage=10, must-revalidate, proxy-revalidate, must-understand");
+        test.assert(list.is_public());
+        test.assert_equal<int64>(10, seconds(list.s_maxage()));
+        test.assert(list.must_revalidate());
+        test.assert(list.proxy_revalidate());
+        test.assert(list.must_understand());
+        test.assert_none<int64>(list.max_age());
+        test.assert(!list.is_private());
+        test.assert(!list.no_cache());
+    };
+
+    export let test_field_lists = func {
+        last list = cc.parse("no-cache=\"Set-Cookie, X-Token\", private=\"Authorization\"");
+        last no_cache = list.no_cache_fields();
+        test.assert_equal<int>(2, no_cache.length);
+        test.assert_equal_string("Set-Cookie", no_cache[0]);
+        test.assert_equal_string("X-Token", no_cache[1]);
+        test.assert_equal<int>(1, list.private_fields().length);
+        test.assert(list.no_cache());
+        test.assert(list.is_private());
+        // Unqualified forms have no fields; the token form is accepted too.
+        test.assert_equal<int>(0, cc.parse("no-cache").no_cache_fields().length);
+        test.assert_equal_string("Foo", cc.parse("private=Foo").private_fields()[0]);
+    };
+
+    export let test_names_ignore_case_and_first_wins = func {
+        last list = cc.parse("Max-Age=60, MAX-AGE=5, No-Store");
+        test.assert_equal<int64>(60, seconds(list.max_age()));
+        test.assert(list.has("no-store"));
+        test.assert(list.has("NO-STORE"));
+        test.assert_equal_string("max-age", list.at(0).name);
+    };
+
+    export let test_quoted_arguments = func {
+        // Recipients accept both forms (RFC 9111 section 5.2).
+        test.assert_equal<int64>(5, seconds(cc.parse("max-age=\"5\"").max_age()));
+        last list = cc.parse("ext=\"a, b \\\"c\\\" \\\\ d\", other=tok");
+        test.assert_equal<int>(2, list.size());
+        test.assert_equal_string("a, b \"c\" \\ d", test.assert_some<string>(list.argument("ext")));
+        test.assert_equal_string("tok", test.assert_some<string>(list.argument("other")));
+        test.assert(!list.is_malformed());
+    };
+
+    export let test_extensions_kept_in_order = func {
+        last list = cc.parse("community=\"UCI\", max-age=3, stale-while-revalidate=30, stale-if-error=60, x-flag");
+        last ext = list.extensions();
+        test.assert_equal<int>(4, ext.length);
+        test.assert_equal_string("community", ext[0].name);
+        test.assert_equal_string("UCI", test.assert_some<string>(ext[0].argument));
+        test.assert_equal_string("stale-while-revalidate", ext[1].name);
+        test.assert_equal_string("x-flag", ext[3].name);
+        test.assert_none<string>(ext[3].argument);
+        test.assert_equal<int64>(30, seconds(list.stale_while_revalidate()));
+        test.assert_equal<int64>(60, seconds(list.stale_if_error()));
+    };
+
+    export let test_delta_seconds_clamp = func {
+        test.assert_equal<int64>(2147483647, seconds(cc.parse_delta_seconds("2147483647")));
+        test.assert_equal<int64>(2147483648, seconds(cc.parse_delta_seconds("2147483648")));
+        test.assert_equal<int64>(2147483648, seconds(cc.parse_delta_seconds("2147483649")));
+        test.assert_equal<int64>(2147483648, seconds(cc.parse_delta_seconds("123456789012345678901234567890")));
+        test.assert_equal<int64>(0, seconds(cc.parse_delta_seconds("0000")));
+        test.assert_none<int64>(cc.parse_delta_seconds(""));
+        test.assert_none<int64>(cc.parse_delta_seconds("-1"));
+        test.assert_none<int64>(cc.parse_delta_seconds("1.5"));
+        test.assert_none<int64>(cc.parse_delta_seconds(" 5"));
+        test.assert_equal<int64>(2147483648, seconds(cc.parse("max-age=99999999999999999999").max_age()));
+    };
+
+    export let test_invalid_delta_arguments = func {
+        // Invalid max-age and s-maxage read as 0 (stale); the others read as absent.
+        test.assert_equal<int64>(0, seconds(cc.parse("max-age=abc").max_age()));
+        test.assert_equal<int64>(0, seconds(cc.parse("max-age").max_age()));
+        test.assert_equal<int64>(0, seconds(cc.parse("max-age=").max_age()));
+        test.assert_equal<int64>(0, seconds(cc.parse("s-maxage=-5").s_maxage()));
+        test.assert_equal<int64>(0, seconds(cc.parse("max-age=5 6").max_age()));
+        test.assert_none<int64>(cc.parse("min-fresh=x").min_fresh());
+        test.assert_none<int64>(cc.parse("min-fresh").min_fresh());
+        test.assert_none<int64>(cc.parse("max-stale=x").max_stale());
+        test.assert_equal<int64>(cc.MaxDeltaSeconds, seconds(cc.parse("max-stale").max_stale()));
+        test.assert_none<int64>(cc.parse("stale-if-error=soon").stale_if_error());
+    };
+
+    export let test_malformed_elements = func {
+        last list = cc.parse("max-age=5 6, =x, no-store, ext=\"open");
+        test.assert(list.is_malformed());
+        // "=x" has no name and is dropped; the others are kept.
+        test.assert_equal<int>(3, list.size());
+        test.assert(list.no_store());
+        test.assert_equal_string("\"open", test.assert_some<string>(list.argument("ext")));
+        test.assert_err<cc.CacheControl>(cc.parse_strict("max-age=5 6"));
+        test.assert_err<cc.CacheControl>(cc.parse_strict("max-age =5"));
+        test.assert_err<cc.CacheControl>(cc.parse_strict("é"));
+        test.assert_err<cc.CacheControl>(cc.parse_strict("ext=\"bad\"x"));
+        last ok = test.assert_ok<cc.CacheControl>(cc.parse_strict(" , max-age=5 ,, public ,"));
+        test.assert_equal<int>(2, ok.size());
+        test.assert_equal<int>(0, cc.parse("").size());
+        // A non-ASCII byte inside a quoted-string is obs-text and allowed.
+        test.assert_equal_string("café", test.assert_some<string>(cc.parse("ext=\"café\"").argument("ext")));
+    };
+
+    export let test_to_string_round_trip = func {
+        last list = cc.parse("Max-Age=5, no-cache=\"Set-Cookie\", private, ext=\"a b\", x=tok, max-stale");
+        last written = list.to_string();
+        test.assert_equal_string("max-age=5, no-cache=\"Set-Cookie\", private, ext=\"a b\", x=tok, max-stale", written);
+        test.assert(list.equals(cc.parse(written)));
+        test.assert_equal<uint32>(list.hash_code(), cc.parse(written).hash_code());
+        test.assert(!list.equals(cc.parse("max-age=6")));
+        test.assert_equal_string("e=\"q\\\"x\"", cc.parse("e=\"q\\\"x\"").to_string());
+    };
+
+    export let test_build_and_headers = func {
+        last list = new cc.CacheControl();
+        list.add("max-age", optional.Optional<string>.Some("60"));
+        list.add("Public", optional.Optional<string>.None);
+        test.assert_equal_string("max-age=60, public", list.to_string());
+        last fields = new headers.Headers();
+        fields.add("Cache-Control", "max-age=60");
+        fields.add("Content-Type", "text/plain");
+        fields.add("cache-control", "no-transform, private=\"a, b\"");
+        last joined = cc.of_headers(fields);
+        test.assert_equal<int>(3, joined.size());
+        test.assert(joined.no_transform());
+        test.assert_equal<int>(2, joined.private_fields().length);
+    };
+);

@@ -1,0 +1,388 @@
+let clocks = import:Std.Time.Clock;
+let dates = import:Std.Net.Http.Date;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let http = import:Std.Net.Http;
+let instants = import:Std.Time.Instant;
+let methods = import:Std.Net.Http.Method;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let strings = import:Std.Text.Strings;
+
+/// @brief The client pool: per-host concurrency limits and idempotency-aware retries around an
+/// `Std.Net.Http.Transport`.
+///
+/// `HostLimits` counts exchanges in flight per origin (scheme, host and port of the URL) and refuses one past
+/// the origin's limit. `RetryPolicy` decides whether a finished attempt is repeated: only for a request whose
+/// method is idempotent (RFC 9110 section 9.2.2: GET, HEAD, OPTIONS, TRACE, PUT, DELETE), or one that carries
+/// an `Idempotency-Key` field when the policy allows that, except that a refused connection (the request never
+/// left) is retried for any method. A retry follows a 502, 503 or 504, a 429 or 503 with `Retry-After`, or a
+/// connection failure (ConnectionRefused, ConnectionReset, TimedOut). Waits double from the base wait up to the
+/// cap; a `Retry-After` (RFC 9110 section 10.2.3, delay-seconds or an HTTP-date) replaces the computed wait,
+/// and one longer than the cap stops the retries. `PooledClient` applies both around a transport, sleeping on an
+/// injected clock. The network part rides on `Std.Net.Http.Client`'s transport, which needs `neura.http.fetch`.
+/// @see [Std.Net.Http.Pool](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Pool)
+#Since("0.3.0")
+export let Pool = module (
+    /// @brief What to do after an attempt: stop with its outcome, or wait and try again.
+    export let RetryDecision = enum (Stop, RetryAfter(durations.Duration));
+
+    /// @brief The origin key of a URL: lowercase "scheme://host:port", with port 80 or 443 filled in; "" when
+    /// the URL is not absolute http or https.
+    #[Pure, ThreadSafe]
+    export let origin_key = func(url: string) -> string {
+        last lower = strings.to_ascii_lower(url);
+        let scheme = "";
+        if (strings.starts_with(lower, "http://")) {
+            scheme = "http";
+        } else if (strings.starts_with(lower, "https://")) {
+            scheme = "https";
+        } else {
+            return "";
+        }
+        last start = scheme.byte_length + 3;
+        let end = start;
+        while (end < lower.byte_length) {
+            last b = lower.byte_at(end);
+            if (b == 47 || b == 63 || b == 35) {
+                break;
+            }
+            end++;
+        }
+        let authority = lower.slice(start, end);
+        last at = strings.last_index_of(authority, "@");
+        if (at >= 0) {
+            authority = authority.slice(at + 1, authority.byte_length);
+        }
+        last bracket = strings.last_index_of(authority, "]");
+        last colon = strings.last_index_of(authority, ":");
+        if (colon > bracket && colon >= 0) {
+            if (colon == authority.byte_length - 1) {
+                authority = authority.slice(0, colon);
+            } else {
+                return scheme + "://" + authority;
+            }
+        }
+        return scheme + "://" + authority + (scheme == "http" ? ":80" : ":443");
+    };
+
+    /// @brief Per-origin limits on exchanges in flight.
+    #[Final, NotThreadSafe]
+    export let HostLimits = class (
+        /// @brief The limit for origins without their own.
+        export last default_limit: int;
+        /// @brief Origins with their own limit.
+        last limited_keys: string[list] = new;
+        /// @brief Their limits, parallel to `limited_keys`.
+        last limits: int[list] = new;
+        /// @brief Origins with exchanges in flight.
+        last active_keys: string[list] = new;
+        /// @brief Their counts, parallel to `active_keys`.
+        last counts: int[list] = new;
+
+        /// @brief Limits of 6 per origin (the common browser value), or `per_origin`. A limit below 1 traps
+        /// with "invalid argument: limit".
+        export let init = func {
+            default_limit = 6;
+        } or func(per_origin: int) {
+            check_limit(per_origin);
+            default_limit = per_origin;
+        };
+
+        /// @brief Gives the origin of `url` its own limit.
+        export let set_limit = func(url: string, limit: int) {
+            check_limit(limit);
+            last key = origin_key(url);
+            for (let i = 0; i < limited_keys.length; i++) {
+                if (limited_keys[i] == key) {
+                    limits[i] = limit;
+                    return;
+                }
+            }
+            limited_keys.append(key);
+            limits.append(limit);
+        };
+
+        /// @brief The limit of the origin of `url`.
+        export let limit_for = func(url: string) -> int {
+            last key = origin_key(url);
+            for (let i = 0; i < limited_keys.length; i++) {
+                if (limited_keys[i] == key) {
+                    return limits[i];
+                }
+            }
+            return default_limit;
+        };
+
+        /// @brief The exchanges in flight to the origin of `url`.
+        export let in_flight = func(url: string) -> int {
+            last at = active_index(origin_key(url));
+            return at < 0 ? 0 : counts[at];
+        };
+
+        /// @brief Takes a slot for the origin of `url`; false at the limit.
+        export let try_acquire = func(url: string) -> bool {
+            last key = origin_key(url);
+            last limit = limit_for(url);
+            last at = active_index(key);
+            if (at < 0) {
+                active_keys.append(key);
+                counts.append(1);
+                return true;
+            }
+            if (counts[at] >= limit) {
+                return false;
+            }
+            counts[at] = counts[at] + 1;
+            return true;
+        };
+
+        /// @brief Returns a slot; releasing an origin without a slot traps with "invalid state: release without
+        /// acquire".
+        export let release = func(url: string) {
+            last at = active_index(origin_key(url));
+            if (at < 0 || counts[at] == 0) {
+                trap_with_message("invalid state: release without acquire");
+            }
+            counts[at] = counts[at] - 1;
+        };
+
+        /// @brief The text "HostLimits(default N)".
+        export let.override to_string = func -> string => "HostLimits(default " + default_limit.to_string() + ")";
+
+        /// @brief The position of `key` among the active origins, or -1.
+        let active_index = func(key: string) -> int {
+            for (let i = 0; i < active_keys.length; i++) {
+                if (active_keys[i] == key) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+    );
+
+    /// @brief When and how long to retry.
+    #[Final, NotThreadSafe]
+    export let RetryPolicy = class (
+        /// @brief The most attempts, the first included.
+        export last max_attempts: int;
+        /// @brief The wait before the second attempt.
+        export last base_wait: durations.Duration;
+        /// @brief The longest wait.
+        export last max_wait: durations.Duration;
+        /// @brief Whether an `Idempotency-Key` field makes any method retryable.
+        let honor_idempotency_key: bool = true;
+
+        /// @brief 3 attempts, 100 ms doubling up to 2 s; or the given values. Fewer than 1 attempt or a
+        /// negative wait traps with "invalid argument: retry policy".
+        export let init = func {
+            max_attempts = 3;
+            base_wait = durations.of_millis(100);
+            max_wait = durations.of_seconds(2);
+        } or func(attempts: int, base: durations.Duration, cap: durations.Duration) {
+            if (attempts < 1 || base.is_negative() || cap.is_negative()) {
+                trap_with_message("invalid argument: retry policy");
+            }
+            max_attempts = attempts;
+            base_wait = base;
+            max_wait = cap;
+        };
+
+        /// @brief Sets whether an `Idempotency-Key` field makes a request retryable.
+        export let set_honor_idempotency_key = func(honor: bool) {
+            honor_idempotency_key = honor;
+        };
+
+        /// @brief Whether `request` may be repeated after it may have reached the server.
+        export let is_repeatable = func(request: http.ClientRequest) -> bool =>
+            methods.is_idempotent_name(request.method)
+                || (honor_idempotency_key && request.headers.contains("Idempotency-Key"));
+
+        /// @brief The computed wait after attempt `attempt` (1-based): base times 2^(attempt-1), at most the cap.
+        export let backoff = func(attempt: int) -> durations.Duration {
+            last cap = max_wait.to_nanos();
+            let wait = base_wait.to_nanos();
+            for (let i = 1; i < attempt && wait < cap; i++) {
+                wait = wait > cap / 2 ? cap : wait * 2;
+            }
+            return durations.of_nanos(wait > cap ? cap : wait);
+        };
+
+        /// @brief The decision after attempt `attempt` ended with `outcome`; `now` resolves an HTTP-date
+        /// `Retry-After`.
+        #NoDiscard
+        export let decide = func(request: http.ClientRequest, attempt: int, outcome: Result<http.Response>,
+            now: clocks.Clock) -> RetryDecision {
+            if (attempt >= max_attempts) {
+                return RetryDecision.Stop;
+            }
+            return match (outcome) {
+                Result.Ok(response) => decide_status(request, attempt, response, now),
+                Result.Err(problem) => decide_error(request, attempt, problem),
+            };
+        };
+
+        /// @brief The decision for a response.
+        let decide_status = func(request: http.ClientRequest, attempt: int, response: http.Response, now: clocks.Clock)
+            -> RetryDecision {
+            last status = response.status;
+            if (!(status == 429 or 502 or 503 or 504) || !is_repeatable(request)) {
+                return RetryDecision.Stop;
+            }
+            match (retry_after(response, now)) {
+                Optional.Some(wait) => {
+                    if (wait.to_nanos() > max_wait.to_nanos()) {
+                        return RetryDecision.Stop;
+                    }
+                    return RetryDecision.RetryAfter(wait);
+                },
+                Optional.None => {},
+            }
+            if (status == 429) {
+                return RetryDecision.Stop;
+            }
+            return RetryDecision.RetryAfter(backoff(attempt));
+        };
+
+        /// @brief The decision for a transport error.
+        let decide_error = func(request: http.ClientRequest, attempt: int, problem: errors.Error) -> RetryDecision {
+            last retryable = match (problem) {
+                errors.Error.Io { kind, message, path } => kind == errors.IoErrorKind.ConnectionRefused
+                    || ((kind == errors.IoErrorKind.ConnectionReset || kind == errors.IoErrorKind.TimedOut)
+                        && is_repeatable(request)),
+                _ => false,
+            };
+            return retryable ? RetryDecision.RetryAfter(backoff(attempt)) : RetryDecision.Stop;
+        };
+
+        /// @brief The text "RetryPolicy(N attempts)".
+        export let.override to_string = func -> string => "RetryPolicy(" + max_attempts.to_string() + " attempts)";
+    );
+
+    /// @brief The wait a `Retry-After` field asks for: delay-seconds, or an HTTP-date minus the clock's now (zero
+    /// when past); None when absent or invalid (RFC 9110 section 10.2.3).
+    #NoDiscard
+    export let retry_after = func(response: http.Response, now: clocks.Clock) -> Optional<durations.Duration> {
+        last field = response.headers.get("Retry-After");
+        last text = match (field) {
+            Optional.Some(t) => t,
+            Optional.None => "",
+        };
+        if (text.byte_length == 0) {
+            return Optional<durations.Duration>.None;
+        }
+        let all_digits = true;
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) < 48 || text.byte_at(i) > 57) {
+                all_digits = false;
+            }
+        }
+        if (all_digits) {
+            if (text.byte_length > 9) {
+                return Optional<durations.Duration>.Some(durations.of_seconds(999999999));
+            }
+            let seconds: int64 = 0;
+            for (let i = 0; i < text.byte_length; i++) {
+                seconds = seconds * 10 + ((text.byte_at(i) - 48) as int64);
+            }
+            return Optional<durations.Duration>.Some(durations.of_seconds(seconds));
+        }
+        return match (now.now()) {
+            Result.Ok(current) => until(text, current),
+            Result.Err(_) => Optional<durations.Duration>.None,
+        };
+    };
+
+    /// @brief The wait until the HTTP-date `text`, zero when past; None when invalid.
+    let until = func(text: string, current: instants.Instant) -> Optional<durations.Duration> => match (dates.parse(text, current)) {
+        Result.Ok(when) => Optional<durations.Duration>.Some(non_negative(when.duration_since(current))),
+        Result.Err(_) => Optional<durations.Duration>.None,
+    };
+
+    /// @brief `span`, or zero when negative.
+    let non_negative = func(span: durations.Duration) -> durations.Duration =>
+        span.is_negative() ? durations.of_nanos(0) : span;
+
+    /// @brief A client that limits exchanges per origin and retries by a policy, over a transport; a
+    /// `Std.Net.Service<ClientRequest, Response>` and itself a `Transport`.
+    #[Final, NotThreadSafe]
+    export let PooledClient = class implements services.Service<http.ClientRequest, http.Response>, http.Transport (
+        /// @brief The transport.
+        last transport: http.Transport;
+        /// @brief The per-origin limits.
+        export last limits: HostLimits;
+        /// @brief The retry policy.
+        export last policy: RetryPolicy;
+        /// @brief The clock retries sleep on.
+        last clock: clocks.Clock;
+        /// @brief The attempts made by the last `send`.
+        let last_attempts: int = 0;
+
+        /// @brief A pooled client.
+        export let init = func(carrier: http.Transport, origin_limits: HostLimits, retries: RetryPolicy, time: clocks.Clock) {
+            transport = carrier;
+            limits = origin_limits;
+            policy = retries;
+            clock = time;
+        };
+
+        /// @brief Sends `request`: fails with "http.pool.busy" when its origin is at its limit; otherwise
+        /// attempts until the policy stops, sleeping between attempts, and returns the last outcome.
+        #NoDiscard
+        export let send = func(request: http.ClientRequest) -> Result<http.Response> {
+            last_attempts = 0;
+            if (origin_key(request.url).byte_length == 0) {
+                return Result<http.Response>.Err(errors.Error.Io { kind: errors.IoErrorKind.InvalidInput,
+                    message: "URL must be absolute http or https", path: "" });
+            }
+            if (!limits.try_acquire(request.url)) {
+                return Result<http.Response>.Err(errors.custom("http.pool.busy",
+                    "too many requests in flight to " + origin_key(request.url)));
+            }
+            let attempt = 0;
+            let outcome: Result<http.Response> = Result<http.Response>.Err(errors.custom("http.pool.none", "no attempt"));
+            while (true) {
+                attempt++;
+                outcome = transport.fetch(request);
+                last decision = policy.decide(request, attempt, outcome, clock);
+                last wait = match (decision) {
+                    RetryDecision.Stop => durations.of_nanos(-1),
+                    RetryDecision.RetryAfter(span) => span,
+                };
+                if (wait.is_negative()) {
+                    break;
+                }
+                last slept = clock.sleep(wait);
+                if (match (slept) {
+                    Result.Ok(_) => false,
+                    Result.Err(_) => true,
+                }) {
+                    break;
+                }
+            }
+            last_attempts = attempt;
+            limits.release(request.url);
+            return outcome;
+        };
+
+        /// @brief `send`, as a transport.
+        export let fetch = func(request: http.ClientRequest) -> Result<http.Response> => send(request);
+
+        /// @brief `send`, as a service.
+        export let call = func(request: http.ClientRequest) -> Result<http.Response> => send(request);
+
+        /// @brief The number of attempts the last `send` made.
+        export let attempts = func -> int => last_attempts;
+
+        /// @brief The text "PooledClient".
+        export let.override to_string = func -> string => "PooledClient";
+    );
+
+    /// @brief Traps unless `limit` is at least 1.
+    let check_limit = func(limit: int) {
+        if (limit < 1) {
+            trap_with_message("invalid argument: limit");
+        }
+    };
+);
