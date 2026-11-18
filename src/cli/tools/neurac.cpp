@@ -32,5 +32,11 @@ int main(int argc, char** argv) {
     if (start.arguments.size() > 1 && start.arguments[1] == "build" && neura::app::is_project_build(start.arguments)) {
         return neura::app::project_build_main(start.arguments);
     }
+    // `neura check` of a file inside a project: its package's import roots and the import rule E1030.
+    if (start.arguments.size() > 1 && start.arguments[1] == "check") {
+        auto arguments = neura::app::project_check_arguments(start.arguments);
+        if (!arguments) return 1;
+        return sdk_options_main(std::move(*arguments), command);
+    }
     return sdk_options_main(std::move(start.arguments), command);
 }

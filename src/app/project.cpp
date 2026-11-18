@@ -371,20 +371,6 @@ std::vector<std::string> package_closure(const Manifest& manifest, const std::st
     return order;
 }
 
-// A package root is a source directory whose name is the first component of
-// its modules: package root `ui` holds `Ui.Main` in `ui/main.nra`, so the
-// compiler's import root is the root's parent (Projects030.md, "Decisions").
-std::vector<fs::path> import_roots(const Project& project, const std::string& package) {
-    std::vector<fs::path> roots;
-    for (const auto& name : package_closure(project.manifest, package)) {
-        const auto found = project.resolved.packages.find(name);
-        if (found == project.resolved.packages.end()) continue;
-        auto parent = found->second.root.value.parent_path();
-        if (std::ranges::find(roots, parent) == roots.end()) roots.push_back(parent);
-    }
-    return roots;
-}
-
 fs::path entry_file(const Project& project, const Target& target) {
     const auto& root = project.resolved.packages.at(target.package.value).root;
     const auto file = root.value.parent_path() / module_path(target.entry.value);
@@ -415,7 +401,12 @@ Compiled compile(const Project& project, const Target& target, const BuildOption
     }
     if (options.no_optimize) command.emplace_back("--no-optimize");
     if (options.no_lift_hints) command.emplace_back("--no-lift-hints");
-    for (const auto& root : import_roots(project, target.package.value)) {
+    if (auto problems = check_closure(project, {source}); !problems.empty()) {
+        auto first = problems.front();
+        for (std::size_t i = 1; i < problems.size(); ++i) first.also(problems[i]);
+        throw first;
+    }
+    for (const auto& root : package_import_roots(project, target.package.value)) {
         command.emplace_back("-I");
         command.push_back(root.string());
     }
@@ -748,9 +739,15 @@ BuildResult build_server(Project& project, const std::string& name, const Target
 BuildResult build_desktop(Project& project, const std::string& name, const Target& target, const BuildOptions& options,
                           const fs::path& out) {
     const auto& desktop = std::get<DesktopSettings>(target.settings);
+    // The embedded web bundle is never marked `dev`: the desktop host refuses
+    // one, and `neura dev` restarts the host after a build instead of
+    // reloading the page.
     auto web_options = options;
     web_options.target = desktop.ui.value;
-    web_options.out.reset();
+    web_options.dev = false;
+    web_options.dev_reload.reset();
+    if (options.dev) web_options.out = project.resolved.root / "dist" / "dev" / desktop.ui.value;
+    else web_options.out.reset();
     const auto web = build_target(project, web_options);
     auto bundle = base_manifest(project, target);
     for (const auto& provider : desktop.providers) {
@@ -873,6 +870,10 @@ void print_diagnostic(std::ostream& err, const Diagnostic& diagnostic) {
     err << "error";
     if (diagnostic.data() && !diagnostic.data()->code.empty()) err << '[' << diagnostic.data()->code << ']';
     err << ": " << diagnostic.what() << '\n';
+    if (diagnostic.data()) {
+        for (const auto& help : diagnostic.data()->helps) err << "  help: " << help << '\n';
+        for (const auto& next : diagnostic.data()->more) print_diagnostic(err, next);
+    }
 }
 
 int spawn_and_wait(const std::vector<std::string>& arguments, const std::optional<fs::path>& directory) {

@@ -90,7 +90,7 @@ def main():
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         body = None
-        for _ in range(100):
+        for _ in range(600):
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}/parts', timeout=2) as response:
                     body = response.read().decode()

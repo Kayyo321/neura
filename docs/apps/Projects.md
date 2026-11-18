@@ -48,7 +48,9 @@ migrations = "server/migrations"
 migrate = "on_start"
 ```
 
-In 0.3.0 the compiler is given the import roots of the target's package and of the packages it depends on. Because sibling packages share a parent, a module can still import a package it does not depend on: the import rule `E1030` is not enforced yet.
+The compiler is given the import roots of the target's package and of the packages it depends on. Because sibling packages share a parent, the build first follows the imports from the entry through the project's packages: an import of a module whose package is not the importer's own, not `Std` and not in its `depends` closure is [E1030](../diagnostics/E1030.md) at the import. This keeps server code out of a web bundle when `ui` does not depend on `server`.
+
+`neura check` of a file inside a project, without `-I`, finds the nearest `neura.toml` above the file, checks the file with its package's import roots, and applies the same import rule.
 
 ## The lock
 
@@ -96,6 +98,23 @@ A server bundle then runs under `neura-server-host`, beside `neura-run` or on `P
 A desktop bundle runs under the pinned Electron 45.3.3 named by `NEURA_DESKTOP_ENGINE` (or installed as `lib/neura/desktop/electron/electron`) with the desktop host's `main.js` from `share/neura/desktop` (or `NEURA_DESKTOP_HOST`), which loads the bundle as a package directory. The `desktop` capability grants the clipboard services.
 
 A web bundle is not runnable: `neura run` names `neura dev` and a static file host instead.
+
+## Developing
+
+```sh
+neura dev --target web               # http://127.0.0.1:4310/
+neura dev --target server --port 9000 -- --config greeting=hi
+```
+
+`neura dev [--project <manifest>] --target <name> [--port <n>] [-- host arguments]` builds the target into `dist/dev/<target>`, marked `"dev": true`, runs it and rebuilds when a file it reads changes, in the foreground. It writes `neura.lock` only when there is none. A watcher compares the SHA-256 of the manifest, the lock, every package's source and asset files and the targets' stylesheets, icons and migrations every 250 ms; other files of the project, such as `dist/` and logs, are not watched. A build that fails is reported and the last good bundle stays in use.
+
+| Kind | What runs |
+| --- | --- |
+| `web` | A static HTTP server on `127.0.0.1`, port 4310 unless `--port` (`--port 0` lets the system choose; a busy port is an error before anything is built). The bundle carries `neura-dev.js`, which polls `/__neura/dev`: after a build the page reloads, or, when only stylesheet files changed, the links are replaced in place in their order. The state of the running program is not kept. Under history routing every application path is the page. |
+| `server` | `neura-server-host` with the bundle, as `neura run` starts it; `--port` listens on `127.0.0.1:<port>`, and the arguments after `--` go to the host. It is restarted after each build. |
+| `desktop` | The desktop host with the bundle, as `neura run` starts it, restarted after each build. The embedded web bundle is not marked `dev`. |
+
+`neura dev` stops on an interrupt, a hangup (closing its terminal), a termination request, or the end of its standard input. Each host runs in a process group of its own, which `neura dev` ends (`SIGTERM`, then `SIGKILL` after two seconds) and reaps when it restarts the host and when it stops; it registers nothing with the system. `neura run` and `neura package` refuse a bundle marked `dev` (`E1029`).
 
 ## Packaging
 

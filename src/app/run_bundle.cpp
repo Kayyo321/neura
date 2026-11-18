@@ -59,15 +59,15 @@ int exec(std::vector<std::string> arguments, std::ostream& err) {
 #endif
 }
 
-int run_server(const VerifiedBundle& bundle, const fs::path& root, const std::vector<std::string>& arguments,
-               std::ostream& err) {
+std::optional<std::vector<std::string>> server_command(const VerifiedBundle& bundle, const fs::path& root,
+                                                      const std::vector<std::string>& arguments, std::ostream& err) {
     auto host = tool_directory() / "neura-server-host";
     if (!fs::exists(host)) {
         const auto found = on_path("neura-server-host");
         if (!found) {
             err << "neura run: neura-server-host was found neither beside " << tool_directory().string()
                 << " nor on PATH\n";
-            return 1;
+            return std::nullopt;
         }
         host = *found;
     }
@@ -109,10 +109,11 @@ int run_server(const VerifiedBundle& bundle, const fs::path& root, const std::ve
     }
     command.insert(command.end(), arguments.begin(), arguments.end());
     command.push_back((root / bundle.manifest().image.path).string());
-    return exec(std::move(command), err);
+    return command;
 }
 
-int run_desktop(const fs::path& root, const std::vector<std::string>& arguments, std::ostream& err) {
+std::optional<std::vector<std::string>> desktop_command(const fs::path& root, const std::vector<std::string>& arguments,
+                                                       std::ostream& err) {
     std::optional<fs::path> engine;
     if (const char* env = std::getenv("NEURA_DESKTOP_ENGINE"); env && *env) engine = fs::path(env);
     else if (const auto installed = install_prefix() / "lib/neura/desktop/electron/electron"; fs::exists(installed))
@@ -123,37 +124,46 @@ int run_desktop(const fs::path& root, const std::vector<std::string>& arguments,
     if (!engine || !fs::exists(*engine)) {
         err << "neura run: the desktop engine target component is not installed: set NEURA_DESKTOP_ENGINE to the "
                "pinned Electron 45.3.3 executable\n";
-        return 1;
+        return std::nullopt;
     }
     if (!fs::exists(host)) {
         err << "neura run: the desktop host is not installed at " << host.string()
             << " (set NEURA_DESKTOP_HOST to the directory holding main.js)\n";
-        return 1;
+        return std::nullopt;
     }
     std::vector<std::string> command{engine->string(), host.string(), "--neura-package=" + root.string()};
     command.insert(command.end(), arguments.begin(), arguments.end());
-    return exec(std::move(command), err);
+    return command;
 }
 
 } // namespace
+
+std::optional<std::vector<std::string>> host_command(const fs::path& directory, const std::vector<std::string>& arguments,
+                                                    std::ostream& err, bool allow_dev) {
+    BundleVerification verification;
+    verification.supported_requirements = supported_requirements();
+    verification.allow_dev = allow_dev;
+    auto bundle = verify_bundle_directory(directory, verification);
+    const auto root = fs::canonical(directory);
+    switch (bundle.manifest().kind) {
+    case TargetKind::Web:
+        err << "neura run: " << directory.string()
+            << " is a web bundle, which runs in a browser: serve it with `neura dev --target <web target>` "
+               "while developing, or copy the directory to any static file host\n";
+        return std::nullopt;
+    case TargetKind::Server: return server_command(bundle, root, arguments, err);
+    case TargetKind::Desktop: return desktop_command(root, arguments, err);
+    }
+    return std::nullopt;
+}
 
 int run_bundle(const fs::path& directory, const std::vector<std::string>& arguments, std::ostream& out,
                std::ostream& err) {
     (void)out;
     try {
-        BundleVerification verification;
-        verification.supported_requirements = supported_requirements();
-        auto bundle = verify_bundle_directory(directory, verification);
-        const auto root = fs::canonical(directory);
-        switch (bundle.manifest().kind) {
-        case TargetKind::Web:
-            err << "neura run: " << directory.string()
-                << " is a web bundle, which runs in a browser: serve it with `neura dev --target <web target>` "
-                   "while developing, or copy the directory to any static file host\n";
-            return 1;
-        case TargetKind::Server: return run_server(bundle, root, arguments, err);
-        case TargetKind::Desktop: return run_desktop(root, arguments, err);
-        }
+        auto command = host_command(directory, arguments, err, false);
+        if (!command) return 1;
+        return exec(std::move(*command), err);
     } catch (const Diagnostic& diagnostic) {
         print_diagnostic(err, diagnostic);
         return 1;
@@ -161,7 +171,6 @@ int run_bundle(const fs::path& directory, const std::vector<std::string>& argume
         err << "neura run: " << error.what() << '\n';
         return 1;
     }
-    return 1;
 }
 
 } // namespace neura::app

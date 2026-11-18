@@ -77,7 +77,7 @@ esac
 
 # The tools of each component, as src/cli/tool_registry.cpp lists them.
 core_tools="neura-run neura-inspect neura-doctor neura-update neura-uninstall neura-server-host"
-sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt neura-new neura-package"
+sdk_tools="neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm neura-explain neura-tags neura-debug neura-lsp neura-fmt neura-new neura-package neura-dev"
 service_tools="neurad"
 
 [ -d "$core_dir" ] || die "$core_dir is not a directory"

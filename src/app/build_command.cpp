@@ -92,6 +92,11 @@ int project_build_main(const std::vector<std::string>& arguments) {
         check_lock(loaded, options.update_lock);
         const auto result = build_target(loaded, options);
         std::cout << result.directory.string() << ": bundle " << result.digest.hex() << '\n';
+        if (fs::exists(result.directory / "404.html")) {
+            // Case 12: history routing needs the static host's help.
+            std::cout << "history routing: the host must answer every application path with index.html, or serve "
+                         "404.html (a copy of it) for unknown paths\n";
+        }
         return 0;
     } catch (const Diagnostic& diagnostic) {
         print_diagnostic(std::cerr, diagnostic);

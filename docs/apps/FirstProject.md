@@ -59,6 +59,14 @@ NEURA_DESKTOP_ENGINE=/path/to/electron neura run dist/desktop
 
 A desktop target builds its web target first and embeds the web bundle unchanged, with the same digest, beside the native child that `Desktop.Main` compiles to, `registry.json` and `desktop.json`. `neura run dist/desktop` starts the pinned Electron 45.3.3 with the desktop host ([Desktop applications](Desktop.md)).
 
-## 5. Change something and build again
+## 5. Develop with neura dev
+
+```sh
+neura dev --target web
+```
+
+`neura dev` builds the page into `dist/dev/web`, serves it at `http://127.0.0.1:4310/` and keeps watching the project. Edit `ui/main.nra` and the open page reloads after the build; edit `ui/base.css` alone and the stylesheet is replaced without a reload. `neura dev --target server` runs the server the same way and restarts it after each change. Stop it with Ctrl-C or Ctrl-D: it stops everything it started.
+
+## 6. Change something and build again
 
 Edit `contracts/parts.nra` to add a starting part, and build the server again: only `dist/server` changes, and the same sources give the same bytes on every build and in every directory. If `neura build` reports `E1022`, the lock no longer matches the manifest (a provider was added, for example); run `neura build --target <name> --update-lock` once and commit the new `neura.lock`.

@@ -366,6 +366,7 @@ Errors about projects and their artifacts.
 | [E1027](E1027.md) | capability used but not declared |
 | [E1028](E1028.md) | limit out of range |
 | [E1029](E1029.md) | bundle cannot be written |
+| [E1030](E1030.md) | module not available to this package or target |
 | [E1031](E1031.md) | unknown or incompatible provider |
 | [E1032](E1032.md) | dependency not pinned or not found |
 | [E1033](E1033.md) | package cannot be built here |

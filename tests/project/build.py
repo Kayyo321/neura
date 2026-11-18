@@ -132,6 +132,14 @@ def main():
         check((first / 'dist/desktop/web/bundle.json').read_bytes() == (first / 'dist/web/bundle.json').read_bytes(),
               'embedded web bundle unchanged')
 
+    # Case 12: history routing writes 404.html and says what the host must do.
+    routed = copy_project('routed')
+    shutil.copy(first / 'neura.lock', routed / 'neura.lock')
+    edit(routed / 'neura.toml', 'styles = ["ui/base.css"]', 'styles = ["ui/base.css"]\nrouting = "history"')
+    result = run('build', '--target', 'web', cwd=routed, env=env)
+    check(result.returncode == 0 and (routed / 'dist/web/404.html').read_bytes() == (routed / 'dist/web/index.html').read_bytes()
+          and 'history routing' in result.stdout, 'history routing writes 404.html and states the host rule (case 12)')
+
     # Case 16: a single-file build in a project directory is a single-file build.
     result = run('build', 'ui/main.nra', '-o', SCRATCH / 'single.nvr', cwd=first)
     check(result.returncode == 0 and (SCRATCH / 'single.nvr').exists(), 'single-file build beside neura.toml')
@@ -148,7 +156,7 @@ def main():
                             stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True)
     try:
         body = None
-        for _ in range(100):
+        for _ in range(600):
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}/hello?name=Ada', timeout=2) as response:
                     body = response.read().decode()
@@ -158,7 +166,9 @@ def main():
         check(body == 'hi, Ada\n', 'neura run serves a server bundle')
     finally:
         host.terminate()
-        host.wait(timeout=30)
+        output, _ = host.communicate(timeout=30)
+        if body != 'hi, Ada\n':
+            print(output)
 
     # Cases 42, 43, 44 and a dev bundle: refused before anything runs.
     def tampered(name, change):

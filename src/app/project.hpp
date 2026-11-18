@@ -92,6 +92,28 @@ int run_bundle(const fs::path& directory, const std::vector<std::string>& argume
 
 bool is_bundle_directory(const fs::path& path);
 
+// The package whose root holds a file (the deepest root), if any.
+std::optional<std::string> package_of(const Project& project, const fs::path& file);
+
+// The compiler's import roots for a package: the parent of each root of the
+// package's depends closure.
+std::vector<fs::path> package_import_roots(const Project& project, const std::string& package);
+
+// E1030 for every import, reachable from `sources` through the project's
+// packages, of a module whose package is outside the importer's closure.
+std::vector<Diagnostic> check_closure(const Project& project, const std::vector<fs::path>& sources);
+
+// `neura check` inside a project: the import roots of the first source's
+// package, when the arguments give none, after the E1030 check. Returns the
+// arguments to use, or nullopt after printing E1030.
+std::optional<std::vector<std::string>> project_check_arguments(const std::vector<std::string>& arguments);
+
+// The command that runs a verified server or desktop bundle; nullopt (with a
+// message on err) for a web bundle or a missing host. Throws a Diagnostic
+// for a bundle that fails verification.
+std::optional<std::vector<std::string>> host_command(const fs::path& directory, const std::vector<std::string>& arguments,
+                                                    std::ostream& err, bool allow_dev);
+
 // SHA-256 of bytes as a digest.
 project::Sha256Digest sha256_of(std::string_view bytes);
 std::string read_file(const fs::path& path);

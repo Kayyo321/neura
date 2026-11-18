@@ -1057,7 +1057,8 @@ neura_target_defaults(neura_project)
 # The project tools' shared layer (docs/design/Projects030.md): `neura build
 # --project`, `neura run <bundle>`, and the neura-new, neura-dev and
 # neura-package tools.
-add_library(neura_app STATIC EXCLUDE_FROM_ALL src/app/project.cpp src/app/run_bundle.cpp src/app/build_command.cpp)
+add_library(neura_app STATIC EXCLUDE_FROM_ALL src/app/project.cpp src/app/run_bundle.cpp src/app/build_command.cpp
+    src/app/closure.cpp)
 target_include_directories(neura_app PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(neura_app PUBLIC neura_project PRIVATE neura_hash)
 if(NEURA_ENABLE_POSTGRES)
@@ -1080,6 +1081,9 @@ if(NEURA_SDK)
     # the desktop host in hosts/desktop beside its own parent directory, as in this repository.
     neura_add_tool(neura-package sdk src/app/package.cpp neura_core_library neura_app)
     add_dependencies(neura neura-package)
+    # `neura dev` (src/app/dev.cpp): build, run and rebuild in the foreground.
+    neura_add_tool(neura-dev sdk src/app/dev.cpp neura_core_library neura_app)
+    add_dependencies(neura neura-dev)
     install(FILES scripts/package-desktop.py DESTINATION share/neura/scripts COMPONENT sdk)
     install(FILES hosts/desktop/main.js hosts/desktop/preload.js DESTINATION share/neura/hosts/desktop COMPONENT sdk)
     install(FILES LICENSE DESTINATION share/neura COMPONENT sdk)
@@ -1194,6 +1198,10 @@ if(BUILD_TESTING AND NEURA_SDK)
     add_test(NAME project-new COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/new.py"
         "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-new-tests")
     set_tests_properties(project-new PROPERTIES TIMEOUT 900)
+    # `neura dev` (tests/project/dev.py): reloads, stylesheet swaps, restarts and process-tree checks.
+    add_test(NAME project-dev COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/dev.py"
+        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-dev-tests")
+    set_tests_properties(project-dev PROPERTIES TIMEOUT 600)
     # `neura package` (tests/project/package.py); the desktop package only with the pinned engine.
     add_test(NAME project-package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/package.py"
         "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-package-tests")

@@ -50,7 +50,7 @@ The two listings for this fixture share a symbol table, so the diff shows rewrit
 | `decompile`, `assemble`, `disassemble` | `neura-decompile`, `neura-asm`, `neura-disasm` | SDK |
 | `explain`, `tags` | `neura-explain`, `neura-tags` | SDK |
 | `debug`, `lsp`, `fmt` | `neura-debug`, `neura-lsp`, `neura-fmt` | SDK |
-| `new`, `package` | `neura-new`, `neura-package` | SDK |
+| `new`, `dev`, `package` | `neura-new`, `neura-dev`, `neura-package` | SDK |
 | `doctor`, `update`, `uninstall` | `neura-doctor`, `neura-update`, `neura-uninstall` | core |
 | `--version`, `version`, `help`, `--help`, `capabilities --json` | `neura` itself | core |
 
@@ -145,6 +145,8 @@ For an image with tasks, `--stats` adds the peak numbers of live tasks, queued m
 A directory with `neura.toml` is a project ([Projects and bundles](../apps/Projects.md)). `neura build --project <manifest> --target <name>` builds one target into its bundle, `dist/<name>` unless `--out <directory>`; without `--project` the manifest is `neura.toml` of the current directory. `--update-lock` writes `neura.lock`, which the build otherwise only compares (`E1022`). A desktop target builds its web target first and embeds it. The command prints the bundle directory and its identity, the SHA-256 of `bundle.json`. Two builds of the same sources, manifest, lock and components give the same bytes, from any directory.
 
 `neura new <directory> --template fullstack|web|server|desktop` writes a project from a template of the SDK into a directory that does not exist or is empty, with its `neura.lock`; `--name` and `--id` set the project's name and id ([Your first Neura project](../apps/FirstProject.md)).
+
+`neura dev --target <name> [--port <n>]` builds a target, serves a web bundle on `127.0.0.1:4310` or runs a server or desktop bundle, and rebuilds when a source changes, reloading the page or restarting the host; it stops everything it started on an interrupt or the end of its input ([Developing](../apps/Projects.md#developing)).
 
 `neura package --target <name> [--format <format>]` wraps a built server bundle with its hosts in a reproducible `.tar.gz`, or a desktop bundle in a `.tar.gz` or `.deb` through the desktop packager ([Packaging](../apps/Projects.md#packaging)).
 

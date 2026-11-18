@@ -80,13 +80,33 @@ def main():
                 print(result.stdout + result.stderr)
         check('dist/' in (project / '.gitignore').read_text(), f'{template}: dist/ is ignored')
 
+    # `neura check` inside a project finds the package's import roots, and refuses an import across packages that
+    # the importer does not depend on (E1030, case 31), as `neura build --target` does.
+    fullstack = SCRATCH / 'fullstack-app'
+    result = run('check', 'ui/main.nra', cwd=fullstack)
+    check(result.returncode == 0, 'neura check of a project file imports Contracts.Parts without -I')
+    if result.returncode != 0:
+        print(result.stdout + result.stderr)
+    page = fullstack / 'ui/main.nra'
+    original = page.read_text()
+    page.write_text(original.replace('let parts = import:Contracts.Parts;',
+                                     'let parts = import:Contracts.Parts;\nlet server = import:Server.Main;'))
+    for args, what in ((['check', 'ui/main.nra'], 'neura check'), (['build', '--target', 'web'], 'neura build')):
+        result = run(*args, cwd=fullstack, env=env)
+        output = result.stdout + result.stderr
+        check(result.returncode == 1 and 'ui/main.nra:6:14: error[E1030]' in output and "package 'server'" in output,
+              f'{what}: the ui package importing Server.Main is E1030 at the import (case 31)')
+        if '[E1030]' not in output:
+            print(output)
+    page.write_text(original)
+
     # The fullstack server answers from the shared contract.
     port = free_port()
     host = subprocess.Popen([str(NEURA), 'run', str(SCRATCH / 'fullstack-app/dist/server'), '--', '--listen',
                              f'127.0.0.1:{port}'], stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
     try:
         body = None
-        for _ in range(100):
+        for _ in range(600):
             try:
                 with urllib.request.urlopen(f'http://127.0.0.1:{port}/parts', timeout=2) as response:
                     body = response.read().decode()

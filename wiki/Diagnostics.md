@@ -369,6 +369,7 @@ Errors about projects and their artifacts.
 | [E1027](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1027.md) | capability used but not declared |
 | [E1028](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1028.md) | limit out of range |
 | [E1029](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1029.md) | bundle cannot be written |
+| [E1030](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1030.md) | module not available to this package or target |
 | [E1031](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1031.md) | unknown or incompatible provider |
 | [E1032](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1032.md) | dependency not pinned or not found |
 | [E1033](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1033.md) | package cannot be built here |

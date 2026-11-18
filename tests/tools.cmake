@@ -5,7 +5,7 @@
 set(NEURA_TOOL_NAMES
     neura-run neura-inspect neura-doctor neura-update neura-uninstall neura-server-host
     neurac neura-test neura-doc neura-cbind neura-decompile neura-asm neura-disasm
-    neura-explain neura-tags neura-debug neura-lsp neura-fmt neura-new neura-package)
+    neura-explain neura-tags neura-debug neura-lsp neura-fmt neura-new neura-package neura-dev)
 
 # neura_copy_tools(<neura> <directory>): copies <neura>, every tool next to it
 # and their shared libraries into <directory>.
