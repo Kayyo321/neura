@@ -360,7 +360,7 @@ export let Sql = module (
             if (real.to_bits() != that.real.to_bits() || octets.length != that.octets.length) {
                 return false;
             }
-            for (let i = 0; i < octets.length; i += 1) {
+            for (let i in 0 .. octets.length) {
                 if (octets[i] != that.octets[i]) {
                     return false;
                 }
@@ -421,7 +421,7 @@ export let Sql = module (
     let doubled_quotes = func(text: string) -> string {
         let out = "";
         let start = 0;
-        for (let i = 0; i < text.byte_length; i += 1) {
+        for (let i in 0 .. text.byte_length) {
             if (text.byte_at(i) == 39) {
                 out ..= text.slice(start, i + 1) .. "'";
                 start = i + 1;
@@ -466,7 +466,7 @@ export let Sql = module (
     /// @brief The values of variadic arguments.
     let values_of = func(arguments: variadic.Argument[]) -> Result<Value[list]> {
         last values: Value[list] = new;
-        for (let i = 0; i < arguments.length; i += 1) {
+        for (let i in 0 .. arguments.length) {
             match (value_of(arguments[i], i + 1)) {
                 Result.Ok(value) => {
                     values.append(value);
@@ -538,7 +538,7 @@ export let Sql = module (
     let decode = func(kinds: uint8[list], bits: uint64[list], texts: string[list], blobs: uint8[list][list])
         -> Value[list] {
         last values: Value[list] = new;
-        for (let i = 0; i < kinds.length; i += 1) {
+        for (let i in 0 .. kinds.length) {
             last kind = kinds[i];
             last word = bits[i];
             if (kind == 1) {
@@ -567,7 +567,7 @@ export let Sql = module (
         }
         for (let start = 0; start + width <= values.length; start += width) {
             last cells: Value[list] = new;
-            for (let i = start; i < start + width; i += 1) {
+            for (let i in start .. start + width) {
                 cells.append(values[i]);
             }
             rows.append(new Row(names, cells));
@@ -593,13 +593,13 @@ export let Sql = module (
         /// when there is none.
         #Pure
         export let index_of = func(name: string) -> int {
-            for (let i = 0; i < names.length; i += 1) {
+            for (let i in 0 .. names.length) {
                 if (names[i] == name) {
                     return i;
                 }
             }
             last wanted = lower(name);
-            for (let i = 0; i < names.length; i += 1) {
+            for (let i in 0 .. names.length) {
                 if (lower(names[i]) == wanted) {
                     return i;
                 }
@@ -616,7 +616,7 @@ export let Sql = module (
             if (names.length != that.names.length) {
                 return false;
             }
-            for (let i = 0; i < names.length; i += 1) {
+            for (let i in 0 .. names.length) {
                 if (names[i] != that.names[i]) {
                     return false;
                 }
@@ -638,7 +638,7 @@ export let Sql = module (
         #Pure
         export let.override to_string = func -> string {
             let out = "";
-            for (let i = 0; i < names.length; i += 1) {
+            for (let i in 0 .. names.length) {
                 out = out + (i == 0 ? "" : ", ") + names[i];
             }
             return out;
@@ -649,7 +649,7 @@ export let Sql = module (
     let lower = func(text: string) -> string {
         let out = "";
         let start = 0;
-        for (let i = 0; i < text.byte_length; i += 1) {
+        for (let i in 0 .. text.byte_length) {
             last b = text.byte_at(i);
             if (b >= 65 && b <= 90) {
                 out ..= text.slice(start, i) .. "abcdefghijklmnopqrstuvwxyz".slice((b - 65) as int, (b - 64) as int);
@@ -818,7 +818,7 @@ export let Sql = module (
             if (cells.length != that.cells.length) {
                 return false;
             }
-            for (let i = 0; i < cells.length; i += 1) {
+            for (let i in 0 .. cells.length) {
                 if (header.names[i] != that.header.names[i] || not cells[i].equals(that.cells[i])) {
                     return false;
                 }
@@ -830,7 +830,7 @@ export let Sql = module (
         #Pure
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 19;
-            for (let i = 0; i < cells.length; i += 1) {
+            for (let i in 0 .. cells.length) {
                 hash = hashing.combine(hashing.combine(hash, header.names[i].hash_code()), cells[i].hash_code());
             }
             return hash;
@@ -840,7 +840,7 @@ export let Sql = module (
         #Pure
         export let.override to_string = func -> string {
             let out = "Row(";
-            for (let i = 0; i < cells.length; i += 1) {
+            for (let i in 0 .. cells.length) {
                 out ..= (i == 0 ? "" : ", ") .. header.names[i] .. "=" .. cells[i].to_string();
             }
             return out .. ")";
