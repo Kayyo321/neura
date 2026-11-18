@@ -18,21 +18,21 @@ These declarations are extracted from the module source. Notes reproduce adjacen
 <!-- BEGIN SOURCE API -->
 The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
 
-- **Handshake** · [`export const Guid: string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L21)
+- **Handshake** · [`export const Guid: string = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L22)
   The GUID a server appends to the client's key (RFC 6455 section 1.3).
-- **Handshake** · [`export const Version: string = "13"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L24)
+- **Handshake** · [`export const Version: string = "13"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L25)
   The only protocol version RFC 6455 defines (section 4.1).
-- **Handshake** · [`export const ErrorCode: string = "ws.handshake"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L27)
+- **Handshake** · [`export const ErrorCode: string = "ws.handshake"`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L28)
   The error code of a handshake failure.
-- **Handshake** · [`export let Header = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L31)
+- **Handshake** · [`export let Header = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L32)
   One header field: a name and its value. Tagged `#Final`, `#Immutable`.
-- **Handshake.Header** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L33)
+- **Handshake.Header** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L34)
   The field name as written.
-- **Handshake.Header** · [`export last value: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L35)
+- **Handshake.Header** · [`export last value: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L36)
   The field value with surrounding whitespace removed.
-- **Handshake.Header** · [`export let init = func(field: string, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L38)
+- **Handshake.Header** · [`export let init = func(field: string, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L39)
   Stores the name and value.
-- **Handshake.Header** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L44)
+- **Handshake.Header** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L45)
   Equal when the names match without ASCII case and the values match exactly.
 - **Handshake.Header** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L53)
   Combines the lowercase name and the value.
@@ -86,69 +86,73 @@ The following public declarations are taken from the module source; each links t
   The Sec-WebSocket-Extensions response, or the empty string.
 - **Handshake.ServerAcceptance** · [`export let init = func(chosen: Optional<string>, extension_response: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L172)
   Stores the fields.
-- **Handshake.ServerAcceptance** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L178)
+- **Handshake.ServerAcceptance** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L178)
+  Equal when the chosen protocol and the extension response are.
+- **Handshake.ServerAcceptance** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L186)
+  Combines the protocol and the extension response, consistent with equals.
+- **Handshake.ServerAcceptance** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L190)
   The chosen protocol and extensions.
-- **Handshake** · [`export let RequestHead = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L189)
+- **Handshake** · [`export let RequestHead = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L201)
   An HTTP/1.1 request head: method, target and headers. Tagged `#Final`.
-- **Handshake.RequestHead** · [`export last method: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L191)
+- **Handshake.RequestHead** · [`export last method: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L203)
   The method token.
-- **Handshake.RequestHead** · [`export last target: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L193)
+- **Handshake.RequestHead** · [`export last target: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L205)
   The request target.
-- **Handshake.RequestHead** · [`export last version: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L195)
+- **Handshake.RequestHead** · [`export last version: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L207)
   The HTTP version, such as `HTTP/1.1`.
-- **Handshake.RequestHead** · [`export last headers: Header[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L197)
+- **Handshake.RequestHead** · [`export last headers: Header[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L209)
   The header fields in order.
-- **Handshake.RequestHead** · [`export let init = func(verb: string, request_target: string, http_version: string, fields: Header[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L200)
+- **Handshake.RequestHead** · [`export let init = func(verb: string, request_target: string, http_version: string, fields: Header[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L212)
   Stores the fields.
-- **Handshake.RequestHead** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L208)
+- **Handshake.RequestHead** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L220)
   The request line.
-- **Handshake** · [`export let ResponseHead = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L213)
+- **Handshake** · [`export let ResponseHead = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L225)
   An HTTP/1.1 response head: status, reason and headers. Tagged `#Final`.
-- **Handshake.ResponseHead** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L215)
+- **Handshake.ResponseHead** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L227)
   The three-digit status code.
-- **Handshake.ResponseHead** · [`export last reason: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L217)
+- **Handshake.ResponseHead** · [`export last reason: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L229)
   The reason phrase, possibly empty.
-- **Handshake.ResponseHead** · [`export last headers: Header[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L219)
+- **Handshake.ResponseHead** · [`export last headers: Header[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L231)
   The header fields in order.
-- **Handshake.ResponseHead** · [`export let init = func(code: int, phrase: string, fields: Header[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L222)
+- **Handshake.ResponseHead** · [`export let init = func(code: int, phrase: string, fields: Header[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L234)
   Stores the fields.
-- **Handshake.ResponseHead** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L229)
+- **Handshake.ResponseHead** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L241)
   The status line.
-- **Handshake** · [`export let sha1 = func(bytes: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L237)
+- **Handshake** · [`export let sha1 = func(bytes: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L249)
   The 20-byte SHA-1 hash (FIPS 180-4) of the bytes. Exposed for the handshake and for tests of it. SHA-1 is not collision resistant; do not use it for new integrity or signature purposes. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let accept_key = func(key: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L241)
+- **Handshake** · [`export let accept_key = func(key: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L253)
   The Sec-WebSocket-Accept value for a key: base64(SHA-1(key + Guid)) (RFC 6455 section 4.2.2). Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let generate_key = func(random: Random) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L249)
+- **Handshake** · [`export let generate_key = func(random: Random) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L261)
   A fresh Sec-WebSocket-Key: 16 bytes from `random`, base64 encoded (RFC 6455 section 4.1). RFC 6455 asks for a randomly selected nonce; pass a Random seeded from entropy in production and a seeded one in tests. Tagged `#NoDiscard`.
-- **Handshake** · [`export let is_valid_key = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L253)
+- **Handshake** · [`export let is_valid_key = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L265)
   Whether the key is base64 text that decodes to exactly 16 bytes. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let client_request = func(host: string, path: string, random: Random, protocols: string[list], extensions: string) -> ClientRequest`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L261)
+- **Handshake** · [`export let client_request = func(host: string, path: string, random: Random, protocols: string[list], extensions: string) -> ClientRequest`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L273)
   A client request for `path` on `host` with a key from `random`, offering the protocols and the extension offer (empty for none). Tagged `#NoDiscard`.
-- **Handshake** · [`export let header_value = func(headers: Header[list], name: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L267)
+- **Handshake** · [`export let header_value = func(headers: Header[list], name: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L279)
   The comma-joined value of every header named `name` (ASCII case ignored), or `None` when absent. Tagged `#NoDiscard`.
-- **Handshake** · [`export let split_list = func(value: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L281)
+- **Handshake** · [`export let split_list = func(value: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L293)
   The trimmed, non-empty elements of a comma-separated header value. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let list_contains = func(value: string, token: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L294)
+- **Handshake** · [`export let list_contains = func(value: string, token: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L306)
   Whether a comma-separated header value contains `token`, ASCII case ignored. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let validate_client_request = func(head: RequestHead) -> Result<ClientOffer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L310)
+- **Handshake** · [`export let validate_client_request = func(head: RequestHead) -> Result<ClientOffer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L322)
   Checks a client's opening request as a server must (RFC 6455 section 4.2.1). Requires the GET method, HTTP/1.1 or later, a Host header, an Upgrade list containing `websocket` and a Connection list containing `Upgrade` (ASCII case ignored), a Sec-WebSocket-Key that decodes to 16 bytes, and Sec-WebSocket-Version 13. A wrong version fails with a message naming it; a server should then answer with `version_mismatch_headers` and status 426. Tagged `#NoDiscard`.
-- **Handshake** · [`export let version_mismatch_headers = func -> Header[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L343)
+- **Handshake** · [`export let version_mismatch_headers = func -> Header[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L347)
   The headers of a 426 response to a request with an unsupported version (RFC 6455 section 4.4). Tagged `#NoDiscard`.
-- **Handshake** · [`export let choose_protocol = func(offered: string[list], supported: string[list]) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L352)
+- **Handshake** · [`export let choose_protocol = func(offered: string[list], supported: string[list]) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L356)
   The first of the client's protocols that the server supports, in the client's order of preference, or `None`. Tagged `#NoDiscard`.
-- **Handshake** · [`export let validate_server_response = func(request: ClientRequest, head: ResponseHead) -> Result<ServerAcceptance>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L369)
+- **Handshake** · [`export let validate_server_response = func(request: ClientRequest, head: ResponseHead) -> Result<ServerAcceptance>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L373)
   Checks a server's response as a client must (RFC 6455 section 4.1, "the client MUST validate"). Requires status 101, an Upgrade list containing `websocket`, a Connection list containing `Upgrade`, a Sec-WebSocket-Accept equal to `accept_key(request.key)`, a Sec-WebSocket-Protocol (if any) that the request offered, and Sec-WebSocket-Extensions (if any) naming only extensions the request offered. Tagged `#NoDiscard`.
-- **Handshake** · [`export let extension_names = func(value: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L421)
+- **Handshake** · [`export let extension_names = func(value: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L417)
   The extension names of a Sec-WebSocket-Extensions value, in order (parameters dropped). Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let request_text = func(method: string, target: string, headers: Header[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L433)
+- **Handshake** · [`export let request_text = func(method: string, target: string, headers: Header[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L429)
   An HTTP/1.1 request head: request line, header lines and the empty line, each ending in CRLF. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let response_text = func(status: int, reason: string, headers: Header[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L443)
+- **Handshake** · [`export let response_text = func(status: int, reason: string, headers: Header[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L439)
   An HTTP/1.1 response head with the status and reason, ending with the empty line. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let head_end = func(bytes: uint8[list]) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L453)
+- **Handshake** · [`export let head_end = func(bytes: uint8[list]) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L449)
   The byte offset just past the first CRLF CRLF in `bytes` (the end of an HTTP head), or -1. Tagged `#NoDiscard`, `#Pure`.
-- **Handshake** · [`export let parse_request_head = func(text: string) -> Result<RequestHead>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L465)
+- **Handshake** · [`export let parse_request_head = func(text: string) -> Result<RequestHead>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L461)
   Parses an HTTP/1.1 request head (request line and header lines, CRLF line ends; the final empty line may be present or not). Tagged `#NoDiscard`.
-- **Handshake** · [`export let parse_response_head = func(text: string) -> Result<ResponseHead>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L490)
+- **Handshake** · [`export let parse_response_head = func(text: string) -> Result<ResponseHead>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/handshake.nra#L486)
   Parses an HTTP/1.1 response head (status line and header lines). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

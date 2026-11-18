@@ -32,29 +32,29 @@ The following public declarations are taken from the module source; each links t
   A keep-alive: a single empty comment line. Tagged `#NoDiscard`.
 - **Emitter** · [`export let retry_only = func(millis: int64) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L86)
   A block that only sets the client's reconnection time; it dispatches no event. A negative time fails. Tagged `#NoDiscard`.
-- **Emitter** · [`export let EventWriter = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L95)
+- **Emitter** · [`export let EventWriter = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L93)
   Writes events to a byte sink, such as the write method of a stream or a response body. Tagged `#Final`, `#NotThreadSafe`.
-- **Emitter.EventWriter** · [`export let init = func(target: func(uint8[list]) -> Result<Unit>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L100)
+- **Emitter.EventWriter** · [`export let init = func(target: func(uint8[list]) -> Result<Unit>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L98)
   Writes through the sink.
-- **Emitter.EventWriter** · [`export let send = func(event: SseEvent) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L106)
+- **Emitter.EventWriter** · [`export let send = func(event: SseEvent) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L104)
   Writes one event, or fails without writing when it cannot be formatted. Tagged `#NoDiscard`.
-- **Emitter.EventWriter** · [`export let send_data = func(data: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L115)
+- **Emitter.EventWriter** · [`export let send_data = func(data: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L113)
   Writes a block of `data` lines with the default type and no identifier. Tagged `#NoDiscard`.
-- **Emitter.EventWriter** · [`export let send_comment = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L119)
+- **Emitter.EventWriter** · [`export let send_comment = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L117)
   Writes a comment. Tagged `#NoDiscard`.
-- **Emitter.EventWriter** · [`export let send_keep_alive = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L123)
+- **Emitter.EventWriter** · [`export let send_keep_alive = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L121)
   Writes a keep-alive comment. Tagged `#NoDiscard`.
-- **Emitter.EventWriter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L126)
+- **Emitter.EventWriter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L124)
   `EventWriter`.
-- **Emitter** · [`export let TypedEventWriter = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L131)
+- **Emitter** · [`export let TypedEventWriter = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L129)
   Writes values of `T` as events through an encoder, for typed streams such as model tokens. Tagged `#Final`, `#NotThreadSafe`.
-- **Emitter.TypedEventWriter** · [`export let init = func(target: EventWriter, encoder: func(T) -> Result<SseEvent>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L138)
+- **Emitter.TypedEventWriter** · [`export let init = func(target: EventWriter, encoder: func(T) -> Result<SseEvent>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L136)
   Writes through `target`, encoding each value with `encoder`.
-- **Emitter.TypedEventWriter** · [`export let send = func(value: T) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L145)
+- **Emitter.TypedEventWriter** · [`export let send = func(value: T) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L143)
   Encodes and writes one value; an encoder error is returned and nothing is written. Tagged `#NoDiscard`.
-- **Emitter.TypedEventWriter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L153)
+- **Emitter.TypedEventWriter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L151)
   `TypedEventWriter`.
-- **Emitter** · [`export let split_lines = func(text: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L158)
+- **Emitter** · [`export let split_lines = func(text: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/emitter.nra#L156)
   The lines of the text split at CRLF, LF and CR; the empty text is one empty line. Tagged `#NoDiscard`, `#Pure`.
 <!-- END SOURCE API -->
 

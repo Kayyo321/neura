@@ -104,7 +104,7 @@ export let DnsTransport = module (
                     : extra.udp_payload_size,
                 Optional.None => messages.MaxUdpSize,
             };
-            if (!stream && bytes.length > limit) {
+            if (not stream && bytes.length > limit) {
                 last cut = messages.response_to(wire_query, response.header.rcode);
                 cut.header.authoritative = true;
                 cut.header.recursion_available = true;
@@ -117,7 +117,7 @@ export let DnsTransport = module (
 
         /// @brief Text such as "MemoryTransport(primary, 3 records)".
         export let.override to_string = func -> string =>
-            "MemoryTransport(" + label + ", " + zone.length.to_string() + " records)";
+            "MemoryTransport(" .. label .. ", " .. zone.length.to_string() .. " records)";
 
         /// @brief Fills the sections of `response` for `question`.
         let answer = func(question: messages.Question, response: messages.Message) {
@@ -139,7 +139,7 @@ export let DnsTransport = module (
                     return;
                 }
             }
-            if (!owner_known) {
+            if (not owner_known) {
                 response.header.rcode = messages.RcodeNameError;
             }
             match (soa) {

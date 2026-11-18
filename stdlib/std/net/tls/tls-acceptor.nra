@@ -49,11 +49,9 @@ export let TlsAcceptor = module (
         /// Unsupported in a build without TLS, and with Closed after close.
         #NoDiscard
         export let accept = func -> Result<TlsStream> {
-            if (!open_now) {
-                return Result<TlsStream>.Err(bytes.closed("listener", bound.to_string()));
-            }
+            return Result<TlsStream>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
             last nanos = support.timeout_nanos(config.handshake_timeout);
-            last outcome = config.is_mutual() || !config.allows_both_versions()
+            last outcome = config.is_mutual() || not config.allows_both_versions()
                 ? host.tls_accept_mutual(id, config.certificate_file, config.key_file, config.alpn(), nanos,
                 tls_connector.version_code(config.min_version), tls_connector.version_code(config.max_version),
                 config.client_ca_file)
@@ -67,9 +65,7 @@ export let TlsAcceptor = module (
 
         /// @brief Releases the listener. Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (host.close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -79,7 +75,7 @@ export let TlsAcceptor = module (
         };
 
         /// @brief Text such as "TlsAcceptor(127.0.0.1:8443)".
-        export let.override to_string = func -> string => "TlsAcceptor(" + bound.to_string() + ")";
+        export let.override to_string = func -> string => "TlsAcceptor(" .. bound.to_string() .. ")";
     );
 
     /// @brief Listens on `address` (port 0 asks for a free port) for TLS connections with a server

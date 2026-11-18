@@ -1,0 +1,94 @@
+let cache_control = import:Std.Net.Http.CacheControl;
+let h2 = import:Std.Net.Http.H2;
+let h3 = import:Std.Net.Http.H3;
+let headers = import:Std.Net.Http.Headers;
+let masque = import:Std.Net.Http.Masque;
+let multipart = import:Std.Net.Http.Multipart;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Http value classes agree.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    let fields = func(name: string, value: string) -> headers.Headers => headers.of(new([name]), new([value]));
+
+    export let test_headers = func {
+        agree(fields("Accept", "text/html"), fields("accept", "text/html"));
+        differ(fields("Accept", "text/html"), fields("Accept", "text/plain"));
+        test.assert(fields("Accept", "text/html").to_string().byte_length > 0);
+    };
+
+    export let test_cache_control = func {
+        last a = cache_control.parse("max-age=60, no-store");
+        last b = cache_control.parse("max-age=60, no-store");
+        agree(a, b);
+        differ(a, cache_control.parse("max-age=61, no-store"));
+        test.assert_equal_string("max-age=60, no-store", a.to_string());
+        agree(a.at(0), b.at(0));
+        differ(a.at(0), a.at(1));
+        test.assert_equal_string("max-age=60", a.at(0).to_string());
+    };
+
+    export let test_h2 = func {
+        last a = new h2.FrameHeader(8, 4, 1, 3);
+        agree(a, new h2.FrameHeader(8, 4, 1, 3));
+        differ(a, new h2.FrameHeader(8, 4, 1, 5));
+        test.assert_equal_string("FrameHeader{length=8, type=4, flags=1, stream=3}", a.to_string());
+        agree(new h2.Settings(), new h2.Settings());
+        test.assert_equal_string("Settings{", new h2.Settings().to_string().slice(0, 9));
+    };
+
+    export let test_h3 = func {
+        last a = new h3.FrameHeader(1, 8, 2);
+        agree(a, new h3.FrameHeader(1, 8, 2));
+        differ(a, new h3.FrameHeader(1, 9, 2));
+        test.assert_equal_string("FrameHeader{type=1, length=8, payload_offset=2}", a.to_string());
+        last d = test.assert_ok<h3.Decoded>(h3.decode_varint(h3.encode_varint(300), 0));
+        agree(d, new h3.Decoded(300, 2));
+        differ(d, new h3.Decoded(301, 2));
+        test.assert_equal_string("300@2", d.to_string());
+        agree(new h3.Settings(), new h3.Settings());
+    };
+
+    export let test_masque = func {
+        last a = test.assert_ok<masque.ConnectRequest>(masque.udp_request("proxy.example", "target.example", 443));
+        last b = test.assert_ok<masque.ConnectRequest>(masque.udp_request("proxy.example", "target.example", 443));
+        agree(a, b);
+        differ(a, test.assert_ok<masque.ConnectRequest>(masque.udp_request("proxy.example", "target.example", 444)));
+        test.assert(a.to_string().byte_length > 0);
+        test.assert_equal_string(a.to_string(), b.to_string());
+    };
+
+    export let test_multipart = func {
+        agree(new multipart.MultipartLimits(), new multipart.MultipartLimits());
+        test.assert(new multipart.MultipartLimits().to_string().byte_length > 0);
+        last a = new multipart.Part(fields("X", "1"), new([1, 2]));
+        agree(a, new multipart.Part(fields("x", "1"), new([1, 2])));
+        differ(a, new multipart.Part(fields("X", "1"), new([1, 3])));
+        test.assert_equal_string("Part{" .. fields("X", "1").to_string() .. ", 2 bytes}", a.to_string());
+    };
+
+    export let test_wire = func {
+        agree(new wire.Limits(), new wire.Limits());
+        last r = new wire.RequestHead("GET", "/", "HTTP/1.1", fields("Host", "example.com"));
+        agree(r, new wire.RequestHead("GET", "/", "HTTP/1.1", fields("host", "example.com")));
+        differ(r, new wire.RequestHead("POST", "/", "HTTP/1.1", fields("Host", "example.com")));
+        test.assert_equal_string("RequestHead{GET / HTTP/1.1, " .. fields("Host", "example.com").to_string() .. "}",
+            r.to_string());
+        last s = new wire.ResponseHead("HTTP/1.1", 200, "OK", fields("Server", "x"));
+        agree(s, new wire.ResponseHead("HTTP/1.1", 200, "OK", fields("Server", "x")));
+        differ(s, new wire.ResponseHead("HTTP/1.1", 404, "Not Found", fields("Server", "x")));
+        test.assert_equal_string("ResponseHead{HTTP/1.1 200 OK, " .. fields("Server", "x").to_string() .. "}",
+            s.to_string());
+    };
+);

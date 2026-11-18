@@ -88,10 +88,9 @@ export let Message = module (
 
         /// @brief Equal when code and bytes are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is EdnsOption)) {
+            if (other is not that: EdnsOption) {
                 return false;
             }
-            last that = other as EdnsOption;
             return code == that.code && same_bytes(data, that.data);
         };
 
@@ -100,7 +99,7 @@ export let Message = module (
 
         /// @brief Text such as "EdnsOption(10, 8 bytes)".
         export let.override to_string = func -> string =>
-            "EdnsOption(" + code.to_string() + ", " + data.length.to_string() + " bytes)";
+            "EdnsOption(" .. code.to_string() .. ", " .. data.length.to_string() .. " bytes)";
     );
 
     /// @brief The EDNS(0) parameters an OPT record carries (RFC 6891 section 6.1.3).
@@ -138,18 +137,15 @@ export let Message = module (
 
         /// @brief Equal when every field and option is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Edns)) {
+            if (other is not that: Edns) {
                 return false;
             }
-            last that = other as Edns;
             if (udp_payload_size != that.udp_payload_size || extended_rcode != that.extended_rcode
                 || version != that.version || dnssec_ok != that.dnssec_ok || options.length != that.options.length) {
                 return false;
             }
             for (let i = 0; i < options.length; i++) {
-                if (!options[i].equals(that.options[i])) {
-                    return false;
-                }
+                return false unless options[i].equals(that.options[i]);
             }
             return true;
         };
@@ -165,8 +161,8 @@ export let Message = module (
         };
 
         /// @brief Text such as "Edns(udp 1232, version 0, do false, 0 options)".
-        export let.override to_string = func -> string => "Edns(udp " + udp_payload_size.to_string() + ", version "
-            + version.to_string() + ", do " + dnssec_ok.to_string() + ", " + options.length.to_string() + " options)";
+        export let.override to_string = func -> string => "Edns(udp " .. udp_payload_size.to_string() .. ", version "
+            .. version.to_string() .. ", do " .. dnssec_ok.to_string() .. ", " .. options.length.to_string() .. " options)";
     );
 
     /// @brief EDNS(0) with a UDP payload size, version 0, no DO bit and no options.
@@ -215,10 +211,9 @@ export let Message = module (
 
         /// @brief Equal when the name (ignoring case), type and class are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Question)) {
+            if (other is not that: Question) {
                 return false;
             }
-            last that = other as Question;
             return qtype == that.qtype && qclass == that.qclass && name.equals(that.name);
         };
 
@@ -228,7 +223,7 @@ export let Message = module (
 
         /// @brief Text such as "www.example.com. IN A".
         export let.override to_string = func -> string =>
-            name.to_string() + " " + class_name(qclass) + " " + type_name(qtype);
+            name.to_string() .. " " .. class_name(qclass) .. " " .. type_name(qtype);
     );
 
     /// @brief One resource record: owner name, type, raw class, TTL (unsigned 32-bit) and data.
@@ -267,10 +262,9 @@ export let Message = module (
 
         /// @brief Equal when owner (ignoring case), type, class, TTL and data are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ResourceRecord)) {
+            if (other is not that: ResourceRecord) {
                 return false;
             }
-            last that = other as ResourceRecord;
             return rtype == that.rtype && rclass == that.rclass && ttl == that.ttl && name.equals(that.name)
                 && same_data(data, that.data);
         };
@@ -284,8 +278,8 @@ export let Message = module (
         };
 
         /// @brief Master-file-like text: "www.example.com. 300 IN A 192.0.2.1".
-        export let.override to_string = func -> string => name.to_string() + " " + ttl.to_string() + " "
-            + class_name(rclass) + " " + type_name(rtype) + " " + data_text(data);
+        export let.override to_string = func -> string => name.to_string() .. " " .. ttl.to_string() .. " "
+            .. class_name(rclass) .. " " .. type_name(rtype) .. " " .. data_text(data);
     );
 
     /// @brief The header fields (RFC 1035 section 4.1.1). The section counts are filled by `decode` and
@@ -355,7 +349,7 @@ export let Message = module (
 
         /// @brief Text such as "Header(id 4660, flags 0x0100)".
         export let.override to_string = func -> string =>
-            "Header(id " + id.to_string() + ", flags " + flags().to_string() + ")";
+            "Header(id " .. id.to_string() .. ", flags " .. flags().to_string() .. ")";
     );
 
     /// @brief A whole DNS message.
@@ -395,9 +389,9 @@ export let Message = module (
         };
 
         /// @brief Text listing the header and section sizes.
-        export let.override to_string = func -> string => "Message(id " + header.id.to_string() + ", rcode "
-            + rcode().to_string() + ", " + questions.length.to_string() + "/" + answers.length.to_string() + "/"
-            + authorities.length.to_string() + "/" + additionals.length.to_string() + ")";
+        export let.override to_string = func -> string => "Message(id " .. header.id.to_string() .. ", rcode "
+            .. rcode().to_string() .. ", " .. questions.length.to_string() .. "/" .. answers.length.to_string() .. "/"
+            .. authorities.length.to_string() .. "/" .. additionals.length.to_string() .. ")";
     );
 
     /// @brief A recursive query for `name` and `qtype` in class IN with `id`.
@@ -468,10 +462,8 @@ export let Message = module (
             Optional.None => {
             },
         }
-        if (writer.length() > 65535) {
-            return Result<uint8[list]>.Err(errors.custom("dns.too_large", "message longer than 65535 bytes"));
-        }
-        return Result<uint8[list]>.Ok(writer.bytes());
+        return if (writer.length() > 65535) -> Result<uint8[list]>.Err(errors.custom("dns.too_large", "message longer than 65535 bytes"))
+            else -> Result<uint8[list]>.Ok(writer.bytes());
     };
 
     /// @brief Decodes a message. Err (Parse) for a truncated or malformed message, a bad name, rdata that does
@@ -516,10 +508,8 @@ export let Message = module (
                 message.additionals.append(record);
             }
         }
-        if (reader.remaining() != 0) {
-            return Result<Message>.Err(parse_error(reader.offset(), "trailing bytes after the message"));
-        }
-        return Result<Message>.Ok(message);
+        return if (reader.remaining() != 0) -> Result<Message>.Err(parse_error(reader.offset(), "trailing bytes after the message"))
+            else -> Result<Message>.Ok(message);
     };
 
     /// @brief The record data as raw bytes, as RFC 3597 section 5 writes it for an unknown type (uncompressed).
@@ -588,12 +578,12 @@ export let Message = module (
         } else if (rtype == TypeAny) {
             return "ANY";
         }
-        return "TYPE" + rtype.to_string();
+        return "TYPE" .. rtype.to_string();
     };
 
     /// @brief "IN" for class 1, otherwise "CLASSn" (RFC 3597 section 5).
     #NoDiscard
-    export let class_name = func(rclass: int) -> string => rclass == ClassIn ? "IN" : "CLASS" + rclass.to_string();
+    export let class_name = func(rclass: int) -> string => rclass == ClassIn ? "IN" : "CLASS" .. rclass.to_string();
 
     /// @brief The master-file-like text of record data; unknown data as `\# length hex` (RFC 3597 section 5).
     #NoDiscard
@@ -603,18 +593,18 @@ export let Message = module (
         RecordData.Ns(target) => target.to_string(),
         RecordData.Cname(target) => target.to_string(),
         RecordData.Ptr(target) => target.to_string(),
-        RecordData.Mx { preference, exchange } => preference.to_string() + " " + exchange.to_string(),
+        RecordData.Mx { preference, exchange } => preference.to_string() .. " " .. exchange.to_string(),
         RecordData.Txt(parts) => quoted(parts),
-        RecordData.Soa { mname, rname, serial, refresh, retry, expire, minimum } => mname.to_string() + " "
-            + rname.to_string() + " " + serial.to_string() + " " + refresh.to_string() + " " + retry.to_string() + " "
-            + expire.to_string() + " " + minimum.to_string(),
-        RecordData.Srv { priority, weight, port, target } => priority.to_string() + " " + weight.to_string() + " "
-            + port.to_string() + " " + target.to_string(),
-        RecordData.Naptr { order, preference, flags, services, regexp, replacement } => order.to_string() + " "
-            + preference.to_string() + " \"" + flags + "\" \"" + services + "\" \"" + regexp + "\" "
-            + replacement.to_string(),
-        RecordData.Opt(options) => options.length.to_string() + " options",
-        RecordData.Unknown(bytes) => "\\# " + bytes.length.to_string() + " " + hex_text(bytes),
+        RecordData.Soa { mname, rname, serial, refresh, retry, expire, minimum } => mname.to_string() .. " "
+            .. rname.to_string() .. " " .. serial.to_string() .. " " .. refresh.to_string() .. " " .. retry.to_string() .. " "
+            .. expire.to_string() .. " " .. minimum.to_string(),
+        RecordData.Srv { priority, weight, port, target } => priority.to_string() .. " " .. weight.to_string() .. " "
+            .. port.to_string() .. " " .. target.to_string(),
+        RecordData.Naptr { order, preference, flags, services, regexp, replacement } => order.to_string() .. " "
+            .. preference.to_string() .. " \"" .. flags .. "\" \"" .. services .. "\" \"" .. regexp .. "\" "
+            .. replacement.to_string(),
+        RecordData.Opt(options) => options.length.to_string() .. " options",
+        RecordData.Unknown(bytes) => "\\# " .. bytes.length.to_string() .. " " .. hex_text(bytes),
     };
 
     /// @brief Writes one record.
@@ -720,10 +710,8 @@ export let Message = module (
             return Result<ResourceRecord>.Err(parse_error(start, "rdata runs past the message"));
         }
         last data = read_data(reader, rtype, length)?;
-        if (reader.offset() != start + length) {
-            return Result<ResourceRecord>.Err(parse_error(start, type_name(rtype) + " rdata does not match RDLENGTH"));
-        }
-        return Result<ResourceRecord>.Ok(new ResourceRecord(owner, rtype, rclass, ttl, data));
+        return if (reader.offset() != start + length) -> Result<ResourceRecord>.Err(parse_error(start, type_name(rtype) .. " rdata does not match RDLENGTH"))
+            else -> Result<ResourceRecord>.Ok(new ResourceRecord(owner, rtype, rclass, ttl, data));
     };
 
     /// @brief Reads the data of a record of `rtype` spanning `length` bytes.
@@ -850,9 +838,9 @@ export let Message = module (
         let text = "";
         for (let i = 0; i < parts.length; i++) {
             if (i > 0) {
-                text = text + " ";
+                text ..= " ";
             }
-            text = text + "\"" + strings.from_bytes_lossy(parts[i]) + "\"";
+            text ..= "\"" .. strings.from_bytes_lossy(parts[i]) .. "\"";
         }
         return text;
     };

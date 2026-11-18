@@ -43,15 +43,19 @@ export let Call = module (
         };
 
         /// @brief Equal when the service and method are (case-sensitive).
-        export let.override equals = func(other: class) -> bool =>
-            other is MethodPath && (other as MethodPath).service == service && (other as MethodPath).method == method;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: MethodPath) {
+                return false;
+            }
+            return that.service == service && that.method == method;
+        };
 
         /// @brief Combines both parts.
         export let.override hash_code = func -> uint32 =>
             hashing.combine(strings.hash(service), strings.hash(method));
 
         /// @brief The `:path` value `/service/method`.
-        export let.override to_string = func -> string => "/" + service + "/" + method;
+        export let.override to_string = func -> string => "/" .. service .. "/" .. method;
     );
 
     /// @brief Parses a `:path` of the form `/service/method`; anything else is a Parse error.
@@ -62,10 +66,8 @@ export let Call = module (
         }
         last rest = text.slice(1, text.byte_length);
         last slash = strings.index_of(rest, "/");
-        if (slash <= 0 || slash == rest.byte_length - 1 || strings.contains(rest.slice(slash + 1, rest.byte_length), "/")) {
-            return Result<MethodPath>.Err(parse_error("method path must be /service/method"));
-        }
-        return Result<MethodPath>.Ok(new MethodPath(rest.slice(0, slash), rest.slice(slash + 1, rest.byte_length)));
+        return if (slash <= 0 || slash == rest.byte_length - 1 || strings.contains(rest.slice(slash + 1, rest.byte_length), "/")) -> Result<MethodPath>.Err(parse_error("method path must be /service/method"))
+            else -> Result<MethodPath>.Ok(new MethodPath(rest.slice(0, slash), rest.slice(slash + 1, rest.byte_length)));
     };
 
     /// @brief One call's request: the method, metadata, messages, and optional timeout.
@@ -95,11 +97,12 @@ export let Call = module (
             new RpcRequest(path, metadata, messages, budget);
 
         /// @brief The path, message count and timeout.
-        export let.override to_string = func -> string => "RpcRequest(" + path.to_string() + ", "
-            + messages.length.to_string() + " messages, timeout " + match (timeout) {
+        export let.override to_string = func -> string => "RpcRequest(" .. path.to_string() .. ", "
+            .. messages.length.to_string() .. " messages, timeout " .. match (timeout) {
             Optional.Some(span) => timeouts.format(span),
             Optional.None => "none",
-        } + ")";
+        }
+        .. ")";
     );
 
     /// @brief A unary request with one message.
@@ -134,7 +137,7 @@ export let Call = module (
 
         /// @brief The status and message count.
         export let.override to_string = func -> string =>
-            "RpcResponse(" + status.to_string() + ", " + messages.length.to_string() + " messages)";
+            "RpcResponse(" .. status.to_string() .. ", " .. messages.length.to_string() .. " messages)";
     );
 
     /// @brief An OK response with one message and no metadata.
@@ -169,8 +172,8 @@ export let Call = module (
         export let header = func(name: string) -> Optional<string> => find(headers, name);
 
         /// @brief The header count and body size.
-        export let.override to_string = func -> string => "WireRequest(" + headers.length.to_string() + " headers, "
-            + body.length.to_string() + " bytes)";
+        export let.override to_string = func -> string => "WireRequest(" .. headers.length.to_string() .. " headers, "
+            .. body.length.to_string() .. " bytes)";
     );
 
     /// @brief An HTTP response as gRPC receives it: status, header pairs, whole body, trailer pairs.
@@ -199,19 +202,17 @@ export let Call = module (
         export let header = func(name: string) -> Optional<string> => find(headers, name);
 
         /// @brief The status, header count, body size and trailer count.
-        export let.override to_string = func -> string => "WireResponse(" + http_status.to_string() + ", "
-            + headers.length.to_string() + " headers, " + body.length.to_string() + " bytes, "
-            + trailers.length.to_string() + " trailers)";
+        export let.override to_string = func -> string => "WireResponse(" .. http_status.to_string() .. ", "
+            .. headers.length.to_string() .. " headers, " .. body.length.to_string() .. " bytes, "
+            .. trailers.length.to_string() .. " trailers)";
     );
 
     /// @brief Whether a content type is gRPC: `application/grpc` alone or followed by `+` or `;`.
     #NoDiscard
     export let is_grpc_content_type = func(content_type: string) -> bool {
         last lower = strings.to_ascii_lower(content_type);
-        if (lower == GrpcContentType) {
-            return true;
-        }
-        return strings.starts_with(lower, GrpcContentType + "+") || strings.starts_with(lower, GrpcContentType + ";");
+        return if (lower == GrpcContentType) -> true
+            else -> strings.starts_with(lower, GrpcContentType .. "+") || strings.starts_with(lower, GrpcContentType .. ";");
     };
 
     /// @brief The client's HTTP request: `:method POST`, `:scheme`, `:path`, `:authority`, then `grpc-timeout` when
@@ -232,7 +233,7 @@ export let Call = module (
             Optional.None => {
             },
         }
-        headers.append(["content-type", GrpcContentType + "+" + subtype]);
+        headers.append(["content-type", GrpcContentType .. "+" .. subtype]);
         headers.append(["te", "trailers"]);
         for (let pair in request.metadata.entries()) {
             headers.append(pair);
@@ -254,7 +255,7 @@ export let Call = module (
         last parsed_path = parse_path(path_text);
         if (is_err<MethodPath>(parsed_path)) {
             return Result<RpcRequest>.Err(statuses.error(statuses.Code.Unimplemented, "malformed method path '"
-                + path_text + "'"));
+                .. path_text .. "'"));
         }
         last path = parsed_path?;
         let budget: Optional<Duration> = Optional<Duration>.None;
@@ -276,7 +277,7 @@ export let Call = module (
             Optional.Some(token) => {
                 if (token != "identity") {
                     return Result<RpcRequest>.Err(statuses.error(statuses.Code.Unimplemented,
-                        "grpc-encoding " + token + " is not supported"));
+                        "grpc-encoding " .. token .. " is not supported"));
                 }
             },
             Optional.None => {
@@ -296,9 +297,9 @@ export let Call = module (
     #NoDiscard
     export let encode_response = func(response: RpcResponse, subtype: string) -> WireResponse {
         last headers: [string, string][list] = new;
-        headers.append(["content-type", GrpcContentType + "+" + subtype]);
+        headers.append(["content-type", GrpcContentType .. "+" .. subtype]);
         last status_pairs = statuses.to_trailers(response.status).entries();
-        if (response.messages.length == 0 && !response.status.is_ok()) {
+        if (response.messages.length == 0 && not response.status.is_ok()) {
             for (let pair in status_pairs) {
                 headers.append(pair);
             }
@@ -330,16 +331,16 @@ export let Call = module (
     #NoDiscard
     export let decode_response = func(wire: WireResponse, max_message_size: int) -> Result<RpcResponse> {
         last content_type = optional.value_or<string>(wire.header("content-type"), "");
-        if (wire.http_status != 200 || !is_grpc_content_type(content_type)) {
-            last mapped = statuses.of(statuses.from_http(wire.http_status), "HTTP status " + wire.http_status.to_string()
-                + (is_grpc_content_type(content_type) ? "" : ", content type '" + content_type + "'"));
+        if (wire.http_status != 200 || not is_grpc_content_type(content_type)) {
+            last mapped = statuses.of(statuses.from_http(wire.http_status), "HTTP status " .. wire.http_status.to_string()
+                .. (is_grpc_content_type(content_type) ? "" : ", content type '" .. content_type .. "'"));
             return Result<RpcResponse>.Ok(status_response(mapped));
         }
         last trailers_only = wire.trailers.length == 0 && optional.is_some<string>(wire.header(statuses.StatusHeader));
         last trailer_source = trailers_only ? wire.headers : wire.trailers;
         last trailer_metadata = meta.from_entries(trailer_source);
         // grpc-message must not be thrown away (PROTOCOL-HTTP2.md), even when from_entries drops its value.
-        if (!trailer_metadata.contains(statuses.MessageHeader)) {
+        if (not trailer_metadata.contains(statuses.MessageHeader)) {
             for (let pair in trailer_source) {
                 if (strings.equals_ignore_ascii_case(pair[0], statuses.MessageHeader)) {
                     trailer_metadata.add_raw(statuses.MessageHeader, pair[1]);
@@ -348,7 +349,7 @@ export let Call = module (
         }
         last final_status = statuses.from_trailers(trailer_metadata, wire.http_status);
         last messages: uint8[list][list] = new;
-        if (!trailers_only) {
+        if (not trailers_only) {
             for (let frame in framing.decode_all(wire.body, max_message_size, false)?) {
                 messages.append(framing.message_of(frame, framing.Compression.Identity)?);
             }
@@ -364,8 +365,8 @@ export let Call = module (
         last kept: [string, string][list] = new;
         for (let pair in pairs) {
             last lower = strings.to_ascii_lower(pair[0]);
-            if (!strings.starts_with(lower, "grpc-") && lower != "content-type" && lower != "te"
-                && lower != "user-agent" && !strings.starts_with(lower, ":")) {
+            if (not strings.starts_with(lower, "grpc-") && lower != "content-type" && lower != "te"
+                && lower != "user-agent" && not strings.starts_with(lower, ":")) {
                 kept.append(pair);
             }
         }

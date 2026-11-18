@@ -31,10 +31,9 @@ export let Extensions = module (
 
         /// @brief Equal when the name and value are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ExtensionParam)) {
+            if (other is not that: ExtensionParam) {
                 return false;
             }
-            last that = other as ExtensionParam;
             return name == that.name && optionals.equals<string>(value, that.value);
         };
 
@@ -44,7 +43,7 @@ export let Extensions = module (
 
         /// @brief `name` or `name=value`.
         export let.override to_string = func -> string => match (value) {
-            Optional.Some(text) => name + "=" + text,
+            Optional.Some(text) => name .. "=" .. text,
             Optional.None => name,
         };
     );
@@ -77,17 +76,14 @@ export let Extensions = module (
 
         /// @brief Equal when the names and parameter lists are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Extension)) {
+            if (other is not that: Extension) {
                 return false;
             }
-            last that = other as Extension;
             if (name != that.name || params.length != that.params.length) {
                 return false;
             }
             for (let i = 0; i < params.length; i++) {
-                if (!params[i].equals(that.params[i])) {
-                    return false;
-                }
+                return false unless params[i].equals(that.params[i]);
             }
             return true;
         };
@@ -105,7 +101,7 @@ export let Extensions = module (
         export let.override to_string = func -> string {
             let text = name;
             for (let param in params) {
-                text = text + "; " + param.to_string();
+                text ..= "; " .. param.to_string();
             }
             return text;
         };
@@ -114,11 +110,8 @@ export let Extensions = module (
     /// @brief Whether `c` is a tchar of RFC 9110 section 5.6.2.
     #[NoDiscard, Pure]
     export let is_token_byte = func(c: uint8) -> bool {
-        if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) {
-            return true;
-        }
-        // ! # $ % & ' * + - . ^ _ ` | ~
-        return c == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
+        return if ((c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122)) -> true
+            else -> c == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
     };
 
     /// @brief Whether the text is a non-empty token.
@@ -128,9 +121,7 @@ export let Extensions = module (
             return false;
         }
         for (let i = 0; i < text.byte_length; i++) {
-            if (!is_token_byte(text.byte_at(i))) {
-                return false;
-            }
+            return false unless is_token_byte(text.byte_at(i));
         }
         return true;
     };
@@ -177,18 +168,14 @@ export let Extensions = module (
                                 }
                             }
                             // A quoted value must be a token, so any other byte (including UTF-8) fails here.
-                            if (!is_token_byte(value.byte_at(j))) {
-                                return syntax("a quoted parameter value must be a token", j);
-                            }
-                            text = text + value.slice(j, j + 1);
+                            return syntax("a quoted parameter value must be a token", j) unless is_token_byte(value.byte_at(j));
+                            text ..= value.slice(j, j + 1);
                             j++;
                         }
                         if (j >= length) {
                             return syntax("unterminated quoted string", j);
                         }
-                        if (!is_token(text)) {
-                            return syntax("a quoted parameter value must be a token", start);
-                        }
+                        return syntax("a quoted parameter value must be a token", start) unless is_token(text);
                         param_value = Optional<string>.Some(text);
                         i = skip_space(value, j + 1);
                     } else {
@@ -207,10 +194,8 @@ export let Extensions = module (
             }
             list.append(new Extension(name, params));
         }
-        if (list.length == 0) {
-            return syntax("no extension in the list", 0);
-        }
-        return Result<Extension[list]>.Ok(list);
+        return if (list.length == 0) -> syntax("no extension in the list", 0)
+            else -> Result<Extension[list]>.Ok(list);
     };
 
     /// @brief The header value of the extensions, `, `-separated.
@@ -218,7 +203,7 @@ export let Extensions = module (
     export let format = func(list: Extension[list]) -> string {
         let text = "";
         for (let i = 0; i < list.length; i++) {
-            text = i == 0 ? list[i].to_string() : text + ", " + list[i].to_string();
+            text = i == 0 ? list[i].to_string() : text .. ", " .. list[i].to_string();
         }
         return text;
     };

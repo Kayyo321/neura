@@ -119,7 +119,7 @@ export let PeakEwma = module (
         export let pending = func(index: int) -> int => waiting[index];
 
         /// @brief Text such as "PeakEwma(3 endpoints)".
-        export let.override to_string = func -> string => "PeakEwma(" + endpoints.length.to_string() + " endpoints)";
+        export let.override to_string = func -> string => "PeakEwma(" .. endpoints.length.to_string() .. " endpoints)";
 
         /// @brief Decays the estimate to `now` and returns the cost.
         let cost_at = func(index: int, now: int64) -> float64 {

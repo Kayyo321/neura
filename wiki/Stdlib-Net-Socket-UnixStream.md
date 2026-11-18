@@ -28,23 +28,23 @@ The following public declarations are taken from the module source; each links t
   Writes every byte. Tagged `#NoDiscard`.
 - **UnixStream.UnixStream** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L60)
   The next bytes the peer sent (at most `ReceiveChunk`), or `None` at the end of its data. Tagged `#NoDiscard`.
-- **UnixStream.UnixStream** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L70)
+- **UnixStream.UnixStream** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L68)
   Sends every byte; the `Std.Net.Transport` form of `write`. Tagged `#NoDiscard`.
-- **UnixStream.UnixStream** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L73)
+- **UnixStream.UnixStream** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L71)
   The longest a read waits; zero waits without limit.
-- **UnixStream.UnixStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L76)
+- **UnixStream.UnixStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L74)
   Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
-- **UnixStream.UnixStream** · [`export let peer_address = func -> Optional<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L81)
+- **UnixStream.UnixStream** · [`export let peer_address = func -> Optional<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L79)
   The dialed peer, or `None` for an accepted socket.
-- **UnixStream.UnixStream** · [`export let local_address = func -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L86)
+- **UnixStream.UnixStream** · [`export let local_address = func -> Result<UnixAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L84)
   The listener's address for an accepted socket; otherwise it asks the host, which traps in Neura 0.3.0 (no local-address service). Tagged `#NoDiscard`.
-- **UnixStream.UnixStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L102)
+- **UnixStream.UnixStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L98)
   Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service. Tagged `#NoDiscard`.
-- **UnixStream.UnixStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L114)
+- **UnixStream.UnixStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L108)
   Releases the connection. Closing again returns Ok.
-- **UnixStream.UnixStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L120)
+- **UnixStream.UnixStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L114)
   Text such as "UnixStream(to /run/app.sock)" or "UnixStream(accepted on @bus)".
-- **UnixStream** · [`export let connect = func(address: UnixAddr) -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L128)
+- **UnixStream** · [`export let connect = func(address: UnixAddr) -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-stream.nra#L122)
   Connects to the Unix-domain stream socket at `address` (`neura.net.unix.connect`). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

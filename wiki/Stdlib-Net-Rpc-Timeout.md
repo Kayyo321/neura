@@ -26,7 +26,7 @@ The following public declarations are taken from the module source; each links t
   The largest TimeoutValue.
 - **Timeout** · [`export let parse = func(text: string) -> Result<Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/timeout.nra#L29)
   Parses a `grpc-timeout` value. Fails with a Parse error for an empty value, more than 8 digits, a non-digit, or a missing or unknown unit. Tagged `#NoDiscard`.
-- **Timeout** · [`export let format = func(span: Duration) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/timeout.nra#L54)
+- **Timeout** · [`export let format = func(span: Duration) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/timeout.nra#L52)
   Formats a duration in the finest unit whose value fits 8 digits, rounding up. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

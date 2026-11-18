@@ -42,9 +42,9 @@ export let RateLimitFilter = module (
             } else {
                 latest[0] = decision;
             }
-            if (!decision.allowed) {
+            if (not decision.allowed) {
                 return Result<Resp>.Err(errors.custom(LimitedCode,
-                    "rate limit exceeded; retry after " + decision.retry_after.to_string()));
+                    "rate limit exceeded; retry after " .. decision.retry_after.to_string()));
             }
             return next.call(request);
         };
@@ -52,10 +52,8 @@ export let RateLimitFilter = module (
         /// @brief The decision for the latest request that reached the limiter, or None before the first.
         #NoDiscard
         export let last_decision = func -> optional.Optional<limiters.RateDecision> {
-            if (latest.length == 0) {
-                return optional.Optional<limiters.RateDecision>.None;
-            }
-            return optional.Optional<limiters.RateDecision>.Some(latest[0]);
+            return if (latest.length == 0) -> optional.Optional<limiters.RateDecision>.None
+                else -> optional.Optional<limiters.RateDecision>.Some(latest[0]);
         };
 
         /// @brief The fixed text "RateLimitFilter".

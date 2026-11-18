@@ -30,23 +30,23 @@ The following public declarations are taken from the module source; each links t
   Whether the deadline has passed on `clock`. Tagged `#NoDiscard`.
 - **Deadline.Deadline** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L44)
   Equal when the readings are.
-- **Deadline.Deadline** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L47)
+- **Deadline.Deadline** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L52)
   The reading's hash.
-- **Deadline.Deadline** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L50)
+- **Deadline.Deadline** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L55)
   `Deadline(at ...)`.
-- **Deadline** · [`export let after = func(clock: Clock, budget: Duration) -> Result<Deadline>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L55)
+- **Deadline** · [`export let after = func(clock: Clock, budget: Duration) -> Result<Deadline>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L60)
   The deadline `budget` after now on `clock`. Tagged `#NoDiscard`.
-- **Deadline** · [`export let of_request = func(clock: Clock, request: calls.RpcRequest) -> Result<optional.Optional<Deadline>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L60)
+- **Deadline** · [`export let of_request = func(clock: Clock, request: calls.RpcRequest) -> Result<optional.Optional<Deadline>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L65)
   The deadline of an incoming request: its timeout after now, or `None` without a timeout. Tagged `#NoDiscard`.
-- **Deadline** · [`export let DeadlineFilter = class implements SimpleFilter<calls.RpcRequest, calls.RpcResponse>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L73)
+- **Deadline** · [`export let DeadlineFilter = class implements SimpleFilter<calls.RpcRequest, calls.RpcResponse>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L78)
   Propagates a deadline to the calls it filters. Before a call: when the deadline has passed it fails with DEADLINE_EXCEEDED without calling the next service; otherwise the request goes on with timeout `min(request timeout, remaining)`. After a call that returns once the deadline has passed, the result is replaced by DEADLINE_EXCEEDED. Tagged `#Final`.
-- **Deadline.DeadlineFilter** · [`export last deadline: Deadline`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L77)
+- **Deadline.DeadlineFilter** · [`export last deadline: Deadline`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L82)
   The deadline of the enclosing work.
-- **Deadline.DeadlineFilter** · [`export let init = func(time: Clock, limit: Deadline)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L80)
+- **Deadline.DeadlineFilter** · [`export let init = func(time: Clock, limit: Deadline)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L85)
   A filter for `limit` on `time`.
-- **Deadline.DeadlineFilter** · [`export let apply = func(request: calls.RpcRequest, next: Service<calls.RpcRequest, calls.RpcResponse>) -> Result<calls.RpcResponse>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L86)
+- **Deadline.DeadlineFilter** · [`export let apply = func(request: calls.RpcRequest, next: Service<calls.RpcRequest, calls.RpcResponse>) -> Result<calls.RpcResponse>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L91)
   Checks the budget, forwards with the remaining timeout, and checks again after the call.
-- **Deadline.DeadlineFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L106)
+- **Deadline.DeadlineFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/deadline.nra#L111)
   The deadline.
 <!-- END SOURCE API -->
 

@@ -44,6 +44,6 @@ export let LoadBalancer = module (
         };
 
         /// @brief Text such as "Selection(index 2)".
-        export let.override to_string = func -> string => "Selection(index " + index.to_string() + ")";
+        export let.override to_string = func -> string => "Selection(index " .. index.to_string() .. ")";
     );
 );

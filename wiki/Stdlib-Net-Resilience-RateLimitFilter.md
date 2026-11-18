@@ -28,9 +28,9 @@ The following public declarations are taken from the module source; each links t
   Calls `next` when the limiter grants a permit for the request's key.
 - **RateLimitFilter.RateLimitFilter** · [`export let last_decision = func -> optional.Optional<limiters.RateDecision>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limit-filter.nra#L54)
   The decision for the latest request that reached the limiter, or None before the first. Tagged `#NoDiscard`.
-- **RateLimitFilter.RateLimitFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limit-filter.nra#L62)
+- **RateLimitFilter.RateLimitFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limit-filter.nra#L60)
   The fixed text "RateLimitFilter".
-- **RateLimitFilter** · [`export let of = func<Req, Resp>(limiter: limiters.RateLimiter, key: func(Req) -> string) -> RateLimitFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limit-filter.nra#L67)
+- **RateLimitFilter** · [`export let of = func<Req, Resp>(limiter: limiters.RateLimiter, key: func(Req) -> string) -> RateLimitFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limit-filter.nra#L65)
   A filter over `limiter` keyed by `key`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

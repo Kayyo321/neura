@@ -32,15 +32,15 @@ The following public declarations are taken from the module source; each links t
   The family of the IP address. Tagged `#Pure`.
 - **SocketAddr.SocketAddr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L44)
   Tests whether another object is a `SocketAddr` with an equal address and the same port.
-- **SocketAddr.SocketAddr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L54)
+- **SocketAddr.SocketAddr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L53)
   Combines the address hash with the port. Tagged `#Pure`.
-- **SocketAddr.SocketAddr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L58)
+- **SocketAddr.SocketAddr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L57)
   `a.b.c.d:port` or `[ipv6]:port`. Tagged `#Pure`.
-- **SocketAddr** · [`export let of_v4 = func(ip: v4.Ipv4Addr, port: int) -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L66)
+- **SocketAddr** · [`export let of_v4 = func(ip: v4.Ipv4Addr, port: int) -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L65)
   The socket address of an IPv4 address and a port; traps when the port is outside 0 to 65535. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **SocketAddr** · [`export let of_v6 = func(ip: v6.Ipv6Addr, port: int) -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L70)
+- **SocketAddr** · [`export let of_v6 = func(ip: v6.Ipv6Addr, port: int) -> SocketAddr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L69)
   The socket address of an IPv6 address and a port; traps when the port is outside 0 to 65535. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **SocketAddr** · [`export let parse = func(text: string) -> Result<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L80)
+- **SocketAddr** · [`export let parse = func(text: string) -> Result<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/socket-addr.nra#L79)
   Parses `a.b.c.d:port` or `[ipv6]:port` (the IPv6 text may carry `%zone`). The port is 1 to 5 decimal digits, 0 to 65535, with no leading zero except a lone `0`. Errors: Empty for ""; the address parser's error (offsets in the whole text); Syntax when the `:port` part or the closing `]` is missing (at the length or after the `]`); UnexpectedEnd for an empty port; InvalidCharacter at a byte of the port that is not a digit or at the byte after a leading zero; OutOfRange at the port's start when it exceeds 65535. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

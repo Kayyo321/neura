@@ -32,7 +32,7 @@ The following public declarations are taken from the module source; each links t
   Whether a fragmented message is open. Tagged `#NoDiscard`.
 - **Message.MessageAssembler** · [`export let add = func(frame: frames.Frame) -> Result<Optional<Message>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/message.nra#L83)
   Adds a data frame (opcode 0, 1 or 2). Returns the message when the frame completes one, `None` when more fragments are needed, or the failure of a broken sequence. A control frame traps with "invalid argument: control frame". Tagged `#NoDiscard`.
-- **Message.MessageAssembler** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/message.nra#L122)
+- **Message.MessageAssembler** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/message.nra#L118)
   Whether a message is open and how many bytes it holds.
 <!-- END SOURCE API -->
 

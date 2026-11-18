@@ -59,7 +59,7 @@ export let TokenBucketLimiter = module (
 
         /// @brief Text such as "TokenBucketLimiter(capacity 10, 2 keys)".
         export let.override to_string = func -> string =>
-            "TokenBucketLimiter(capacity " + capacity.to_string() + ", " + buckets_by_key.size().to_string() + " keys)";
+            "TokenBucketLimiter(capacity " .. capacity.to_string() .. ", " .. buckets_by_key.size().to_string() .. " keys)";
 
         /// @brief Creates and stores a full bucket for `key`.
         let fresh = func(key: string) -> buckets.TokenBucket {

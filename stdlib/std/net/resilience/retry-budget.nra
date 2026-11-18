@@ -64,8 +64,8 @@ export let RetryBudget = module (
                 return "RetryBudget(unlimited)";
             }
             last hundredths = balance % 100;
-            return "RetryBudget(" + percent.to_string() + " percent, balance " + (balance / 100).to_string() + "."
-                + (hundredths < 10 ? "0" : "") + hundredths.to_string() + ")";
+            return "RetryBudget(" .. percent.to_string() .. " percent, balance " .. (balance / 100).to_string() .. "."
+                .. (hundredths < 10 ? "0" : "") .. hundredths.to_string() .. ")";
         };
     );
 

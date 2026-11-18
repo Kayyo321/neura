@@ -130,7 +130,7 @@ export let ByteRing = module (
 
         /// @brief `ByteRing(length N, capacity M)`; the bytes are not shown.
         export let.override to_string = func -> string =>
-            "ByteRing(length " + used.to_string() + ", capacity " + storage.length.to_string() + ")";
+            "ByteRing(length " .. used.to_string() .. ", capacity " .. storage.length.to_string() .. ")";
 
         /// @brief Moves the head past `count` readable bytes.
         let advance = func(count: int) {

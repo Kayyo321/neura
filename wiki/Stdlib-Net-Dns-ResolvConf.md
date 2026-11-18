@@ -66,15 +66,15 @@ The following public declarations are taken from the module source; each links t
   The skipped lines and values, each "line N: reason". Tagged `#NoDiscard`.
 - **ResolvConf.ResolvConf** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L136)
   Equal when the servers, search list and options are equal (unknown options and problems are not compared).
-- **ResolvConf.ResolvConf** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L160)
+- **ResolvConf.ResolvConf** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L157)
   Combines the compared fields.
-- **ResolvConf.ResolvConf** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L175)
+- **ResolvConf.ResolvConf** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L172)
   Text such as "ResolvConf(nameservers [10.0.0.1], search [corp.example], ndots 1, timeout 5, attempts 2)", with " rotate" and " edns0" when set.
-- **ResolvConf** · [`export let defaults = func -> ResolvConf`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L195)
+- **ResolvConf** · [`export let defaults = func -> ResolvConf`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L192)
   The configuration of an empty file: no servers, empty search list, default options. Tagged `#NoDiscard`.
-- **ResolvConf** · [`export let parse = func(text: string) -> ResolvConf`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L200)
+- **ResolvConf** · [`export let parse = func(text: string) -> ResolvConf`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L197)
   Parses resolv.conf text; never fails. Skipped lines and values are listed in `problems`. Tagged `#NoDiscard`.
-- **ResolvConf** · [`export let read = func(path: string) -> Result<ResolvConf>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L294)
+- **ResolvConf** · [`export let read = func(path: string) -> Result<ResolvConf>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/resolv-conf.nra#L291)
   Reads and parses the file at `path` (usually `DefaultPath`). Fails only when the file cannot be read as UTF-8 text. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

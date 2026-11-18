@@ -42,25 +42,25 @@ The following public declarations are taken from the module source; each links t
   The value of `key`. Tagged `#NoDiscard`.
 - **TraceState.TraceState** · [`export let put = func(key: string, value: string) -> Result<TraceState>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L77)
   A state with `key` set to `value` and moved to the front; the right-most member is dropped when the list would exceed 32. Fails with a Parse error when the key or value is invalid. Tagged `#NoDiscard`.
-- **TraceState.TraceState** · [`export let remove = func(key: string) -> TraceState`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L99)
+- **TraceState.TraceState** · [`export let remove = func(key: string) -> TraceState`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L95)
   A state without `key`; the others keep their order. Tagged `#NoDiscard`.
-- **TraceState.TraceState** · [`export let truncated = func(max_length: int) -> TraceState`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L114)
+- **TraceState.TraceState** · [`export let truncated = func(max_length: int) -> TraceState`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L110)
   A state whose header is at most `max_length` characters: whole members are removed, first those longer than 128 characters (right to left), then from the right (spec "tracestate Limits"). Tagged `#NoDiscard`.
-- **TraceState.TraceState** · [`export let to_header = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L138)
+- **TraceState.TraceState** · [`export let to_header = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L134)
   The header value: `key=value` members joined by commas without spaces ("" when empty). Tagged `#NoDiscard`.
-- **TraceState.TraceState** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L147)
+- **TraceState.TraceState** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L143)
   Equal when the members and their order are.
-- **TraceState.TraceState** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L155)
+- **TraceState.TraceState** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L151)
   The hash of the header value.
-- **TraceState.TraceState** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L158)
+- **TraceState.TraceState** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L154)
   The header value.
-- **TraceState** · [`export let empty = func -> TraceState`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L173)
+- **TraceState** · [`export let empty = func -> TraceState`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L169)
   A state with no members. Tagged `#NoDiscard`.
-- **TraceState** · [`export let parse = func(text: string) -> Result<TraceState>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L177)
+- **TraceState** · [`export let parse = func(text: string) -> Result<TraceState>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L173)
   Parses a combined `tracestate` value by the rules described for the module. Tagged `#NoDiscard`.
-- **TraceState** · [`export let is_valid_key = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L218)
+- **TraceState** · [`export let is_valid_key = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L210)
   Whether `key` is a valid list-member key. Tagged `#NoDiscard`.
-- **TraceState** · [`export let is_valid_value = func(value: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L238)
+- **TraceState** · [`export let is_valid_value = func(value: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/trace-state.nra#L226)
   Whether `value` is a valid list-member value: 1 to 256 characters of 0x20 to 0x7E other than `,` and `=`, the last not a space. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

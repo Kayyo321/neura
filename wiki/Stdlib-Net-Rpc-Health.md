@@ -26,53 +26,53 @@ The following public declarations are taken from the module source; each links t
   The proto number of a status. Tagged `#NoDiscard`.
 - **Health** · [`export let of_number = func(value: int64) -> ServingStatus`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L40)
   The status with a proto number; numbers outside 0 to 3 read as UNKNOWN (proto3 open enum). Tagged `#NoDiscard`.
-- **Health** · [`export let check_path = func -> calls.MethodPath`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L55)
+- **Health** · [`export let check_path = func -> calls.MethodPath`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L53)
   The `Check` method path. Tagged `#NoDiscard`.
-- **Health** · [`export let watch_path = func -> calls.MethodPath`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L59)
+- **Health** · [`export let watch_path = func -> calls.MethodPath`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L57)
   The `Watch` method path. Tagged `#NoDiscard`.
-- **Health** · [`export let encode_request = func(service: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L63)
+- **Health** · [`export let encode_request = func(service: string) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L61)
   A `HealthCheckRequest` (field 1 omitted for the empty name, as proto3 does). Tagged `#NoDiscard`.
-- **Health** · [`export let decode_request = func(bytes: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L73)
+- **Health** · [`export let decode_request = func(bytes: uint8[list]) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L71)
   The service name of a `HealthCheckRequest`; unknown fields are skipped. Tagged `#NoDiscard`.
-- **Health** · [`export let encode_response = func(value: ServingStatus) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L89)
+- **Health** · [`export let encode_response = func(value: ServingStatus) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L87)
   A `HealthCheckResponse` (field 1 omitted for UNKNOWN). Tagged `#NoDiscard`.
-- **Health** · [`export let decode_response = func(bytes: uint8[list]) -> Result<ServingStatus>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L99)
+- **Health** · [`export let decode_response = func(bytes: uint8[list]) -> Result<ServingStatus>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L97)
   The status of a `HealthCheckResponse`; unknown fields are skipped. Tagged `#NoDiscard`.
-- **Health** · [`export let Watcher = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L115)
+- **Health** · [`export let Watcher = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L113)
   A registered watcher of one service name. Tagged `#Final`.
-- **Health.Watcher** · [`export last id: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L117)
+- **Health.Watcher** · [`export last id: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L115)
   The id `watch` returned.
-- **Health.Watcher** · [`export last service: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L119)
+- **Health.Watcher** · [`export last service: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L117)
   The watched name.
-- **Health.Watcher** · [`export let init = func(watcher_id: int, name: string, notify: func(ServingStatus) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L124)
+- **Health.Watcher** · [`export let init = func(watcher_id: int, name: string, notify: func(ServingStatus) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L122)
   A watcher with every part given.
-- **Health.Watcher** · [`export let report = func(value: ServingStatus)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L131)
+- **Health.Watcher** · [`export let report = func(value: ServingStatus)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L129)
   Reports `value`.
-- **Health.Watcher** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L134)
+- **Health.Watcher** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L132)
   The id and name.
-- **Health** · [`export let HealthService = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L139)
+- **Health** · [`export let HealthService = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L137)
   Serving statuses by service name, with watchers. Tagged `#Final`, `#NotThreadSafe`.
-- **Health.HealthService** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L150)
+- **Health.HealthService** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L148)
   A registry with only the server entry `""` set to SERVING.
-- **Health.HealthService** · [`export let set_status = func(service: string, value: ServingStatus)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L156)
+- **Health.HealthService** · [`export let set_status = func(service: string, value: ServingStatus)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L154)
   Sets the status of `service` (registering it) and reports a change to its watchers.
-- **Health.HealthService** · [`export let clear_status = func(service: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L172)
+- **Health.HealthService** · [`export let clear_status = func(service: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L170)
   Unregisters `service`; its watchers see SERVICE_UNKNOWN.
-- **Health.HealthService** · [`export let shutdown = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L189)
+- **Health.HealthService** · [`export let shutdown = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L187)
   Marks every registered service NOT_SERVING, as a server does when it shuts down.
-- **Health.HealthService** · [`export let check = func(service: string) -> Result<ServingStatus>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L200)
+- **Health.HealthService** · [`export let check = func(service: string) -> Result<ServingStatus>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L198)
   The status of a registered `service`, or a NOT_FOUND status error. Tagged `#NoDiscard`.
-- **Health.HealthService** · [`export let watch = func(service: string, callback: func(ServingStatus) -> void) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L211)
+- **Health.HealthService** · [`export let watch = func(service: string, callback: func(ServingStatus) -> void) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L209)
   Reports the current status of `service` to `callback` at once (SERVICE_UNKNOWN when not registered), then every change; returns the watcher id.
-- **Health.HealthService** · [`export let cancel_watch = func(id: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L223)
+- **Health.HealthService** · [`export let cancel_watch = func(id: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L221)
   Removes a watcher; returns whether it existed.
-- **Health.HealthService** · [`export let check_handler = func -> Service<calls.RpcRequest, calls.RpcResponse>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L237)
+- **Health.HealthService** · [`export let check_handler = func -> Service<calls.RpcRequest, calls.RpcResponse>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L235)
   The `Check` handler: decodes the request, answers the status or NOT_FOUND. Tagged `#NoDiscard`.
-- **Health.HealthService** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L241)
+- **Health.HealthService** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L239)
   The number of registered names.
-- **Health** · [`export let register = func(health: HealthService, server: grpc.GrpcServer)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L266)
+- **Health** · [`export let register = func(health: HealthService, server: grpc.GrpcServer)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L264)
   Installs the `Check` method of `health` on `server`.
-- **Health** · [`export let check_remote = func(channel: grpc.GrpcChannel, service: string, budget: optional.Optional<Duration>) -> Result<ServingStatus>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L271)
+- **Health** · [`export let check_remote = func(channel: grpc.GrpcChannel, service: string, budget: optional.Optional<Duration>) -> Result<ServingStatus>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/rpc/health.nra#L269)
   Calls `Check` for `service` over `channel`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

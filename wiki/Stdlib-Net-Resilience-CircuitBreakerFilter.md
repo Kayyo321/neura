@@ -26,13 +26,13 @@ The following public declarations are taken from the module source; each links t
   A filter over `guard` that counts the results `classify` returns true for as failures.
 - **CircuitBreakerFilter.CircuitBreakerFilter** · [`export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L36)
   Calls `next` when the breaker admits the request and reports the outcome; otherwise returns the `resilience.circuit_open` error without calling it.
-- **CircuitBreakerFilter.CircuitBreakerFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L51)
+- **CircuitBreakerFilter.CircuitBreakerFilter** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L49)
   Text such as "CircuitBreakerFilter(CircuitBreaker(Open))".
-- **CircuitBreakerFilter** · [`export let of = func<Req, Resp>(breaker: breakers.CircuitBreaker) -> CircuitBreakerFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L56)
+- **CircuitBreakerFilter** · [`export let of = func<Req, Resp>(breaker: breakers.CircuitBreaker) -> CircuitBreakerFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L54)
   A filter over `breaker` that counts every `Err` as a failure. Tagged `#NoDiscard`.
-- **CircuitBreakerFilter** · [`export let classified = func<Req, Resp>(breaker: breakers.CircuitBreaker, classify: func(Result<Resp>) -> bool) -> CircuitBreakerFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L61)
+- **CircuitBreakerFilter** · [`export let classified = func<Req, Resp>(breaker: breakers.CircuitBreaker, classify: func(Result<Resp>) -> bool) -> CircuitBreakerFilter<Req, Resp>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L59)
   A filter over `breaker` with a failure classifier. Tagged `#NoDiscard`.
-- **CircuitBreakerFilter** · [`export let is_err = func<Resp>(outcome: Result<Resp>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L66)
+- **CircuitBreakerFilter** · [`export let is_err = func<Resp>(outcome: Result<Resp>) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/circuit-breaker-filter.nra#L64)
   Whether `outcome` is an `Err`. Tagged `#Pure`.
 <!-- END SOURCE API -->
 

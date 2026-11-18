@@ -57,20 +57,19 @@ export let Client = module (
         #NoDiscard
         export let header_lines = func -> string[list] {
             last lines: string[list] = new;
-            lines.append("Accept: " + EventStreamType);
+            lines.append("Accept: " .. EventStreamType);
             lines.append("Cache-Control: no-store");
             if (last_event_id.byte_length > 0) {
-                lines.append("Last-Event-ID: " + last_event_id);
+                lines.append("Last-Event-ID: " .. last_event_id);
             }
             return lines;
         };
 
         /// @brief Equal when the URL, cursor and attempt number are equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SseRequest)) {
+            if (other is not request: SseRequest) {
                 return false;
             }
-            last request = other as SseRequest;
             return url == request.url && last_event_id == request.last_event_id && attempt == request.attempt;
         };
 
@@ -81,7 +80,7 @@ export let Client = module (
 
         /// @brief `SseRequest(url, Last-Event-ID "...", attempt n)`.
         export let.override to_string = func -> string =>
-            "SseRequest(" + url + ", Last-Event-ID \"" + last_event_id + "\", attempt " + attempt.to_string() + ")";
+            "SseRequest(" .. url .. ", Last-Event-ID \"" .. last_event_id .. "\", attempt " .. attempt.to_string() .. ")";
     );
 
     /// @brief The response to an attempt: status, media type, and the body as a chunk source that returns
@@ -104,7 +103,7 @@ export let Client = module (
 
         /// @brief `SseResponse(status, content type)`.
         export let.override to_string = func -> string =>
-            "SseResponse(" + status.to_string() + ", " + content_type + ")";
+            "SseResponse(" .. status.to_string() .. ", " .. content_type .. ")";
     );
 
     /// @brief A reconnecting event-stream client. Not for use by several tasks at once.
@@ -178,7 +177,7 @@ export let Client = module (
                 if (state == ReadyState.Closed) {
                     return Result<Optional<SseEvent>>.Ok(Optional<SseEvent>.None);
                 }
-                if (!has_body) {
+                if (not has_body) {
                     match (open()) {
                         Result.Ok(_) => {},
                         Result.Err(e) => {
@@ -229,7 +228,7 @@ export let Client = module (
             if (max_attempts > 0 && failures >= max_attempts) {
                 state = ReadyState.Closed;
                 return Result<Unit>.Err(errors.custom("sse.gave_up",
-                    "gave up after " + failures.to_string() + " failed attempts"));
+                    "gave up after " .. failures.to_string() .. " failed attempts"));
             }
             if (wait_first) {
                 match (clock.sleep(duration.of_millis(next_delay_millis()))) {
@@ -253,11 +252,9 @@ export let Client = module (
                         return Result<Unit>.Ok(Unit.Value);
                     }
                     if (response.status != 200) {
-                        return fail("the response status is " + response.status.to_string() + ", not 200");
+                        return fail("the response status is " .. response.status.to_string() .. ", not 200");
                     }
-                    if (!is_event_stream(response.content_type)) {
-                        return fail("the response media type is \"" + response.content_type + "\", not text/event-stream");
-                    }
+                    return fail("the response media type is \"" .. response.content_type .. "\", not text/event-stream") unless is_event_stream(response.content_type);
                     failures = 0;
                     state = ReadyState.Open;
                     body = response.body;
@@ -322,7 +319,7 @@ export let Client = module (
 
         /// @brief `EventSourceClient(url, state)`.
         export let.override to_string = func -> string =>
-            "EventSourceClient(" + url + ", " + state.to_string() + ")";
+            "EventSourceClient(" .. url .. ", " .. state.to_string() .. ")";
     );
 
     /// @brief Decodes each event of a client into a `T` with a decoding hook, such as a JSON decoder for
@@ -360,7 +357,7 @@ export let Client = module (
         export let close = func -> Result<Unit> => source.close();
 
         /// @brief `TypedEventSource(url)`.
-        export let.override to_string = func -> string => "TypedEventSource(" + source.url + ")";
+        export let.override to_string = func -> string => "TypedEventSource(" .. source.url .. ")";
     );
 
     /// @brief A client for a new stream at `url`.

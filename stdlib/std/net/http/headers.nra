@@ -67,10 +67,8 @@ export let Headers = module (
         #NoDiscard
         export let get = func(name: string) -> Optional<string> {
             last at = index_of(strings.to_ascii_lower(name));
-            if (at < 0) {
-                return Optional<string>.None;
-            }
-            return Optional<string>.Some(values[at]);
+            return if (at < 0) -> Optional<string>.None
+                else -> Optional<string>.Some(values[at]);
         };
 
         /// @brief Every value of `name` in order, as a new list.
@@ -90,10 +88,8 @@ export let Headers = module (
         #NoDiscard
         export let joined = func(name: string) -> Optional<string> {
             last all = get_all(name);
-            if (all.length == 0) {
-                return Optional<string>.None;
-            }
-            return Optional<string>.Some(strings.join(all, ", "));
+            return if (all.length == 0) -> Optional<string>.None
+                else -> Optional<string>.Some(strings.join(all, ", "));
         };
 
         /// @brief The comma-separated elements of every value of `name` (RFC 9110 section 5.6.1), each trimmed,
@@ -143,7 +139,7 @@ export let Headers = module (
                         break;
                     }
                 }
-                if (!present) {
+                if (not present) {
                     seen.append(key);
                 }
             }
@@ -169,15 +165,14 @@ export let Headers = module (
 
         /// @brief Equal when both hold the same fields in the same order, names compared without case.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Headers)) {
+            if (other is not map: Headers) {
                 return false;
             }
-            last map = other as Headers;
             if (map.size() != names.length) {
                 return false;
             }
             for (let i = 0; i < names.length; i++) {
-                if (!strings.equals_ignore_ascii_case(map.name_at(i), names[i]) || map.value_at(i) != values[i]) {
+                if (not strings.equals_ignore_ascii_case(map.name_at(i), names[i]) || map.value_at(i) != values[i]) {
                     return false;
                 }
             }
@@ -198,9 +193,9 @@ export let Headers = module (
         export let.override to_string = func -> string {
             last parts: string[list] = new;
             for (let i = 0; i < names.length; i++) {
-                parts.append(names[i] + ": " + values[i]);
+                parts.append(names[i] .. ": " .. values[i]);
             }
-            return "Headers{" + strings.join(parts, "; ") + "}";
+            return "Headers{" .. strings.join(parts, "; ") .. "}";
         };
 
         /// @brief The position of the first field with lowercase name `key`, or -1.
@@ -247,9 +242,7 @@ export let Headers = module (
             return false;
         }
         for (let i = 0; i < name.byte_length; i++) {
-            if (!is_tchar(name.byte_at(i))) {
-                return false;
-            }
+            return false unless is_tchar(name.byte_at(i));
         }
         return true;
     };
@@ -257,11 +250,8 @@ export let Headers = module (
     /// @brief Whether byte `b` is a tchar (RFC 9110 section 5.6.2).
     #[Pure, ThreadSafe]
     export let is_tchar = func(b: uint8) -> bool {
-        if ((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122)) {
-            return true;
-        }
-        // ! # $ % & ' * + - . ^ _ ` | ~
-        return b == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
+        return if ((b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122)) -> true
+            else -> b == 33 or 35 or 36 or 37 or 38 or 39 or 42 or 43 or 45 or 46 or 94 or 95 or 96 or 124 or 126;
     };
 
     /// @brief Whether `value` can be a field value: no CR, LF or NUL, and no other control byte except tab
@@ -329,14 +319,14 @@ export let Headers = module (
 
     /// @brief Traps unless `name` is a token.
     let check_name = func(name: string) {
-        if (!is_token(name)) {
+        if (not is_token(name)) {
             trap_with_message("invalid argument: header name");
         }
     };
 
     /// @brief Traps unless `value` is a valid field value.
     let check_value = func(value: string) {
-        if (!is_valid_value(value)) {
+        if (not is_valid_value(value)) {
             trap_with_message("invalid argument: header value");
         }
     };

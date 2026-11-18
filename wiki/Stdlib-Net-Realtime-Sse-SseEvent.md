@@ -34,13 +34,13 @@ The following public declarations are taken from the module source; each links t
   Stores the fields.
 - **SseEvent.SseEvent** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L38)
   Equal when the type, data, identifier and reconnection time are equal.
-- **SseEvent.SseEvent** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L48)
+- **SseEvent.SseEvent** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L47)
   Combines the hashes of the four fields in order.
-- **SseEvent.SseEvent** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L59)
+- **SseEvent.SseEvent** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L58)
   `SseEvent(type, id "...", data "...")`, with the reconnection time when set.
-- **SseEvent** · [`export let message = func(payload: string) -> SseEvent`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L73)
+- **SseEvent** · [`export let message = func(payload: string) -> SseEvent`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L72)
   An event of type `message` with the data and no identifier or reconnection time. Tagged `#NoDiscard`.
-- **SseEvent** · [`export let of = func(kind: string, payload: string, identifier: string) -> SseEvent`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L78)
+- **SseEvent** · [`export let of = func(kind: string, payload: string, identifier: string) -> SseEvent`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/sse-event.nra#L77)
   An event with the type, data and identifier and no reconnection time. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

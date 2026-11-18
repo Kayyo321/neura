@@ -135,7 +135,7 @@ export let Mdns = module (
         };
 
         /// @brief Text such as "MdnsQuerier(1s)".
-        export let.override to_string = func -> string => "MdnsQuerier(" + window.to_string() + ")";
+        export let.override to_string = func -> string => "MdnsQuerier(" .. window.to_string() .. ")";
     );
 
     /// @brief The decodable responses among datagrams; others are dropped.

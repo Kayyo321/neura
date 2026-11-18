@@ -53,7 +53,7 @@ export let AppHandler = module (
         };
 
         /// @brief The text "RouterHandler(Router(N routes))".
-        export let.override to_string = func -> string => "RouterHandler(" + router.to_string() + ")";
+        export let.override to_string = func -> string => "RouterHandler(" .. router.to_string() .. ")";
     );
 
     /// @brief `router` as a handler.
@@ -82,7 +82,7 @@ export let AppHandler = module (
         last fields: [string, string][list] = new;
         for (let i = 0; i < response.headers.size(); i++) {
             last name = response.headers.name_at(i);
-            if (!is_host_owned(name)) {
+            if (not is_host_owned(name)) {
                 fields.append([name, response.headers.value_at(i)]);
             }
         }

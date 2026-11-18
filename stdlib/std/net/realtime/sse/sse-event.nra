@@ -36,10 +36,9 @@ export let SseEvent = module (
 
         /// @brief Equal when the type, data, identifier and reconnection time are equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SseEvent)) {
+            if (other is not event: SseEvent) {
                 return false;
             }
-            last event = other as SseEvent;
             return event_type == event.event_type && data == event.data && id == event.id
                 && optional_equals(retry, event.retry);
         };
@@ -57,14 +56,14 @@ export let SseEvent = module (
 
         /// @brief `SseEvent(type, id "...", data "...")`, with the reconnection time when set.
         export let.override to_string = func -> string {
-            let text = "SseEvent(" + event_type + ", id \"" + id + "\", data \"" + data + "\"";
+            let text = "SseEvent(" .. event_type .. ", id \"" .. id .. "\", data \"" .. data .. "\"";
             match (retry) {
                 Optional.Some(millis) => {
-                    text = text + ", retry " + millis.to_string();
+                    text ..= ", retry " .. millis.to_string();
                 },
                 Optional.None => {},
             }
-            return text + ")";
+            return text .. ")";
         };
     );
 
@@ -84,6 +83,6 @@ export let SseEvent = module (
             Optional.Some(y) => x == y,
             Optional.None => false,
         },
-        Optional.None => !is_some<int64>(b),
+        Optional.None => not is_some<int64>(b),
     };
 );

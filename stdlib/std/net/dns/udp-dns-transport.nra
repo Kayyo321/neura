@@ -53,7 +53,7 @@ export let UdpDnsTransport = module (
         };
 
         /// @brief Text such as "UdpDnsTransport(192.0.2.53:53)".
-        export let.override to_string = func -> string => "UdpDnsTransport(" + server.to_string() + ")";
+        export let.override to_string = func -> string => "UdpDnsTransport(" .. server.to_string() .. ")";
 
         /// @brief Closes the socket and passes the outcome on.
         let finish = func(socket: int64, outcome: Result<messages.Message>) -> Result<messages.Message> {
@@ -94,9 +94,7 @@ export let UdpDnsTransport = module (
             }
             match (ips.parse(sender)) {
                 Result.Ok(ip) => {
-                    if (!ips.equals(ip, server.ip)) {
-                        return false;
-                    }
+                    return false unless ips.equals(ip, server.ip);
                 },
                 Result.Err(_) => {
                     return false;

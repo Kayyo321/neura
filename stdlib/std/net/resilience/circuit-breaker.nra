@@ -170,7 +170,7 @@ export let CircuitBreaker = module (
         };
 
         /// @brief Text such as "CircuitBreaker(Closed)".
-        export let.override to_string = func -> string => "CircuitBreaker(" + current.to_string() + ")";
+        export let.override to_string = func -> string => "CircuitBreaker(" .. current.to_string() .. ")";
 
         /// @brief Records one outcome in the current state.
         let record = func(failed: bool) -> Result<Unit> {

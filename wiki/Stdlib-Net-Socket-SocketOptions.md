@@ -36,49 +36,49 @@ The following public declarations are taken from the module source; each links t
   The value set for option number `option`, or -1 when it is not set. Tagged `#Pure`.
 - **SocketOptions.SocketOptions** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L96)
   Equal when the kind, the settings and the multipath flag are.
-- **SocketOptions.SocketOptions** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L117)
+- **SocketOptions.SocketOptions** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L116)
   A hash consistent with equals.
-- **SocketOptions.SocketOptions** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L128)
+- **SocketOptions.SocketOptions** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L127)
   Text such as "SocketOptions(TcpStream: no_delay=1, keep_alive=1)".
-- **SocketOptions** · [`export let SocketOptionsBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L146)
+- **SocketOptions** · [`export let SocketOptionsBuilder = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L145)
   Collects option values; `build` validates them for one socket kind. Setting an option again replaces its value. Tagged `#Final`, `#NotThreadSafe`.
-- **SocketOptions.SocketOptionsBuilder** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L153)
+- **SocketOptions.SocketOptionsBuilder** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L152)
   An empty builder.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_reuse_address = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L163)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_reuse_address = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L162)
   `SO_REUSEADDR`.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_reuse_port = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L168)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_reuse_port = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L167)
   `SO_REUSEPORT`: several sockets bind the same port and the kernel spreads the load.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_no_delay = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L173)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_no_delay = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L172)
   `TCP_NODELAY`: disables Nagle's algorithm.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_fast_open = func(queue_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L178)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_fast_open = func(queue_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L177)
   `TCP_FASTOPEN` on a listener: the queue length of pending fast-open requests.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_user_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L184)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_user_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L183)
   `TCP_USER_TIMEOUT`: how long sent data may stay unacknowledged before the connection is dropped; zero keeps the system default.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L189)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L188)
   `SO_KEEPALIVE`.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive_idle = func(idle: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L194)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive_idle = func(idle: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L193)
   `TCP_KEEPIDLE`: idle time before the first probe. Needs keepalive.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive_interval = func(interval: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L199)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive_interval = func(interval: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L198)
   `TCP_KEEPINTVL`: time between probes. Needs keepalive.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive_count = func(probes: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L204)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_keep_alive_count = func(probes: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L203)
   `TCP_KEEPCNT`: unanswered probes before the connection is dropped. Needs keepalive.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_receive_buffer = func(bytes: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L209)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_receive_buffer = func(bytes: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L208)
   `SO_RCVBUF` in bytes.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_send_buffer = func(bytes: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L214)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_send_buffer = func(bytes: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L213)
   `SO_SNDBUF` in bytes.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_broadcast = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L219)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_broadcast = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L218)
   `SO_BROADCAST`.
-- **SocketOptions.SocketOptionsBuilder** · [`export let set_multipath = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L224)
+- **SocketOptions.SocketOptionsBuilder** · [`export let set_multipath = func(enabled: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L223)
   Creates the socket with Multipath TCP (`IPPROTO_MPTCP`, Linux 5.6 and later).
-- **SocketOptions.SocketOptionsBuilder** · [`export let build = func(kind: SocketKind) -> Result<SocketOptions>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L231)
+- **SocketOptions.SocketOptionsBuilder** · [`export let build = func(kind: SocketKind) -> Result<SocketOptions>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L230)
   The validated option set for `kind`, or the first problem as a Custom error with the code `socket.options` (see the module documentation). Tagged `#NoDiscard`.
-- **SocketOptions.SocketOptionsBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L293)
+- **SocketOptions.SocketOptionsBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L288)
   Text such as "SocketOptionsBuilder".
-- **SocketOptions** · [`export let builder = func -> SocketOptionsBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L311)
+- **SocketOptions** · [`export let builder = func -> SocketOptionsBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L306)
   An empty builder. Tagged `#NoDiscard`.
-- **SocketOptions** · [`export let none = func(kind: SocketKind) -> SocketOptions`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L315)
+- **SocketOptions** · [`export let none = func(kind: SocketKind) -> SocketOptions`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L310)
   The empty option set for `kind`: nothing to apply. Tagged `#NoDiscard`.
-- **SocketOptions** · [`export let applies = func(option: int, kind: SocketKind) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L320)
+- **SocketOptions** · [`export let applies = func(option: int, kind: SocketKind) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/socket-options.nra#L315)
   Whether option number `option` (13 for multipath) applies to sockets of `kind`. Tagged `#Pure`.
 <!-- END SOURCE API -->
 

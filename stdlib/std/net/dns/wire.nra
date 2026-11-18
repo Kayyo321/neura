@@ -171,7 +171,7 @@ export let Wire = module (
 
         /// @brief The text "WireReader(offset N of M)".
         export let.override to_string = func -> string =>
-            "WireReader(offset " + position.to_string() + " of " + data.length.to_string() + ")";
+            "WireReader(offset " .. position.to_string() .. " of " .. data.length.to_string() .. ")";
     );
 
     /// @brief A writer that builds one DNS message and remembers name offsets for compression.
@@ -264,7 +264,7 @@ export let Wire = module (
                         },
                     }
                 }
-                if (out.length <= MaxPointerOffset && !suffixes.contains_key(suffix_key)) {
+                if (out.length <= MaxPointerOffset && not suffixes.contains_key(suffix_key)) {
                     suffixes.set(suffix_key, out.length);
                 }
                 last label = name.label(i);
@@ -275,12 +275,12 @@ export let Wire = module (
         };
 
         /// @brief The text "WireWriter(N bytes)".
-        export let.override to_string = func -> string => "WireWriter(" + out.length.to_string() + " bytes)";
+        export let.override to_string = func -> string => "WireWriter(" .. out.length.to_string() .. " bytes)";
     );
 
     /// @brief A truncation error at `at`.
     let truncated = func(at: int, what: string) -> errors.Error =>
-        errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at, message: what + " runs past the message" };
+        errors.Error.Parse { kind: errors.ParseErrorKind.UnexpectedEnd, offset: at, message: what .. " runs past the message" };
 
     /// @brief A name error.
     let name_error = func(kind: errors.ParseErrorKind, at: int, text: string) -> Result<names.DnsName> =>

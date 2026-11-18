@@ -23,15 +23,17 @@ The following public declarations are taken from the module source; each links t
   The longest a read waits; zero, the initial value, waits without limit. Setting a negative timeout traps with "invalid argument: negative timeout". Since 0.2.0.
 - **TcpStream.TcpStream** · [`export let init = func(opened: socket.Handle)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L67)
   Use connect or TcpListener.accept; the handle comes from the library.
-- **TcpStream.TcpStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L74)
+- **TcpStream.TcpStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L73)
+  `TcpStream(<address>, open)` or `TcpStream(<address>, closed)`; the address is the text the socket was opened with, empty for an accepted connection.
+- **TcpStream.TcpStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L79)
   Up to `max` bytes; an empty list once the peer has closed its side. Waits at most the read timeout, then fails with TimedOut. A maximum below 1 traps. Tagged `#NoDiscard`.
-- **TcpStream.TcpStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L89)
+- **TcpStream.TcpStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L92)
   Writes every byte, repeating partial host writes. When the task's scope is cancelled while the write waits, it fails with Cancelled and the message "stream write cancelled after N bytes", where N is the number of bytes already sent. Tagged `#NoDiscard`.
-- **TcpStream.TcpStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L121)
+- **TcpStream.TcpStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L122)
   Releases the connection. Closing again does nothing and returns Ok; the stream is closed even when the host reports an error.
-- **TcpStream** · [`export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L139)
+- **TcpStream** · [`export let connect = func(host: string, port: int, timeout: Duration) -> Result<TcpStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L138)
   Connects to `host` (a name or an address) and `port`, waiting at most `timeout` (zero waits without limit). A port outside 0 through 65,535 traps with "invalid argument: port"; a negative timeout traps with "invalid argument: negative timeout". Tagged `#NoDiscard`.
-- **TcpStream** · [`export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L162)
+- **TcpStream** · [`export let with_connection = func<T>(host: string, port: int, body: func(TcpStream) -> Result<T>) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tcp-stream.nra#L161)
   Connects to `host` and `port` without a time limit, runs `body` with the stream, and closes the stream exactly once however the body ends (Concurrency.md section 7, "Resources"). - If the connection fails, the open error is returned and `body` is not called. - `body` runs in a scope the helper owns, so every task started in that scope has finished before the stream is closed. - The stream is closed after the body returns a value, after it returns an error, and after it returns because its scope was cancelled. - A body `Ok` whose close fails returns the close error. A body `Err` whose close fails returns a `Context` error whose cause is the body's error and whose message names the close error's message. A trap in the body ends the run without closing; the runner then closes every socket the run left open. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

@@ -92,8 +92,8 @@ export let ShadowFilter = module (
         export let dropped = func -> int64 => dropped_count;
 
         /// @brief Text such as "ShadowFilter(500 bp, 3 mirrored, 1 dropped)".
-        export let.override to_string = func -> string => "ShadowFilter(" + rate.to_string() + " bp, "
-            + mirrored_count.to_string() + " mirrored, " + dropped_count.to_string() + " dropped)";
+        export let.override to_string = func -> string => "ShadowFilter(" .. rate.to_string() .. " bp, "
+            .. mirrored_count.to_string() .. " mirrored, " .. dropped_count.to_string() .. " dropped)";
     );
 
     /// @brief Mirrors requests to a shadow task that runs beside the primary call; returns after both.
@@ -150,8 +150,8 @@ export let ShadowFilter = module (
         export let shadow_failures = func -> int64 => failed_count;
 
         /// @brief Text such as "ConcurrentShadowFilter(500 bp, 3 mirrored, 0 failed)".
-        export let.override to_string = func -> string => "ConcurrentShadowFilter(" + rate.to_string() + " bp, "
-            + mirrored_count.to_string() + " mirrored, " + failed_count.to_string() + " failed)";
+        export let.override to_string = func -> string => "ConcurrentShadowFilter(" .. rate.to_string() .. " bp, "
+            .. mirrored_count.to_string() .. " mirrored, " .. failed_count.to_string() .. " failed)";
     );
 
     /// @brief What a shadow worker did before its channel closed.
@@ -169,9 +169,13 @@ export let ShadowFilter = module (
         };
 
         /// @brief Equal when both counts are.
-        export let.override equals = func(other: class) -> bool =>
-            other is WorkerReport && handled == (other as WorkerReport).handled
-            && failed == (other as WorkerReport).failed;
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: WorkerReport) {
+                return false;
+            }
+            return handled == that.handled
+                && failed == that.failed;
+        };
 
         /// @brief Combines the counts.
         export let.override hash_code = func -> uint32 =>
@@ -179,7 +183,7 @@ export let ShadowFilter = module (
 
         /// @brief Text such as "WorkerReport(3 handled, 1 failed)".
         export let.override to_string = func -> string =>
-            "WorkerReport(" + handled.to_string() + " handled, " + failed.to_string() + " failed)";
+            "WorkerReport(" .. handled.to_string() .. " handled, " .. failed.to_string() .. " failed)";
     );
 
     /// @brief Calls `shadow` for each request received from `queue`, in order, until the channel is closed (or this

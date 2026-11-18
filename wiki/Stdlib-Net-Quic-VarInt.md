@@ -22,15 +22,15 @@ The following public declarations are taken from the module source; each links t
   The largest encodable value, 2^62 - 1.
 - **VarInt** · [`export let encoded_length = func(value: uint64) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L21)
   The shortest encoding length of `value`: 1 through 63 take 1 byte, through 16,383 2, through 1,073,741,823 4, and the rest 8. Tagged `#Pure`.
-- **VarInt** · [`export let encode = func(value: uint64) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L37)
+- **VarInt** · [`export let encode = func(value: uint64) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L35)
   The shortest encoding of `value`. Tagged `#NoDiscard`.
-- **VarInt** · [`export let encode_with_length = func(value: uint64, length: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L42)
+- **VarInt** · [`export let encode_with_length = func(value: uint64, length: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L40)
   The encoding of `value` in `length` bytes (1, 2, 4 or 8). Another length, or one too short for the value, traps with "invalid argument: varint length". Tagged `#NoDiscard`.
-- **VarInt** · [`export let append = func(out: uint8[list], value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L49)
+- **VarInt** · [`export let append = func(out: uint8[list], value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L47)
   Appends the shortest encoding of `value` to `out`.
-- **VarInt** · [`export let append_with_length = func(out: uint8[list], value: uint64, length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L54)
+- **VarInt** · [`export let append_with_length = func(out: uint8[list], value: uint64, length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L52)
   Appends the encoding of `value` in `length` bytes to `out` (see `encode_with_length`).
-- **VarInt** · [`export let decode = func(bytes: uint8[list], offset: int) -> Result<[uint64, int]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L71)
+- **VarInt** · [`export let decode = func(bytes: uint8[list], offset: int) -> Result<[uint64, int]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/var-int.nra#L69)
   The value encoded at `offset` and the number of bytes it took (RFC 9000 section A.1). A Parse error of kind UnexpectedEnd, at `offset`, when the bytes end inside it; an offset outside the list traps. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

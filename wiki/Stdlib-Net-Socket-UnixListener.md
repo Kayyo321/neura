@@ -26,11 +26,11 @@ The following public declarations are taken from the module source; each links t
   The bound address.
 - **UnixListener.UnixListener** · [`export let accept = func -> Result<UnixStream>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L41)
   Waits for the next connection; its local address is this listener's and its peer is unknown. Tagged `#NoDiscard`.
-- **UnixListener.UnixListener** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L55)
+- **UnixListener.UnixListener** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L53)
   Releases the listener. Closing again returns Ok.
-- **UnixListener.UnixListener** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L68)
+- **UnixListener.UnixListener** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L64)
   Text such as "UnixListener(/run/app.sock)".
-- **UnixListener** · [`export let bind = func(address: UnixAddr) -> Result<UnixListener>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L73)
+- **UnixListener** · [`export let bind = func(address: UnixAddr) -> Result<UnixListener>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/unix-listener.nra#L69)
   Listens on `address`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

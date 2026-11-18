@@ -135,10 +135,9 @@ export let H2 = module (
 
         /// @brief Equal fields.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FrameHeader)) {
+            if (other is not that: FrameHeader) {
                 return false;
             }
-            last that = other as FrameHeader;
             return length == that.length && frame_type == that.frame_type && flags == that.flags
                 && stream_id == that.stream_id;
         };
@@ -148,8 +147,8 @@ export let H2 = module (
 
         /// @brief The fields by name.
         export let.override to_string = func -> string =>
-            "FrameHeader{length=" + length.to_string() + ", type=" + frame_type.to_string() + ", flags="
-            + flags.to_string() + ", stream=" + stream_id.to_string() + "}";
+            "FrameHeader{length=" .. length.to_string() .. ", type=" .. frame_type.to_string() .. ", flags="
+            .. flags.to_string() .. ", stream=" .. stream_id.to_string() .. "}";
     );
 
     /// @brief The identifiers and values of a SETTINGS frame, in order.
@@ -187,10 +186,10 @@ export let H2 = module (
 
         /// @brief Equal settings in the same order.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Settings)) {
+            if (other is not that: Settings) {
                 return false;
             }
-            return to_string() == (other as Settings).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the text form.
@@ -201,11 +200,11 @@ export let H2 = module (
             let text = "Settings{";
             for (let i = 0; i < ids.length; i++) {
                 if (i > 0) {
-                    text += ", ";
+                    text ..= ", ";
                 }
-                text = text + ids[i].to_string() + "=" + values[i].to_string();
+                text ..= ids[i].to_string() .. "=" .. values[i].to_string();
             }
-            return text + "}";
+            return text .. "}";
         };
     );
 
@@ -290,7 +289,7 @@ export let H2 = module (
                 | ((payload[at + 4] as int64) << 8) | (payload[at + 5] as int64);
             if ((id == SettingEnablePush || id == SettingEnableConnectProtocol) && value > 1) {
                 return Result<Settings>.Err(
-                    error.custom("PROTOCOL_ERROR", "setting " + id.to_string() + " must be 0 or 1"));
+                    error.custom("PROTOCOL_ERROR", "setting " .. id.to_string() .. " must be 0 or 1"));
             }
             if (id == SettingInitialWindowSize && value > MaxWindowSize) {
                 return Result<Settings>.Err(error.custom("FLOW_CONTROL_ERROR", "initial window size above 2^31-1"));
@@ -324,7 +323,7 @@ export let H2 = module (
         export let close = func(error_code: int) -> Result<Unit> => host_close(error_code);
 
         /// @brief The authority.
-        export let.override to_string = func -> string => "H2Connection{" + authority + "}";
+        export let.override to_string = func -> string => "H2Connection{" .. authority .. "}";
     );
 
     /// @brief Opens an HTTP/2 connection to `authority` (host:port): TCP, TLS with ALPN "h2", the preface and

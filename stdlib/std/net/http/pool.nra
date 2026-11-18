@@ -61,10 +61,10 @@ export let Pool = module (
             if (colon == authority.byte_length - 1) {
                 authority = authority.slice(0, colon);
             } else {
-                return scheme + "://" + authority;
+                return scheme .. "://" .. authority;
             }
         }
-        return scheme + "://" + authority + (scheme == "http" ? ":80" : ":443");
+        return scheme .. "://" .. authority .. (scheme == "http" ? ":80" : ":443");
     };
 
     /// @brief Per-origin limits on exchanges in flight.
@@ -149,7 +149,7 @@ export let Pool = module (
         };
 
         /// @brief The text "HostLimits(default N)".
-        export let.override to_string = func -> string => "HostLimits(default " + default_limit.to_string() + ")";
+        export let.override to_string = func -> string => "HostLimits(default " .. default_limit.to_string() .. ")";
 
         /// @brief The position of `key` among the active origins, or -1.
         let active_index = func(key: string) -> int {
@@ -227,22 +227,18 @@ export let Pool = module (
         let decide_status = func(request: http.ClientRequest, attempt: int, response: http.Response, now: clocks.Clock)
             -> RetryDecision {
             last status = response.status;
-            if (!(status == 429 or 502 or 503 or 504) || !is_repeatable(request)) {
+            if (not (status == 429 or 502 or 503 or 504) || not is_repeatable(request)) {
                 return RetryDecision.Stop;
             }
             match (retry_after(response, now)) {
                 Optional.Some(wait) => {
-                    if (wait.to_nanos() > max_wait.to_nanos()) {
-                        return RetryDecision.Stop;
-                    }
-                    return RetryDecision.RetryAfter(wait);
+                    return if (wait.to_nanos() > max_wait.to_nanos()) -> RetryDecision.Stop
+                        else -> RetryDecision.RetryAfter(wait);
                 },
                 Optional.None => {},
             }
-            if (status == 429) {
-                return RetryDecision.Stop;
-            }
-            return RetryDecision.RetryAfter(backoff(attempt));
+            return if (status == 429) -> RetryDecision.Stop
+                else -> RetryDecision.RetryAfter(backoff(attempt));
         };
 
         /// @brief The decision for a transport error.
@@ -257,7 +253,7 @@ export let Pool = module (
         };
 
         /// @brief The text "RetryPolicy(N attempts)".
-        export let.override to_string = func -> string => "RetryPolicy(" + max_attempts.to_string() + " attempts)";
+        export let.override to_string = func -> string => "RetryPolicy(" .. max_attempts.to_string() .. " attempts)";
     );
 
     /// @brief The wait a `Retry-After` field asks for: delay-seconds, or an HTTP-date minus the clock's now (zero
@@ -336,9 +332,9 @@ export let Pool = module (
                 return Result<http.Response>.Err(errors.Error.Io { kind: errors.IoErrorKind.InvalidInput,
                     message: "URL must be absolute http or https", path: "" });
             }
-            if (!limits.try_acquire(request.url)) {
+            if (not limits.try_acquire(request.url)) {
                 return Result<http.Response>.Err(errors.custom("http.pool.busy",
-                    "too many requests in flight to " + origin_key(request.url)));
+                    "too many requests in flight to " .. origin_key(request.url)));
             }
             let attempt = 0;
             let outcome: Result<http.Response> = Result<http.Response>.Err(errors.custom("http.pool.none", "no attempt"));

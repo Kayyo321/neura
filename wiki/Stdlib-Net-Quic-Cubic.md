@@ -58,11 +58,11 @@ The following public declarations are taken from the module source; each links t
   Text such as "Cubic(window 12000, in flight 0)".
 - **Cubic** · [`export let k_millis = func(w_max: int64, cwnd_epoch: int64, max_datagram_size: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L190)
   K in whole milliseconds, rounded down: cbrt((w_max - cwnd_epoch) / (C * size)) seconds, with windows in bytes; 0 when `w_max` is not above `cwnd_epoch`. Tagged `#Pure`.
-- **Cubic** · [`export let w_cubic = func(t_millis: int64, k: int64, w_max: int64, max_datagram_size: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L200)
+- **Cubic** · [`export let w_cubic = func(t_millis: int64, k: int64, w_max: int64, max_datagram_size: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L197)
   W_cubic(t) in bytes for `t_millis` into the epoch (see the module documentation). Tagged `#Pure`.
-- **Cubic** · [`export let w_est_increase = func(acked: int64, max_datagram_size: int64, cwnd: int64, full_alpha: bool) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L224)
+- **Cubic** · [`export let w_est_increase = func(acked: int64, max_datagram_size: int64, cwnd: int64, full_alpha: bool) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L221)
   The W_est increase for `acked` bytes: alpha * acked * size / cwnd, with alpha 9/17, or 1 when `full_alpha` (W_est has reached cwnd_prior), rounded down. Tagged `#Pure`.
-- **Cubic** · [`export let integer_cube_root = func(value: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L229)
+- **Cubic** · [`export let integer_cube_root = func(value: int64) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/cubic.nra#L226)
   The largest n with n^3 <= value (value non-negative). Tagged `#Pure`.
 <!-- END SOURCE API -->
 

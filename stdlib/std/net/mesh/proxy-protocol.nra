@@ -112,10 +112,9 @@ export let ProxyProtocol = module (
 
         /// @brief Equal when the type and every value byte are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Tlv)) {
+            if (other is not that: Tlv) {
                 return false;
             }
-            last that = other as Tlv;
             return type_code == that.type_code && same_bytes(value, that.value);
         };
 
@@ -124,7 +123,7 @@ export let ProxyProtocol = module (
 
         /// @brief Text such as "Tlv(1, 2 bytes)": the type in decimal and the value length.
         export let.override to_string = func -> string =>
-            "Tlv(" + type_code.to_string() + ", " + value.length.to_string() + " bytes)";
+            "Tlv(" .. type_code.to_string() .. ", " .. value.length.to_string() .. " bytes)";
     );
 
     /// @brief The decoded value of a `PP2_TYPE_SSL` TLV (section 2.2.6).
@@ -208,10 +207,9 @@ export let ProxyProtocol = module (
 
         /// @brief Equal when the bits, the verify result and the sub-TLVs are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SslInfo)) {
+            if (other is not that: SslInfo) {
                 return false;
             }
-            last that = other as SslInfo;
             return client == that.client && verify == that.verify && same_tlvs(subs, that.subs);
         };
 
@@ -220,8 +218,8 @@ export let ProxyProtocol = module (
             hashing.combine(hashing.combine(client as uint32, verify), hash_tlvs(subs));
 
         /// @brief Text such as "SslInfo(client 7, verify 0, 5 sub-TLVs)".
-        export let.override to_string = func -> string => "SslInfo(client " + client.to_string() + ", verify "
-            + verify.to_string() + ", " + subs.length.to_string() + " sub-TLVs)";
+        export let.override to_string = func -> string => "SslInfo(client " .. client.to_string() .. ", verify "
+            .. verify.to_string() .. ", " .. subs.length.to_string() .. " sub-TLVs)";
     );
 
     /// @brief A PROXY protocol header, parsed or to be sent.
@@ -325,10 +323,9 @@ export let ProxyProtocol = module (
 
         /// @brief Equal when every field and TLV are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ProxyHeader)) {
+            if (other is not that: ProxyHeader) {
                 return false;
             }
-            last that = other as ProxyHeader;
             return version == that.version && command == that.command && transport == that.transport
                 && same_addresses(addresses, that.addresses) && same_tlvs(tlvs, that.tlvs);
         };
@@ -342,9 +339,9 @@ export let ProxyProtocol = module (
         };
 
         /// @brief Text such as "ProxyHeader(v2 PROXY STREAM 192.168.0.1:56324 -> 192.168.0.11:443, 0 TLVs)".
-        export let.override to_string = func -> string => "ProxyHeader(v" + version.to_string() + " "
-            + (command == Command.Local ? "LOCAL" : "PROXY") + " " + transport_name(transport) + " "
-            + addresses_text(addresses) + ", " + tlvs.length.to_string() + " TLVs)";
+        export let.override to_string = func -> string => "ProxyHeader(v" .. version.to_string() .. " "
+            .. (command == Command.Local ? "LOCAL" : "PROXY") .. " " .. transport_name(transport) .. " "
+            .. addresses_text(addresses) .. ", " .. tlvs.length.to_string() .. " TLVs)";
 
         /// @brief The first TLV of type `code` as UTF-8 text.
         let text_tlv = func(code: int) -> Optional<string> => match (tlv(code)) {
@@ -381,10 +378,8 @@ export let ProxyProtocol = module (
     /// @brief The header in its own version's form; version 2 adds a CRC32C TLV when `with_crc` is true.
     #NoDiscard
     export let encode = func(header: ProxyHeader, with_crc: bool) -> Result<uint8[list]> {
-        if (header.version == 1) {
-            return Result<uint8[list]>.Ok(strings.to_bytes(encode_v1(header)?));
-        }
-        return encode_v2(header, with_crc);
+        return if (header.version == 1) -> Result<uint8[list]>.Ok(strings.to_bytes(encode_v1(header)?))
+            else -> encode_v2(header, with_crc);
     };
 
     /// @brief The version 1 line, CRLF included. Fails for LOCAL, for Unix or datagram addresses, for mixed
@@ -444,7 +439,7 @@ export let ProxyProtocol = module (
         }
         out.append((family * 16 + proto) as uint8);
         for (let t in header.tlvs) {
-            if (!with_crc || t.type_code != TypeCrc32c) {
+            if (not with_crc || t.type_code != TypeCrc32c) {
                 put_tlv(body, t);
             }
         }
@@ -583,7 +578,7 @@ export let ProxyProtocol = module (
 
         /// @brief Text such as "ProxyDecoder(12 bytes buffered)".
         export let.override to_string = func -> string =>
-            "ProxyDecoder(" + buffer.length.to_string() + " bytes buffered)";
+            "ProxyDecoder(" .. buffer.length.to_string() .. " bytes buffered)";
     );
 
     /// @brief A decoded header and its length in bytes.
@@ -630,10 +625,8 @@ export let ProxyProtocol = module (
                     return Detection.NotProxy;
                 }
             }
-            if (n < 13) {
-                return Detection.NeedMore;
-            }
-            return (bytes[start + 12] >> 4) == 2 ? Detection.V2 : Detection.NotProxy;
+            return if (n < 13) -> Detection.NeedMore
+                else -> (bytes[start + 12] >> 4) == 2 ? Detection.V2 : Detection.NotProxy;
         }
         last v1 = strings.to_bytes("PROXY ");
         for (let i = 0; i < 6 && i < n; i++) {
@@ -680,10 +673,8 @@ export let ProxyProtocol = module (
             }
         }
         if (end < 0) {
-            if (n >= MaxV1Length) {
-                return v1_failure(MaxV1Length, "no CRLF in the first 107 bytes");
-            }
-            return Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
+            return if (n >= MaxV1Length) -> v1_failure(MaxV1Length, "no CRLF in the first 107 bytes")
+                else -> Result<Optional<Decoded>>.Ok(Optional<Decoded>.None);
         }
         last line_bytes: uint8[list] = new;
         for (let i = 0; i < end; i++) {
@@ -699,7 +690,7 @@ export let ProxyProtocol = module (
         }
         last protocol = parts[1];
         if (protocol != "TCP4" && protocol != "TCP6") {
-            return v1_failure(6, "unknown protocol " + protocol);
+            return v1_failure(6, "unknown protocol " .. protocol);
         }
         last offset_source = 6 + protocol.byte_length + 1;
         last offset_destination = offset_source + parts[2].byte_length + 1;
@@ -707,12 +698,8 @@ export let ProxyProtocol = module (
         last offset_dport = offset_sport + parts[4].byte_length + 1;
         last source_ip = parse_ip(protocol, parts[2]);
         last destination_ip = parse_ip(protocol, parts[3]);
-        if (!has_ip(source_ip)) {
-            return v1_failure(offset_source, "bad " + protocol + " source address");
-        }
-        if (!has_ip(destination_ip)) {
-            return v1_failure(offset_destination, "bad " + protocol + " destination address");
-        }
+        return v1_failure(offset_source, "bad " .. protocol .. " source address") unless has_ip(source_ip);
+        return v1_failure(offset_destination, "bad " .. protocol .. " destination address") unless has_ip(destination_ip);
         last source_port = parse_port(parts[4]);
         if (source_port < 0) {
             return v1_failure(offset_sport, "bad source port");
@@ -737,15 +724,15 @@ export let ProxyProtocol = module (
         last ver_cmd = bytes[start + 12] as int;
         last code = ver_cmd % 16;
         if (code > 1) {
-            return v2_failure(12, "unassigned command " + code.to_string());
+            return v2_failure(12, "unassigned command " .. code.to_string());
         }
         last fam = (bytes[start + 13] as int) / 16;
         last proto = (bytes[start + 13] as int) % 16;
         if (fam > 3) {
-            return v2_failure(13, "unknown address family " + fam.to_string());
+            return v2_failure(13, "unknown address family " .. fam.to_string());
         }
         if (proto > 2) {
-            return v2_failure(13, "unknown transport protocol " + proto.to_string());
+            return v2_failure(13, "unknown transport protocol " .. proto.to_string());
         }
         last length = get_u16(bytes, start + 14);
         last total = V2FixedLength + length;
@@ -754,8 +741,8 @@ export let ProxyProtocol = module (
         }
         last block = fam == 1 ? 12 : (fam == 2 ? 36 : (fam == 3 ? 216 : 0));
         if (length < block) {
-            return v2_failure(14, "address length " + length.to_string() + " is shorter than the family's "
-                + block.to_string() + " bytes");
+            return v2_failure(14, "address length " .. length.to_string() .. " is shorter than the family's "
+                .. block.to_string() .. " bytes");
         }
         last command = code == 0 ? Command.Local : Command.Proxy;
         let transport = proto == 1 ? Transport.Stream : (proto == 2 ? Transport.Dgram : Transport.Unspec);
@@ -861,7 +848,7 @@ export let ProxyProtocol = module (
         if (name.length == 0) {
             return Result<Optional<unixes.UnixAddr>>.Ok(Optional<unixes.UnixAddr>.None);
         }
-        if (!abstract_namespace && !terminated) {
+        if (not abstract_namespace && not terminated) {
             return Result<Optional<unixes.UnixAddr>>.Err(parse_failure(ParseErrorKind.Syntax, offset,
                 "PROXY v2: Unix path has no NUL in its 108 bytes"));
         }
@@ -917,8 +904,8 @@ export let ProxyProtocol = module (
             return Result<string>.Err(custom("mesh.proxy_unencodable", "source and destination families differ"));
         }
         last name = ips.octets(source.ip).length == 4 ? "TCP4" : "TCP6";
-        return Result<string>.Ok("PROXY " + name + " " + a + " " + b + " " + source.port.to_string() + " "
-            + destination.port.to_string() + "\r\n");
+        return Result<string>.Ok("PROXY " .. name .. " " .. a .. " " .. b .. " " .. source.port.to_string() .. " "
+            .. destination.port.to_string() .. "\r\n");
     };
 
     /// @brief RFC 5952 text from the groups alone: lowercase, the longest run of two or more zero groups (the
@@ -947,14 +934,14 @@ export let ProxyProtocol = module (
         let k = 0;
         while (k < 8) {
             if (k == best_start) {
-                text += "::";
+                text ..= "::";
                 k += best_length;
                 continue;
             }
-            if (text != "" && !strings.ends_with(text, ":")) {
-                text += ":";
+            if (text != "" && not strings.ends_with(text, ":")) {
+                text ..= ":";
             }
-            text += hex_group(groups[k] as int);
+            text ..= hex_group(groups[k] as int);
             k++;
         }
         return text;
@@ -969,7 +956,7 @@ export let ProxyProtocol = module (
         let text = "";
         let v = value;
         while (v > 0) {
-            text = digits.slice(v % 16, v % 16 + 1) + text;
+            text = digits.slice(v % 16, v % 16 + 1) .. text;
             v = v / 16;
         }
         return text;
@@ -1034,11 +1021,11 @@ export let ProxyProtocol = module (
 
     /// @brief A version 1 syntax failure at `offset`.
     let v1_failure = func(offset: int, message: string) -> Result<Optional<Decoded>> =>
-        Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, offset, "PROXY v1: " + message));
+        Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, offset, "PROXY v1: " .. message));
 
     /// @brief A version 2 syntax failure at `offset`.
     let v2_failure = func(offset: int, message: string) -> Result<Optional<Decoded>> =>
-        Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, offset, "PROXY v2: " + message));
+        Result<Optional<Decoded>>.Err(parse_failure(ParseErrorKind.Syntax, offset, "PROXY v2: " .. message));
 
     /// @brief A parse error.
     let parse_failure = func(kind: ParseErrorKind, offset: int, message: string) -> Error =>
@@ -1061,8 +1048,8 @@ export let ProxyProtocol = module (
     /// @brief Text for a pair of addresses.
     let addresses_text = func(a: Addresses) -> string => match (a) {
         Addresses.Unspecified => "unspecified",
-        Addresses.Inet { source, destination } => source.to_string() + " -> " + destination.to_string(),
-        Addresses.Unix { source, destination } => unix_text(source) + " -> " + unix_text(destination),
+        Addresses.Inet { source, destination } => source.to_string() .. " -> " .. destination.to_string(),
+        Addresses.Unix { source, destination } => unix_text(source) .. " -> " .. unix_text(destination),
     };
 
     /// @brief A Unix address or "unnamed".
@@ -1170,9 +1157,7 @@ export let ProxyProtocol = module (
             return false;
         }
         for (let i = 0; i < a.length; i++) {
-            if (!a[i].equals(b[i])) {
-                return false;
-            }
+            return false unless a[i].equals(b[i]);
         }
         return true;
     };

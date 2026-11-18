@@ -40,21 +40,21 @@ The following public declarations are taken from the module source; each links t
   True when `bytes` more fit in the window.
 - **Ledbat.Ledbat** · [`export let queuing_delay_micros = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L76)
   The filtered current delay minus the base delay in microseconds; 0 before any sample. Tagged `#Pure`.
-- **Ledbat.Ledbat** · [`export let on_packet_sent = func(bytes: int64, sent_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L84)
+- **Ledbat.Ledbat** · [`export let on_packet_sent = func(bytes: int64, sent_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L82)
   Adds a sent packet to the bytes in flight.
-- **Ledbat.Ledbat** · [`export let on_packet_acked = func(bytes: int64, sent_nanos: int64, now_nanos: int64, delay_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L90)
+- **Ledbat.Ledbat** · [`export let on_packet_acked = func(bytes: int64, sent_nanos: int64, now_nanos: int64, delay_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L88)
   "on acknowledgement" of section 2.4.2; `delay_nanos` is the one-way delay sample.
-- **Ledbat.Ledbat** · [`export let on_packets_lost = func(bytes: int64, latest_sent_nanos: int64, now_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L120)
+- **Ledbat.Ledbat** · [`export let on_packets_lost = func(bytes: int64, latest_sent_nanos: int64, now_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L118)
   "on data loss" of section 2.4.2, once per recovery period.
-- **Ledbat.Ledbat** · [`export let on_congestion_event = func(sent_nanos: int64, now_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L127)
+- **Ledbat.Ledbat** · [`export let on_congestion_event = func(sent_nanos: int64, now_nanos: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L125)
   Halves the window, at most once per recovery period.
-- **Ledbat.Ledbat** · [`export let on_persistent_congestion = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L141)
+- **Ledbat.Ledbat** · [`export let on_persistent_congestion = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L139)
   The congestion timeout: one MSS.
-- **Ledbat.Ledbat** · [`export let set_app_limited = func(limited: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L147)
+- **Ledbat.Ledbat** · [`export let set_app_limited = func(limited: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L145)
   Whether the sender is application- or flow-control-limited.
-- **Ledbat.Ledbat** · [`export let name = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L152)
+- **Ledbat.Ledbat** · [`export let name = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L150)
   "Ledbat".
-- **Ledbat.Ledbat** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L155)
+- **Ledbat.Ledbat** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/ledbat.nra#L153)
   Text such as "Ledbat(window 2400, in flight 0)".
 <!-- END SOURCE API -->
 

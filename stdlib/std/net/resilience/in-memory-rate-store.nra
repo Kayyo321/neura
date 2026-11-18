@@ -57,7 +57,7 @@ export let InMemoryRateStore = module (
         };
 
         /// @brief Text such as "InMemoryRateStore(3 keys)".
-        export let.override to_string = func -> string => "InMemoryRateStore(" + values.size().to_string() + " keys)";
+        export let.override to_string = func -> string => "InMemoryRateStore(" .. values.size().to_string() .. " keys)";
     );
 
     /// @brief An empty store.

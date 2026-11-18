@@ -45,18 +45,14 @@ export let UdpSocket = module (
         /// @brief The bound address; its port is the one the host chose for a bind to port 0.
         #NoDiscard
         export let local_address = func -> Result<SocketAddr> {
-            if (!open_now) {
-                return Result<SocketAddr>.Err(bytes.closed("socket", bound.to_string()));
-            }
+            return Result<SocketAddr>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
             return Result<SocketAddr>.Ok(bound);
         };
 
         /// @brief Sends `data` as one datagram to `target`; the count the host sent.
         #NoDiscard
         export let send_to = func(data: uint8[list], target: SocketAddr) -> Result<int> {
-            if (!open_now) {
-                return Result<int>.Err(bytes.closed("socket", bound.to_string()));
-            }
+            return Result<int>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
             return counted(host.udp_send_to(id, target.host_text(), target.port, data), target.to_string());
         };
 
@@ -65,9 +61,7 @@ export let UdpSocket = module (
         #NoDiscard
         export let receive_from = func(max: int) -> Result<Datagram<SocketAddr>> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return Result<Datagram<SocketAddr>>.Err(bytes.closed("socket", bound.to_string()));
-            }
+            return Result<Datagram<SocketAddr>>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
             return match (host.udp_receive_from(id, max, timeout_nanos)) {
                 host.DatagramOutcome.Ok(received) => datagram_of(received),
                 host.DatagramOutcome.Error(code) => Result<Datagram<SocketAddr>>.Err(
@@ -81,9 +75,7 @@ export let UdpSocket = module (
         #NoDiscard
         export let send_segmented = func(data: uint8[list], segment_size: int, target: SocketAddr) -> Result<int> {
             offload.segment_count(data.length, segment_size);
-            if (!open_now) {
-                return Result<int>.Err(bytes.closed("socket", bound.to_string()));
-            }
+            return Result<int>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
             return counted(host.udp_send_segmented(id, target.host_text(), target.port, data, segment_size),
                 target.to_string());
         };
@@ -93,9 +85,7 @@ export let UdpSocket = module (
         #NoDiscard
         export let receive_coalesced = func(max: int) -> Result<uint8[list][list]> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return Result<uint8[list][list]>.Err(bytes.closed("socket", bound.to_string()));
-            }
+            return Result<uint8[list][list]>.Err(bytes.closed("socket", bound.to_string())) unless open_now;
             return match (host.udp_receive_coalesced(id, max, timeout_nanos)) {
                 host.CoalescedOutcome.Ok(received) => Result<uint8[list][list]>.Ok(split_coalesced(received)),
                 host.CoalescedOutcome.Error(code) => Result<uint8[list][list]>.Err(
@@ -113,9 +103,7 @@ export let UdpSocket = module (
 
         /// @brief Releases the socket. Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (host.close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -125,7 +113,7 @@ export let UdpSocket = module (
         };
 
         /// @brief Text such as "UdpSocket(127.0.0.1:5353)".
-        export let.override to_string = func -> string => "UdpSocket(" + bound.to_string() + ")";
+        export let.override to_string = func -> string => "UdpSocket(" .. bound.to_string() .. ")";
     );
 
     /// @brief Binds a UDP socket to `address` (port 0 asks for a free port) with no options.
@@ -150,7 +138,7 @@ export let UdpSocket = module (
                 return Result<UdpSocket>.Err(host_error.io(code, "bind failed", text));
             },
         }
-        if (!at_bind && !options.is_empty()) {
+        if (not at_bind && not options.is_empty()) {
             match (support.apply(id, options, text)) {
                 Result.Ok(_) => {},
                 Result.Err(problem) => {

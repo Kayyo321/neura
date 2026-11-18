@@ -32,65 +32,65 @@ The following public declarations are taken from the module source; each links t
   The value, or the empty text for a flag. Tagged `#Pure`.
 - **Query.QueryPair** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L48)
   Pairs are equal when keys are equal and both values are absent or equal.
-- **Query.QueryPair** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L58)
+- **Query.QueryPair** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L57)
   Combines the key and value hashes. Tagged `#Pure`.
-- **Query.QueryPair** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L63)
+- **Query.QueryPair** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L62)
   The pair encoded in the Rfc3986 mode. Tagged `#Pure`.
-- **Query** · [`export let QueryString = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L69)
+- **Query** · [`export let QueryString = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L68)
   An ordered, mutable list of query pairs. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.0.
-- **Query.QueryString** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L74)
+- **Query.QueryString** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L73)
   An empty query.
-- **Query.QueryString** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L78)
+- **Query.QueryString** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L77)
   The number of pairs.
-- **Query.QueryString** · [`export let pair_at = func(index: int) -> QueryPair`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L81)
+- **Query.QueryString** · [`export let pair_at = func(index: int) -> QueryPair`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L80)
   The pair at an index from 0; an index out of range traps.
-- **Query.QueryString** · [`export let get = func(key: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L84)
+- **Query.QueryString** · [`export let get = func(key: string) -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L83)
   The first value for the key: Some("") for a flag, None when the key is missing.
-- **Query.QueryString** · [`export let get_all = func(key: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L94)
+- **Query.QueryString** · [`export let get_all = func(key: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L93)
   Every value for the key in order, flags as empty text.
-- **Query.QueryString** · [`export let contains = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L105)
+- **Query.QueryString** · [`export let contains = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L104)
   Tests whether any pair has the key.
-- **Query.QueryString** · [`export let add = func(key: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L115)
+- **Query.QueryString** · [`export let add = func(key: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L114)
   Appends a pair with a value (`key=value`).
-- **Query.QueryString** · [`export let add_flag = func(key: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L120)
+- **Query.QueryString** · [`export let add_flag = func(key: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L119)
   Appends a flag without a value (`key`).
-- **Query.QueryString** · [`export let remove_all = func(key: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L125)
+- **Query.QueryString** · [`export let remove_all = func(key: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L124)
   Removes every pair with the key and returns how many were removed.
-- **Query.QueryString** · [`export let set = func(key: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L138)
+- **Query.QueryString** · [`export let set = func(key: string, value: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L137)
   Replaces the pairs with the key by one pair at the place of the first, or appends it.
-- **Query.QueryString** · [`export let encode = func(mode: QueryMode) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L166)
+- **Query.QueryString** · [`export let encode = func(mode: QueryMode) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L165)
   The raw query text (without `?`): pairs joined by `&`, keys and values encoded for the mode.
-- **Query.QueryString** · [`export let tree = func -> QueryNode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L179)
+- **Query.QueryString** · [`export let tree = func -> QueryNode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L178)
   The nested-key tree of the pairs (see the module comment).
-- **Query.QueryString** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L193)
+- **Query.QueryString** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L192)
   Two queries are equal when their pairs are equal in order.
-- **Query.QueryString** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L210)
+- **Query.QueryString** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L206)
   Combines the pair hashes in order.
-- **Query.QueryString** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L219)
+- **Query.QueryString** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L215)
   The query encoded in the Rfc3986 mode.
-- **Query** · [`export let QueryNode = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L225)
+- **Query** · [`export let QueryNode = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L221)
   One node of the nested-key tree: the values assigned at its path and its children in first-seen order. Tagged `#Final`, `#NotThreadSafe`. Since 0.3.0.
-- **Query.QueryNode** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L227)
+- **Query.QueryNode** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L223)
   The node's segment name; the root's is empty.
-- **Query.QueryNode** · [`export last values: string[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L229)
+- **Query.QueryNode** · [`export last values: string[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L225)
   The values assigned at exactly this path, in order (a flag adds the empty text).
-- **Query.QueryNode** · [`export last children: QueryNode[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L231)
+- **Query.QueryNode** · [`export last children: QueryNode[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L227)
   The child nodes in first-seen order.
-- **Query.QueryNode** · [`export let init = func(node_name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L234)
+- **Query.QueryNode** · [`export let init = func(node_name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L230)
   A node with no values or children.
-- **Query.QueryNode** · [`export let child = func(child_name: string) -> optional.Optional<QueryNode>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L239)
+- **Query.QueryNode** · [`export let child = func(child_name: string) -> optional.Optional<QueryNode>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L235)
   The child with the name, if any.
-- **Query.QueryNode** · [`export let value = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L249)
+- **Query.QueryNode** · [`export let value = func -> optional.Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L245)
   The first value at this path, if any.
-- **Query.QueryNode** · [`export let child_names = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L257)
+- **Query.QueryNode** · [`export let child_names = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L251)
   The names of the children in order.
-- **Query.QueryNode** · [`export let child_for = func(segment: string) -> QueryNode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L267)
+- **Query.QueryNode** · [`export let child_for = func(segment: string) -> QueryNode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L261)
   The existing child with the name, or a new one appended; the empty name appends a child named by its index.
-- **Query.QueryNode** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L284)
+- **Query.QueryNode** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L278)
   The node as `name{values}[children]`, for diagnostics.
-- **Query** · [`export let parse = func(raw: string, mode: QueryMode) -> Result<QueryString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L308)
+- **Query** · [`export let parse = func(raw: string, mode: QueryMode) -> Result<QueryString>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L302)
   The pairs of a raw query (the text after `?`, without it). Errors: Parse InvalidCharacter at the offset in `raw` of a `%` not followed by two hex digits; Encoding at the offset in `raw` of decoded bytes that are not UTF-8. Tagged `#NoDiscard`. Since 0.3.0.
-- **Query** · [`export let key_path = func(key: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L339)
+- **Query** · [`export let key_path = func(key: string) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/query.nra#L333)
   The path segments of a key under the bracket convention; a key that does not fit it is one segment. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

@@ -50,63 +50,63 @@ The following public declarations are taken from the module source; each links t
   Whether `name` (any case) is present.
 - **CacheControl.CacheControl** · [`export let argument = func(name: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L106)
   The argument of the first `name` directive; None when absent or without an argument. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let max_age = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L117)
+- **CacheControl.CacheControl** · [`export let max_age = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L115)
   `max-age` (request, section 5.2.1.1; response, section 5.2.2.1) in seconds; an invalid argument reads as 0. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let s_maxage = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L121)
+- **CacheControl.CacheControl** · [`export let s_maxage = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L119)
   `s-maxage` (section 5.2.2.10) in seconds; an invalid argument reads as 0. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let min_fresh = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L125)
+- **CacheControl.CacheControl** · [`export let min_fresh = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L123)
   `min-fresh` (section 5.2.1.3) in seconds; None when absent or invalid. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let max_stale = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L130)
+- **CacheControl.CacheControl** · [`export let max_stale = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L128)
   `max-stale` (section 5.2.1.2) in seconds: 2147483648 (any staleness) without an argument, None when absent or when the argument is invalid. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let stale_while_revalidate = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L144)
+- **CacheControl.CacheControl** · [`export let stale_while_revalidate = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L142)
   `stale-while-revalidate` (RFC 5861, kept as an extension) in seconds; None when absent or invalid. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let stale_if_error = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L148)
+- **CacheControl.CacheControl** · [`export let stale_if_error = func -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L146)
   `stale-if-error` (RFC 5861, kept as an extension) in seconds; None when absent or invalid. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let no_cache = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L151)
+- **CacheControl.CacheControl** · [`export let no_cache = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L149)
   `no-cache`, qualified or not (sections 5.2.1.4, 5.2.2.4).
-- **CacheControl.CacheControl** · [`export let no_cache_fields = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L156)
+- **CacheControl.CacheControl** · [`export let no_cache_fields = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L154)
   The field names of a qualified `no-cache` (section 5.2.2.4); empty when unqualified or absent. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let no_store = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L159)
+- **CacheControl.CacheControl** · [`export let no_store = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L157)
   `no-store` (sections 5.2.1.5, 5.2.2.5).
-- **CacheControl.CacheControl** · [`export let no_transform = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L162)
+- **CacheControl.CacheControl** · [`export let no_transform = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L160)
   `no-transform` (sections 5.2.1.6, 5.2.2.6).
-- **CacheControl.CacheControl** · [`export let only_if_cached = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L165)
+- **CacheControl.CacheControl** · [`export let only_if_cached = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L163)
   `only-if-cached` (section 5.2.1.7).
-- **CacheControl.CacheControl** · [`export let must_revalidate = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L168)
+- **CacheControl.CacheControl** · [`export let must_revalidate = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L166)
   `must-revalidate` (section 5.2.2.2).
-- **CacheControl.CacheControl** · [`export let proxy_revalidate = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L171)
+- **CacheControl.CacheControl** · [`export let proxy_revalidate = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L169)
   `proxy-revalidate` (section 5.2.2.8).
-- **CacheControl.CacheControl** · [`export let must_understand = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L174)
+- **CacheControl.CacheControl** · [`export let must_understand = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L172)
   `must-understand` (section 5.2.2.3).
-- **CacheControl.CacheControl** · [`export let is_public = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L177)
+- **CacheControl.CacheControl** · [`export let is_public = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L175)
   `public` (section 5.2.2.9).
-- **CacheControl.CacheControl** · [`export let is_private = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L180)
+- **CacheControl.CacheControl** · [`export let is_private = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L178)
   `private`, qualified or not (section 5.2.2.7).
-- **CacheControl.CacheControl** · [`export let private_fields = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L184)
+- **CacheControl.CacheControl** · [`export let private_fields = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L182)
   The field names of a qualified `private` (section 5.2.2.7); empty when unqualified or absent. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let extensions = func -> Directive[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L188)
+- **CacheControl.CacheControl** · [`export let extensions = func -> Directive[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L186)
   The directives that RFC 9111 section 5.2 does not define, in order. Tagged `#NoDiscard`.
-- **CacheControl.CacheControl** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L200)
+- **CacheControl.CacheControl** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L198)
   The directives as a field value: joined with ", ", arguments as tokens where possible and as quoted-strings otherwise (always quoted for the field lists of `no-cache` and `private`).
-- **CacheControl.CacheControl** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L209)
+- **CacheControl.CacheControl** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L207)
   Equal when both hold equal directives in the same order.
-- **CacheControl.CacheControl** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L226)
+- **CacheControl.CacheControl** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L221)
   Combines the directives' hashes in order.
-- **CacheControl.CacheControl** · [`export let mark_malformed = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L235)
+- **CacheControl.CacheControl** · [`export let mark_malformed = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L230)
   Records that a parsed element did not fit the grammar.
-- **CacheControl.CacheControl** · [`export let append_directive = func(d: Directive)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L240)
+- **CacheControl.CacheControl** · [`export let append_directive = func(d: Directive)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L235)
   Appends an already-built directive (used by the parser).
-- **CacheControl** · [`export let parse = func(text: string) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L300)
+- **CacheControl** · [`export let parse = func(text: string) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L295)
   The directives of a `Cache-Control` field value (RFC 9111 section 5.2). Never fails; see the module description for malformed elements. Tagged `#NoDiscard`.
-- **CacheControl** · [`export let of_headers = func(fields: headers.Headers) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L308)
+- **CacheControl** · [`export let of_headers = func(fields: headers.Headers) -> CacheControl`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L303)
   The directives of every `Cache-Control` field line of `fields`, in order. Tagged `#NoDiscard`.
-- **CacheControl** · [`export let parse_strict = func(text: string) -> Result<CacheControl>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L319)
+- **CacheControl** · [`export let parse_strict = func(text: string) -> Result<CacheControl>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L314)
   `parse`, but Err (Syntax, at the start of the offending element) when an element does not fit `token [ "=" ( token / quoted-string ) ]`. Tagged `#NoDiscard`.
-- **CacheControl** · [`export let parse_delta_seconds = func(text: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L332)
+- **CacheControl** · [`export let parse_delta_seconds = func(text: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L327)
   delta-seconds (RFC 9111 section 1.2.2): one or more ASCII digits; values above 2147483648 read as 2147483648. None for an empty text or any other byte. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **CacheControl** · [`export let is_known = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L354)
+- **CacheControl** · [`export let is_known = func(name: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L349)
   Whether RFC 9111 section 5.2 defines `name` (lowercase), as a request or a response directive. Tagged `#Pure`, `#ThreadSafe`.
-- **CacheControl** · [`export let quote = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L362)
+- **CacheControl** · [`export let quote = func(text: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/cache-control.nra#L357)
   `text` as a quoted-string: in double quotes, with `"` and `\` escaped by a backslash. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

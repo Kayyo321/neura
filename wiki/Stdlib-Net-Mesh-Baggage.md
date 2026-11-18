@@ -36,63 +36,63 @@ The following public declarations are taken from the module source; each links t
   The encoded form, `key` or `key=value`. Tagged `#NoDiscard`.
 - **Baggage.Property** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L57)
   Equal when the key and value are.
-- **Baggage.Property** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L61)
+- **Baggage.Property** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L65)
   The hash of the encoded form.
-- **Baggage.Property** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L64)
+- **Baggage.Property** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L68)
   The encoded form.
-- **Baggage** · [`export let Entry = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L69)
+- **Baggage** · [`export let Entry = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L73)
   One list-member: key, decoded value, and properties in order. Tagged `#Final`.
-- **Baggage.Entry** · [`export last key: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L71)
+- **Baggage.Entry** · [`export last key: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L75)
   The key, a token.
-- **Baggage.Entry** · [`export last value: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L73)
+- **Baggage.Entry** · [`export last value: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L77)
   The decoded value.
-- **Baggage.Entry** · [`export let init = func(name: string, decoded: string, properties: Property[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L79)
+- **Baggage.Entry** · [`export let init = func(name: string, decoded: string, properties: Property[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L83)
   An entry (the property list is copied). A key that is not a token traps with "invalid argument: key".
-- **Baggage.Entry** · [`export let property_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L93)
+- **Baggage.Entry** · [`export let property_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L97)
   The number of properties. Tagged `#NoDiscard`.
-- **Baggage.Entry** · [`export let property_at = func(index: int) -> Property`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L97)
+- **Baggage.Entry** · [`export let property_at = func(index: int) -> Property`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L101)
   The property at `index`. Tagged `#NoDiscard`.
-- **Baggage.Entry** · [`export let to_header = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L101)
+- **Baggage.Entry** · [`export let to_header = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L105)
   The encoded member, `key=value;prop;prop=value`, without spaces. Tagged `#NoDiscard`.
-- **Baggage.Entry** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L110)
+- **Baggage.Entry** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L114)
   Equal when the encoded members are.
-- **Baggage.Entry** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L114)
+- **Baggage.Entry** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L122)
   The hash of the encoded member.
-- **Baggage.Entry** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L117)
+- **Baggage.Entry** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L125)
   The encoded member.
-- **Baggage** · [`export let Baggage = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L122)
+- **Baggage** · [`export let Baggage = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L130)
   The list-members of one baggage, in order; duplicate keys are kept as received. Tagged `#Final`.
-- **Baggage.Baggage** · [`export let init = func(entries: Entry[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L127)
+- **Baggage.Baggage** · [`export let init = func(entries: Entry[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L135)
   A baggage over `entries` (copied).
-- **Baggage.Baggage** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L136)
+- **Baggage.Baggage** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L144)
   The number of list-members. Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L140)
+- **Baggage.Baggage** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L148)
   Whether there are no list-members. Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let entry_at = func(index: int) -> Entry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L144)
+- **Baggage.Baggage** · [`export let entry_at = func(index: int) -> Entry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L152)
   The member at `index`. Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let get = func(key: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L148)
+- **Baggage.Baggage** · [`export let get = func(key: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L156)
   The value of the first member named `key`. Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let set = func(key: string, value: string) -> Baggage`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L161)
+- **Baggage.Baggage** · [`export let set = func(key: string, value: string) -> Baggage`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L169)
   A baggage where `key` has `value` and no properties: the first member named `key` is replaced in place and later ones removed, or the member is appended. A key that is not a token traps with "invalid argument: key". Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let remove = func(key: string) -> Baggage`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L181)
+- **Baggage.Baggage** · [`export let remove = func(key: string) -> Baggage`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L189)
   A baggage without the members named `key`. Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let to_header = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L194)
+- **Baggage.Baggage** · [`export let to_header = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L202)
   The header value within the propagation limits: whole members from the left while the result holds at most 64 members and 8192 bytes; members are joined by "," without spaces. Tagged `#NoDiscard`.
-- **Baggage.Baggage** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L210)
+- **Baggage.Baggage** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L218)
   Equal when every member and the order are.
-- **Baggage.Baggage** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L227)
+- **Baggage.Baggage** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L232)
   Combines the member hashes.
-- **Baggage.Baggage** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L236)
+- **Baggage.Baggage** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L241)
   Text such as "Baggage(3 members)".
-- **Baggage** · [`export let empty = func -> Baggage`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L241)
+- **Baggage** · [`export let empty = func -> Baggage`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L246)
   A baggage with no members. Tagged `#NoDiscard`.
-- **Baggage** · [`export let parse = func(text: string) -> Result<Baggage>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L245)
+- **Baggage** · [`export let parse = func(text: string) -> Result<Baggage>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L250)
   Parses a combined `baggage` value by the rules described for the module. Tagged `#NoDiscard`.
-- **Baggage** · [`export let is_baggage_octet = func(b: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L308)
+- **Baggage** · [`export let is_baggage_octet = func(b: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L309)
   Whether `b` is a baggage-octet: 0x21, 0x23-0x2B, 0x2D-0x3A, 0x3C-0x5B, 0x5D-0x7E. Tagged `#NoDiscard`.
-- **Baggage** · [`export let encode = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L313)
+- **Baggage** · [`export let encode = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L314)
   `value` with every byte of its UTF-8 form outside `baggage-octet`, and `%`, percent-encoded. Tagged `#NoDiscard`.
-- **Baggage** · [`export let decode = func(text: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L330)
+- **Baggage** · [`export let decode = func(text: string) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/mesh/baggage.nra#L331)
   The decoded value, or None when a byte is not a baggage-octet or a `%` is not a full triplet. Decoded bytes that are not UTF-8 become U+FFFD. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

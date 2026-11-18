@@ -82,7 +82,7 @@ export let TraceParent = module (
         /// @brief The version-00 header value, with the flags this version does not define cleared.
         #NoDiscard
         export let to_header = func -> string =>
-            "00-" + hex(trace_id) + "-" + hex(parent_id) + "-" + hex_byte(flags & KnownFlags);
+            "00-" .. hex(trace_id) .. "-" .. hex(parent_id) .. "-" .. hex_byte(flags & KnownFlags);
 
         /// @brief The same trace continued by a new span: the same trace id, `span_id` as the parent id, the
         /// known flags kept (the random-trace-id flag must not change while the trace id is kept). Traps like
@@ -99,10 +99,9 @@ export let TraceParent = module (
 
         /// @brief Equal when the version, both ids and the flags are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is TraceParent)) {
+            if (other is not that: TraceParent) {
                 return false;
             }
-            last that = other as TraceParent;
             return version == that.version && flags == that.flags && same_bytes(trace_id, that.trace_id)
                 && same_bytes(parent_id, that.parent_id);
         };
@@ -126,7 +125,7 @@ export let TraceParent = module (
     /// @brief Parses a `traceparent` value by the rules described for the module.
     #NoDiscard
     export let parse = func(text: string) -> Result<TraceParent> {
-        if (text.byte_length < 3 || !is_hex(text.byte_at(0)) || !is_hex(text.byte_at(1)) || text.byte_at(2) != 45) {
+        if (text.byte_length < 3 || not is_hex(text.byte_at(0)) || not is_hex(text.byte_at(1)) || text.byte_at(2) != 45) {
             return fail(0, "the version is not two lowercase hex digits followed by a dash");
         }
         last version = hex_value(text.byte_at(0)) * 16 + hex_value(text.byte_at(1));
@@ -147,7 +146,7 @@ export let TraceParent = module (
         if (parent.length != ParentIdBytes || text.byte_at(52) != 45) {
             return fail(36, "the parent id is not 16 lowercase hex digits followed by a dash");
         }
-        if (!is_hex(text.byte_at(53)) || !is_hex(text.byte_at(54))) {
+        if (not is_hex(text.byte_at(53)) || not is_hex(text.byte_at(54))) {
             return fail(53, "the flags are not two lowercase hex digits");
         }
         if (text.byte_length > Length && text.byte_at(55) != 45) {
@@ -168,9 +167,7 @@ export let TraceParent = module (
     export let random_id = func(random: Random, count: int) -> uint8[list] {
         while (true) {
             last bytes = random.fill_bytes(count);
-            if (!all_zero(bytes)) {
-                return bytes;
-            }
+            return bytes unless all_zero(bytes);
         }
         return new;
     };
@@ -187,7 +184,7 @@ export let TraceParent = module (
     /// @brief A parse error at `offset`.
     let fail = func(offset: int, text: string) -> Result<TraceParent> =>
         Result<TraceParent>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
-            message: "traceparent: " + text });
+            message: "traceparent: " .. text });
 
     /// @brief Whether `b` is a lowercase hex digit.
     let is_hex = func(b: uint8) -> bool => (b >= 48 && b <= 57) || (b >= 97 && b <= 102);
@@ -201,7 +198,7 @@ export let TraceParent = module (
         for (let i = 0; i < count; i++) {
             last high = text.byte_at(start + 2 * i);
             last low = text.byte_at(start + 2 * i + 1);
-            if (!is_hex(high) || !is_hex(low)) {
+            if (not is_hex(high) || not is_hex(low)) {
                 return bytes;
             }
             bytes.append((hex_value(high) * 16 + hex_value(low)) as uint8);
@@ -219,7 +216,7 @@ export let TraceParent = module (
     let hex = func(bytes: uint8[list]) -> string {
         let text = "";
         for (let b in bytes) {
-            text += hex_byte(b as int);
+            text ..= hex_byte(b as int);
         }
         return text;
     };

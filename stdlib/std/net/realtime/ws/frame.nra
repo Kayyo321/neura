@@ -71,10 +71,9 @@ export let Frame = module (
 
         /// @brief Equal when every field and every payload byte are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Frame)) {
+            if (other is not that: Frame) {
                 return false;
             }
-            last that = other as Frame;
             if (fin != that.fin || rsv1 != that.rsv1 || rsv2 != that.rsv2 || rsv3 != that.rsv3
                 || opcode != that.opcode || payload.length != that.payload.length) {
                 return false;
@@ -101,16 +100,16 @@ export let Frame = module (
         export let.override to_string = func -> string {
             let flags = fin ? "FIN" : "";
             if (rsv1) {
-                flags += " RSV1";
+                flags ..= " RSV1";
             }
             if (rsv2) {
-                flags += " RSV2";
+                flags ..= " RSV2";
             }
             if (rsv3) {
-                flags += " RSV3";
+                flags ..= " RSV3";
             }
-            return "Frame(opcode " + opcode.to_string() + ", " + flags + ", " + payload.length.to_string()
-                + " bytes)";
+            return "Frame(opcode " .. opcode.to_string() .. ", " .. flags .. ", " .. payload.length.to_string()
+                .. " bytes)";
         };
     );
 
@@ -129,9 +128,9 @@ export let Frame = module (
         last code = frame.opcode;
         if ((code >= 3 && code <= 7) || code >= 11) {
             return Result<uint8[list]>.Err(close_status.failure(close_status.ProtocolError,
-                "reserved opcode " + code.to_string()));
+                "reserved opcode " .. code.to_string()));
         }
-        if (code >= 8 && (!frame.fin || frame.payload.length > MaxControlPayload)) {
+        if (code >= 8 && (not frame.fin || frame.payload.length > MaxControlPayload)) {
             return Result<uint8[list]>.Err(close_status.failure(close_status.ProtocolError,
                 "a control frame must be final and at most 125 bytes"));
         }
@@ -262,16 +261,14 @@ export let Frame = module (
                 return fail("reserved bits set without a negotiated extension", close_status.ProtocolError);
             }
             if ((code >= 3 && code <= 7) || code >= 11) {
-                return fail("reserved opcode " + code.to_string(), close_status.ProtocolError);
+                return fail("reserved opcode " .. code.to_string(), close_status.ProtocolError);
             }
-            if (code >= 8 && (!fin || short_length > MaxControlPayload)) {
+            if (code >= 8 && (not fin || short_length > MaxControlPayload)) {
                 return fail("a control frame must be final and at most 125 bytes", close_status.ProtocolError);
             }
             match (receiver) {
                 Role.Server => {
-                    if (!masked) {
-                        return fail("a client frame must be masked", close_status.ProtocolError);
-                    }
+                    return fail("a client frame must be masked", close_status.ProtocolError) unless masked;
                 },
                 Role.Client => {
                     if (masked) {
@@ -307,8 +304,8 @@ export let Frame = module (
                 }
             }
             if (length > (max_frame_size as uint64)) {
-                return fail("frame of " + length.to_string() + " bytes exceeds the limit of "
-                    + max_frame_size.to_string(), close_status.MessageTooBig);
+                return fail("frame of " .. length.to_string() .. " bytes exceeds the limit of "
+                    .. max_frame_size.to_string(), close_status.MessageTooBig);
             }
             last size = length as int;
             last key_start = offset + header;
@@ -340,7 +337,7 @@ export let Frame = module (
 
         /// @brief The role and buffered byte count.
         export let.override to_string = func -> string =>
-            "FrameDecoder(" + receiver.to_string() + ", " + buffered().to_string() + " bytes buffered)";
+            "FrameDecoder(" .. receiver.to_string() .. ", " .. buffered().to_string() .. " bytes buffered)";
 
         /// @brief Drops the consumed prefix once it is at least half the buffer.
         let compact = func {

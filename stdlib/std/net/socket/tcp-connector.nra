@@ -43,7 +43,7 @@ export let TcpConnector = module (
         export let connect = func -> Result<TcpSocket> => connect_with(target, timeout, settings);
 
         /// @brief Text such as "TcpConnector(127.0.0.1:8080)".
-        export let.override to_string = func -> string => "TcpConnector(" + target.to_string() + ")";
+        export let.override to_string = func -> string => "TcpConnector(" .. target.to_string() .. ")";
     );
 
     /// @brief A connector for `address` with `timeout` and no options.
