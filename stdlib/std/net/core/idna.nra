@@ -59,14 +59,14 @@ export let Idna = module (
                 last decoded = punycode.decode_text(lowered.slice(4, lowered.byte_length));
                 match (decoded) {
                     Result.Ok(value) => {
-                        text += value;
+                        text ..= value;
                     },
                     Result.Err(e) => {
                         return failed(ParseErrorKind.Syntax, label.offset, "invalid punycode in xn-- label");
                     },
                 }
             } else {
-                text += lowered;
+                text ..= lowered;
             }
         }
         if (ends_with_root(domain)) {
@@ -151,7 +151,7 @@ export let Idna = module (
             if (i > 0) {
                 text ..= ".";
             }
-            text += label_to_ascii(labels[i], std3)?;
+            text ..= label_to_ascii(labels[i], std3)?;
         }
         if (text.byte_length > MaxNameLength) {
             return failed(ParseErrorKind.OutOfRange, 0, "domain name longer than 253 bytes");
@@ -303,7 +303,7 @@ export let Idna = module (
         let value = s;
         while (value > 0) {
             last d = (value % 16) as int;
-            text = digits.slice(d, d + 1) + text;
+            text = digits.slice(d, d + 1) .. text;
             value = value / 16;
         }
         while (text.byte_length < 4) {

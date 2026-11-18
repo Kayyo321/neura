@@ -196,14 +196,14 @@ export let Masque = module (
                 last low = (b % 16) as int;
                 if (start < i) {
                     // Bytes start..i-1 are unreserved ASCII, so both ends are character boundaries.
-                    text += value.slice(start, i);
+                    text ..= value.slice(start, i);
                 }
                 text ..= "%" .. digits.slice(high, high + 1) .. digits.slice(low, low + 1);
                 start = i + 1;
             }
         }
         if (start < value.byte_length) {
-            text += value.slice(start, value.byte_length);
+            text ..= value.slice(start, value.byte_length);
         }
         return text;
     };

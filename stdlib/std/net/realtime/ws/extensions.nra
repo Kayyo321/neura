@@ -172,7 +172,7 @@ export let Extensions = module (
                             }
                             // A quoted value must be a token, so any other byte (including UTF-8) fails here.
                             return syntax("a quoted parameter value must be a token", j) unless is_token_byte(value.byte_at(j));
-                            text = text + value.slice(j, j + 1);
+                            text ..= value.slice(j, j + 1);
                             j++;
                         }
                         if (j >= length) {

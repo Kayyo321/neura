@@ -168,7 +168,7 @@ export let Ipv6Addr = module (
                         if (i > 0 && i != best_start + best_length) {
                             text ..= ":";
                         }
-                        text += hex_group(group(i));
+                        text ..= hex_group(group(i));
                         i++;
                     }
                 }
@@ -370,7 +370,7 @@ export let Ipv6Addr = module (
         let text = "";
         let rest = value;
         while (rest > 0) {
-            text = HexDigits.slice(rest % 16, rest % 16 + 1) + text;
+            text = HexDigits.slice(rest % 16, rest % 16 + 1) .. text;
             rest = rest / 16;
         }
         return text;

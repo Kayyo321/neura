@@ -218,14 +218,14 @@ export let Urn = module (
         let i = 0;
         while (i < length) {
             if (percent.is_triplet(text, i)) {
-                result += text.slice(copied, i) + strings.to_ascii_upper(text.slice(i, i + 3));
+                result ..= text.slice(copied, i) .. strings.to_ascii_upper(text.slice(i, i + 3));
                 i += 3;
                 copied = i;
             } else {
                 i++;
             }
         }
-        return result + text.slice(copied, length);
+        return result .. text.slice(copied, length);
     };
 
     /// @brief A parse failure.

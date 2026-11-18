@@ -583,7 +583,7 @@ export let Multipart = module (
                         if (j + 1 >= length || value.byte_at(j + 1) >= 128) {
                             return false;
                         }
-                        text = text + value.slice(segment, j) + value.slice(j + 1, j + 2);
+                        text ..= value.slice(segment, j) .. value.slice(j + 1, j + 2);
                         j += 2;
                         segment = j;
                         continue;
@@ -592,7 +592,7 @@ export let Multipart = module (
                 }
                 return false unless closed;
                 names.append(name);
-                values.append(text + value.slice(segment, j));
+                values.append(text .. value.slice(segment, j));
                 k = j + 1;
             } else {
                 last value_start = k;

@@ -169,7 +169,7 @@ export let Query = module (
                     text ..= "&";
                 }
                 last pair = entries[i];
-                text += encode_pair(this_key: pair.key, this_value: pair.value, mode: mode);
+                text ..= encode_pair(this_key: pair.key, this_value: pair.value, mode: mode);
             }
             return text;
         };
@@ -283,14 +283,14 @@ export let Query = module (
                 if (i > 0) {
                     text ..= ",";
                 }
-                text += values[i];
+                text ..= values[i];
             }
             text ..= "}[";
             for (let i = 0; i < children.length; i++) {
                 if (i > 0) {
                     text ..= " ";
                 }
-                text += children[i].to_string();
+                text ..= children[i].to_string();
             }
             return text .. "]";
         };

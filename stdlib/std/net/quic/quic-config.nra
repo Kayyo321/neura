@@ -80,7 +80,7 @@ export let QuicConfig = module (
             last protocols = tls_config.alpn();
             let alpn = "";
             for (let name in protocols) {
-                alpn = alpn + (alpn.byte_length > 0 ? "," : "") + name;
+                alpn ..= (alpn.byte_length > 0 ? "," : "") .. name;
             }
             return "QuicConfig(" .. congestion.to_string() .. ", alpn " .. alpn .. ", "
                 .. max_bidirectional_streams.to_string() .. "/" .. max_unidirectional_streams.to_string() .. " streams, "

@@ -460,7 +460,7 @@ export let CacheControl = module (
                 if (i + 1 >= end) {
                     return Optional<string>.None;
                 }
-                out += text.slice(segment, i);
+                out ..= text.slice(segment, i);
                 segment = i + 1;
                 i += 2;
                 continue;
@@ -469,7 +469,7 @@ export let CacheControl = module (
                 if (i + 1 != end) {
                     return Optional<string>.None;
                 }
-                return Optional<string>.Some(out + text.slice(segment, i));
+                return Optional<string>.Some(out .. text.slice(segment, i));
             }
             if ((b < 32 && b != 9) || b == 127) {
                 return Optional<string>.None;

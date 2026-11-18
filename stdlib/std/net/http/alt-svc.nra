@@ -184,7 +184,7 @@ export let AltSvc = module (
         let text = "";
         for (let b in name) {
             if (b < 128 && b != 37 && header_map.is_tchar(b)) {
-                text += ascii(b);
+                text ..= ascii(b);
             } else {
                 last high = (b / 16) as int;
                 last low = (b % 16) as int;
@@ -346,7 +346,7 @@ export let AltSvc = module (
                 if (i + 1 >= text.byte_length) {
                     return Optional<string>.None;
                 }
-                out += text.slice(segment, i);
+                out ..= text.slice(segment, i);
                 segment = i + 1;
                 i += 2;
                 continue;
@@ -355,7 +355,7 @@ export let AltSvc = module (
                 if (i + 1 != text.byte_length) {
                     return Optional<string>.None;
                 }
-                return Optional<string>.Some(out + text.slice(segment, i));
+                return Optional<string>.Some(out .. text.slice(segment, i));
             }
             i++;
         }

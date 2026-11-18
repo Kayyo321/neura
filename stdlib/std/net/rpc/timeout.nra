@@ -61,7 +61,7 @@ export let Timeout = module (
             last unit = unit_nanos(unit_char.byte_at(0));
             last count = total % unit == 0 ? total / unit : total / unit + 1;
             if (count <= (MaxValue as uint64)) {
-                return count.to_string() + unit_char;
+                return count.to_string() .. unit_char;
             }
         }
         // Unreachable: the int64 range is under 2562048 hours.

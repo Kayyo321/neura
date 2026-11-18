@@ -332,7 +332,7 @@ export let Uri = module (
                 input = "";
             } else {
                 last next = find_first(input, 1, input.byte_length, "/");
-                output += input.slice(0, next);
+                output ..= input.slice(0, next);
                 input = input.slice(next, input.byte_length);
             }
         }
@@ -769,7 +769,7 @@ export let Uri = module (
             optional.Optional.None => {
             },
         }
-        text += optional.value_or<string>(host, "");
+        text ..= optional.value_or<string>(host, "");
         match (port) {
             optional.Optional.Some(p) => {
                 text ..= ":" .. p.to_string();
@@ -795,7 +795,7 @@ export let Uri = module (
         if (optional.is_some<string>(host)) {
             text ..= "//" .. authority_text(userinfo, host, port);
         }
-        text += path;
+        text ..= path;
         match (query) {
             optional.Optional.Some(q) => {
                 text ..= "?" .. q;
@@ -825,7 +825,7 @@ export let Uri = module (
             return "/" .. reference_path;
         }
         last at = strings.last_index_of(base.path, "/");
-        return at < 0 ? reference_path : base.path.slice(0, at + 1) + reference_path;
+        return at < 0 ? reference_path : base.path.slice(0, at + 1) .. reference_path;
     };
 
     /// @brief Keeps a path without authority from starting with `//`.
@@ -912,7 +912,7 @@ export let Uri = module (
             last zone = strings.index_of(h, "%25");
             if (zone >= 0) {
                 last address = strings.to_ascii_lower(h.slice(0, zone));
-                return Result<string>.Ok(address + percent.normalize(h.slice(zone, h.byte_length)));
+                return Result<string>.Ok(address .. percent.normalize(h.slice(zone, h.byte_length)));
             }
             return Result<string>.Ok(strings.to_ascii_lower(h));
         }
@@ -949,11 +949,11 @@ export let Uri = module (
         for (let i = 0; i < length; i++) {
             last b = name.byte_at(i);
             if (b < 128 && not percent.is_allowed(b, percent.EncodeSet.RegName)) {
-                text += name.slice(start, i) + percent.encode(name.slice(i, i + 1), percent.EncodeSet.RegName);
+                text ..= name.slice(start, i) .. percent.encode(name.slice(i, i + 1), percent.EncodeSet.RegName);
                 start = i + 1;
             }
         }
-        return text + name.slice(start, length);
+        return text .. name.slice(start, length);
     };
 
     /// @brief Syntax-based and (http, https) scheme-based normalization.

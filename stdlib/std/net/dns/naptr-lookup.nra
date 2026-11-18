@@ -80,7 +80,7 @@ export let NaptrLookup = module (
 
         /// @brief Combines the fields.
         export let.override hash_code = func -> uint32 => hashing.combine(hashing.combine(hashing.combine(
-            replacement.hash_code(), order as uint32), preference as uint32), strings.hash(flags + services + regexp));
+            replacement.hash_code(), order as uint32), preference as uint32), strings.hash(flags .. services .. regexp));
 
         /// @brief Text such as "100 10 \"S\" \"SIP+D2U\" \"\" _sip._udp.example.com.".
         export let.override to_string = func -> string => order.to_string() .. " " .. preference.to_string() .. " \""

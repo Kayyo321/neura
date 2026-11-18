@@ -216,7 +216,7 @@ export let TraceParent = module (
     let hex = func(bytes: uint8[list]) -> string {
         let text = "";
         for (let b in bytes) {
-            text += hex_byte(b as int);
+            text ..= hex_byte(b as int);
         }
         return text;
     };

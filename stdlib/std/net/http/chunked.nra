@@ -346,7 +346,7 @@ export let Chunked = module (
         let value = n;
         while (value > 0) {
             last d = (value % 16) as int;
-            text = digits.slice(d, d + 1) + text;
+            text = digits.slice(d, d + 1) .. text;
             value = value / 16;
         }
         return text;

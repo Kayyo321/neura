@@ -947,7 +947,7 @@ export let ProxyProtocol = module (
             if (text != "" && not strings.ends_with(text, ":")) {
                 text ..= ":";
             }
-            text += hex_group(groups[k] as int);
+            text ..= hex_group(groups[k] as int);
             k++;
         }
         return text;
@@ -962,7 +962,7 @@ export let ProxyProtocol = module (
         let text = "";
         let v = value;
         while (v > 0) {
-            text = digits.slice(v % 16, v % 16 + 1) + text;
+            text = digits.slice(v % 16, v % 16 + 1) .. text;
             v = v / 16;
         }
         return text;

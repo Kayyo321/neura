@@ -208,7 +208,7 @@ export let Baggage = module (
                 if (count == MaxMembers || text.byte_length + added > MaxBytes) {
                     break;
                 }
-                text += (count > 0 ? "," : "") + member;
+                text ..= (count > 0 ? "," : "") .. member;
                 count++;
             }
             return text;
