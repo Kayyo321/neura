@@ -92,7 +92,7 @@ void usage(std::ostream& out) {
            "       neura debug --stdio\n"
            "       neura fmt [--check | --write] [--stdin --stdin-filepath <file>] <file.nra>...\n"
            "       neura capabilities --json\n"
-           "       neura check [-I source-root] [--task-safety | --fix] <file.nra>...\n"
+           "       neura check [-I source-root] [--task-safety | --fix | --show-derived[=Name]] <file.nra>...\n"
            "       neura docs <file.nra>... [-o <file.json>]\n"
            "       neura docs --doxygen <file.nra>\n"
            "       neura emit-ir [-I source-root] [--no-optimize] <file.nra>... [-o <file.nir>]\n"
@@ -239,6 +239,7 @@ struct Options {
     std::optional<neura::nvm::TaskDumpFormat> task_dump;
     // check --task-safety: report every function instead of only checking.
     bool task_safety = false;
+    std::optional<std::string> show_derived;
     // check --fix: apply machine-applicable suggestions in place.
     bool fix = false;
     // Editor test discovery and execution. Human terminal output is the default.
@@ -723,6 +724,10 @@ Options read_options(int argc, char** argv) {
             if (form == "text") options.task_dump = neura::nvm::TaskDumpFormat::Text;
             else if (form == "json") options.task_dump = neura::nvm::TaskDumpFormat::Json;
             else throw std::runtime_error("--task-dump expects text or json");
+        } else if (arg == "--show-derived" || arg.starts_with("--show-derived=")) {
+            if (options.command != Command::Check) throw std::runtime_error("--show-derived applies only to check");
+            if (arg == "--show-derived=") throw std::runtime_error("--show-derived= needs a module name");
+            options.show_derived = arg == "--show-derived" ? "" : std::string(arg.substr(15));
         } else if (arg == "--task-safety") {
             if (options.command != Command::Check) throw std::runtime_error("--task-safety applies only to check");
             options.task_safety = true;
@@ -814,6 +819,8 @@ Options read_options(int argc, char** argv) {
     if (options.command == Command::Build && !options.output) {
         throw std::runtime_error(options.native_executable ? "build --native requires -o <file>" : "build requires -o <file.nvr>");
     }
+    if (options.show_derived && (options.fix || options.task_safety))
+        throw std::runtime_error("--show-derived cannot be combined with --fix or --task-safety");
     if (options.fix && options.task_safety) {
         throw std::runtime_error("--fix cannot be combined with --task-safety");
     }
@@ -1996,6 +2003,18 @@ int dispatch(const Options& options) {
         if (options.fix) return check_fix(options);
         auto program = load_source_program(options);
         if (options.task_safety) return task_safety_report(std::move(program));
+        if (options.show_derived) {
+            std::string output;
+            for (const auto& codec : program.derived_codecs) {
+                if (options.show_derived->empty() || program.symbols[codec.module].name == *options.show_derived)
+                    output += neura::tooling::format_source(codec.source, codec.declaration.file);
+            }
+            if (!options.show_derived->empty() && output.empty())
+                throw std::runtime_error("no derived module named '" + *options.show_derived + "'");
+            const auto status = check_program(std::move(program));
+            if (status == 0) std::cout << output;
+            return status;
+        }
         return check_program(std::move(program));
     }
     case Command::Docs:

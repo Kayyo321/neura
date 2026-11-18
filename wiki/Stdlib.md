@@ -128,6 +128,7 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Encoding.Csv`](Stdlib-Encoding-Csv) | [Contracts](Stdlib-Encoding-Csv#detailed-contracts) | [Declarations](Stdlib-Encoding-Csv#exported-declarations) |
 | [`Std.Encoding.Hex`](Stdlib-Encoding-Hex) | [Contracts](Stdlib-Encoding-Hex#detailed-contracts) | [Declarations](Stdlib-Encoding-Hex#exported-declarations) |
 | [`Std.Encoding.Json`](Stdlib-Encoding-Json) | [Contracts](Stdlib-Encoding-Json#detailed-contracts) | [Declarations](Stdlib-Encoding-Json#exported-declarations) |
+| [`Std.Encoding.JsonCodecSupport`](Stdlib-Encoding-JsonCodecSupport) | [Contracts](Stdlib-Encoding-JsonCodecSupport#detailed-contracts) | [Declarations](Stdlib-Encoding-JsonCodecSupport#exported-declarations) |
 | [`Std.Encoding.Utf8`](Stdlib-Encoding-Utf8) | [Contracts](Stdlib-Encoding-Utf8#detailed-contracts) | [Declarations](Stdlib-Encoding-Utf8#exported-declarations) |
 
 ### `Std.Fs`

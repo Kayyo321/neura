@@ -289,6 +289,22 @@ struct AccessorClause {
 // A record class (docs/design/Records030.md, Records). The parser has built
 // its fields, one `export last` field per component, and its generated
 // constructor `init = func(components) => set`, already expanded.
+struct DeriveMapping {
+    bool variant{};
+    std::vector<std::string> parts;
+    std::vector<Span> part_spans;
+    Span path;
+    std::string wire;
+    Span wire_span;
+};
+
+struct DeriveSyntax {
+    TypeSyntax generator;
+    std::vector<TypeSyntax> arguments;
+    std::vector<DeriveMapping> mappings;
+    std::optional<Span> close_brace;
+};
+
 struct RecordSyntax {
     // The word `record`, and the ')' that ends the components.
     Span keyword;
@@ -396,6 +412,7 @@ struct Declaration {
     // A record (docs/design/Records030.md): a class whose members the parser
     // built from its components. Lowering adds its value members.
     std::shared_ptr<const RecordSyntax> record{};
+    std::shared_ptr<const DeriveSyntax> derive{};
     // The word `implements` of a class or of a module's conformance list
     // (`module implements I<T> (`, trusted companions only).
     std::optional<Span> implements_span{};

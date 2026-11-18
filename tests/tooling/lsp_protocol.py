@@ -23,7 +23,8 @@ class Client:
         self.reader = threading.Thread(target=self.read, daemon=True)
         self.reader.start()
         result = self.request('initialize', {'rootUri': pathlib.Path(root).as_uri(),
-                              'capabilities': {}, 'initializationOptions': {
+                              'capabilities': {'workspace': {'workspaceEdit': {'changeAnnotationSupport': {}}}},
+                              'initializationOptions': {
                                   'sourceRoots': [str(root)], 'stdlibPath': str(REPOSITORY / 'stdlib'),
                                   'trusted': True}})
         assert result['capabilities']['positionEncoding'] == 'utf-16'
@@ -165,6 +166,57 @@ class LanguageServerTests(unittest.TestCase):
         self.assertEqual({item['textDocument']['uri'] for item in rename['documentChanges']},
                          {module.as_uri(), main.as_uri()})
         self.assertTrue(all(edit['newText'] == 'sum' for item in rename['documentChanges'] for edit in item['edits']))
+
+    def test_record_field_rename_pins_each_derived_wire_name(self):
+        path = self.root / 'model.nra'
+        source = ('let json = import:Std.Encoding.Json;\n'
+                  'let User = record (name: string);\n'
+                  'let A = derive json.Codec<User>;\n'
+                  'let B = derive json.Codec<User> { field User.name: "nickname"; };\n'
+                  'let console = import:Std.Io.Console;\n'
+                  'let program = import:Std.Program;\n'
+                  'let.promote _ = import:Std.Core.Result;\n'
+                  'let App = module:program.Entry (\n'
+                  '    export let.override main = func(args: string[]) -> program.ExitCode {\n'
+                  '        last user = new User("Ada");\n'
+                  '        match (A.encode(user)) { Result.Ok(text) => { console.print_line(text); }, '
+                  'Result.Err(_) => { return program.ExitCode.Failure; }, }\n'
+                  '        match (B.encode(user)) { Result.Ok(text) => { console.print_line(text); }, '
+                  'Result.Err(_) => { return program.ExitCode.Failure; }, }\n'
+                  '        return program.ExitCode.Ok;\n'
+                  '    };\n'
+                  ');\n')
+        self.client.open(path, source)
+        response = self.client.request('textDocument/rename', {**params(path, 1, 21), 'newName': 'display'})
+        edits = response['documentChanges'][0]['edits']
+        pinned = [edit for edit in edits if edit.get('annotationId') == 'neura.preserveSchema']
+        self.assertEqual(len(pinned), 1)
+        self.assertIn('field User.display: "name";', pinned[0]['newText'])
+        lines = source.splitlines(keepends=True)
+        for edit in sorted(edits, key=lambda e: (e['range']['start']['line'], e['range']['start']['character']),
+                           reverse=True):
+            start, end = edit['range']['start'], edit['range']['end']
+            self.assertEqual(start['line'], end['line'])
+            line = lines[start['line']]
+            lines[start['line']] = line[:start['character']] + edit['newText'] + line[end['character']:]
+        self.assertIn('record (display: string)', lines[1])
+        self.assertIn('field User.display: "nickname";', lines[3])
+        self.assertTrue(response['changeAnnotations']['neura.preserveSchema']['label'])
+        for snapshot in (source, ''.join(lines)):
+            path.write_text(snapshot)
+            image = self.root / 'rename.nvr'
+            subprocess.run([BINARY, 'build', path, '-o', image], check=True, capture_output=True)
+            program = subprocess.run([BINARY, 'run', image], check=True, text=True, capture_output=True)
+            self.assertEqual(program.stdout, '{"name":"Ada"}\n{"nickname":"Ada"}\n')
+
+    def test_incomplete_json_derivation_keeps_previous_symbols(self):
+        path = self.root / 'model.nra'
+        self.client.open(path, 'let visible = 1;\nlet Incomplete = derive')
+        response = self.client.request('textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        self.assertIn('visible', [symbol['name'] for symbol in response])
+        reports = [n['params']['diagnostics'] for n in self.client.notifications
+                   if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+        self.assertEqual([item['code'] for item in reports[-1]], ['E0202'])
 
     def test_prepare_rename_uses_reference_range(self):
         module = self.root / 'math.nra'

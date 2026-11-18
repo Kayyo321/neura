@@ -1,3 +1,5 @@
+let json = import:Std.Encoding.Json;
+
 let Records = module (
     /// A point in the plane.
     export let Point = record (x: int, y: int);
@@ -11,6 +13,11 @@ let Records = module (
 
     export let Endpoint = enum (Origin, At { point: Point });
     export let Pin = record (label: string, endpoint: Endpoint);
+
+    /// Encodes a pin with the public field name "name".
+    export let PinJson = derive json.Codec<Pin> {
+        field Pin.label: "name";
+    };
 
     /// Prints the named payload in declaration order.
     export let describe_pin = func(pin: Pin) -> string => pin.endpoint.to_string();

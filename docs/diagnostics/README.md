@@ -70,6 +70,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0311](E0311.md) | reserved name |
 | [E0315](E0315.md) | ambiguous extension function |
 | [E0316](E0316.md) | extension function used without a call |
+| [E0318](E0318.md) | derivation mapping names no reachable member |
+| [E0319](E0319.md) | invalid or repeated wire name |
 
 ## E04xx: Types and bindings
 
@@ -205,6 +207,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0576](E0576.md) | invalid static requirement or call of one |
 | [E0577](E0577.md) | ambiguous static requirement |
 | [E0578](E0578.md) | conformance declared by a module |
+| [E0579](E0579.md) | unknown or misplaced derivation |
+| [E0590](E0590.md) | unsupported JSON codec shape |
 
 ## E06xx: Concurrency
 

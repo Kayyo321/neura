@@ -744,6 +744,23 @@ An `any` uses a `uint32` tag, a `uint64` for the scalar bits, a text handle and 
 
 [Tasks](CoreLanguage#tasks-scopes-and-select) are isolated: a task's mutable objects, arrays, and lists stay with it, and another task can affect them only by sending a message. Three rules of the type system enforce this. The compiler checks them on the whole linked program, including prebuilt NeuraIR modules, and reports a violation at the span of the offending expression. [Concurrency](Concurrency#5-isolation-between-tasks) specifies them with the runtime.
 
+#### Deriving a JSON codec
+
+A file or module can declare a JSON codec for an acyclic record or enum. The resulting module exports `to_json` and `from_json` for JSON trees and `encode` and `decode` for text. Each returns a `Result`. Two codecs for the same type can choose different wire names.
+
+<!-- example: check -->
+```neura
+let json = import:Std.Encoding.Json;
+let Account = record (id: uint64, label: string);
+let AccountJson = derive json.Codec<Account> {
+    field Account.label: "display_name";
+};
+```
+
+Encoding `new Account(7, "Ada")` with this codec produces `{"id":7,"display_name":"Ada"}`. Fields are read once in declaration order. A nil record is JSON null. An optional record field omits `None`; a missing member decodes to `None`. A present null can decode to `Some(nil)` when the wrapped type is a record. Other uses of `Optional` in a schema are rejected. Tuples use arrays of the declared length. An enum uses an object with a `variant` string and, for a variant with fields, a `payload` array or named object.
+
+The decoder scans for repeated known names before decoding fields in declaration order. Unknown members are ignored. Integers retain their full width and require an integer-form JSON number. Float encoding and decoding return an error for nonfinite values. Syntax errors retain the JSON parser's category and byte offset. A codec error carries a `json.codec.*` code and a message beginning with the affected path. Input text is limited to 16 MiB. [All wire and failure rules](https://github.com/Kayyo321/neura/blob/main/docs/design/Records030.md#the-json-codec)
+
 ### Scope-bound types
 
 `Std.Concurrent.Task<T>` and `Std.Concurrent.Scope` are *scope-bound*, and so is an array, list, or tuple with a scope-bound element. A scope-bound value must not be reachable after the `scope` block that created it exits.

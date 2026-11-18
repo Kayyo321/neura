@@ -73,6 +73,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0311](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0311.md) | reserved name |
 | [E0315](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0315.md) | ambiguous extension function |
 | [E0316](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0316.md) | extension function used without a call |
+| [E0318](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0318.md) | derivation mapping names no reachable member |
+| [E0319](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0319.md) | invalid or repeated wire name |
 
 ## E04xx: Types and bindings
 
@@ -208,6 +210,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0576](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0576.md) | invalid static requirement or call of one |
 | [E0577](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0577.md) | ambiguous static requirement |
 | [E0578](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0578.md) | conformance declared by a module |
+| [E0579](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0579.md) | unknown or misplaced derivation |
+| [E0590](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0590.md) | unsupported JSON codec shape |
 
 ## E06xx: Concurrency
 

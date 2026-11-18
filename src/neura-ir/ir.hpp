@@ -281,6 +281,26 @@ struct IrNativeLibrary {
     bool operator==(const IrNativeLibrary&) const = default;
 };
 
+// Source-only derivation facts used by the compiler's expansion view and by
+// workspace rename. The emitted ordinary functions carry the execution data.
+struct DerivedWireMember {
+    SymbolId symbol = no_symbol;
+    std::string payload_field;
+    std::string path;
+    std::string wire;
+    bool variant{};
+    bool pinned{};
+};
+
+struct DerivedCodec {
+    SymbolId module = no_symbol;
+    Span declaration;
+    std::optional<Span> close_brace;
+    std::string source;
+    std::vector<DerivedWireMember> members;
+    std::vector<std::pair<std::string, std::string>> schema_imports{};
+};
+
 struct IrProgram {
     std::vector<IrSymbol> symbols;
     std::vector<IrBody> bodies;
@@ -301,6 +321,7 @@ struct IrProgram {
     // Set by elaborate_class_hooks on a program whose events it derived; not
     // part of a .nir file.
     bool hooks_elaborated = false;
+    std::vector<DerivedCodec> derived_codecs{};
 };
 
 // The source loader can supply this trusted library file and retry lowering.

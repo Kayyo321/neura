@@ -67,6 +67,8 @@ NEURA_DIAGNOSTIC(E0310, "misuse of the discard name '_'")
 NEURA_DIAGNOSTIC(E0311, "reserved name")
 NEURA_DIAGNOSTIC(E0315, "ambiguous extension function")
 NEURA_DIAGNOSTIC(E0316, "extension function used without a call")
+NEURA_DIAGNOSTIC(E0318, "derivation mapping names no reachable member")
+NEURA_DIAGNOSTIC(E0319, "invalid or repeated wire name")
 
 // Types and bindings
 NEURA_DIAGNOSTIC(E0401, "assignment to a constant binding")
@@ -193,6 +195,8 @@ NEURA_DIAGNOSTIC(E0575, "invalid accessor override")
 NEURA_DIAGNOSTIC(E0576, "invalid static requirement or call of one")
 NEURA_DIAGNOSTIC(E0577, "ambiguous static requirement")
 NEURA_DIAGNOSTIC(E0578, "conformance declared by a module")
+NEURA_DIAGNOSTIC(E0579, "unknown or misplaced derivation")
+NEURA_DIAGNOSTIC(E0590, "unsupported JSON codec shape")
 
 // Concurrency
 NEURA_DIAGNOSTIC(E0601, "function is not task-safe")

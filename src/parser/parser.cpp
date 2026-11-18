@@ -835,6 +835,44 @@ private:
         return result;
     }
 
+    void derive_initializer(Declaration& declaration, std::optional<Declaration::Kind> owner) {
+        const auto word = advance().span;
+        if (block_depth_ || (owner && owner != Declaration::Kind::Module))
+            throw Diagnostic(word, "a derivation is a member of a file or module").with_code("E0579");
+        definition_has_no_annotation(declaration);
+        auto syntax = std::make_shared<DeriveSyntax>();
+        const auto generator = cursor_;
+        syntax->generator.name = qualified_name();
+        syntax->generator.span = span_from(generator);
+        if (!match("<")) expected("'<' and the type to derive");
+        syntax->arguments = type_arguments();
+        if (match("{")) {
+            while (!at_end() && !at("}")) {
+                DeriveMapping mapping;
+                if (!next_is_word(0, "field") && !next_is_word(0, "variant"))
+                    expected("'field' or 'variant' in a derivation mapping");
+                mapping.variant = advance().text == "variant";
+                const auto path = cursor_;
+                do {
+                    const auto& name = identifier();
+                    mapping.parts.push_back(name.text);
+                    mapping.part_spans.push_back(name.span);
+                } while (match("."));
+                mapping.path = span_from(path);
+                expect(":");
+                if (current().kind != TokenKind::String || current().parts) expected("a wire name as one string literal");
+                mapping.wire_span = current().span;
+                mapping.wire = decode_string_literal(advance().text);
+                if (!match(";")) expected("';' after the mapping");
+                syntax->mappings.push_back(std::move(mapping));
+            }
+            syntax->close_brace = current().span;
+            expect("}");
+        }
+        declaration.kind = Declaration::Kind::Module;
+        declaration.derive = std::move(syntax);
+    }
+
     Declaration declaration(std::optional<Declaration::Kind> owner = std::nullopt) {
         const auto start = cursor_;
         bool expression_body = false;
@@ -1059,6 +1097,12 @@ private:
                 }
                 expect(")");
                 expand_constructor_shorthands(result);
+            } else if (next_is_word(0, "derive") && cursor_ + 1 < tokens_.size() &&
+                       tokens_[cursor_ + 1].kind == TokenKind::Identifier) {
+                derive_initializer(result, owner);
+            } else if (next_is_word(0, "derive") && tokens_[cursor_ + 1].kind == TokenKind::End) {
+                advance();
+                expected("a generator or ';' after 'derive'");
             } else if (!result.type && !result.last && record_initializer(result)) {
                 // A record (parser_records.inc).
             } else {
@@ -2368,6 +2412,8 @@ private:
     }
 
     Expr primary(std::string_view branch_keyword) {
+        if (next_is_word(0, "derive") && tokens_[cursor_ + 1].kind == TokenKind::Identifier)
+            throw Diagnostic(current().span, "a derivation is a declaration, not an expression").with_code("E0202");
         const auto start = cursor_;
         if (match("match")) {
             auto statement = parse_match(true, start);

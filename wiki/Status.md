@@ -9,6 +9,7 @@ This release carries the language below from source through NeuraIR, optimizatio
 
 | Area | Supported | Specification |
 | --- | --- | --- |
+| Derived JSON codecs for records and enums | `derive json.Codec<T>` generates tree and text conversions, validates wire mappings and emits ordinary callable bodies. | [Types](Types#deriving-a-json-codec) |
 | Core | Bindings (`let`, `const`, and assign-once `last` with definite assignment) and destructuring (with a tuple annotation and a value per name), functions and closures, lambdas with untyped parameters where a function type is expected, fixed-arity function overloads, variadic parameters, named arguments and constant defaults, interpolated strings, `nameof`, expression bodies, `if`/`else`, conditional expressions, comparison chains, `do`, `do`/`while`, `while`, three-part `for`, for-each, `break`, `continue`, `return` | [Core language](CoreLanguage) |
 | Numbers | Sized integers and floats, aliases, checked arithmetic and conversions, update and compound assignment operators, bitwise operations and shifts, exact float bit reinterpretation | [Numbers](Numbers) |
 | Types | Classes and interfaces with first-use static initialization, getters and setters of exported fields, startup singletons, umbrella `class`, explicit `nil`, reference identity and checked casts, object casts, non-null primitive borrows with checked owners, primitive companion calls, value members and `===`, UTF-8 text, tuples, payload enums with exhaustive matching, and anonymous classes in type positions | [Types](Types) |

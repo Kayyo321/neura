@@ -33,6 +33,8 @@ The compiler derives [class hook](lang/Types.md#class-hooks) events after specia
 
 Range bounds, stride, checked length arithmetic, and element generation lower to explicit NeuraIR before conversion. The executable uses circuits for the arithmetic and control flow and a deterministic NVM state operation to allocate a collection of a computed length. Allocation checks the heap budget before reserving the backing storage.
 
+JSON derivation resolves the trusted generator, the root type and its reachable fields while lowering. The compiler emits ordinary checked functions. Their string constants hold wire names and error paths, so a compiled codec runs from a stripped executable image. Imported NeuraIR supplies the same record and enum metadata used by source callers. This expansion adds no NVR section or host service. [JSON codec contract](design/Records030.md#the-json-codec)
+
 Class static fields lower to global slots in a class-owned scope. NeuraIR
 expresses first-use initialization with a guarded function and a shared
 global state slot. Active uses reach the initializer through ordinary calls

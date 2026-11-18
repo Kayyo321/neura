@@ -224,12 +224,12 @@ The new companion functions are the operators: `add` is `left + right` and `mult
 
 | Rule | Status |
 | --- | --- |
-| `let Name = derive G<T>;` or `... { mappings };` asks a compiler-owned generator for a module named `Name`. `G` must resolve to a generator the compiler owns; the only one in 0.3.0 is `Std.Encoding.Json.Codec`, declared in the trusted library. Any other target is `E0579`. | proposed |
-| A derivation is a member of a file or a module. It is not written in a function body, a class or an interface, and is not an expression. `export` exports the module. | proposed |
-| The result is a module of ordinary checked functions. It is not an object: nothing is allocated to hold a codec, and `Name` is used as a module is (`UserJson.encode(user)`). | proposed |
-| Tags never cause generation. `#Serializable`, `#SerialName` and `#Skip` stay reserved and are not read by a derivation. | proposed |
-| A mapping `field Q.member: "wire";` pins the wire name of a record field, or of a named payload field written `Enum.Variant.field`; `variant Enum.Variant: "wire";` pins a variant's. `Q` is resolved like any type name. The member must exist, be accessible, and belong to a shape reachable from `T` (`E0318`). Two mappings for one member, an empty wire name, and two members of one record, one enum or one named payload with the same wire name after mapping are `E0319`. A mapping holds for every occurrence of the shape in this derivation and for no other derivation. | proposed |
-| Two derivations for one type are two independent modules. | proposed |
+| `let Name = derive G<T>;` or `... { mappings };` asks a compiler-owned generator for a module named `Name`. `G` must resolve to a generator the compiler owns; the only one in 0.3.0 is `Std.Encoding.Json.Codec`, declared in the trusted library. Any other target is `E0579`. | implemented |
+| A derivation is a member of a file or a module. It is not written in a function body, a class or an interface, and is not an expression. `export` exports the module. | implemented |
+| The result is a module of ordinary checked functions. It is not an object: nothing is allocated to hold a codec, and `Name` is used as a module is (`UserJson.encode(user)`). | implemented |
+| Tags never cause generation. `#Serializable`, `#SerialName` and `#Skip` stay reserved and are not read by a derivation. | implemented |
+| A mapping `field Q.member: "wire";` pins the wire name of a record field, or of a named payload field written `Enum.Variant.field`; `variant Enum.Variant: "wire";` pins a variant's. `Q` is resolved like any type name. The member must exist, be accessible, and belong to a shape reachable from `T` (`E0318`). Two mappings for one member, an empty wire name, and two members of one record, one enum or one named payload with the same wire name after mapping are `E0319`. A mapping holds for every occurrence of the shape in this derivation and for no other derivation. | implemented |
+| Two derivations for one type are two independent modules. | implemented |
 
 ### The JSON codec
 
@@ -237,40 +237,42 @@ The new companion functions are the operators: `add` is `left + right` and `mult
 
 | Function | Meaning | Status |
 | --- | --- | --- |
-| `to_json(value: T) -> Result<JsonValue>` | The value as a JSON tree | proposed |
-| `encode(value: T) -> Result<string>` | `Json.write` of `to_json` | proposed |
-| `from_json(value: JsonValue) -> Result<T>` | The value a JSON tree describes | proposed |
-| `decode(text: string) -> Result<T>` | `Json.parse`, then `from_json` | proposed |
+| `to_json(value: T) -> Result<JsonValue>` | The value as a JSON tree | implemented |
+| `encode(value: T) -> Result<string>` | `Json.write` of `to_json` | implemented |
+| `from_json(value: JsonValue) -> Result<T>` | The value a JSON tree describes | implemented |
+| `decode(text: string) -> Result<T>` | `Json.parse`, then `from_json` | implemented |
 
 `T`, the root, is a record or an enum other than `Optional`. The shapes a codec supports, each checked over everything reachable from the root (`E0590` at the derivation, naming the path to the unsupported type):
 
 | Shape | JSON | Status |
 | --- | --- | --- |
-| `bool` | `true`, `false` | proposed |
-| Integers of every width | A number written as an integer, exactly. Decoding accepts only a number with no fraction and no exponent that the type holds; it goes through the type's `parse`, never through a float. | proposed |
-| Floats of every width | The shortest round-trip text. Encoding a NaN or an infinity returns an error; decoding a number that rounds to an infinity does too. | proposed |
-| `string` | A string | proposed |
-| Record | An object with one member per field, in declaration order. A nil record is `null`. | proposed |
-| Tuple | An array of exactly the tuple's length | proposed |
-| Enum, fieldless or not | An object whose `"variant"` is the variant's wire name. A fieldless variant has no `"payload"`; positional payloads are a `"payload"` array in order; named payloads are a `"payload"` object. | proposed |
-| `Optional<U>` as the type of a record field | `None` omits the member; a missing member decodes as `None`; a present member decodes as `Some`. A present `null` is `Some(nil)` when `U` is a record and an error otherwise. | proposed |
-| `Optional` anywhere else (a tuple element, an enum payload, inside another `Optional`, the root) | Rejected (`E0590`) | proposed |
+| `bool` | `true`, `false` | implemented |
+| Integers of every width | A number written as an integer, exactly. Decoding accepts only a number with no fraction and no exponent that the type holds; it goes through the type's `parse`, never through a float. | implemented |
+| Floats of every width | The shortest round-trip text. Encoding a NaN or an infinity returns an error; decoding a number that rounds to an infinity does too. | implemented |
+| `string` | A string | implemented |
+| Record | An object with one member per field, in declaration order. A nil record is `null`. | implemented |
+| Tuple | An array of exactly the tuple's length | implemented |
+| Enum, fieldless or not | An object whose `"variant"` is the variant's wire name. A fieldless variant has no `"payload"`; positional payloads are a `"payload"` array in order; named payloads are a `"payload"` object. | implemented |
+| `Optional<U>` as the type of a record field | `None` omits the member; a missing member decodes as `None`; a present member decodes as `Some`. A present `null` is `Some(nil)` when `U` is a record and an error otherwise. | implemented |
+| `Optional` anywhere else (a tuple element, an enum payload, inside another `Optional`, the root) | Rejected (`E0590`) | implemented |
 | `FrozenList<U>` | An array, when the frozen-collection work lands with its element and size limits. Until then rejected. | proposed |
-| A shape that can reach itself (a record holding its own type, directly or through others) | Rejected (`E0590`): the first generator accepts only acyclic shapes. | proposed |
-| Anything not record-eligible | Rejected (`E0590`) | proposed |
+| A shape that can reach itself (a record holding its own type, directly or through others) | Rejected (`E0590`): the first generator accepts only acyclic shapes. | implemented |
+| Anything not record-eligible | Rejected (`E0590`) | implemented |
 
 Schema rules:
 
 | Rule | Status |
 | --- | --- |
-| A wire name is the declared name of the field or variant unless a mapping pins it. Renaming a declaration changes an unpinned wire name; the compiler keeps no memory of an earlier schema. | proposed |
-| Encoding reads each field once, in declaration order, as outside code reads it, and emits members in that order. | proposed |
-| Decoding an object: a member whose name is no field's is ignored; a field's name appearing twice is an error at the second; then, in declaration order, a missing required field is an error and each present field is decoded; then the record is built by its generated constructor, once. No field is written any other way. | proposed |
-| Decoding an enum: `"variant"` must be present once and name a variant; `"payload"` must be absent for a fieldless variant and present once, with the right kind, length and member names, for the others. Unknown members of a named payload are ignored as for a record; unknown members beside `"variant"` and `"payload"` are ignored. | proposed |
-| Expected failures are returned: a parse failure as `Json.parse` returns it, and every other one as `Error.custom(code, message)` with one of the codes `json.codec.type`, `json.codec.missing`, `json.codec.duplicate`, `json.codec.range`, `json.codec.variant`, `json.codec.payload`, `json.codec.not_finite`, `json.codec.too_large`, and a message that begins with the JSON path of the value, such as `$.owner.id`. The first failure in the order above is the one returned. A trap in a constructor or a hook is not caught. | proposed |
-| Bounds: `decode` returns `json.codec.too_large` for a text longer than 16,777,216 bytes, before parsing. Nesting is bounded by `Json.MaxDepth` and by the shape, which is finite because it is acyclic. The number of objects a decode constructs is at most the number of record positions in the shape. | proposed |
-| Wire names, error codes and paths are string constants of the generated functions. They are execution data and survive removal of `NAME` and `SMAP`. No type, layout or symbol identifier of an image appears in the JSON. | proposed |
-| The generated functions allocate with ordinary constructor and list operations, and their summaries report it. | proposed |
+| A wire name is the declared name of the field or variant unless a mapping pins it. Renaming a declaration changes an unpinned wire name; the compiler keeps no memory of an earlier schema. | implemented |
+| Encoding reads each field once, in declaration order, as outside code reads it, and emits members in that order. | implemented |
+| Decoding an object: a member whose name is no field's is ignored; a field's name appearing twice is an error at the second; then, in declaration order, a missing required field is an error and each present field is decoded; then the record is built by its generated constructor, once. No field is written any other way. | implemented |
+| Decoding an enum: `"variant"` must be present once and name a variant; `"payload"` must be absent for a fieldless variant and present once, with the right kind, length and member names, for the others. Unknown members of a named payload are ignored as for a record; unknown members beside `"variant"` and `"payload"` are ignored. | implemented |
+| Expected failures are returned: a parse failure as `Json.parse` returns it, and every other one as `Error.custom(code, message)` with one of the codes `json.codec.type`, `json.codec.missing`, `json.codec.duplicate`, `json.codec.range`, `json.codec.variant`, `json.codec.payload`, `json.codec.not_finite`, `json.codec.too_large`, and a message that begins with the JSON path of the value, such as `$.owner.id`. The first failure in the order above is the one returned. A trap in a constructor or a hook is not caught. | implemented |
+| Bounds: `decode` returns `json.codec.too_large` for a text longer than 16,777,216 bytes, before parsing. Nesting is bounded by `Json.MaxDepth` and by the shape, which is finite because it is acyclic. The number of objects a decode constructs is at most the number of record positions in the shape. | implemented |
+| Wire names, error codes and paths are string constants of the generated functions. They are execution data and survive removal of `NAME` and `SMAP`. No type, layout or symbol identifier of an image appears in the JSON. | implemented |
+| The generated functions allocate with ordinary constructor and list operations, and their summaries report it. | implemented |
+
+For text decoding, the codec uses the JSON parser's ordered member view so it can identify the second occurrence of a known key. The existing `Json.parse` API still keeps the last occurrence at the first key's position. `from_json` sees exactly the members supplied in the caller's tree. [Generated codec functions](../lang/Types.md#deriving-a-json-codec)
 
 **Expansion.** The generator runs in lowering, after declarations are resolved and before bodies are finalized. It builds a `Declaration` tree for the module, in which every type and callee is a `$`-prefixed name that no source can write and that lowering binds to the resolved symbol for this derivation only; the tree then goes through the ordinary lowering path, so visibility, construction, definite assignment and every other check apply to it. The module has the four functions and one private pair of helpers per reachable record and enum. Every generated node carries the span of the derivation, or of the mapping that named it, and every generated symbol carries `generated`. `neura check --show-derived[=Name] file.nra` prints the tree as Neura source with the bound names written as qualified names; the language server shows the same text.
 

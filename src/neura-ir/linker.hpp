@@ -13,6 +13,9 @@ inline constexpr std::string_view stable_closure_prefix = "$closure@";
 struct LinkedImports {
     IrProgram program;
     std::map<std::pair<std::string, std::string>, SymbolId> modules;
+    // Available top-level module selectors for spelling a transitive schema
+    // type in an ordinary-source expansion. Not serialized.
+    std::map<SymbolId, std::string> artifact_origins;
 };
 
 // Merge a lowered compilation unit into a single symbol space. Files with

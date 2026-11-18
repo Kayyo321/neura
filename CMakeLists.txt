@@ -311,6 +311,7 @@ add_library(neura_compiler STATIC
     src/lexer/lexer.cpp
     src/parser/parser.cpp
     src/neura-ir/lowering.cpp
+    src/neura-ir/derive_json.cpp
     src/neura-ir/ir_print.cpp
     src/neura-ir/integer.cpp
     src/neura-ir/float.cpp
@@ -614,6 +615,9 @@ if(BUILD_TESTING)
     add_test(NAME records-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/records.py" "$<TARGET_FILE:neura>")
     set_tests_properties(records-boundary PROPERTIES TIMEOUT 300)
+    add_test(NAME records-codecs COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/codecs.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(records-codecs PROPERTIES TIMEOUT 300)
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).
     add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"

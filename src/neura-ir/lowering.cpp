@@ -5,6 +5,7 @@
 #include "conformance.hpp"
 #include "control_flow.hpp"
 #include "definite_assignment.hpp"
+#include "derive_json.hpp"
 #include "float.hpp"
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
@@ -253,6 +254,7 @@ private:
     std::vector<SymbolId> file_ids_;
     Names linked_files_;
     Names library_files_;
+    std::map<SymbolId, std::string> artifact_origins_;
     std::map<std::string, SymbolId, std::less<>> reference_layouts_;
     std::set<const Statement*> reference_field_bindings_;
     // The single assignments of deferred `last` bindings (definite_assignment.hpp).
@@ -625,6 +627,15 @@ private:
     bool record_class(SymbolId cls) const;
     void check_record_syntax(const Declaration& decl) const;
     void declare_record(SymbolId id, const Declaration& decl);
+    std::vector<SymbolId> derivations_;
+    std::map<SymbolId, std::vector<SymbolId>> derived_members_;
+    void expand_derivation(SymbolId id);
+    using CodecImports = std::map<SymbolId, std::pair<std::string, std::string>>;
+    std::string codec_source_name(SymbolId id, const Context& ctx, const Declaration& decl, CodecImports& imports);
+    std::size_t codec_shape(const IrType& type, const Span& at, const std::string& path,
+                            std::vector<IrType>& active, std::vector<CodecShape>& shapes);
+    void codec_mappings(std::vector<CodecShape>& shapes, const DeriveSyntax& syntax, const Context& ctx);
+
     void lower_record_members(SymbolId id);
     std::vector<TagSyntax> record_tags(const Declaration& decl) const;
     std::optional<std::string> record_ineligible(const IrType& type, IrType& inner, std::vector<IrType> path = {}) const;
@@ -1008,6 +1019,7 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
         declare(child, id, property ? SymbolKind::Field : member_kind);
     }
     if (decl.record) declare_record(id, decl);
+    if (decl.derive) derivations_.push_back(id);
     return id;
 }
 
@@ -5170,6 +5182,8 @@ void Lowering::lower_declaration(SymbolId id) {
         for (const auto branch : branches) lower_declaration(branch);
     } else if (declaration.kind == DeclKind::Module || class_or_interface(symbol(id).kind)) {
         if (declaration.record) check_record(id);
+        if (declaration.derive)
+            for (const auto child : derived_members_.at(id)) lower_declaration(child);
         // A companion's conformance is checked when a bound needs it
         // (satisfies_by_conformance); any other module's is rejected here.
         if (declaration.kind == DeclKind::Module && !companion_primitive(id)) check_module_conformance(id);
@@ -5284,6 +5298,7 @@ void Lowering::lower_declaration(SymbolId id) {
 void Lowering::seed(LinkedImports linked) {
     program_ = std::move(linked.program);
     linked_modules_ = std::move(linked.modules);
+    artifact_origins_ = std::move(linked.artifact_origins);
     entries_.resize(program_.symbols.size());
 
     // A singleton's class and value share their source name. Older files
@@ -5409,6 +5424,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             if (stmt.kind == StmtKind::Binding) prepare_promotions(*stmt.declaration, file_ids_[i]);
         }
     }
+    for (const auto id : derivations_) expand_derivation(id);
     for (std::size_t i = 0; i < files.size(); ++i) {
         const auto id = file_ids_[i];
         auto ctx = context(id);
@@ -5476,6 +5492,7 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
 
 #include "lowering_accessors.inc"
 #include "lowering_records.inc"
+#include "lowering_derive.inc"
 #include "lowering_properties.inc"
 #include "lowering_static.inc"
 #include "lowering_calls.inc"
