@@ -5,6 +5,7 @@ let data = import:Std.Core.Internal.UnicodeProperties;
 let lookup = import:Std.Core.Internal.UnicodeLookup;
 let ucd = import:Std.Core.Internal.UnicodeCharacter;
 let unicode_case = import:Std.Text.Internal.UnicodeCase;
+let unicode_names = import:Std.Core.Internal.UnicodeNameLookup;
 
 /// @brief Unicode characters (Stdlib.md section 8.5): Java's Character over Unicode 17.0.0, in two shapes.
 ///
@@ -661,23 +662,59 @@ export let Character = module (
 
     // Names
 
-    /// @brief The Unicode Name property of a code point, with Java's getName fallback for defined code points
-    /// that have none.
-    /// @stub the Unicode name table (about 0.9 MB of names for 35,000 ranges) is not bundled in Neura 0.3.0
-    #ThreadSafe
+    /// @brief Java's getName: the name of a code point, or None when it is unassigned or above 0x10FFFF.
+    ///
+    /// A code point listed by name in UnicodeData.txt has its Unicode Name, such as `LATIN SMALL LETTER A`,
+    /// `GRINNING FACE`, or `CJK COMPATIBILITY IDEOGRAPH-F900`. A control has Java's name for it, its Unicode 1.0
+    /// name such as `NULL` and `LINE FEED (LF)`, with `BEL` for U+0007 and the aliases `PADDING CHARACTER`,
+    /// `HIGH OCTET PRESET`, and `SINGLE GRAPHIC CHARACTER INTRODUCER` for U+0080, U+0081, and U+0099. Every
+    /// other assigned code point, the CJK unified ideographs, Hangul syllables, Tangut ideographs, surrogates,
+    /// private use, and U+0084, has Java's block form: the block name in capitals with spaces for its spaces,
+    /// hyphens, and underscores, a space, and the code point in uppercase hex without leading zeros, such as
+    /// `CJK UNIFIED IDEOGRAPHS 4E00`, `HANGUL SYLLABLES AC00`, and `LATIN 1 SUPPLEMENT 84`. unicode_name gives
+    /// the Unicode Name instead. Unlike Java, which throws, a value above 0x10FFFF gives None.
+    #[Pure, ThreadSafe]
     export let get_name = func(code_point: uint32) -> Optional<string> {
-        trap_with_message(
-            "unsupported: Std.Core.Character.get_name is not implemented in Neura 0.3.0 " +
-            "(the Unicode name table is not bundled)");
+        if (code_point > MaxCodePoint) {
+            return Optional<string>.None;
+        }
+        last name = unicode_names.java_name(code_point);
+        return name.byte_length == 0 ? Optional<string>.None : Optional<string>.Some(name);
     };
 
-    /// @brief The code point with a Unicode name, matched without regard to case (Java's codePointOf).
-    /// @stub the Unicode name table (about 0.9 MB of names for 35,000 ranges) is not bundled in Neura 0.3.0
-    #ThreadSafe
-    export let code_point_of = func(name: string) -> Optional<uint32> {
-        trap_with_message(
-            "unsupported: Std.Core.Character.code_point_of is not implemented in Neura 0.3.0 " +
-            "(the Unicode name table is not bundled)");
+    /// @brief The Unicode Name property (Python's unicodedata.name), or None when the code point has none:
+    /// controls, surrogates, private use, noncharacters, unassigned code points, and values above 0x10FFFF.
+    /// The names of Hangul syllables and of the patterned ranges are generated: `HANGUL SYLLABLE GAG`,
+    /// `CJK UNIFIED IDEOGRAPH-4E00`, `TANGUT IDEOGRAPH-17000`, `KHITAN SMALL SCRIPT CHARACTER-18B00`,
+    /// `NUSHU CHARACTER-1B170`, `EGYPTIAN HIEROGLYPH-13460`, and `CJK COMPATIBILITY IDEOGRAPH-F900`.
+    #[Pure, ThreadSafe]
+    export let unicode_name = func(code_point: uint32) -> Optional<string> {
+        if (code_point > MaxCodePoint) {
+            return Optional<string>.None;
+        }
+        last name = unicode_names.unicode_name(code_point);
+        return name.byte_length == 0 ? Optional<string>.None : Optional<string>.Some(name);
+    };
+
+    /// @brief Java's codePointOf: the code point with a name that get_name or unicode_name returns, compared
+    /// after removing leading and trailing characters up to U+0020 and uppercasing with the root rules, so
+    /// `" latin small letter a "` gives U+0061. Name aliases other than Java's control names, the loose
+    /// matching of UAX #44, and named sequences are not accepted. Traps with "invalid argument: not a Unicode
+    /// character name" for any other text; try_code_point_of returns None instead.
+    #[Pure, ThreadSafe]
+    export let code_point_of = func(name: string) -> uint32 {
+        last found = unicode_names.code_point_of(name);
+        if (found < 0) {
+            trap_with_message("invalid argument: not a Unicode character name");
+        }
+        return found as uint32;
+    };
+
+    /// @brief code_point_of, with None for a text that is not a name.
+    #[Pure, ThreadSafe]
+    export let try_code_point_of = func(name: string) -> Optional<uint32> {
+        last found = unicode_names.code_point_of(name);
+        return found < 0 ? Optional<uint32>.None : Optional<uint32>.Some(found as uint32);
     };
 
     // Code points and encodings

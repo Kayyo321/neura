@@ -1,0 +1,479 @@
+let names = import:Std.Core.Internal.UnicodeNames;
+
+/// @brief Reads the generated name tables of Std.Core.Internal.UnicodeNames (scripts/generate-unicode-tables.py)
+/// for Std.Core.Character.get_name, unicode_name, and code_point_of.
+///
+/// A name is stored, generated from a rule, or Java's block form. The 34,594 stored names are front-coded
+/// records in code point order, in blocks of 32 that each start with a whole name, so reading a name decodes
+/// at most 32 records. The Special ranges give the Hangul syllables (Unicode section 3.12), the patterned
+/// names such as CJK UNIFIED IDEOGRAPH-4E00, and the code points whose Java name is the block form; Controls
+/// holds Java's names of the controls. A name is found from its text by its trailing hexadecimal number, its
+/// Hangul jamo, the controls, or the blocks whose names start with its first word.
+///
+/// The tables hold four-digit numbers so that every index is a shift. The code uses int addition, shifts,
+/// and comparisons only, because each other arithmetic operation, such as a division or a uint64 conversion,
+/// adds its own circuit to the image of every program that calls these functions.
+export let UnicodeNameLookup = module (
+    /// @brief Java's getName: the stored or patterned Unicode name, Java's name of a control, or the block
+    /// form (the Java block name, a space, and the code point in uppercase hex without leading zeros);
+    /// the empty string for an unassigned code point. The code point is at most 0x10FFFF.
+    #[Pure, ThreadSafe]
+    export let java_name = func(code_point: uint32) -> string {
+        last point = code_point as int;
+        last special = find_special(point);
+        if (special >= 0) {
+            last java = digit(names.SpecialKinds, (special << 1) + 1);
+            if (java > 0) {
+                return entry(names.JavaBlocks, names.JavaBlockOffsets, java - 1) + " " + hex(point, 1);
+            }
+            return special_name(point, special);
+        }
+        if (point < 32 || (point >= 127 && point <= 159)) {
+            return entry(names.Controls, names.ControlOffsets, point < 32 ? point : point - 95);
+        }
+        return stored_name(point);
+    };
+
+    /// @brief The Unicode Name property: the stored or patterned name, or the empty string when the code
+    /// point has none (controls, surrogates, private use, noncharacters, and unassigned code points). The
+    /// code point is at most 0x10FFFF.
+    #[Pure, ThreadSafe]
+    export let unicode_name = func(code_point: uint32) -> string {
+        last point = code_point as int;
+        last special = find_special(point);
+        if (special >= 0) {
+            return special_name(point, special);
+        }
+        if (point < 32 || (point >= 127 && point <= 159)) {
+            return "";
+        }
+        return stored_name(point);
+    };
+
+    /// @brief The code point that a Java name or a Unicode name names, after removing leading and trailing
+    /// characters up to U+0020 and uppercasing with the root rules, as Java's codePointOf does; -1 when no
+    /// code point has the name.
+    #[Pure, ThreadSafe]
+    export let code_point_of = func(text: string) -> int {
+        last key = upper(trim(text));
+        if (key.byte_length == 0) {
+            return -1;
+        }
+        last by_number = patterned(key);
+        if (by_number >= 0) {
+            return by_number;
+        }
+        last syllable = hangul(key);
+        if (syllable >= 0) {
+            return syllable;
+        }
+        for (let i = 0; i < 65; i += 1) {
+            if (entry(names.Controls, names.ControlOffsets, i) == key) {
+                return i < 32 ? i : i + 95;
+            }
+        }
+        return stored(key);
+    };
+
+    // Stored names
+
+    /// @brief The stored name of a code point, or the empty string.
+    #Pure
+    let stored_name = func(point: int) -> string {
+        let low = 0;
+        let high = names.RunCount + 1;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            if (number(names.RunStarts, middle << 2) <= point) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if (low == 0) {
+            return "";
+        }
+        last index = number(names.RunRecords, (low - 1) << 2) + point - number(names.RunStarts, (low - 1) << 2);
+        if (index >= number(names.RunRecords, low << 2)) {
+            return "";
+        }
+        last decoded = decode(index >> names.BlockShift, (index & ((1 << names.BlockShift) - 1)) + 1);
+        return decoded[decoded.length - 1];
+    };
+
+    /// @brief The code point of record number `index`.
+    #Pure
+    let record_code_point = func(index: int) -> int {
+        let low = 0;
+        let high = names.RunCount + 1;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            if (number(names.RunRecords, middle << 2) <= index) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return number(names.RunStarts, (low - 1) << 2) + index - number(names.RunRecords, (low - 1) << 2);
+    };
+
+    /// @brief The code point of a stored name, or -1: the blocks listed for the key's first word are decoded
+    /// and compared.
+    #Pure
+    let stored = func(key: string) -> int {
+        let first_end = 0;
+        while (first_end < key.byte_length && key.byte_at(first_end) != 32) {
+            first_end += 1;
+        }
+        last word = find_word(key.slice(0, first_end));
+        if (word < 0) {
+            return -1;
+        }
+        last from = number(names.FirstWordBlockOffsets, word << 2);
+        last to = number(names.FirstWordBlockOffsets, (word + 1) << 2);
+        for (let offset = from; offset < to; offset += 2) {
+            last block = (digit(names.FirstWordBlocks, offset) << 6) | digit(names.FirstWordBlocks, offset + 1);
+            last decoded = decode(block, 1 << names.BlockShift);
+            for (let i = 0; i < decoded.length; i += 1) {
+                if (decoded[i] == key) {
+                    return record_code_point((block << names.BlockShift) + i);
+                }
+            }
+        }
+        return -1;
+    };
+
+    /// @brief The number of a first word in FirstWords, or -1.
+    #Pure
+    let find_word = func(word: string) -> int {
+        let low = 0;
+        let high = (names.FirstWordOffsets.byte_length >> 2) - 1;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            last candidate = entry(names.FirstWords, names.FirstWordOffsets, middle);
+            if (candidate == word) {
+                return middle;
+            }
+            if (before(candidate, word)) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief The first `limit` records of a block, fewer in the last block.
+    #Pure
+    let decode = func(block: int, limit: int) -> string[list] {
+        last result: string[list] = new;
+        let position = number(names.BlockOffsets, block << 2);
+        let previous = "";
+        for (let index = block << names.BlockShift; index < names.RecordCount && result.length < limit;
+                index += 1) {
+            previous = decode_record(position, previous);
+            result.append(previous);
+            while (names.Stream.byte_at(position) != 46) {
+                position += 1;
+            }
+            position += 1;
+        }
+        return result;
+    };
+
+    /// @brief Decodes the record at a Stream offset, given the previous name of its block.
+    #Pure
+    let decode_record = func(start: int, previous: string) -> string {
+        let position = start;
+        last shared = digit(names.Stream, position);
+        position += 1;
+        let bytes: uint8[list] = new;
+        if (shared > 0) {
+            let words = 0;
+            for (let i = 0; i < previous.byte_length; i += 1) {
+                last byte = previous.byte_at(i);
+                if (byte == 32) {
+                    words += 1;
+                    if (words == shared) {
+                        break;
+                    }
+                }
+                bytes.append(byte);
+            }
+        }
+        while (true) {
+            last byte = names.Stream.byte_at(position);
+            if (byte == 46) {
+                break;
+            }
+            if (byte == 32) {
+                position += 1;
+                continue;
+            }
+            if (bytes.length > 0) {
+                bytes.append(32);
+            }
+            last lead = names.Leads.byte_at((byte as int) - 32);
+            if (lead == 32) {
+                while (true) {
+                    last letter = names.Stream.byte_at(position);
+                    if (letter == 46 || letter == 32 || names.Leads.byte_at((letter as int) - 32) != 32) {
+                        break;
+                    }
+                    bytes.append(letter);
+                    position += 1;
+                }
+                continue;
+            }
+            last lead_number = (lead as int) - 48;
+            let code = 0;
+            if (lead_number < names.OneByteLeads) {
+                code = lead_number;
+                position += 1;
+            } else if (lead_number < names.OneByteLeads + names.TwoByteLeads) {
+                code = names.OneByteLeads + ((lead_number - names.OneByteLeads) << 6) +
+                    digit(names.Stream, position + 1);
+                position += 2;
+            } else {
+                code = names.OneByteLeads + (names.TwoByteLeads << 6) +
+                    ((lead_number - names.OneByteLeads - names.TwoByteLeads) << 12) +
+                    (digit(names.Stream, position + 1) << 6) + digit(names.Stream, position + 2);
+                position += 3;
+            }
+            last end = number(names.DictionaryOffsets, (code + 1) << 2);
+            for (let i = number(names.DictionaryOffsets, code << 2); i < end; i += 1) {
+                bytes.append(names.Dictionary.byte_at(i));
+            }
+        }
+        let [valid, text] = string.from_utf8(bytes);
+        return text;
+    };
+
+    // Generated names
+
+    /// @brief The number of the Special range holding a code point, or -1.
+    #Pure
+    let find_special = func(point: int) -> int {
+        let low = 0;
+        let high = names.SpecialCount;
+        while (low < high) {
+            last middle = low + (high - low) / 2;
+            if (number(names.SpecialFirsts, middle << 2) <= point) {
+                low = middle + 1;
+            } else {
+                high = middle;
+            }
+        }
+        if (low == 0 || number(names.SpecialLasts, (low - 1) << 2) < point) {
+            return -1;
+        }
+        return low - 1;
+    };
+
+    /// @brief The Unicode name of a code point in Special range `special`, or the empty string.
+    #Pure
+    let special_name = func(point: int, special: int) -> string {
+        last prefix = digit(names.SpecialKinds, special << 1);
+        if (prefix == 0) {
+            return "";
+        }
+        if (prefix == 1) {
+            // The syllable index is (lead * 21 + vowel) * 28 + tail.
+            let rest = point - 44032;
+            let lead = 0;
+            while (rest >= 588) {
+                rest -= 588;
+                lead += 1;
+            }
+            let vowel = 0;
+            while (rest >= 28) {
+                rest -= 28;
+                vowel += 1;
+            }
+            return "HANGUL SYLLABLE " + jamo(lead) + jamo(19 + vowel) + jamo(40 + rest);
+        }
+        return entry(names.Prefixes, names.PrefixOffsets, prefix - 2) + hex(point, 4);
+    };
+
+    /// @brief The code point of a name that ends in a hexadecimal number after a space or hyphen, when the
+    /// number names a code point of a Special range whose Java or Unicode name is the key; otherwise -1.
+    #Pure
+    let patterned = func(key: string) -> int {
+        let start = key.byte_length;
+        while (start > 0 && is_hex(key.byte_at(start - 1))) {
+            start -= 1;
+        }
+        last length = key.byte_length - start;
+        if (length == 0 || length > 6 || start == 0) {
+            return -1;
+        }
+        last separator = key.byte_at(start - 1);
+        if (separator != 32 && separator != 45) {
+            return -1;
+        }
+        let value = 0;
+        for (let i = start; i < key.byte_length; i += 1) {
+            last byte = key.byte_at(i) as int;
+            value = (value << 4) | (byte <= 57 ? byte - 48 : byte - 55);
+        }
+        if (value > 1114111) {
+            return -1;
+        }
+        last special = find_special(value);
+        if (special < 0) {
+            return -1;
+        }
+        return java_name(value as uint32) == key || special_name(value, special) == key ? value : -1;
+    };
+
+    /// @brief The code point of a Hangul syllable name, or -1.
+    #Pure
+    let hangul = func(key: string) -> int {
+        last prefix = "HANGUL SYLLABLE ";
+        if (key.byte_length <= prefix.byte_length || !starts_with(key, prefix, 0)) {
+            return -1;
+        }
+        last rest = key.slice(prefix.byte_length, key.byte_length);
+        let lead_base = 44032;
+        for (let l = 0; l < 19; l += 1) {
+            last lead = jamo(l);
+            if (starts_with(rest, lead, 0)) {
+                let vowel_base = lead_base;
+                for (let v = 0; v < 21; v += 1) {
+                    last vowel = jamo(19 + v);
+                    if (starts_with(rest, vowel, lead.byte_length)) {
+                        last tail = rest.slice(lead.byte_length + vowel.byte_length, rest.byte_length);
+                        for (let t = 0; t < 28; t += 1) {
+                            if (jamo(40 + t) == tail) {
+                                return vowel_base + t;
+                            }
+                        }
+                    }
+                    vowel_base += 28;
+                }
+            }
+            lead_base += 588;
+        }
+        return -1;
+    };
+
+    /// @brief Jamo short name number `index`: leading consonants from 0, vowels from 19, trailing
+    /// consonants from 40.
+    #Pure
+    let jamo = func(index: int) -> string => entry(names.Jamo, names.JamoOffsets, index);
+
+    // Table and text helpers
+
+    /// @brief The four-digit number at a byte offset.
+    #Pure
+    let number = func(table: string, offset: int) -> int =>
+        (digit(table, offset) << 18) | (digit(table, offset + 1) << 12) | (digit(table, offset + 2) << 6) |
+        digit(table, offset + 3);
+
+    /// @brief The one-digit number at a byte offset.
+    #Pure
+    let digit = func(table: string, offset: int) -> int => (table.byte_at(offset) as int) - 48;
+
+    /// @brief Text number `index` of a joined list with four-digit offsets.
+    #Pure
+    let entry = func(texts: string, offsets: string, index: int) -> string =>
+        texts.slice(number(offsets, index << 2), number(offsets, (index + 1) << 2));
+
+    /// @brief The text without leading and trailing characters up to U+0020 (Java's String.trim).
+    #Pure
+    let trim = func(text: string) -> string {
+        let start = 0;
+        let end = text.byte_length;
+        while (start < end && text.byte_at(start) <= 32) {
+            start += 1;
+        }
+        while (end > start && text.byte_at(end - 1) <= 32) {
+            end -= 1;
+        }
+        return text.slice(start, end);
+    };
+
+    /// @brief The text uppercased with the root rules, as Java's toUpperCase(Locale.ROOT) does, when the result
+    /// is ASCII; otherwise the empty string, which is no name. The root rules map each character on its own, and
+    /// the characters above U+007F that map to ASCII are those of UpperFrom, such as U+0131 to I and U+00DF to SS.
+    #Pure
+    let upper = func(text: string) -> string {
+        let bytes: uint8[list] = new;
+        let i = 0;
+        while (i < text.byte_length) {
+            last byte = text.byte_at(i);
+            if (byte < 128) {
+                bytes.append(byte >= 97 && byte <= 122 ? byte - 32 : byte);
+                i += 1;
+                continue;
+            }
+            let found = -1;
+            last count = names.UpperFromOffsets.byte_length >> 2;
+            for (let k = 0; k + 1 < count && found < 0; k += 1) {
+                last from = entry(names.UpperFrom, names.UpperFromOffsets, k);
+                if (starts_with(text, from, i)) {
+                    found = k;
+                    i += from.byte_length;
+                }
+            }
+            if (found < 0) {
+                return "";
+            }
+            last mapped = entry(names.UpperTo, names.UpperToOffsets, found);
+            for (let j = 0; j < mapped.byte_length; j += 1) {
+                bytes.append(mapped.byte_at(j));
+            }
+        }
+        let [valid, result] = string.from_utf8(bytes);
+        return result;
+    };
+
+    /// @brief Uppercase hex of a value with at least `width` digits.
+    #Pure
+    let hex = func(value: int, width: int) -> string {
+        last digits = "0123456789ABCDEF";
+        let count = 1;
+        while (count < 6 && (value >> (count << 2)) > 0) {
+            count += 1;
+        }
+        if (count < width) {
+            count = width;
+        }
+        let bytes: uint8[list] = new;
+        for (let shift = (count - 1) << 2; shift >= 0; shift -= 4) {
+            bytes.append(digits.byte_at((value >> shift) & 15));
+        }
+        let [valid, text] = string.from_utf8(bytes);
+        return text;
+    };
+
+    /// @brief Tests an uppercase hexadecimal digit.
+    #Pure
+    let is_hex = func(byte: uint8) -> bool => (byte >= 48 && byte <= 57) || (byte >= 65 && byte <= 70);
+
+    /// @brief Tests whether `text` holds `part` at a byte offset.
+    #Pure
+    let starts_with = func(text: string, part: string, offset: int) -> bool {
+        if (offset + part.byte_length > text.byte_length) {
+            return false;
+        }
+        for (let i = 0; i < part.byte_length; i += 1) {
+            if (text.byte_at(offset + i) != part.byte_at(i)) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Byte-wise order of two strings.
+    #Pure
+    let before = func(left: string, right: string) -> bool {
+        last count = left.byte_length < right.byte_length ? left.byte_length : right.byte_length;
+        for (let i = 0; i < count; i += 1) {
+            if (left.byte_at(i) != right.byte_at(i)) {
+                return left.byte_at(i) < right.byte_at(i);
+            }
+        }
+        return left.byte_length < right.byte_length;
+    };
+);

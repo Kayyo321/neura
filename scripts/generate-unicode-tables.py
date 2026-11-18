@@ -8,15 +8,22 @@ map). The script runs a small Perl program, refuses any other Unicode
 version, and checks the SHA-256 of the canonical dump against DUMP_SHA256, so
 a regeneration reproduces the checked-in tables byte for byte.
 
-    python3 scripts/generate-unicode-tables.py --perl "PERL COMMAND"
-    python3 scripts/generate-unicode-tables.py --perl "PERL COMMAND" --check
+    python3 scripts/generate-unicode-tables.py --perl "PERL COMMAND" --ucd DIRECTORY
+    python3 scripts/generate-unicode-tables.py --perl "PERL COMMAND" --ucd DIRECTORY --check
 
 PERL COMMAND is a perl 5.44 or later whose Unicode::UCD reports 17.0.0, for
-example `flatpak run --command=perl org.freedesktop.Sdk//25.08`. --check
-writes nothing and exits with status 1 when a generated file differs.
+example `flatpak run --command=perl org.freedesktop.Sdk//25.08`. DIRECTORY
+holds the unmodified UCD 17.0.0 files of NAME_FILES (UnicodeData.txt,
+extracted/DerivedName.txt, NameAliases.txt, Jamo.txt, and SpecialCasing.txt,
+all in one directory), whose SHA-256 digests are pinned; the character names come from
+them and not from Perl, whose Unicode::UCD 17.0.0 names U+18D00 through
+U+18D1E "TANGUT IDEOGRAPH SUPPLEMENT-..." where DerivedName.txt has "TANGUT
+IDEOGRAPH-...". --check writes nothing and exits with status 1 when a
+generated file differs.
 
 The output is ordinary Neura source under stdlib/std/core: the property
-tables (internal/unicode-properties.nra) and the generated public modules
+tables (internal/unicode-properties.nra), the name tables
+(internal/unicode-names.nra), and the generated public modules
 unicode-script.nra and unicode-block.nra. Running Neura needs neither Perl
 nor UCD files. The Unicode License V3 notice is copied from
 stdlib/std/text/internal/unicode-case-data.nra, which holds the same
@@ -357,8 +364,10 @@ def header(description):
     ]
 
 
-def generate(data):
+def generate(data, names):
     files = {}
+    files["internal/unicode-names.nra"], stats = names_module(names)
+    print("names: " + ", ".join(f"{k} {v}" for k, v in stats.items()), file=sys.stderr)
     files["internal/unicode-properties.nra"] = properties_module(data)
     files["unicode-script.nra"] = script_module(data)
     files["unicode-block.nra"] = block_module(data)
@@ -645,9 +654,488 @@ def block_module(data):
     return "\n".join(out)
 
 
+# ---------------------------------------------------------------------------------------------------------
+# Character names (Character.get_name, unicode_name, and code_point_of).
+
+NAME_FILES = {
+    "UnicodeData.txt": "2e1efc1dcb59c575eedf5ccae60f95229f706ee6d031835247d843c11d96470c",
+    "DerivedName.txt": "019758bbe6c756c40fca6d505187ea660c5e195533e2ff2c841963a212c9d369",
+    "NameAliases.txt": "793f6f1e4d15fd90f05ae66460191dc4d75d1fea90136a25f30dd6a4cb950eac",
+    "Jamo.txt": "17bb07f5e37f995351ddcef393c04464a9e3891ed0c0bd56a03a5c5e400a6326",
+    "SpecialCasing.txt": "efc25faf19de21b92c1194c111c932e03d2a5eaf18194e33f1156e96de4c9588",
+}
+
+# Java's getName for the controls, which have no Unicode Name: the Unicode_1_Name of UnicodeData.txt, except
+# these four, each a NameAliases.txt alias of the type given. Observed with OpenJDK 17.0.21
+# (tests/stdlib/character/generators/JavaNames.java): U+0007 takes the abbreviation BEL because its
+# Unicode_1_Name BELL is the Name of U+1F514, and three controls without a Unicode_1_Name take their figment
+# alias. U+0084, which has neither, takes the block form like the other unnamed code points.
+JAVA_CONTROL_NAMES = {
+    0x0007: ("BEL", "abbreviation"),
+    0x0080: ("PADDING CHARACTER", "figment"),
+    0x0081: ("HIGH OCTET PRESET", "figment"),
+    0x0099: ("SINGLE GRAPHIC CHARACTER INTRODUCER", "figment"),
+}
+CONTROLS = tuple(range(0x00, 0x20)) + tuple(range(0x7F, 0xA0))
+
+# Java's UnicodeBlock constants that do not follow the Blocks.txt name; a block-form name would use the
+# constant, so the generator refuses to give such a block a block-form name.
+JAVA_LEGACY_BLOCKS = ("Greek and Coptic", "Cyrillic Supplement", "Combining Diacritical Marks for Symbols")
+
+HANGUL_FIRST, HANGUL_LAST = 0xAC00, 0xD7A3
+NAME_BLOCK = 32           # names per front-coding block
+NAME_WORD = re.compile(r"[A-Z0-9-]+")
+# The bytes that start a dictionary code in the name stream: printable ASCII except the name alphabet
+# (A-Z, 0-9, hyphen, space), the record end '.', and the quote and backslash.
+NAME_LEADS = "".join(chr(b) for b in range(33, 127)
+                     if not (chr(b).isdigit() or chr(b).isupper() or chr(b) in "-. \"\\"))
+
+
+def ucd_records(path):
+    for line in path.read_text(encoding="utf-8").splitlines():
+        data = line.split("#", 1)[0].strip()
+        if data:
+            yield [field.strip() for field in data.split(";")]
+
+
+def read_name_files(directory):
+    """The pinned name files as {file name: path}; raises unless every digest matches."""
+    paths = {}
+    for name, digest in NAME_FILES.items():
+        candidates = [directory / name, directory / "extracted" / name]
+        path = next((c for c in candidates if c.exists()), None)
+        if path is None:
+            raise SystemExit(f"{name} is not in {directory}")
+        actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        if actual != digest:
+            raise SystemExit(f"{path} has SHA-256 {actual}, not the pinned {digest}")
+        paths[name] = path
+    return paths
+
+
+def name_data(directory, data):
+    """Everything the name tables hold, derived from the pinned files and checked for consistency:
+    {explicit, patterns, jamo, java_controls, fallback, assigned}."""
+    paths = read_name_files(directory)
+    # UnicodeData.txt: names, Unicode_1_Name, and the assigned code points (ranges written First/Last).
+    listed, ranges_, assigned = {}, [], set()
+    first = None
+    for fields in ucd_records(paths["UnicodeData.txt"]):
+        point, name, u1 = int(fields[0], 16), fields[1], fields[10]
+        if name.endswith(", First>"):
+            first = (point, name)
+            continue
+        if name.endswith(", Last>"):
+            ranges_.append((first[0], point, first[1][1:-8]))
+            assigned.update(range(first[0], point + 1))
+            continue
+        listed[point] = (name, u1)
+        assigned.add(point)
+    # The Perl General_Category agrees on the assigned code points.
+    gc = data["maps"]["gc"]["ranges"]
+    for start, end, _ in ranges_:
+        assert value_at(gc, start) != "Cn"
+    perl_assigned = set()
+    for index, (start, value) in enumerate(gc):
+        end = gc[index + 1][0] if index + 1 < len(gc) else 0x110000
+        if value != "Cn":
+            perl_assigned.update(range(start, end))
+    if perl_assigned != assigned:
+        raise SystemExit("UnicodeData.txt and the Perl General_Category disagree on the assigned code points")
+
+    # DerivedName.txt: explicit names, NR2 patterns, and the Hangul syllables (listed one by one).
+    explicit, patterns = {}, []
+    for cps, name in ucd_records(paths["DerivedName.txt"]):
+        if "*" in name:
+            low, _, high = cps.partition("..")
+            if not name.endswith("-*"):
+                raise SystemExit(f"unexpected pattern {name}")
+            patterns.append((int(low, 16), int(high or low, 16), name[:-1]))
+        else:
+            explicit[int(cps, 16)] = name
+
+    # Jamo.txt short names and the NR1 rule of Unicode section 3.12.
+    jamo = {int(fields[0], 16): fields[1] for fields in ucd_records(paths["Jamo.txt"])}
+    leads = [jamo[0x1100 + i] for i in range(19)]
+    vowels = [jamo[0x1161 + i] for i in range(21)]
+    tails = [""] + [jamo[0x11A8 + i] for i in range(27)]
+    for point in range(HANGUL_FIRST, HANGUL_LAST + 1):
+        index = point - HANGUL_FIRST
+        derived = "HANGUL SYLLABLE " + leads[index // 588] + vowels[index % 588 // 28] + tails[index % 28]
+        if explicit.pop(point, None) != derived:
+            raise SystemExit(f"DerivedName.txt does not give U+{point:04X} the NR1 name {derived}")
+
+    # Every listed UnicodeData name that is not in angle brackets is the Name, explicit or by a pattern.
+    def unicode_name(point):
+        if point in explicit:
+            return explicit[point]
+        if HANGUL_FIRST <= point <= HANGUL_LAST:
+            index = point - HANGUL_FIRST
+            return "HANGUL SYLLABLE " + leads[index // 588] + vowels[index % 588 // 28] + tails[index % 28]
+        for low, high, prefix in patterns:
+            if low <= point <= high:
+                return f"{prefix}{point:04X}"
+        return None
+
+    for point, (name, _) in listed.items():
+        if not name.startswith("<") and unicode_name(point) != name:
+            raise SystemExit(f"U+{point:04X}: UnicodeData.txt {name!r}, DerivedName.txt {unicode_name(point)!r}")
+        if name.startswith("<") and name != "<control>":
+            raise SystemExit(f"U+{point:04X}: unexpected {name}")
+    for point in explicit:
+        if point not in listed or listed[point][0].startswith("<"):
+            raise SystemExit(f"U+{point:04X} has a DerivedName.txt name but no UnicodeData.txt name")
+
+    # NameAliases.txt backs the Java control overrides.
+    aliases = {}
+    for point, alias, kind in ucd_records(paths["NameAliases.txt"]):
+        aliases.setdefault(int(point, 16), []).append((alias, kind))
+    java_controls = {}
+    for point in CONTROLS:
+        if listed[point][0] != "<control>":
+            raise SystemExit(f"U+{point:04X} is not a control")
+        if point in JAVA_CONTROL_NAMES:
+            alias = JAVA_CONTROL_NAMES[point]
+            if alias not in aliases.get(point, []):
+                raise SystemExit(f"U+{point:04X}: {alias} is not in NameAliases.txt")
+            java_controls[point] = alias[0]
+        elif listed[point][1]:
+            java_controls[point] = listed[point][1]
+    assert sum(1 for c in java_controls.values() if c) == 64
+
+    # Java's block form for every assigned code point without a Java name.
+    blk = data["maps"]["blk"]["ranges"]
+    fallback = {}
+    for point in sorted(assigned):
+        listed_name = listed.get(point, ("<range>", ""))[0]
+        if point in java_controls or not listed_name.startswith("<"):
+            continue
+        block = value_at(blk, point)
+        if block == "No_Block" or block in JAVA_LEGACY_BLOCKS:
+            raise SystemExit(f"U+{point:04X} would take a block-form name in block {block}")
+        fallback[point] = re.sub(r"[ _\-]", " ", block.upper())
+
+    # The names are distinct across both members, so code_point_of is a function.
+    owner = {}
+    for point in sorted(assigned):
+        for name in {unicode_name(point), java_name_of(point, listed, java_controls, fallback, unicode_name)}:
+            if name is None:
+                continue
+            if owner.setdefault(name, point) != point:
+                raise SystemExit(f"{name!r} names U+{owner[name]:04X} and U+{point:04X}")
+    # The characters above U+007F whose full uppercase mapping (root rules: SpecialCasing.txt without
+    # conditions, otherwise the simple mapping) is ASCII. Uppercasing is context-free under the root rules, so a
+    # text with any other non-ASCII character uppercases to a non-ASCII text, which is no name.
+    special_upper = {}
+    for fields in ucd_records(paths["SpecialCasing.txt"]):
+        if len(fields) > 4 and fields[4]:
+            continue
+        special_upper[int(fields[0], 16)] = "".join(chr(int(c, 16)) for c in fields[3].split())
+    simple_upper = {}
+    for fields in ucd_records(paths["UnicodeData.txt"]):
+        if fields[12]:
+            simple_upper[int(fields[0], 16)] = chr(int(fields[12], 16))
+    ascii_uppers = []
+    for point in range(0x80, 0x110000):
+        mapped = special_upper.get(point, simple_upper.get(point, chr(point)))
+        if mapped.isascii():
+            ascii_uppers.append((point, mapped))
+    return {"explicit": explicit, "patterns": patterns, "jamo": (leads, vowels, tails),
+            "ascii_uppers": ascii_uppers,
+            "java_controls": java_controls, "fallback": fallback, "assigned": assigned,
+            "unicode_name": unicode_name,
+            "java_name": lambda p: java_name_of(p, listed, java_controls, fallback, unicode_name)}
+
+
+def java_name_of(point, listed, java_controls, fallback, unicode_name):
+    if point in java_controls:
+        return java_controls[point]
+    if point in fallback:
+        return f"{fallback[point]} {point:X}"
+    if point in listed:
+        return unicode_name(point)
+    return None
+
+
+def name_stream(explicit):
+    """The front-coded name records in code point order, the dictionary, and its code widths.
+
+    A record is one byte '0' + P, where P is how many leading words the name shares with the previous name of
+    its block (0 for the first name of a block), then the remaining words, then '.'. A word is either its
+    letters or a dictionary code; two words spelled out in a row are separated by a space. A code starts with
+    a byte of NAME_LEADS: lead number l < W1 is word l; W1 <= l < W1 + W2 is word W1 + (l - W1) * 64 + d with
+    one more digit d; any higher lead takes two more digits."""
+    points = sorted(explicit)
+    items, previous = [], []
+    for index, point in enumerate(points):
+        words = explicit[point].split(" ")
+        if not all(NAME_WORD.fullmatch(w) for w in words):
+            raise SystemExit(f"unexpected name {explicit[point]!r}")
+        shared = 0
+        if index % NAME_BLOCK:
+            while shared < min(len(words), len(previous)) and words[shared] == previous[shared]:
+                shared += 1
+        items.append((shared, words[shared:]))
+        previous = words
+    frequency = {}
+    for _, words in items:
+        for word in words:
+            frequency[word] = frequency.get(word, 0) + 1
+    order = sorted(frequency, key=lambda w: (-frequency[w], w))
+    best = None
+    for w1 in range(len(NAME_LEADS) + 1):
+        for w2 in range(len(NAME_LEADS) + 1 - w1):
+            w3 = len(NAME_LEADS) - w1 - w2
+            widths = [1] * w1 + [2] * (w2 * 64) + [3] * (w3 * 4096)
+            chosen = {}
+            for word in order:
+                if len(chosen) == len(widths):
+                    break
+                width = widths[len(chosen)]
+                if frequency[word] * len(word) > frequency[word] * width + len(word) + 1:
+                    chosen[word] = len(chosen)
+            text = encode_records(items, chosen, w1, w2)
+            size = len(text) + sum(len(w) + 1 for w in chosen)
+            if best is None or size < best[0]:
+                best = (size, text, list(chosen), w1, w2)
+    _, text, dictionary, w1, w2 = best
+    return points, text, dictionary, w1, w2
+
+
+def encode_records(items, chosen, w1, w2):
+    out = []
+    for shared, words in items:
+        out.append(chr(48 + shared))
+        spelled = False
+        for word in words:
+            code = chosen.get(word)
+            if code is None:
+                if spelled:
+                    out.append(" ")
+                out.append(word)
+                spelled = True
+                continue
+            spelled = False
+            if code < w1:
+                out.append(NAME_LEADS[code])
+            elif code < w1 + w2 * 64:
+                code -= w1
+                out.append(NAME_LEADS[w1 + code // 64] + chr(48 + code % 64))
+            else:
+                code -= w1 + w2 * 64
+                out.append(NAME_LEADS[w1 + w2 + code // 4096] + digits(code % 4096, 2))
+        out.append(".")
+    return "".join(out)
+
+
+def decode_records(text, dictionary, w1, w2):
+    """The inverse of encode_records, for the generator's own check."""
+    names, previous, position = [], [], 0
+    lead_index = {c: i for i, c in enumerate(NAME_LEADS)}
+    while position < len(text):
+        shared = ord(text[position]) - 48
+        position += 1
+        words = previous[:shared]
+        word = None
+        while True:
+            c = text[position]
+            if c == "." or c == " " or c in lead_index:
+                if word is not None:
+                    words.append(word)
+                    word = None
+                if c == ".":
+                    position += 1
+                    break
+                if c == " ":
+                    position += 1
+                    continue
+                lead = lead_index[c]
+                if lead < w1:
+                    code, position = lead, position + 1
+                elif lead < w1 + w2:
+                    code = w1 + (lead - w1) * 64 + ord(text[position + 1]) - 48
+                    position += 2
+                else:
+                    code = (w1 + w2 * 64 + (lead - w1 - w2) * 4096 + (ord(text[position + 1]) - 48) * 64 +
+                            ord(text[position + 2]) - 48)
+                    position += 3
+                words.append(dictionary[code])
+            else:
+                word = (word or "") + c
+                position += 1
+        names.append(" ".join(words))
+        previous = words
+    return names
+
+
+def joined(texts, width=3):
+    """Texts joined, with the start of each and then the end as `width`-digit words."""
+    offsets, position = [], 0
+    for text in texts:
+        offsets.append(position)
+        position += len(text)
+    offsets.append(position)
+    return "".join(texts), "".join(digits(o, width) for o in offsets)
+
+
+def names_module(names):
+    explicit = names["explicit"]
+    points, stream, dictionary, w1, w2 = name_stream(explicit)
+    if decode_records(stream, dictionary, w1, w2) != [explicit[p] for p in points]:
+        raise SystemExit("the name stream does not decode to the names")
+    block_offsets = []
+    position = 0
+    for index in range(0, len(points)):
+        if index % NAME_BLOCK == 0:
+            block_offsets.append(position)
+        position = stream.index(".", position) + 1
+    # Runs of consecutive explicitly named code points: first code point and first name index.
+    runs = []
+    for index, point in enumerate(points):
+        if index == 0 or points[index - 1] != point - 1:
+            runs.append((point, index))
+    runs.append((0x110000, len(points)))
+    # The first word of every name, sorted, with the blocks whose names start with it.
+    blocks_of = {}
+    for index, point in enumerate(points):
+        blocks_of.setdefault(explicit[point].split(" ")[0], set()).add(index // NAME_BLOCK)
+    first_words = sorted(blocks_of, key=lambda w: w.encode())
+    word_blocks = [ "".join(digits(b, 2) for b in sorted(blocks_of[w])) for w in first_words]
+    # Ranges without a stored name: NR1 (Hangul), NR2 patterns, and Java's block form.
+    prefixes = sorted({prefix for _, _, prefix in names["patterns"]})
+    java_blocks = sorted(set(names["fallback"].values()))
+    kind = {}
+    for low, high, prefix in names["patterns"]:
+        for point in range(low, high + 1):
+            kind[point] = [2 + prefixes.index(prefix), 0]
+    for point in range(HANGUL_FIRST, HANGUL_LAST + 1):
+        kind[point] = [1, 0]
+    for point, block in names["fallback"].items():
+        kind.setdefault(point, [0, 0])[1] = 1 + java_blocks.index(block)
+    special = []
+    for point in sorted(kind):
+        if special and special[-1][1] == point - 1 and special[-1][2] == kind[point]:
+            special[-1][1] = point
+        else:
+            special.append([point, point, kind[point]])
+    assert NAME_BLOCK & (NAME_BLOCK - 1) == 0 and len(points) // NAME_BLOCK < 4096
+    for low, high, (prefix, java) in special:
+        assert prefix < 64 and java < 64
+        if java == 0:
+            assert all(names["java_name"](p) == names["unicode_name"](p) for p in (low, high))
+    leads, vowels, tails = names["jamo"]
+    controls = [names["java_controls"].get(p, "") for p in CONTROLS]
+    lead_table = "".join(chr(48 + NAME_LEADS.index(chr(b))) if chr(b) in NAME_LEADS else " "
+                         for b in range(32, 127))
+    dictionary_text, dictionary_offsets = joined(dictionary, 4)
+    first_text, first_offsets = joined(first_words, 4)
+    blocks_text, blocks_offsets = joined(word_blocks, 4)
+    prefix_text, prefix_offsets = joined(prefixes, 4)
+    java_text, java_offsets = joined(java_blocks, 4)
+    control_text, control_offsets = joined(controls, 4)
+    jamo_text, jamo_offsets = joined(leads + vowels + tails, 4)
+    upper_from = [chr(point) for point, _ in names["ascii_uppers"]]
+    upper_offsets, position = [], 0
+    for text in upper_from:
+        upper_offsets.append(position)
+        position += len(text.encode())
+    upper_offsets.append(position)
+    upper_to, upper_to_offsets = joined([mapped for _, mapped in names["ascii_uppers"]], 4)
+
+    def const(name, value, kind="string"):
+        text = neura_string(value) if kind == "string" else str(value)
+        return f"    export const {name}: {kind} = {text};"
+
+    # Every table holds four-digit numbers unless it says otherwise, so a reader multiplies by shifting.
+    out = header("The Name property (DerivedName.txt, NameAliases.txt, Jamo.txt) and Java's getName names.")
+    out += [
+        "/// @brief Generated name tables for Std.Core.Character.get_name, unicode_name, and code_point_of, read by",
+        "/// Std.Core.Internal.UnicodeNameLookup. Numbers are big-endian groups of four digits unless a comment says",
+        "/// otherwise, each digit a byte whose value minus 48 holds six bits. A joined list of texts has an",
+        "/// offsets table with the start of each text and then the end. Only the members that read names import",
+        "/// this module.",
+        "export let UnicodeNames = module (",
+        f"    /// @brief {len(points)} stored names in code point order, front-coded in blocks of {NAME_BLOCK}: a",
+        "    /// record is '0' plus the number of leading words shared with the previous name of its block, the",
+        "    /// other words spelled out (two in a row separated by a space) or as dictionary codes, and '.'.",
+        const("Stream", stream),
+        f"    /// @brief The start of each block of {NAME_BLOCK} records in Stream.",
+        const("BlockOffsets", "".join(digits(o, 4) for o in block_offsets)),
+        "    /// @brief The base-2 logarithm of the number of records in a block.",
+        const("BlockShift", NAME_BLOCK.bit_length() - 1, "int"),
+        f"    /// @brief The number of stored names.",
+        const("RecordCount", len(points), "int"),
+        "",
+        f"    /// @brief {len(dictionary)} dictionary words, most frequent first, joined, and their offsets.",
+        const("Dictionary", dictionary_text),
+        const("DictionaryOffsets", dictionary_offsets),
+        "    /// @brief For each byte from 32 through 126, '0' plus its lead number when it starts a dictionary code,",
+        "    /// otherwise a space. Leads below OneByteLeads are one-byte codes (the word number is the lead number),",
+        "    /// the next TwoByteLeads take one more digit, and the rest take two more digits.",
+        const("Leads", lead_table),
+        const("OneByteLeads", w1, "int"),
+        const("TwoByteLeads", w2, "int"),
+        "",
+        f"    /// @brief The first code points of the {len(runs) - 1} runs of consecutive stored names, then 0x110000.",
+        const("RunStarts", "".join(digits(p, 4) for p, _ in runs)),
+        "    /// @brief The record number of the first name of each run, then the number of records.",
+        const("RunRecords", "".join(digits(i, 4) for _, i in runs)),
+        f"    /// @brief The number of runs.",
+        const("RunCount", len(runs) - 1, "int"),
+        "",
+        f"    /// @brief The {len(first_words)} distinct first words of the stored names, sorted bytewise, joined, and",
+        "    /// their offsets.",
+        const("FirstWords", first_text),
+        const("FirstWordOffsets", first_offsets),
+        "    /// @brief For each first word, the two-digit numbers of the blocks holding a name that starts with it,",
+        "    /// joined, and their offsets.",
+        const("FirstWordBlocks", blocks_text),
+        const("FirstWordBlockOffsets", blocks_offsets),
+        "",
+        f"    /// @brief The first and last code points of the {len(special)} ranges whose names are not stored.",
+        const("SpecialFirsts", "".join(digits(low, 4) for low, _, _ in special)),
+        const("SpecialLasts", "".join(digits(high, 4) for _, high, _ in special)),
+        "    /// @brief Two one-digit numbers for each range: its Unicode names (0 none, 1 Hangul syllables, 2 or more",
+        "    /// the prefix numbered 2 less followed by the code point in hex) and its Java names (0 the Unicode",
+        "    /// names, otherwise the block form with the Java block name numbered 1 less).",
+        const("SpecialKinds", "".join(digits(prefix, 1) + digits(java, 1) for _, _, (prefix, java) in special)),
+        const("SpecialCount", len(special), "int"),
+        f"    /// @brief The {len(prefixes)} prefixes of the patterned names (NR2), joined, and their offsets.",
+        const("Prefixes", prefix_text),
+        const("PrefixOffsets", prefix_offsets),
+        f"    /// @brief The {len(java_blocks)} Java block names of the block form, joined, and their offsets.",
+        const("JavaBlocks", java_text),
+        const("JavaBlockOffsets", java_offsets),
+        "",
+        "    /// @brief Java's names of the controls U+0000 through U+001F and U+007F through U+009F in order, empty",
+        "    /// for U+0084, joined, and their offsets.",
+        const("Controls", control_text),
+        const("ControlOffsets", control_offsets),
+        "",
+        "    /// @brief The Jamo short names: 19 leading consonants, 21 vowels, and 28 trailing consonants (the first",
+        "    /// empty), joined, and their offsets.",
+        const("Jamo", jamo_text),
+        const("JamoOffsets", jamo_offsets),
+        "",
+        f"    /// @brief The {len(upper_from)} characters above U+007F whose uppercase mapping under the root rules is",
+        "    /// ASCII, joined, with the offsets of their UTF-8 bytes, and those mappings, joined, and their offsets.",
+        const("UpperFrom", "".join(upper_from)),
+        const("UpperFromOffsets", "".join(digits(o, 4) for o in upper_offsets)),
+        const("UpperTo", upper_to),
+        const("UpperToOffsets", upper_to_offsets),
+        ");",
+        "",
+    ]
+    stats = {"names": len(points), "stream": len(stream), "dictionary": len(dictionary),
+             "runs": len(runs) - 1, "first_words": len(first_words), "special": len(special)}
+    return "\n".join(out), stats
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n\n")[0])
     parser.add_argument("--perl", default="perl", help="the perl command whose Unicode::UCD is 17.0.0")
+    parser.add_argument("--ucd", type=Path, required=True,
+                        help="the directory of the UCD 17.0.0 files of NAME_FILES")
     parser.add_argument("--check", action="store_true", help="compare instead of writing")
     parser.add_argument("--dump", type=Path, help="also write the canonical dump to this file")
     args = parser.parse_args()
@@ -658,7 +1146,7 @@ def main():
     if DUMP_SHA256 == "PENDING":
         print(f"dump SHA-256 {data['sha256']}", file=sys.stderr)
     stale = []
-    for relative, text in generate(data).items():
+    for relative, text in generate(data, name_data(args.ucd, data)).items():
         path = CORE / relative
         if args.check:
             if not path.exists() or path.read_text(encoding="utf-8") != text:
