@@ -1,0 +1,121 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Event-loop backends: which kernel readiness or completion interface the runtime's driver waits with
+/// (`io_uring`, `epoll`, `kqueue`, or portable `poll`), how one is chosen for a platform, and the hook that asks
+/// the driver to switch.
+///
+/// Sockets do not wait themselves: in a program with tasks the host's overlapping services park the calling
+/// task and the runtime's driver waits for every parked operation, so blocking code and tasks use the same
+/// socket objects. The choice is real and tested: a backend is available when the platform has it (`io_uring`
+/// on Linux 5.1 and later, `epoll` on Linux, `kqueue` on macOS and the BSDs, `poll` everywhere except
+/// Windows, whose driver waits with its own interface), and `select` takes the first available backend of a
+/// preference list, falling back to the default order `IoUring`, `Epoll`, `Kqueue`, `Poll`. `install` is the
+/// hook: the driver waits with `poll(2)` only, so it needs a runtime service that no runtime offers yet and
+/// traps in Neura 0.3.0.
+/// @see [Std.Net.Socket.EventLoop](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-EventLoop)
+#Since("0.3.0")
+export let EventLoop = module (
+    /// @brief A kernel interface the driver can wait with.
+    export let EventLoopBackend = enum (IoUring, Epoll, Kqueue, Poll);
+
+    /// @brief An operating system and kernel version, as a deployment describes its target.
+    #[Final, Immutable]
+    export let Platform = class (
+        /// @brief The lowercase system name: "linux", "macos", "freebsd", "openbsd", "netbsd", "dragonfly",
+        /// "windows", or another.
+        export last system: string;
+        /// @brief The kernel's major version.
+        export last major: int;
+        /// @brief The kernel's minor version.
+        export last minor: int;
+
+        /// @brief A platform. The name is lowercased; a negative version traps with "invalid argument: version".
+        export let init = func(name: string, major_version: int, minor_version: int) {
+            if (major_version < 0 || minor_version < 0) {
+                trap_with_message("invalid argument: version");
+            }
+            system = strings.to_ascii_lower(name);
+            major = major_version;
+            minor = minor_version;
+        };
+
+        /// @brief True when the kernel is at least `major_version`.`minor_version`.
+        #Pure
+        export let at_least = func(major_version: int, minor_version: int) -> bool =>
+            major > major_version || (major == major_version && minor >= minor_version);
+
+        /// @brief Equal when the system and version are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Platform)) {
+                return false;
+            }
+            last that = other as Platform;
+            return system == that.system && major == that.major && minor == that.minor;
+        };
+
+        /// @brief A hash consistent with equals.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(system.hash_code(), major as uint32), minor as uint32);
+
+        /// @brief Text such as "linux 6.1".
+        export let.override to_string = func -> string => system + " " + major.to_string() + "." + minor.to_string();
+    );
+
+    /// @brief The default preference: `IoUring`, `Epoll`, `Kqueue`, `Poll`.
+    #NoDiscard
+    export let default_order = func -> EventLoopBackend[list] =>
+        new([EventLoopBackend.IoUring, EventLoopBackend.Epoll, EventLoopBackend.Kqueue, EventLoopBackend.Poll]);
+
+    /// @brief Whether `platform` has `backend` (see the module documentation).
+    #Pure
+    export let is_available = func(backend: EventLoopBackend, platform: Platform) -> bool {
+        last linux = platform.system == "linux";
+        if (backend == EventLoopBackend.IoUring) {
+            return linux && platform.at_least(5, 1);
+        }
+        if (backend == EventLoopBackend.Epoll) {
+            return linux;
+        }
+        if (backend == EventLoopBackend.Kqueue) {
+            return platform.system == "macos" or "freebsd" or "openbsd" or "netbsd" or "dragonfly";
+        }
+        return platform.system != "windows";
+    };
+
+    /// @brief The first backend of `preference` that `platform` has, else the first of the default order it
+    /// has. Err (a Custom error with the code `socket.event_loop`) when it has none, as on Windows.
+    #NoDiscard
+    export let select = func(platform: Platform, preference: EventLoopBackend[list]) -> Result<EventLoopBackend> {
+        for (let backend in preference) {
+            if (is_available(backend, platform)) {
+                return Result<EventLoopBackend>.Ok(backend);
+            }
+        }
+        for (let backend in default_order()) {
+            if (is_available(backend, platform)) {
+                return Result<EventLoopBackend>.Ok(backend);
+            }
+        }
+        return Result<EventLoopBackend>.Err(errors.custom("socket.event_loop",
+            "no event-loop backend is available on " + platform.to_string()));
+    };
+
+    /// @brief Asks the runtime's driver to wait with `backend`. Traps in Neura 0.3.0: the driver waits with
+    /// `poll(2)` only and no runtime offers a service to switch.
+    #NoDiscard
+    export let install = func(backend: EventLoopBackend) -> Result<Unit> {
+        last code = backend == EventLoopBackend.IoUring ? 1 : backend == EventLoopBackend.Epoll ? 2
+            : backend == EventLoopBackend.Kqueue ? 3 : 4;
+        return match (host.select_event_loop(code)) {
+            host.DoneOutcome.Ok => Result<Unit>.Ok(Unit.Value),
+            host.DoneOutcome.Error(failure) => Result<Unit>.Err(
+                host_error.io(failure, "event loop change failed", backend.to_string())),
+        };
+    };
+);

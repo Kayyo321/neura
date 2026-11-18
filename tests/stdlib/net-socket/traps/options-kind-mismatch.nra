@@ -1,0 +1,17 @@
+// status: 134
+// stderr: invalid argument: options for Udp given to a TcpStream socket
+// A connector takes only options built for TCP streams.
+let duration = import:Std.Time.Duration;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let options = import:Std.Net.Socket.SocketOptions;
+let tcp_connector = import:Std.Net.Socket.TcpConnector;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last target = result.expect<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:9"), "address");
+        let _ = new tcp_connector.TcpConnector(target, duration.of_seconds(1), options.none(options.SocketKind.Udp));
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,93 @@
+let datagrams = import:Std.Net.Socket.DatagramSocket;
+let event_loop = import:Std.Net.Socket.EventLoop;
+let error = import:Std.Core.Error;
+let offload = import:Std.Net.Socket.Offload;
+let optional = import:Std.Core.Optional;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let test = import:Std.Test;
+let unix_addr = import:Std.Net.Core.UnixAddr;
+
+// The pure parts of Std.Net.Socket: UDP segmentation rules, event-loop backend selection, and datagram values.
+let LogicTests = module (
+    let numbered = func(count: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        let i = 0;
+        while (i < count) {
+            out.append(i as uint8);
+            i++;
+        }
+        return out;
+    };
+
+    export let test_segment_count = func {
+        test.assert_equal<int>(0, offload.segment_count(0, 1200));
+        test.assert_equal<int>(1, offload.segment_count(1, 1200));
+        test.assert_equal<int>(1, offload.segment_count(1200, 1200));
+        test.assert_equal<int>(2, offload.segment_count(1201, 1200));
+        test.assert_equal<int>(55, offload.segment_count(65507, 1200));
+    };
+
+    export let test_split_cuts_segments_with_a_short_last_one = func {
+        last parts = offload.split(numbered(10), 4);
+        test.assert_equal<int>(3, parts.length);
+        test.assert_equal<int>(4, parts[0].length);
+        test.assert_equal<int>(4, parts[1].length);
+        test.assert_equal<int>(2, parts[2].length);
+        test.assert_equal<uint8>(0, parts[0][0]);
+        test.assert_equal<uint8>(4, parts[1][0]);
+        test.assert_equal<uint8>(9, parts[2][1]);
+        test.assert_equal<int>(0, offload.split(numbered(0), 4).length);
+        test.assert_equal<int>(1, offload.split(numbered(4), 4).length);
+    };
+
+    let linux = func(major: int, minor: int) -> event_loop.Platform => new event_loop.Platform("Linux", major, minor);
+
+    export let test_backend_availability = func {
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.IoUring, linux(5, 1)));
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.IoUring, linux(6, 8)));
+        test.assert(!event_loop.is_available(event_loop.EventLoopBackend.IoUring, linux(5, 0)));
+        test.assert(!event_loop.is_available(event_loop.EventLoopBackend.IoUring, linux(4, 19)));
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.Epoll, linux(2, 6)));
+        test.assert(!event_loop.is_available(event_loop.EventLoopBackend.Kqueue, linux(6, 1)));
+        last mac = new event_loop.Platform("macos", 23, 0);
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.Kqueue, mac));
+        test.assert(!event_loop.is_available(event_loop.EventLoopBackend.Epoll, mac));
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.Poll, mac));
+        test.assert(event_loop.is_available(event_loop.EventLoopBackend.Kqueue, new event_loop.Platform("FreeBSD", 14, 1)));
+        test.assert(!event_loop.is_available(event_loop.EventLoopBackend.Poll, new event_loop.Platform("windows", 10, 0)));
+        test.assert_equal_string("linux 5.10", linux(5, 10).to_string());
+        test.assert(linux(5, 10).equals(new event_loop.Platform("LINUX", 5, 10)));
+        test.assert_equal<uint32>(linux(5, 10).hash_code(), new event_loop.Platform("linux", 5, 10).hash_code());
+    };
+
+    export let test_select_prefers_then_falls_back = func {
+        last empty: event_loop.EventLoopBackend[list] = new;
+        test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(linux(6, 1), empty))
+            == event_loop.EventLoopBackend.IoUring);
+        test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(linux(4, 19), empty))
+            == event_loop.EventLoopBackend.Epoll);
+        test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(new event_loop.Platform("openbsd", 7, 5),
+            empty)) == event_loop.EventLoopBackend.Kqueue);
+        test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(new event_loop.Platform("illumos", 5, 11),
+            empty)) == event_loop.EventLoopBackend.Poll);
+        last preference: event_loop.EventLoopBackend[list] = new([event_loop.EventLoopBackend.Kqueue,
+            event_loop.EventLoopBackend.Poll]);
+        // Kqueue is not on Linux: the next preference wins over the default order.
+        test.assert(test.assert_ok<event_loop.EventLoopBackend>(event_loop.select(linux(6, 1), preference))
+            == event_loop.EventLoopBackend.Poll);
+        last failure = test.assert_err<event_loop.EventLoopBackend>(event_loop.select(
+            new event_loop.Platform("windows", 10, 0), preference));
+        test.assert_equal_string("no event-loop backend is available on windows 10.0", error.message(failure));
+        test.assert_equal<int>(4, event_loop.default_order().length);
+    };
+
+    export let test_datagram_values = func {
+        last from = test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse("127.0.0.1:9000"));
+        last named = new datagrams.Datagram<socket_addr.SocketAddr>(numbered(5),
+            optional.Optional<socket_addr.SocketAddr>.Some(from));
+        test.assert_equal_string("Datagram(5 bytes from 127.0.0.1:9000)", named.to_string());
+        last unnamed = new datagrams.Datagram<unix_addr.UnixAddr>(numbered(2), optional.Optional<unix_addr.UnixAddr>.None);
+        test.assert_equal_string("Datagram(2 bytes from an unnamed sender)", unnamed.to_string());
+        test.assert_none<unix_addr.UnixAddr>(unnamed.sender);
+    };
+);

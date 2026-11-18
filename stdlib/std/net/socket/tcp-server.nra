@@ -1,0 +1,144 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Net.Listener;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let socket = import:Std.Net.Internal.Socket;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.SocketOptions;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Net.TcpListener;
+let.promote _ = import:Std.Net.Socket.TcpSocket;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A `Std.Net.Listener` of `TcpSocket`s over the host's TCP listener (`Std.Net.TcpListener`). Needs the
+/// net capability.
+///
+/// `bind` listens on a socket address; port 0 asks the host for a free port, and `address()` reports the port
+/// it chose. The base runtime always sets `SO_REUSEADDR` on a listener. A set holding an option that must be set
+/// before the socket is bound (`SO_REUSEADDR`, `SO_REUSEPORT`, `TCP_FASTOPEN`) is passed whole to a host service
+/// that creates the listener with its options, which no runtime offers yet; other options are applied with the
+/// host's option service after the listener is created, which arrives with the runtime-services branch. So in
+/// Neura 0.3.0 a `bind` with a non-empty set traps, as does a multipath listener. An accepted socket's peer
+/// address is not reported by the host, so its `peer_address` is `None`; its `local_address` is the server's
+/// address when the server is bound to a specific address. After close, `accept` fails with Closed.
+/// @see [Std.Net.Socket.TcpServer](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-TcpServer)
+#Since("0.3.0")
+export let TcpServer = module (
+    /// @brief A listening TCP socket that yields `TcpSocket`s.
+    #[Final, NoDiscard(reason: "a server must be closed"), NotThreadSafe]
+    export let TcpServer = class implements Listener<SocketAddr, TcpSocket> (
+        /// @brief The host's listener ID.
+        last id: int64;
+        /// @brief The bound address, with the port the host chose.
+        last bound: SocketAddr;
+        /// @brief The listener that closes the host socket.
+        last listener: TcpListener;
+        /// @brief True when the listener uses Multipath TCP.
+        export last multipath: bool;
+        /// @brief Tracks whether accept may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `bind`; the handle comes from the library.
+        export let init = func(opened: socket.Handle, address: SocketAddr, uses_multipath: bool) {
+            id = opened.id;
+            bound = address;
+            listener = new TcpListener(opened, address.port);
+            multipath = uses_multipath;
+        };
+
+        /// @brief The bound address; its port is the one the host chose for a bind to port 0. Still available
+        /// after close.
+        export let address = func -> SocketAddr => bound;
+
+        /// @brief The bound port.
+        export let local_port = func -> int => bound.port;
+
+        /// @brief Waits for the next connection. Fails with Closed after close, and with Cancelled when the
+        /// task's scope is cancelled first.
+        #NoDiscard
+        export let accept = func -> Result<TcpSocket> {
+            if (!open_now) {
+                return Result<TcpSocket>.Err(bytes.closed("listener", bound.to_string()));
+            }
+            return match (host.accept(id)) {
+                host.IdOutcome.Ok(accepted) => Result<TcpSocket>.Ok(new TcpSocket(
+                    new socket.Handle(accepted, bound.to_string()), Optional<SocketAddr>.None, local_of(bound),
+                    multipath)),
+                host.IdOutcome.Error(code) => Result<TcpSocket>.Err(
+                    host_error.io(code, "accept failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Releases the listener, as `TcpListener.close`. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            open_now = false;
+            return listener.close();
+        };
+
+        /// @brief Text such as "TcpServer(127.0.0.1:8080)".
+        export let.override to_string = func -> string => "TcpServer(" + bound.to_string() + ")";
+    );
+
+    /// @brief Listens on `address` with no options. Port 0 asks the host for a free port.
+    #NoDiscard
+    export let bind = func(address: SocketAddr) -> Result<TcpServer> =>
+        bind_with(address, none(SocketKind.TcpListener));
+
+    /// @brief Listens on `address` with an option set built for `SocketKind.TcpListener` (another kind traps
+    /// with "invalid argument"). A non-empty set or multipath traps in Neura 0.3.0 (see the module
+    /// documentation); with multipath, every option is applied after the listener is created.
+    #NoDiscard
+    export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<TcpServer> {
+        support.check_kind(options, SocketKind.TcpListener);
+        last text = address.to_string();
+        last has_settings = options.settings().length > 0;
+        last at_bind = !options.multipath && support.needs_bind_time(options);
+        last outcome = options.multipath ? host.mptcp_listen(address.host_text(), address.port)
+            : at_bind ? host.listen_with_options(address.host_text(), address.port, support.numbers(options),
+                support.values(options))
+            : host.listen(address.host_text(), address.port);
+        let id: int64 = 0;
+        match (outcome) {
+            host.IdOutcome.Ok(opened) => {
+                id = opened;
+            },
+            host.IdOutcome.Error(code) => {
+                return Result<TcpServer>.Err(host_error.io(code, "bind failed", text));
+            },
+        }
+        let port = 0;
+        match (host.local_port(id)) {
+            host.CountOutcome.Ok(chosen) => {
+                port = chosen;
+            },
+            host.CountOutcome.Error(code) => {
+                host.close(id);
+                return Result<TcpServer>.Err(host_error.io(code, "bind failed", text));
+            },
+        }
+        last server = new TcpServer(new socket.Handle(id, text), new SocketAddr(address.ip, port), options.multipath);
+        if (has_settings && !at_bind) {
+            match (support.apply(id, options, text)) {
+                Result.Ok(_) => {},
+                Result.Err(problem) => {
+                    server.close();
+                    return Result<TcpServer>.Err(problem);
+                },
+            }
+        }
+        return Result<TcpServer>.Ok(server);
+    };
+
+    /// @brief The local address of an accepted socket: the server's, unless it is bound to the unspecified
+    /// address (then the host would have to report it).
+    let local_of = func(bound: SocketAddr) -> Optional<SocketAddr> {
+        last unspecified = match (bound.ip) {
+            ips.IpAddr.V4(v4) => v4.is_unspecified(),
+            ips.IpAddr.V6(v6) => v6.is_unspecified(),
+        };
+        return unspecified ? Optional<SocketAddr>.None : Optional<SocketAddr>.Some(bound);
+    };
+);

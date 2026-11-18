@@ -1,0 +1,13 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Socket\.Internal\.HostCalls\.unix_connect is not implemented in Neura 0\.3\.0
+// UnixStream.connect calls the host's Unix-domain service, which this runtime lacks.
+let program = import:Std.Program;
+let unix_addr = import:Std.Net.Core.UnixAddr;
+let unix_stream = import:Std.Net.Socket.UnixStream;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = unix_stream.connect(unix_addr.abstract_name("neura-test"));
+        return program.ExitCode.Ok;
+    };
+);
