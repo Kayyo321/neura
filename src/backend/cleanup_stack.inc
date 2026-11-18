@@ -143,9 +143,16 @@ void FunctionCompiler::resume_chain() {
     const auto type = c_.type_of(field.type, function.span);
     const auto boolean = c_.scalar(nvr::TypeKind::Bool);
     for (std::size_t k = 1; k <= count; ++k) {
-        const auto same = equal(current().synth.circuit(), lanes(index), lanes(immediate(type, k)));
+        // Each comparison carries its LIFT hint, as a written `==` does, so
+        // that tier 2 lifts the chain and tier 3 does not leave native code
+        // at it on every resume.
+        const auto number = immediate(type, k);
+        // The lanes first: form_of finds the index among the block's inputs.
+        auto compared = bits(boolean, {equal(current().synth.circuit(), lanes(index), lanes(number))});
+        auto form = binary_form("==", boolean, index, number);
+        const auto same = described(std::move(compared), std::move(form));
         const auto next = new_block();
-        branch(bits(boolean, {same}), resume_blocks_[k - 1], next);
+        branch(same, resume_blocks_[k - 1], next);
         begin(next, function.span);
     }
 }

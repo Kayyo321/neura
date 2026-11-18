@@ -1,0 +1,17 @@
+// Repeated loop regions are released after each deferred reader.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let total = 0;
+let accumulate = func(values: int[]) {
+    total += values[0];
+};
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let index = 0; index < 64; index++) {
+            let values = [index, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0];
+            defer accumulate(values);
+        }
+        console.println("loop {}", total);
+        return program.ExitCode.Ok;
+    };
+);

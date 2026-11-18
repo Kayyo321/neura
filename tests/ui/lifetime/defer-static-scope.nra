@@ -1,0 +1,7 @@
+// Edge case 23 (docs/design/Lifetime030.md): a startup block is not a
+// function body, so `defer` and `using` in one are E0472.
+let console = import:Std.Io.Console;
+
+static scope {
+    defer console.print_line("never");
+}

@@ -1,0 +1,35 @@
+// Edge case 25's neighbours (docs/design/Lifetime030.md, `defer`): a
+// `defer` written directly in a constructor body and in a destructor body
+// runs when that body ends, after the body's other statements, and the
+// constructor's array is still live when its deferred call reads it.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let show = func(values: int[]) -> void {
+    console.print_line("deferred " + values[1].to_string());
+};
+
+let Tracked = class (
+    export let label: string = "";
+    export let init = func(name: string) {
+        let values = [1, 2, 3];
+        defer show(values);
+        defer console.print_line("init done " + name);
+        label = name;
+        console.print_line("init " + name);
+    };
+
+    export let deinit = func() -> void {
+        defer console.print_line("deinit done " + label);
+        console.print_line("deinit " + label);
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let tracked = new Tracked("a");
+        destroy tracked;
+        console.print_line("end");
+        return program.ExitCode.Ok;
+    };
+);

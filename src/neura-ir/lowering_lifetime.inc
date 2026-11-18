@@ -102,6 +102,10 @@ void Lowering::lower_defer(std::vector<IrNode>& instructions, const Statement& s
 // the close is combined with the returned value by close_outcome
 // (std/io/internal/close-outcome.nra); on any other exit a failed close returns
 // its error from the function.
+namespace {
+bool frame_owned(const IrProgram& program, const IrType& type, unsigned depth);
+} // namespace
+
 IrNode Lowering::lower_using(const Statement& stmt, Context& context) {
     require_function_block(stmt.keyword, "using", context);
     const auto function = context.function;
@@ -117,6 +121,17 @@ IrNode Lowering::lower_using(const Statement& stmt, Context& context) {
                                                            : "the function returns '" + describe(result_type) + "'");
         error.note("a failed close returns its error from the function");
         throw error.help("return a Result, or move the block into a function or lambda that returns one");
+    }
+    // A return's value is combined with the close by close_outcome, which
+    // takes the value as an argument: an array it carries would be returned
+    // from a call that did not create it (docs/design/Storage030.md).
+    if (!result_type.arguments.empty() && frame_owned(program_, result_type.arguments.front(), 0)) {
+        auto error = Diagnostic(stmt.keyword, "'using' cannot carry the returned '" +
+                                                  describe(result_type) + "' through its close").with_code("E0473");
+        if (const auto written = result_spans_.find(function); written != result_spans_.end())
+            error.label(written->second, "this result holds storage that belongs to the frame");
+        error.note("a return inside 'using' passes its value to the close, which may replace it with the close error");
+        throw error.help("return a list, which the result can hold, or close the resource before building the array");
     }
     const auto& acquisition = stmt.expressions.front();
     if (acquisition.kind == ExprKind::Nil)

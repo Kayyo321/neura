@@ -2562,6 +2562,13 @@ private:
     Expr new_expression(std::size_t start, std::string_view branch_keyword) {
         if (at_contextual("with")) return copy_expression(start);
         if (match("func")) return lambda_expression(start, branch_keyword, true);
+        if (at_generator()) {
+            // `new iterator(...) -> T { ... }`: an owned capturing generator
+            // (docs/design/Lifetime030.md, Generators).
+            auto result = generator_expression(start);
+            result.text = "new";
+            return result;
+        }
         if (at_contextual("bound") && next_is(1, "(")) {
             advance();
             expect("(");

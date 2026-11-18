@@ -205,6 +205,9 @@ enum class IrOp {
 // function; a bare bound value records the receiver form for diagnostics.
 inline constexpr std::string_view bound_closure = "$bound";
 inline constexpr std::string_view owned_lambda = "$new_func";
+// A bare generator expression (docs/design/Lifetime030.md): a capturing one
+// that escapes needs `new iterator` (E0479). `new iterator` is owned_lambda.
+inline constexpr std::string_view generator_closure = "$iterator";
 inline constexpr std::string_view owned_bound = "$new_bound";
 inline constexpr std::string_view task_closure = "$task_closure";
 inline constexpr std::string_view region_reference = "$region_reference";

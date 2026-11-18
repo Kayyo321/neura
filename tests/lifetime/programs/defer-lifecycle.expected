@@ -1,0 +1,6 @@
+init a
+init done a
+deferred 2
+deinit a
+deinit done a
+end

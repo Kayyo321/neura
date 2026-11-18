@@ -3570,8 +3570,11 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         if (expr.text == "new") result.text = owned_lambda;
         return result;
     }
-    case ExprKind::Generator:
-        return generator_lambda(*expr.lambda, context);
+    case ExprKind::Generator: {
+        auto result = generator_lambda(*expr.lambda, context);
+        result.text = expr.text == "new" ? owned_lambda : generator_closure;
+        return result;
+    }
     case ExprKind::Interpolation:
         return interpolation(expr, context);
     case ExprKind::NameOf:

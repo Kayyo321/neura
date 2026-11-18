@@ -1,0 +1,32 @@
+// Case 78: a yield admits its hooked result once before consumer events.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let sets = 0;
+let Item = class (
+    | set: {
+        sets += 1;
+        return value;
+    };
+);
+let App = module:program.Entry (
+    let one = iterator() -> Item {
+        let item: Item = new;
+        sets = 0;
+        yield item;
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let iter = one().iterator();
+        if (!iter.has_next() || sets != 1) {
+            console.println("yield setters {}", sets);
+            return program.ExitCode.Failure;
+        }
+        console.print_line("yield setter 1");
+        let value: Item = iter.next();
+        if (value == nil || sets <= 1) {
+            return program.ExitCode.Failure;
+        }
+        console.print_line("consumer admission observed");
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,28 @@
+// Case 25: the saved receiver is read at registration, not at exit.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let log: string = "";
+
+let Item = class (
+    | get: {
+        log += "G";
+        return instance;
+    };
+
+    export let run = func() {
+        log += "M";
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let item: Item = new;
+        log = "";
+        {
+            defer item.run();
+            log += "B";
+        }
+        console.print_line(log);
+        return program.ExitCode.Ok;
+    };
+);

@@ -49,7 +49,20 @@ bool has_class_hooks(const IrProgram& program) {
 namespace neura {
 namespace {
 
-bool hidden_name(const std::string& name) { return name.starts_with('$') && !name.starts_with("$capture"); }
+// A generator's state names a moved local `$local<M>:<name>`
+// (docs/design/Lifetime030.md): a binding with the events of that local.
+bool moved_local(const std::string& name) {
+    return name.starts_with("$local") && name.find(':') != std::string::npos;
+}
+
+bool hidden_name(const std::string& name) {
+    return name.starts_with('$') && !name.starts_with("$capture") && !moved_local(name);
+}
+
+// A generator's state class (docs/design/Lifetime030.md, Generators).
+bool generator_class(const IrSymbol& item) {
+    return item.kind == SymbolKind::Class && item.name.starts_with("$generator");
+}
 
 // A class the compiler writes: the root class and closure layouts.
 bool compiler_class(const IrSymbol& item) {
@@ -129,6 +142,11 @@ public:
             // MakeClosure admitted; the root class's members are built in.
             exempt_body_ = owner < program_.symbols.size() && compiler_class(program_.symbols[owner]) &&
                            (function.name == "init" || program_.symbols[owner].name == "$class");
+            // A generator's generated has_next and next add no event: the
+            // body of `$resume` keeps every event of the source body.
+            if (owner < program_.symbols.size() && generator_class(program_.symbols[owner]) &&
+                (function.name == "has_next" || function.name == "next"))
+                exempt_body_ = true;
         }
         if (exempt_body_) return;
         for (auto& node : body.instructions) value(node);
@@ -144,6 +162,13 @@ private:
     SymbolId accessor_field_ = no_symbol;
 
     const IrSymbol* symbol(SymbolId id) const { return id < program_.symbols.size() ? &program_.symbols[id] : nullptr; }
+
+    // A member of a generator's state class.
+    bool generator_member(SymbolId id) const {
+        const auto* item = symbol(id);
+        const auto* owner = item ? symbol(item->owner) : nullptr;
+        return owner && generator_class(*owner);
+    }
 
     // A local, parameter, global or field that is not a compiler temporary,
     // and not a parameter of an accessor or hook function.
@@ -282,14 +307,24 @@ private:
             place(node.operands[0]);
             value(node.operands[1]);
             const auto& destination = node.operands[0];
+            // A store to the carried return value is no event; the store to
+            // a generator's buffer before a Yield is the result admission.
+            if (destination.op == IrOp::Pending) return;
+            const bool buffer = destination.op == IrOp::Field && generator_member(destination.symbol) &&
+                                symbol(destination.symbol)->name == "$buffer";
             const bool hidden = (destination.op == IrOp::Load || destination.op == IrOp::Field) &&
-                                !source_binding(destination.symbol);
+                                !source_binding(destination.symbol) && !buffer;
             if (!hidden) admit(node.operands[1], destination.type);
             return;
         }
         case IrOp::Initialize: {
-            for (auto& operand : node.operands) value(operand);
             const auto* target = symbol(node.symbol);
+            // A `using` token copies the admitted binding without a getter.
+            if (target && target->name.starts_with("$using")) {
+                for (auto& operand : node.operands) visit(operand);
+                return;
+            }
+            for (auto& operand : node.operands) value(operand);
             if (node.operands.size() != 1 || !target ||
                 (!source_binding(node.symbol) && node.text != parameter_admission)) return;
             // A singleton's instance is created by the compiler, not stored
@@ -300,6 +335,11 @@ private:
         }
         case IrOp::Return: {
             for (auto& operand : node.operands) value(operand);
+            // The generated forwarding of a generator's has_next and next
+            // adds no event.
+            if (node.operands.size() == 1 && node.operands.front().op == IrOp::VirtualCall &&
+                generator_member(node.operands.front().symbol))
+                return;
             if (node.operands.size() == 1 && !exempt_signature_ && node.text != argument_transport)
                 if (const auto* function = symbol(function_)) admit(node.operands.front(), function->type);
             return;
@@ -309,6 +349,12 @@ private:
         case IrOp::CallClosure:
         case IrOp::BaseInitialize:
         case IrOp::Allocate:
+            // A generator's call copies its admitted arguments and captures
+            // into the state: not a second read or admission.
+            if (node.op == IrOp::Allocate && generator_member(node.symbol)) {
+                for (auto& operand : node.operands) visit(operand);
+                return;
+            }
             call(node);
             return;
         case IrOp::MakeClosure: {
@@ -351,6 +397,8 @@ private:
         case IrOp::ClassIs: case IrOp::ClassCast: case IrOp::ValueEquals: case IrOp::ValueHash:
         case IrOp::ValueText: case IrOp::ReferencePlace: case IrOp::TaskScope: case IrOp::Spawn:
         case IrOp::ConformanceCall: case IrOp::SchedulerCall: case IrOp::AnyPack: case IrOp::AnyTag: case IrOp::AnyUnpack:
+        // docs/design/Lifetime030.md: a Cleanup's lists keep their events,
+        // which happen when they run; reading Pending and a Yield are none.
         case IrOp::Cleanup: case IrOp::Pending: case IrOp::Yield:
             break;
         }

@@ -1,0 +1,13 @@
+error[E0479]: a generator that captures outer bindings escapes here
+ --> $DIR/generator-escape-bare.nra:6:12
+  |
+6 |     return iterator() -> int {
+  |            ^^^^^^^^^^^^^^^^^^^... its state keeps the captures after the call that creates it
+  |
+  = help: write 'new iterator(...) -> T { ... }', or capture nothing
+help: construct an owned generator
+  |
+6 |     return new iterator() -> int {
+  |            ++++
+
+For more information about this error, try `neura explain E0479`.

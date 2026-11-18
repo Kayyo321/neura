@@ -1539,7 +1539,8 @@ private:
     }
 
     void check_make_closure(const IrNode& node) {
-        if (!node.text.empty() && node.text != bound_closure && !explicitly_owned_closure(node)) {
+        if (!node.text.empty() && node.text != bound_closure && node.text != generator_closure &&
+            !explicitly_owned_closure(node)) {
             report(node.span, "unknown closure construction form");
         }
         if ((node.text == bound_closure || node.text == owned_bound) && node.operands.size() != 1) {
