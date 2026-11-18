@@ -1000,12 +1000,15 @@ private:
                 }
             }
             if (!pending.empty()) {
-                std::lock_guard lock(reap_mutex_);
+                std::unique_lock lock(reap_mutex_);
                 exiting_.insert(exiting_.end(), std::make_move_iterator(pending.begin()),
                                 std::make_move_iterator(pending.end()));
                 if (stop.stop_requested()) {
                     for (auto& entry : exiting_) ::kill(entry.pid, SIGKILL);
                 }
+                // Workers still exiting: look again shortly, not at once, or
+                // this thread spins on a core while they finish.
+                reap_changed_.wait_for(lock, 2ms, [&] { return stop.stop_requested(); });
             }
         }
     }
@@ -1046,7 +1049,7 @@ private:
         std::int64_t value = 0;
     };
     static constexpr std::uint32_t config_operation = 1;
-    static constexpr std::uint32_t metric_operation = 2;
+    static constexpr std::uint32_t metric_operation = 3; // 2 is SQL (the sql-providers branch)
     static constexpr std::size_t max_application_metrics = 1024;
     Metrics metrics_;
     std::mutex metrics_mutex_;

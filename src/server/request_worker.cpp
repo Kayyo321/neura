@@ -20,7 +20,7 @@ using worker::Clock;
 using worker::FrameKind;
 
 constexpr std::uint32_t config_call = 1;
-constexpr std::uint32_t metric_call = 2;
+constexpr std::uint32_t metric_call = 3; // 2 is SQL (the sql-providers branch)
 
 std::vector<std::uint8_t> bytes_of(std::string_view text) {
     return {text.begin(), text.end()};
@@ -93,7 +93,7 @@ public:
         return std::string(reinterpret_cast<const char*>(in->data()) + 5, size);
     }
 
-    // Call body: uint32 call identifier, uint32 operation (2, metric),
+    // Call body: uint32 call identifier, uint32 operation (3, metric),
     // uint32 kind, int64 value, text name. Return body: uint32 call
     // identifier, uint32 error code.
     std::uint32_t metric(std::string_view name, std::uint32_t kind, std::int64_t value) override {

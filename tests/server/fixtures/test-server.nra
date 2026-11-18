@@ -34,6 +34,29 @@ let TestServer = module:program.Entry (
         if (request.path == "/early") {
             return Result<app.Response>.Ok(app.text(200, "early\n"));
         }
+        if (request.path == "/stream-first") {
+            // 4 MB of response before any of the body is read: the worker
+            // blocks sending while the host still sends it the body.
+            last fields: [string, string][list] = new;
+            return Result<app.Response>.Ok(app.stream(200, fields, new func(writer: app.BodyWriter) -> Result<Unit> {
+                last chunk: uint8[list] = new;
+                for (let i = 0; i < 1000; i++) {
+                    chunk.append(98 as uint8);
+                }
+                for (let n = 0; n < 4000; n++) {
+                    match (writer.write(chunk)) {
+                        Result.Err(problem) => {
+                            return Result<Unit>.Err(problem);
+                        },
+                        Result.Ok(_) => {},
+                    }
+                }
+                return match (body.read_all()) {
+                    Result.Ok(all) => writer.write_text("read " + all.length.to_string()),
+                    Result.Err(problem) => Result<Unit>.Err(problem),
+                };
+            }));
+        }
         let total = 0;
         let reads = 0;
         while (true) {

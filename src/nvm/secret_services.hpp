@@ -20,7 +20,8 @@
 // A size outside 1 to 65,536, a range outside the buffer, or a handle that
 // was never created or was released answers invalid_input (4). Locked bytes
 // beyond 1 MiB per execution, or beyond what RLIMIT_MEMLOCK allows, answer
-// too_large (16). A platform without mlock, and a run that records a trace,
+// too_large (16). A platform without mlock, MADV_DONTDUMP and
+// MADV_WIPEONFORK (every one but Linux), and a run that records a trace,
 // answer unsupported (13): a trace would hold the secret.
 
 #include "host.hpp"

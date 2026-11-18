@@ -381,6 +381,15 @@ def test_streamed_request_body(args, image):
         response = connection.getresponse()
         check(response.status == 200 and response.read() == b"received 10 in 1 reads\n", "after the early answer")
         connection.close()
+        # The worker streams 4 MB back before it reads a 4 MB body: neither
+        # side may block the other.
+        connection = http.client.HTTPConnection("127.0.0.1", port, timeout=60)
+        connection.request("POST", "/stream-first", body=b"x" * 4_000_000)
+        response = connection.getresponse()
+        data = response.read()
+        check(response.status == 200 and len(data) == 4_000_000 + len(b"read 4000000")
+              and data.endswith(b"read 4000000"), f"stream before the body: {response.status} {len(data)} {data[-20:]!r}")
+        connection.close()
         # A slow client: the handler reads the body as it comes.
         with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
             sock.sendall(b"POST /upload HTTP/1.1\r\nHost: t\r\nContent-Length: 6\r\nConnection: close\r\n\r\nabc")

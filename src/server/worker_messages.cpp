@@ -193,10 +193,13 @@ Channel::Status Channel::send(FrameKind kind, std::span<const std::uint8_t> body
     wire.insert(wire.end(), body.begin(), body.end());
     std::size_t offset = 0;
     while (offset < wire.size()) {
+        // Never block inside send(2): a full socket waits in poll below, with
+        // the deadline, and the worker reads what the host sends meanwhile.
 #ifdef MSG_NOSIGNAL
-        const auto written = ::send(descriptor_, wire.data() + offset, wire.size() - offset, MSG_NOSIGNAL);
+        const auto written =
+            ::send(descriptor_, wire.data() + offset, wire.size() - offset, MSG_NOSIGNAL | MSG_DONTWAIT);
 #else
-        const auto written = ::send(descriptor_, wire.data() + offset, wire.size() - offset, 0);
+        const auto written = ::send(descriptor_, wire.data() + offset, wire.size() - offset, MSG_DONTWAIT);
 #endif
         if (written > 0) {
             offset += static_cast<std::size_t>(written);

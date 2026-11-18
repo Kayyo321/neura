@@ -2,6 +2,7 @@
 
 #include "provider_internal.hpp"
 
+#include <cerrno>
 #include <cstring>
 #include <map>
 
@@ -64,7 +65,9 @@ struct SecretServices::State {
     }
 
     HostCompletion create(std::int32_t size) {
-#ifdef _WIN32
+#if defined(_WIN32) || !defined(MADV_DONTDUMP) || !defined(MADV_WIPEONFORK)
+        // Without both exclusions the promise of these services cannot be
+        // kept: Windows, macOS and the BSDs answer unsupported.
         (void)size;
         return fail(host_error::unsupported);
 #else
@@ -77,18 +80,10 @@ struct SecretServices::State {
         if (memory == MAP_FAILED) return fail(host_error::too_large);
         // Excluded from core dumps and from a forked child before any secret
         // byte is written; then locked, so it is never written to swap.
-#ifdef MADV_DONTDUMP
-        if (::madvise(memory, mapped, MADV_DONTDUMP) != 0) {
+        if (::madvise(memory, mapped, MADV_DONTDUMP) != 0 || ::madvise(memory, mapped, MADV_WIPEONFORK) != 0) {
             ::munmap(memory, mapped);
             return fail(host_error::unsupported);
         }
-#endif
-#ifdef MADV_WIPEONFORK
-        if (::madvise(memory, mapped, MADV_WIPEONFORK) != 0) {
-            ::munmap(memory, mapped);
-            return fail(host_error::unsupported);
-        }
-#endif
         if (::mlock(memory, mapped) != 0) {
             // ENOMEM and EPERM: over RLIMIT_MEMLOCK. Never a silent fallback.
             const int error = errno;
