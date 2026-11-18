@@ -27,7 +27,7 @@ Arrays use [activation and static regions](Collections.md#array-lifetime). An ow
 
 ## Application platform development
 
-[HTML factories](../apps/Html.md) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. Host reconciliation, application packaging, and full render effect checks are separate milestones.
+[HTML factories](../apps/Html.md) construct views in ordinary NeuraIR and NVR, with typed holes and external template sources. Host reconciliation, application packaging, and full render effect checks are separate milestones. [State and components](../apps/Components.md) are library code in `Std.Ui`: `ui.State<T>` of deeply immutable values, subscriptions, components with slots, and roots whose turns render and commit over a `ui.Host`, tested on the in-memory `Std.Ui.ModelHost`; the browser and desktop hosts, commands, controls, routing and contracts are not implemented.
 
 ## Outside this release
 

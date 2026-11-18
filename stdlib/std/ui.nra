@@ -1,3 +1,7 @@
+let build = import:Std.Ui.Internal.Build;
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
 let storage = import:Std.Ui.Internal.Storage;
 let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Error;
@@ -198,4 +202,672 @@ export let Ui = module (
         #Internal
         export let init = func(return_value: string) => set;
     );
+
+    // State, components and roots (docs/apps/Components.md).
+
+    /// @brief Stops one subscriber of a `State`. `close()` may be called any number of times.
+    #[Final, NotThreadSafe]
+    export let Subscription = class (
+        let open: bool = true;
+
+        /// @brief Stops the notifications. Later calls do nothing.
+        export let close = func {
+            open = false;
+        };
+
+        /// @brief Reports whether the subscriber is still notified.
+        export let is_open = func -> bool => open;
+
+        /// @brief `Subscription(open)` or `Subscription(closed)`.
+        export let.override to_string = func -> string {
+            if (open) {
+                return "Subscription(open)";
+            }
+            return "Subscription(closed)";
+        };
+    );
+
+    /// @brief One subscriber of a state and the handle that closes it.
+    #[Final, NotThreadSafe]
+    let Subscriber = class<T> (
+        export last handle: Subscription;
+        export last listener: func(T) -> void;
+
+        export let init = func(handle: Subscription, listener: func(T) -> void) => set;
+    );
+
+    /// @brief One value of a deeply immutable type, observed by subscribers in one task.
+    /// `T` must be deeply immutable (E0580). Each accepted `set` or `update` replaces the value at
+    /// once and notifies every open subscriber once, in subscription order, with the new value,
+    /// even when it equals the old one, unless the state was built with an `equal` function that
+    /// reports the two equal. A `set` made while the state is notifying replaces the value and
+    /// queues its notification, which runs when the current round ends; more than 100 rounds in
+    /// one notification traps with `state update loop`.
+    #[Final, NotThreadSafe, Frozen]
+    export let State = class<T> (
+        let value: T;
+        let equal: func(T, T) -> bool;
+        let has_equal: bool = false;
+        let subscribers: Subscriber<T>[list] = new;
+        let pending: T[list] = new;
+        let notifying: bool = false;
+
+        /// @brief A state holding `initial` that notifies on every accepted update.
+        export let init = func(initial: T) {
+            value = initial;
+            equal = new func(a: T, b: T) -> bool => false;
+        };
+
+        /// @brief Returns the current value.
+        export let get = func -> T => value;
+
+        /// @brief Replaces the value and notifies, unless the `equal` function given to `with_equality` reports the old and new values equal.
+        export let set = func(next: T) {
+            if (has_equal) {
+                last same = equal;
+                if (same(value, next)) {
+                    return;
+                }
+            }
+            value = next;
+            if (notifying) {
+                pending.append(next);
+                return;
+            }
+            notifying = true;
+            deliver(next);
+            let rounds = 1;
+            while (pending.length > 0) {
+                rounds += 1;
+                if (rounds > 100) {
+                    trap_with_message("state update loop");
+                }
+                last queued = pending[0];
+                pending.remove_at(0);
+                deliver(queued);
+            }
+            notifying = false;
+        };
+
+        /// @brief Calls `change` once with the current value and sets its result. `change` is not retained.
+        export let update = func(change: func(T) -> T) {
+            set(change(value));
+        };
+
+        /// @brief Adds a subscriber that is notified after each accepted update until its subscription is closed.
+        export let subscribe = func(listener: func(T) -> void) -> Subscription {
+            last handle = new Subscription();
+            subscribers.append(new Subscriber<T>(handle, listener));
+            return handle;
+        };
+
+        /// @brief The number of subscribers whose subscription is open.
+        export let subscriber_count = func -> int {
+            let count = 0;
+            for (let i = 0; i < subscribers.length; i++) {
+                if (subscribers[i].handle.is_open()) {
+                    count += 1;
+                }
+            }
+            return count;
+        };
+
+        /// @brief Suppresses the notification of an update whose value `same` reports equal to the current one. `same` is retained.
+        #Internal
+        export let use_equality = func(same: func(T, T) -> bool) {
+            equal = same;
+            has_equal = true;
+        };
+
+        let deliver = func(current: T) {
+            last count = subscribers.length;
+            for (let i = 0; i < count; i++) {
+                last entry = subscribers[i];
+                if (entry.handle.is_open()) {
+                    last listener = entry.listener;
+                    listener(current);
+                }
+            }
+            let j = 0;
+            while (j < subscribers.length) {
+                if (subscribers[j].handle.is_open()) {
+                    j += 1;
+                } else {
+                    subscribers.remove_at(j);
+                }
+            }
+        };
+
+        /// @brief `State(` and the value's text `)`.
+        export let.override to_string = func -> string => "State(" + value.to_string() + ")";
+    );
+
+    /// @brief A state holding `initial` whose updates notify only when `same(old, new)` is false. `same` is retained.
+    export let with_equality = func<T>(initial: T, same: func(T, T) -> bool) -> State<T> {
+        last state = new State<T>(initial);
+        state.use_equality(same);
+        return state;
+    };
+
+    /// @brief A state and the function that renders a view of its value, mounted at most once at a time.
+    /// Build one with `component`. It renders when it is mounted and after each turn in which its state
+    /// notified; unmounting closes its subscription and raises its generation.
+    #[Final, NotThreadSafe]
+    export let Component = class (
+        last render_view: func() -> View;
+        last attach: func(Component) -> Subscription;
+        #Internal
+        export let subscription: Subscription = nil;
+        #Internal
+        export let children: Component[list] = new;
+        #Internal
+        export let owner: Root = nil;
+        #Internal
+        export let dirty: bool = false;
+        #Internal
+        export let view: View = nil;
+        let generation_count: uint64 = 0;
+        let render_total: int64 = 0;
+
+        #Internal
+        export let init = func(render_view: func() -> View, attach: func(Component) -> Subscription) => set;
+
+        /// @brief Raised by each unmount; a completion or event that carries an older generation is discarded.
+        export let generation = func -> uint64 => generation_count;
+
+        /// @brief Reports whether the component is part of a root.
+        export let is_mounted = func -> bool => owner != nil;
+
+        /// @brief The number of times the component has rendered.
+        export let render_count = func -> int64 => render_total;
+
+        /// @brief The view of the last render, or nil before the first.
+        export let current_view = func -> View => view;
+
+        /// @brief Marks the component for rendering at the end of the turn, when it is mounted.
+        #Internal
+        export let invalidate = func {
+            if (owner != nil) {
+                dirty = true;
+            }
+        };
+
+        #Internal
+        export let render_now = func -> View {
+            last render = render_view;
+            last next = render();
+            view = next;
+            dirty = false;
+            render_total += 1;
+            return next;
+        };
+
+        #Internal
+        export let attach_to = func(root: Root) {
+            owner = root;
+            last subscribe = attach;
+            subscription = subscribe(instance);
+            dirty = true;
+        };
+
+        #Internal
+        export let detach = func {
+            for (let i = 0; i < children.length; i++) {
+                children[i].detach();
+            }
+            children = new;
+            if (subscription != nil) {
+                subscription.close();
+                subscription = nil;
+            }
+            owner = nil;
+            dirty = false;
+            view = nil;
+            generation_count += 1;
+        };
+
+        /// @brief `Component(generation N, mounted)` or `Component(generation N)`.
+        export let.override to_string = func -> string {
+            if (owner != nil) {
+                return "Component(generation " + generation_count.to_string() + ", mounted)";
+            }
+            return "Component(generation " + generation_count.to_string() + ")";
+        };
+    );
+
+    /// @brief A component that renders `state`'s value with `render`. `render` is retained, so a
+    /// capturing function is written `new func`. Rendering should only read and allocate; the
+    /// compiler does not check that yet.
+    export let component = func<T>(state: State<T>, render: func(T) -> View) -> Component =>
+        new Component(
+            new func() -> View => render(state.get()),
+            new func(target: Component) -> Subscription => state.subscribe(new func(value: T) {
+                target.invalidate();
+            }));
+
+    /// @brief A view that embeds `child`. The child renders by itself when its own state changes;
+    /// the parent's render does not run again for it.
+    export let slot = func(child: Component) -> View => new View("neura:slot", 0, new storage.Payload<Component>(0, child));
+
+    /// @brief Why a commit failed validation.
+    export let DiagnosticKind = enum (ViewReused, DuplicateKey, LimitExceeded);
+
+    /// @brief A commit the host refused without changing anything.
+    #[Final, Immutable]
+    export let Diagnostic = class (
+        export last kind: DiagnosticKind;
+        export last message: string;
+        export last slot: uint32;
+        export last index: int64;
+        export last key: string;
+
+        export let init = func(kind: DiagnosticKind, message: string, slot: uint32, index: int64, key: string) => set;
+
+        /// @brief The kind and the message.
+        export let.override to_string = func -> string => kind.to_string() + ": " + message;
+    );
+
+    /// @brief What a host did with a commit: applied it, or refused it and kept the previous view.
+    export let RenderOutcome = enum (Committed, Invalid(Diagnostic));
+
+    /// @brief A failed commit, as given to a root's render-failure handler. `Fault` means the host
+    /// failed while applying: the root stops taking events until `reset`.
+    export let RenderFailure = enum (Invalid(Diagnostic), Fault(Error));
+
+    /// @brief A root-level event: events were dropped while the root was overloaded.
+    export let RootEvent = enum (InputOverflow(uint32));
+
+    /// @brief One component and the view it rendered in a turn.
+    #[Final, NotThreadSafe]
+    export let Rendered = class (
+        export last component: Component;
+        export last view: View;
+
+        #Internal
+        export let init = func(component: Component, view: View) => set;
+    );
+
+    /// @brief The renders of one turn, parents before children, sent to the host as one request.
+    #[Final, NotThreadSafe]
+    export let Commit = class (
+        export last sequence: uint64;
+        export last rendered: Rendered[list];
+
+        #Internal
+        export let init = func(sequence: uint64, rendered: Rendered[list]) => set;
+    );
+
+    /// @brief The services a root needs from the document or window that shows it. The web, desktop
+    /// and model hosts implement it; `mount` takes one.
+    export let Host = interface (
+        /// @brief Opens a root on `target` (a selector or a window name); `Err` for a second root on one target or too many roots.
+        let open = func(target: string) -> result.Result<uint64>;
+        /// @brief Applies one turn's renders.
+        let commit = func(root: uint64, batch: Commit) -> result.Result<RenderOutcome>;
+        /// @brief Waits until events arrive and posts them with `root.post`; false when no event will ever come.
+        let wait = func(root: Root) -> bool;
+        /// @brief After an input overflow, posts one input event for each controlled element whose value changed.
+        let resynchronize = func(root: Root);
+        /// @brief Empties a faulted root so that it accepts a fresh view.
+        let reset = func(root: uint64);
+        /// @brief Closes the root.
+        let close = func(root: uint64);
+    );
+
+    /// @brief One event waiting in a root's queue.
+    #[Final, NotThreadSafe]
+    let QueuedEvent = class (
+        export last listener: uint64;
+        export last target: Component;
+        export last generation: uint64;
+        export last coalesce: bool;
+        export let deliver: func() -> void;
+        export last overflow: uint32;
+
+        export let init = func(listener: uint64, target: Component, generation: uint64, coalesce: bool,
+                               deliver: func() -> void, overflow: uint32) => set;
+    );
+
+    /// @brief Counts that show what a root holds and has done.
+    #[Final, Immutable]
+    export let RootStats = class (
+        export last components: int32;
+        export last subscriptions: int32;
+        export last queued: int32;
+        export last turns: uint64;
+        export last renders: uint64;
+        export last commits: uint64;
+        export last dropped: uint64;
+        export last discarded: uint64;
+
+        #Internal
+        export let init = func(components: int32, subscriptions: int32, queued: int32, turns: uint64, renders: uint64,
+                               commits: uint64, dropped: uint64, discarded: uint64) => set;
+
+        /// @brief Every count, by name.
+        export let.override to_string = func -> string =>
+            "components " + components.to_string() + ", subscriptions " + subscriptions.to_string() + ", queued "
+            + queued.to_string() + ", turns " + turns.to_string() + ", renders " + renders.to_string() + ", commits "
+            + commits.to_string() + ", dropped " + dropped.to_string() + ", discarded " + discarded.to_string();
+    );
+
+    /// @brief A mounted component tree and its event loop. One turn takes the next event, calls its
+    /// handler, renders each component whose state notified, once, parents before children, and
+    /// commits the renders as one host request.
+    #[Final, NotThreadSafe]
+    export let Root = class (
+        last host: Host;
+        last handle: uint64;
+        last top: Component;
+        let queue: QueuedEvent[list] = new;
+        let queue_limit: int = 1024;
+        let dropped: uint32 = 0;
+        let closed: bool = false;
+        let faulted: bool = false;
+        let failure_handler: func(RenderFailure) -> void;
+        let overflow_handler: func(RootEvent) -> void;
+        let has_overflow_handler: bool = false;
+        let sequence: uint64 = 0;
+        let turn_total: uint64 = 0;
+        let render_total: uint64 = 0;
+        let commit_total: uint64 = 0;
+        let dropped_total: uint64 = 0;
+        let discarded_total: uint64 = 0;
+
+        #Internal
+        export let init = func(host: Host, handle: uint64, top: Component) {
+            instance.host = host;
+            instance.handle = handle;
+            instance.top = top;
+            failure_handler = new func(failure: RenderFailure) {
+                console.print_line("neura.ui: render failure: " + describe_failure(failure));
+            };
+            overflow_handler = new func(event: RootEvent) {};
+        };
+
+        /// @brief Replaces the handler of failed commits. The default prints the failure and keeps the previous view.
+        export let on_render_failure = func(handler: func(RenderFailure) -> void) {
+            failure_handler = handler;
+        };
+
+        /// @brief Sets the handler of `RootEvent.InputOverflow`, delivered before the first event accepted after an overflow.
+        export let on_overflow = func(handler: func(RootEvent) -> void) {
+            overflow_handler = handler;
+            has_overflow_handler = true;
+        };
+
+        /// @brief Sets the number of queued events at which the root is overloaded (U-7, default 1,024; at most 65,536).
+        export let set_queue_limit = func(limit: int) {
+            if (limit < 1 || limit > 65536) {
+                trap_with_message("invalid argument: a queue limit is 1 to 65,536 events");
+            }
+            queue_limit = limit;
+        };
+
+        /// @brief The host's handle of this root.
+        export let host_handle = func -> uint64 => handle;
+
+        /// @brief The component the root was mounted with.
+        export let component = func -> Component => top;
+
+        /// @brief Reports whether the root stopped after a host failure.
+        export let is_faulted = func -> bool => faulted;
+
+        /// @brief Reports whether the root was closed.
+        export let is_closed = func -> bool => closed;
+
+        /// @brief Reports whether events are being dropped because the queue is full.
+        export let is_overloaded = func -> bool => dropped > 0;
+
+        /// @brief Queues an event for `listener` of `target`, called by a host. A coalesced event
+        /// replaces the queued one of the same listener and keeps its place. Over the queue limit an
+        /// event that cannot be coalesced is dropped and counted, and false is returned. An event whose
+        /// component unmounted before its turn is discarded.
+        export let post = func(listener: uint64, target: Component, coalesce: bool, deliver: func() -> void) -> bool {
+            if (closed) {
+                return false;
+            }
+            if (coalesce) {
+                for (let i = 0; i < queue.length; i++) {
+                    last queued = queue[i];
+                    if (queued.coalesce && queued.listener == listener && queued.target == target) {
+                        queued.deliver = deliver;
+                        return true;
+                    }
+                }
+            }
+            if (queue.length >= queue_limit) {
+                dropped += 1;
+                dropped_total += 1;
+                return false;
+            }
+            if (dropped > 0) {
+                queue.append(new QueuedEvent(0, nil, 0, false, new func() {}, dropped));
+                dropped = 0;
+            }
+            last generation = target == nil ? 0 : target.generation();
+            queue.append(new QueuedEvent(listener, target, generation, coalesce, deliver, 0));
+            return true;
+        };
+
+        /// @brief Runs one turn. Returns false when the root is closed or faulted, or the host has no more events.
+        export let turn = func -> bool {
+            if (closed || faulted) {
+                return false;
+            }
+            if (queue.length == 0 && !host.wait(instance)) {
+                return false;
+            }
+            if (queue.length == 0) {
+                return !closed;
+            }
+            last event = queue[0];
+            queue.remove_at(0);
+            turn_total += 1;
+            if (event.overflow > 0) {
+                if (has_overflow_handler) {
+                    last handler = overflow_handler;
+                    handler(RootEvent.InputOverflow(event.overflow));
+                }
+                host.resynchronize(instance);
+                flush();
+                return !closed;
+            }
+            if (event.target != nil && (event.target.owner != instance || event.target.generation() != event.generation)) {
+                discarded_total += 1;
+                return true;
+            }
+            last deliver = event.deliver;
+            deliver();
+            flush();
+            return !closed && !faulted;
+        };
+
+        /// @brief Runs turns until the root is closed or faulted, or the host has no more events.
+        export let run = func {
+            while (turn()) {
+            }
+        };
+
+        /// @brief Clears a fault: the host empties the root, every component renders again and the root takes events.
+        export let reset = func {
+            if (closed) {
+                return;
+            }
+            host.reset(handle);
+            faulted = false;
+            invalidate_all(top);
+            flush();
+        };
+
+        /// @brief Unmounts the component tree and closes the root on the host.
+        export let close = func {
+            if (closed) {
+                return;
+            }
+            closed = true;
+            top.detach();
+            queue = new;
+            host.close(handle);
+        };
+
+        /// @brief The root's counts.
+        export let stats = func -> RootStats {
+            last counts: int32[] = [0, 0];
+            count_tree(top, counts);
+            return new RootStats(counts[0], counts[1], queue.length, turn_total, render_total, commit_total,
+                                 dropped_total, discarded_total);
+        };
+
+        #Internal
+        export let start = func {
+            top.attach_to(instance);
+            flush();
+        };
+
+        let count_tree = func(node: Component, counts: int32[]) {
+            if (node.owner == nil) {
+                return;
+            }
+            counts[0] += 1;
+            if (node.subscription != nil && node.subscription.is_open()) {
+                counts[1] += 1;
+            }
+            for (let i = 0; i < node.children.length; i++) {
+                count_tree(node.children[i], counts);
+            }
+        };
+
+        let invalidate_all = func(node: Component) {
+            node.dirty = true;
+            for (let i = 0; i < node.children.length; i++) {
+                invalidate_all(node.children[i]);
+            }
+        };
+
+        let flush = func {
+            if (closed || faulted) {
+                return;
+            }
+            last rendered: Rendered[list] = new;
+            render_tree(top, rendered);
+            if (rendered.length == 0) {
+                return;
+            }
+            sequence += 1;
+            match (host.commit(handle, new Commit(sequence, rendered))) {
+                result.Result.Ok(outcome) => {
+                    match (outcome) {
+                        RenderOutcome.Committed => {
+                            commit_total += 1;
+                        },
+                        RenderOutcome.Invalid(diagnostic) => {
+                            last handler = failure_handler;
+                            handler(RenderFailure.Invalid(diagnostic));
+                        },
+                    }
+                },
+                result.Result.Err(problem) => {
+                    faulted = true;
+                    last handler = failure_handler;
+                    handler(RenderFailure.Fault(problem));
+                },
+            }
+        };
+
+        let render_tree = func(node: Component, out: Rendered[list]) {
+            if (node.dirty) {
+                last view = node.render_now();
+                render_total += 1;
+                out.append(new Rendered(node, view));
+                last found: Component[list] = new;
+                children_of(view, found);
+                for (let i = 0; i < node.children.length; i++) {
+                    last old = node.children[i];
+                    if (!contains_component(found, old)) {
+                        old.detach();
+                    }
+                }
+                for (let i = 0; i < found.length; i++) {
+                    last child = found[i];
+                    if (!contains_component(node.children, child)) {
+                        if (child.owner != nil) {
+                            trap_with_message("a component is mounted twice");
+                        }
+                        child.attach_to(instance);
+                    }
+                }
+                node.children = found;
+            }
+            for (let i = 0; i < node.children.length; i++) {
+                render_tree(node.children[i], out);
+            }
+        };
+
+        /// @brief `Root(handle N)` with its state.
+        export let.override to_string = func -> string {
+            let text = "Root(handle " + handle.to_string();
+            if (closed) {
+                text = text + ", closed";
+            }
+            if (faulted) {
+                text = text + ", faulted";
+            }
+            return text + ")";
+        };
+    );
+
+    let contains_component = func(items: Component[list], item: Component) -> bool {
+        for (let i = 0; i < items.length; i++) {
+            if (items[i] == item) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    // The components embedded by slots in `view`, in document order.
+    let children_of = func(view: View, found: Component[list]) {
+        if (view == nil) {
+            return;
+        }
+        let slot = view.slots;
+        while (slot != nil) {
+            if (slot is storage.Payload<Component>) {
+                found.append((slot as storage.Payload<Component>).value);
+            } else if (slot is storage.Payload<View>) {
+                children_of((slot as storage.Payload<View>).value, found);
+            } else if (slot is storage.Payload<build.Items>) {
+                let item = (slot as storage.Payload<build.Items>).value.first;
+                while (item != nil) {
+                    children_of(item.view, found);
+                    item = item.next;
+                }
+            }
+            slot = slot.next;
+        }
+    };
+
+    let describe_failure = func(failure: RenderFailure) -> string => match (failure) {
+        RenderFailure.Invalid(diagnostic) => "invalid commit: " + diagnostic.to_string(),
+        RenderFailure.Fault(problem) => "host fault: " + error.message(problem),
+    };
+
+    /// @brief Opens a root on `target` of `host`, renders `top` and commits it. `Err` when the host
+    /// refuses the target (a second root on one element, more than U-9 roots) or `top` is mounted.
+    export let mount = func(host: Host, target: string, top: Component) -> result.Result<Root> {
+        if (top.is_mounted()) {
+            return result.Result<Root>.Err(error.custom("ui.mounted", "the component is already mounted"));
+        }
+        match (host.open(target)) {
+            result.Result.Ok(handle) => {
+                last root = new Root(host, handle, top);
+                root.start();
+                return result.Result<Root>.Ok(root);
+            },
+            result.Result.Err(problem) => {
+                return result.Result<Root>.Err(problem);
+            },
+        }
+    };
 );

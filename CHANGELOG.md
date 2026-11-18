@@ -19,6 +19,8 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- `Std.Ui` state and components: `ui.State<T>` of deeply immutable values with ordered subscriptions and queued re-entrant notifications (`state update loop` after 100 rounds), `ui.with_equality`, `ui.component`, `ui.slot`, and `ui.mount` over the `ui.Host` interface, whose roots run turns that render each notified component once, parents before children, and commit them as one request; render failures, faults and `reset`, unmounting with generations, coalesced events and input overflow ([State and components](docs/apps/Components.md)).
+- `Std.Ui.ModelHost`, an in-memory host with scripted events for tests, and `Std.Web.mount`, declared and trapping as unsupported until the browser runtime has its UI services.
 - `Std.Collections.Frozen.FrozenList<T>`: a list of deeply immutable elements in private storage, built by `frozen.copy_of`, `copy_of_list`, `of` and `empty`, whose `appended`, `replaced`, `removed`, `concat` and `slice` return new lists ([Collections](docs/lang/Collections.md#frozenlist)). A template's `@for` iterates one. It cannot yet be sent to another task (`E0602`).
 - The standard-library tag `#Frozen` (id 87; `.nir` files record it as any tag) and two diagnostics: `E0580` for a type argument of `FrozenList` or `ui.State` that is not deeply immutable, followed through generic functions to the outermost written argument, and `E0581` for frozen storage that is exposed or changed, or `#Frozen` outside the standard library ([E0580](docs/diagnostics/E0580.md), [E0581](docs/diagnostics/E0581.md)).
 - `E0449`: a tuple of more than 64 value words, which names the shape and its size ([E0449](docs/diagnostics/E0449.md)).

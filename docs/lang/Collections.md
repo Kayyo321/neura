@@ -81,7 +81,7 @@ The same loop visits any value that implements `Std.Collections.Iterable<T>`, ca
 
 ## FrozenList
 
-`Std.Collections.Frozen.FrozenList<T>` is a list that nobody can change, with storage nobody else holds. Its element type must be deeply immutable: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class whose fields are too, or a `FrozenList` of them (`E0580` at the type argument otherwise, also when a generic function passes its type parameter on). The class is `#Immutable`, so a [UI state](../design/Components030.md) may hold one. It cannot yet cross to another task: the image format admits no collection in a transferable layout, so sending a `FrozenList` on a channel or to `spawn` is `E0602` in 0.3.0.
+`Std.Collections.Frozen.FrozenList<T>` is a list that nobody can change, with storage nobody else holds. Its element type must be deeply immutable: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class whose fields are too, or a `FrozenList` of them (`E0580` at the type argument otherwise, also when a generic function passes its type parameter on). The class is `#Immutable`, so a [UI state](../apps/Components.md) may hold one. It cannot yet cross to another task: the image format admits no collection in a transferable layout, so sending a `FrozenList` on a channel or to `spawn` is `E0602` in 0.3.0.
 
 <!-- example: run -->
 ```neura

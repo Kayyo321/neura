@@ -1,0 +1,4 @@
+// A state of a list (E0580; Components030 case 25).
+let ui = import:Std.Ui;
+
+let rows = new ui.State<int32[list]>(new);

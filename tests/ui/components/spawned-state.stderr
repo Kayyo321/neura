@@ -1,0 +1,13 @@
+error[E0602]: a value of type State<int32> is not transferable, so it cannot be given to a spawned task
+   --> $DIR/spawned-state.nra:9:31
+    |
+  9 |         let task = spawn read(state);
+    |                               ^^^^^ not transferable
+   ::: /home/dev/neura-a3-int/stdlib/std/ui.nra:246:14
+    |
+246 |     #[Final, NotThreadSafe, Frozen]
+    |              ------------- 'State<int32>' is marked #NotThreadSafe here
+    |
+    = note: the instances of a #NotThreadSafe class, and of a class that extends one, stay in the task that holds them
+
+For more information about this error, try `neura explain E0602`.

@@ -1,0 +1,184 @@
+let error = import:Std.Core.Error;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+/// @brief A UI host in memory, for tests of state, components and turns without a browser.
+/// A test scripts events in batches; each `wait` of a root posts the next batch, and a root's
+/// `run` returns when the script is exhausted. Commits are recorded as lines in `log`, and a
+/// test can make the next commit fail or be refused. The host does not interpret views: the
+/// browser and desktop hosts apply them, and reconciliation belongs to them.
+#Since("0.3.0")
+export let ModelHost = module (
+    /// @brief One scripted event.
+    #[Final, NotThreadSafe]
+    let Step = class (
+        export last listener: uint64;
+        export last target: ui.Component;
+        export last coalesce: bool;
+        export last deliver: func() -> void;
+
+        export let init = func(listener: uint64, target: ui.Component, coalesce: bool, deliver: func() -> void) => set;
+    );
+
+    /// @brief The steps posted by one `wait`.
+    #[Final, NotThreadSafe]
+    let Batch = class (
+        export last steps: Step[list] = new;
+    );
+
+    /// @brief A host whose document is memory and whose events are scripted.
+    #[Final, NotThreadSafe]
+    export let Host = class implements ui.Host (
+        let targets: string[list] = new;
+        let open_roots: bool[list] = new;
+        let batches: Batch[list] = new;
+        let scripting: Batch = new;
+        let resync: Batch = new;
+        let fail_next: bool = false;
+        let invalid_next: bool = false;
+        let invalid_kind: ui.DiagnosticKind = ui.DiagnosticKind.ViewReused;
+        let root_limit: int = 16;
+        /// @brief One line per host request, in order.
+        export last log: string[list] = new;
+        /// @brief How many events `post` refused.
+        export let refused: int = 0;
+
+        /// @brief Sets the number of live roots (U-9, default 16).
+        export let set_root_limit = func(limit: int) {
+            root_limit = limit;
+        };
+
+        /// @brief Adds a click on `target`'s listener `listener` to the batch being scripted.
+        export let click = func(listener: uint64, target: ui.Component, handler: func(ui.ClickEvent) -> void) {
+            last event = new ui.ClickEvent(0, 1.0, 2.0, new ui.Modifiers(false, false, false, false), 1);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds a pointer move, which a root coalesces per listener, to the batch being scripted.
+        export let pointer_move = func(listener: uint64, target: ui.Component, handler: func(ui.PointerEvent) -> void,
+                                       x: float64, y: float64) {
+            last event = new ui.PointerEvent(x, y, 0, ui.PointerKind.Mouse, new ui.Modifiers(false, false, false, false));
+            scripting.steps.append(new Step(listener, target, true, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds an input event with `value` to the batch being scripted.
+        export let input = func(listener: uint64, target: ui.Component, handler: func(ui.InputEvent) -> void,
+                                value: string) {
+            last event = new ui.InputEvent(value, false, false);
+            scripting.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Adds an input event that the host posts when a root resynchronizes after an overflow.
+        export let input_on_resynchronize = func(listener: uint64, target: ui.Component,
+                                                 handler: func(ui.InputEvent) -> void, value: string) {
+            last event = new ui.InputEvent(value, false, false);
+            resync.steps.append(new Step(listener, target, false, new func() {
+                handler(event);
+            }));
+        };
+
+        /// @brief Ends the batch being scripted; the next `wait` of a root posts it.
+        export let end_batch = func {
+            batches.append(scripting);
+            scripting = new;
+        };
+
+        /// @brief Makes the next commit fail as a host failure while applying.
+        export let fail_next_commit = func {
+            fail_next = true;
+        };
+
+        /// @brief Makes the next commit be refused with a diagnostic of `kind`.
+        export let refuse_next_commit = func(kind: ui.DiagnosticKind) {
+            invalid_next = true;
+            invalid_kind = kind;
+        };
+
+        export let open = func(target: string) -> result.Result<uint64> {
+            let live = 0;
+            for (let i = 0; i < targets.length; i++) {
+                if (open_roots[i]) {
+                    if (targets[i] == target) {
+                        log.append("open " + target + ": refused, the target has a root");
+                        return result.Result<uint64>.Err(error.custom("ui.target", "the target already has a root"));
+                    }
+                    live += 1;
+                }
+            }
+            if (live >= root_limit) {
+                log.append("open " + target + ": refused, too many roots");
+                return result.Result<uint64>.Err(error.custom("ui.roots", "too many live roots"));
+            }
+            targets.append(target);
+            open_roots.append(true);
+            last handle = targets.length as uint64;
+            log.append("open " + target + ": root " + handle.to_string());
+            return result.Result<uint64>.Ok(handle);
+        };
+
+        export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome> {
+            let line = "commit " + batch.sequence.to_string() + " on root " + root.to_string() + ": "
+                + batch.rendered.length.to_string() + " render";
+            if (batch.rendered.length != 1) {
+                line = line + "s";
+            }
+            if (fail_next) {
+                fail_next = false;
+                log.append(line + ", host failure");
+                return result.Result<ui.RenderOutcome>.Err(error.custom("ui.host", "the host failed while applying"));
+            }
+            if (invalid_next) {
+                invalid_next = false;
+                log.append(line + ", refused");
+                last diagnostic = new ui.Diagnostic(invalid_kind, "refused by the model host", 0, -1, "");
+                return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(diagnostic));
+            }
+            log.append(line);
+            return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
+        };
+
+        export let wait = func(root: ui.Root) -> bool {
+            if (batches.length == 0) {
+                return false;
+            }
+            last batch = batches[0];
+            batches.remove_at(0);
+            post_all(root, batch);
+            return true;
+        };
+
+        export let resynchronize = func(root: ui.Root) {
+            log.append("resynchronize root " + root.host_handle().to_string());
+            last batch = resync;
+            resync = new;
+            post_all(root, batch);
+        };
+
+        export let reset = func(root: uint64) {
+            log.append("reset root " + root.to_string());
+        };
+
+        export let close = func(root: uint64) {
+            open_roots[(root as int) - 1] = false;
+            log.append("close root " + root.to_string());
+        };
+
+        let post_all = func(root: ui.Root, batch: Batch) {
+            for (let i = 0; i < batch.steps.length; i++) {
+                last step = batch.steps[i];
+                if (!root.post(step.listener, step.target, step.coalesce, step.deliver)) {
+                    refused += 1;
+                }
+            }
+        };
+
+        /// @brief `ModelHost(` the number of roots opened `)`.
+        export let.override to_string = func -> string => "ModelHost(" + targets.length.to_string() + " roots)";
+    );
+);

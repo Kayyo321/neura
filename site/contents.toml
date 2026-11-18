@@ -41,6 +41,7 @@ pages = [
   { source = "docs/lang/Overview.md", label = "Overview" },
   { source = "docs/lang/CoreLanguage.md", label = "Core language" },
   { source = "docs/apps/Html.md", label = "HTML factories" },
+  { source = "docs/apps/Components.md", label = "State and components" },
   { source = "docs/lang/Numbers.md", label = "Numbers" },
   { source = "docs/lang/Types.md", label = "Types" },
   { source = "docs/lang/Modules.md", label = "Modules and imports" },

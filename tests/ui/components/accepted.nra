@@ -1,0 +1,23 @@
+// States of deeply immutable values and a component (Components030 cases 1 to 3).
+let frozen = import:Std.Collections.Frozen;
+let ui = import:Std.Ui;
+
+#Immutable
+let Stock = class (
+    export last name: string;
+    export last count: int32;
+
+    export let init = func(name: string, count: int32) => set;
+);
+
+let view = html(count: int32) { <output>{count}</output> };
+
+let number = new ui.State<int32>(0);
+let stock = new ui.State<Stock>(new Stock("bolt", 0));
+let pair = new ui.State<[string, string]>(["a", "b"]);
+let stocks = new ui.State<frozen.FrozenList<Stock>>(frozen.empty<Stock>());
+let step: int32 = 12;
+let restock = func() {
+    stock.update(func(current: Stock) -> Stock => new Stock(current.name, current.count + step));
+};
+let counter = ui.component<int32>(number, func(value: int32) -> ui.View => view(value));

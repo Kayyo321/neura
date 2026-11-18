@@ -220,6 +220,13 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
 | [`Std.Ui`](Stdlib-Ui) | [Contracts](Stdlib-Ui#detailed-contracts) | [Declarations](Stdlib-Ui#exported-declarations) |
+| [`Std.Ui.ModelHost`](Stdlib-Ui-ModelHost) | [Contracts](Stdlib-Ui-ModelHost#detailed-contracts) | [Declarations](Stdlib-Ui-ModelHost#exported-declarations) |
+
+### `Std.Web`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Web`](Stdlib-Web) | [Contracts](Stdlib-Web#detailed-contracts) | [Declarations](Stdlib-Web#exported-declarations) |
 
 ## Specification sections
 

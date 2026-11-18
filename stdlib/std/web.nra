@@ -1,0 +1,15 @@
+let result = import:Std.Core.Result;
+let scope = import:Std.Concurrent.Scope;
+let ui = import:Std.Ui;
+
+/// @brief Mounting components in a browser document.
+/// `ui.mount` takes any `ui.Host`; this module will provide the browser's, over the `neura.ui.*`
+/// host services of the browser runtime.
+#Since("0.3.0")
+export let Web = module (
+    /// @brief Mounts `component` on the element that `selector` names, with its tasks in `tasks`.
+    /// @stub the neura.ui.* host services are not in the browser runtime yet; use ui.mount with a ui.Host
+    export let mount = func(selector: string, component: ui.Component, tasks: scope.Scope) -> result.Result<ui.Root> {
+        trap_with_message("unsupported: Std.Web.mount is not implemented in Neura 0.3.0 (the neura.ui.* host services are not in the browser runtime yet; use ui.mount with a ui.Host)");
+    };
+);
