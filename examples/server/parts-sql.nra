@@ -219,8 +219,8 @@ let PartsSql = module:program.Entry (
                     if (request.method == "DELETE") {
                         return match (repository.delete(number)) {
                             Result.Err(problem) => Result<app.Response>.Err(problem),
-                            Result.Ok(existed) => Result<app.Response>.Ok(existed ? app.empty(204)
-                                                                                  : app.json(404, "{\"error\":\"not found\"}")),
+                            Result.Ok(existed) => Result<app.Response>.Ok(
+                                existed ? app.empty(204) : app.json(404, "{\"error\":\"not found\"}")),
                         };
                     }
                     return Result<app.Response>.Ok(app.json(405, "{\"error\":\"method\"}")

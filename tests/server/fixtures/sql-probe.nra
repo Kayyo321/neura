@@ -41,7 +41,8 @@ let SqlProbe = module:program.Entry (
     let route = func(context: app.Context, pool: sql.Pool, database: string, request: app.Request)
         -> Result<app.Response> {
         if (request.path == "/config") {
-            return Result<app.Response>.Ok(app.text(200, optional.value_or<string>(context.config(request.query), "none")));
+            last value = optional.value_or<string>(context.config(request.query), "none");
+            return Result<app.Response>.Ok(app.text(200, value));
         }
         if (request.path == "/setup") {
             return answer(pool.execute("CREATE TABLE IF NOT EXISTS probe (v TEXT NOT NULL UNIQUE)"));

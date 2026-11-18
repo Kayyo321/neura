@@ -7,6 +7,7 @@
 #include "util/sha256.hpp"
 
 #include <algorithm>
+#include <cstdint>
 #include <ctime>
 #include <fstream>
 #include <map>
@@ -165,7 +166,7 @@ Status migrate(Pool& pool, const std::vector<Migration>& migrations, bool apply,
                                            wait, cursor);
             std::vector<Value> values;
             bool more = true;
-            while (status.ok() && more) status = cursor->fetch(1000, wait, values, more);
+            while (status.ok() && more) status = cursor->fetch(1000, SIZE_MAX, wait, values, more);
             if (!status.ok()) {
                 cursor.reset();
                 (void)connection->rollback(wait);

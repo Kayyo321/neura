@@ -49,7 +49,7 @@ A server image gets its pool from `context.sql_pool("main")`, which fails when t
 
 The host checks every setting before it starts and lists every problem: an unknown setting, a pool with settings and no URL, a URL it cannot parse, a password in a URL, an SQLite pool with a password. It then opens one connection of each pool and checks its migrations; a pool that does not connect fails the start.
 
-PostgreSQL connects with `sslmode=verify-full` unless the URL names another mode, which the host accepts only when every host of the URL is a loopback address (`localhost`, `127.0.0.1`, `::1`) or a Unix socket directory. Certificates are checked against libpq's default root file or the `sslrootcert` the URL names.
+PostgreSQL connects with `sslmode=verify-full` unless the URL names another mode, which the host accepts only when every host of the URL is a loopback address (`localhost`, `127.0.0.1`, `::1`) or a Unix socket directory. Name the certificate authority with `sslrootcert=<file>` in the URL, for example `sslrootcert=/etc/ssl/certs/ca-certificates.crt` for a server whose certificate a public authority signed. Without it libpq reads `~/.postgresql/root.crt` of the user who runs the host, and `sslrootcert=system` would read the trust store of the statically linked OpenSSL's build prefix, not the system's.
 
 `neura run` and `neura test` take `--sql-pool <name>=<url>`, `--sql-pool <name>.migrations=<directory>` (applied before the program starts) and `--sql-pool <name>.password_env=<variable>`, and grant the `sql` group with them. Their pools have no deadline.
 
@@ -61,7 +61,7 @@ PostgreSQL connects with `sslmode=verify-full` unless the URL names another mode
 | `Pool.acquire()` | A leased `Connection`, waiting at most S-10 |
 | `Pool.begin()` | A `Transaction` on a connection of its own; closing it returns the connection |
 | `Pool.execute`, `query_one`, `query_page` | One statement on a connection that is acquired and returned around it |
-| `Connection.execute(sql, parameters...)` | The affected row count; 0 for a query |
+| `Connection.execute(sql, parameters...)` | The rows an `INSERT`, `UPDATE` or `DELETE` affected, with or without `RETURNING`; 0 for a query or a definition |
 | `Connection.query_one(sql, parameters...)` | The first row, or `NotFound` |
 | `Connection.query_page(sql, limit, parameters...)` | At most `limit` rows as an `ImmutableList<Row>`; a limit of 0 runs the statement and returns none; a limit above S-11 is `TooLarge` |
 | `Connection.open_cursor(sql, parameters...)` | A `Cursor` whose `fetch(max)` returns the next rows; `has_more()`, `close()` |
@@ -129,7 +129,8 @@ Every failure is an `Error.Custom` whose detail is an `SqlError`: its `kind`, th
 | `PoolExhausted` | S-10 acquires already wait on the pool |
 | `ConstraintViolation` | A unique, foreign-key, check or not-null failure; the detail is the constraint's name (PostgreSQL) or SQLite's message, such as `UNIQUE constraint failed: users.email` |
 | `Serialization` | A serialization failure or a deadlock (PostgreSQL), or an SQLite snapshot that cannot be upgraded |
-| `Cancelled`, `Other` | A cancelled statement; anything else |
+| `Cancelled` | A statement cancelled before it finished; the hosts of this release do not cancel one, since a scope's cancellation does not reach SQL calls |
+| `Other` | Anything else |
 
 Retrying is the application's decision; the library and the host retry nothing.
 

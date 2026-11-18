@@ -25,6 +25,7 @@ import socket
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 from pathlib import Path
 
@@ -154,6 +155,49 @@ def crud_journey(args, port, label):
     check(status == 404, f"{label} second delete: {status} {body!r}")
 
 
+def concurrent_journey(args, port, label):
+    """40 creates, 10 updates of one part and 10 lists at once, from 20 threads: the
+    workers' leases share the host's pool on the host's threads."""
+    status, body = call(args, port, "POST", "/parts", b'{"code":"shared","quantity":0}')
+    check(status == 201, f"{label} shared part: {status} {body!r}")
+    shared = json.loads(body)["id"] if status == 201 else 0
+    before = len(json.loads(call(args, port, "GET", "/parts")[1]))
+    jobs = [("POST", "/parts", f'{{"code":"c{i}","quantity":{i}}}'.encode(), 201) for i in range(40)]
+    jobs += [("PUT", f"/parts/{shared}", f'{{"quantity":{i}}}'.encode(), 200) for i in range(10)]
+    jobs += [("GET", "/parts", None, 200) for _ in range(10)]
+    results = []
+    lock = threading.Lock()
+
+    def worker(batch):
+        for method, path, body, expected in batch:
+            try:
+                status, _ = http_call(port, method, path, body)
+            except OSError as error:
+                status = repr(error)
+            with lock:
+                results.append((method, path, status, expected))
+
+    threads = [threading.Thread(target=worker, args=(jobs[i::20],)) for i in range(20)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join(120)
+    wrong = [r for r in results if r[2] != r[3]]
+    check(len(results) == len(jobs) and not wrong, f"{label} concurrent requests: {len(results)} done, wrong {wrong[:5]}")
+    status, body = call(args, port, "GET", "/parts")
+    after = len(json.loads(body)) if status == 200 else -1
+    check(after == before + 40, f"{label} rows after the concurrent creates: {before} then {after}")
+
+
+def http_call(port, method, path, body=None, timeout=60):
+    connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
+    connection.request(method, path, body=body)
+    response = connection.getresponse()
+    response.read()
+    connection.close()
+    return response.status, None
+
+
 def probe_journey(args, port, label):
     status, body = call(args, port, "POST", "/setup")
     check(status == 200, f"{label} setup: {status} {body!r}")
@@ -203,6 +247,7 @@ def test_sqlite_crud(args):
                 "--config", "sql.main.migrate=on_start")
     try:
         crud_journey(args, host.port, "sqlite")
+        concurrent_journey(args, host.port, "sqlite")
     finally:
         host.stop()
     check("applied 0001_create_parts.sql" in host.stderr(), f"migrations applied at start: {host.stderr()}")
@@ -210,7 +255,7 @@ def test_sqlite_crud(args):
     host = Host(args, image, "--sql-pool", f"main=sqlite:{database}", "--config", f"sql.main.migrations={migrations}")
     try:
         status, body = call(args, host.port, "GET", "/parts")
-        check(status == 200 and len(json.loads(body)) == 1, f"data survives a restart: {status} {body!r}")
+        check(status == 200 and len(json.loads(body)) == 42, f"data survives a restart: {status} {len(body)}")
     finally:
         host.stop()
 
@@ -368,15 +413,38 @@ def free_port():
         return sock.getsockname()[1]
 
 
+def make_certificates(openssl, directory):
+    """A CA and a server certificate for localhost and 127.0.0.1, signed by it."""
+    directory.mkdir(parents=True, exist_ok=True)
+    run = lambda *command: subprocess.run([openssl, *command], cwd=directory, capture_output=True, check=True)
+    run("req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", "ca.key", "-out", "ca.crt", "-days", "2",
+        "-subj", "/CN=neura-sql-test-ca")
+    run("req", "-newkey", "rsa:2048", "-nodes", "-keyout", "server.key", "-out", "server.csr",
+        "-subj", "/CN=localhost")
+    (directory / "server.ext").write_text("subjectAltName=DNS:localhost,IP:127.0.0.1\n")
+    run("x509", "-req", "-in", "server.csr", "-CA", "ca.crt", "-CAkey", "ca.key", "-CAcreateserial",
+        "-out", "server.crt", "-days", "2", "-extfile", "server.ext")
+    for name in ("ca.crt", "server.crt", "server.key"):
+        os.chmod(directory / name, 0o644)
+
+
 class Postgres:
-    def __init__(self, version, image):
+    def __init__(self, version, image, certificates=None):
         self.port = free_port()
         self.name = f"neura-sql-test-{version.replace('.', '-')}-{os.getpid()}"
         subprocess.run(["docker", "rm", "-f", self.name], capture_output=True)
-        result = subprocess.run(["docker", "run", "-d", "--rm", "--name", self.name, "--network", "host",
-                                 "-e", f"POSTGRES_PASSWORD={PG_PASSWORD}", image,
-                                 "-c", "listen_addresses=127.0.0.1", "-c", f"port={self.port}"],
-                                capture_output=True, text=True, timeout=120)
+        command = ["docker", "run", "-d", "--rm", "--name", self.name, "--network", "host",
+                   "-e", f"POSTGRES_PASSWORD={PG_PASSWORD}"]
+        server = ["-c", "listen_addresses=127.0.0.1", "-c", f"port={self.port}"]
+        if certificates:
+            # The server's key must belong to the postgres user.
+            command += ["-v", f"{certificates}:/certs:ro", "--entrypoint", "sh", image, "-c",
+                        "cp /certs/server.crt /certs/server.key /tmp/ && chown postgres /tmp/server.key && "
+                        "chmod 600 /tmp/server.key && exec docker-entrypoint.sh postgres " + " ".join(server) +
+                        " -c ssl=on -c ssl_cert_file=/tmp/server.crt -c ssl_key_file=/tmp/server.key"]
+        else:
+            command += [image, *server]
+        result = subprocess.run(command, capture_output=True, text=True, timeout=120)
         if result.returncode != 0:
             raise RuntimeError(f"cannot start PostgreSQL {version}: {result.stderr}")
         deadline = time.time() + 60
@@ -426,6 +494,7 @@ def test_postgres(args):
                         env=env)
             try:
                 crud_journey(args, host.port, label)
+                concurrent_journey(args, host.port, label)
             finally:
                 host.stop()
             check(PG_PASSWORD not in host.stderr(), f"{label}: the password is not logged")
@@ -458,6 +527,37 @@ def test_postgres(args):
                   f"{label}: verify-full by default refuses a server without TLS: {result.stderr}")
         finally:
             server.stop()
+        if not args.openssl:
+            continue
+        # verify-full against a server with TLS: the CA the URL names, the
+        # host name in the certificate, and a CA that did not sign it.
+        certificates = Path(args.work) / "pg-certificates"
+        shutil.rmtree(certificates, ignore_errors=True)
+        make_certificates(args.openssl, certificates)
+        other = Path(args.work) / "pg-other-ca"
+        shutil.rmtree(other, ignore_errors=True)
+        make_certificates(args.openssl, other)
+        server = Postgres(version, image, certificates)
+        try:
+            for host_name, ca, expected in (("localhost", certificates, True), ("127.0.0.1", certificates, True),
+                                            ("localhost", other, False)):
+                url = (f"main=postgresql://postgres@{host_name}:{server.port}/postgres"
+                       f"?sslrootcert={ca / 'ca.crt'}")
+                tls = Host(args, probe, "--sql-pool", url, "--config", "sql.main.password_env=NEURA_SQL_TEST_PASSWORD",
+                           env=env, expect_ready=False)
+                try:
+                    if expected:
+                        check(tls.ready, f"{label}: verify-full over TLS to {host_name}: {tls.stderr()}")
+                        if tls.ready:
+                            status, body = call(args, tls.port, "POST", "/setup")
+                            check(status == 200, f"{label}: a statement over TLS: {status} {body!r}")
+                    else:
+                        check(not tls.ready and "certificate verify failed" in tls.stderr(),
+                              f"{label}: a certificate from another CA is refused: {tls.stderr()}")
+                finally:
+                    tls.stop()
+        finally:
+            server.stop()
 
 
 def main():
@@ -467,6 +567,7 @@ def main():
     parser.add_argument("--source", required=True)
     parser.add_argument("--work", required=True)
     parser.add_argument("--curl")
+    parser.add_argument("--openssl", help="makes certificates for the PostgreSQL TLS checks")
     parser.add_argument("--postgres", action="store_true", help="run the PostgreSQL tests instead")
     parser.add_argument("--postgres-build", action="store_true", help="the host has the PostgreSQL provider")
     parser.add_argument("--only")

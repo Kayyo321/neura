@@ -517,18 +517,14 @@ SqlAnswer Session::call(SqlOperation operation, const std::vector<HostValue>& ar
         }
         std::vector<Value> values;
         bool more = false;
-        if (limit > 0) {
-            status = cursor->fetch(static_cast<std::size_t>(limit), wait, values, more);
-            if (!status.ok()) return answer(status);
-        } else {
-            // A limit of zero runs the statement and reads no row.
-            std::vector<Value> none;
-            status = cursor->fetch(0, wait, none, more);
-            if (!status.ok()) return answer(status);
-        }
+        // A limit of zero runs the statement and reads no row.
+        status = cursor->fetch(static_cast<std::size_t>(limit), config.page_bytes, wait, values, more);
+        if (!status.ok()) return answer(status);
         const auto columns = cursor->columns();
         cursor.reset();
-        if (encoded_bytes(values) > config.page_bytes) {
+        const auto rows = columns.empty() ? 0 : values.size() / columns.size();
+        // A page is whole: the byte budget stopping it early is TooLarge.
+        if (encoded_bytes(values) > config.page_bytes || (more && rows < static_cast<std::size_t>(limit))) {
             return answer(Status::failure(host_error::too_large,
                                           "the page holds more than " + std::to_string(config.page_bytes) +
                                               " bytes; read it with a cursor in smaller pages"));
@@ -554,13 +550,15 @@ SqlAnswer Session::call(SqlOperation operation, const std::vector<HostValue>& ar
         }
         std::vector<Value> values;
         bool more = false;
-        const auto status = found->second.cursor->fetch(static_cast<std::size_t>(max), wait, values, more);
+        // The cursor stops before the page would exceed the channel's
+        // frame, so later rows stay for the next fetch.
+        const auto status = found->second.cursor->fetch(static_cast<std::size_t>(max), held.pool->config().page_bytes,
+                                                        wait, values, more);
         if (!status.ok()) return answer(status);
         if (encoded_bytes(values) > held.pool->config().page_bytes) {
             return answer(Status::failure(host_error::too_large,
-                                          "the page holds more than " +
-                                              std::to_string(held.pool->config().page_bytes) +
-                                              " bytes; fetch fewer rows at a time"));
+                                          "one row holds more than " + std::to_string(held.pool->config().page_bytes) +
+                                              " bytes, more than the channel carries; the row is skipped"));
         }
         auto encoded = encode_values(values);
         std::vector<HostValue> fields;

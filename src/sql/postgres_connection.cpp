@@ -216,7 +216,8 @@ public:
     ~PostgresCursor() override;
 
     const std::vector<std::string>& columns() const override { return columns_; }
-    Status fetch(std::size_t max, const Wait& wait, std::vector<Value>& values, bool& more) override;
+    Status fetch(std::size_t max, std::size_t budget, const Wait& wait, std::vector<Value>& values,
+                 bool& more) override;
 
 private:
     PostgresConnection& connection_;
@@ -239,9 +240,12 @@ public:
         while (PGresult* result = next(wait, status)) {
             if (status.ok()) {
                 status = check(result, wait);
-                if (status.ok()) {
-                    const char* count = PQcmdTuples(result);
-                    if (count && *count) affected = std::strtoll(count, nullptr, 10);
+                // INSERT, UPDATE, DELETE and MERGE count their rows, with or
+                // without RETURNING; a query affects none, as on SQLite.
+                const std::string_view tag = PQcmdStatus(result);
+                const char* count = PQcmdTuples(result);
+                if (status.ok() && count && *count && !tag.starts_with("SELECT")) {
+                    affected = std::strtoll(count, nullptr, 10);
                 }
             }
             PQclear(result);
@@ -574,10 +578,16 @@ PostgresCursor::~PostgresCursor() {
     connection_.cursor_closed();
 }
 
-Status PostgresCursor::fetch(std::size_t max, const Wait& wait, std::vector<Value>& values, bool& more) {
+Status PostgresCursor::fetch(std::size_t max, std::size_t budget, const Wait& wait, std::vector<Value>& values,
+                             bool& more) {
     std::size_t rows = 0;
+    std::size_t bytes = 0;
     while (pending_ && rows < max) {
         const int fields = PQnfields(pending_);
+        std::size_t size = 0;
+        for (int i = 0; i < fields; ++i) size += 16 + static_cast<std::size_t>(PQgetlength(pending_, 0, i));
+        if (rows > 0 && bytes + size > budget) break;
+        bytes += size;
         for (int i = 0; i < fields; ++i) {
             Value value;
             if (!PQgetisnull(pending_, 0, i) &&

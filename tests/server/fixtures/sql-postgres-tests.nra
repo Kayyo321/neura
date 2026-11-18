@@ -105,7 +105,8 @@ let SqlPostgresTests = module (
         last second = test.assert_ok<immutable.ImmutableList<sql.Row>>(cursor.fetch(1000));
         test.assert_equal<int64>(2000, test.assert_ok<int64>(second.get(999).int64("n")));
         test.assert_ok<Unit>(cursor.close());
-        last page = test.assert_ok<immutable.ImmutableList<sql.Row>>(connection.query_page("SELECT n FROM generate_series(1, 5) AS n", 3));
+        last page = test.assert_ok<immutable.ImmutableList<sql.Row>>(
+            connection.query_page("SELECT n FROM generate_series(1, 5) AS n", 3));
         test.assert_equal<int>(3, page.size());
         test.assert_ok<Unit>(connection.close());
     };

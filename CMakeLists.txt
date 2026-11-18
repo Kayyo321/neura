@@ -795,7 +795,7 @@ if(BUILD_TESTING)
                 list(APPEND NEURA_SQL_TEST_OPTIONS --curl "${NEURA_SERVER_TEST_CURL}")
             endif()
             if(NEURA_ENABLE_POSTGRES)
-                list(APPEND NEURA_SQL_TEST_OPTIONS --postgres-build)
+                list(APPEND NEURA_SQL_TEST_OPTIONS --postgres-build --openssl "${NEURA_SERVER_TEST_OPENSSL}")
             endif()
             add_test(NAME server-sql COMMAND "${Python3_EXECUTABLE}"
                 "${CMAKE_CURRENT_SOURCE_DIR}/tests/server/sql_host_test.py"
@@ -1153,6 +1153,10 @@ if(BUILD_TESTING)
             continue()
         endif()
         get_filename_component(area "${area_dir}" NAME)
+        # Std.Data.Sql's tests need the SQL providers (--sql-pool).
+        if(area STREQUAL "sql" AND NOT TARGET neura_sql)
+            continue()
+        endif()
         add_test(NAME stdlib-${area} COMMAND ${CMAKE_COMMAND}
             "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"

@@ -303,16 +303,17 @@ export let Sql = module (
         export let byte_count = func -> int => octets.length;
 
         /// @brief The raw integer payload: the Int, 1 or 0 for a Bool, 0 otherwise.
-        #Pure
+        #[Internal, Pure]
         export let wire_integer = func -> int64 => integer;
         /// @brief The raw Float payload; 0.0 for other kinds.
-        #Pure
+        #[Internal, Pure]
         export let wire_real = func -> float64 => real;
         /// @brief The raw Text payload; empty for other kinds.
-        #Pure
+        #[Internal, Pure]
         export let wire_text = func -> string => characters;
         /// @brief The raw Bytes payload, not copied: the library passes it to the host. Use `as_bytes` for a
         /// copy.
+        #Internal
         export let wire_bytes = func -> uint8[list] => octets;
 
         /// @brief Equal kinds and payloads; Floats compare by their bits, so NaN equals NaN.
@@ -403,7 +404,9 @@ export let Sql = module (
         last digits = "0123456789ABCDEF";
         let out = "";
         for (let b in data) {
-            out = out + digits.slice((b >> 4) as int, ((b >> 4) as int) + 1) + digits.slice((b & 15) as int, ((b & 15) as int) + 1);
+            last high = (b >> 4) as int;
+            last low = (b & 15) as int;
+            out = out + digits.slice(high, high + 1) + digits.slice(low, low + 1);
         }
         return out;
     };
@@ -942,7 +945,8 @@ export let Sql = module (
         /// @brief At most `limit` rows of a query on a connection of its own. A limit above the pool's page
         /// (S-11) is TooLarge.
         #NoDiscard
-        export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>> {
+        export let query_page = func(text: string, limit: int, parameters: ...)
+            -> Result<immutable.ImmutableList<Row>> {
             return match (values_of(parameters)) {
                 Result.Err(problem) => Result<immutable.ImmutableList<Row>>.Err(problem),
                 Result.Ok(values) => match (acquire()) {
@@ -1026,7 +1030,7 @@ export let Sql = module (
         };
 
         /// @brief The host's lease number, valid in this execution only; the host refuses any other number.
-        #Pure
+        #[Internal, Pure]
         export let handle = func -> int64 => lease;
 
         /// @brief Whether `close` has not been called.
@@ -1069,7 +1073,8 @@ export let Sql = module (
         /// @brief At most `limit` rows of a query. A limit of 0 runs it and returns no row; a limit above the
         /// pool's page (S-11) is TooLarge.
         #NoDiscard
-        export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>> {
+        export let query_page = func(text: string, limit: int, parameters: ...)
+            -> Result<immutable.ImmutableList<Row>> {
             if (!open_now) {
                 return Result<immutable.ImmutableList<Row>>.Err(closed("connection", "query_page"));
             }
@@ -1183,7 +1188,8 @@ export let Sql = module (
 
         /// @brief At most `limit` rows of a query.
         #NoDiscard
-        export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>> {
+        export let query_page = func(text: string, limit: int, parameters: ...)
+            -> Result<immutable.ImmutableList<Row>> {
             if (!active) {
                 return Result<immutable.ImmutableList<Row>>.Err(closed("transaction", "query_page"));
             }

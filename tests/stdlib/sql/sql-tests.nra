@@ -89,8 +89,10 @@ let SqlTests = module (
         last nut = rows[1];
         test.assert_float_near(2.0, test.assert_ok<float64>(nut.float64("weight")), 0.0);
         test.assert(!test.assert_ok<bool>(nut.bool("active")));
-        test.assert_equal_string("small", test.assert_some<string>(test.assert_ok<Optional<string>>(nut.optional_text("note"))));
-        test.assert_equal_string("Row(id=2, code='nut', weight=2.0, active=0, photo=NULL, note='small')", nut.to_string());
+        last note = test.assert_ok<Optional<string>>(nut.optional_text("note"));
+        test.assert_equal_string("small", test.assert_some<string>(note));
+        test.assert_equal_string("Row(id=2, code='nut', weight=2.0, active=0, photo=NULL, note='small')",
+                                 nut.to_string());
         test.assert(kind(test.assert_err<int64>(nut.int64("missing"))) == sql.ErrorKind.NotFound);
         test.assert(kind(test.assert_err<string>(nut.text("photo"))) == sql.ErrorKind.InvalidInput);
         test.assert(kind(test.assert_err<int64>(nut.int64("code"))) == sql.ErrorKind.InvalidInput);
@@ -117,7 +119,8 @@ let SqlTests = module (
         test.assert(kind(narrowed) == sql.ErrorKind.InvalidInput);
         test.assert(strings.contains(detail(narrowed), "outside the int32 range"));
         last too_big: uint64 = 18446744073709551615;
-        test.assert(kind(test.assert_err<sql.Row>(pool.query_one("SELECT $1 AS x", too_big))) == sql.ErrorKind.InvalidInput);
+        last unsigned = test.assert_err<sql.Row>(pool.query_one("SELECT $1 AS x", too_big));
+        test.assert(kind(unsigned) == sql.ErrorKind.InvalidInput);
         last exact = test.assert_ok<sql.Row>(pool.query_one("SELECT 9007199254740993 AS x"));
         test.assert(kind(test.assert_err<float64>(exact.float64("x"))) == sql.ErrorKind.InvalidInput);
     };
@@ -227,6 +230,16 @@ let SqlTests = module (
         test.assert(!cursor.has_more());
         test.assert_equal<int>(0, page(cursor.fetch(10)).size());
         test.assert_ok<Unit>(cursor.close());
+        // Pages stop before about 1 MB of values; the rest stays for the next fetch.
+        last wide = test.assert_ok<sql.Cursor>(connection.open_cursor(
+            "WITH RECURSIVE c(x) AS (SELECT 1 UNION ALL SELECT x + 1 FROM c WHERE x < 5) "
+            + "SELECT x, zeroblob(300000) AS b FROM c"));
+        test.assert_equal<int>(3, page(wide.fetch(10)).size());
+        last tail = page(wide.fetch(10));
+        test.assert_equal<int>(2, tail.size());
+        test.assert_equal<int64>(5, test.assert_ok<int64>(tail.get(1).int64("x")));
+        test.assert(!wide.has_more());
+        test.assert_ok<Unit>(wide.close());
         test.assert_ok<int64>(connection.execute("DROP TABLE numbers"));
         test.assert_ok<Unit>(connection.close());
         test.assert(kind(test.assert_err<int64>(connection.execute("SELECT 1"))) == sql.ErrorKind.InvalidInput);
@@ -243,7 +256,8 @@ let SqlTests = module (
     export let test_unicode_text_and_empty_bytes = func() -> void {
         last pool = main();
         last empty: uint8[list] = new;
-        last row = test.assert_ok<sql.Row>(pool.query_one("SELECT $1 AS t, $2 AS b", "héllo ✓", sql.bytes_value(empty)));
+        last row = test.assert_ok<sql.Row>(pool.query_one("SELECT $1 AS t, $2 AS b", "héllo ✓",
+                                                          sql.bytes_value(empty)));
         test.assert_equal_string("héllo ✓", test.assert_ok<string>(row.text("t")));
         test.assert_equal<int>(0, test.assert_ok<uint8[list]>(row.bytes("b")).length);
     };

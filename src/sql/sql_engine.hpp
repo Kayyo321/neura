@@ -67,8 +67,11 @@ public:
     virtual ~Cursor() = default;
     virtual const std::vector<std::string>& columns() const = 0;
     // Appends up to `max` rows, row by row, to `values`; `more` tells
-    // whether another row may follow.
-    virtual Status fetch(std::size_t max, const Wait& wait, std::vector<Value>& values, bool& more) = 0;
+    // whether another row follows. Stops early, before a row that would
+    // take the values past `budget` bytes (16 per value and its payload),
+    // but always returns at least one row when there is one.
+    virtual Status fetch(std::size_t max, std::size_t budget, const Wait& wait, std::vector<Value>& values,
+                         bool& more) = 0;
 };
 
 class Connection {

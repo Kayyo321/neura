@@ -49,7 +49,8 @@ public:
     ~SqliteCursor() override;
 
     const std::vector<std::string>& columns() const override { return columns_; }
-    Status fetch(std::size_t max, const Wait& wait, std::vector<Value>& values, bool& more) override;
+    Status fetch(std::size_t max, std::size_t budget, const Wait& wait, std::vector<Value>& values,
+                 bool& more) override;
 
 private:
     SqliteConnection& connection_;
@@ -300,13 +301,15 @@ SqliteCursor::~SqliteCursor() {
     if (started_) connection_.statement_closed();
 }
 
-Status SqliteCursor::fetch(std::size_t max, const Wait& wait, std::vector<Value>& values, bool& more) {
+Status SqliteCursor::fetch(std::size_t max, std::size_t budget, const Wait& wait, std::vector<Value>& values,
+                           bool& more) {
     if (!started_) {
         started_ = true;
         connection_.statement_opened();
     }
     const auto columns = static_cast<int>(columns_.size());
     std::size_t rows = 0;
+    std::size_t bytes = 0;
     // The statement runs even when no row is wanted.
     while (!done_ && (rows < max || !pending_)) {
         if (!pending_) {
@@ -322,6 +325,16 @@ Status SqliteCursor::fetch(std::size_t max, const Wait& wait, std::vector<Value>
             pending_ = true;
         }
         if (rows == max) break;
+        std::size_t size = 0;
+        for (int i = 0; i < columns; ++i) {
+            // Only text and blobs have a payload; asking an INTEGER or REAL
+            // column for its bytes would convert it to text.
+            const int type = sqlite3_column_type(statement_, i);
+            size += 16;
+            if (type == SQLITE_TEXT || type == SQLITE_BLOB) size += static_cast<std::size_t>(sqlite3_column_bytes(statement_, i));
+        }
+        if (rows > 0 && bytes + size > budget) break;
+        bytes += size;
         for (int i = 0; i < columns; ++i) {
             Value value;
             switch (sqlite3_column_type(statement_, i)) {
