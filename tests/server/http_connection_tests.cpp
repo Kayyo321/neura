@@ -49,7 +49,8 @@ private:
 
 class Loopback {
 public:
-    explicit Loopback(BufferedResponder respond, ConnectionLimits limits = {}) {
+    template <typename Respond>
+    explicit Loopback(Respond respond, ConnectionLimits limits = {}) {
         const Socket listener(::socket(AF_INET, SOCK_STREAM, 0));
         sockaddr_in address{};
         address.sin_family = AF_INET;
@@ -251,6 +252,25 @@ void timeouts() {
     check_error(body.receive_to_close(), "504");
     body.finish_writes();
     check(body.end() == ConnectionEnd::RequestTimeout, "body read did not honor the request deadline");
+
+    // The server host's 504 for a request past S-8 starts after the
+    // connection's deadline when the host is slow to see its own (50 ms
+    // earlier): it still reaches the client whole.
+    const Responder late = [](const RequestHead&, RequestBody&, ResponseWriter& writer,
+                              ConnectionClock::time_point deadline) {
+        std::this_thread::sleep_until(deadline + 100ms);
+        const string answer = "{\"error\":\"timeout\"}";
+        if (writer.start(504, {}, answer.size()) != StreamStatus::Ready) return;
+        if (writer.write(answer) != StreamStatus::Ready) return;
+        (void)writer.finish();
+    };
+    limits.request_timeout = 50ms;
+    Loopback past(late, limits);
+    past.send(get);
+    past.finish_writes();
+    const auto reply = past.receive_to_close();
+    check(reply.starts_with("HTTP/1.1 504 ") && reply.ends_with("\r\n\r\n{\"error\":\"timeout\"}"),
+          "a response started past the deadline did not reach the client: " + reply);
 }
 
 void response_limit() {

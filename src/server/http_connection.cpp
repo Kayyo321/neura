@@ -207,6 +207,12 @@ public:
                        std::optional<std::uint64_t> length) override {
         if (started_) return fail();
         started_ = true;
+        // A response that starts at or past the deadline is the host's 504
+        // for a request past S-8: like close_with_status's, it has its own
+        // bounded write window, or it would never leave and the client would
+        // see the connection close with no answer. The host's deadline is
+        // 50 ms before this one, which a loaded machine can overrun.
+        if (ConnectionClock::now() >= deadline_) deadline_ = ConnectionClock::now() + std::chrono::seconds{1};
         const bool no_content = status == 204 || status == 304;
         if (status < 200 || status > 599 || !valid_fields(headers) ||
             ((no_content || status == 205) && length && *length != 0)) {
