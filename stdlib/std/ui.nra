@@ -852,6 +852,8 @@ export let Ui = module (
         // Set while the root renders, and when a component is invalidated meanwhile (a child's mount action that
         // changes state, such as a router reading the host's location), so that the turn renders again.
         let rendering: bool = false;
+        // Set by `render_all_again` during a render: the turn renders its dirty components again before it commits.
+        let render_before_commit: bool = false;
         let invalidated_while_rendering: bool = false;
 
         #Internal
@@ -1141,13 +1143,14 @@ export let Ui = module (
             }
         };
 
-        /// @brief Renders every component again at the end of the turn, as after a reset. The router calls it
-        /// when it learns, as it mounts, that links rendered earlier in the turn used another routing form.
+        /// @brief Renders every component again, as after a reset. Called during a render, the components render
+        /// again before the turn commits, so the page never shows the first renders. The router calls it when it
+        /// learns, as it mounts, that links rendered earlier in the turn used another routing form.
         #Internal
         export let render_all_again = func {
             invalidate_all(top);
             if (rendering) {
-                invalidated_while_rendering = true;
+                render_before_commit = true;
             }
         };
 
@@ -1327,7 +1330,32 @@ export let Ui = module (
             invalidated_while_rendering = false;
             rendering = true;
             render_tree(top, rendered, journal);
+            // At most four further passes, so that a render that keeps asking cannot hold the root. A component
+            // rendered twice commits its last view only.
+            let passes = 0;
+            while (render_before_commit && passes < 4 && !closed) {
+                render_before_commit = false;
+                passes += 1;
+                render_tree(top, rendered, journal);
+            }
+            render_before_commit = false;
             rendering = false;
+            if (passes > 0) {
+                let i = 0;
+                while (i < rendered.length) {
+                    let later = false;
+                    for (let j = i + 1; j < rendered.length; j++) {
+                        if (rendered[j].component == rendered[i].component) {
+                            later = true;
+                        }
+                    }
+                    if (later) {
+                        rendered.remove_at(i);
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
             if (rendered.length == 0) {
                 return;
             }

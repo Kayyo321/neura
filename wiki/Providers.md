@@ -65,9 +65,11 @@ All have a `uint32` error. The adapter key is the `host` member of `new NvmExecu
 | `neura.ui.commit` | 1 | `int64` root, `uint8[list]` operations | none | no | `ui` |
 | `neura.ui.event.next` | 1 | `int64` root, `int32` maximum | `uint8[list]` events | yes, can be cancelled | `ui` |
 | `neura.ui.stats` | 1 | `int64` root | `[int64 nodes, int64 listeners, int64 templates, int64 queued]` | no | `ui` |
+| `neura.ui.focus` | 1 | `int64` root, element `id` text | none | no | `ui` |
 | `neura.history.current` | 1 | none | path text | no | `history` |
 | `neura.history.push`, `replace` | 1 | path text | the current path | no | `history` |
 | `neura.history.next` | 1 | none | path text | yes, can be cancelled | `history` |
+| `neura.history.link` | 1 | path text | the `href` text | no | `history` |
 
 The runtime answers two kinds of service itself, without reporting a request to the adapter:
 
@@ -107,6 +109,9 @@ A browser run proves blocks only on idle callbacks, one attempt at a time, and e
 | `commit` | Decodes the batch, validates all of it, then applies it; marks `neura:first-commit` once and `neura:commit-end` after each | 4: undecodable or rejected batch, nothing changed; 100: the browser failed while applying, and the root is faulted |
 | `event.next` | Answers at once when events are queued, or waits for the next; at most `maximum` (1 to 65,536) records | 3: another `event.next` is waiting on the root; 4; 15: cancelled |
 | `stats` | Managed nodes (the container excluded), installed listeners, registered templates, queued events | 4 |
+| `focus` | Moves the keyboard focus to the element whose `id` is the text, when the root's element contains it (the root's own element excluded); the browser fires the element's `focus` and `blur` events as for any focus change. Added in 0.3.0 for `ui.FocusHost` | 1: the root holds no such element; 4: an unknown root or an empty `id` |
+
+A cancelled `event.next` whose answer the adapter had not yet delivered when the cancellation reached it (`cancelRequest` in `nvm.js` discards such an answer) puts the records it took back at the front of the queue, so a wait that loses a race loses no event; a cancelled `history.next` keeps its navigation for the next wait in the same way.
 
 A faulted root delivers no events and refuses every commit with 100 until it is closed. There is no reset service: `Std.Ui` resets a root by closing it and opening a new one on the same element.
 
@@ -164,9 +169,9 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 
 ## History services
 
-`HistoryHost` in `ui.mjs` implements the `history` group. A path is absolute (it starts with `/`), at most 8 KiB, without control characters; another path answers error 4. With `mode: "hash"`, the default, the path is kept in the fragment (`#/parts/7`), so any static file host serves the page. With `mode: "history"` it is the URL's path and query, and the host must serve `index.html` for unknown paths.
+`HistoryHost` in `ui.mjs` implements the `history` group. A path is absolute (it starts with `/`), at most 8 KiB, without control characters; another path answers error 4. With `mode: "hash"`, the default, the path is kept in the fragment (`#/parts/7`), so any static file host serves the page. With `mode: "history"` it is the URL's path and query below `base` (default `/`; `new HistoryHost({ mode: 'history', base: '/app/' })` keeps `/parts/7` at `/app/parts/7`), and the server must answer every application path below the base with `index.html` (the server rule of [web bundles](#web-bundles)). Paths are percent-encoded in the URL and decoded when read; a malformed escape is read as written.
 
-`push` and `replace` change the URL without loading a page and answer the current path. `next` waits for a navigation the program did not make (back, forward, an edited fragment); navigations while nobody waits coalesce to the latest. A second waiting `next` answers 3, and a cancelled one 15.
+`push` and `replace` change the URL without loading a page and answer the current path. `next` waits for a navigation the program did not make (back, forward, an edited fragment); navigations while nobody waits coalesce to the latest. A second waiting `next` answers 3, and a cancelled one 15. `link` (version 1, added in 0.3.0) answers the `href` of a link to the path in the page's mode: `#/parts/7` with hash routing, and the base followed by the path, `/parts/7` or `/app/parts/7`, with history routing. A program learns the routing mode only through `link`, so one image runs under either mode.
 
 ## Web bundles
 
@@ -175,12 +180,14 @@ Generated with `encodeCommit` and `encodeEvents` of `hosts/web/ui-wire.mjs` (`no
 | File | Content |
 | --- | --- |
 | `index.html` | The content-security policy as a `meta` element, the mount element (`--mount`, default `app`), a JSON data block naming the image and `nvm.wasm` with their SHA-256, the boot module with its `integrity`, a message for browsers without WebAssembly exception handling, and a failure banner |
-| `bundle.json` | Canonical JSON (sorted keys, no whitespace): `schema` 1, `kind` `web`, `id`, `name`, `version`, `image`, `files` (path, SHA-256, byte length, media type, `initial`), `requires` (`browser_adapter` 1, `ui_host` 1), `capabilities`, `origins`, `limits` (`W-1`), `contracts`, `csp`, `routing` |
+| `bundle.json` | Canonical JSON (sorted keys, no whitespace): `schema` 1, `kind` `web`, `id`, `name`, `version`, `image`, `files` (path, SHA-256, byte length, media type, `initial`), `requires` (`browser_adapter` 1, `ui_host` 1), `capabilities`, `origins`, `limits` (`W-1`), `contracts`, `csp`, `routing`, `base` (the URL path of a history-routed bundle) |
 | `boot.<sha256>.mjs`, `nvm.<sha256>.js`, `ui.<sha256>.mjs`, `dom.<sha256>.mjs`, `ui-wire.<sha256>.mjs`, `nvm.<sha256>.mjs` | The browser host, with each import renamed to the file's digest name |
 | `nvm.<sha256>.wasm`, `app.<sha256>.nvr` | The runtime and the image |
 | `styles/<sha256>.css`, `assets/<sha256>.<extension>` | The image's stylesheets and assets, when it has any |
 
-The policy is `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`, and the same text is the `csp` field. The boot module fetches the image and `nvm.wasm` with their `integrity`, so a changed file stops the start. It compiles `nvm.wasm` by streaming when the host sends `application/wasm` and from bytes otherwise, runs the image with `browserHost` and a `UiHost` and `HistoryHost`, and sets `data-neura-state` on the root element to `running`, `completed`, `failed` or `unsupported`. A trap shows the failure banner with the trap's diagnostic. With `--routing history` the script writes `404.html` and says that the host must serve it for unknown paths.
+The policy is `default-src 'none'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self'; img-src 'self'; font-src 'self'; connect-src 'self'; base-uri 'none'; form-action 'none'`, and the same text is the `csp` field. The boot module fetches the image and `nvm.wasm` with their `integrity`, so a changed file stops the start. It compiles `nvm.wasm` by streaming when the host sends `application/wasm` and from bytes otherwise, runs the image with `browserHost` and a `UiHost` and `HistoryHost`, and sets `data-neura-state` on the root element to `running`, `completed`, `failed` or `unsupported`. A trap shows the failure banner with the trap's diagnostic. The boot module fetches the image and the runtime relative to its own URL, which is the bundle's directory, and gives the `UiHost` that directory as `assetBase`, so bundled media resolve against the bundle whatever the page's path.
+
+With `--routing history` (and `--base`, default `/`, the URL path the bundle is served under), the page's own references (the boot module and the stylesheets) start at the base instead of `./`, because the page is also served at deep application paths such as `/parts/7`, where a relative reference would resolve below `/parts/`; the policy's `base-uri 'none'` rules out a `<base>` element. The boot configuration and `bundle.json` carry `base`. The server rule: the host serves the bundle's files at `<base><file>` and answers every other path below the base with `index.html`. The script also writes `404.html`, a copy of `index.html`, for static hosts that serve that file for unknown paths (GitHub Pages, for example), and prints the rule. With hash routing the references stay relative and the bundle works under any path.
 
 The script does not yet refuse an image whose imports fall outside the groups a web target may have, and it does not name module imports with `integrity`, which only the boot module carries.
 

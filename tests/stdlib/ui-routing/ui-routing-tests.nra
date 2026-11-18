@@ -150,4 +150,23 @@ let UiRoutingTests = module (
         test.assert(!router.component().is_mounted());
         test.assert(!router.current_page().is_mounted());
     };
+
+    // Under history routing, a page that renders the router's links before the router mounts first writes them
+    // in the hash form; the router renders the page again before the turn commits, so the one commit carries
+    // `/parts`, never `#/parts`.
+    export let test_links_follow_history_routing = func() -> void {
+        let trace: string[list] = new;
+        let router = parts_router(trace);
+        let host = new model.Host();
+        host.use_history_routing();
+        let outer = ui.component<string>(new ui.State<string>("app"), new func(name: string) -> ui.View {
+            trace.append("render " + name + " " + router.href("/parts"));
+            return shell_view(router.link("/parts"), router.on_link("/parts"), ui.slot(router.component()));
+        });
+        let root = mounted(host, "#app", outer);
+        test.assert_equal_string("render app #/parts; render home; render app /parts", join(trace));
+        test.assert_equal_string("open #app: root 1; commit 1 on root 1: 3 renders", join(host.log));
+        test.assert(root.stats().commits == 1);
+        root.close();
+    };
 );

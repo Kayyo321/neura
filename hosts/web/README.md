@@ -50,8 +50,8 @@ The members of `host` grant [the browser services](../../docs/runtime/Providers.
 | `clockMonotonic` | `clockMonotonic(context)` | A signed 64-bit `BigInt` in nanoseconds |
 | `sleep` | `sleep(nanos, context)` | `undefined` when the time has passed |
 | `entropy` | `entropy(count, context)` | A `Uint8Array` of `count` bytes |
-| `ui` | A `UiHost`: `openRoot`, `closeRoot`, `template`, `commit`, `nextEvents`, `stats` | As [UI services](../../docs/runtime/Providers.md#ui-services) |
-| `history` | A `HistoryHost`: `current`, `push`, `replace`, `next` | As [History services](../../docs/runtime/Providers.md#history-services) |
+| `ui` | A `UiHost`: `openRoot`, `closeRoot`, `template`, `commit`, `nextEvents`, `stats`, `focus` | As [UI services](../../docs/runtime/Providers.md#ui-services) |
+| `history` | A `HistoryHost`: `current`, `push`, `replace`, `next`, `link` | As [History services](../../docs/runtime/Providers.md#history-services) |
 
 Every answer may instead be `{ error }` with a positive uint32 host error code, or a promise of either. `context.sequence` is the request's `BigInt` sequence number, from zero in each execution. A cancellable request also has `context.signal`, an `AbortSignal`. A service that throws, or whose promise rejects, closes the execution.
 
@@ -59,7 +59,7 @@ Every answer may instead be `{ error }` with a positive uint32 host error code, 
 
 ## UI services
 
-`ui.mjs` serves the UI and history groups over `DomRoot`, and `ui-wire.mjs` decodes [commits](../../docs/runtime/Providers.md#commit-encoding) and encodes [events](../../docs/runtime/Providers.md#event-encoding). Each root queues its events, coalesces `pointermove` and `scroll`, and reports overflow at the limit U-7. A commit marks `neura:first-commit` once and `neura:commit-end` after each, for the browser budgets.
+`ui.mjs` serves the UI and history groups over `DomRoot`, and `ui-wire.mjs` decodes [commits](../../docs/runtime/Providers.md#commit-encoding) and encodes [events](../../docs/runtime/Providers.md#event-encoding). Each root queues its events, coalesces `pointermove` and `scroll`, and reports overflow at the limit U-7. A commit marks `neura:first-commit` once and `neura:commit-end` after each, for the browser budgets. `new UiHost({ assetBase })` passes `assetBase` to each root's `DomRoot`; the boot module of a bundle sets it to the bundle's directory. `new HistoryHost({ mode, base })` keeps the path in the fragment (`hash`, the default) or in the URL below `base` (`history`). A cancelled `nextEvents` or `next` whose answer the adapter discarded returns what it took to the queue, so `Std.Web` can race them against each other and against command completions without losing an event.
 
 ## Runtime checks
 

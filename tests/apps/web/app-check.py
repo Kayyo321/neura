@@ -58,6 +58,8 @@ def main():
         # Name, source, journey module, linked stylesheets, routing mode, and the path the browser opens.
         journeys = (('app', HERE / 'app/app.nra', 'app-test.mjs', 1, 'hash', '/'),
                     ('portfolio', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0, 'hash', '/'),
+                    ('portfolio-history', HERE / 'portfolio/portfolio.nra', 'portfolio-test.mjs', 0, 'history',
+                     '/projects/neura'),
                     ('tasks', HERE / 'tasks/tasks.nra', 'tasks-test.mjs', 0, 'hash', '/'))
         for name, source, module, linked, routing, start in journeys:
             if args.only and name not in args.only:
@@ -79,7 +81,7 @@ def main():
                 raise SystemExit(f'{name}: expected {linked} linked stylesheets, found {sheets}')
             for browser in browsers:
                 version = subprocess.check_output([browser, '--version'], text=True, timeout=10).strip()
-                report = host_check.run_browser(browser, directory)
+                report = host_check.run_browser(browser, directory, path=start, fallback=routing == 'history')
                 if 'error' in report:
                     raise SystemExit(f'{name}: {version}: {report["error"]}')
                 steps = '; '.join(step['name'] + (f' {step["ms"]} ms' if 'ms' in step else '') for step in report['steps'])
@@ -89,14 +91,16 @@ def main():
     return 0
 
 
-def probe(bundle, work, browser):
-    """Loads a copy of `bundle` with bundle-probe.mjs added to its page and returns the probe's report."""
+def probe(bundle, work, browser, path='/', base=None):
+    """Loads a copy of `bundle` with bundle-probe.mjs added to its page and returns the probe's report. A bundle
+    built for history routing under `base` is opened at `path`, with index.html answering every application path."""
     copy = work / f'probe-{bundle.name}'
     shutil.copytree(bundle, copy)
     shutil.copy(HERE / 'bundle-probe.mjs', copy / 'bundle-probe.mjs')
     index = (copy / 'index.html').read_text()
-    (copy / 'index.html').write_text(index.replace('</head>', '<script type="module" src="./bundle-probe.mjs"></script>\n</head>'))
-    report = host_check.run_browser(browser, copy)
+    source = f'{base}bundle-probe.mjs' if base else './bundle-probe.mjs'
+    (copy / 'index.html').write_text(index.replace('</head>', f'<script type="module" src="{source}"></script>\n</head>'))
+    report = host_check.run_browser(browser, copy, path=path, fallback=base is not None)
     shutil.rmtree(copy)
     if 'error' in report:
         raise SystemExit(f'bundle {bundle.name}: {report["error"]}')
@@ -125,8 +129,26 @@ def walkthrough(args, work, browsers):
     if len(assets) != 2 or any(entry['initial'] or entry['media_type'] != 'image/svg+xml'
                                or not (parts / entry['path']).exists() for entry in assets):
         raise SystemExit(f'expected two bundled SVG assets, not initial: {assets}')
+    # The same application under history routing, served from the site's root and opened at a deep path: its
+    # page's references start at the base, and the adapter resolves its bundled image against the bundle.
+    deep = site / 'parts-history'
+    built = subprocess.run([sys.executable, ROOT / 'scripts/build-web-bundle.py', '--source', HERE / 'app/app.nra',
+                            '--neura', args.neura, '--wasm', args.wasm, '--id', 'org.example.parts', '--routing',
+                            'history', '--base', '/', '--out', deep], check=True, timeout=120, capture_output=True,
+                           text=True)
+    if 'must answer every application path below /' not in built.stdout or not (deep / '404.html').exists():
+        raise SystemExit(f'bundle: history routing did not state the server rule: {built.stdout}')
+    index = (deep / 'index.html').read_text()
+    if './' in index or 'href="/styles/' not in index:
+        raise SystemExit('bundle: a history-routed page must reference its files from the base')
     for browser in browsers:
         version = subprocess.check_output([browser, '--version'], text=True, timeout=10).strip()
+        report = probe(deep, work, browser, path='/parts/7', base='/')
+        image = report.get('image', '')
+        if report.get('state') != 'running' or not any(image.endswith('/' + entry['path']) for entry in assets):
+            raise SystemExit(f'bundle: unexpected deep-link report {report}')
+        print(f'bundle: {version}: under history routing, the deep link /parts/7 loaded the application and its '
+              f'bundled image from {image.split("/", 3)[-1]}')
         report = probe(bundle, work, browser)
         if report != {'state': 'running', 'sheets': 1, 'color': 'rgb(42, 93, 176)', 'clicked': '1'}:
             raise SystemExit(f'bundle: unexpected walkthrough report {report}')

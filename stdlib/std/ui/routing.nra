@@ -132,6 +132,8 @@ export let Routing = module (
         let page_key: string = "";
         let page_made: bool = false;
         let history: ui.HistoryHost = nil;
+        // Set when `href` answered in the hash form before the router knew its host.
+        let early_links: bool = false;
         let listening: ui.Subscription = nil;
 
         /// @brief A router with no routes, at `/`.
@@ -213,6 +215,7 @@ export let Routing = module (
             if (history != nil) {
                 return history.link(path);
             }
+            early_links = true;
             return "#" + path;
         };
 
@@ -299,7 +302,13 @@ export let Routing = module (
             history = root.history();
             if (history != nil) {
                 location.set(resolve(history.location()));
+                // A parent that rendered its links before this router mounted wrote them in the hash form; under
+                // another routing form, the turn renders them again.
+                if (early_links && history.link("/") != "#/") {
+                    root.render_all_again();
+                }
             }
+            early_links = false;
             last self = instance;
             listening = root.on_navigation(new func(path: string) {
                 self.location.set(self.resolve(path));

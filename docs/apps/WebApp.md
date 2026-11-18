@@ -106,6 +106,8 @@ python3 -m http.server --directory dist 8000
 
 Open `http://localhost:8000/`. The page shows the heading and `0`; each click on *Add one* increments the number. The bundle uses relative references only, so any static file host serves it under any path: copy `dist/` to the host. A browser without WebAssembly exception handling shows a message instead of the application.
 
+The bundle uses hash routing by default: a router keeps its path in the fragment (`/#/parts/7`), which every static host serves. For addresses without the fragment, bundle with `--routing history` and, when the application does not live at the site's root, `--base /app/`. The page then references its files from the base, and the server must follow one rule, which the script prints: serve the bundle's files at `<base><file>` and answer every other path below the base with `index.html`, so that a deep link such as `/app/parts/7` loads the application at that route. The script also writes `404.html`, a copy of `index.html`, for hosts that serve that file for unknown paths. The same image runs under either mode: the router asks the page for its links.
+
 ## Going further
 
 [`tests/apps/web/app/app.nra`](../../tests/apps/web/app/app.nra) is a larger page checked in the browsers: a keyed `@for` list that adds, removes and reverses items over a `ui.State<FrozenList<string>>`, a text input bound both ways with `prop:value` and `on:input`, and a button that closes the root from a handler. Its check confirms after each step that only the component that changed renders and commits, that reordered items keep their elements, and that typing keeps the input's focus and selection.

@@ -110,9 +110,13 @@ def build(args):
         missing = [path for path in links if path not in files]
         if missing:
             sys.exit(f'build-web-bundle: {listing} links unlisted stylesheets {missing}')
-    stylesheets = ''.join(f'<link rel="stylesheet" href="./{html.escape(path)}">\n' for path in links)
+    # Hash routing keeps every page at the bundle's index.html, so references stay relative and the bundle works
+    # under any path. History routing serves index.html at every application path (/parts/7), where a relative
+    # reference would resolve below /parts/: the page's own references start at --base instead.
+    prefix = args.base if args.routing == 'history' else './'
+    stylesheets = ''.join(f'<link rel="stylesheet" href="{html.escape(prefix + path)}">\n' for path in links)
 
-    boot = json.dumps({'image': {'path': image_path, 'digest': digest(image)},
+    boot = json.dumps({'base': args.base, 'image': {'path': image_path, 'digest': digest(image)},
                        'routing': args.routing,
                        'wasm': {'path': renamed['nvm.wasm'], 'digest': digest(files[renamed['nvm.wasm']])}},
                       sort_keys=True, separators=(',', ':'))
@@ -126,7 +130,7 @@ def build(args):
 <meta http-equiv="Content-Security-Policy" content="{html.escape(CSP)}">
 <title>{html.escape(args.title)}</title>
 {stylesheets}<script type="application/json" id="neura-boot">{boot}</script>
-<script type="module" src="./{boot_module}" integrity="{integrity}"></script>
+<script type="module" src="{html.escape(prefix + boot_module)}" integrity="{integrity}"></script>
 </head>
 <body>
 <div id="{args.mount}"></div>
@@ -138,6 +142,7 @@ def build(args):
     add('index.html', page)
 
     manifest = {
+        'base': args.base,
         'capabilities': ['clock', 'console', 'entropy', 'ui'],
         'contracts': [],
         'csp': CSP,
@@ -159,8 +164,9 @@ def build(args):
     (out / 'bundle.json').write_bytes(text)
     if args.routing == 'history':
         shutil.copy(out / 'index.html', out / '404.html')
-        print('build-web-bundle: history routing: the host must serve 404.html (a copy of index.html) for '
-              'unknown paths')
+        print(f'build-web-bundle: history routing under {args.base}: the host must answer every application path '
+              f'below {args.base} with index.html (or serve 404.html, a copy of it, for unknown paths); the files '
+              f'of the bundle must be served at {args.base}<file>')
     print(f'{out}: {len(files) + 1} files, bundle {digest(text)}')
 
 
@@ -181,7 +187,11 @@ def main():
     parser.add_argument('--lang', default='en')
     parser.add_argument('--mount', default='app', help='the id of the element the entry mounts on')
     parser.add_argument('--routing', choices=('hash', 'history'), default='hash')
+    parser.add_argument('--base', default='/',
+                        help='the URL path the bundle is served under, starting and ending with "/" (history routing)')
     args = parser.parse_args()
+    if not (args.base.startswith('/') and args.base.endswith('/')) or any(c in args.base for c in '"<>\\?#'):
+        parser.error('--base is a URL path that starts and ends with "/"')
     if args.source is None:
         build(args)
         return

@@ -305,7 +305,7 @@ The standard console service is `neura.console.write_line` version 1. It takes a
 | `neura.entropy.fill` | int32 count | uint8 list | Operating-system entropy |
 | `neura.env.get` | text name | [bool found, text value] | |
 | `neura.process.exit` | int32 status | void | Terminal: ends the run with the status |
-| `neura.ui.*`, `neura.history.*` | as in [host providers](Providers#ui-services) | | Served by a browser page. A native run binds them and answers error 14, so an image that mounts a component loads and `Std.Web.mount` returns `Err` |
+| `neura.ui.*`, `neura.history.*` | as in [host providers](Providers#ui-services) | | Served by a browser page. A native run binds them, `neura.ui.focus` and `neura.history.link` included, and answers error 14, so an image that mounts a component loads and `Std.Web.mount` returns `Err` |
 | `neura.net.connect` | text host, int32 port, int64 timeout nanoseconds | int64 ID | TCP connect; 0 means no timeout. Overlaps in an image with tasks, except for name resolution; version 2 is cancellable and a cancelled connect leaves no socket |
 | `neura.net.listen` | text host, int32 port | int64 ID | Port 0 asks for a free port |
 | `neura.net.local_port` | int64 ID | int32 | The listener's bound port |

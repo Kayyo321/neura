@@ -23,7 +23,9 @@ function supported() {
 
 async function fetchVerified(path, digest) {
     const integrity = `sha256-${btoa(String.fromCharCode(...digest.match(/../g).map(hex => parseInt(hex, 16))))}`;
-    const response = await fetch(new URL(path, page.baseURI), { integrity, cache: 'force-cache' });
+    // Relative to this module, which lies in the bundle's directory: under history routing the page's own URL
+    // may be a deep application path such as /parts/7.
+    const response = await fetch(new URL(path, import.meta.url), { integrity, cache: 'force-cache' });
     if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
     return response;
 }
@@ -50,8 +52,9 @@ async function start() {
             },
         }),
     ]);
-    const ui = new UiHost();
-    const history = new HistoryHost({ mode: config.routing });
+    // Bundled media resolve against the bundle's directory, whatever the page's path.
+    const ui = new UiHost({ assetBase: new URL('./', import.meta.url).href });
+    const history = new HistoryHost({ mode: config.routing, base: config.base ?? '/' });
     const execution = new NvmExecution(module, new Uint8Array(image), { host: browserHost({ ui, history }) });
     page.documentElement.dataset.neuraState = 'running';
     try {

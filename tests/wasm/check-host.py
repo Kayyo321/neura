@@ -75,6 +75,12 @@ class Handler(SimpleHTTPRequestHandler):
     def log_message(self, *_):
         pass
 
+    def do_GET(self):
+        # The server rule of history routing: an application path that names no file is answered with index.html.
+        if getattr(self.server, 'fallback', False) and not Path(self.translate_path(self.path)).exists():
+            self.path = '/index.html'
+        super().do_GET()
+
     def do_POST(self):
         size = int(self.headers.get('Content-Length', '0'))
         if self.path != f'/result?{self.server.token}' or not 0 < size < 4 * 1024 * 1024:
@@ -85,8 +91,11 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
 
 
-def run_browser(browser, work, timeout=45):
+def run_browser(browser, work, timeout=45, path='/', fallback=False):
+    """Serves `work` and opens `path` in `browser` until the page posts its report. With `fallback`, a path that
+    names no file is answered with index.html, as a host serving a history-routed application must."""
     with ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=work)) as server:
+        server.fallback = fallback
         server.reports = Queue()
         server.token = secrets.token_hex(20)
         thread = Thread(target=server.serve_forever, daemon=True)
@@ -102,7 +111,7 @@ def run_browser(browser, work, timeout=45):
                 else:
                     flags = ['--headless', '--disable-gpu', '--disable-background-networking', '--disable-sync',
                              '--no-first-run', f'--user-data-dir={profile}']
-                address = f'http://127.0.0.1:{server.server_port}/?{server.token}'
+                address = f'http://127.0.0.1:{server.server_port}{path}?{server.token}'
                 with log.open('wb') as output:
                     process = subprocess.Popen([browser, *flags, address], start_new_session=True,
                                                stdout=output, stderr=subprocess.STDOUT)
