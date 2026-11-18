@@ -1,6 +1,6 @@
 /// @brief The kinds of type that Std.Reflect describes (docs/design/Expressions030.md, typeof). `typeof` of a
 /// value never gives Interface, Any or TypeParameter; only a type operand does.
-/// @see [Std.Reflect.Type.TypeKind](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-TypeKind)
+/// @see [Std.Reflect.Type.TypeKind](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Type-TypeKind)
 #Since("0.3.0")
 export let TypeKind = module (
     /// @brief One kind of type. The order is part of the contract: `typeof` passes a kind as its ordinal.

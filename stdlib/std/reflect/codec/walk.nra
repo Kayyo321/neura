@@ -1,0 +1,123 @@
+let model = import:Std.Reflect.Internal.Model;
+let kinds = import:Std.Reflect.Type.TypeKind;
+
+/// @brief Structural traversal (docs/design/Reflect030.md, The packages). `WalkEngine` walks a value depth first:
+/// the exported fields a Variant can hold of a class or record, the elements of a list or tuple, and the payloads of an enum's active variant.
+/// A visitor sees each value before its children and may skip them or stop the walk; an object reached again
+/// while it is being walked is reported as a cycle instead of being entered.
+/// @see [Std.Reflect.Codec.Walk](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Codec-Walk)
+#Since("0.3.0")
+export let Walk = module (
+    /// @brief What a visitor asks for after seeing a value, and how a walk ended.
+    #Since("0.3.0")
+    export let WalkControl = enum (Continue, SkipChildren, Stop, Cycle);
+
+    /// @brief A read-only visitor. `path` is the JSON-like path of the value (`$`, `$.name`, `$[2]`).
+    #Since("0.3.0")
+    export let ReflectVisitor = interface (
+        /// @brief Called before the value's children. `Cycle` is passed for an object already open on the path.
+        export let enter = func(path: string, value: model.Variant, control: WalkControl) -> WalkControl;
+        /// @brief Called after the value's children, unless the walk stopped.
+        export let leave = func(path: string, value: model.Variant);
+    );
+
+    /// @brief A visitor that may replace field values: `visit_field` returns the value to store, which is
+    /// written through `Variant.set_field` when it differs from the current one.
+    #Since("0.3.0")
+    export let ReflectMutVisitor = interface (
+        export let visit_field = func(owner: model.Variant, field: model.FieldInfo, value: model.Variant) -> model.Variant;
+    );
+
+    /// @brief The walker. It allocates only its path stack.
+    #Since("0.3.0")
+    export let WalkEngine = class (
+        export let init = func { };
+
+        /// @brief Walks `root` with `visitor`; the result is `Stop` when the visitor stopped the walk.
+        export let walk = func(root: model.Variant, visitor: ReflectVisitor) -> WalkControl {
+            last open: model.Variant[list] = new;
+            return visit("$", root, visitor, open);
+        };
+
+        /// @brief Walks the fields of every object under `root`, letting `visitor` replace each field's value.
+        export let walk_mut = func(root: model.Variant, visitor: ReflectMutVisitor) {
+            last open: model.Variant[list] = new;
+            rewrite(root, visitor, open);
+        };
+
+        let visit = func(path: string, value: model.Variant, visitor: ReflectVisitor, open: model.Variant[list])
+            -> WalkControl {
+            if (is_open(open, value)) {
+                visitor.enter(path, value, WalkControl.Cycle);
+                return WalkControl.Cycle;
+            }
+            last asked = visitor.enter(path, value, WalkControl.Continue);
+            if (asked == WalkControl.Stop) {
+                return WalkControl.Stop;
+            }
+            if (asked != WalkControl.SkipChildren && not value.is_nil()) {
+                last type = value.descriptor();
+                last object = type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record;
+                if (object) {
+                    open.append(value);
+                    for (let field in type.fields) {
+                        if (not field.exported || not field.dynamic) {
+                            continue;
+                        }
+                        if (visit(path .. "." .. field.name, value.field(field.index), visitor, open) == WalkControl.Stop) {
+                            return WalkControl.Stop;
+                        }
+                    }
+                    open.remove_at(open.length - 1);
+                } else if (type.kind == kinds.TypeKind.List || type.kind == kinds.TypeKind.Tuple ||
+                           type.kind == kinds.TypeKind.Enum) {
+                    for (let i in 0 .. value.length()) {
+                        last at = path .. "[" .. i.to_string() .. "]";
+                        if (visit(at, value.element(i), visitor, open) == WalkControl.Stop) {
+                            return WalkControl.Stop;
+                        }
+                    }
+                }
+            }
+            visitor.leave(path, value);
+            return WalkControl.Continue;
+        };
+
+        let rewrite = func(value: model.Variant, visitor: ReflectMutVisitor, open: model.Variant[list]) {
+            if (value.is_nil() || is_open(open, value)) {
+                return;
+            }
+            last type = value.descriptor();
+            if (type.kind != kinds.TypeKind.Class && type.kind != kinds.TypeKind.Record) {
+                return;
+            }
+            open.append(value);
+            for (let field in type.fields) {
+                if (not field.exported || not field.dynamic) {
+                    continue;
+                }
+                last current = value.field(field.index);
+                last replaced = visitor.visit_field(value, field, current);
+                if (not replaced.equals(current)) {
+                    value.set_field(field.index, replaced);
+                }
+                rewrite(replaced, visitor, open);
+            }
+            open.remove_at(open.length - 1);
+        };
+
+        let is_open = func(open: model.Variant[list], value: model.Variant) -> bool {
+            if (value.ordinal <= 14) {
+                return false;
+            }
+            for (let item in open) {
+                if (item.equals(value)) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        export let.override to_string = func -> string => "WalkEngine";
+    );
+);

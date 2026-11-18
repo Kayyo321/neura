@@ -1,0 +1,64 @@
+// The JSON bridge, tags, enums, tuples, generics, nil, the schema and TypeId (docs/design/Reflect030.md, edge case 10).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let.promote optional = import:Std.Core.Optional;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+let bridge = import:Std.Reflect.Codec.JsonBridge;
+let schemas = import:Std.Reflect.Codec.SchemaBuilder;
+
+let Address = record (city: string, zip: int32);
+let User = record (id: int64, name: string, score: float64, active: bool, span: [int32, int32],
+                   home: Address, nickname: Optional<string>);
+let Shape = enum (Dot, Circle { radius: float64 }, Rect(int32, int32));
+let Account = class (
+    export let owner: string = "";
+    export let notes: string[list] = new;
+    export let balance: int64 = 0;
+    #Sensitive
+    export let pin: string = "0000";
+    #Skip
+    export let cache: int32 = 9;
+    #SerialName("kind")
+    export let shape: Shape = Shape.Dot;
+    export let init = func { };
+);
+let Box = class<T> (
+    export let value: T;
+    export let init = func(v: T) { value = v; };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let user = new User(7, "Ada", 2.5, true, [1 as int32, 9 as int32], new Address("Paris", 75001), Optional<string>.Some("ace"));
+        let text = bridge.encode(variants.of(user));
+        console.print_line(text);
+        let back: User = bridge.decode_as<User>(text);
+        console.print_line(back.to_string());
+        console.print_line((back === user).to_string());
+        let account = new Account();
+        account.owner = "Bo";
+        account.balance = 42;
+        account.notes.append("a");
+        account.notes.append("b");
+        account.shape = Shape.Rect(3, 4);
+        let encoded = bridge.encode(variants.of(account));
+        console.print_line(encoded);
+        let copy: Account = bridge.decode_as<Account>(encoded);
+        console.print_line(copy.owner + " " + copy.balance.to_string() + " " + copy.pin + " " + copy.cache.to_string() + " " + copy.shape.to_string() + " " + copy.notes.length.to_string());
+        let shape = Shape.Circle { radius: 1.5 };
+        let sv = variants.of(shape);
+        console.print_line(sv.descriptor().name + " v=" + sv.variant_index().to_string() + " n=" + sv.length().to_string() + " p0=" + sv.element(0).to_string());
+        let pair: [int32, string] = [1, "x"];
+        let pv = variants.of(pair);
+        console.print_line(pv.descriptor().name + " " + pv.element(1).to_string());
+        let box = new Box<int32>(5);
+        let bd = types.of_value(box);
+        console.print_line(bd.name + " origin=" + bd.generic_origin + " args=" + bd.generic_arguments[0] + " f=" + variants.of(box).field(0).to_string());
+        let nothing: Account = nil;
+        console.print_line("nil ordinal " + types.of_value(nothing).ordinal.to_string() + " " + variants.of(nothing).is_nil().to_string());
+        console.print_line(schemas.json_schema_text(types.of<Account>()));
+        console.print_line(types.of<User>().id.to_string());
+        return program.ExitCode.Ok;
+    };
+);

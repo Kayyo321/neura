@@ -1,0 +1,41 @@
+// Reflection of a class with a get hook (docs/design/Hooks030.md): reflection works on a hooked class, and the
+// hook runs on each read of the reference, here the user's argument and the library's three reads of its
+// parameter (of_value, pack, ordinal), the same count in every build; the class tests that select the type read
+// nothing.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let bridge = import:Std.Reflect.Codec.JsonBridge;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let reads = 0;
+
+let Session = class (
+    | get: {
+        reads = reads + 1;
+        return instance;
+    };
+    export let user: string = "";
+    export let init = func(user: string) => set;
+);
+let Admin = class : Session (
+    export let level: int32 = 3;
+    export let init = func(user: string) {
+        super.init(user);
+    };
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let session: Session = new Admin("root");
+        let before = reads;
+        let described = types.of_value(session);
+        console.print_line(described.name + " " + (reads - before).to_string());
+        let value = variants.of(session);
+        value.set_field_named("level", variants.of(5 as int32));
+        console.print_line(value.field_named("user").to_string() + " " + value.field_named("level").to_string());
+        console.print_line(bridge.encode(value));
+        console.print_line((described.info() === typeof(session)).to_string());
+        return program.ExitCode.Ok;
+    };
+);

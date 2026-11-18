@@ -124,6 +124,7 @@ std::string_view spelling(IrOp op) {
     case IrOp::Yield: return "yield";
     case IrOp::ConcatText: return "concat_text";
     case IrOp::TypeOf: return "type_of";
+    case IrOp::Reflect: return "reflect";
     }
     return "<invalid>";
 }

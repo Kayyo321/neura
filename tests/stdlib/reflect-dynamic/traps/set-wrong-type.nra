@@ -1,0 +1,19 @@
+// status: 134
+// stderr: reflection: field count of Counter takes int32
+// A value of another type traps naming both types; nothing is converted (docs/design/Reflect030.md, edge case 6).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Counter = class (
+    export let count: int32 = 0;
+);
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        variants.of(new Counter()).set_field_named("count", variants.of(5 as int64));
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

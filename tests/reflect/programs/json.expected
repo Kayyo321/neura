@@ -1,0 +1,11 @@
+{"id":7,"name":"Ada","score":2.5,"active":true,"span":[1,9],"home":{"city":"Paris","zip":75001},"nickname":"ace"}
+User(id: 7, name: Ada, score: 2.5, active: true, span: [1, 9], home: Address(city: Paris, zip: 75001), nickname: Some(ace))
+true
+{"owner":"Bo","notes":["a","b"],"balance":42,"pin":"<redacted>","kind":{"variant":"Rect","payload":[3,4]}}
+Bo 42 0000 9 Rect(3, 4) 2
+Shape v=1 n=1 p0=1.5
+[int32, string] x
+Box<int32> origin=Box args=int32 f=5
+nil ordinal 0 true
+{"$schema":"https://json-schema.org/draft/2020-12/schema","$ref":"#/$defs/Account","$defs":{"Account":{"type":"object","properties":{"owner":{"type":"string"},"notes":{"type":"array","items":{"type":"string"}},"balance":{"type":"integer"},"pin":{"type":"string"},"kind":{"$ref":"#/$defs/Shape"}},"required":["owner","notes","balance","pin","kind"]},"Shape":{"oneOf":[{"type":"object","properties":{"variant":{"const":"Dot"}},"required":["variant"]},{"type":"object","properties":{"variant":{"const":"Circle"},"payload":{"type":"array","prefixItems":[{"type":"number"}]}},"required":["variant","payload"]},{"type":"object","properties":{"variant":{"const":"Rect"},"payload":{"type":"array","prefixItems":[{"type":"integer"},{"type":"integer"}]}},"required":["variant","payload"]}]}}}
+TypeId.TypeId(high: 11784124320062342743, low: 5100997540443002472)

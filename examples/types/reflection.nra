@@ -1,0 +1,50 @@
+let bridge = import:Std.Reflect.Codec.JsonBridge;
+let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Reflection = module (
+    /// A record and a class that reflection describes without any written code.
+    export let Point = record (x: int32, y: int32);
+
+    export let Account = class (
+        export let owner: string = "";
+        #Sensitive
+        export let pin: string = "0000";
+        export let init = func { };
+    );
+
+    export let Named = interface (
+        export let name = func -> string;
+    );
+
+    /// Answers every call of a proxied interface with the method's name.
+    export let Echo = class implements proxies.InvocationHandler (
+        export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant =>
+            variants.of(context.method.name);
+    );
+
+    /// The fields of a point, by name and type.
+    export let describe = func(p: Point) -> string {
+        let text = "";
+        for (let field in types.of_value(p).fields) {
+            text ..= field.name .. ": " .. field.type_name() .. "; ";
+        }
+        return text;
+    };
+
+    /// A point written as JSON and read back.
+    export let round_trip = func(p: Point) -> bool =>
+        bridge.decode_as<Point>(bridge.encode(variants.of(p))) === p;
+
+    /// An account as JSON: the #Sensitive pin is redacted.
+    export let account_json = func(account: Account) -> string => bridge.encode(variants.of(account));
+
+    /// A field written by name through a Variant.
+    export let rename = func(account: Account, owner: string) {
+        variants.of(account).set_field_named("owner", variants.of(owner));
+    };
+
+    /// An object implementing Named whose calls reach Echo.
+    export let echo = func -> string => proxies.create<Named>(new Echo()).name();
+);

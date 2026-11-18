@@ -1,0 +1,342 @@
+let.promote optional = import:Std.Core.Optional;
+
+/// @brief C layouts and argument classification for a declared target (docs/design/Reflect030.md, The
+/// packages). Everything is computed from the target triple the program names, never from the machine that
+/// runs it, so a program can describe the layout of another platform. Supported families: System V x86-64
+/// (Linux, BSD, macOS on x86-64), AAPCS64 (Linux and macOS on AArch64), Windows x64, and wasm32.
+/// `long double`, bit fields and packed structs are not described.
+/// @see [Std.Reflect.Ffi.Abi](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Ffi-Abi)
+#Since("0.3.0")
+export let Abi = module (
+    /// @brief The calling-convention family of a target.
+    #Since("0.3.0")
+    export let CallingConvention = enum (SystemV64, Aapcs64, Win64, Wasm32);
+
+    /// @brief A target: its triple, family, and the sizes that differ between C data models (LP64, LLP64,
+    /// ILP32).
+    #Since("0.3.0")
+    export let Target = record (triple: string, convention: CallingConvention, pointer_bytes: int, long_bytes: int);
+
+    /// @brief The C scalar types.
+    #Since("0.3.0")
+    export let CType = enum (
+        Bool, Char, SChar, UChar, Short, UShort, Int, UInt, Long, ULong, LongLong, ULongLong, Float, Double,
+        Pointer, SizeT, Int8, UInt8, Int16, UInt16, Int32, UInt32, Int64, UInt64
+    );
+
+    /// @brief One member of a C struct: a scalar or a nested struct, repeated `count` times (a C array).
+    #Since("0.3.0")
+    export let CMember = class (
+        export last name: string;
+        export last scalar: CType;
+        /// @brief The nested struct, or nil for a scalar member.
+        export last nested: CStruct;
+        export last count: int;
+
+        export let init = func(label: string, type: CType, inner: CStruct, repeat: int) {
+            name = label;
+            scalar = type;
+            nested = inner;
+            count = repeat;
+        };
+
+        export let.override to_string = func -> string {
+            last base = nested == nil ? scalar.to_string() : nested.to_string();
+            return name .. ": " .. base .. (count == 1 ? "" : "[" .. count.to_string() .. "]");
+        };
+
+        /// @brief The same name, scalar or nested layout text, and count.
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: CMember) {
+                return to_string() == that.to_string();
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+    );
+
+    /// @brief A C struct: its members in declaration order.
+    #Since("0.3.0")
+    export let CStruct = class (
+        export last name: string;
+        export last members: CMember[list];
+
+        export let init = func(label: string) {
+            name = label;
+            members = new;
+        };
+
+        /// @brief Adds a scalar member and returns this struct.
+        export let scalar = func(label: string, type: CType) -> CStruct {
+            members.append(new CMember(label, type, nil, 1));
+            return instance;
+        };
+
+        /// @brief Adds a C array of `count` scalars and returns this struct.
+        export let array = func(label: string, type: CType, count: int) -> CStruct {
+            if (count < 1) {
+                trap_with_message("invalid argument: an array member needs at least one element");
+            }
+            members.append(new CMember(label, type, nil, count));
+            return instance;
+        };
+
+        /// @brief Adds a nested struct member and returns this struct.
+        export let nested = func(label: string, inner: CStruct) -> CStruct {
+            members.append(new CMember(label, CType.Int, inner, 1));
+            return instance;
+        };
+
+        export let.override to_string = func -> string {
+            let text = "struct " .. name .. " {";
+            for (let i in 0 .. members.length) {
+                text ..= (i == 0 ? " " : "; ") .. members[i].to_string();
+            }
+            return text .. " }";
+        };
+    );
+
+    /// @brief The layout of a struct on a target: size, alignment and each member's byte offset.
+    #Since("0.3.0")
+    export let AbiLayout = class (
+        export last target: Target;
+        export last size: int;
+        export last alignment: int;
+        export last offsets: [string, int][list];
+
+        export let init = func(on: Target, bytes: int, align: int, at: [string, int][list]) {
+            target = on;
+            size = bytes;
+            alignment = align;
+            offsets = at;
+        };
+
+        /// @brief The byte offset of the member named `name`; an unknown name traps.
+        export let offset = func(name: string) -> int {
+            for (let entry in offsets) {
+                if (entry[0] == name) {
+                    return entry[1];
+                }
+            }
+            trap_with_message("invalid argument: no member named " .. name);
+            return -1;
+        };
+
+        export let.override to_string = func -> string {
+            let text = "size " .. size.to_string() .. " align " .. alignment.to_string();
+            for (let entry in offsets) {
+                text ..= " " .. entry[0] .. "@" .. entry[1].to_string();
+            }
+            return text;
+        };
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: AbiLayout) {
+                return to_string() == that.to_string() && target === that.target;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+    );
+
+    /// @brief How an aggregate argument is passed: per eightbyte in integer or SSE registers (System V), in
+    /// floating-point registers (an AAPCS64 homogeneous floating-point aggregate), in general registers, or in
+    /// memory (on the stack, or by a hidden reference on AAPCS64 and Windows x64).
+    #Since("0.3.0")
+    export let ArgumentClass = enum (Integer, Sse, FloatRegisters, GeneralRegisters, Memory, Indirect);
+
+    /// @brief The target a triple names: `x86_64-...-linux-gnu`, `x86_64-apple-darwin`, `aarch64-...`,
+    /// `arm64-apple-darwin`, `x86_64-pc-windows-msvc` or `-gnu`, `wasm32-...`. Another triple returns None.
+    #Since("0.3.0")
+    export let target = func(triple: string) -> Optional<Target> {
+        last arch = before(triple, "-");
+        if (arch == "x86_64" || arch == "amd64") {
+            if (contains(triple, "windows")) {
+                return Optional<Target>.Some(new Target(triple, CallingConvention.Win64, 8, 4));
+            }
+            return Optional<Target>.Some(new Target(triple, CallingConvention.SystemV64, 8, 8));
+        }
+        if (arch == "aarch64" || arch == "arm64") {
+            if (contains(triple, "windows")) {
+                return Optional<Target>.None;
+            }
+            return Optional<Target>.Some(new Target(triple, CallingConvention.Aapcs64, 8, 8));
+        }
+        return if (arch == "wasm32") -> Optional<Target>.Some(new Target(triple, CallingConvention.Wasm32, 4, 4));
+        else -> Optional<Target>.None;
+    };
+
+    /// @brief The size of a scalar in bytes on the target.
+    #Since("0.3.0")
+    export let size_of = func(type: CType, on: Target) -> int => match (type) {
+        CType.Bool => 1,
+        CType.Char => 1,
+        CType.SChar => 1,
+        CType.UChar => 1,
+        CType.Int8 => 1,
+        CType.UInt8 => 1,
+        CType.Short => 2,
+        CType.UShort => 2,
+        CType.Int16 => 2,
+        CType.UInt16 => 2,
+        CType.Int => 4,
+        CType.UInt => 4,
+        CType.Int32 => 4,
+        CType.UInt32 => 4,
+        CType.Float => 4,
+        CType.Long => on.long_bytes,
+        CType.ULong => on.long_bytes,
+        CType.Pointer => on.pointer_bytes,
+        CType.SizeT => on.pointer_bytes,
+        CType.LongLong => 8,
+        CType.ULongLong => 8,
+        CType.Int64 => 8,
+        CType.UInt64 => 8,
+        CType.Double => 8,
+    };
+
+    /// @brief The alignment of a scalar in bytes on the target (its size on every supported target).
+    #Since("0.3.0")
+    export let align_of = func(type: CType, on: Target) -> int => size_of(type, on);
+
+    /// @brief Whether a scalar is a floating-point type.
+    #Since("0.3.0")
+    export let is_float = func(type: CType) -> bool => type == CType.Float || type == CType.Double;
+
+    /// @brief The layout of `shape` on `on`, with C's rules: each member at the next multiple of its alignment,
+    /// the struct aligned to its strictest member and padded to a multiple of that alignment. An empty struct
+    /// traps (C has none).
+    #Since("0.3.0")
+    export let layout = func(shape: CStruct, on: Target) -> AbiLayout {
+        if (shape.members.length == 0) {
+            trap_with_message("invalid argument: a C struct needs at least one member");
+        }
+        let offset = 0;
+        let alignment = 1;
+        last offsets: [string, int][list] = new;
+        for (let member in shape.members) {
+            last size = member_size(member, on);
+            last align = member_align(member, on);
+            offset = round_up(offset, align);
+            offsets.append([member.name, offset]);
+            offset = offset + size;
+            alignment = align > alignment ? align : alignment;
+        }
+        return new AbiLayout(on, round_up(offset, alignment), alignment, offsets);
+    };
+
+    /// @brief How `shape` is passed as an argument on `on`: one class per eightbyte on System V x86-64, and
+    /// one class for the whole value on the other targets.
+    #Since("0.3.0")
+    export let classify = func(shape: CStruct, on: Target) -> ArgumentClass[list] {
+        last result: ArgumentClass[list] = new;
+        last described = layout(shape, on);
+        last scalars: [CType, int][list] = new;
+        flatten(shape, on, 0, scalars);
+        if (on.convention == CallingConvention.SystemV64) {
+            if (described.size > 16 || not naturally_aligned(scalars, on)) {
+                result.append(ArgumentClass.Memory);
+                return result;
+            }
+            last words = (described.size + 7) / 8;
+            for (let word in 0 .. words) {
+                let all_float = true;
+                let any_member = false;
+                for (let entry in scalars) {
+                    if (entry[1] / 8 == word) {
+                        any_member = true;
+                        all_float = all_float && is_float(entry[0]);
+                    }
+                }
+                result.append(any_member && all_float ? ArgumentClass.Sse : ArgumentClass.Integer);
+            }
+            return result;
+        }
+        if (on.convention == CallingConvention.Aapcs64) {
+            if (homogeneous_float(scalars) && scalars.length <= 4) {
+                result.append(ArgumentClass.FloatRegisters);
+            } else if (described.size <= 16) {
+                result.append(ArgumentClass.GeneralRegisters);
+            } else {
+                result.append(ArgumentClass.Indirect);
+            }
+            return result;
+        }
+        if (on.convention == CallingConvention.Win64) {
+            last size = described.size;
+            result.append(size == 1 || size == 2 || size == 4 || size == 8 ? ArgumentClass.Integer : ArgumentClass.Indirect);
+            return result;
+        }
+        // wasm32 (the C ABI of clang's wasm32 target): a struct with one scalar is passed as that scalar,
+        // anything else by reference.
+        result.append(scalars.length == 1 ? (is_float(scalars[0][0]) ? ArgumentClass.Sse : ArgumentClass.Integer)
+                                          : ArgumentClass.Indirect);
+        return result;
+    };
+
+    let member_align = func(member: CMember, on: Target) -> int =>
+        member.nested == nil ? align_of(member.scalar, on) : layout(member.nested, on).alignment;
+
+    let member_size = func(member: CMember, on: Target) -> int =>
+        (member.nested == nil ? size_of(member.scalar, on) : layout(member.nested, on).size) * member.count;
+
+    // Every scalar of a struct with its byte offset, nested structs and arrays expanded.
+    let flatten = func(shape: CStruct, on: Target, base: int, into: [CType, int][list]) {
+        last described = layout(shape, on);
+        for (let i in 0 .. shape.members.length) {
+            last member = shape.members[i];
+            last start = base + described.offsets[i][1];
+            for (let k in 0 .. member.count) {
+                if (member.nested == nil) {
+                    into.append([member.scalar, start + k * size_of(member.scalar, on)]);
+                } else {
+                    flatten(member.nested, on, start + k * layout(member.nested, on).size, into);
+                }
+            }
+        }
+    };
+
+    let naturally_aligned = func(scalars: [CType, int][list], on: Target) -> bool {
+        for (let entry in scalars) {
+            if (entry[1] % align_of(entry[0], on) != 0) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let homogeneous_float = func(scalars: [CType, int][list]) -> bool {
+        if (scalars.length == 0 || not is_float(scalars[0][0])) {
+            return false;
+        }
+        for (let entry in scalars) {
+            if (entry[0] != scalars[0][0]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let round_up = func(value: int, alignment: int) -> int => (value + alignment - 1) / alignment * alignment;
+
+    let before = func(text: string, separator: string) -> string {
+        for (let i in 0 .. text.byte_length) {
+            if (text.slice(i, i + 1) == separator) {
+                return text.slice(0, i);
+            }
+        }
+        return text;
+    };
+
+    let contains = func(text: string, part: string) -> bool {
+        if (part.byte_length > text.byte_length) {
+            return false;
+        }
+        for (let i in 0 ..= text.byte_length - part.byte_length) {
+            if (text.slice(i, i + part.byte_length) == part) {
+                return true;
+            }
+        }
+        return false;
+    };
+);

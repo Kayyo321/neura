@@ -1,0 +1,730 @@
+let hashing = import:Std.Core.Hash;
+let.promote optional = import:Std.Core.Optional;
+let intrinsics = import:Std.Reflect.Internal.Intrinsics;
+let layouts = import:Std.Reflect.Core.MemoryLayout;
+let policies = import:Std.Reflect.Core.ReflectPolicy;
+let type_ids = import:Std.Reflect.Core.TypeId;
+let type_info = import:Std.Reflect.Core.TypeInfo;
+let kinds = import:Std.Reflect.Type.TypeKind;
+
+/// @brief The descriptors of Std.Reflect and the dynamic value, in one module because they refer to each other
+/// (docs/design/Reflect030.md). The public modules re-export these classes under the names of the
+/// specification.
+#Since("0.3.0")
+export let Model = module (
+    /// @brief A tag written on a declaration, with its arguments as written (`name` and value text, in order).
+    #Since("0.3.0")
+    export let Attribute = class (
+        export last name: string;
+        export last arguments: [string, string][list];
+
+        export let init = func(tag: string, values: [string, string][list]) {
+            name = tag;
+            arguments = values;
+        };
+
+        /// @brief The text of the named argument, or of the positional argument at `name` when it is a number.
+        export let argument = func(key: string) -> Optional<string> {
+            for (let entry in arguments) {
+                if (entry[0] == key) {
+                    return Optional<string>.Some(entry[1]);
+                }
+            }
+            return Optional<string>.None;
+        };
+
+        export let.override to_string = func -> string {
+            let text = "#" .. name;
+            if (arguments.length == 0) {
+                return text;
+            }
+            text ..= "(";
+            for (let i in 0 .. arguments.length) {
+                text ..= (i == 0 ? "" : ", ") .. arguments[i][0] .. ": " .. arguments[i][1];
+            }
+            return text .. ")";
+        };
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: Attribute) {
+                return to_string() == that.to_string();
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 => to_string().hash_code();
+    );
+
+    /// @brief A parameter of a method or constructor, or a payload of an enum variant.
+    #Since("0.3.0")
+    export let ParamInfo = class (
+        export last index: int;
+        export last name: string;
+        /// @brief The ordinal of the declared type in the program's reflection universe; -2 is `any`.
+        export last type_ordinal: int;
+        export last attributes: Attribute[list];
+
+        export let init = func(position: int, label: string, ordinal: int, tags: Attribute[list]) {
+            index = position;
+            name = label;
+            type_ordinal = ordinal;
+            attributes = tags;
+        };
+
+        /// @brief The declared type's name.
+        export let type_name = func -> string => name_of(type_ordinal);
+
+        export let.override to_string = func -> string => name .. ": " .. type_name();
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: ParamInfo) {
+                return index == that.index && name == that.name && type_ordinal == that.type_ordinal;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(index as uint32, name.hash_code()), type_ordinal as uint32);
+    );
+
+    /// @brief A field of a class or record: its position (base fields first), name, declared type and flags.
+    #Since("0.3.0")
+    export let FieldInfo = class (
+        export last owner: int;
+        export last index: int;
+        export last name: string;
+        export last type_ordinal: int;
+        export last exported: bool;
+        export last is_const: bool;
+        export last is_last: bool;
+        export last has_getter: bool;
+        export last has_setter: bool;
+        /// @brief Whether a Variant can hold the field's value: false for an array, a scope-bound value or a
+        /// primitive reference, which `Variant.field` and the codec cannot read.
+        export last dynamic: bool;
+        export last attributes: Attribute[list];
+
+        export let init = func(owner_ordinal: int, position: int, label: string, ordinal: int, flags: string,
+                               tags: Attribute[list]) {
+            owner = owner_ordinal;
+            index = position;
+            name = label;
+            type_ordinal = ordinal;
+            exported = has_flag(flags, "e");
+            is_const = has_flag(flags, "c");
+            is_last = has_flag(flags, "l");
+            has_getter = has_flag(flags, "g");
+            has_setter = has_flag(flags, "s");
+            dynamic = has_flag(flags, "d");
+            attributes = tags;
+        };
+
+        /// @brief The declared type's name.
+        export let type_name = func -> string => name_of(type_ordinal);
+
+        /// @brief Whether `set` can write the field: exported, not `const` or `last`, not read-only through a
+        /// getter, and its class keeps its layout.
+        export let writable = func -> bool =>
+            exported && dynamic && not is_const && not is_last && (not has_getter || has_setter) &&
+            descriptor(owner).policy != policies.Level.Strip;
+
+        /// @brief Whether the field is a property: read and written through accessors rather than storage.
+        export let is_property = func -> bool => has_getter || has_setter;
+
+        export let.override to_string = func -> string => name .. ": " .. type_name();
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: FieldInfo) {
+                return owner == that.owner && index == that.index;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32);
+    );
+
+    /// @brief A variant of an enum, with its payloads (named or numbered from 0).
+    #Since("0.3.0")
+    export let VariantInfo = class (
+        export last owner: int;
+        export last index: int;
+        export last name: string;
+        export last payloads: ParamInfo[list];
+        export last attributes: Attribute[list];
+
+        export let init = func(owner_ordinal: int, position: int, label: string, items: ParamInfo[list],
+                               tags: Attribute[list]) {
+            owner = owner_ordinal;
+            index = position;
+            name = label;
+            payloads = items;
+            attributes = tags;
+        };
+
+        export let.override to_string = func -> string {
+            if (payloads.length == 0) {
+                return name;
+            }
+            let text = name .. "(";
+            for (let i in 0 .. payloads.length) {
+                text ..= (i == 0 ? "" : ", ") .. payloads[i].to_string();
+            }
+            return text .. ")";
+        };
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: VariantInfo) {
+                return owner == that.owner && index == that.index;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32);
+    );
+
+    /// @brief A constructor of a class or record, by position among its `init` functions.
+    #Since("0.3.0")
+    export let ConstructorInfo = class (
+        export last owner: int;
+        export last index: int;
+        export last exported: bool;
+        export last parameters: ParamInfo[list];
+
+        export let init = func(owner_ordinal: int, position: int, flags: string, items: ParamInfo[list]) {
+            owner = owner_ordinal;
+            index = position;
+            exported = has_flag(flags, "e");
+            parameters = items;
+        };
+
+        export let.override to_string = func -> string => "init" .. parameter_text(parameters);
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: ConstructorInfo) {
+                return owner == that.owner && index == that.index;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32 + 7919);
+    );
+
+    /// @brief An instance method: its name, parameters, result type and whether `invoke` can call it.
+    #Since("0.3.0")
+    export let MethodInfo = class (
+        export last owner: int;
+        export last index: int;
+        export last name: string;
+        /// @brief The result's ordinal: 0 for `void`, -2 for `any`.
+        export last result_ordinal: int;
+        export last exported: bool;
+        /// @brief Whether every parameter and the result can be held dynamically, so `invoke` can call it.
+        export last invocable: bool;
+        export last parameters: ParamInfo[list];
+        export last attributes: Attribute[list];
+
+        export let init = func(owner_ordinal: int, position: int, label: string, result: int, flags: string,
+                               items: ParamInfo[list], tags: Attribute[list]) {
+            owner = owner_ordinal;
+            index = position;
+            name = label;
+            result_ordinal = result;
+            exported = has_flag(flags, "e");
+            invocable = has_flag(flags, "v");
+            parameters = items;
+            attributes = tags;
+        };
+
+        /// @brief The result type's name (`void` for none).
+        export let result_name = func -> string => result_ordinal == 0 ? "void" : name_of(result_ordinal);
+
+        export let.override to_string = func -> string => name .. parameter_text(parameters) .. " -> " .. result_name();
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: MethodInfo) {
+                return owner == that.owner && index == that.index;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 => hashing.combine(owner as uint32, index as uint32 + 104729);
+    );
+
+    /// @brief The full descriptor of one type of the program's reflection universe.
+    #Since("0.3.0")
+    export let TypeDescriptor = class (
+        /// @brief The type's ordinal in this program: 0 is nil, 1 to 14 the scalars and `string`.
+        export last ordinal: int;
+        export last kind: kinds.TypeKind;
+        export last name: string;
+        export last qualified_name: string;
+        /// @brief `kind:qualified-name@declaring-file`, the input of `id`.
+        export last identity: string;
+        export last id: type_ids.TypeId;
+        export last layout: layouts.MemoryLayout;
+        export last policy: policies.Level;
+        /// @brief The ordinal of the base class, or 0.
+        export last base_ordinal: int;
+        /// @brief The generic declaration of an instance such as `Box<int32>` (`Box`), or "".
+        export last generic_origin: string;
+        /// @brief The type arguments of a generic instance, as written in its name.
+        export last generic_arguments: string[list];
+        export last interfaces: int[list];
+        /// @brief The element types of an array or list (one) or a tuple (each).
+        export last elements: int[list];
+        export last fields: FieldInfo[list];
+        export last variants: VariantInfo[list];
+        export last constructors: ConstructorInfo[list];
+        export last methods: MethodInfo[list];
+        export last attributes: Attribute[list];
+
+        export let init = func(position: int, text: string) {
+            ordinal = position;
+            last lines = split(text, 10);
+            last head = split(lines[0], 9);
+            kind = kinds.of_ordinal(number(head[1]));
+            name = unescape(head[2]);
+            qualified_name = unescape(head[3]);
+            identity = unescape(head[4]);
+            id = type_ids.of_identity(identity);
+            layout = new layouts.MemoryLayout(number(head[5]), layouts.form_of_text(head[6]), head[7] == "1",
+                                              number(head[8]));
+            policy = policies.of_text(head[9]);
+            base_ordinal = number(head[10]);
+            generic_origin = unescape(head[11]);
+            generic_arguments = new;
+            interfaces = new;
+            elements = new;
+            fields = new;
+            variants = new;
+            constructors = new;
+            methods = new;
+            attributes = new;
+            // Each entry's tags and parameters follow it.
+            let tags: Attribute[list] = attributes;
+            let params: ParamInfo[list] = new;
+            for (let i in 1 .. lines.length) {
+                last line = lines[i];
+                if (line.byte_length == 0) {
+                    continue;
+                }
+                last parts = split(line, 9);
+                last tag = parts[0];
+                if (tag == "@") {
+                    last values: [string, string][list] = new;
+                    for (let j in 2 .. parts.length) {
+                        last argument = parts[j];
+                        last equal = index_of_byte(argument, 61);
+                        values.append([unescape(argument.slice(0, equal)),
+                                       unescape(argument.slice(equal + 1, argument.byte_length))]);
+                    }
+                    tags.append(new Attribute(unescape(parts[1]), values));
+                } else if (tag == "G") {
+                    generic_arguments.append(unescape(parts[1]));
+                } else if (tag == "I") {
+                    interfaces.append(number(parts[1]));
+                } else if (tag == "E") {
+                    elements.append(number(parts[1]));
+                } else if (tag == "F") {
+                    last field_tags: Attribute[list] = new;
+                    fields.append(new FieldInfo(ordinal, fields.length, unescape(parts[1]), number(parts[2]),
+                                                parts.length > 3 ? parts[3] : "", field_tags));
+                    tags = field_tags;
+                } else if (tag == "V") {
+                    last variant_tags: Attribute[list] = new;
+                    params = new;
+                    variants.append(new VariantInfo(ordinal, variants.length, unescape(parts[1]), params, variant_tags));
+                    tags = variant_tags;
+                } else if (tag == "C") {
+                    params = new;
+                    constructors.append(new ConstructorInfo(ordinal, constructors.length, parts.length > 2 ? parts[2] : "",
+                                                            params));
+                    tags = new;
+                } else if (tag == "M") {
+                    last method_tags: Attribute[list] = new;
+                    params = new;
+                    methods.append(new MethodInfo(ordinal, methods.length, unescape(parts[1]), number(parts[2]),
+                                                  parts.length > 3 ? parts[3] : "", params, method_tags));
+                    tags = method_tags;
+                } else if (tag == "P") {
+                    last param_tags: Attribute[list] = new;
+                    params.append(new ParamInfo(params.length, unescape(parts[1]), number(parts[2]), param_tags));
+                    tags = param_tags;
+                }
+            }
+        };
+
+        /// @brief The `typeof` record of this type.
+        export let info = func -> type_info.TypeInfo => new type_info.TypeInfo(kind, name, qualified_name);
+
+        /// @brief The base class's descriptor, or nil.
+        export let base = func -> TypeDescriptor => base_ordinal == 0 ? nil : descriptor(base_ordinal);
+
+        /// @brief The field named `label`, or nil.
+        export let field = func(label: string) -> FieldInfo {
+            for (let item in fields) {
+                if (item.name == label) {
+                    return item;
+                }
+            }
+            return nil;
+        };
+
+        /// @brief The variant named `label`, or nil.
+        export let variant = func(label: string) -> VariantInfo {
+            for (let item in variants) {
+                if (item.name == label) {
+                    return item;
+                }
+            }
+            return nil;
+        };
+
+        /// @brief The first method named `label`, or nil.
+        export let method = func(label: string) -> MethodInfo {
+            for (let item in methods) {
+                if (item.name == label) {
+                    return item;
+                }
+            }
+            return nil;
+        };
+
+        /// @brief The first attribute named `tag`, or nil.
+        export let attribute = func(tag: string) -> Attribute => find_attribute(attributes, tag);
+
+        /// @brief Whether this type is `other` or derives from it through bases and interfaces.
+        export let derives_from = func(other: TypeDescriptor) -> bool {
+            if (other == nil) {
+                return false;
+            }
+            if (ordinal == other.ordinal) {
+                return true;
+            }
+            for (let face in interfaces) {
+                if (descriptor(face).derives_from(other)) {
+                    return true;
+                }
+            }
+            return base_ordinal != 0 && descriptor(base_ordinal).derives_from(other);
+        };
+
+        export let.override to_string = func -> string => qualified_name;
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: TypeDescriptor) {
+                return ordinal == that.ordinal;
+            }
+            return false;
+        };
+        export let.override hash_code = func -> uint32 => identity.hash_code();
+    );
+
+    /// @brief A value of any type of the reflection universe together with its type (docs/design/Reflect030.md,
+    /// Dynamic values). A value an `any` cannot hold is kept in a compiler box that the program never sees.
+    #Since("0.3.0")
+    export let Variant = class (
+        /// @brief The value as an `any` (a box for arrays, lists, tuples, enums and function values).
+        export last raw: any;
+        /// @brief The ordinal of the value's type; 0 for nil.
+        export last ordinal: int;
+
+        export let init = func(value: any, type_ordinal: int) {
+            raw = value;
+            ordinal = type_ordinal;
+        };
+
+        /// @brief The descriptor of the value's type.
+        export let descriptor = func -> TypeDescriptor => descriptor_of(ordinal);
+
+        /// @brief Whether the value is nil (a nil reference or an empty any).
+        export let is_nil = func -> bool => ordinal == 0;
+
+        /// @brief The value as a `T`; a value of another type traps naming both types.
+        export let get = func<T>() -> T => intrinsics.unpack<T>(raw);
+
+        /// @brief Whether the value's type is `T` or derives from it.
+        export let is_type = func<T>() -> bool {
+            last wanted = intrinsics.ordinal_of<T>();
+            return ordinal == wanted || (ordinal != 0 && descriptor().derives_from(descriptor_of(wanted)));
+        };
+
+        /// @brief The field at `index` (see TypeDescriptor.fields), read through its getter if it has one.
+        export let field = func(index: int) -> Variant => wrap(intrinsics.get(raw, ordinal, index));
+
+        /// @brief The field named `label`; an unknown name traps.
+        export let field_named = func(label: string) -> Variant => field(field_index(label));
+
+        /// @brief Writes the field at `index`, through its setter if it has one. A value of another type, a
+        /// `const` or `last` field, and a class whose policy keeps no layout trap.
+        export let set_field = func(index: int, value: Variant) {
+            intrinsics.set(raw, ordinal, index, value.raw);
+        };
+
+        /// @brief Writes the field named `label`.
+        export let set_field_named = func(label: string, value: Variant) {
+            set_field(field_index(label), value);
+        };
+
+        /// @brief The element count of an array, list or tuple, or the payload count of an enum's variant.
+        export let length = func -> int => intrinsics.length(raw, ordinal);
+
+        /// @brief The element at `index`, or the payload at `index` of an enum's active variant.
+        export let element = func(index: int) -> Variant => wrap(intrinsics.element(raw, ordinal, index));
+
+        /// @brief The index of an enum value's variant (see TypeDescriptor.variants).
+        export let variant_index = func -> int => intrinsics.variant(raw, ordinal);
+
+        /// @brief Calls the method at `index` (see TypeDescriptor.methods) with the arguments; nil for `void`.
+        export let invoke = func(index: int, arguments: Variant[list]) -> Variant =>
+            wrap(intrinsics.invoke(raw, ordinal, index, raws(arguments)));
+
+        /// @brief Calls the first method named `label`.
+        export let invoke_named = func(label: string, arguments: Variant[list]) -> Variant {
+            last method = descriptor().method(label);
+            if (method == nil) {
+                trap_with_message("reflection: " .. descriptor().name .. " has no method " .. label);
+            }
+            return invoke(method.index, arguments);
+        };
+
+        let field_index = func(label: string) -> int {
+            last item = descriptor().field(label);
+            if (item == nil) {
+                trap_with_message("reflection: " .. descriptor().name .. " has no field " .. label);
+            }
+            return item.index;
+        };
+
+        /// @brief The text of a scalar or string, `nil`, or the type and members of any other value.
+        export let.override to_string = func -> string => match.is (raw) {
+            v: bool => v.to_string(),
+            v: int8 => v.to_string(),
+            v: int16 => v.to_string(),
+            v: int32 => v.to_string(),
+            v: int64 => v.to_string(),
+            v: uint8 => v.to_string(),
+            v: uint16 => v.to_string(),
+            v: uint32 => v.to_string(),
+            v: uint64 => v.to_string(),
+            v: float16 => v.to_string(),
+            v: bfloat16 => v.to_string(),
+            v: float32 => v.to_string(),
+            v: float64 => v.to_string(),
+            v: string => v,
+            nil => "nil",
+            _ => descriptor().name,
+        };
+
+        /// @brief The same type and, for scalars and strings, the same value; references compare by identity.
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: Variant) {
+                if (ordinal != that.ordinal) {
+                    return false;
+                }
+                if (ordinal >= 1 && ordinal <= 14) {
+                    return to_string() == that.to_string();
+                }
+                return same_reference(raw, that.raw);
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(ordinal as uint32, ordinal >= 1 && ordinal <= 14 ? to_string().hash_code() : 0);
+    );
+
+    /// @brief One call of a proxy's method: the interface, the method, and the arguments as Variants.
+    #Since("0.3.0")
+    export let MethodCallContext = class (
+        export last interface_type: TypeDescriptor;
+        export last method: MethodInfo;
+        export last arguments: Variant[list];
+
+        export let init = func(face: TypeDescriptor, called: MethodInfo, values: Variant[list]) {
+            interface_type = face;
+            method = called;
+            arguments = values;
+        };
+
+        export let.override to_string = func -> string {
+            let text = interface_type.name .. "." .. method.name .. "(";
+            for (let i in 0 .. arguments.length) {
+                text ..= (i == 0 ? "" : ", ") .. arguments[i].to_string();
+            }
+            return text .. ")";
+        };
+    );
+
+    /// @brief What a proxy calls for each method: the result is unpacked to the method's result type, and a
+    /// value of another type traps. A `void` method ignores the result.
+    #Since("0.3.0")
+    export let InvocationHandler = interface (
+        export let invoke = func(context: MethodCallContext) -> Variant;
+    );
+
+    /// @brief The entry of every proxy method (docs/design/Reflect030.md, Proxies); the compiler calls it.
+    #Since("0.3.0")
+    export let proxy_dispatch = func(handler: class, type: int, method: int, arguments: any[list]) -> any {
+        last values: Variant[list] = new;
+        for (let item in arguments) {
+            values.append(wrap(item));
+        }
+        last face = descriptor(type);
+        last chosen = handler as InvocationHandler;
+        return chosen.invoke(new MethodCallContext(face, face.methods[method], values)).raw;
+    };
+
+    /// @brief The value of `value`'s type.
+    #Since("0.3.0")
+    export let variant_of = func<T>(value: T) -> Variant => new Variant(intrinsics.pack(value), intrinsics.ordinal(value));
+
+    /// @brief A Variant of a value already held in an any.
+    #Since("0.3.0")
+    export let wrap = func(value: any) -> Variant => new Variant(value, intrinsics.ordinal(value));
+
+    /// @brief A new value of the type at `ordinal`: constructor `selector` of a class or record, variant
+    /// `selector` of an enum, or an array, list or tuple of the arguments (selector 0).
+    #Since("0.3.0")
+    export let construct = func(ordinal: int, selector: int, arguments: Variant[list]) -> Variant =>
+        wrap(intrinsics.construct(ordinal, selector, raws(arguments)));
+
+    /// @brief The number of types in the program's reflection universe.
+    #Since("0.3.0")
+    export let count = func -> int {
+        load();
+        return table.length;
+    };
+
+    /// @brief The descriptor of the type at `ordinal`; an ordinal outside the universe traps.
+    #Since("0.3.0")
+    export let descriptor_of = func(ordinal: int) -> TypeDescriptor => descriptor(ordinal);
+
+    /// @brief The descriptor of `T`.
+    #Since("0.3.0")
+    export let descriptor_for = func<T>() -> TypeDescriptor => descriptor(intrinsics.ordinal_of<T>());
+
+    /// @brief The first attribute of `items` named `tag`, or nil.
+    #Since("0.3.0")
+    export let find_attribute = func(items: Attribute[list], tag: string) -> Attribute {
+        for (let item in items) {
+            if (item.name == tag) {
+                return item;
+            }
+        }
+        return nil;
+    };
+
+    let table: string[list] = new;
+    let cache: TypeDescriptor[list] = new;
+    let loaded = false;
+
+    let load = func {
+        if (loaded) {
+            return;
+        }
+        table = intrinsics.table();
+        for (let i in 0 .. table.length) {
+            cache.append(nil);
+        }
+        loaded = true;
+    };
+
+    let descriptor = func(ordinal: int) -> TypeDescriptor {
+        load();
+        if (ordinal < 0 || ordinal >= table.length) {
+            trap_with_message("reflection: no type has ordinal " .. ordinal.to_string());
+        }
+        if (cache[ordinal] == nil) {
+            cache[ordinal] = new TypeDescriptor(ordinal, table[ordinal]);
+        }
+        return cache[ordinal];
+    };
+
+    let name_of = func(ordinal: int) -> string {
+        if (ordinal == -2) {
+            return "any";
+        }
+        return if (ordinal < 0) -> "?";
+        else -> descriptor(ordinal).name;
+    };
+
+    let raws = func(arguments: Variant[list]) -> any[list] {
+        last result: any[list] = new;
+        for (let item in arguments) {
+            result.append(item.raw);
+        }
+        return result;
+    };
+
+    let same_reference = func(a: any, b: any) -> bool => match.is (a) {
+        x: class => match.is (b) {
+            y: class => x == y,
+            _ => false,
+        },
+        _ => false,
+    };
+
+    let has_flag = func(flags: string, flag: string) -> bool {
+        for (let i in 0 .. flags.byte_length) {
+            if (flags.slice(i, i + 1) == flag) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    let parameter_text = func(items: ParamInfo[list]) -> string {
+        let text = "(";
+        for (let i in 0 .. items.length) {
+            text ..= (i == 0 ? "" : ", ") .. items[i].to_string();
+        }
+        return text .. ")";
+    };
+
+    let split = func(text: string, separator: uint8) -> string[list] {
+        last parts: string[list] = new;
+        let start = 0;
+        last count = text.byte_length;
+        for (let i in 0 .. count) {
+            if (text.byte_at(i) == separator) {
+                parts.append(text.slice(start, i));
+                start = i + 1;
+            }
+        }
+        parts.append(text.slice(start, count));
+        return parts;
+    };
+
+    let index_of_byte = func(text: string, wanted: uint8) -> int {
+        for (let i in 0 .. text.byte_length) {
+            if (text.byte_at(i) == wanted) {
+                return i;
+            }
+        }
+        return text.byte_length;
+    };
+
+    let unescape = func(text: string) -> string {
+        if (index_of_byte(text, 92) == text.byte_length) {
+            return text;
+        }
+        let result = "";
+        let i = 0;
+        while (i < text.byte_length) {
+            if (text.byte_at(i) == 92 && i + 1 < text.byte_length) {
+                last next = text.byte_at(i + 1);
+                result ..= (next == 116 ? "\t" : next == 110 ? "\n" : "\\");
+                i += 2;
+            } else {
+                last stop = i + 1;
+                result ..= text.slice(i, stop);
+                i = stop;
+            }
+        }
+        return result;
+    };
+
+    let number = func(text: string) -> int {
+        let value = 0;
+        let negative = false;
+        for (let i in 0 .. text.byte_length) {
+            last digit = text.byte_at(i);
+            if (digit == 45) {
+                negative = true;
+            } else {
+                value = value * 10 + (digit as int - 48);
+            }
+        }
+        return negative ? -value : value;
+    };
+);

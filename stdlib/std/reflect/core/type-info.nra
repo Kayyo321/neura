@@ -3,7 +3,7 @@ let kinds = import:Std.Reflect.Type.TypeKind;
 /// @brief What `typeof(...)` returns (docs/design/Expressions030.md, typeof): the kind of a type, its name with
 /// type arguments, and its qualified name. Reflection data is part of the program, so it is the same in an image
 /// without names or a source map. This record is the extension point of Std.Reflect: later packages add to it.
-/// @see [Std.Reflect.Core.TypeInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-TypeInfo)
+/// @see [Std.Reflect.Core.TypeInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Core-TypeInfo)
 #Since("0.3.0")
 export let TypeInfo = module (
     /// @brief A described type. As a record it compares, hashes and prints by value: `typeof(a) === typeof(b)`

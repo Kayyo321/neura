@@ -1,0 +1,158 @@
+// Std.Reflect.Dynamic and Std.Reflect.Member (docs/design/Reflect030.md, Dynamic values): reading, writing,
+// constructing and invoking through Variants, cursors, and the values an any cannot hold.
+let.promote optional = import:Std.Core.Optional;
+let cursors = import:Std.Reflect.Member.ValueCursor;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+let test = import:Std.Test;
+
+let Point = record (x: int32, y: int32);
+
+let Counter = class (
+    export let count: int32 = 0;
+    export let reads: int32 = 0;
+    export let tracked: int32 = 5;
+        | get: {
+            reads = reads + 1;
+            return tracked;
+        };
+        | set: tracked = value * 10;
+    export let owner: Point = nil;
+    export let names: string[list] = new;
+    export let pair: [int32, string] = [1, "one"];
+    export let maybe: Optional<int64> = Optional<int64>.None;
+    export let init = func { };
+    export let add = func(by: int32) -> int32 {
+        count = count + by;
+        return count;
+    };
+    export let clear = func {
+        count = 0;
+    };
+);
+
+let Shape = enum (Dot, Line(int32), Box { width: int32, height: int32 });
+
+let DynamicTests = module (
+    export let test_scalars_round_trip = func() -> void {
+        test.assert_equal_int32(42, variants.of(42 as int32).get<int32>());
+        test.assert_equal_string("x", variants.of("x").get<string>());
+        test.assert(variants.of(true).get<bool>());
+        test.assert_equal_string("2.5", variants.of(2.5).to_string());
+        test.assert(variants.of(7 as uint8).is_type<uint8>());
+        test.assert(!variants.of(7 as uint8).is_type<int32>());
+        test.assert(variants.of(3 as int32).equals(variants.of(3 as int32)));
+        test.assert(!variants.of(3 as int32).equals(variants.of(3 as int64)));
+    };
+
+    export let test_fields_read_and_write = func() -> void {
+        last counter = new Counter();
+        last value = variants.of(counter);
+        test.assert_equal_int32(0, value.field_named("count").get<int32>());
+        value.set_field_named("count", variants.of(9 as int32));
+        test.assert_equal_int32(9, counter.count);
+        // Accessors run as for counter.tracked.
+        test.assert_equal_int32(5, value.field_named("tracked").get<int32>());
+        test.assert_equal_int32(1, counter.reads);
+        value.set_field_named("tracked", variants.of(2 as int32));
+        test.assert_equal_int32(20, counter.tracked);
+        // A field of a class type, nil and not nil.
+        test.assert(value.field_named("owner").is_nil());
+        value.set_field_named("owner", variants.of(new Point(1, 2)));
+        test.assert_equal_int32(2, counter.owner.y);
+        value.set_field_named("owner", variants.of(nil as Point));
+        test.assert(counter.owner == nil);
+    };
+
+    export let test_values_any_cannot_hold = func() -> void {
+        last counter = new Counter();
+        counter.names.append("a");
+        counter.names.append("b");
+        last value = variants.of(counter);
+        last names = value.field_named("names");
+        test.assert_equal_string("string[list]", names.descriptor().name);
+        test.assert_equal_int32(2, names.length());
+        test.assert_equal_string("b", names.element(1).get<string>());
+        last pair = value.field_named("pair");
+        test.assert_equal_int32(2, pair.length());
+        test.assert_equal_string("one", pair.element(1).get<string>());
+        last maybe = value.field_named("maybe");
+        test.assert_equal_int32(0, maybe.variant_index());
+        test.assert_equal_int32(0, maybe.length());
+        value.set_field_named("maybe", variants.of(Optional<int64>.Some(8)));
+        test.assert_equal_int32(1, value.field_named("maybe").variant_index());
+        test.assert(value.field_named("maybe").element(0).get<int64>() == 8);
+        last copied: [int32, string] = pair.get<[int32, string]>();
+        test.assert_equal_string("one", copied[1]);
+    };
+
+    export let test_enums = func() -> void {
+        last box = variants.of(Shape.Box { width: 3, height: 4 });
+        test.assert_equal_int32(2, box.variant_index());
+        test.assert_equal_int32(2, box.length());
+        test.assert_equal_int32(4, box.element(1).get<int32>());
+        last dot = variants.of(Shape.Dot);
+        test.assert_equal_int32(0, dot.variant_index());
+        test.assert_equal_int32(0, dot.length());
+        last shape = types.of<Shape>();
+        last arguments: variants.Variant[list] = new;
+        arguments.append(variants.of(6 as int32));
+        last line = variants.construct(shape, 1, arguments).get<Shape>();
+        test.assert_equal_string("Line(6)", line.to_string());
+        last none: variants.Variant[list] = new;
+        test.assert_equal_string("Dot", variants.construct(shape, 0, none).get<Shape>().to_string());
+    };
+
+    export let test_construct_records_classes_lists_and_tuples = func() -> void {
+        last arguments: variants.Variant[list] = new;
+        arguments.append(variants.of(3 as int32));
+        arguments.append(variants.of(4 as int32));
+        last point = variants.construct(types.of<Point>(), 0, arguments).get<Point>();
+        test.assert(point === new Point(3, 4));
+        last none: variants.Variant[list] = new;
+        last counter = variants.construct(types.of<Counter>(), 0, none).get<Counter>();
+        test.assert_equal_int32(5, counter.tracked);
+        last items: variants.Variant[list] = new;
+        items.append(variants.of("p"));
+        items.append(variants.of("q"));
+        last list = variants.construct(types.of<string[list]>(), 0, items).get<string[list]>();
+        test.assert_equal_int32(2, list.length);
+        test.assert_equal_string("q", list[1]);
+        last parts: variants.Variant[list] = new;
+        parts.append(variants.of(9 as int32));
+        parts.append(variants.of("nine"));
+        last tuple = variants.construct(types.of<[int32, string]>(), 0, parts).get<[int32, string]>();
+        test.assert_equal_int32(9, tuple[0]);
+    };
+
+    export let test_invoke = func() -> void {
+        last counter = new Counter();
+        last value = variants.of(counter);
+        last arguments: variants.Variant[list] = new;
+        arguments.append(variants.of(4 as int32));
+        test.assert_equal_int32(4, value.invoke_named("add", arguments).get<int32>());
+        test.assert_equal_int32(8, value.invoke_named("add", arguments).get<int32>());
+        last none: variants.Variant[list] = new;
+        test.assert(value.invoke_named("clear", none).is_nil());
+        test.assert_equal_int32(0, counter.count);
+        // Root methods are not listed; a descriptor's methods are the class's own and inherited ones.
+        test.assert(value.descriptor().method("to_string") == nil);
+    };
+
+    export let test_cursors = func() -> void {
+        last counter = new Counter();
+        counter.owner = new Point(5, 6);
+        counter.names.append("z");
+        last root = variants.of(counter);
+        last owner_index = root.descriptor().field("owner").index;
+        last names_index = root.descriptor().field("names").index;
+        last at = cursors.at(root).child(owner_index).child(1);
+        test.assert_equal_int32(6, at.value().get<int32>());
+        test.assert_equal_string("int32", at.descriptor().name);
+        test.assert_equal_string("z", cursors.at(root).child(names_index).child(0).value().get<string>());
+        last steps: int[list] = new;
+        steps.append(root.descriptor().field("count").index);
+        new cursors.ValueCursorMut(root, steps).write(variants.of(11 as int32));
+        test.assert_equal_int32(11, counter.count);
+    };
+);

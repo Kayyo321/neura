@@ -1,0 +1,17 @@
+// status: 134
+// stderr: reflection: field x of Point is not writable
+// A record's fields are `last`: Variant.set_field traps (docs/design/Reflect030.md, edge case 6).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Point = record (x: int32, y: int32);
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        variants.of(new Point(1, 2)).set_field_named("x", variants.of(5 as int32));
+        console.print_line("after");
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,9 @@
+error[E1302]: a class keeps one reflection policy
+ --> $DIR/two-policies.nra:5:1
+  |
+5 | let Secret = class implements policies.Strip, policies.Layout ( );
+  | ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ implements both ReflectPolicy.Strip and ReflectPolicy.Layout
+  |
+  = help: keep one marker
+
+For more information about this error, try `neura explain E1302`.
