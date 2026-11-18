@@ -1,0 +1,13 @@
+// run-options: --gpu=off --deny-entropy
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: JWE AES-GCM wrapping IV must be 12 bytes
+let jwe = import:Std.Crypto.Token.Jwe;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last key = new jwe.GcmWrappingKey(jwe.ContentEncryption.A128Gcm, jwe.GcmWrapAlgorithm.A128GcmKw, new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]));
+        let _ = jwe.seal_with(key, new, new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), new([0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0]), new);
+        return program.ExitCode.Ok;
+    };
+);

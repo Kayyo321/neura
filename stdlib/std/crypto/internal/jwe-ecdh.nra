@@ -1,0 +1,167 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let ecdh = import:Std.Crypto.Asymmetric.Ecdh;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let json = import:Std.Encoding.Json;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The protected ECDH-ES parameters and the RFC 7518 Concat KDF. Internal.
+#Since("0.3.0")
+export let JweEcdh = module (
+    const InvalidJwe = "crypto.invalid_jwe";
+
+    export let Parameters = class (
+        export last public_key: ecdsa.EcPublicKey;
+        export last apu: uint8[list];
+        export last apv: uint8[list];
+
+        export let init = func(ephemeral: ecdsa.EcPublicKey, producer, recipient: uint8[list]) {
+            public_key = ephemeral;
+            apu = producer;
+            apv = recipient;
+        };
+
+        export let.override to_string = func -> string => "JweEcdh.Parameters";
+    );
+
+    let curve_name = func(curve: ecdsa.Curve) -> string => match (curve) {
+        ecdsa.Curve.P256 => "P-256",
+        ecdsa.Curve.P384 => "P-384",
+        ecdsa.Curve.P521 => "P-521",
+        ecdsa.Curve.Secp256k1 => "",
+    };
+
+    let count_members = func(value: json.JsonValue) -> int {
+        let count = 0;
+        match (value) {
+            json.JsonValue.Object(members) => {
+                count = members.length;
+                for (let entry in members) {
+                    count += count_members(entry[1]);
+                }
+            },
+            json.JsonValue.Array(items) => {
+                for (let item in items) {
+                    count += count_members(item);
+                }
+            },
+            _ => {},
+        }
+        return count;
+    };
+
+    // The base JSON parser keeps one value for a repeated name. Count every JSON member separator
+    // outside strings and compare the parsed tree to reject duplicates inside the nested epk as well.
+    let unique_members = func(bytes: uint8[list], members: [string, json.JsonValue][list]) -> bool {
+        let separators = 0;
+        let in_string = false;
+        let escaped = false;
+        for (let byte in bytes) {
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (byte == '\\') {
+                    escaped = true;
+                } else if (byte == '"') {
+                    in_string = false;
+                }
+            } else if (byte == '"') {
+                in_string = true;
+            } else if (byte == ':') {
+                separators++;
+            }
+        }
+        return separators == count_members(json.JsonValue.Object(members));
+    };
+
+    export let check_parties = func(apu, apv: uint8[list], both_present: bool) -> Result<Unit> {
+        if (both_present && constant_time.ct_eq(apu, apv)) {
+            return jose.fail<Unit>(InvalidJwe, "JWE apu and apv must be distinct");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let parse_ephemeral = func(members: [string, json.JsonValue][list], curve: ecdsa.Curve) -> Result<ecdsa.EcPublicKey> {
+        if ((jose.required_text(members, "kty", InvalidJwe)?) != "EC"
+            || (jose.required_text(members, "crv", InvalidJwe)?) != curve_name(curve)
+            || jose.has(members, "d")) {
+            return jose.fail<ecdsa.EcPublicKey>(InvalidJwe, "JWE epk must be a public EC key on the recipient curve");
+        }
+        last x = jose.required_bytes(members, "x", InvalidJwe)?;
+        last y = jose.required_bytes(members, "y", InvalidJwe)?;
+        last size = ecdsa.scalar_length(curve);
+        if (x.length != size || y.length != size) {
+            return jose.fail<ecdsa.EcPublicKey>(InvalidJwe, "JWE epk coordinates have the wrong length");
+        }
+        let sec1: uint8[list] = new([4]);
+        words.append_all(sec1, x);
+        words.append_all(sec1, y);
+        return match (ecdsa.parse_public_key(curve, sec1)) {
+            Result.Ok(key) => Result<ecdsa.EcPublicKey>.Ok(key),
+            Result.Err(_) => jose.fail<ecdsa.EcPublicKey>(InvalidJwe, "JWE epk is not a point on the recipient curve"),
+        };
+    };
+
+    export let parse = func(bytes: uint8[list], curve: ecdsa.Curve) -> Result<Parameters> {
+        last members = jose.parse_object_bytes(bytes, InvalidJwe)?;
+        if (not unique_members(bytes, members)) {
+            return jose.fail<Parameters>(InvalidJwe, "repeated member name in the JWE protected header");
+        }
+        last ephemeral = match (json.member(members, "epk")) {
+            Optional.Some(json.JsonValue.Object(key)) => parse_ephemeral(key, curve),
+            _ => jose.fail<ecdsa.EcPublicKey>(InvalidJwe, "JWE epk must be a public JWK object"),
+        }?;
+        last apu = jose.decode(jose.text_member(members, "apu", InvalidJwe)?, InvalidJwe, "JWE apu is not base64url")?;
+        last apv = jose.decode(jose.text_member(members, "apv", InvalidJwe)?, InvalidJwe, "JWE apv is not base64url")?;
+        check_parties(apu, apv, jose.has(members, "apu") && jose.has(members, "apv"))?;
+        return Result<Parameters>.Ok(new Parameters(ephemeral, apu, apv));
+    };
+
+    export let header = func(alg, enc: string, ephemeral: ecdsa.EcPrivateKey, apu, apv: uint8[list]) -> uint8[list] {
+        last sec1 = ephemeral.public_key_bytes();
+        last width = ecdsa.scalar_length(ephemeral.curve);
+        last x = jose.encode(words.slice(sec1, 1, 1 + width));
+        last y = jose.encode(words.slice(sec1, 1 + width, sec1.length));
+        last producer = apu.length == 0 ? "" : (",\"apu\":" .. jose.quote(jose.encode(apu)));
+        last recipient = apv.length == 0 ? "" : (",\"apv\":" .. jose.quote(jose.encode(apv)));
+        return words.utf8("{\"alg\":" .. jose.quote(alg) .. ",\"enc\":" .. jose.quote(enc) .. producer .. recipient
+            .. ",\"epk\":{\"kty\":\"EC\",\"crv\":" .. jose.quote(curve_name(ephemeral.curve))
+            .. ",\"x\":" .. jose.quote(x) .. ",\"y\":" .. jose.quote(y) .. "}}");
+    };
+
+    let append_field = func(out, bytes: uint8[list]) {
+        words.append32_be(out, bytes.length as uint32);
+        words.append_all(out, bytes);
+    };
+
+    // RFC 7518 section 4.6.2. The largest supported output is 512 bits, or two SHA-256 blocks.
+    export let derive = func(private_key: ecdsa.EcPrivateKey, peer: ecdsa.EcPublicKey, algorithm_id: string,
+        apu, apv: uint8[list], length: int) -> Result<uint8[list]> {
+        last shared = ecdh.diffie_hellman(private_key, peer)?;
+        let input: uint8[list] = new([0, 0, 0, 0]);
+        words.append_all(input, shared.expose());
+        shared.wipe();
+        append_field(input, words.utf8(algorithm_id));
+        append_field(input, apu);
+        append_field(input, apv);
+        words.append32_be(input, (length * 8) as uint32);
+        let key: uint8[list] = new;
+        let round: uint8 = 1;
+        while (key.length < length) {
+            input[3] = round;
+            let digest = sha2.sha256(input);
+            last take = length - key.length < digest.length ? length - key.length : digest.length;
+            for (let index in 0 .. take) {
+                key.append(digest[index]);
+            }
+            words.wipe(digest);
+            round++;
+        }
+        words.wipe(input);
+        return Result<uint8[list]>.Ok(key);
+    };
+);
