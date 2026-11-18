@@ -4,6 +4,7 @@ let datagram_socket = import:Std.Net.Socket.DatagramSocket;
 let duration = import:Std.Time.Duration;
 let error = import:Std.Core.Error;
 let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
 let socket_addr = import:Std.Net.Core.SocketAddr;
 let test = import:Std.Test;
 let udp = import:Std.Net.Socket.UdpSocket;
@@ -14,9 +15,9 @@ let unix_listener = import:Std.Net.Socket.UnixListener;
 let unix_stream = import:Std.Net.Socket.UnixStream;
 
 // UdpSocket, UnixDatagram, UnixListener and UnixStream over real sockets: UDP on the loopback interface, Unix
-// sockets named `@...` after a fresh UDP port, so parallel runs do not collide. On Linux the names are in the
-// abstract namespace; elsewhere the host takes them as paths in the working directory, which nothing here
-// binds twice.
+// sockets named after a fresh UDP port, so parallel runs do not collide. On Linux the names are in the
+// abstract namespace. Elsewhere an abstract name is Unsupported (Std.Net.Core.UnixAddr), which the first test
+// checks, and the names are socket files in the working directory, which nothing here binds twice.
 let DatagramUnixTests = module (
     let kind_of = func(e: error.Error) -> error.IoErrorKind {
         return match (e) {
@@ -50,12 +51,32 @@ let DatagramUnixTests = module (
         return text;
     };
 
-    // An abstract name no other run holds: the port of a UDP socket bound for the purpose.
-    let unique_name = func(role: string) -> unix_addr.UnixAddr {
+    // A name no other run holds: the port of a UDP socket bound for the purpose.
+    let unique_text = func(role: string) -> string {
         last holder = udp_socket();
         last port = test.assert_ok<socket_addr.SocketAddr>(holder.local_address()).port;
         test.assert_ok<unit.Unit>(holder.close());
-        return unix_addr.abstract_name("neura-net-test-" + role + "-" + port.to_string());
+        return "neura-net-test-" + role + "-" + port.to_string();
+    };
+
+    // Whether the host has the abstract namespace: a bind there succeeds, or it is Unsupported.
+    let abstract_namespace = func -> bool {
+        let supported = false;
+        match (unix_datagram.bind(unix_addr.abstract_name(unique_text("probe")))) {
+            result.Result.Ok(socket) => {
+                test.assert_ok<unit.Unit>(socket.close());
+                supported = true;
+            },
+            result.Result.Err(e) => {
+                test.assert(kind_of(e) == error.IoErrorKind.Unsupported);
+            },
+        }
+        return supported;
+    };
+
+    let unique_name = func(role: string) -> unix_addr.UnixAddr {
+        last text = unique_text(role);
+        return abstract_namespace() ? unix_addr.abstract_name(text) : unix_addr.of_path(text + ".sock");
     };
 
     export let test_udp_round_trip_on_loopback = func {

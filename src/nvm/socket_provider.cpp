@@ -132,6 +132,19 @@ bool unix_address(const std::string& path, sockaddr_un& out, socklen_t& length) 
     return true;
 }
 
+// Why unix_address refused a path: an abstract name off Linux is
+// Unsupported (Std.Net.Core.UnixAddr), anything else InvalidInput.
+HostCompletion unix_address_failure(const std::string& path) {
+#ifndef __linux__
+    if (!path.empty() && path.front() == '@' && path.size() < sizeof(sockaddr_un::sun_path) &&
+        path.find('\0') == std::string::npos) {
+        return fail(host_error::unsupported);
+    }
+#endif
+    (void)path;
+    return fail(host_error::invalid_input);
+}
+
 std::string unix_path(const sockaddr_un& address, socklen_t length) {
     const auto offset = offsetof(sockaddr_un, sun_path);
     if (length <= offset) return {};
@@ -332,7 +345,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         if (!granted->net) return denied();
         sockaddr_un address{};
         socklen_t length = 0;
-        if (!unix_address(request.arguments.at(0).bytes, address, length)) return fail(host_error::invalid_input);
+        if (!unix_address(request.arguments.at(0).bytes, address, length)) {
+            return unix_address_failure(request.arguments.at(0).bytes);
+        }
         if (full()) return fail(host_error::other);
         const int descriptor = new_socket(AF_UNIX, SOCK_STREAM);
         if (descriptor < 0) return errno_failure();
@@ -352,7 +367,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         if (!granted->net) return denied();
         sockaddr_un address{};
         socklen_t length = 0;
-        if (!unix_address(request.arguments.at(0).bytes, address, length)) return fail(host_error::invalid_input);
+        if (!unix_address(request.arguments.at(0).bytes, address, length)) {
+            return unix_address_failure(request.arguments.at(0).bytes);
+        }
         if (full()) return fail(host_error::other);
         const int descriptor = new_socket(AF_UNIX, SOCK_STREAM);
         if (descriptor < 0) return errno_failure();
@@ -369,7 +386,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         const auto& path = request.arguments.at(0).bytes;
         sockaddr_un address{};
         socklen_t length = 0;
-        if (!path.empty() && !unix_address(path, address, length)) return fail(host_error::invalid_input);
+        if (!path.empty() && !unix_address(path, address, length)) return unix_address_failure(path);
         if (full()) return fail(host_error::other);
         const int descriptor = new_socket(AF_UNIX, SOCK_DGRAM);
         if (descriptor < 0) return errno_failure();
@@ -386,8 +403,9 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
         auto* socket = find(request.arguments.at(0));
         sockaddr_un address{};
         socklen_t length = 0;
-        if (!socket || !socket->datagram || !unix_address(request.arguments.at(1).bytes, address, length)) {
-            return fail(host_error::invalid_input);
+        if (!socket || !socket->datagram) return fail(host_error::invalid_input);
+        if (!unix_address(request.arguments.at(1).bytes, address, length)) {
+            return unix_address_failure(request.arguments.at(1).bytes);
         }
         const auto& bytes = request.arguments.at(2).bytes;
         ssize_t sent;
