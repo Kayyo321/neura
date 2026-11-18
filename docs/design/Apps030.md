@@ -129,7 +129,9 @@ cmake --build --preset wasm-runtime
 
 For the standalone Node smoke test, configure the preset with `-DNEURA_WASM_SMOKE=ON`. Run `node tests/wasm/smoke.cjs build/wasm-runtime/neura_wasm_smoke.js /path/to/image.nvr 2` with a smoke image that uses only `neura.console.write_line`. The modes `0`, `1` and `2` exercise tier 0, normal tier 2 and eager portable function programs respectively.
 
-Configure with `-DNEURA_WASM_HOST=ON` to link `nvm.wasm` and its ES module loader. The [browser adapter](../../hosts/web/README.md#nvm-execution) verifies and binds an image before starting it, then resumes the same execution across step slices. Its initial host binds console line writes and wall and monotonic clock reads. A due proof remains queued while the embedder processes events. The embedder can attempt one proof on an idle callback.
+Configure with `-DNEURA_WASM_HOST=ON` to link `nvm.wasm` and its ES module loader. The [browser adapter](../../hosts/web/README.md#nvm-execution) verifies and binds an image before starting it, then resumes the same execution across step slices. A due proof remains queued while the embedder processes events. The embedder can attempt one proof on an idle callback.
+
+Step 2's production interface and step 4's services are implemented (2026-11-17, autonomous agents, awaiting owner confirmation): version 1 of the [browser adapter interface](../runtime/Providers.md#browser-adapter-interface) carries any host request, `run()` drives overlapping and cancellable requests, sleeps and scope deadlines without polling, and the [UI and history services](../runtime/Providers.md#ui-services) serve commits and events through the DOM adapter. Their checks are `tests/wasm/check-host.py` and `tests/apps/web/check.py`, under Node, headless Chromium 156 and headless Firefox 153 ESR. Step 3's measurements, step 5's `neura.http.fetch`, step 6's bundles, recording and replay in the browser, and the B-W7 qualification remain open.
 
 ## Version axes
 

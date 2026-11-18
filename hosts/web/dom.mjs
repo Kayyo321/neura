@@ -493,6 +493,17 @@ export class DomRoot {
         }
     }
 
+    // Managed nodes (the container excluded) and installed listeners.
+    stats() {
+        let listeners = 0;
+        for (const record of this.#records.values()) listeners += record.handlers?.size ?? 0;
+        return { nodes: this.#records.size - 1, listeners };
+    }
+
+    get faulted() {
+        return this.#faulted;
+    }
+
     reset() {
         if (this.#closed || this.#applying) throw new RootFault("UI root cannot reset");
         const root = this.#records.get(ROOT);

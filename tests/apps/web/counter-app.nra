@@ -1,0 +1,10 @@
+// The entry of the browser counter check (tests/apps/web/check.py): three clicks, then the root's counters,
+// history paths, and closing the root.
+let counter = import:Std.Probe.Counter;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(arguments: string[]) -> program.ExitCode {
+        return counter.run(3) == 0 ? program.ExitCode.Ok : program.ExitCode.Failure;
+    };
+);

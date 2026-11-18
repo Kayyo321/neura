@@ -105,6 +105,8 @@ pages = [
   { source = "docs/runtime/NVM.md", label = "Neura Virtual Machine" },
   { source = "docs/runtime/NVR.md", label = "NVR format" },
   { source = "docs/runtime/Kernels.md", label = "Kernels" },
+  { source = "docs/runtime/Providers.md", label = "Application host providers" },
+  { source = "hosts/web/README.md", label = "Browser host" },
   { source = "docs/Benchmarks.md", label = "Wall-clock benchmarks" },
 ]
 

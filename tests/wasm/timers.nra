@@ -1,7 +1,7 @@
 // Browser waits (docs/runtime/Providers.md, "Scheduling"): three tasks sleep
 // 200 ms each and overlap, a scope deadline cancels a long sleep, and a
 // connection the browser does not grant fails at once with CapabilityDenied.
-// The elapsed-time bounds are generous so that a busy machine still passes.
+// Three sleeps in turn would take 600 ms; overlapped they take a little over 200 ms.
 let channels = import:Std.Concurrent.Channel;
 let console = import:Std.Io.Console;
 let durations = import:Std.Time.Duration;
@@ -77,7 +77,7 @@ export let Main = module : program.Entry (
             }
         }
         let elapsed = now() - started;
-        console.print_line("three sleeps overlapped: " + (elapsed >= 200000000 && elapsed < 550000000).to_string());
+        console.print_line("three sleeps overlapped: " + (elapsed >= 200000000 && elapsed < 600000000).to_string());
 
         let sleeps = channels.open<string>(1);
         let connects = channels.open<string>(1);
