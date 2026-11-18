@@ -575,8 +575,8 @@ private:
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
     IrNode for_each_iterable(const Statement& stmt, Context& context, IrNode items);
-    IrNode for_each_range(const Statement& stmt, Context& context, std::vector<IrNode> prelude,
-                          const IrNode& current, const IrNode& step, const IrNode& length);
+    IrNode for_each_range(const Statement& stmt, Context& context, std::vector<IrNode> prelude, IrNode condition,
+                          std::vector<IrNode> before, IrNode element, std::vector<IrNode> after);
     std::vector<IrNode> body(const std::vector<Statement>& stmts, Context& context);
     SymbolId owner_kind(SymbolId id, SymbolKind kind) const;
 
@@ -3580,6 +3580,37 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
             throw;
         }
     }(), "$range_stop");
+    if (each && !expr.step_colon && format->bits <= 32) {
+        // A for-each over a range with the default step and elements of at
+        // most 32 bits compares with the stop instead of counting an index.
+        // Its length, `stop - start` (plus one for `..=`), cannot overflow
+        // int64; converting it to int32 fails as construction's length does.
+        const auto nonempty = save(binary(inclusive ? "<=" : "<", bool_type, current, stop), "$range_nonempty");
+        auto difference = binary("-", int64_type, convert(int64_type, stop), convert(int64_type, current));
+        if (inclusive) difference = binary("+", int64_type, std::move(difference), integer(int64_type, "1"));
+        save(convert(int32_type, select(nonempty, std::move(difference), integer(int64_type, "0"))), "$range_length");
+        std::vector<IrNode> advance;
+        if (!inclusive) {
+            // `current < stop` before the step, so `current + 1` never
+            // overflows and the element, `current - 1`, never underflows.
+            // The element is computed after the store, not loaded before
+            // it: the converter can let a closure that captures a binding
+            // initialized from a load see a later store to the loaded local
+            // in the same block (reproduced on the base compiler without
+            // ranges), and storing first avoids that pattern.
+            advance.push_back(store(current, binary("+", element, current, integer(element, "1"))));
+            return for_each_range(*each, context, std::move(result.body), binary("<", bool_type, current, stop),
+                                  std::move(advance), binary("-", element, current, integer(element, "1")), {});
+        }
+        // `..=` may end at the type's maximum: step only while `current < stop`.
+        const auto more = save(nonempty, "$range_more", false);
+        advance.push_back(store(more, binary("<", bool_type, current, stop)));
+        auto next = node(IrOp::Branch, span);
+        next.operands.push_back(more);
+        next.body.push_back(store(current, binary("+", element, current, integer(element, "1"))));
+        advance.push_back(std::move(next));
+        return for_each_range(*each, context, std::move(result.body), more, {}, current, std::move(advance));
+    }
     const auto step = save(expr.step_colon ? value(expr.operands[2], context, &element)
                                            : integer(element, "1"), "$range_step");
     const auto& distance_type = format->bits <= 32 ? uint32_type : uint64_type;
@@ -3638,7 +3669,19 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
                        select(has_items, one, zero));
     }
     const auto length = save(convert(int32_type, std::move(count)), "$range_length");
-    if (each) return for_each_range(*each, context, std::move(result.body), current, step, length);
+    if (each) {
+        // As construction's loop below: bind `current`, advance the index,
+        // and add the step only while another element remains.
+        const auto index = save(integer(int32_type, "0"), "$range_index", false);
+        std::vector<IrNode> advance;
+        advance.push_back(store(index, binary("+", int32_type, index, integer(int32_type, "1"))));
+        auto next = node(IrOp::Branch, span);
+        next.operands.push_back(binary("<", bool_type, index, length));
+        next.body.push_back(store(current, binary("+", element, current, step)));
+        advance.push_back(std::move(next));
+        return for_each_range(*each, context, std::move(result.body), binary("<", bool_type, index, length), {},
+                              current, std::move(advance));
+    }
     auto allocation = node(IrOp::RepeatCollection, span, result.type);
     allocation.operands = {convert(uint64_type, length), current};
     const auto items = save(std::move(allocation), "$range_items");
@@ -5088,58 +5131,37 @@ IrNode Lowering::for_each(const Statement& stmt, Context& context) {
     return result;
 }
 
-// `for (let i in a .. b : s)` and `..=`: `prelude` evaluates the bounds and
-// the step once and computes the length exactly as range construction does,
-// with the same failures (a zero step, an over-long range). The loop then
-// binds `current` instead of storing it into a collection, so nothing is
-// allocated. As in construction, `current` advances only while another
-// element remains, so it never passes the last element and cannot overflow.
-IrNode Lowering::for_each_range(const Statement& stmt, Context& context, std::vector<IrNode> prelude,
-                                const IrNode& current, const IrNode& step, const IrNode& length) {
+// `for (let i in a .. b : s)` and `..=`, built by `range`: `prelude`
+// evaluates the bounds and the step once and checks the length as range
+// construction does, with the same failures (a zero step, an over-long
+// range). Each iteration tests `condition`, runs `before`, binds `element`,
+// runs `after`, and runs the body. `before` and `after` move the range's
+// current value to the next element only while one remains, so it never
+// passes the last element and cannot overflow. Nothing is allocated.
+IrNode Lowering::for_each_range(const Statement& stmt, Context& context, std::vector<IrNode> prelude, IrNode condition,
+                                std::vector<IrNode> before, IrNode element, std::vector<IrNode> after) {
     const auto& declaration = *stmt.declaration;
-    const auto& range_span = stmt.expressions.front().span;
-    const auto element = current.type;
+    const auto element_type = element.type;
     auto result = node(IrOp::Block, stmt.span);
     result.body = std::move(prelude);
-    const auto binary = [&](std::string op, const IrType& type, IrNode left, IrNode right) {
-        auto operation = node(IrOp::Binary, range_span, type);
-        operation.text = std::move(op);
-        operation.operands = {std::move(left), std::move(right)};
-        return operation;
-    };
-    const auto store = [&](IrNode place, IrNode stored) {
-        auto operation = node(IrOp::Store, range_span);
-        operation.operands = {std::move(place), std::move(stored)};
-        return operation;
-    };
-    auto zero = node(IrOp::Integer, range_span, int32_type);
-    zero.text = "0";
-    auto one = zero;
-    one.text = "1";
-    const auto index = save_temporary(std::move(zero), result.body, context, "$range_index", false);
-
     auto loop = node(IrOp::Loop, stmt.span);
-    const auto in_range = binary("<", bool_type, index, length);
-    loop.operands.push_back(in_range);
+    loop.operands.push_back(std::move(condition));
     context.scopes.emplace_back();
-    IrType declared = element;
+    IrType declared = element_type;
     if (declaration.type) {
         declared = type(*declaration.type, context);
-        require_type(element, declared, declaration.type->span);
+        require_type(element_type, declared, declaration.type->span);
     }
     auto element_id = add(SymbolKind::Local, declaration.name, declaration.span, context.owner);
     symbol(element_id).type = declared;
     symbol(element_id).constant = declaration.constant;
     context.scopes.back().emplace(declaration.name, element_id);
+    for (auto& step : before) loop.body.push_back(std::move(step));
     auto bind = node(IrOp::Initialize, stmt.span);
     bind.symbol = element_id;
-    bind.operands.push_back(current);
+    bind.operands.push_back(std::move(element));
     loop.body.push_back(std::move(bind));
-    loop.body.push_back(store(index, binary("+", int32_type, index, std::move(one))));
-    auto advance = node(IrOp::Branch, range_span);
-    advance.operands.push_back(in_range);
-    advance.body.push_back(store(current, binary("+", element, current, step)));
-    loop.body.push_back(std::move(advance));
+    for (auto& step : after) loop.body.push_back(std::move(step));
     ++context.loops;
     for (const auto& item : stmt.body) {
         append_statement(loop.body, item, context);

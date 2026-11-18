@@ -575,6 +575,56 @@ export let Main = module : program.Entry (
             compare("closures", counted, built);
         }
         {
+            let top: int64 = 9223372036854775807;
+            let low: uint8 = 253;
+            let counted_actions: (func() -> string)[list] = new;
+            for (let value in 0 .. 9 : 4) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in top - 2 ..= top) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in low .. 255) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in low ..= 255) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            for (let value in 3 .. 0 : -1) {
+                counted_actions.append(new func() -> string => value.to_string());
+            }
+            let counted = "";
+            for (let action in counted_actions) {
+                counted = counted + " " + action();
+            }
+            let built_actions: (func() -> string)[list] = new;
+            let stepped = 0 .. 9 : 4;
+            for (let value in stepped) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let wide = top - 2 ..= top;
+            for (let value in wide) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let narrow = low .. 255;
+            for (let value in narrow) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let narrow_inclusive = low ..= 255;
+            for (let value in narrow_inclusive) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let down = 3 .. 0 : -1;
+            for (let value in down) {
+                built_actions.append(new func() -> string => value.to_string());
+            }
+            let built = "";
+            for (let action in built_actions) {
+                built = built + " " + action();
+            }
+            compare("captured in every form", counted, built);
+        }
+        {
             let counted = "";
             for (let outer in 0 ..= 3) {
                 for (let inner: int in outer .. 3) {
