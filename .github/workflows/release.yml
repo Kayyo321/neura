@@ -121,14 +121,14 @@ jobs:
             timeout-scale: 12
           # The Intel runner is about twice as slow as the arm one, and its
           # suite is projected to reach the 360-minute job limit: the pure-Neura suites
-          # stdlib-crypto-asymmetric and stdlib-crypto-pqc (hours each without
+          # stdlib-crypto-asymmetric and stdlib-crypto-pqc with its parts (hours each without
           # the JIT) run on the other three targets, including arm macOS with
           # the same compiler, library and interpreter without the JIT
           # (docs/ContinuousIntegration.md, "Tests that run on fewer targets").
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
             minimum: 174
-            exclude: "^(server-sql-postgres|stdlib-crypto-asymmetric|stdlib-crypto-pqc)$"
+            exclude: "^(server-sql-postgres|stdlib-crypto-asymmetric|stdlib-crypto-pqc(-.*)?)$"
             timeout-scale: 12
     env:
       NEURA_LIBCLANG_REQUIRED: "1"

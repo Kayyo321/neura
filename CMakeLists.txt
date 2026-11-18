@@ -1923,15 +1923,37 @@ if(BUILD_TESTING AND NEURA_SDK)
         if(area STREQUAL "sql" AND NOT TARGET neura_sql)
             continue()
         endif()
+        # The test files that run as entries of their own, stdlib-<area>-<file>:
+        # without the JIT, one entry of the whole area ran for hours, alone at
+        # the end of the slower targets' suites.
+        set(split_files)
+        if(area STREQUAL "crypto-pqc")
+            set(split_files slh-dsa-sign-fast-tests slh-dsa-sign-sha2-small-tests slh-dsa-sign-shake-small-tests)
+        endif()
+        string(REPLACE ";" "," skipped "${split_files}")
         add_test(NAME stdlib-${area} COMMAND ${CMAKE_COMMAND}
             "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
             "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
             "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests/${area}"
             "-DAREA=${area}"
             "-DNATIVE_TEST_DIR=${neura_native_test_dir}"
+            "-DSKIP_FILES=${skipped}"
             -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/area.cmake"
         )
         set_tests_properties(stdlib-${area} PROPERTIES FIXTURES_REQUIRED stdlib)
+        foreach(file IN LISTS split_files)
+            string(REGEX REPLACE "-tests$" "" part "${file}")
+            add_test(NAME stdlib-${area}-${part} COMMAND ${CMAKE_COMMAND}
+                "-DNEURA=${CMAKE_CURRENT_BINARY_DIR}/stdlib-install/prefix/bin/neura${CMAKE_EXECUTABLE_SUFFIX}"
+                "-DSOURCE_DIR=${CMAKE_CURRENT_SOURCE_DIR}"
+                "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/stdlib-tests/${area}-${part}"
+                "-DAREA=${area}"
+                "-DNATIVE_TEST_DIR=${neura_native_test_dir}"
+                "-DONLY_FILE=${file}"
+                -P "${CMAKE_CURRENT_SOURCE_DIR}/tests/stdlib/area.cmake"
+            )
+            set_tests_properties(stdlib-${area}-${part} PROPERTIES FIXTURES_REQUIRED stdlib)
+        endforeach()
     endforeach()
 
     # The desktop window host and its Neura native child (docs/design/Desktop030.md). These tests need the
@@ -2118,7 +2140,8 @@ if(BUILD_TESTING)
     # the many short ones instead of running alone at the end. The costs are
     # their seconds on the x86_64 Linux CI runner (release trial 16).
     set(neura_test_costs
-        backend-reference 2640 lifetime-programs 900 stdlib-crypto-pqc 750 decompiler-behavior 540
+        backend-reference 2640 lifetime-programs 900 stdlib-crypto-pqc 300 stdlib-crypto-pqc-slh-dsa-sign-shake-small 400
+        stdlib-crypto-pqc-slh-dsa-sign-sha2-small 300 stdlib-crypto-pqc-slh-dsa-sign-fast 200 decompiler-behavior 540
         stdlib-crypto-asymmetric 480 app-ui-reconcile 450 stdlib-character 390 backend-tier3 380
         program-fuzz 370 lifecycle-update 360 decompiler-lift 350 stdlib-crypto-pki 330
         expressions-equivalence 300 stdlib-crypto-advanced 290 lift-corpus 260 stdlib-crypto-token 250

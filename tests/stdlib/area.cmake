@@ -44,9 +44,22 @@ function(neura prefix directory)
     set("${prefix}_stderr" "${stderr}" PARENT_SCOPE)
 endfunction()
 
-# Test files.
+# Test files. A long area may be split into several CTest entries (see
+# NEURA_STDLIB_SPLIT_FILES in CMakeLists.txt): ONLY_FILE runs that one test
+# file and nothing else; SKIP_FILES (names without .nra, separated by commas) leaves
+# those files to their own entries.
 file(GLOB test_files "${area_dir}/*.nra")
 list(SORT test_files)
+if(DEFINED ONLY_FILE)
+    set(test_files "${area_dir}/${ONLY_FILE}.nra")
+    if(NOT EXISTS "${test_files}")
+        message(FATAL_ERROR "${AREA}: no test file ${ONLY_FILE}.nra")
+    endif()
+endif()
+string(REPLACE "," ";" SKIP_FILES "${SKIP_FILES}")
+foreach(skipped IN LISTS SKIP_FILES)
+    list(REMOVE_ITEM test_files "${area_dir}/${skipped}.nra")
+endforeach()
 foreach(file IN LISTS test_files)
     get_filename_component(name "${file}" NAME_WE)
     file(STRINGS "${file}" test_options_line REGEX "^// test-options: ")
@@ -160,6 +173,9 @@ function(check_programs kind default_status)
     endforeach()
 endfunction()
 
+if(DEFINED ONLY_FILE)
+    return()
+endif()
 check_programs(programs 0)
 # A trap's status depends on its class (nvm::exit_status), so each trap
 # program states it.
