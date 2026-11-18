@@ -3608,8 +3608,8 @@ bool Lowering::lowers_to_text(const Expr& syntax, Context& context) {
 }
 
 // The text of `operands` in order. Adjacent string constants fold at
-// compile time. Until NeuraIR has the one-allocation `concat text`
-// operation, the rest is the left fold of the string `+` that it replaces.
+// compile time; two or more operands left after folding are one
+// `concat text` (NeuraIR 1.15), which allocates once.
 IrNode Lowering::concatenate_text(std::vector<IrNode> operands, const Span& span) {
     std::vector<IrNode> folded;
     for (auto& operand : operands) {
@@ -3619,8 +3619,9 @@ IrNode Lowering::concatenate_text(std::vector<IrNode> operands, const Span& span
         }
         folded.push_back(std::move(operand));
     }
-    auto result = std::move(folded.front());
-    for (std::size_t i = 1; i < folded.size(); ++i) result = arithmetic("+", span, std::move(result), std::move(folded[i]));
+    if (folded.size() == 1) return std::move(folded.front());
+    auto result = node(IrOp::ConcatText, span, string_type);
+    result.operands = std::move(folded);
     return result;
 }
 

@@ -20,7 +20,11 @@ inline constexpr std::uint16_t nir_major_version = 1;
 // ConformanceCall (docs/design/Records030.md) is written under this minor
 // version, assigned to static interface requirements.
 inline constexpr std::uint16_t nir_records_minor = 13;
-inline constexpr std::uint16_t nir_minor_version = nir_records_minor;
+// NeuraIR 1.14 belongs to the lifetime milestone (M8, its own branch) and
+// adds nothing this reader writes. NeuraIR 1.15 adds the 0.3.0 expression
+// operations (docs/design/Expressions030.md): ConcatText (tag 73).
+inline constexpr std::uint16_t nir_expressions_minor = 15;
+inline constexpr std::uint16_t nir_minor_version = nir_expressions_minor;
 // NeuraIR 1.12, the matching milestone (docs/design/Matching030.md): a
 // return inside a scoped value, which the postfix `?` lowers to, and the
 // type `any` with its operations. A file uses it only when its program

@@ -19,10 +19,13 @@ inline constexpr std::uint16_t major_version = 1;
 // The highest minor version of major version 1 that this code reads and
 // writes. The writer emits the lowest minor version whose features the image
 // uses, so images that need nothing newer stay byte-identical to 1.0.
-inline constexpr std::uint16_t minor_version = 8;
+inline constexpr std::uint16_t minor_version = 9;
 // The minor version that adds the class hook operations HookEnter and
 // HookLeave (docs/design/Hooks030.md). The lead may renumber it at merge.
 inline constexpr std::uint16_t hooks_minor_version = 8;
+// The minor version that adds ConcatText, the one-allocation string chain
+// (docs/design/Expressions030.md, String chains).
+inline constexpr std::uint16_t concat_minor_version = 9;
 inline constexpr std::uint32_t graph_profile = 1;
 
 enum class TypeKind : std::uint8_t {
@@ -202,10 +205,14 @@ enum class StateOp : std::uint8_t {
     // 1 set) on the task's stack of active events; HookLeave closes the
     // newest one, which the same frame opened. A hidden hook function runs
     // them first and last.
-    HookEnter = 33, HookLeave = 34
+    HookEnter = 33, HookLeave = 34,
+    // NVR 1.9 (concat_minor_version). ConcatText(text, text, ...) is the
+    // text of its two or more text arguments in order, built with one
+    // allocation of the total length; immediate zero.
+    ConcatText = 35
 };
 
-inline constexpr std::uint8_t state_op_count = 35;
+inline constexpr std::uint8_t state_op_count = 36;
 
 // The most events a task can have open at once.
 inline constexpr std::size_t max_hook_events = 64;

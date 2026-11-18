@@ -1228,6 +1228,12 @@ private:
         case IrOp::TextEqual:
             check_text_operation(node);
             break;
+        case IrOp::ConcatText:
+            if (node.operands.size() < 2) report(node.span, "a text concatenation needs at least two operands");
+            for (const auto& operand : node.operands)
+                require_assignable(operand.type, IrType{TypeKind::String, "string", no_symbol, {}}, operand.span, "text concatenation operand");
+            if (node.type.kind != TypeKind::String) report(node.span, "a text concatenation yields a string");
+            break;
         case IrOp::ReinterpretFloat:
             if (expect_operands(node, 1, "float bit reinterpretation")) {
                 const auto& source = node.operands.front().type;

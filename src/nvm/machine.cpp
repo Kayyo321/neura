@@ -627,6 +627,8 @@ public:
     std::uint64_t peak_heap_cells() const { return peak_cells_; }
     std::uint64_t live_stack_cells() const { return live_stack_cells_; }
     std::uint64_t peak_stack_cells() const { return peak_stack_cells_; }
+    std::uint64_t text_allocations() const { return heap_.text_counters().allocations - text_baseline_.allocations; }
+    std::uint64_t text_bytes_copied() const { return heap_.text_counters().bytes_copied - text_baseline_.bytes_copied; }
     std::vector<HeapEntryWidth> heap_entry_widths() const {
         std::vector<HeapEntryWidth> entries;
         heap_.for_each([&](std::uint64_t handle, Heap::Ref item) {
@@ -1772,6 +1774,7 @@ private:
                 const_values_[i] = bits;
             }
         }
+        text_baseline_ = heap_.text_counters();
 
         if (item_) {
             initialize_globals();
@@ -3914,6 +3917,25 @@ private:
             events.push_back(event);
             return 0;
         }
+        case nvr::StateOp::ConcatText: {
+            // A string chain (docs/design/Expressions030.md): the total is
+            // checked first, then one block of the final length is reserved
+            // with the operands as roots, and only after any collection that
+            // causes are the operands' bytes read and copied into place.
+            std::uint64_t total = 0;
+            for (std::size_t i = 0; i < args.size(); ++i) {
+                total += heap_.length(typed_entry(args[i], types[i].type));
+                if (total > max_text_bytes) fault(TrapKind::InvalidText, "text exceeds the int32 byte length limit");
+            }
+            if (heap_.last_handle() >= limits_.max_handles) fault(TrapKind::HandleLimit);
+            const auto cells = Heap::text_cells(static_cast<std::size_t>(total));
+            ensure_heap_cells(cells, "allocation of ", args);
+            std::vector<std::string_view> parts;
+            parts.reserve(args.size());
+            for (std::size_t i = 0; i < args.size(); ++i) parts.push_back(heap_.text(typed_entry(args[i], types[i].type)));
+            const auto result_type = image_.functions[frames_.back().function].frame_types[exit.result_slot];
+            return insert_allocation(heap_.create_text_parts(result_type, static_cast<std::size_t>(total), parts), cells);
+        }
         case nvr::StateOp::HookLeave: {
             auto& events = frames_.hooks;
             if (events.empty() || events.back().depth != frames_.size())
@@ -4533,6 +4555,7 @@ private:
     FleetHeapCells* fleet_heap_ = nullptr;
     // The largest live heap size the run reached, in cells.
     std::uint64_t peak_cells_ = 0;
+    Heap::TextCounters text_baseline_{};
     std::vector<std::uint64_t> function_steps_;
     std::uint64_t next_collection_ = std::min<std::uint64_t>(256, limits_.max_heap_cells);
     std::vector<std::uint64_t> const_values_;
@@ -5119,6 +5142,8 @@ std::optional<HostValue> Execution::invoke_callback(std::string_view name, std::
 std::uint64_t Execution::steps() const { return state_->steps(); }
 std::uint64_t Execution::live_heap_cells() const { return state_->live_heap_cells(); }
 std::uint64_t Execution::peak_heap_cells() const { return state_->peak_heap_cells(); }
+std::uint64_t Execution::text_allocations() const { return state_->text_allocations(); }
+std::uint64_t Execution::text_bytes_copied() const { return state_->text_bytes_copied(); }
 std::uint64_t Execution::live_stack_cells() const { return state_->live_stack_cells(); }
 std::uint64_t Execution::peak_stack_cells() const { return state_->peak_stack_cells(); }
 std::vector<Execution::HeapEntryWidth> Execution::heap_entry_widths() const { return state_->heap_entry_widths(); }

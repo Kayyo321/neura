@@ -37,6 +37,8 @@ inline RunResult finished_result(const Execution& execution, const Event& event,
                      execution.peak_queued_messages(), execution.peak_pending_requests()};
     result.peak_stack_cells = execution.peak_stack_cells();
     result.live_stack_cells = execution.live_stack_cells();
+    result.text_allocations = execution.text_allocations();
+    result.text_bytes_copied = execution.text_bytes_copied();
     result.task_profile = execution.task_profile();
     for (const auto& site : result.task_profile) {
         result.task_profile_sites.push_back(execution.location(site.function, site.block));

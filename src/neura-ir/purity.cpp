@@ -585,6 +585,7 @@ private:
             break;
         case IrOp::TextSlice:
         case IrOp::TextFromUtf8:
+        case IrOp::ConcatText:
             allocate(node, "builds a string");
             trap(node, "builds a string");
             break;

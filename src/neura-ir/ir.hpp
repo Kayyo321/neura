@@ -188,7 +188,13 @@ enum class IrOp {
     // argument the type the call goes through, a type parameter bounded by
     // the interface, and its operands the arguments. Specialization replaces
     // it with a direct call of the implementation; none remains after it.
-    ConformanceCall
+    ConformanceCall,
+    // Tags 70-72 belong to the lifetime milestone (M8), on its own branch.
+    // NeuraIR nir_expressions_minor (docs/design/Expressions030.md, String
+    // chains). ConcatText is the text of its two or more string operands in
+    // written order, built with one allocation; it may trap (length limit,
+    // heap budget) and is never merged, split or reassociated.
+    ConcatText = 73
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written

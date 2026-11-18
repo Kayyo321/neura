@@ -344,6 +344,7 @@ void EffectAnalysis::add(const IrNode& node, Effects& effects) const {
         break;
     case IrOp::TextSlice:
     case IrOp::TextFromUtf8:
+    case IrOp::ConcatText:
         effects.element_reads = true;
         effects.allocates = true;
         effects.may_trap = true;

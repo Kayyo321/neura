@@ -587,7 +587,7 @@ Hello, Ada! You have 3 messages.
 [x]
 ```
 
-The compiler currently builds a chain as the string concatenations of `+`; the single allocation the design specifies needs a runtime operation that is not yet in this build.
+A chain evaluates its operands once each, left to right, then allocates its result once and copies each operand's bytes once, however many operands it has; `a + b + c` allocates a string per `+`. A parenthesized inner chain is a separate allocation, made before the next outer operand is evaluated. A result longer than the text length limit, or one the heap budget cannot hold, traps after every operand ran and stores nothing.
 
 ### Character literals
 

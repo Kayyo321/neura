@@ -79,6 +79,7 @@ std::string_view op_name(IrOp op) {
     case IrOp::AnyUnpack: return "any_unpack";
     case IrOp::HookAdmit: return "hook_admit";
     case IrOp::ConformanceCall: return "conformance_call";
+    case IrOp::ConcatText: return "concat_text";
     }
     return "<invalid>";
 }
