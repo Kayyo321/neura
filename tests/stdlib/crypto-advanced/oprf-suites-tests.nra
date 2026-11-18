@@ -67,6 +67,10 @@ let OprfSuitesTests = module (
 
     export let test_rfc_9497_ristretto255_single_and_batch = func => transcripts(vectors.ristretto, oprf.Suite.Ristretto255Sha512, 0, 8);
 
+    export let test_rfc_9497_decaf448_base_and_verifiable = func => transcripts(vectors.decaf, oprf.Suite.Decaf448Shake256, 0, 5);
+
+    export let test_rfc_9497_decaf448_partial = func => transcripts(vectors.decaf, oprf.Suite.Decaf448Shake256, 5, 8);
+
     export let test_rfc_9497_p256_single_and_batch = func => transcripts(vectors.p256, oprf.Suite.P256Sha256, 0, 8);
 
     export let test_rfc_9497_p384_base_and_verifiable = func => transcripts(vectors.p384, oprf.Suite.P384Sha384, 0, 5);
@@ -102,8 +106,8 @@ let OprfSuitesTests = module (
         last outputs = test.assert_ok(state.finalize_batch(evaluation.evaluated_elements(), new));
         test.assert(state.is_spent());
         assert_elements(new([
-        test.assert_ok(server.full_evaluate(new([1]), new)),
-        test.assert_ok(server.full_evaluate(second, new))]), outputs);
+            test.assert_ok(server.full_evaluate(new([1]), new)),
+            test.assert_ok(server.full_evaluate(second, new))]), outputs);
 
         let _ = test.assert_err(oprf.generate_key_pair(oprf.Mode.Base, suite));
         let _ = test.assert_err(client.blind_batch(new([first, second]), new));
@@ -140,7 +144,7 @@ let OprfSuitesTests = module (
 
         last sixth = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
         last noncanonical = bytes("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551" +
-        "0000000000000000000000000000000000000000000000000000000000000001");
+            "0000000000000000000000000000000000000000000000000000000000000001");
         let _ = test.assert_err(sixth.finalize_batch(elements, noncanonical));
         test.assert(sixth.is_spent());
         let _ = test.assert_err(client.blind_batch_with(inputs, new, new([blinds[0]])));

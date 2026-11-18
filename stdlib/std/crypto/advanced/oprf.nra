@@ -12,7 +12,7 @@ let groups = import:Std.Crypto.Internal.OprfGroup;
 let secret = import:Std.Crypto.Core.SecretBytes;
 let words = import:Std.Crypto.Internal.Words;
 
-/// @brief Oblivious PRFs in RFC 9497 with four prime-order ciphersuites and batched evaluation.
+/// @brief Oblivious PRFs in RFC 9497 with five prime-order ciphersuites and batched evaluation.
 /// Context and wire data are bound to the selected mode. Bind a verifiable client to an authenticated
 /// server public key. The runtime does not guarantee constant-time interpretation of these operations.
 /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)

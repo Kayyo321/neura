@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Transcode the RFC 9497 A.1, A.3, A.4 and A.5 OPRF transcripts."""
+"""Transcode the RFC 9497 A.1 through A.5 OPRF transcripts."""
 
 import hashlib
 from pathlib import Path
@@ -12,6 +12,7 @@ SOURCE = Path("/home/dev/neura-gate/030/crypto2/sources/advanced/rfc9497.txt")
 SOURCE_SHA256 = "95160517617374655fe23af2c6cec311eae326deb7689239f97641fd5a560432"
 SUITES = {
     1: ("ristretto", "ristretto255-SHA512", 32, 32, 64),
+    2: ("decaf", "decaf448-SHAKE256", 56, 56, 64),
     3: ("p256", "P256-SHA256", 32, 33, 32),
     4: ("p384", "P384-SHA384", 48, 49, 48),
     5: ("p521", "P521-SHA512", 66, 67, 64),
@@ -93,7 +94,7 @@ def main():
         tables.append((name, COLUMNS, rows))
     print(write_module("crypto-advanced", "oprf-suites-vectors.nra", "OprfSuitesVectors", [
         "python3 scripts/crypto-vectors/gen-oprf-suites.py",
-        "RFC 9497 Appendix A.1, A.3, A.4 and A.5, all single-element and batched transcripts.",
+        "RFC 9497 Appendix A.1 through A.5, all single-element and batched transcripts.",
         "RFC text SHA-256 " + digest,
     ], tables))
 

@@ -1,0 +1,87 @@
+// test-options: --gpu=off --deny-entropy --max-steps 3000000000
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let oprf = import:Std.Crypto.Advanced.Oprf;
+let test = import:Std.Test;
+let vectors = import:Decaf448Vectors;
+let suite_vectors = import:OprfSuitesVectors;
+
+let Decaf448Tests = module (
+    let bytes = func(value: string) -> uint8[list] => test.assert_ok(hex.decode(value));
+
+    let scalar = func(value: uint8) -> uint8[list] {
+        let out: uint8[list] = new([value]);
+        for (let i = 1; i < 56; i++) {
+            out.append(0);
+        }
+        return out;
+    };
+
+    export let test_rfc_9496_generator_multiples = func {
+        last suite = oprf.Suite.Decaf448Shake256;
+        for (let i = 1; i < vectors.generator.length; i++) {
+            last server = new oprf.Server(oprf.Mode.Base, scalar(i as uint8), suite);
+            test.assert_equal_string(vectors.generator[i], hex.encode(server.public_key_bytes()));
+            server.wipe();
+        }
+    };
+
+    export let test_rfc_9496_generator_decoding = func {
+        last server = new oprf.Server(oprf.Mode.Base, scalar(1), oprf.Suite.Decaf448Shake256);
+        defer server.wipe();
+        for (let i = 1; i < vectors.generator.length; i++) {
+            last response = test.assert_ok(server.evaluate_with(bytes(vectors.generator[i]), new, new));
+            test.assert_equal_string(vectors.generator[i], hex.encode(response.evaluated_element()));
+        }
+    };
+
+    export let test_rfc_9496_noncanonical_and_identity_rejection = func {
+        last server = new oprf.Server(oprf.Mode.Base, scalar(1), oprf.Suite.Decaf448Shake256);
+        defer server.wipe();
+        for (let bad in vectors.rejected) {
+            let _ = test.assert_err(server.evaluate_with(bytes(bad), new, new));
+        }
+        let _ = test.assert_err(server.evaluate_with(bytes(vectors.generator[0]), new, new));
+        let _ = test.assert_err(server.evaluate_with(bytes("02"), new, new));
+        let _ = test.assert_err(server.evaluate_with(bytes(suite_vectors.ristretto[8]), new, new));
+    };
+
+    export let test_decaf448_rejects_invalid_proof_and_consumes_state = func {
+        last rows = suite_vectors.decaf;
+        last row = 2 * 13;
+        last client = new oprf.Client(oprf.Mode.Verifiable, bytes(rows[row + 4]), oprf.Suite.Decaf448Shake256);
+        last input = bytes(rows[row + 5]);
+        last blind = bytes(rows[row + 7]);
+        last evaluated = bytes(rows[row + 9]);
+        let mutated = bytes(rows[row + 10]);
+        mutated[0] ^= 1;
+        last first = test.assert_ok(client.blind_with(input, new, blind));
+        let _ = test.assert_err(first.finalize(evaluated, mutated));
+        test.assert(first.is_spent());
+
+        // This c equals the order. The response scalar is canonical.
+        last order = "f34458ab92c27823558fc58d72c26c219036d6ae49db4ec4e923ca7cffffffffffffffffffffffffffffffffffffffffffffffffffffff3f";
+        last second = test.assert_ok(client.blind_with(input, new, blind));
+        let _ = test.assert_err(second.finalize(evaluated, bytes(order + hex.encode(scalar(1)))));
+        test.assert(second.is_spent());
+
+        last third = test.assert_ok(client.blind_with(input, new, blind));
+        let _ = test.assert_err(third.finalize(evaluated, scalar(1)));
+        test.assert(third.is_spent());
+    };
+
+    export let test_decaf448_drbg_round_trip = func {
+        last suite = oprf.Suite.Decaf448Shake256;
+        last random = new drbg.ChaCha20Drbg(bytes(suite_vectors.decaf[1]));
+        last server = test.assert_ok(oprf.generate_key_pair(oprf.Mode.Partial, random, suite));
+        defer server.wipe();
+        last client = new oprf.Client(oprf.Mode.Partial, server.public_key_bytes(), suite);
+        last input: uint8[list] = new([2, 3, 4]);
+        last info: uint8[list] = new([5, 6]);
+        last state = test.assert_ok(client.blind(input, info, random));
+        last response = test.assert_ok(server.evaluate(state.blinded_element(), info, random));
+        last result = test.assert_ok(state.finalize(response.evaluated_element(), response.encoded_proof()));
+        test.assert_equal_string(hex.encode(test.assert_ok(server.full_evaluate(input, info))), hex.encode(result));
+        test.assert(state.is_spent());
+    };
+);
