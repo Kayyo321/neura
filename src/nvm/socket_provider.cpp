@@ -646,6 +646,7 @@ void add_socket_services(const Adder& add, StandardServices::Tables& tables, con
             }
         }
 #else
+        (void)request;
         return fail(host_error::unsupported);
 #endif
     });

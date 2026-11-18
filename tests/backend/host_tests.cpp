@@ -1227,6 +1227,8 @@ NEURA_TEST(host, secret_memory_is_locked_and_released) {
 
     secrets.set_recording(true);
     expect_error(call("neura.memory.lock.create", {i32(16)}), host_error::unsupported, "no buffer in a recorded run");
+#else
+    (void)call;
 #endif
     nvm::SecretServices denied(false);
     nvm::HostRegistry other;

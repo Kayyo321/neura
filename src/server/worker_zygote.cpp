@@ -23,6 +23,7 @@ extern char** environ;
 namespace neura::server {
 namespace {
 
+#ifdef __linux__
 void flush_output() {
     std::cout.flush();
     std::cerr.flush();
@@ -37,6 +38,7 @@ bool send_all(int descriptor, const void* data, std::size_t size) {
         return false;
     }
 }
+#endif // The two helpers serve the Linux zygote only.
 
 // Waits up to `timeout` for `size` bytes, one message of the control channel.
 bool receive_exact(int descriptor, void* data, std::size_t size, std::chrono::milliseconds timeout) {
