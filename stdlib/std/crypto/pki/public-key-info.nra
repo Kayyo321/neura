@@ -15,7 +15,7 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// Known algorithms: rsaEncryption (RFC 3279, NULL parameters, the RSAPublicKey read), id-RSASSA-PSS (RFC 4055,
 /// optional parameters), id-ecPublicKey with a named curve (RFC 5480: P-256, P-384, P-521, secp256k1; explicit
 /// curve parameters are refused), Ed25519, Ed448, X25519 and X448 (RFC 8410), ML-DSA (RFC 9881), ML-KEM and
-/// SLH-DSA (NIST CSOR OIDs). The parameters must have the form each specification gives, and keys of a fixed
+/// SLH-DSA, HashML-DSA (NIST CSOR OIDs) and ML-DSA-65 with Ed25519 (composite signatures draft -19). The parameters must have the form each specification gives, and keys of a fixed
 /// size must have that size; anything else is a `Parse` error. Other algorithms parse as `Unknown`.
 /// @see [Std.Crypto.Pki.PublicKeyInfo](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PublicKeyInfo)
 #Since("0.3.0")
@@ -23,7 +23,7 @@ export let PublicKeyInfo = module (
     /// @brief The public-key algorithms this module identifies.
     #Since("0.3.0")
     export let KeyAlgorithm = enum (Rsa, RsaPss, Ec, Ed25519, Ed448, X25519, X448, MlDsa44, MlDsa65, MlDsa87, MlKem512,
-        MlKem768, MlKem1024, SlhDsa, Unknown);
+        MlKem768, MlKem1024, SlhDsa, Unknown, MlDsa65Ed25519);
 
     /// @brief A subject public key with its algorithm. Compared by its DER encoding.
     #[Final, Since("0.3.0")]
@@ -99,10 +99,10 @@ export let PublicKeyInfo = module (
         export let policy_algorithm = func -> Optional<Algorithm> {
             match (key_algorithm) {
                 KeyAlgorithm.Rsa => {
-                    return Optional<Algorithm>.Some(modulus_bits(rsa_modulus) <= 1024 ? Algorithm.Rsa1024 : Algorithm.RsaPkcs1v15);
+                    return Optional<Algorithm>.Some(modulus_bits(rsa_modulus) < 2048 ? Algorithm.Rsa1024 : Algorithm.RsaPkcs1v15);
                 },
                 KeyAlgorithm.RsaPss => {
-                    return Optional<Algorithm>.Some(Algorithm.RsaPss);
+                    return Optional<Algorithm>.Some(modulus_bits(rsa_modulus) < 2048 ? Algorithm.Rsa1024 : Algorithm.RsaPss);
                 },
                 KeyAlgorithm.Ec => {
                     if (parameter_set == "P-256") {
@@ -145,6 +145,9 @@ export let PublicKeyInfo = module (
                 },
                 KeyAlgorithm.MlKem1024 => {
                     return Optional<Algorithm>.Some(Algorithm.MlKem1024);
+                },
+                KeyAlgorithm.MlDsa65Ed25519 => {
+                    return Optional<Algorithm>.Some(Algorithm.Ed25519MlDsa65);
                 },
                 KeyAlgorithm.SlhDsa => {
                     return Optional<Algorithm>.Some(Algorithm.SlhDsa);
@@ -288,15 +291,18 @@ export let PublicKeyInfo = module (
             } else if (dotted == oids.X448) {
                 which = KeyAlgorithm.X448;
                 size = 56;
-            } else if (dotted == oids.MlDsa44) {
+            } else if (dotted == oids.MlDsa44 || dotted == oids.HashMlDsa44WithSha512) {
                 which = KeyAlgorithm.MlDsa44;
                 size = 1312;
-            } else if (dotted == oids.MlDsa65) {
+            } else if (dotted == oids.MlDsa65 || dotted == oids.HashMlDsa65WithSha512) {
                 which = KeyAlgorithm.MlDsa65;
                 size = 1952;
-            } else if (dotted == oids.MlDsa87) {
+            } else if (dotted == oids.MlDsa87 || dotted == oids.HashMlDsa87WithSha512) {
                 which = KeyAlgorithm.MlDsa87;
                 size = 2592;
+            } else if (dotted == oids.MlDsa65Ed25519Sha512) {
+                which = KeyAlgorithm.MlDsa65Ed25519;
+                size = 1984;
             } else if (dotted == oids.MlKem512) {
                 which = KeyAlgorithm.MlKem512;
                 size = 800;

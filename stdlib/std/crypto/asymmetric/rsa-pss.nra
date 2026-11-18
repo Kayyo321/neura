@@ -126,20 +126,35 @@ export let RsaPss = module (
     #[Final, Since("0.3.0")]
     export let RsaPssVerifier = class implements Verifier<rsa.RsaPublicKey, uint8[list]> (
         last key: rsa.RsaPublicKey;
-        /// @brief The hash of the message and of MGF1.
+        /// @brief The hash of the message.
         export last hash: Algorithm;
+        /// @brief The digest used by MGF1.
+        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaPss)
+        #Since("0.3.0")
+        export last mask_hash: Algorithm;
         /// @brief The salt length, or -1 for any.
         export last salt_length: int;
 
-        /// @brief A verifier with SHA-256 and a 32-byte salt, or the given hash and salt length (-1 accepts any).
+        /// @brief A verifier with SHA-256 and a 32-byte salt, or the given digest and salt length (-1 accepts
+        /// any). MGF1 uses the message digest unless an explicit MGF1 digest is supplied.
+        /// @see [Std.Crypto.Asymmetric.RsaPss](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-RsaPss)
+        #Since("0.3.0")
         export let init = func(public_key: rsa.RsaPublicKey) {
             key = public_key;
             hash = Algorithm.Sha256;
+            mask_hash = Algorithm.Sha256;
             salt_length = 32;
             check();
         } or func(public_key: rsa.RsaPublicKey, digest: Algorithm, salt_bytes: int) {
             key = public_key;
             hash = digest;
+            mask_hash = digest;
+            salt_length = salt_bytes;
+            check();
+        } or func(public_key: rsa.RsaPublicKey, digest: Algorithm, mgf_digest: Algorithm, salt_bytes: int) {
+            key = public_key;
+            hash = digest;
+            mask_hash = mgf_digest;
             salt_length = salt_bytes;
             check();
         };
@@ -148,6 +163,8 @@ export let RsaPss = module (
             crypto_policy.require(Algorithm.RsaPss);
             asym_hash.check(hash);
             crypto_policy.require(hash);
+            asym_hash.check(mask_hash);
+            crypto_policy.require(mask_hash);
             if (salt_length < -1) {
                 trap_with_message("invalid argument: RSA-PSS salt length must be -1 or more");
             }
@@ -167,7 +184,7 @@ export let RsaPss = module (
         #NoDiscard
         export let verify_digest = func(digest: uint8[list], signature: uint8[list]) -> bool {
             last core = key.core;
-            if (signature.length != core.k) {
+            if (signature.length != core.k || digest.length != asym_hash.output_length(hash)) {
                 return false;
             }
             last s = rsa_core.os2ip_below(core, signature);
@@ -176,7 +193,7 @@ export let RsaPss = module (
             }
             last em_bits = core.bits - 1;
             last em = mp_bytes(core.apply(s), (em_bits + 7) / 8);
-            return rsa_core.pss_verify(hash, digest, em, em_bits, salt_length);
+            return rsa_core.pss_verify(hash, mask_hash, digest, em, em_bits, salt_length);
         };
 
         export let.override to_string = func -> string => "RsaPssVerifier(" + key.bits().to_string() + " bits)";

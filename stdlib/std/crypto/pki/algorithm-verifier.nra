@@ -1,0 +1,397 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let composite = import:Std.Crypto.Internal.CompositeMlDsa65;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let oids = import:Std.Crypto.Pki.Oids;
+let pkcs1 = import:Std.Crypto.Asymmetric.RsaPkcs1v15;
+let pss = import:Std.Crypto.Asymmetric.RsaPss;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+
+/// @brief Signature verification for certificates, certification requests, OCSP and Certificate Transparency.
+/// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+#Since("0.3.0")
+export let AlgorithmVerifier = module (
+    /// @brief Dispatches by signature OID. Unknown or policy-denied algorithms give UnsupportedAlgorithm.
+    /// Mismatched keys, malformed parameters and failed signature checks give Invalid.
+    /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+    #[Final, Since("0.3.0")]
+    export let AlgorithmVerifier = class implements SignatureVerifier (
+        /// @brief Creates a stateless verifier with the library's algorithm dispatch.
+        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+        #Since("0.3.0")
+        export let init = func {};
+
+        /// @brief Checks the signature under the supplied key and signature AlgorithmIdentifier.
+        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify_signature = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
+                signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+            last dotted = algorithm.oid.dotted;
+            if (dotted == oids.RsaSsaPss) {
+                return verify_pss(algorithm, key, signed, signature);
+            }
+            last rsa_digest = rsa_hash(dotted);
+            if (rsa_digest != Algorithm.Sha1) {
+                return verify_pkcs1(rsa_digest, algorithm, key, signed, signature);
+            }
+            last ec_digest = ec_hash(dotted);
+            if (ec_digest != Algorithm.Sha1) {
+                return verify_ecdsa(ec_digest, algorithm, key, signed, signature);
+            }
+            if (dotted == oids.Ed25519 || dotted == oids.Ed448) {
+                return verify_ed(algorithm, key, signed, signature);
+            }
+            if (dotted == oids.MlDsa65Ed25519Sha512) {
+                return verify_composite(algorithm, key, signed, signature);
+            }
+            match (ml_set(dotted)) {
+                Optional.Some(set) => { return verify_ml(set, algorithm, key, signed, signature); },
+                Optional.None => {},
+            }
+            match (slh_set(dotted)) {
+                Optional.Some(set) => { return verify_slh(set, algorithm, key, signed, signature); },
+                Optional.None => {},
+            }
+            return SignatureCheck.UnsupportedAlgorithm;
+        };
+
+        /// @brief The verifier's class name.
+        /// @see [Std.Crypto.Pki.AlgorithmVerifier](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AlgorithmVerifier)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "AlgorithmVerifier";
+    );
+
+    let checked = func(valid: bool) -> SignatureCheck => valid ? SignatureCheck.Valid : SignatureCheck.Invalid;
+
+    let rsa_allowed = func(key: SubjectPublicKeyInfo) -> bool =>
+        key.key_bits() >= 2048 || crypto_policy.allows(Algorithm.Rsa1024);
+
+    let verify_pkcs1 = func(hash: Algorithm, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
+            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        if (!crypto_policy.allows(Algorithm.RsaPkcs1v15) || !crypto_policy.allows(hash)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        // RFC 4055 section 5: expect NULL and accept absent parameters. OpenSSL also emits NULL for SHA-3.
+        if (key.key_algorithm != KeyAlgorithm.Rsa || (algorithm.has_parameters() && !algorithm.has_null_parameters())) {
+            return SignatureCheck.Invalid;
+        }
+        if (!rsa_allowed(key)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        return match (rsa.parse_public_key(key.rsa_modulus, key.rsa_exponent)) {
+            Result.Ok(public_key) => checked(new pkcs1.RsaPkcs1v15Verifier(public_key, hash).verify(signed, signature)),
+            Result.Err(_) => SignatureCheck.Invalid,
+        };
+    };
+
+    let pss_key_permits = func(key: SubjectPublicKeyInfo, params: RsaPssParameters) -> bool {
+        if (key.key_algorithm == KeyAlgorithm.Rsa || !key.algorithm.has_parameters()) {
+            return true;
+        }
+        return match (key.algorithm.pss_parameters()) {
+            Result.Ok(restriction) => restriction.hash.equals(params.hash)
+                && restriction.mask_hash.equals(params.mask_hash) && params.salt_length >= restriction.salt_length,
+            Result.Err(_) => false,
+        };
+    };
+
+    let verify_pss_parameters = func(params: RsaPssParameters, key: SubjectPublicKeyInfo, signed: uint8[list],
+            signature: uint8[list]) -> SignatureCheck {
+        last hash = digest_oid(params.hash.dotted);
+        last mask_hash = digest_oid(params.mask_hash.dotted);
+        if (hash == Algorithm.Sha1 || mask_hash == Algorithm.Sha1 || !crypto_policy.allows(hash)
+                || !crypto_policy.allows(mask_hash) || !rsa_allowed(key)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (!pss_key_permits(key, params)) {
+            return SignatureCheck.Invalid;
+        }
+        return match (rsa.parse_public_key(key.rsa_modulus, key.rsa_exponent)) {
+            Result.Ok(public_key) => checked(new pss.RsaPssVerifier(public_key, hash, mask_hash,
+                params.salt_length).verify(signed, signature)),
+            Result.Err(_) => SignatureCheck.Invalid,
+        };
+    };
+
+    let verify_pss = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
+            signature: uint8[list]) -> SignatureCheck {
+        if (!crypto_policy.allows(Algorithm.RsaPss)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (key.key_algorithm != KeyAlgorithm.Rsa && key.key_algorithm != KeyAlgorithm.RsaPss) {
+            return SignatureCheck.Invalid;
+        }
+        return match (algorithm.pss_parameters()) {
+            Result.Ok(params) => verify_pss_parameters(params, key, signed, signature),
+            Result.Err(_) => SignatureCheck.Invalid,
+        };
+    };
+
+    let key_curve = func(key: SubjectPublicKeyInfo) -> Optional<ecdsa.Curve> {
+        last name = key.parameter_set;
+        if (name == "P-256") {
+            return Optional<ecdsa.Curve>.Some(ecdsa.Curve.P256);
+        }
+        if (name == "P-384") {
+            return Optional<ecdsa.Curve>.Some(ecdsa.Curve.P384);
+        }
+        if (name == "P-521") {
+            return Optional<ecdsa.Curve>.Some(ecdsa.Curve.P521);
+        }
+        if (name == "secp256k1") {
+            return Optional<ecdsa.Curve>.Some(ecdsa.Curve.Secp256k1);
+        }
+        return Optional<ecdsa.Curve>.None;
+    };
+
+    let verify_ecdsa_curve = func(curve: ecdsa.Curve, hash: Algorithm, key: SubjectPublicKeyInfo, signed: uint8[list],
+            signature: uint8[list]) -> SignatureCheck {
+        if (!crypto_policy.allows(ecdsa.algorithm_of(curve))) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        return match (ecdsa.parse_public_key(curve, key.key)) {
+            Result.Ok(public_key) => checked(new ecdsa.EcdsaVerifier(public_key, hash).verify(signed, signature)),
+            Result.Err(_) => SignatureCheck.Invalid,
+        };
+    };
+
+    let verify_ecdsa = func(hash: Algorithm, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
+            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        if (!crypto_policy.allows(hash)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (algorithm.has_parameters() || key.key_algorithm != KeyAlgorithm.Ec) {
+            return SignatureCheck.Invalid;
+        }
+        return match (key_curve(key)) {
+            Optional.Some(curve) => verify_ecdsa_curve(curve, hash, key, signed, signature),
+            Optional.None => SignatureCheck.UnsupportedAlgorithm,
+        };
+    };
+
+    let verify_ed = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
+            signature: uint8[list]) -> SignatureCheck {
+        last is_25519 = algorithm.oid.matches(oids.Ed25519);
+        if (!crypto_policy.allows(is_25519 ? Algorithm.Ed25519 : Algorithm.Ed448)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+            return SignatureCheck.Invalid;
+        }
+        if (is_25519) {
+            return match (ed25519.parse_public_key(key.key)) {
+                Result.Ok(public_key) => checked(new ed25519.Ed25519Verifier(public_key).verify(signed, signature)),
+                Result.Err(_) => SignatureCheck.Invalid,
+            };
+        }
+        return match (ed448.parse_public_key(key.key)) {
+            Result.Ok(public_key) => checked(new ed448.Ed448Verifier(public_key).verify(signed, signature)),
+            Result.Err(_) => SignatureCheck.Invalid,
+        };
+    };
+
+    let verify_ml = func(set: ml_dsa.ParameterSet, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
+            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        last which = match (set) {
+            ml_dsa.ParameterSet.MlDsa44 => Algorithm.MlDsa44,
+            ml_dsa.ParameterSet.MlDsa65 => Algorithm.MlDsa65,
+            ml_dsa.ParameterSet.MlDsa87 => Algorithm.MlDsa87,
+        };
+        last dotted = algorithm.oid.dotted;
+        last prehashed = dotted == oids.HashMlDsa44WithSha512 || dotted == oids.HashMlDsa65WithSha512
+            || dotted == oids.HashMlDsa87WithSha512;
+        if (!crypto_policy.allows(which) || (prehashed && !crypto_policy.allows(Algorithm.Sha512))) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+            return SignatureCheck.Invalid;
+        }
+        match (ml_dsa.parse_public_key(set, key.key)) {
+            Result.Ok(public_key) => {
+                last verifier = new ml_dsa.MlDsaVerifier(public_key);
+                if (prehashed) {
+                    return checked(verifier.verify_prehash(signed, signature, new, Algorithm.Sha512));
+                }
+                return checked(verifier.verify(signed, signature));
+            },
+            Result.Err(_) => {
+                return SignatureCheck.Invalid;
+            },
+        }
+        return SignatureCheck.Invalid;
+    };
+
+    let verify_slh = func(set: slh_dsa.ParameterSet, algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo,
+            signed: uint8[list], signature: uint8[list]) -> SignatureCheck {
+        if (!crypto_policy.allows(Algorithm.SlhDsa)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+            return SignatureCheck.Invalid;
+        }
+        return match (slh_dsa.parse_public_key(set, key.key)) {
+            Result.Ok(public_key) => checked(new slh_dsa.SlhDsaVerifier(public_key).verify(signed, signature)),
+            Result.Err(_) => SignatureCheck.Invalid,
+        };
+    };
+
+    let verify_composite = func(algorithm: AlgorithmIdentifier, key: SubjectPublicKeyInfo, signed: uint8[list],
+            signature: uint8[list]) -> SignatureCheck {
+        if (!crypto_policy.allows(Algorithm.Ed25519MlDsa65) || !crypto_policy.allows(Algorithm.Ed25519)
+                || !crypto_policy.allows(Algorithm.MlDsa65) || !crypto_policy.allows(Algorithm.Sha512)) {
+            return SignatureCheck.UnsupportedAlgorithm;
+        }
+        if (algorithm.has_parameters() || !key.algorithm.oid.equals(algorithm.oid)) {
+            return SignatureCheck.Invalid;
+        }
+        return checked(composite.verify(key.key, signed, signature, new));
+    };
+
+    // SHA-1 and unknown hash OIDs are both unsupported.
+
+    let rsa_hash = func(dotted: string) -> Algorithm {
+        if (dotted == oids.Sha224WithRsa) {
+            return Algorithm.Sha224;
+        }
+        if (dotted == oids.Sha256WithRsa) {
+            return Algorithm.Sha256;
+        }
+        if (dotted == oids.Sha384WithRsa) {
+            return Algorithm.Sha384;
+        }
+        if (dotted == oids.Sha512WithRsa) {
+            return Algorithm.Sha512;
+        }
+        if (dotted == oids.RsaWithSha3_224) {
+            return Algorithm.Sha3_224;
+        }
+        if (dotted == oids.RsaWithSha3_256) {
+            return Algorithm.Sha3_256;
+        }
+        if (dotted == oids.RsaWithSha3_384) {
+            return Algorithm.Sha3_384;
+        }
+        if (dotted == oids.RsaWithSha3_512) {
+            return Algorithm.Sha3_512;
+        }
+        return Algorithm.Sha1;
+    };
+
+    let ec_hash = func(dotted: string) -> Algorithm {
+        if (dotted == oids.EcdsaWithSha224) {
+            return Algorithm.Sha224;
+        }
+        if (dotted == oids.EcdsaWithSha256) {
+            return Algorithm.Sha256;
+        }
+        if (dotted == oids.EcdsaWithSha384) {
+            return Algorithm.Sha384;
+        }
+        if (dotted == oids.EcdsaWithSha512) {
+            return Algorithm.Sha512;
+        }
+        if (dotted == oids.EcdsaWithSha3_224) {
+            return Algorithm.Sha3_224;
+        }
+        if (dotted == oids.EcdsaWithSha3_256) {
+            return Algorithm.Sha3_256;
+        }
+        if (dotted == oids.EcdsaWithSha3_384) {
+            return Algorithm.Sha3_384;
+        }
+        if (dotted == oids.EcdsaWithSha3_512) {
+            return Algorithm.Sha3_512;
+        }
+        return Algorithm.Sha1;
+    };
+
+    let digest_oid = func(dotted: string) -> Algorithm {
+        if (dotted == oids.Sha224) {
+            return Algorithm.Sha224;
+        }
+        if (dotted == oids.Sha256) {
+            return Algorithm.Sha256;
+        }
+        if (dotted == oids.Sha384) {
+            return Algorithm.Sha384;
+        }
+        if (dotted == oids.Sha512) {
+            return Algorithm.Sha512;
+        }
+        if (dotted == oids.Sha3_224) {
+            return Algorithm.Sha3_224;
+        }
+        if (dotted == oids.Sha3_256) {
+            return Algorithm.Sha3_256;
+        }
+        if (dotted == oids.Sha3_384) {
+            return Algorithm.Sha3_384;
+        }
+        if (dotted == oids.Sha3_512) {
+            return Algorithm.Sha3_512;
+        }
+        return Algorithm.Sha1;
+    };
+
+    let ml_set = func(dotted: string) -> Optional<ml_dsa.ParameterSet> {
+        if (dotted == oids.MlDsa44 || dotted == oids.HashMlDsa44WithSha512) {
+            return Optional<ml_dsa.ParameterSet>.Some(ml_dsa.ParameterSet.MlDsa44);
+        }
+        if (dotted == oids.MlDsa65 || dotted == oids.HashMlDsa65WithSha512) {
+            return Optional<ml_dsa.ParameterSet>.Some(ml_dsa.ParameterSet.MlDsa65);
+        }
+        if (dotted == oids.MlDsa87 || dotted == oids.HashMlDsa87WithSha512) {
+            return Optional<ml_dsa.ParameterSet>.Some(ml_dsa.ParameterSet.MlDsa87);
+        }
+        return Optional<ml_dsa.ParameterSet>.None;
+    };
+
+    let slh_set = func(dotted: string) -> Optional<slh_dsa.ParameterSet> {
+        if (dotted == oids.SlhDsaSha2_128s) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Sha2_128s);
+        }
+        if (dotted == oids.SlhDsaSha2_128f) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Sha2_128f);
+        }
+        if (dotted == oids.SlhDsaSha2_192s) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Sha2_192s);
+        }
+        if (dotted == oids.SlhDsaSha2_192f) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Sha2_192f);
+        }
+        if (dotted == oids.SlhDsaSha2_256s) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Sha2_256s);
+        }
+        if (dotted == oids.SlhDsaSha2_256f) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Sha2_256f);
+        }
+        if (dotted == oids.SlhDsaShake128s) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Shake128s);
+        }
+        if (dotted == oids.SlhDsaShake128f) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Shake128f);
+        }
+        if (dotted == oids.SlhDsaShake192s) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Shake192s);
+        }
+        if (dotted == oids.SlhDsaShake192f) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Shake192f);
+        }
+        if (dotted == oids.SlhDsaShake256s) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Shake256s);
+        }
+        if (dotted == oids.SlhDsaShake256f) {
+            return Optional<slh_dsa.ParameterSet>.Some(slh_dsa.ParameterSet.Shake256f);
+        }
+        return Optional<slh_dsa.ParameterSet>.None;
+    };
+);

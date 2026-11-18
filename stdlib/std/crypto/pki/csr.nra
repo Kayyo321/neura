@@ -7,6 +7,8 @@ let.promote _ = import:Std.Crypto.Pki.GeneralName;
 let.promote _ = import:Std.Crypto.Pki.Name;
 let.promote _ = import:Std.Crypto.Pki.Oid;
 let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
 let der = import:Std.Crypto.Pki.Der;
 let extensions = import:Std.Crypto.Pki.Extensions;
 let identifiers = import:Std.Crypto.Pki.AlgorithmIdentifier;
@@ -21,8 +23,8 @@ let writer = import:Std.Crypto.Pki.DerWriter;
 /// caller-supplied signing function.
 ///
 /// The extensionRequest attribute (PKCS #9, RFC 2985) is read into `extensions`, and challengePassword into
-/// `challenge_password`; every attribute also stays in `attributes`. Parsing does not check the signature: pass
-/// `info_bytes`, `signature_algorithm`, `public_key` and `signature` to a SignatureVerifier.
+/// `challenge_password`; every attribute also stays in `attributes`. Call `verify_signature` to check
+/// a parsed request against its own public key.
 /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Csr)
 #Since("0.3.0")
 export let Csr = module (
@@ -85,6 +87,16 @@ export let Csr = module (
             challenge_password = password;
             signature_algorithm = algorithm;
             signature = signature_bytes;
+        };
+
+        /// @brief Checks the request's signature under its public key. A supplied verifier overrides
+        /// the library's AlgorithmVerifier.
+        /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Csr)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify_signature = func -> SignatureCheck {
+            return verify_signature(new algorithm_verifier.AlgorithmVerifier());
+        } or func(verifier: SignatureVerifier) -> SignatureCheck {
+            return verifier.verify_signature(signature_algorithm, public_key, info_bytes, signature);
         };
 
         /// @brief The requested subjectAltName entries, if the extensionRequest has them.
@@ -191,6 +203,15 @@ export let Csr = module (
     #[NoDiscard, Since("0.3.0")]
     export let parse_pem = func(text: string) -> Result<CertificationRequest> =>
         parse(pem.decode(text, "CERTIFICATE REQUEST")?);
+
+    /// @brief Checks the request's signature under its public key using the library verifier or a supplied verifier.
+    /// @see [Std.Crypto.Pki.Csr](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Csr)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_signature = func(request: CertificationRequest) -> SignatureCheck {
+        return request.verify_signature();
+    } or func(request: CertificationRequest, verifier: SignatureVerifier) -> SignatureCheck {
+        return request.verify_signature(verifier);
+    };
 
     /// @brief The extensionRequest attribute carrying the extensions.
     #[NoDiscard, Since("0.3.0")]

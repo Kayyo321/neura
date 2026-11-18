@@ -1,0 +1,38 @@
+// test-options: --gpu=off --max-steps 4000000000
+let algorithm_ids = import:Std.Crypto.Pki.AlgorithmIdentifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let certificate = import:Std.Crypto.Pki.Certificate;
+let hex = import:Std.Encoding.Hex;
+let oids = import:Std.Crypto.Pki.Oids;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let signature = import:Std.Crypto.Pki.SignatureVerifier;
+let test = import:Std.Test;
+let vectors = import:PqcSignatureVectors;
+
+let SignatureCompositeTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_composite_message_signature = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last algorithm = algorithm_ids.without_parameters(oids.MlDsa65Ed25519Sha512);
+        last row = vectors.composite;
+        last key = test.assert_ok(public_keys.of(algorithm, decode(row[1])));
+        last message = decode(row[0]);
+        let signed = decode(row[2]);
+        test.assert(verifier.verify_signature(algorithm, key, message, signed) == signature.SignatureCheck.Valid);
+        test.assert(verifier.verify_signature(algorithm, key, message, decode(row[3])) == signature.SignatureCheck.Invalid);
+        signed[0] = signed[0] ^ 1;
+        test.assert(verifier.verify_signature(algorithm, key, message, signed) == signature.SignatureCheck.Invalid);
+        signed[0] = signed[0] ^ 1;
+        signed[signed.length - 1] = signed[signed.length - 1] ^ 1;
+        test.assert(verifier.verify_signature(algorithm, key, message, signed) == signature.SignatureCheck.Invalid);
+    };
+
+    export let test_composite_self_signed_certificate = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        last cert = test.assert_ok(certificate.parse(decode(vectors.composite[4])));
+        test.assert_equal_string(oids.MlDsa65Ed25519Sha512, cert.signature_algorithm.oid.dotted);
+        test.assert(verifier.verify_signature(cert.signature_algorithm, cert.public_key, cert.tbs_bytes, cert.signature)
+            == signature.SignatureCheck.Valid);
+    };
+);

@@ -73,6 +73,27 @@ Neura has interfaces with type parameters but no value parameters, and a class c
 | FF1 (2.5) | KAT | all 9 NIST FF1 samples (AES-128/192/256, radix 10 and 36, with and without a tweak); radix 2 and 65536 round trips | implemented |
 | Raw ECB and CBC modes (2.5) | not exposed | | by design |
 
+### PKI
+
+Verification runs in Neura and shares the asymmetric and post-quantum primitives. RSA-PSS supports an independent MGF1 hash and enforces the minimum salt length in a constrained key. PKCS #1 v1.5 verification accepts both absent and NULL signature parameters for interoperable SHA-2 and SHA-3 encodings. SHA-1 signatures and policy-denied schemes return UnsupportedAlgorithm. CSOR HashML-DSA keys and signatures must use the matching OID. This is outside the RFC 9881 profile.
+
+| Item (spec section) | Tier | Vectors and notes | Status |
+| --- | --- | --- | --- |
+| Strict DER reader and writer, OIDs, BIT STRING, strings, times (2.9) | KAT + logic | `openssl asn1parse -genstr` encodings (11 OIDs incl. 2.25 128-bit arcs, 14 INTEGERs, 8 times, 8 string types); 21 malformed inputs and 27 malformed values with exact error offsets; recorded certificates rebuilt byte for byte; fuzz: every truncation of 3 certificates, 2 single-byte mutations per byte of the leaf, hostile lengths; the typed parsers (certificate, CSR, PKCS #8, EncryptedPrivateKeyInfo, OCSP request and response, SCT list, filter cascade, PEM with non-ASCII text) get every truncation and byte mutations, none traps | implemented |
+| Strict PEM, several blocks (2.9) | KAT | `openssl x509 -outform PEM` output decoded and re-encoded byte for byte; 14 rejections | implemented |
+| X.509 v3 certificates, all RFC 5280 extensions, SCT list kept as bytes (2.9) | KAT | 11 recorded openssl certificates (ECDSA P-256/P-384, Ed25519, RSA PKCS #1, RSA-PSS, ML-DSA-44): every field compared with Python `cryptography` 43 (policyMappings with openssl), 218 field checks | implemented |
+| SubjectPublicKeyInfo with algorithm identification (2.9) | KAT | 18 openssl keys: RSA, RSA-PSS, P-256/384/521, secp256k1, Ed25519, Ed448, X25519, X448, ML-DSA-44/65/87, ML-KEM-512/768/1024, SLH-DSA-SHA2-128s, SLH-DSA-SHAKE-128f; OIDs from the NIST CSOR page | implemented |
+| PKCS #10 CSRs: parse and build with a caller's signer (2.9) | KAT | 2 openssl CSRs (extensionRequest, challengePassword) parsed against `cryptography` and rebuilt byte for byte | implemented |
+| PKCS #8 OneAsymmetricKey (2.9) | KAT | the 18 keys as `openssl pkcs8 -topk8 -nocrypt`, re-encoded byte for byte | implemented |
+| EncryptedPrivateKeyInfo, PBES2 with PBKDF2 and AES-CBC/GCM (2.9) | KAT | 4 `openssl pkcs8 -v2` records (one HMAC-SHA-1, refused) decrypted against hashlib + `cryptography`; 5 PBES2 encodings (AES-128/192/256-GCM, AES-128/256-CBC) built here and by hashlib + `cryptography` byte for byte; GCM built here because `openssl pkcs8` refuses AEAD | implemented |
+| RFC 5280 section 6.1 path validation with policy tree, name constraints, EKU, RFC 9525 names (2.9) | logic | 199 C2SP x509-limbo cases (commit b12423782a; rfc5280, pathlen, pathological, webpki, cve, invalid, rfc9881 prefixes): all match, 24 documented divergences (webpki/CA-B Forum-only rules, listed in gen-pki-paths.py); recorded openssl chains with one error code per check; 21 policy cases over 4 chains (skip counts, two mapping levels, anyPolicy intermediates, a self-issued rollover) decided by `openssl verify -policy_check`; signatures from a truth table of `cryptography` (and openssl for ML-DSA) results | implemented; signatures through the phase-2 verifier |
+| OCSP request/response, delegated responders, nonce (2.9) | KAT + logic | 5 `openssl ocsp` requests rebuilt byte for byte (SHA-1 and SHA-256 CertIDs, nonce, two certificates); 8 responses (good, revoked, unknown, two, delegated by name and by key, no-EKU responder) parsed against `cryptography` and verified; CertID hashes against hashlib | implemented |
+| SCTs, precert reconstruction, STH, Merkle proofs (2.9) | KAT + logic | 2 real SCTs of letsencrypt.org (recorded 2026-11-17) with signed data rebuilt and checked against `cryptography`; a generated RSA log: TLS list, embedded SCT from a precertificate, 7-leaf log, 18 audit paths and 7 consistency proofs, STH JSON | implemented |
+| CRLite filter cascades (2.9) | KAT | 3 cascades built by mozilla/filter-cascade (b5469a2d) over CRLite keys of recorded certificates; 8 rust-cascade test_data files (f05b3da9) incl. a real v1 CRLite filter, MurmurHash3, SHA-256 counter mode, inverted and salted | implemented |
+| RSA PKCS #1 v1.5 and PSS, ECDSA, Ed25519, Ed448, pure ML-DSA and SLH-DSA signature dispatch (2.9) | KAT | Certificates produced and independently verified with OpenSSL 3.5.7 and Python cryptography 43. Covers key mismatches, altered signatures, RSA-PSS salt restrictions and a separate MGF1 digest. | implemented |
+| HashML-DSA SHA-512 and composite ML-DSA-65 with Ed25519 (2.9) | KAT | NIST ACVP and OpenSSL HashML-DSA, plus official composite -19 raw and X.509 vectors. | implemented |
+| Default verification for certificate paths, CSRs, OCSP and CT (2.9) | logic + KAT | Independent RSA-PSS, ECDSA, and Ed25519 fixtures through the public entry points. | implemented |
+
 ## Runtime needs
 
 Each stub below waits on a host operation that the runtime does not yet offer. A runtime lane is to add it. The library keeps the full API and logic, so only the body of the host call changes.

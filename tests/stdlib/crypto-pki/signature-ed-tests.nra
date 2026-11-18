@@ -1,0 +1,14 @@
+// test-options: --gpu=off --max-steps 20000000000
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let cases = import:SignatureTestCases;
+let vectors = import:SignatureVectors;
+
+let SignatureEdTests = module (
+    export let test_eddsa = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["ed25519", "ed448"]) {
+            cases.verify(vectors.certificates, name, verifier);
+            cases.reject_flipped(cases.read(vectors.certificates, name), verifier, name);
+        }
+    };
+);

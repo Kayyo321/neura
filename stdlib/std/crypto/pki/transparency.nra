@@ -6,6 +6,7 @@ let.promote _ = import:Std.Crypto.Pki.AlgorithmIdentifier;
 let.promote _ = import:Std.Crypto.Pki.Certificate;
 let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
 let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
 let base64 = import:Std.Encoding.Base64;
 let der = import:Std.Crypto.Pki.Der;
 let error = import:Std.Core.Error;
@@ -304,9 +305,14 @@ export let Transparency = module (
     };
 
     /// @brief Verifies the SCT under the log's key: the log ID must be the SHA-256 of the key's
-    /// SubjectPublicKeyInfo, and the signature must verify over `signed_data`.
+    /// SubjectPublicKeyInfo, and the signature must verify over `signed_data`. Unless supplied, the verifier
+    /// is the library's AlgorithmVerifier.
+    /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Transparency)
     #[NoDiscard, Since("0.3.0")]
     export let verify_sct = func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
+            issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
+        return verify_sct(sct, entry, certificate, issuer, log_key, new algorithm_verifier.AlgorithmVerifier());
+    } or func(sct: SignedCertificateTimestamp, entry: EntryType, certificate: Certificate,
             issuer: Optional<Certificate>, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier) -> Result<Unit> {
         if (!same(sha2.sha256(log_key.der_bytes), sct.log_id)) {
             return failure<Unit>("ct.log_id", "the SCT's log ID is not this log's key");
@@ -338,9 +344,12 @@ export let Transparency = module (
         return failure<Unit>("ct.unsupported", "unreachable");
     };
 
-    /// @brief Verifies a signed tree head under the log's key.
+    /// @brief Verifies a signed tree head under the log's key using the library verifier or a supplied verifier.
+    /// @see [Std.Crypto.Pki.Transparency](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Transparency)
     #[NoDiscard, Since("0.3.0")]
-    export let verify_sth = func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier)
+    export let verify_sth = func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo) -> Result<Unit> {
+        return verify_sth(sth, log_key, new algorithm_verifier.AlgorithmVerifier());
+    } or func(sth: SignedTreeHead, log_key: SubjectPublicKeyInfo, verifier: SignatureVerifier)
             -> Result<Unit> {
         return check(algorithm_of(sth.hash_algorithm, sth.signature_algorithm), log_key, sth.signed_data(), sth.signature,
             verifier);

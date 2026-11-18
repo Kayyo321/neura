@@ -152,8 +152,8 @@ export let RsaCore = module (
     };
 
     /// @brief EMSA-PSS-VERIFY (RFC 8017, section 9.1.2) with a fixed salt length, or any salt length when
-    /// `salt_length` is -1.
-    export let pss_verify = func(hash: Algorithm, digest: uint8[list], em: uint8[list], em_bits: int,
+    /// `salt_length` is -1. MGF1 may use a separate digest.
+    export let pss_verify = func(hash: Algorithm, mask_hash: Algorithm, digest: uint8[list], em: uint8[list], em_bits: int,
             salt_length: int) -> bool {
         last h_len = asym_hash.output_length(hash);
         last em_len = (em_bits + 7) / 8;
@@ -169,7 +169,7 @@ export let RsaCore = module (
         }
         last masked = words.slice(em, 0, em_len - h_len - 1);
         last h = words.slice(em, em_len - h_len - 1, em_len - 1);
-        let db = words.xor(masked, asym_hash.mgf1(hash, h, masked.length));
+        let db = words.xor(masked, asym_hash.mgf1(mask_hash, h, masked.length));
         db[0] = db[0] & top_mask;
         // DB = PS (zeros) || 0x01 || salt.
         let one_at = -1;

@@ -7,6 +7,7 @@ let.promote _ = import:Std.Crypto.Pki.Extensions;
 let.promote _ = import:Std.Crypto.Pki.GeneralName;
 let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
 let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let error = import:Std.Core.Error;
 let extensions = import:Std.Crypto.Pki.Extensions;
@@ -73,8 +74,13 @@ export let PathValidation = module (
         /// @brief The smallest RSA modulus accepted, in bits.
         export let min_rsa_bits: int = 2048;
 
-        /// @brief Options for validation at the instant with the verifier.
-        export let init = func(at: instant.Instant, signature_verifier: SignatureVerifier) {
+        /// @brief Options for validation at the instant using the library verifier or a supplied verifier.
+        /// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-PathValidation)
+        #Since("0.3.0")
+        export let init = func(at: instant.Instant) {
+            time = at;
+            verifier = new algorithm_verifier.AlgorithmVerifier();
+        } or func(at: instant.Instant, signature_verifier: SignatureVerifier) {
             time = at;
             verifier = signature_verifier;
         };

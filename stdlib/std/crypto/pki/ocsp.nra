@@ -8,6 +8,7 @@ let.promote _ = import:Std.Crypto.Pki.Extensions;
 let.promote _ = import:Std.Crypto.Pki.Name;
 let.promote _ = import:Std.Crypto.Pki.Oid;
 let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
 let certificates = import:Std.Crypto.Pki.Certificate;
 let der = import:Std.Crypto.Pki.Der;
 let error = import:Std.Core.Error;
@@ -622,8 +623,13 @@ export let Ocsp = module (
     /// @brief The SingleResponse for the certificate (issued by `issuer`) after checking the response as the
     /// module describes, at the instant `at` with `skew_seconds` of allowed clock skew. `nonce` is the nonce sent,
     /// or empty when none was. A revoked or unknown status is returned, not an error: the caller decides.
+    /// Unless supplied, the verifier is the library's AlgorithmVerifier.
+    /// @see [Std.Crypto.Pki.Ocsp](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ocsp)
     #[NoDiscard, Since("0.3.0")]
     export let verify = func(response: OcspResponse, certificate: Certificate, issuer: Certificate,
+            at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
+        return verify(response, certificate, issuer, new algorithm_verifier.AlgorithmVerifier(), at, skew_seconds, nonce);
+    } or func(response: OcspResponse, certificate: Certificate, issuer: Certificate,
             verifier: SignatureVerifier, at: instant.Instant, skew_seconds: int64, nonce: uint8[list]) -> Result<SingleResponse> {
         if (response.status != ResponseStatus.Successful) {
             return failure<SingleResponse>("ocsp.status", "the responder did not answer successfully");
