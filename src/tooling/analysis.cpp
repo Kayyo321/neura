@@ -565,6 +565,7 @@ void AnalysisSession::index_workspace() {
     if (workspace_indexed_)
         return;
     workspace_indexed_ = true;
+    workspace_truncated = false;
     std::error_code error;
     std::size_t count = 0;
     const auto options = fs::directory_options::skip_permission_denied;
@@ -579,14 +580,18 @@ void AnalysisSession::index_workspace() {
             continue;
         }
         if (it->is_regular_file(error) && it->path().extension() == ".nra") {
-            if (++count > 5000)
+            if (++count > 5000) {
+                workspace_truncated = true;
                 break;
+            }
             try {
                 document(path_uri(fs::weakly_canonical(it->path()).generic_string()));
             } catch (const std::exception &) {
             }
         }
     }
+    // A directory that could not be read ends the walk early.
+    if (error) workspace_truncated = true;
 }
 void AnalysisSession::analyze(std::string_view uri) {
     auto *active = document(uri);

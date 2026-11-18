@@ -632,7 +632,13 @@ class Server {
     int rename_on_disk(const fs::path &file, std::size_t line, std::size_t column, const std::string &name,
                        const std::vector<fs::path> &roots, const fs::path &library) {
         initialized_ = true;
-        session_.root = fs::current_path();
+        // The workspace whose files the rename may change: the current
+        // directory, or the file's own directory when the file is outside
+        // it, as an editor opens a project.
+        const auto absolute = fs::weakly_canonical(fs::absolute(file));
+        const auto current = fs::weakly_canonical(fs::current_path());
+        const auto inside = absolute.lexically_relative(current);
+        session_.root = !inside.empty() && *inside.begin() != ".." ? current : absolute.parent_path();
         for (const auto &root : roots) session_.source_roots.push_back(fs::weakly_canonical(root));
         session_.source_roots.push_back(fs::weakly_canonical(fs::absolute(file).parent_path()));
         session_.library = library;
@@ -661,6 +667,12 @@ class Server {
         } catch (const RequestError &error) {
             throw std::runtime_error(std::string("rename: ") + error.what());
         }
+        // A rename that may have missed a file is not applied.
+        if (session_.workspace_truncated)
+            throw std::runtime_error("rename: " + session_.root.string() +
+                                     " could not be searched completely (more than 5000 .nra files, or a directory "
+                                     "that could not be read), so a reference could be missed; run 'neura rename' "
+                                     "from the project's directory");
         std::map<std::string, std::string> contents;
         for (const auto &edit : plan.edits) {
             if (!contents.contains(edit.span.file)) contents[edit.span.file] = session_.documents.at(edit.span.file).source;

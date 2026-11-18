@@ -112,6 +112,9 @@ class AnalysisSession {
         workspace_indexed_ = false;
     }
     void index_workspace();
+    // Set when index_workspace stopped at its file limit, so that the index
+    // may miss a reference.
+    bool workspace_truncated{};
     const EditorSymbol *symbol_at(const EditorDocument &document, std::size_t offset) const;
     std::optional<std::size_t> symbol_index_at(const EditorDocument &document, std::size_t offset) const;
     Json location(const Span &span) const;

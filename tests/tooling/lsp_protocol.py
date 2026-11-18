@@ -445,7 +445,8 @@ class LanguageServerTests(unittest.TestCase):
                   'let UserJson = derive json.Codec<User>;\n'
                   'let greet = func(u: User) -> string => u.name;\n')
         path.write_text(source)
-        result = subprocess.run([BINARY, 'rename', path, '2:20', 'display'], capture_output=True, text=True)
+        result = subprocess.run([BINARY, 'rename', path, '2:20', 'display'], capture_output=True, text=True,
+                                cwd=self.root)
         self.assertEqual(result.returncode, 0, result.stderr)
         self.assertIn('field User.display: "name";', result.stderr)
         self.assertIn('so that the JSON wire name does not change', result.stderr)
@@ -460,10 +461,47 @@ class LanguageServerTests(unittest.TestCase):
                                    (['9:1', 'other'], 'past the end'),
                                    (['2', 'other'], 'usage: neura rename')):
             with self.subTest(arguments=arguments):
-                result = subprocess.run([BINARY, 'rename', path, *arguments], capture_output=True, text=True)
+                result = subprocess.run([BINARY, 'rename', path, *arguments], capture_output=True, text=True,
+                                        cwd=self.root)
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(message, result.stderr)
                 self.assertEqual(path.read_text(), renamed)
+
+    def test_command_line_rename_across_files_and_modules(self):
+        # `neura rename` reads the files under the current directory, so a
+        # caller in a subdirectory is renamed with the declaration, and a
+        # module whose file follows its name moves with it, unless the new
+        # file name is taken.
+        project = self.root / 'project'
+        (project / 'sub').mkdir(parents=True)
+        (project / 'lib.nra').write_text('export let Lib = module (\n'
+                                         '    export let plus = func(a: int, b: int) -> int => a + b;\n);\n')
+        (project / 'app.nra').write_text('let lib = import:Lib;\nlet use = func() -> int => lib.plus(1, 2);\n')
+        (project / 'sub' / 'more.nra').write_text('let lib = import:Lib;\n'
+                                                  'let again = func() -> int => lib.plus(3, 4);\n')
+        rename = lambda *arguments: subprocess.run([BINARY, 'rename', *arguments], capture_output=True, text=True,
+                                                   cwd=project)
+        result = rename('app.nra', '2:32', 'add')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('applied 3 edits to 3 files', result.stderr)
+        self.assertIn('export let add = func', (project / 'lib.nra').read_text())
+        self.assertIn('lib.add(1, 2)', (project / 'app.nra').read_text())
+        self.assertIn('lib.add(3, 4)', (project / 'sub' / 'more.nra').read_text())
+        result = rename('lib.nra', '1:12', 'Tools')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('moved', result.stderr)
+        self.assertFalse((project / 'lib.nra').exists())
+        self.assertIn('export let Tools = module', (project / 'tools.nra').read_text())
+        self.assertIn('import:Tools;', (project / 'sub' / 'more.nra').read_text())
+        for source in ('app.nra', 'sub/more.nra'):
+            check = subprocess.run([BINARY, 'check', '-I', '.', source], capture_output=True, text=True, cwd=project)
+            self.assertEqual(check.returncode, 0, check.stderr)
+        (project / 'other.nra').write_text('let unrelated = 1;\n')
+        before = {item: item.read_text() for item in project.rglob('*.nra')}
+        result = rename('tools.nra', '1:12', 'Other')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('already exists', result.stderr)
+        self.assertEqual({item: item.read_text() for item in project.rglob('*.nra')}, before)
 
     def test_accessor_dispatch_word_completion(self):
         # Edge case 144: after `| get.`, `override:` under `let.override`
