@@ -4,7 +4,7 @@ error[E0261]: control character in character literal
 3 | let bell = '�';
   |            ^^^ a control character is written as an escape
   |
-  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits and a value up to FF
 
 error[E0261]: control character in character literal
  --> $DIR/character-control.nra:4:14
@@ -12,6 +12,6 @@ error[E0261]: control character in character literal
 4 | let delete = '�';
   |              ^^^ a control character is written as an escape
   |
-  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits and a value up to FF
 
 For more information about this error, try `neura explain E0261`.

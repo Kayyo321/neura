@@ -1,0 +1,7 @@
+// A Unicode escape names a scalar value: a surrogate or a value above
+// U+10FFFF is E0269 at the escape (docs/design/Expressions030.md, Escapes,
+// edge case 57).
+let surrogate = "\u{D800}";
+let last_surrogate = "\u{dfff}";
+let above = "\u{110000}";
+let character = '\u{D83D}';

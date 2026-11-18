@@ -19,21 +19,30 @@ error[E0260]: character literal is not one byte
 error[E0260]: character literal is not one byte
  --> $DIR/character-not-a-byte.nra:5:14
   |
-5 | let escape = '\u{41}';
-  |              ^^^^^^^^ a character literal has no \u escape
+5 | let escape = '\u{100}';
+  |              ^^^^^^^^^ this escape is U+0100, above U+00FF
   |
-  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
-  = help: use Std.Core.Character for a Unicode code point, or a string literal for text
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits and a value up to FF
+  = help: use Std.Core.Character for a Unicode code point, such as Character.of(0x100), or a string literal for text
+
+error[E0260]: character literal is not one byte
+ --> $DIR/character-not-a-byte.nra:6:13
+  |
+6 | let emoji = '\u{1F600}';
+  |             ^^^^^^^^^^^ this escape is U+1F600, above U+00FF
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits and a value up to FF
+  = help: use Std.Core.Character for a Unicode code point, such as Character.of(0x1F600), or a string literal for text
 
 error[E0261]: character literal holds more than one character
- --> $DIR/character-not-a-byte.nra:6:15
+ --> $DIR/character-not-a-byte.nra:7:15
   |
-6 | let several = 'éa';
+7 | let several = 'éa';
   |               ^^^^ a character literal holds one character
   |
 help: use double quotes for a string
   |
-6 | let several = "éa";
+7 | let several = "éa";
   |               ~~~~
 
 Some errors have detailed explanations: E0260, E0261.

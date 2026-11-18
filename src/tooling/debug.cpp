@@ -1069,8 +1069,12 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
                 if (position < input.size() && input[position] == '\'') {
                     // A character literal is the integer of its byte
                     // (docs/design/Expressions030.md); the lexer checks it.
-                    const auto width = position + 1 < input.size() && input[position + 1] == '\\'
-                        ? (position + 2 < input.size() && input[position + 2] == 'x' ? 6 : 4) : 3;
+                    // Through the closing quote; an escape's next byte never
+                    // closes it, so '\'' ends at its third quote.
+                    auto close = position + 1;
+                    if (close < input.size() && input[close] == '\\') close += 2;
+                    while (close < input.size() && input[close] != '\'') ++close;
+                    const auto width = std::min(close + 1, input.size()) - position;
                     const auto literal = input.substr(position, width);
                     std::vector<Token> tokens;
                     try {

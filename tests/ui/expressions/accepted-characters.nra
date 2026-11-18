@@ -2,6 +2,7 @@
 // 29): every escape, contextual integer typing, the `byte` default and
 // ranges with character bounds are accepted.
 let escapes: byte[] = ['A', '\n', '\r', '\t', '\'', '\\', '\"', '"', '\0', '\x41', '\xFF', '\xfe', ' ', '~'];
+let unicode: byte[] = ['\u{41}', '\u{0}', '\u{e9}', '\u{FF}', '\u{0000FF}'];
 let letter = 'A';
 let code: int32 = 'A';
 let wide: uint64 = '\xFF';

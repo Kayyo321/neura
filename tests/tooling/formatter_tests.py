@@ -134,6 +134,10 @@ let reference=func(value:&int)->&int=>value;'''
         formatted = self.formatted('let f=func(a:string){let s="";s..=a.."!";s..=(a);};')
         self.assertIn('s ..= a .. "!";', formatted)
         self.assertIn('s ..= (a);', formatted)
+        # docs/design/Expressions030.md, Escapes: every escape stays as written.
+        formatted = self.formatted('let a="\\u{1F600}\\xC3\\xA9\\0\\\'";let c=\'\\u{e9}\';')
+        self.assertIn('let a = "\\u{1F600}\\xC3\\xA9\\0\\\'";', formatted)
+        self.assertIn("let c = '\\u{e9}';", formatted)
 
     def test_negation_words_keep_their_spelling(self):
         # docs/design/Expressions030.md, Tooling: `not` and `!` stay as written.

@@ -63,6 +63,9 @@ Errors about declarations, scopes, and name resolution.
 | [E0263](E0263.md) | range or chain of the wrong shape |
 | [E0265](E0265.md) | narrowing binding outside the condition of an if |
 | [E0266](E0266.md) | is not narrowing inside an && chain |
+| [E0268](E0268.md) | invalid Unicode escape |
+| [E0269](E0269.md) | Unicode escape that is not a scalar value |
+| [E0270](E0270.md) | string literal escapes that are not valid UTF-8 |
 | [E0301](E0301.md) | duplicate local binding |
 | [E0302](E0302.md) | duplicate declaration |
 | [E0303](E0303.md) | duplicate parameter or field name |

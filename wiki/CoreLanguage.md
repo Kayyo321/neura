@@ -7,7 +7,7 @@ This page defines the core of the language: bindings, functions, control flow, t
 
 ## Source and bindings
 
-Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let`, `const`, or `last`, with an optional type annotation, and ends with `;`. The exact Unicode identifier and escape rules remain open.
+Source files are UTF-8; `//` introduces a comment through the end of the line. Identifiers use letters, digits and underscores and cannot start with a digit. Keywords are reserved. A binding is introduced by `let`, `const`, or `last`, with an optional type annotation, and ends with `;`. String and character literals have the [escapes](#escapes) below; the exact Unicode identifier rules remain open.
 
 | Introducer | Assigned | Where |
 | --- | --- | --- |
@@ -602,8 +602,9 @@ A character literal is one character between single quotes, `'A'`, and names one
 | `'\n'`, `'\r'`, `'\t'`, `'\0'` | 10, 13, 9, 0 |
 | `'\\'`, `'\''`, `'\"'` | 92, 39, 34 |
 | `'\xHH'`, with exactly two hexadecimal digits | any byte, 0x00 to 0xFF |
+| `'\u{H}'`, with one to six hexadecimal digits and a value up to FF | that byte, so `'\u{E9}'` is 0xE9 |
 
-A character outside ASCII, such as `'é'`, and a `\u` escape are `E0260`: use `Std.Core.Character` for a Unicode code point and a string literal for text. An empty literal, more than one character, a line or file end before the closing quote, a raw tab or control byte, and any other escape are `E0261`. A typographic quote `‘` or `’` is `E0101`.
+A character outside ASCII, such as `'é'`, and a `\u{...}` escape above `\u{FF}` are `E0260`: use `Std.Core.Character` for a Unicode code point and a string literal for text. An empty literal, more than one character, a line or file end before the closing quote, a raw tab or control byte, and any other escape are `E0261`. A typographic quote `‘` or `’` is `E0101`.
 
 <!-- example: run -->
 ```neura
@@ -633,6 +634,41 @@ export let Main = module : program.Entry (
 
 ```text
 66 10 3 25
+```
+
+### Escapes
+
+A backslash in a string, interpolated string or character literal starts an escape ([proposal](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#escapes), implemented, proposed). Every escape a character literal accepts is also accepted in a string.
+
+| Escape | String literal | Character literal |
+| --- | --- | --- |
+| `\n`, `\r`, `\t` | newline, carriage return, tab | 10, 13, 9 |
+| `\0` | U+0000 | 0 |
+| `\\`, `\'`, `\"` | backslash, apostrophe, quote | 92, 39, 34 |
+| `\xHH`, exactly two hexadecimal digits | the byte 0xHH | the byte 0xHH |
+| `\u{H}`, one to six hexadecimal digits in either case | the code point, encoded as UTF-8 | the byte, for a value up to FF |
+
+A string is UTF-8 text, so the bytes that a literal's `\x` escapes and characters write must together be valid UTF-8: `"\xC3\xA9"` is `"é"`, and a lone `"\xE9"` is `E0270`, whose fix is `\u{E9}`. A `\u` escape names a Unicode scalar value: a surrogate (`\u{D800}` to `\u{DFFF}`) or a value above `\u{10FFFF}` is `E0269`, and a `\u` without braces, with no digits or more than six, or without its `}` is `E0268`. Any other escape is `E0104` in a string and `E0261` in a character literal. The formatter keeps every escape as written.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let same = "caf\u{E9}" == "café" && "\xC3\xA9" == "\u{e9}" && "\u{1F600}" == "😀";
+        console.print_line(same.to_string() + " " + "it\'s".byte_length.to_string() + " " + "a\0b".byte_length.to_string());
+        let latin: byte = '\u{E9}';
+        console.print_line(latin.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+true 4 3
+233
 ```
 
 ### Optional access and coalescing

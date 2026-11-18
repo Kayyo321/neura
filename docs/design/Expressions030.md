@@ -47,7 +47,7 @@ conjunct       = narrowing | expression-above-&&
 primary        = ... | "typeof" "(" ( expression | type-path ) ")" | char-literal
 char-literal   = "'" ( char-ascii | char-escape ) "'"
 char-ascii     = any byte 0x20..0x7E except "'" and "\"
-char-escape    = "\" ( "n" | "r" | "t" | "0" | "\" | "'" | "\"" ) | "\x" hex hex
+char-escape    = "\" ( "n" | "r" | "t" | "0" | "\" | "'" | "\"" ) | "\x" hex hex | "\u{" hex [hex [hex [hex [hex [hex]]]]] "}"
 equality-op    = "==" | "!=" | "===" | "!=="
 range-or-chain = coalescing [ ( ".." | "..=" ) coalescing [ ":" coalescing ] ]   ; a range
                | coalescing ".." coalescing { ".." coalescing }                  ; a chain
@@ -139,13 +139,26 @@ Lowering emits `type of` (NeuraIR op 74) with the operand, or with no operand an
 | Rule | Detail | Status |
 | --- | --- | --- |
 | Form. | A single character between single quotes: one printable ASCII byte (0x20 to 0x7E) other than `'` and `\`, or one escape. | implemented, proposed |
-| Escapes. | `\n` (10), `\r` (13), `\t` (9), `\0` (0), `\\`, `\'`, `\"`, and `\xHH` with exactly two hexadecimal digits, which gives any byte 0x00 to 0xFF. No other escape exists; `\u{...}` is E0260. | implemented, proposed |
+| Escapes. | `\n` (10), `\r` (13), `\t` (9), `\0` (0), `\\`, `\'`, `\"`, `\xHH` with exactly two hexadecimal digits, which gives any byte 0x00 to 0xFF, and `\u{H}` whose value is at most FF, which gives that byte. A `\u{...}` above FF is E0260; see [Escapes](#escapes). | implemented, proposed |
 | Value and type. | The literal is an integer literal whose value is the byte. Where an integer type is expected it takes that type, as a decimal literal does, and a value the type cannot hold is the existing out-of-range literal error (`let s: int8 = '\xFF';`). Without an expected type its type is `byte` (`uint8`), not `int32`. `'A' + 1` with no context is a `byte` of 66. | implemented, proposed |
 | Bytes that are not one character. | A character outside ASCII (any UTF-8 sequence of two or more bytes, such as `'é'` or `'€'`) is E0260, whose help points to `Std.Core.Character` for Unicode code points and to a string literal for text. | implemented, proposed |
 | Malformed literals. | `''`, more than one character (`'ab'`), a line end or the end of the file before the closing quote, a raw tab or control byte, and an unknown escape are E0261, with the span of the literal (or of the escape) and, for `'ab'`, a suggestion to use a string. | implemented, proposed |
 | Typographic quotes. | `‘` and `’` stay E0101; the note now says that a character literal uses ASCII `'`. | implemented, proposed |
 
 A character literal folds like any integer literal and adds no NeuraIR or NVR operation: `let c: byte = 'H';` builds the same image as `let c: byte = 72;`.
+
+## Escapes
+
+The owner approved on 2026-11-17 adding the Unicode escape, `\0` and `\'` to string literals, and then asked that every escape a character literal accepts also be accepted in strings. The lexer decodes them; no NeuraIR or NVR change follows, and a program that uses none of the new escapes builds the same image.
+
+| Rule | Detail | Status |
+| --- | --- | --- |
+| Escapes of every literal. | `\n`, `\r`, `\t`, `\0` (U+0000), `\\`, `\'`, `\"`, `\xHH` with exactly two hexadecimal digits, and `\u{H}` with one to six hexadecimal digits in either case, in string, interpolated-string (outside holes) and character literals. | implemented, proposed |
+| `\u` in a string. | One Unicode scalar value, encoded as UTF-8. A surrogate (`\u{D800}` to `\u{DFFF}`) or a value above `\u{10FFFF}` is E0269 at the escape; a `\u` without `{`, empty braces, more than six digits, a non-hexadecimal character, or no `}` is E0268 at the escape. | implemented, proposed |
+| `\u` in a character literal. | A value up to FF is that byte, as `'A'` is a byte: `'\u{41}'` is 65 and `'\u{E9}'` 233. A larger scalar value is E0260, whose help names `Std.Core.Character` with the value (`Character.of(0x1F600)`). E0268 and E0269 apply as in strings. | implemented, proposed |
+| `\x` in a string. | One byte. The decoded bytes of the literal (its characters and escapes together) must be valid UTF-8: `"\xC3\xA9" == "é"`. A literal that is not is E0270 at the literal, labelled at the `\x` escape where the first invalid sequence starts, with the suggestion `\u{HH}` for that byte's code point. In an interpolated string each text part between holes is checked. | implemented, proposed |
+| Other escapes. | Unknown escapes and a `\x` without two hexadecimal digits stay E0104 in strings and E0261 in character literals; a raw null byte in a string stays E0104. | implemented, proposed |
+| Formatting. | The token keeps the literal as written, so the formatter writes every escape back unchanged. | implemented, proposed |
 
 ## Ranges with `..=`
 
@@ -213,7 +226,7 @@ The lexer produces a keyword token for `not` and `typeof`, a symbol token for `!
 
 | Code | Rejection and primary span | Help | Status |
 | --- | --- | --- | --- |
-| E0260 | A character literal whose character is not one byte (non-ASCII, or a `\u` escape), at the literal | Use `Std.Core.Character` for a Unicode code point, or a string literal for text | implemented, proposed |
+| E0260 | A character literal whose character is not one byte (non-ASCII, or a `\u{...}` escape above `FF`), at the literal | Use `Std.Core.Character` for a Unicode code point, or a string literal for text | implemented, proposed |
 | E0261 | A malformed character literal: empty, several characters, unterminated, a raw control byte, or an unknown escape, at the literal or escape | List the escapes; for several characters, suggest double quotes | implemented, proposed |
 | E0262 | A `..=` statement whose destination is not a `string`, or whose right side has a step, at the operator | Explain both forms of `..=` | implemented, proposed |
 | E0263 | A range or chain of the wrong shape: a third bound, a step on a string chain, `..=` mixed with `..` or applied to strings in an expression, at the offending operator or colon | Show the range forms or the statement form | implemented, proposed |
@@ -221,6 +234,9 @@ The lexer produces a keyword token for `not` and `typeof`, a symbol token for `!
 | E0265 | A narrowing binding outside the whole condition or a top-level `&&` conjunct of an `if`, at the binding name | Name the allowed positions; for `while`, suggest an `if` inside the loop | implemented, proposed |
 | E0266 | An `is not` narrowing inside an `&&` chain, at `not` | Use the whole condition, or test with `is` and bind in the true branch | implemented, proposed |
 | E0267 | `typeof` without `(`, or with an operand that has no type (a `void` call, a module, an overload group, a function name), at the operand | Pass a value or a type | proposed |
+| E0268 | A malformed Unicode escape in a string or character literal: no `{`, no digits, more than six, a non-hexadecimal character, or no `}`, at the escape | Show the form `\u{1F600}` | implemented, proposed |
+| E0269 | A Unicode escape that is a surrogate or above `\u{10FFFF}`, at the escape | Name the scalar value ranges | implemented, proposed |
+| E0270 | A string literal whose decoded bytes are not valid UTF-8 because of `\x` escapes, at the literal, labelled at the first offending escape | Suggest `\u{HH}` for that byte's code point | implemented, proposed |
 | E1100 | A non-string operand of a string chain or of a `..=` statement, or a chain that mixes string and integer operands, at the first offending operand | Show its type and suggest `.to_string()` | implemented, proposed |
 
 Every other rejection uses an existing code: operand types of `not` and `!==` as for `!` and `===`, subject and pattern rules of a narrowing as for `match.is` (E0411, E0490, E0605), integer literal ranges for character literals, readonly destinations, and return types.
@@ -253,7 +269,7 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 24. `typeof` works in a stripped image and in an image built from `.nir`, with the same names.
 25. `'A'`, `'\n'`, `'\''`, `'\\'`, `'\"'`, `'"'`, `'\0'`, `'\x41'`, `'\xFF'` are accepted with the values 65, 10, 39, 92, 34, 34, 0, 65, 255.
 26. `''`, `'ab'`, `'\q'`, `'\x4'`, `'\x4G'`, an unterminated `'a` and a tab between quotes are E0261.
-27. `'é'` and `'\u{41}'` are E0260 with the help naming `Std.Core.Character`.
+27. `'é'` and `'\u{100}'` are E0260 with the help naming `Std.Core.Character`; `'\u{41}'` is 65 and `'\u{FF}'` 255.
 28. `let c = 'A';` is a `byte`; `let i: int32 = 'A';` is 65; `let s: int8 = '\xFF';` is the existing literal range error.
 29. `'A' .. 'Z'` without context is a `byte[]` range; `'a' ..= 'z'` contains 26 bytes.
 30. `0 ..= 5` gives six elements; `5 ..= 0 : -1` six descending; `0 ..= 5 : 2` gives 0, 2, 4; `{0 ..= 5}` and `new(0 ..= 5)` for a list are accepted.
@@ -282,6 +298,9 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 53. `return match (d) { ... } unless g;` and `return if (c) -> a else -> b unless g;` guard the whole value.
 54. Comments and line breaks between any two tokens of these forms are accepted, and formatting twice gives the same text.
 55. Incomplete editor input (`if (x is y:`, `if (x is not`, `typeof(`, `'`, `return if (c) ->`) reports one error at the end of input and keeps earlier declarations for the LSP.
+56. `"\u{1F600}" == "😀"`, `"\u{e9}" == "é"`, `"\xC3\xA9" == "é"`, `"\0"` has length 1 and `"it\'s"` is `it's`.
+57. `"\u{D800}"`, `"\u{110000}"` are E0269; `"\u1F600"`, `"\u{}"`, `"\u{1234567}"`, `"\u{12"` and `"\u{12G}"` are E0268, all at the escape.
+58. `"\xE9"` and `"\xC3"` alone are E0270 with the suggestion `\u{E9}` (`\u{C3}`); `"\x4G"` is E0104.
 
 ## Order of work
 
@@ -291,6 +310,7 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 | 2 | `not`, `is not`: lexer, parser, formatter, LSP, highlighting. | identical to `!` forms | implemented, proposed |
 | 3 | Narrowing in `if`, then `is not` scoping and E0265/E0266. | identical to the `match.is` forms | implemented, proposed |
 | 4 | Character literals, E0260/E0261, docs of literals and numbers. | identical to integer literals | implemented, proposed |
+| 4b | Escapes: `\0`, `\'`, `\xHH` and `\u{H}` in string and character literals; E0268, E0269, E0270. | identical where unused | implemented, proposed |
 | 5 | Inclusive ranges, string chains, `..=` statements, `!==`; NeuraIR 1.15 op 73, NVR 1.9 op 35, loader, assembler, tiers, counters; E0262, E0263, E1100. | new only where used | implemented, proposed |
 | 6 | `return if` compact arms and `unless`; E0264. | identical to the `if` forms | proposed |
 | 7 | `typeof`, NeuraIR op 74 and its elaboration, `Std.Reflect.Core.TypeInfo` and `Std.Reflect.Type.TypeKind`; E0267. | no NVR change | proposed |
@@ -316,7 +336,8 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 - **`TypeInfo` is a record.** A final, immutable record gives value equality, hashing and text without hand-written members, can be shared between tasks, and can gain components later; `===` compares types.
 - **Implementation of dynamic `typeof`.** A chain of class tests expanded after specialization needs no new runtime operation or image section and works in stripped images and through `.nir`; its cost grows with the number of candidate classes.
 - **Character literals are `byte` integer literals.** They follow contextual integer typing so `b == 'A'` works for any integer `b`, default to `byte` because a character literal names a byte, accept `\xHH` for any byte, and reject anything outside one byte, pointing to `Std.Core.Character`.
-- **No `\u` escape in character literals.** An escape that can only name ASCII would add a spelling without a use, and it would suggest that wider code points are accepted.
+- **`\u` in character literals up to FF (revised).** The first version of this note had no `\u` escape in character literals. After the owner approved Unicode escapes and asked that strings and character literals share their escapes, `'\u{E9}'` names the byte 0xE9, as `'A'` names 65, and anything above FF stays E0260 pointing to `Std.Core.Character`, so the one-byte rule is unchanged.
+- **`\x` in strings must leave valid UTF-8.** Strings are UTF-8 text, so a `\x` escape is allowed where the bytes together stay valid UTF-8 and is E0270 otherwise; limiting `\x` in strings to 00-7F, as Rust does, was the rejected alternative.
 - **`..=` has two roles.** By the owner's decision of 2026-11-17, `..=` in an expression is the inclusive range, and a statement that is exactly `place ..= text;` is concatenation assignment; an integer place is E0262 explaining both, so neither reading is chosen silently.
 - **Chains are flat and n-ary.** Associativity does not change the text, and a flat chain is what lets the compiler allocate once; parentheses mark a separate allocation.
 - **A new runtime operation for chains.** The existing `+` path builds a byte collection and then the text, so no existing operation can produce the text with one allocation; one state operation with a loader-validated signature is the smallest addition.

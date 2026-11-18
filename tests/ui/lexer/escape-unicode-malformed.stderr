@@ -1,0 +1,57 @@
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:3:17
+  |
+3 | let no_brace = "\u1F600";
+  |                 ^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:4:14
+  |
+4 | let empty = "\u{}";
+  |              ^^^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:5:13
+  |
+5 | let long = "\u{1234567}";
+  |             ^^^^^^^^^^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:6:18
+  |
+6 | let bad_digit = "\u{12G}";
+  |                  ^^^^^^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:7:18
+  |
+7 | let character = '\u{}';
+  |                  ^^^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:8:23
+  |
+8 | let interpolated = $"x\u{zz}";
+  |                       ^^^^^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+error[E0268]: invalid Unicode escape
+ --> $DIR/escape-unicode-malformed.nra:9:17
+  |
+9 | let unclosed = "\u{12";
+  |                 ^^^^^ a Unicode escape is \u{...} with one to six hexadecimal digits
+  |
+  = help: write a code point in braces, such as \u{E9} or \u{1F600}
+
+For more information about this error, try `neura explain E0268`.

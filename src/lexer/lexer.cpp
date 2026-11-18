@@ -23,6 +23,151 @@ constexpr bool is_name_char(char c) {
     return is_name_start(c) || is_digit(c);
 }
 
+constexpr bool is_hex_digit(char c) {
+    return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+}
+
+constexpr std::uint32_t hex_value(char c) {
+    return is_digit(c) ? static_cast<std::uint32_t>(c - '0')
+                       : static_cast<std::uint32_t>((c | 0x20) - 'a' + 10);
+}
+
+constexpr std::size_t lead_width(unsigned char lead) {
+    return lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
+}
+
+// One escape of a string or character literal (docs/lang/CoreLanguage.md,
+// Escapes): `text` starts at the backslash and ends where the literal's
+// line does. `width` is the escape's length in source bytes, backslash
+// included; for an invalid escape it covers what was read, for the span of
+// the diagnostic. `value` is the byte of a simple or `\x` escape, or the
+// code point of a Unicode escape, backslash u{...}.
+struct EscapeRead {
+    enum class Status : std::uint8_t {
+        Ok, End, Unknown, BadByte, BadUnicode, NotScalar
+    };
+    Status status = Status::Ok;
+    std::size_t width = 1;
+    std::uint32_t value = 0;
+    bool byte = false;
+    bool scalar = false;
+};
+
+EscapeRead read_escape(std::string_view text) {
+    EscapeRead result;
+    const auto at = [&](std::size_t i) { return i < text.size() ? text[i] : '\0'; };
+    const char kind = at(1);
+    if (text.size() < 2 || kind == '\n' || kind == '\r') {
+        result.status = EscapeRead::Status::End;
+        return result;
+    }
+    result.width = 2;
+    switch (kind) {
+    case 'n': result.value = '\n'; return result;
+    case 'r': result.value = '\r'; return result;
+    case 't': result.value = '\t'; return result;
+    case '0': result.value = 0; return result;
+    case '\\': case '\'': case '"': result.value = static_cast<unsigned char>(kind); return result;
+    case 'x':
+        result.byte = true;
+        while (result.width < 4 && is_hex_digit(at(result.width))) {
+            result.value = result.value * 16 + hex_value(at(result.width));
+            ++result.width;
+        }
+        if (result.width != 4) result.status = EscapeRead::Status::BadByte;
+        return result;
+    case 'u': {
+        result.scalar = true;
+        if (at(2) != '{') {
+            result.status = EscapeRead::Status::BadUnicode;
+            return result;
+        }
+        std::size_t i = 3;
+        while (i < text.size() && is_hex_digit(text[i]) && i < 3 + 7) {
+            result.value = result.value * 16 + hex_value(text[i]);
+            ++i;
+        }
+        const auto digits = i - 3;
+        if (at(i) != '}' || digits == 0 || digits > 6) {
+            // The span runs through a `}` a few bytes on, so a backslash-u{zz}
+            // is one error and its brace closes nothing else.
+            auto close = i;
+            while (close < text.size() && close < i + 8 && text[close] != '}' && text[close] != '"' &&
+                   text[close] != '\'' && text[close] != '\\' && static_cast<unsigned char>(text[close]) < 0x80)
+                ++close;
+            result.width = at(close) == '}' ? close + 1 : i;
+            result.status = EscapeRead::Status::BadUnicode;
+            return result;
+        }
+        result.width = i + 1;
+        if (result.value > 0x10FFFF || (result.value >= 0xD800 && result.value <= 0xDFFF))
+            result.status = EscapeRead::Status::NotScalar;
+        return result;
+    }
+    default:
+        result.width = std::min(text.size(), 1 + lead_width(static_cast<unsigned char>(kind)));
+        result.status = EscapeRead::Status::Unknown;
+        return result;
+    }
+}
+
+void append_utf8(std::string& out, std::uint32_t value) {
+    if (value < 0x80) {
+        out += static_cast<char>(value);
+    } else if (value < 0x800) {
+        out += static_cast<char>(0xC0 | (value >> 6));
+        out += static_cast<char>(0x80 | (value & 0x3F));
+    } else if (value < 0x10000) {
+        out += static_cast<char>(0xE0 | (value >> 12));
+        out += static_cast<char>(0x80 | ((value >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (value & 0x3F));
+    } else {
+        out += static_cast<char>(0xF0 | (value >> 18));
+        out += static_cast<char>(0x80 | ((value >> 12) & 0x3F));
+        out += static_cast<char>(0x80 | ((value >> 6) & 0x3F));
+        out += static_cast<char>(0x80 | (value & 0x3F));
+    }
+}
+
+// The decoded bytes of a valid escape: one byte, or a code point's UTF-8.
+void append_escape(std::string& out, const EscapeRead& escape) {
+    if (escape.scalar) append_utf8(out, escape.value);
+    else out += static_cast<char>(escape.value);
+}
+
+// The offset of the first byte of `text` that does not begin a valid UTF-8
+// sequence, or npos.
+std::size_t first_invalid_utf8(std::string_view text) {
+    for (std::size_t i = 0; i < text.size();) {
+        const auto lead = static_cast<unsigned char>(text[i]);
+        if (lead < 0x80) {
+            ++i;
+            continue;
+        }
+        const auto width = lead_width(lead);
+        const auto second = i + 1 < text.size() ? static_cast<unsigned char>(text[i + 1]) : 0;
+        bool valid = lead >= 0xC2 && lead <= 0xF4 && i + width <= text.size() &&
+                     !(lead == 0xE0 && second < 0xA0) && !(lead == 0xED && second > 0x9F) &&
+                     !(lead == 0xF0 && second < 0x90) && !(lead == 0xF4 && second > 0x8F);
+        for (std::size_t k = 1; valid && k < width; ++k) {
+            const auto continuation = static_cast<unsigned char>(text[i + k]);
+            valid = continuation >= 0x80 && continuation <= 0xBF;
+        }
+        if (!valid) return i;
+        i += width;
+    }
+    return std::string_view::npos;
+}
+
+std::string hex_digits(std::uint32_t value, int minimum) {
+    constexpr char digits[] = "0123456789ABCDEF";
+    std::string text;
+    for (int shift = 20; shift >= 0; shift -= 4) {
+        if (!text.empty() || (value >> shift) != 0 || shift < minimum * 4) text += digits[(value >> shift) & 0xF];
+    }
+    return text;
+}
+
 constexpr auto keywords = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new",
     "destroy", "if", "else", "while", "do", "for", "in", "break", "continue", "return", "true", "false",
@@ -330,10 +475,26 @@ private:
     // so the formatter writes it back; decode_character_literal gives its
     // value.
     static constexpr std::string_view character_escapes =
-        "the escapes are \\n, \\r, \\t, \\0, \\\\, \\', \\\" and \\xHH with two hexadecimal digits";
+        "the escapes are \\n, \\r, \\t, \\0, \\\\, \\', \\\", \\xHH with two hexadecimal digits, and "
+        "\\u{H} with one to six hexadecimal digits and a value up to FF";
+    static constexpr std::string_view string_escapes =
+        "the escapes are \\n, \\r, \\t, \\0, \\\\, \\', \\\", \\xHH with two hexadecimal digits, and "
+        "\\u{H} with one to six hexadecimal digits";
 
-    static constexpr bool is_hex(char c) {
-        return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    // A malformed Unicode escape (E0268), at the escape.
+    static Diagnostic unicode_escape_error(Span escape) {
+        return Diagnostic(std::move(escape), "invalid Unicode escape").with_code("E0268")
+            .label("a Unicode escape is \\u{...} with one to six hexadecimal digits")
+            .help("write a code point in braces, such as \\u{E9} or \\u{1F600}");
+    }
+
+    // A Unicode escape whose value is a surrogate or above U+10FFFF (E0269).
+    static Diagnostic scalar_escape_error(Span escape, std::uint32_t value) {
+        const bool surrogate = value >= 0xD800 && value <= 0xDFFF;
+        return Diagnostic(std::move(escape), "Unicode escape is not a Unicode scalar value").with_code("E0269")
+            .label(surrogate ? "U+" + hex_digits(value, 4) + " is a surrogate code point"
+                             : "this value is above U+10FFFF")
+            .note("a Unicode escape names a scalar value: U+0000 to U+D7FF or U+E000 to U+10FFFF");
     }
 
     static constexpr std::size_t utf8_width(unsigned char lead) {
@@ -391,33 +552,33 @@ private:
         }
         const auto first = static_cast<unsigned char>(content.front());
         if (first == '\\') {
-            const char kind = content.size() > 1 ? content[1] : '\0';
-            if (kind == 'u') {
-                malformed(Diagnostic(literal, "character literal is not one byte").with_code("E0260")
-                    .label("a character literal has no \\u escape")
-                    .help("use Std.Core.Character for a Unicode code point, or a string literal for text")
-                    .note(std::string(character_escapes)));
-            }
-            std::size_t width = 2;
-            bool valid = std::string_view("nrt0\\'\"").find(kind) != std::string_view::npos;
-            if (kind == 'x') {
-                valid = content.size() >= 4 && is_hex(content[2]) && is_hex(content[3]);
-                width = 4;
-            } else if (!valid) {
-                width = 1 + utf8_width(static_cast<unsigned char>(kind));
-            }
-            if (!valid) {
-                auto escape = start;
-                escape.offset += 1;
-                escape.column += 1;
-                escape.length = std::min(width, content.size());
-                malformed(Diagnostic(escape, kind == 'x' ? "invalid \\x escape in character literal"
-                                                         : "unknown escape in character literal")
+            const auto read = read_escape(content);
+            auto escape = start;
+            escape.offset += 1;
+            escape.column += 1;
+            // A short \\x escape is shown with the two bytes after `x`.
+            escape.length = std::min(read.status == EscapeRead::Status::BadByte ? std::size_t{4} : read.width,
+                                     content.size());
+            switch (read.status) {
+            case EscapeRead::Status::Ok: break;
+            case EscapeRead::Status::BadUnicode: malformed(unicode_escape_error(escape)); break;
+            case EscapeRead::Status::NotScalar: malformed(scalar_escape_error(escape, read.value)); break;
+            default:
+                malformed(Diagnostic(escape, read.byte ? "invalid \\x escape in character literal"
+                                                       : "unknown escape in character literal")
                     .with_code("E0261")
-                    .label(kind == 'x' ? "\\x takes exactly two hexadecimal digits" : "unknown escape")
+                    .label(read.byte ? "\\x takes exactly two hexadecimal digits" : "unknown escape")
+                    .note(std::string(character_escapes)));
+                break;
+            }
+            if (read.scalar && read.value > 0xFF) {
+                malformed(Diagnostic(literal, "character literal is not one byte").with_code("E0260")
+                    .label("this escape is U+" + hex_digits(read.value, 4) + ", above U+00FF")
+                    .help("use Std.Core.Character for a Unicode code point, such as Character.of(0x" +
+                          hex_digits(read.value, 1) + "), or a string literal for text")
                     .note(std::string(character_escapes)));
             }
-            if (content.size() == width) {
+            if (content.size() == read.width) {
                 finish();
                 return TokenKind::Integer;
             }
@@ -454,11 +615,85 @@ private:
         malformed(std::move(error));
     }
 
+    // The `\\x` escapes of a literal's text: where each one's byte is in
+    // the decoded text, and its span (docs/lang/CoreLanguage.md, Escapes).
+    struct ByteEscape {
+        std::size_t at = 0;
+        Span span;
+        std::uint32_t value = 0;
+    };
+
+    // E0270 when `\\x` escapes leave `decoded` invalid UTF-8; `literal` is
+    // the literal's span. The label names the escape where the first
+    // invalid sequence starts.
+    void check_byte_escapes(const std::string& decoded, const std::vector<ByteEscape>& escapes, Span literal) {
+        if (escapes.empty()) return;
+        const auto invalid = first_invalid_utf8(decoded);
+        if (invalid == std::string_view::npos) return;
+        const ByteEscape* culprit = &escapes.front();
+        for (const auto& escape : escapes)
+            if (escape.at <= invalid) culprit = &escape;
+        auto error = Diagnostic(std::move(literal), "string literal escapes do not form valid UTF-8").with_code("E0270")
+            .label(culprit->span, "this byte does not form a valid UTF-8 sequence here")
+            .note("a string holds UTF-8 text: \\xHH escapes must together form UTF-8 sequences, as "
+                  "\\xC3\\xA9 does for U+00E9");
+        if (culprit->value >= 0x80)
+            error.suggest("to write the code point U+" + hex_digits(culprit->value, 4) + ", use a Unicode escape",
+                          culprit->span, "\\u{" + hex_digits(culprit->value, 2) + "}", Applicability::MaybeIncorrect);
+        report(std::move(error));
+    }
+
+    // One escape of a string literal at the current offset: its decoded
+    // bytes are appended to `decoded`, or an error is reported. Leaves the
+    // offset after the escape.
+    void string_escape(std::string& decoded, std::vector<ByteEscape>& bytes) {
+        auto escape = location();
+        const auto read = read_escape(source_.substr(offset_));
+        escape.length = read.width;
+        if (read.status == EscapeRead::Status::Ok) {
+            if (read.byte) bytes.push_back({decoded.size(), escape, read.value});
+            append_escape(decoded, read);
+            for (std::size_t i = 0; i < read.width; ++i) advance();
+            return;
+        }
+        if (read.status == EscapeRead::Status::BadUnicode) {
+            report(unicode_escape_error(escape));
+        } else if (read.status == EscapeRead::Status::NotScalar) {
+            report(scalar_escape_error(escape, read.value));
+        } else {
+            const bool more = read.status != EscapeRead::Status::End;
+            escape.length = more && !read.byte ? 2 : read.width;
+            auto error = Diagnostic(escape, "invalid string escape").with_code("E0104")
+                .label(read.byte ? "\\x takes exactly two hexadecimal digits" : "unknown escape")
+                .note(std::string(string_escapes));
+            if (more && !read.byte) {
+                escape.length = 1;
+                error.suggest("to write a backslash, escape it", escape, "\\\\", Applicability::MaybeIncorrect);
+            }
+            report(std::move(error));
+            if (!more) {
+                advance();
+                return;
+            }
+            if (!read.byte) {
+                advance();
+                advance_text();
+                return;
+            }
+        }
+        for (std::size_t i = 0; i < read.width; ++i) advance();
+    }
+
     TokenKind string(Span start) {
         advance();
+        std::string decoded;
+        std::vector<ByteEscape> bytes;
         while (offset_ < source_.size() && peek() != '\n' && peek() != '\r') {
             if (peek() == '"') {
                 advance();
+                auto literal = start;
+                literal.length = offset_ - start.offset;
+                check_byte_escapes(decoded, bytes, literal);
                 return TokenKind::String;
             }
             if (peek() == '\0') {
@@ -470,24 +705,12 @@ private:
                 continue;
             }
             if (peek() == '\\') {
-                auto escape = location();
-                advance();
-                constexpr std::string_view escapes = "nrt\\\"";
-                if (escapes.find(peek()) == std::string_view::npos) {
-                    const bool more = offset_ < source_.size() && peek() != '\n' && peek() != '\r';
-                    escape.length = more ? 2 : 1;
-                    auto error = Diagnostic(escape, "invalid string escape").with_code("E0104")
-                        .label("unknown escape")
-                        .note("the escapes are \\n, \\r, \\t, \\\\, and \\\"");
-                    if (more) {
-                        escape.length = 1;
-                        error.suggest("to write a backslash, escape it", escape, "\\\\", Applicability::MaybeIncorrect);
-                    }
-                    report(std::move(error));
-                    if (!more) continue;
-                }
+                string_escape(decoded, bytes);
+                continue;
             }
+            const auto before = offset_;
             advance_text();
+            decoded.append(source_.substr(before, offset_ - before));
         }
         // The string runs to the end of its line: label the opening quote,
         // and offer the closing one where the line ends, before a final ';'
@@ -538,25 +761,6 @@ private:
         throw Skipped{};
     }
 
-    // Decodes one escape of the literal's text into `text`.
-    void escape(std::string& text) {
-        auto at = location();
-        advance();
-        constexpr std::string_view escapes = "nrt\\\"";
-        const char c = peek();
-        if (escapes.find(c) == std::string_view::npos || line_end()) {
-            at.length = line_end() ? 1 : 2;
-            report(Diagnostic(at, "invalid string escape").with_code("E0104")
-                .label("unknown escape")
-                .note("the escapes are \\n, \\r, \\t, \\\\, and \\\""));
-            if (line_end()) return;
-            advance_text();
-            return;
-        }
-        text += c == 'n' ? '\n' : c == 'r' ? '\r' : c == 't' ? '\t' : c;
-        advance();
-    }
-
     TokenKind interpolated(Span start) {
         if (++interpolation_depth_ > interpolation_limit) {
             auto at = start;
@@ -573,11 +777,14 @@ private:
         advance();
         auto parts = std::make_shared<std::vector<InterpolationPart>>();
         std::string text;
+        std::vector<ByteEscape> bytes;
         Span text_start = location();
         const auto flush = [&] {
             if (location().offset == text_start.offset) return;
             auto span = text_start;
             span.length = offset_ - text_start.offset;
+            check_byte_escapes(text, bytes, span);
+            bytes.clear();
             parts->push_back({InterpolationPart::Kind::Text, span, std::exchange(text, {}), {}, {}, std::nullopt});
         };
         while (!line_end()) {
@@ -589,7 +796,7 @@ private:
                 return TokenKind::String;
             }
             if (c == '\\') {
-                escape(text);
+                string_escape(text, bytes);
                 continue;
             }
             if (c == '{' && peek(1) == '{') {
@@ -805,33 +1012,23 @@ std::vector<Token> lex_recovering(std::string_view source, const std::string& fi
 std::uint8_t decode_character_literal(std::string_view literal) {
     const auto text = literal.substr(1, literal.size() - 2);
     if (text.front() != '\\') return static_cast<std::uint8_t>(text.front());
-    switch (text[1]) {
-    case 'n': return '\n';
-    case 'r': return '\r';
-    case 't': return '\t';
-    case '0': return 0;
-    case 'x': {
-        std::uint8_t value = 0;
-        std::from_chars(text.data() + 2, text.data() + 4, value, 16);
-        return value;
-    }
-    default: return static_cast<std::uint8_t>(text[1]);
-    }
+    // The lexer accepted the literal, so its escape is valid and, for a
+    // Unicode escape, at most U+00FF.
+    return static_cast<std::uint8_t>(read_escape(text).value);
 }
 
 std::string decode_string_literal(std::string_view literal) {
     auto text = literal.substr(1, literal.size() - 2);
     std::string result;
     result.reserve(text.size());
-    for (std::size_t i = 0; i < text.size(); ++i) {
-        auto ch = text[i];
-        if (ch == '\\') {
-            ch = text[++i];
-            if (ch == 'n') ch = '\n';
-            else if (ch == 'r') ch = '\r';
-            else if (ch == 't') ch = '\t';
+    for (std::size_t i = 0; i < text.size();) {
+        if (text[i] != '\\') {
+            result += text[i++];
+            continue;
         }
-        result += ch;
+        const auto escape = read_escape(text.substr(i));
+        if (escape.status == EscapeRead::Status::Ok) append_escape(result, escape);
+        i += std::max<std::size_t>(escape.width, 1);
     }
     return result;
 }
