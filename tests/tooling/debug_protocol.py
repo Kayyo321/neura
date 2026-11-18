@@ -601,6 +601,46 @@ let App = module:program.Entry (
         outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
         self.assertEqual(outputs, '0\n1\nbody\ndeferred\n')
 
+    def test_condition_reads_a_generator_local_moved_into_its_state(self):
+        # docs/design/Lifetime030.md, Tooling: a local whose scope contains a
+        # `yield` lives in the generator's state, and a condition or an
+        # evaluation in the `$resume` frame reads it by its source name.
+        path = self.source('moved.nra', """let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    let squares = iterator(count: int) -> int {
+        for (let index = 0; index < count; index++) {
+            let square = index * index;
+            yield square;
+        }
+    };
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let value in squares(5)) {
+            console.print_line(value.to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);
+""")
+        self.launch(path)
+        result = self.client.request('setBreakpoints', {'source': {'path': str(path)},
+                                                        'breakpoints': [{'line': 7, 'condition': 'square == 9'}]})
+        self.assertTrue(result['breakpoints'][0]['verified'])
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        self.assertIn('$resume', frame['name'])
+        evaluate = lambda text: self.client.request('evaluate', {'frameId': frame['id'], 'expression': text})['result']
+        self.assertEqual(evaluate('square'), '9')
+        self.assertEqual(evaluate('index'), '3')
+        self.assertEqual(evaluate('index == 3 && square > 4'), 'true')
+        self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'missing'}, success=False)
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
+        self.assertEqual(outputs, '0\n1\n4\n9\n16\n')
+
     def test_pending_breakpoint_keeps_id_and_condition_short_circuits(self):
         path = self.source('pending.nra', """let program = import:Std.Program;
 let App = module:program.Entry (
