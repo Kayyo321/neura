@@ -1,0 +1,6 @@
+// Unknown and short escapes in a character literal are E0261 at the escape
+// (docs/design/Expressions030.md, edge case 26).
+let unknown = '\q';
+let short = '\x4';
+let wrong = '\x4G';
+let wide = '\é';

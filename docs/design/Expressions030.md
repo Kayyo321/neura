@@ -138,12 +138,12 @@ Lowering emits `type of` (NeuraIR op 74) with the operand, or with no operand an
 
 | Rule | Detail | Status |
 | --- | --- | --- |
-| Form. | A single character between single quotes: one printable ASCII byte (0x20 to 0x7E) other than `'` and `\`, or one escape. | proposed |
-| Escapes. | `\n` (10), `\r` (13), `\t` (9), `\0` (0), `\\`, `\'`, `\"`, and `\xHH` with exactly two hexadecimal digits, which gives any byte 0x00 to 0xFF. No other escape exists; `\u{...}` is E0260. | proposed |
-| Value and type. | The literal is an integer literal whose value is the byte. Where an integer type is expected it takes that type, as a decimal literal does, and a value the type cannot hold is the existing out-of-range literal error (`let s: int8 = '\xFF';`). Without an expected type its type is `byte` (`uint8`), not `int32`. `'A' + 1` with no context is a `byte` of 66. | proposed |
-| Bytes that are not one character. | A character outside ASCII (any UTF-8 sequence of two or more bytes, such as `'é'` or `'€'`) is E0260, whose help points to `Std.Core.Character` for Unicode code points and to a string literal for text. | proposed |
-| Malformed literals. | `''`, more than one character (`'ab'`), a line end or the end of the file before the closing quote, a raw tab or control byte, and an unknown escape are E0261, with the span of the literal (or of the escape) and, for `'ab'`, a suggestion to use a string. | proposed |
-| Typographic quotes. | `‘` and `’` stay E0101; the note now says that a character literal uses ASCII `'`. | proposed |
+| Form. | A single character between single quotes: one printable ASCII byte (0x20 to 0x7E) other than `'` and `\`, or one escape. | implemented, proposed |
+| Escapes. | `\n` (10), `\r` (13), `\t` (9), `\0` (0), `\\`, `\'`, `\"`, and `\xHH` with exactly two hexadecimal digits, which gives any byte 0x00 to 0xFF. No other escape exists; `\u{...}` is E0260. | implemented, proposed |
+| Value and type. | The literal is an integer literal whose value is the byte. Where an integer type is expected it takes that type, as a decimal literal does, and a value the type cannot hold is the existing out-of-range literal error (`let s: int8 = '\xFF';`). Without an expected type its type is `byte` (`uint8`), not `int32`. `'A' + 1` with no context is a `byte` of 66. | implemented, proposed |
+| Bytes that are not one character. | A character outside ASCII (any UTF-8 sequence of two or more bytes, such as `'é'` or `'€'`) is E0260, whose help points to `Std.Core.Character` for Unicode code points and to a string literal for text. | implemented, proposed |
+| Malformed literals. | `''`, more than one character (`'ab'`), a line end or the end of the file before the closing quote, a raw tab or control byte, and an unknown escape are E0261, with the span of the literal (or of the escape) and, for `'ab'`, a suggestion to use a string. | implemented, proposed |
+| Typographic quotes. | `‘` and `’` stay E0101; the note now says that a character literal uses ASCII `'`. | implemented, proposed |
 
 A character literal folds like any integer literal and adds no NeuraIR or NVR operation: `let c: byte = 'H';` builds the same image as `let c: byte = 72;`.
 
@@ -213,8 +213,8 @@ The lexer produces a keyword token for `not` and `typeof`, a symbol token for `!
 
 | Code | Rejection and primary span | Help | Status |
 | --- | --- | --- | --- |
-| E0260 | A character literal whose character is not one byte (non-ASCII, or a `\u` escape), at the literal | Use `Std.Core.Character` for a Unicode code point, or a string literal for text | proposed |
-| E0261 | A malformed character literal: empty, several characters, unterminated, a raw control byte, or an unknown escape, at the literal or escape | List the escapes; for several characters, suggest double quotes | proposed |
+| E0260 | A character literal whose character is not one byte (non-ASCII, or a `\u` escape), at the literal | Use `Std.Core.Character` for a Unicode code point, or a string literal for text | implemented, proposed |
+| E0261 | A malformed character literal: empty, several characters, unterminated, a raw control byte, or an unknown escape, at the literal or escape | List the escapes; for several characters, suggest double quotes | implemented, proposed |
 | E0262 | A `..=` statement whose destination is not a `string`, or whose right side has a step, at the operator | Explain both forms of `..=` | proposed |
 | E0263 | A range or chain of the wrong shape: a third bound, a step on a string chain, `..=` mixed with `..` or applied to strings in an expression, at the offending operator or colon | Show the range forms or the statement form | proposed |
 | E0264 | A malformed `return if`: a missing `->`, a missing final `else`, or a block arm, at the expected position | Show the compact arm form | proposed |
@@ -290,7 +290,7 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 | 1 | This note. | none | proposed |
 | 2 | `not`, `is not`: lexer, parser, formatter, LSP, highlighting. | identical to `!` forms | implemented, proposed |
 | 3 | Narrowing in `if`, then `is not` scoping and E0265/E0266. | identical to the `match.is` forms | implemented, proposed |
-| 4 | Character literals, E0260/E0261, docs of literals and numbers. | identical to integer literals | proposed |
+| 4 | Character literals, E0260/E0261, docs of literals and numbers. | identical to integer literals | implemented, proposed |
 | 5 | Inclusive ranges, string chains, `..=` statements, `!==`; NeuraIR 1.15 op 73, NVR 1.9 op 35, loader, assembler, tiers, counters; E0262, E0263, E1100. | new only where used | proposed |
 | 6 | `return if` compact arms and `unless`; E0264. | identical to the `if` forms | proposed |
 | 7 | `typeof`, NeuraIR op 74 and its elaboration, `Std.Reflect.Core.TypeInfo` and `Std.Reflect.Type.TypeKind`; E0267. | no NVR change | proposed |
@@ -332,3 +332,4 @@ Every other rejection uses an existing code: operand types of `not` and `!==` as
 - **Step 3: lowering.** A narrowing `if` is lowered by its own function (`narrowing_if`), which builds the steps of `general_match` with `is_pattern` instead of synthesizing a `match.is` statement, because the branch bodies cannot be copied into one. The image tests in `tests/expressions/equivalence` compare it with the hand-written `match.is` forms. A scalar or string subject (`if (s is t: string)`) keeps the `_` arm without the coverage check that rejects it in `match.is` (E0491). A program that defines a lambda inside the branch differs from the `match.is` form only in the generated closure's name, which records the file it is written in.
 - **Step 3: scopes and names.** The true branch is a block inside the bindings' scope, so a `let` in it may hide a binding, as a block inside any scope may. Two narrowings of one condition that bind the same name, and an after-`if` binding of `is not` whose name the enclosing block already declares, are the duplicate-local error E0301. Assigning a binding is the error that assigning a `match.is` binding gives, E0440 ("cannot assign twice"), since the binding is made the same way.
 - **Step 3: rejections.** E0265 is reported in two ways: for a narrowing the parser recognized at the start of a top-level conjunct but that is not a conjunct root (`x is y: T || z`), and for a parse that fails at the `:` directly after `is name` or `is not name` in an `if`, `while`, `do` or `for` condition (parentheses, `!`, `a + b is y: T`, loops). Incomplete input such as `if (x is y:` reports the existing missing-type error at the end of the input. The language server lists the bindings as read-only names of the enclosing scope; hover with the refined type is left for step 8.
+- **Step 4: character literals.** The token is an Integer whose text is the literal as written, so the formatter, the language server's number class and the hole lexer of interpolated strings need no change; the parser gives the expression the decimal value and marks it, and lowering gives a marked literal `byte` where no integer type is expected, in a generic call's inference as well. Two literals in one binary operation keep the existing rule that the left operand types the right one, so `'A' + 1` is a `byte` and `1 + 'A'` an `int32`; `-'A'` with no expected type is the unsigned-literal range error E0424, with a note giving the literal's value. Three quotes, `'''`, are E0261 with the suggestion `'\''`. A tab between quotes has the machine-applicable fix `'\t'`; an unterminated literal skips the rest of its line, as an unterminated string does. The debugger's expressions accept a character literal where they accept an integer.

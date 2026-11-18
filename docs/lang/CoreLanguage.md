@@ -538,6 +538,49 @@ let plain = func(shape: Shape, ready: bool) -> bool => shape is not Circle && no
 
 A conditional expression `condition ? when_true : when_false` evaluates its Boolean condition and then evaluates only the selected arm. Both arm types must be assignable to the expression's expected type when one is available. Otherwise the first arm supplies the type, with contextual typing from the second arm for a first-arm `nil` or a numeric literal paired with a nonliteral. The conditional operator associates to the right.
 
+### Character literals
+
+A character literal is one character between single quotes, `'A'`, and names one byte ([design](../design/Expressions030.md#character-literals), implemented, proposed). It is an integer literal whose value is that byte: where an integer type is expected it takes that type, as a decimal literal does, and without an expected type it is a `byte`, not an `int32`. So `let c = 'A';` is a `byte` of 65, `let i: int32 = 'A';` is 65, `'A' + 1` is a `byte` of 66, `b == 'A'` compares any integer `b` with 65, and `'a' .. 'z'` is a `byte[]`. A value that the expected type cannot hold is the literal range error `E0424`, as in `let s: int8 = '\xFF';`. A character literal builds the same program as the decimal literal of its byte.
+
+| Form | Value |
+| --- | --- |
+| A printable ASCII character other than `'` and `\`, such as `'A'` or `'"'` | its code, 0x20 to 0x7E |
+| `'\n'`, `'\r'`, `'\t'`, `'\0'` | 10, 13, 9, 0 |
+| `'\\'`, `'\''`, `'\"'` | 92, 39, 34 |
+| `'\xHH'`, with exactly two hexadecimal digits | any byte, 0x00 to 0xFF |
+
+A character outside ASCII, such as `'é'`, and a `\u` escape are `E0260`: use `Std.Core.Character` for a Unicode code point and a string literal for text. An empty literal, more than one character, a line or file end before the closing quote, a raw tab or control byte, and any other escape are `E0261`. A typographic quote `‘` or `’` is `E0101`.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let count = func(text: string, wanted: byte) -> int {
+    let found = 0;
+    for (let value: byte in text.to_bytes()) {
+        if (value == wanted) {
+            found = found + 1;
+        }
+    }
+    return found;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let letter = 'A';
+        let code: int32 = '\n';
+        console.print_line((letter + 1).to_string() + " " + code.to_string() + " " +
+                           count("banana", 'a').to_string() + " " + ('a' .. 'z').length.to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+66 10 3 25
+```
+
 ### Optional access and coalescing
 
 `receiver?.member` and `receiver?.method(arguments)` evaluate the receiver once ([design](../design/Matching030.md), implemented, proposed). When it is nil, the result is `Optional.None` and neither the member nor the arguments are evaluated; otherwise the result is `Optional.Some` of the member or of the call's result, or `Some(Unit.Value)` after a call that returns nothing. The type is always `Optional<M>`, so `Some(nil)` and `None` stay different. The receiver is a class or interface reference or an `Optional` of one: `None` skips, and `Some(r)` skips when `r` is nil, which is how `pet?.owner?.name` has the type `Optional<string>`. A chain needs `?.` at each step: `pet?.owner.name` applies `.name` to an `Optional` ([E0305](../diagnostics/E0305.md)). A receiver that is never absent is [E0494](../diagnostics/E0494.md), and `?.` is not an assignment target and takes no `++` or `--` ([E0233](../diagnostics/E0233.md)).

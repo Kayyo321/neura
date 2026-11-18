@@ -538,6 +538,11 @@ bool numeric_argument(const Expr& input) {
             (input.operands.front().kind == ExprKind::Integer || input.operands.front().kind == ExprKind::Float));
 }
 
+// A character literal, whose default type is `byte`.
+bool character_argument(const Expr& input) {
+    return input.kind == ExprKind::Integer && input.character;
+}
+
 bool float_argument(const Expr& input) {
     return input.kind == ExprKind::Float || (input.kind == ExprKind::Unary && input.operands.front().kind == ExprKind::Float);
 }
@@ -638,7 +643,9 @@ Substitution Lowering::infer_type_arguments(SymbolId target, const Expr& expr, s
         if (untyped_lambda_expr(input)) continue;
         if (contextual_argument(input)) {
             if (numeric_argument(input) && declared.kind == TypeKind::TypeParameter)
-                literals.emplace_back(first + i, float_argument(input) ? float64_type : int32_type);
+                literals.emplace_back(first + i, float_argument(input)   ? float64_type
+                                                 : character_argument(input) ? uint8_type
+                                                                             : int32_type);
             continue;
         }
         if (input.kind == ExprKind::Lambda && input.lambda) {

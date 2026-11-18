@@ -1,0 +1,33 @@
+error[E0261]: unknown escape in character literal
+ --> $DIR/character-escape.nra:3:16
+  |
+3 | let unknown = '\q';
+  |                ^^ unknown escape
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+
+error[E0261]: invalid \x escape in character literal
+ --> $DIR/character-escape.nra:4:14
+  |
+4 | let short = '\x4';
+  |              ^^^ \x takes exactly two hexadecimal digits
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+
+error[E0261]: invalid \x escape in character literal
+ --> $DIR/character-escape.nra:5:14
+  |
+5 | let wrong = '\x4G';
+  |              ^^^^ \x takes exactly two hexadecimal digits
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+
+error[E0261]: unknown escape in character literal
+ --> $DIR/character-escape.nra:6:13
+  |
+6 | let wide = '\é';
+  |             ^^ unknown escape
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+
+For more information about this error, try `neura explain E0261`.

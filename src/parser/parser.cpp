@@ -768,7 +768,10 @@ private:
         } else if (token.kind == TokenKind::Integer || token.kind == TokenKind::Float) {
             result.kind = token.kind == TokenKind::Integer ? TagArgumentSyntax::Kind::Integer
                                                            : TagArgumentSyntax::Kind::Float;
-            result.text = (negative ? "-" : "") + advance().text;
+            const bool character = is_character_literal(token);
+            result.text = advance().text;
+            if (character) result.text = std::to_string(decode_character_literal(result.text));
+            if (negative) result.text = "-" + result.text;
         } else if (!negative && (at("true") || at("false"))) {
             result.kind = TagArgumentSyntax::Kind::Boolean;
             result.text = advance().text;
@@ -2615,6 +2618,14 @@ private:
         if (at("true") || at("false")) return token_expression(Expr::Kind::Boolean);
         if (at("nil")) return token_expression(Expr::Kind::Nil);
         if (token.kind == TokenKind::Identifier) return token_expression(Expr::Kind::Name);
+        if (is_character_literal(token)) {
+            // A character literal is the integer literal of its byte
+            // (docs/design/Expressions030.md, Character literals).
+            auto result = token_expression(Expr::Kind::Integer);
+            result.text = std::to_string(decode_character_literal(result.text));
+            result.character = true;
+            return result;
+        }
         if (token.kind == TokenKind::Integer) return token_expression(Expr::Kind::Integer);
         if (token.kind == TokenKind::Float) return token_expression(Expr::Kind::Float);
         if (token.kind == TokenKind::String && token.parts) return interpolated_string();

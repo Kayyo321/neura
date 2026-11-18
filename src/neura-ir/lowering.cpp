@@ -2953,9 +2953,12 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
 IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative) {
     const bool floating = expr.kind == ExprKind::Float;
     auto kind = floating ? TypeKind::Float : TypeKind::Integer;
+    // A character literal defaults to `byte` (docs/design/Expressions030.md).
     auto result = node(floating ? IrOp::Float : IrOp::Integer, expr.span,
                        expected && expected->kind == kind ? *expected
-                                                         : (floating ? float64_type : int32_type));
+                       : floating                         ? float64_type
+                       : expr.character                   ? uint8_type
+                                                          : int32_type);
     result.text = negative ? "-" + expr.text : expr.text;
     if (floating) {
         // Literals convert directly from decimal to the target format, so a
@@ -2987,8 +2990,11 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
     std::uint64_t magnitude = 0;
     auto [end, error] = std::from_chars(expr.text.data(), expr.text.data() + expr.text.size(), magnitude);
     if (error != std::errc{} || end != expr.text.data() + expr.text.size() ||
-        magnitude > limit || (negative && !signed_integer))
-        throw Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
+        magnitude > limit || (negative && !signed_integer)) {
+        auto error = Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
+        if (expr.character) error.note("a character literal is the integer " + expr.text);
+        throw error;
+    }
     return result;
 }
 

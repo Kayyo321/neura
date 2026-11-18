@@ -148,6 +148,10 @@ struct Expr {
     // conjunct of the `&&` chain that is the whole condition.
     std::string binding{};
     std::optional<Span> narrowing{};
+    // docs/design/Expressions030.md, Character literals. An Integer written
+    // as a character literal, whose text is its value in decimal; its type
+    // without an expected integer type is `byte`.
+    bool character{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the

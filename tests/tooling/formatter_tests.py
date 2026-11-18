@@ -135,6 +135,18 @@ let f=func(s:Shape,c:bool)->int{if(s is   c2 :Circle&&c2.radius>0){return c2.rad
         self.assertIn('    if (s is not c3: Circle) {\n', formatted)
         self.assertIn('    if (c ? s is Circle : c) {\n', formatted)
 
+    def test_character_literals_keep_their_spelling(self):
+        # docs/design/Expressions030.md, Tooling: a character literal is
+        # written back as written, and a quote in it hides no comment.
+        source = r"""let q='"';// a comment with " quote
+let t=['\t','\\','\'','\x41','\xff'];let n='a'..'z';let y=t[0]+'B';let s=$"{'}'}";"""
+        formatted = self.formatted(source)
+        self.assertIn("""let q = '"'; // a comment with " quote""", formatted)
+        self.assertIn(r"""let t = ['\t', '\\', '\'', '\x41', '\xff'];""", formatted)
+        self.assertIn("let n = 'a' .. 'z';", formatted)
+        self.assertIn("let y = t[0] + 'B';", formatted)
+        self.assertIn("""let s = $"{'}'}";""", formatted)
+
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
         formatted = self.formatted(source)

@@ -1,0 +1,6 @@
+// Malformed character literals (docs/design/Expressions030.md, edge case 26):
+// an empty literal, three quotes, and more than one character are E0261.
+let empty = '';
+let quote = ''';
+let word = 'ab';
+let escaped = '\nb';

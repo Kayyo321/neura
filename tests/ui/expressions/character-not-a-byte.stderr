@@ -1,0 +1,40 @@
+error[E0260]: character literal is not one byte
+ --> $DIR/character-not-a-byte.nra:3:14
+  |
+3 | let accent = 'é';
+  |              ^^^ this character is not ASCII
+  |
+  = note: a character literal names one byte; \xHH writes any byte
+  = help: use Std.Core.Character for a Unicode code point, or a string literal for text
+
+error[E0260]: character literal is not one byte
+ --> $DIR/character-not-a-byte.nra:4:12
+  |
+4 | let euro = '€';
+  |            ^^^ this character is not ASCII
+  |
+  = note: a character literal names one byte; \xHH writes any byte
+  = help: use Std.Core.Character for a Unicode code point, or a string literal for text
+
+error[E0260]: character literal is not one byte
+ --> $DIR/character-not-a-byte.nra:5:14
+  |
+5 | let escape = '\u{41}';
+  |              ^^^^^^^^ a character literal has no \u escape
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \" and \xHH with two hexadecimal digits
+  = help: use Std.Core.Character for a Unicode code point, or a string literal for text
+
+error[E0261]: character literal holds more than one character
+ --> $DIR/character-not-a-byte.nra:6:15
+  |
+6 | let several = 'éa';
+  |               ^^^^ a character literal holds one character
+  |
+help: use double quotes for a string
+  |
+6 | let several = "éa";
+  |               ~~~~
+
+Some errors have detailed explanations: E0260, E0261.
+For more information about an error, try `neura explain E0260`.

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <charconv>
 #include <cstdint>
 #include <string>
 #include <optional>
@@ -216,6 +217,9 @@ private:
         if (peek() == '$' && peek(1) == '"') {
             return interpolated(start);
         }
+        if (peek() == '\'') {
+            return character(start);
+        }
         if (peek() == '.' && peek(1) == '.') {
             advance();
             advance();
@@ -265,7 +269,7 @@ private:
         if (text == "\u201C" || text == "\u201D")
             error.suggest("use an ASCII double quote", invalid, "\"", Applicability::MaybeIncorrect);
         else if (text == "\u2018" || text == "\u2019")
-            error.note("Neura has no character literals; strings use '\"'");
+            error.note("a character literal uses the ASCII quote ', as in 'a', and a string uses '\"'");
         else if (text == "\u2212" || text == "\u2013")
             error.suggest("use an ASCII minus sign", invalid, "-", Applicability::MaybeIncorrect);
         else if (text == "\u00A0")
@@ -315,6 +319,136 @@ private:
             throw Skipped{};
         }
         return kind;
+    }
+
+    // Character literals (docs/design/Expressions030.md, Character
+    // literals): one printable ASCII byte or one escape between single
+    // quotes. The token is an Integer whose text is the literal as written,
+    // so the formatter writes it back; decode_character_literal gives its
+    // value.
+    static constexpr std::string_view character_escapes =
+        "the escapes are \\n, \\r, \\t, \\0, \\\\, \\', \\\" and \\xHH with two hexadecimal digits";
+
+    static constexpr bool is_hex(char c) {
+        return is_digit(c) || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F');
+    }
+
+    static constexpr std::size_t utf8_width(unsigned char lead) {
+        return lead < 0x80 ? 1 : lead >= 0xF0 ? 4 : lead >= 0xE0 ? 3 : 2;
+    }
+
+    TokenKind character(Span start) {
+        // Find the closing quote on this line; a backslash takes the byte
+        // after it, so '\'' closes at its third quote.
+        std::size_t end = offset_ + 1;
+        while (end < source_.size() && source_[end] != '\n' && source_[end] != '\r' && source_[end] != '\'') {
+            if (source_[end] == '\\' && end + 1 < source_.size() && source_[end + 1] != '\n' &&
+                source_[end + 1] != '\r')
+                ++end;
+            ++end;
+        }
+        const bool closed = end < source_.size() && source_[end] == '\'';
+        const auto content = source_.substr(offset_ + 1, end - offset_ - 1);
+        // Consumes the literal through its closing quote, or to the line end.
+        const auto finish = [&] {
+            advance();
+            while (offset_ < end) advance_text();
+            if (closed) advance();
+        };
+        const auto malformed = [&](Diagnostic error) {
+            finish();
+            report(std::move(error));
+            throw Skipped{};
+        };
+        auto literal = start;
+        literal.length = (closed ? end + 1 : end) - start.offset;
+        if (!closed) {
+            auto quote = start;
+            quote.length = 1;
+            finish();
+            report(Diagnostic(quote, "unterminated character literal").with_code("E0261")
+                .label("this character literal is not closed")
+                .label(location(), offset_ >= source_.size() ? "the file ends here" : "the line ends here")
+                .note("a character literal is one character or one escape between single quotes, such as 'a' "
+                      "or '\\n'"));
+            throw Skipped{};
+        }
+        if (content.empty()) {
+            // Three quotes in a row most likely mean a quote character.
+            if (peek(2) == '\'') {
+                literal.length = 3;
+                end = offset_ + 2;
+                malformed(Diagnostic(literal, "empty character literal").with_code("E0261")
+                    .label("the first two quotes enclose nothing")
+                    .suggest("escape the quote character", literal, "'\\''", Applicability::MaybeIncorrect));
+            }
+            malformed(Diagnostic(literal, "empty character literal").with_code("E0261")
+                .label("a character literal holds one character")
+                .help("write one character or one escape, such as 'a' or '\\0'"));
+        }
+        const auto first = static_cast<unsigned char>(content.front());
+        if (first == '\\') {
+            const char kind = content.size() > 1 ? content[1] : '\0';
+            if (kind == 'u') {
+                malformed(Diagnostic(literal, "character literal is not one byte").with_code("E0260")
+                    .label("a character literal has no \\u escape")
+                    .help("use Std.Core.Character for a Unicode code point, or a string literal for text")
+                    .note(std::string(character_escapes)));
+            }
+            std::size_t width = 2;
+            bool valid = std::string_view("nrt0\\'\"").find(kind) != std::string_view::npos;
+            if (kind == 'x') {
+                valid = content.size() >= 4 && is_hex(content[2]) && is_hex(content[3]);
+                width = 4;
+            } else if (!valid) {
+                width = 1 + utf8_width(static_cast<unsigned char>(kind));
+            }
+            if (!valid) {
+                auto escape = start;
+                escape.offset += 1;
+                escape.column += 1;
+                escape.length = std::min(width, content.size());
+                malformed(Diagnostic(escape, kind == 'x' ? "invalid \\x escape in character literal"
+                                                         : "unknown escape in character literal")
+                    .with_code("E0261")
+                    .label(kind == 'x' ? "\\x takes exactly two hexadecimal digits" : "unknown escape")
+                    .note(std::string(character_escapes)));
+            }
+            if (content.size() == width) {
+                finish();
+                return TokenKind::Integer;
+            }
+        } else if (first >= 0x80) {
+            if (content.size() == utf8_width(first)) {
+                const auto before = errors_.size();
+                finish();
+                // Invalid UTF-8 is E0102, which advance_text reported.
+                if (errors_.size() != before) throw Skipped{};
+                report(Diagnostic(literal, "character literal is not one byte").with_code("E0260")
+                    .label("this character is not ASCII")
+                    .help("use Std.Core.Character for a Unicode code point, or a string literal for text")
+                    .note("a character literal names one byte; \\xHH writes any byte"));
+                throw Skipped{};
+            }
+        } else if (first < 0x20 || first == 0x7F) {
+            auto error = Diagnostic(literal, "control character in character literal").with_code("E0261")
+                .label(first == '\t' ? "a tab is written \\t" : "a control character is written as an escape")
+                .note(std::string(character_escapes));
+            if (first == '\t' && content.size() == 1)
+                error.suggest("write the escape", literal, "'\\t'", Applicability::MachineApplicable);
+            malformed(std::move(error));
+        } else if (content.size() == 1) {
+            finish();
+            return TokenKind::Integer;
+        }
+        auto error = Diagnostic(literal, "character literal holds more than one character").with_code("E0261")
+            .label("a character literal holds one character");
+        if (content.find_first_of("\\\"") == std::string_view::npos)
+            error.suggest("use double quotes for a string", literal, "\"" + std::string(content) + "\"",
+                          Applicability::MaybeIncorrect);
+        else
+            error.help("use a string literal, in double quotes, for text");
+        malformed(std::move(error));
     }
 
     TokenKind string(Span start) {
@@ -663,6 +797,23 @@ std::vector<Token> lex(std::string_view source, const std::string& file) {
 std::vector<Token> lex_recovering(std::string_view source, const std::string& file,
                                   std::vector<Diagnostic>& diagnostics) {
     return Lexer(source, file).run(&diagnostics);
+}
+
+std::uint8_t decode_character_literal(std::string_view literal) {
+    const auto text = literal.substr(1, literal.size() - 2);
+    if (text.front() != '\\') return static_cast<std::uint8_t>(text.front());
+    switch (text[1]) {
+    case 'n': return '\n';
+    case 'r': return '\r';
+    case 't': return '\t';
+    case '0': return 0;
+    case 'x': {
+        std::uint8_t value = 0;
+        std::from_chars(text.data() + 2, text.data() + 4, value, 16);
+        return value;
+    }
+    default: return static_cast<std::uint8_t>(text[1]);
+    }
 }
 
 std::string decode_string_literal(std::string_view literal) {

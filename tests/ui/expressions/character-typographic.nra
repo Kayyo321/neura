@@ -1,0 +1,3 @@
+// A typographic single quote is E0101; the note names the ASCII quote of a
+// character literal (docs/design/Expressions030.md, Character literals).
+let quote = ‘a’;

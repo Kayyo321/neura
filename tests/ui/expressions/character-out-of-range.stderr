@@ -1,0 +1,9 @@
+error[E0424]: integer literal is outside the range of int8
+ --> $DIR/character-out-of-range.nra:4:19
+  |
+4 | let small: int8 = '\xFF';
+  |                   ^^^^^^
+  |
+  = note: a character literal is the integer 255
+
+For more information about this error, try `neura explain E0424`.

@@ -1,0 +1,34 @@
+// Character literals (docs/design/Expressions030.md, Character literals),
+// built against character-literals.expanded.nra, the same program written
+// with decimal literals: a character literal folds like an integer literal,
+// and without an expected type it is a `byte`.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let identity = func<T>(value: T) -> T => value;
+
+let count = func(text: string, wanted: byte) -> int {
+    let found = 0;
+    for (let value: byte in text.to_bytes()) {
+        if (value == wanted || value == '\t') {
+            found = found + 1;
+        }
+    }
+    return found;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let letter: byte = 'H';
+        let plain = 'A';
+        let code: int32 = '\n';
+        let next = 'A' + 1;
+        let large: int64 = '\xFF';
+        let lower = 'a' .. 'z';
+        let inferred = identity('A');
+        console.print_line(letter.to_string() + " " + plain.to_string() + " " + code.to_string() + " " +
+                           next.to_string() + " " + large.to_string() + " " + lower.length.to_string() + " " +
+                           inferred.to_string() + " " + count("a\tbanana", 'a').to_string());
+        return program.ExitCode.Ok;
+    };
+);

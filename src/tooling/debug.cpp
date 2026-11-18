@@ -5,6 +5,7 @@
 #include "test_protocol.hpp"
 #include "backend/converter.hpp"
 #include "cli/source_loader.hpp"
+#include "lexer/lexer.hpp"
 #include "neura-ir/any.hpp"
 #include "neura-ir/class_hooks.hpp"
 #include "neura-ir/containment.hpp"
@@ -1065,7 +1066,23 @@ InspectedValue Adapter::expression(std::string_view text, const FrameRef& select
                 if (!take(")")) throw std::runtime_error("expected ')'");
             } else {
                 space();
-                if (position < input.size() && ((input[position] >= '0' && input[position] <= '9') || input[position] == '-')) {
+                if (position < input.size() && input[position] == '\'') {
+                    // A character literal is the integer of its byte
+                    // (docs/design/Expressions030.md); the lexer checks it.
+                    const auto width = position + 1 < input.size() && input[position + 1] == '\\'
+                        ? (position + 2 < input.size() && input[position + 2] == 'x' ? 6 : 4) : 3;
+                    const auto literal = input.substr(position, width);
+                    std::vector<Token> tokens;
+                    try {
+                        tokens = lex(literal, "<expression>");
+                    } catch (const Diagnostic&) {
+                    }
+                    if (tokens.size() != 2 || !is_character_literal(tokens.front()))
+                        throw std::runtime_error("invalid character literal");
+                    position += width;
+                    const auto value = decode_character_literal(literal);
+                    result = {{type(nvr::TypeKind::Unsigned, 64), value, true, std::to_string(value), 0}};
+                } else if (position < input.size() && ((input[position] >= '0' && input[position] <= '9') || input[position] == '-')) {
                     const auto start = position;
                     if (input[position] == '-') ++position;
                     while (position < input.size() && input[position] >= '0' && input[position] <= '9') ++position;

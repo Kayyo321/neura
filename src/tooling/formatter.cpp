@@ -376,7 +376,7 @@ bool word(std::string_view text) {
     if (text.empty()) return false;
     const auto first = static_cast<unsigned char>(text.front());
     return (first >= 'a' && first <= 'z') || (first >= 'A' && first <= 'Z') ||
-           (first >= '0' && first <= '9') || first == '_' || first == '"';
+           (first >= '0' && first <= '9') || first == '_' || first == '"' || first == '\'';
 }
 
 class Writer {
