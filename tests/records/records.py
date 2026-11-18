@@ -9,6 +9,7 @@ the record's attributes survive the round trip.
 Usage: records.py <neura>
 """
 import pathlib
+import re
 import struct
 import subprocess
 import sys
@@ -83,6 +84,57 @@ class RecordBoundaryTests(unittest.TestCase):
         result = run('run', 'app.nvr', cwd=self.directory)
         self.assertEqual(result.returncode, 0, result.stderr)
         return result.stdout
+
+    def test_the_decompiler_names_records_accessors_and_derivations(self):
+        # docs/design/Records030.md, Lowering and artifacts: with names, a
+        # record is a layout with its generated methods, a getter a method,
+        # and a derived module's functions carry its name; nothing claims
+        # the `record` or `derive` spelling. Without names none is shown.
+        (self.directory / 'decompiled.nra').write_text('''
+let console = import:Std.Io.Console;
+let json = import:Std.Encoding.Json;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+
+let Named = interface (
+    let name: string;
+        | get;
+);
+let User = record implements Named (id: int64, name: string);
+let Badge = class implements Named (
+    export let name: string = "badge";
+        | get: "badge " + name;
+);
+let UserJson = derive json.Codec<User>;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let named: Named[] = [new User(1 as int64, "ada"), new Badge()];
+        for (let item in named) {
+            console.print_line(item.name);
+        }
+        console.print_line((new User(2 as int64, "bo") === new User(2 as int64, "bo")).to_string());
+        match (UserJson.encode(new User(2 as int64, "bo"))) {
+            Result.Ok(text) => { console.print_line(text); },
+            Result.Err(_) => { return program.ExitCode.Failure; },
+        }
+        return program.ExitCode.Ok;
+    };
+);
+''')
+        self.assertEqual(self.build_and_run('decompiled.nra'), 'ada\nbadge badge\ntrue\n{"id":2,"name":"bo"}\n')
+        named = run('decompile', 'app.nvr', cwd=self.directory)
+        self.assertEqual(named.returncode, 0, named.stderr)
+        for text in ('{ field0: int64, field1: text }  // provenance: User\n', '// provenance: User.init\n',
+                     '// provenance: User.equals\n', '// provenance: User.$get_name\n',
+                     '// provenance: Badge.$get_name\n', '// provenance: UserJson.encode\n'):
+            self.assertIn(text, named.stdout)
+        for line in named.stdout.splitlines():
+            code = re.sub(r'"(?:\\.|[^"\\])*"', '""', line.split('//', 1)[0])
+            self.assertNotRegex(code, r'\b(record|derive)\b|\bnew with\b', line)
+        bare = run('decompile', '--no-provenance', 'app.nvr', cwd=self.directory)
+        self.assertEqual(bare.returncode, 0, bare.stderr)
+        self.assertNotRegex(bare.stdout, r'User|Badge|UserJson|\$get_')
 
     def test_a_record_from_a_nir_module_behaves_as_from_source(self):
         expected = EXPECTED.format(hash=segment_hash())

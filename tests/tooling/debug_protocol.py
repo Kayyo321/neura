@@ -171,6 +171,51 @@ let App = module:program.Entry (
         self.assertIn('dap output\n', ''.join(outputs))
         self.assertFalse(self.capabilities['supportsStepBack'])
 
+    def test_records_and_getters_show_raw_fields(self):
+        # docs/design/Records030.md, Tooling: a record's fields are shown
+        # raw, and a field with a getter shows its stored value; inspecting
+        # runs no getter, adapter or to_string (the getter would print).
+        path = self.source('records.nra', '''let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let User = record (id: int64, name: string);
+let Badge = class (
+    export let label: string = "stored";
+        | get: {
+            console.print_line("getter ran");
+            return "read " + label;
+        };
+);
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let user = new User(7 as int64, "ada");
+        let badge = new Badge();
+        console.print_line(user.name);
+        return program.ExitCode.Ok;
+    };
+);
+''')
+        self.launch(path)
+        self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 15}]})
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        scopes = self.client.request('scopes', {'frameId': frame['id']})['scopes']
+        variables = {item['name']: item for item in self.client.request(
+            'variables', {'variablesReference': scopes[0]['variablesReference']})['variables']}
+        fields = lambda name: {item['name']: item['value'] for item in self.client.request(
+            'variables', {'variablesReference': variables[name]['variablesReference']})['variables']}
+        user = fields('user')
+        self.assertEqual(user['id'], '7')
+        self.assertIn('ada', user['name'])
+        self.assertIn('stored', fields('badge')['label'])
+        self.assertIn('stored', self.client.request('evaluate', {'frameId': frame['id'],
+                                                                 'expression': 'badge.label'})['result'])
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
+        self.assertEqual(outputs, 'ada\n')
+
     def test_hooked_nil_inspection_uses_raw_storage(self):
         source = '''let program = import:Std.Program;
 let console = import:Std.Io.Console;
