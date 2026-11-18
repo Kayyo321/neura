@@ -1,7 +1,7 @@
 #include "server/http_tls.hpp"
 
 #include <array>
-#include <atomic>
+#include <mutex>
 #include <cstdio>
 #include <cstdlib>
 #include <fstream>
@@ -329,8 +329,28 @@ void deadlines_and_truncation(TlsContextHandle context, const KeyPair& pair) {
           "unexpected TCP EOF was mistaken for an authenticated TLS close");
 }
 
+// The published context: a listener's connections each take a snapshot of
+// it, and a reload replaces it. A mutex, not std::atomic<std::shared_ptr>,
+// which libc++ (macOS) does not provide.
+class PublishedContext {
+public:
+    explicit PublishedContext(TlsContextHandle context) : context_(std::move(context)) {}
+    TlsContextHandle load() const {
+        const std::lock_guard lock(mutex_);
+        return context_;
+    }
+    void store(TlsContextHandle context) {
+        const std::lock_guard lock(mutex_);
+        context_ = std::move(context);
+    }
+
+private:
+    mutable std::mutex mutex_;
+    TlsContextHandle context_;
+};
+
 void context_snapshots(TlsContextHandle first, const KeyPair& first_pair, const KeyPair& second_pair) {
-    std::atomic<TlsContextHandle> current(std::move(first));
+    PublishedContext current(std::move(first));
     Loopback original(current.load(), echo_target);
     Client existing(original.client(), first_pair.certificate, TLS1_3_VERSION);
     check(existing.connect(), "original context handshake failed");
