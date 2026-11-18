@@ -67,173 +67,173 @@ The following public declarations are taken from the module source; each links t
   The raw Float payload; 0.0 for other kinds. Tagged `#Pure`.
 - **Sql.Value** · [`export let wire_text = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L313)
   The raw Text payload; empty for other kinds. Tagged `#Pure`.
-- **Sql.Value** · [`export let wire_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L316)
+- **Sql.Value** · [`export let wire_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L317)
   The raw Bytes payload, not copied: the library passes it to the host. Use `as_bytes` for a copy.
-- **Sql.Value** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L320)
+- **Sql.Value** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L321)
   Equal kinds and payloads; Floats compare by their bits, so NaN equals NaN. Tagged `#Pure`.
-- **Sql.Value** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L341)
+- **Sql.Value** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L342)
   Combines the kind and the payload. Tagged `#Pure`.
-- **Sql.Value** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L354)
+- **Sql.Value** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L355)
   NULL, true or false, the number, the text in single quotes with quotes doubled, or the bytes as X'..' hexadecimal. Tagged `#Pure`.
-- **Sql** · [`export let null_value = func -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L366)
+- **Sql** · [`export let null_value = func -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L367)
   NULL. Tagged `#NoDiscard`.
-- **Sql** · [`export let bool_value = func(value: bool) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L370)
+- **Sql** · [`export let bool_value = func(value: bool) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L371)
   A Boolean. Tagged `#NoDiscard`.
-- **Sql** · [`export let int_value = func(value: int64) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L374)
+- **Sql** · [`export let int_value = func(value: int64) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L375)
   A 64-bit integer. Tagged `#NoDiscard`.
-- **Sql** · [`export let float_value = func(value: float64) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L378)
+- **Sql** · [`export let float_value = func(value: float64) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L379)
   A 64-bit float. Tagged `#NoDiscard`.
-- **Sql** · [`export let text_value = func(value: string) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L382)
+- **Sql** · [`export let text_value = func(value: string) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L383)
   UTF-8 text. Tagged `#NoDiscard`.
-- **Sql** · [`export let bytes_value = func(value: uint8[list]) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L386)
+- **Sql** · [`export let bytes_value = func(value: uint8[list]) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L387)
   Bytes, copied. Tagged `#NoDiscard`.
-- **Sql** · [`export let Columns = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L549)
+- **Sql** · [`export let Columns = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L552)
   The column names of a result, shared by its rows. Tagged `#Final`.
-- **Sql.Columns** · [`export last names: string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L551)
+- **Sql.Columns** · [`export last names: string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L554)
   The names in result order.
-- **Sql.Columns** · [`export let init = func(list: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L554)
+- **Sql.Columns** · [`export let init = func(list: string[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L557)
   Wraps the host's list.
-- **Sql.Columns** · [`export let index_of = func(name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L561)
+- **Sql.Columns** · [`export let index_of = func(name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L564)
   The index of `name`: an exact match first, then one that differs only in ASCII case; -1 when there is none. Tagged `#Pure`.
-- **Sql.Columns** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L578)
+- **Sql.Columns** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L581)
   Equal names in the same order. Tagged `#Pure`.
-- **Sql.Columns** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L596)
+- **Sql.Columns** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L599)
   Combines the names' hashes. Tagged `#Pure`.
-- **Sql.Columns** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L606)
+- **Sql.Columns** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L609)
   The names separated by commas. Tagged `#Pure`.
-- **Sql** · [`export let Row = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L633)
+- **Sql** · [`export let Row = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L636)
   One immutable result row. The typed accessors return Err for a missing column, a NULL in a required read, and a value that does not convert exactly; the `optional_` forms answer None for NULL. No integer is narrowed and no float rounded silently. Tagged `#Final`. Since 0.3.0.
-- **Sql.Row** · [`export let init = func(names: Columns, values: Value[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L640)
+- **Sql.Row** · [`export let init = func(names: Columns, values: Value[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L643)
   Builds a row; results make these.
-- **Sql.Row** · [`export let column_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L647)
+- **Sql.Row** · [`export let column_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L650)
   The number of columns. Tagged `#Pure`.
-- **Sql.Row** · [`export let column_name = func(index: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L651)
+- **Sql.Row** · [`export let column_name = func(index: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L654)
   The name of column `index`, from 0. Tagged `#Pure`.
-- **Sql.Row** · [`export let at = func(index: int) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L655)
+- **Sql.Row** · [`export let at = func(index: int) -> Value`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L658)
   The value of column `index`, from 0. Tagged `#Pure`.
-- **Sql.Row** · [`export let value = func(name: string) -> Result<Value>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L659)
+- **Sql.Row** · [`export let value = func(name: string) -> Result<Value>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L662)
   The value of the named column. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let int64 = func(name: string) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L669)
+- **Sql.Row** · [`export let int64 = func(name: string) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L672)
   The named column as an int64: an Int. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let optional_int64 = func(name: string) -> Result<Optional<int64>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L673)
+- **Sql.Row** · [`export let optional_int64 = func(name: string) -> Result<Optional<int64>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L676)
   The named column as an int64, None for NULL. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let int32 = func(name: string) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L686)
+- **Sql.Row** · [`export let int32 = func(name: string) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L689)
   The named column as an int32: an Int within the int32 range. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let optional_int32 = func(name: string) -> Result<Optional<int32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L690)
+- **Sql.Row** · [`export let optional_int32 = func(name: string) -> Result<Optional<int32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L693)
   The named column as an int32, None for NULL. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let bool = func(name: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L705)
+- **Sql.Row** · [`export let bool = func(name: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L708)
   The named column as a Boolean: a Bool, or an Int 0 or 1 (SQLite stores Booleans so). Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let optional_bool = func(name: string) -> Result<Optional<bool>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L709)
+- **Sql.Row** · [`export let optional_bool = func(name: string) -> Result<Optional<bool>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L712)
   The named column as a Boolean, None for NULL. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let float64 = func(name: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L725)
+- **Sql.Row** · [`export let float64 = func(name: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L728)
   The named column as a float64: a Float, or an Int that a float64 holds exactly. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let optional_float64 = func(name: string) -> Result<Optional<float64>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L730)
+- **Sql.Row** · [`export let optional_float64 = func(name: string) -> Result<Optional<float64>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L733)
   The named column as a float64, None for NULL. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let text = func(name: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L746)
+- **Sql.Row** · [`export let text = func(name: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L749)
   The named column as text: a Text. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let optional_text = func(name: string) -> Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L750)
+- **Sql.Row** · [`export let optional_text = func(name: string) -> Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L753)
   The named column as text, None for NULL. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let bytes = func(name: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L763)
+- **Sql.Row** · [`export let bytes = func(name: string) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L766)
   The named column as bytes: a Bytes, copied. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let optional_bytes = func(name: string) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L768)
+- **Sql.Row** · [`export let optional_bytes = func(name: string) -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L771)
   The named column as bytes, None for NULL. Tagged `#NoDiscard`.
-- **Sql.Row** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L781)
+- **Sql.Row** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L784)
   Equal column names and values. Tagged `#Pure`.
-- **Sql.Row** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L799)
+- **Sql.Row** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L802)
   Combines the names and values. Tagged `#Pure`.
-- **Sql.Row** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L809)
+- **Sql.Row** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L812)
   The columns and values, such as "Row(id=7, name='bolt')". Tagged `#Pure`.
-- **Sql** · [`export let Pool = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L887)
+- **Sql** · [`export let Pool = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L890)
   A pool the host declares, by name. Pools come from `pool(name)` or `Std.App.Context.sql_pool`; the connections stay in the host. Tagged `#Final`. Since 0.3.0.
-- **Sql.Pool** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L889)
+- **Sql.Pool** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L892)
   The pool's name in the host's configuration.
-- **Sql.Pool** · [`export let init = func(pool_name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L892)
+- **Sql.Pool** · [`export let init = func(pool_name: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L895)
   Names a pool; use `pool(name)`, which checks that the host has it.
-- **Sql.Pool** · [`export let acquire = func -> Result<Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L899)
+- **Sql.Pool** · [`export let acquire = func -> Result<Connection>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L902)
   Leases a connection, waiting at most the pool's S-10 timeout. PoolExhausted when too many acquires already wait, TimedOut after the wait. Tagged `#NoDiscard`.
-- **Sql.Pool** · [`export let begin = func -> Result<Transaction>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L909)
+- **Sql.Pool** · [`export let begin = func -> Result<Transaction>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L912)
   Leases a connection and begins a transaction on it; closing the transaction also returns the connection. Tagged `#NoDiscard`.
-- **Sql.Pool** · [`export let execute = func(text: string, parameters: ...) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L918)
+- **Sql.Pool** · [`export let execute = func(text: string, parameters: ...) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L921)
   Runs one statement on a connection of its own and returns the affected row count. Tagged `#NoDiscard`.
-- **Sql.Pool** · [`export let query_one = func(text: string, parameters: ...) -> Result<Row>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L931)
+- **Sql.Pool** · [`export let query_one = func(text: string, parameters: ...) -> Result<Row>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L934)
   The first row of a query on a connection of its own, or NotFound. Tagged `#NoDiscard`.
-- **Sql.Pool** · [`export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L945)
+- **Sql.Pool** · [`export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L948)
   At most `limit` rows of a query on a connection of its own. A limit above the pool's page (S-11) is TooLarge. Tagged `#NoDiscard`.
-- **Sql.Pool** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L958)
+- **Sql.Pool** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L962)
   The pool's name, such as "Pool(main)"; the host keeps its URL and password. Tagged `#Pure`.
-- **Sql.Pool** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L962)
+- **Sql.Pool** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L966)
   Equal names. Tagged `#Pure`.
-- **Sql.Pool** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L966)
+- **Sql.Pool** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L970)
   The name's hash. Tagged `#Pure`.
-- **Sql** · [`export let pool = func(name: string) -> Result<Pool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L971)
+- **Sql** · [`export let pool = func(name: string) -> Result<Pool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L975)
   The pool named `name`, or NotFound when the host has none; CapabilityDenied without a host. Tagged `#NoDiscard`.
-- **Sql** · [`export let Connection = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1014)
+- **Sql** · [`export let Connection = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1018)
   A leased connection. `close` returns it to the pool, rolling back any transaction left open; after close every operation fails with InvalidInput. Statements run one at a time; while a cursor is open on the connection, other statements fail with InvalidInput. Tagged `#Final`, `#NoDiscard(reason: "a connection must be closed")`, `#NotThreadSafe`. Since 0.3.0.
-- **Sql.Connection** · [`export last pool_name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1016)
+- **Sql.Connection** · [`export last pool_name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1020)
   The pool's name.
-- **Sql.Connection** · [`export let init = func(pool_value: string, handle_value: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1023)
+- **Sql.Connection** · [`export let init = func(pool_value: string, handle_value: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1027)
   Wraps a lease; use `Pool.acquire`.
-- **Sql.Connection** · [`export let handle = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1030)
+- **Sql.Connection** · [`export let handle = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1034)
   The host's lease number, valid in this execution only; the host refuses any other number. Tagged `#Pure`.
-- **Sql.Connection** · [`export let is_open = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1034)
+- **Sql.Connection** · [`export let is_open = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1038)
   Whether `close` has not been called. Tagged `#Pure`.
-- **Sql.Connection** · [`export let execute = func(text: string, parameters: ...) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1038)
+- **Sql.Connection** · [`export let execute = func(text: string, parameters: ...) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1042)
   Runs one statement and returns the affected row count (0 for a query). Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let execute_values = func(text: string, values: Value[list]) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1050)
+- **Sql.Connection** · [`export let execute_values = func(text: string, values: Value[list]) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1054)
   Runs one statement with a list of parameter values. Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let query_one = func(text: string, parameters: ...) -> Result<Row>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1059)
+- **Sql.Connection** · [`export let query_one = func(text: string, parameters: ...) -> Result<Row>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1063)
   The first row of a query, or NotFound. Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1072)
+- **Sql.Connection** · [`export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1076)
   At most `limit` rows of a query. A limit of 0 runs it and returns no row; a limit above the pool's page (S-11) is TooLarge. Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let query_page_values = func(text: string, limit: int, values: Value[list]) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1084)
+- **Sql.Connection** · [`export let query_page_values = func(text: string, limit: int, values: Value[list]) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1089)
   At most `limit` rows of a query with a list of parameter values. Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1094)
+- **Sql.Connection** · [`export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1099)
   Runs a query whose rows are fetched in pages through the cursor, which must be closed. Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let begin = func -> Result<Transaction>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1107)
+- **Sql.Connection** · [`export let begin = func -> Result<Transaction>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1112)
   Begins a transaction on this connection; closing the transaction leaves the connection open. A second transaction while one is open is InvalidInput. Tagged `#NoDiscard`.
-- **Sql.Connection** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1115)
+- **Sql.Connection** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1120)
   Returns the connection to its pool. Closing again does nothing and returns Ok.
-- **Sql.Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1128)
+- **Sql.Connection** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1133)
   The pool and state, such as "Connection(main, open)"; never the URL or a password. Tagged `#Pure`.
-- **Sql** · [`export let Transaction = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1137)
+- **Sql** · [`export let Transaction = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1142)
   A transaction. It ends by `commit` or by `close`: `close` without a commit rolls back; after a commit that returned Ok, `close` only releases. A failed commit has rolled back, except OutcomeUnknown: the connection failed after COMMIT was sent, nothing is retried, and the connection is discarded. After the end every statement fails with InvalidInput. Tagged `#Final`, `#NoDiscard(reason: "a transaction must be closed")`, `#NotThreadSafe`. Since 0.3.0.
-- **Sql.Transaction** · [`export last pool_name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1141)
+- **Sql.Transaction** · [`export last pool_name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1146)
   The pool's name.
-- **Sql.Transaction** · [`export let init = func(lease_value: int64, pool_value: string, owns: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1150)
+- **Sql.Transaction** · [`export let init = func(lease_value: int64, pool_value: string, owns: bool)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1155)
   Wraps a begun transaction; use `Pool.begin` or `Connection.begin`.
-- **Sql.Transaction** · [`export let is_active = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1158)
+- **Sql.Transaction** · [`export let is_active = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1163)
   Whether neither commit, rollback nor close has ended it. Tagged `#Pure`.
-- **Sql.Transaction** · [`export let execute = func(text: string, parameters: ...) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1162)
+- **Sql.Transaction** · [`export let execute = func(text: string, parameters: ...) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1167)
   Runs one statement and returns the affected row count. Tagged `#NoDiscard`.
-- **Sql.Transaction** · [`export let query_one = func(text: string, parameters: ...) -> Result<Row>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1174)
+- **Sql.Transaction** · [`export let query_one = func(text: string, parameters: ...) -> Result<Row>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1179)
   The first row of a query, or NotFound. Tagged `#NoDiscard`.
-- **Sql.Transaction** · [`export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1186)
+- **Sql.Transaction** · [`export let query_page = func(text: string, limit: int, parameters: ...) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1191)
   At most `limit` rows of a query. Tagged `#NoDiscard`.
-- **Sql.Transaction** · [`export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1198)
+- **Sql.Transaction** · [`export let open_cursor = func(text: string, parameters: ...) -> Result<Cursor>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1204)
   A cursor over a query's rows, within the transaction. Tagged `#NoDiscard`.
-- **Sql.Transaction** · [`export let commit = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1211)
+- **Sql.Transaction** · [`export let commit = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1217)
   Commits. Err means the transaction rolled back, or for OutcomeUnknown that its outcome is unknown; either way it has ended. Tagged `#NoDiscard`.
-- **Sql.Transaction** · [`export let rollback = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1224)
+- **Sql.Transaction** · [`export let rollback = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1230)
   Rolls back. Tagged `#NoDiscard`.
-- **Sql.Transaction** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1237)
+- **Sql.Transaction** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1243)
   Rolls back unless it was committed or rolled back, and returns the connection when the transaction came from `Pool.begin`. Closing again does nothing and returns Ok.
-- **Sql.Transaction** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1264)
+- **Sql.Transaction** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1270)
   The pool and state, such as "Transaction(main, active)". Tagged `#Pure`.
-- **Sql** · [`export let in_transaction = func<T>(on: Pool, body: func(Transaction) -> Result<T>) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1271)
+- **Sql** · [`export let in_transaction = func<T>(on: Pool, body: func(Transaction) -> Result<T>) -> Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1277)
   Runs `body` in a transaction of its own connection: commits when it returns Ok, rolls back when it returns Err, and returns the connection either way. The commit's error replaces an Ok. Tagged `#NoDiscard`.
-- **Sql** · [`export let Cursor = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1311)
+- **Sql** · [`export let Cursor = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1317)
   The rows of a query read in pages. `close` ends the statement; the connection takes other statements only after it. Tagged `#Final`, `#NoDiscard(reason: "a cursor must be closed")`, `#NotThreadSafe`. Since 0.3.0.
-- **Sql.Cursor** · [`export last columns: Columns`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1315)
+- **Sql.Cursor** · [`export last columns: Columns`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1321)
   The column names.
-- **Sql.Cursor** · [`export let init = func(cursor: int64, names: Columns)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1322)
+- **Sql.Cursor** · [`export let init = func(cursor: int64, names: Columns)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1328)
   Wraps an open cursor; use `open_cursor`.
-- **Sql.Cursor** · [`export let has_more = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1329)
+- **Sql.Cursor** · [`export let has_more = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1335)
   Whether rows may remain to fetch. Tagged `#Pure`.
-- **Sql.Cursor** · [`export let fetch = func(max: int) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1334)
+- **Sql.Cursor** · [`export let fetch = func(max: int) -> Result<immutable.ImmutableList<Row>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1340)
   Up to `max` further rows; an empty list at the end. A `max` above the pool's page (S-11) is TooLarge. Tagged `#NoDiscard`.
-- **Sql.Cursor** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1355)
+- **Sql.Cursor** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1361)
   Ends the statement. Closing again does nothing and returns Ok.
-- **Sql.Cursor** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1368)
+- **Sql.Cursor** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/data/sql.nra#L1374)
   The columns and state, such as "Cursor(id, name; open)". Tagged `#Pure`.
 <!-- END SOURCE API -->
 
