@@ -1,0 +1,109 @@
+let errors = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let test = import:Std.Test;
+let urns = import:Std.Net.Core.Urn;
+
+// URNs (RFC 8141): syntax, components, and URN-equivalence with the examples of the fetched RFC text.
+let UrnTests = module (
+    let parse = func(text: string) -> urns.Urn => test.assert_ok<urns.Urn>(urns.parse(text));
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    // RFC 8141 sections 2.2, 2.3.1, 2.3.2 (its line-wrapped q-component example joined), 2.3.3 and 5 (examples
+    // copied from the RFC text).
+    export let test_rfc_examples_parse = func {
+        last plain = parse("urn:example:1/406/47452/2");
+        test.assert_equal_string("example", plain.nid);
+        test.assert_equal_string("1/406/47452/2", plain.nss);
+        last r = parse("urn:example:foo-bar-baz-qux?+CCResolve:cc=uk");
+        test.assert_equal_string("foo-bar-baz-qux", r.nss);
+        test.assert_equal_string("CCResolve:cc=uk", test.assert_some<string>(r.r_component));
+        test.assert_none<string>(r.q_component);
+        last q = parse("urn:example:weather?=op=map&lat=39.56&lon=-104.85&datetime=1969-07-21T02:56:15Z");
+        test.assert_equal_string("op=map&lat=39.56&lon=-104.85&datetime=1969-07-21T02:56:15Z", test.assert_some<string>(q.q_component));
+        test.assert_none<string>(q.r_component);
+        last f = parse("urn:example:foo-bar-baz-qux#somepart");
+        test.assert_equal_string("somepart", test.assert_some<string>(f.f_component));
+        last colons = parse("urn:example:apple:pear:plum:cherry");
+        test.assert_equal_string("apple:pear:plum:cherry", colons.nss);
+        test.assert_equal_string("urn:example:apple:pear:plum:cherry", colons.to_string());
+    };
+
+    export let test_all_components = func {
+        last u = parse("URN:Example:a/b?+r?x/y?=q?+z#frag?/");
+        test.assert_equal_string("URN", u.scheme);
+        test.assert_equal_string("r?x/y", test.assert_some<string>(u.r_component));
+        test.assert_equal_string("q?+z", test.assert_some<string>(u.q_component));
+        test.assert_equal_string("frag?/", test.assert_some<string>(u.f_component));
+        test.assert_equal_string("URN:Example:a/b", u.assigned_name());
+        test.assert_equal_string("urn:example:a/b", u.equivalence_key());
+        last empty_fragment = parse("urn:ex:a#");
+        test.assert_equal_string("", test.assert_some<string>(empty_fragment.f_component));
+        test.assert_equal_string("é,", test.assert_ok<string>(parse("urn:ex:%C3%A9%2c").decoded_nss()));
+    };
+
+    // RFC 8141 section 3.2, all six groups.
+    export let test_rfc_equivalence_examples = func {
+        last first = parse("urn:example:a123,z456");
+        // 1: scheme and NID are case-insensitive.
+        test.assert(first.equals(parse("URN:example:a123,z456")));
+        test.assert(first.equals(parse("urn:EXAMPLE:a123,z456")));
+        test.assert_equal<uint32>(first.hash_code(), parse("urn:EXAMPLE:a123,z456").hash_code());
+        // 2: r-, q- and f-components are ignored.
+        test.assert(first.equals(parse("urn:example:a123,z456?+abc")));
+        test.assert(first.equals(parse("urn:example:a123,z456?=xyz")));
+        test.assert(first.equals(parse("urn:example:a123,z456#789")));
+        // 3: '/' and what follows count.
+        last foo = parse("urn:example:a123,z456/foo");
+        last bar = parse("urn:example:a123,z456/bar");
+        last baz = parse("urn:example:a123,z456/baz");
+        test.assert(!foo.equals(bar) && !bar.equals(baz) && !foo.equals(baz) && !first.equals(foo));
+        // 4: percent-encoding is compared with uppercase hex but not decoded.
+        last encoded = parse("urn:example:a123%2Cz456");
+        last encoded_lower = parse("URN:EXAMPLE:a123%2cz456");
+        test.assert(encoded.equals(encoded_lower));
+        test.assert_equal<uint32>(encoded.hash_code(), encoded_lower.hash_code());
+        test.assert(!encoded.equals(first));
+        // 5: other NSS characters are case-sensitive.
+        test.assert(!first.equals(parse("urn:example:A123,z456")));
+        test.assert(!first.equals(parse("urn:example:a123,Z456")));
+        // 6: U+0430 percent-encoded is a different URN.
+        test.assert(!first.equals(parse("urn:example:%D0%B0123,z456")));
+    };
+
+    export let test_nid_rules = func {
+        // 2 to 32 characters, letters, digits and hyphens, alphanumeric at both ends.
+        test.assert_equal_string("ab", parse("urn:ab:x").nid);
+        test.assert_equal_string("a-1", parse("urn:a-1:x").nid);
+        parse("urn:abcdefghijklmnopqrstuvwxyz012345:x");
+        test.assert_err<urns.Urn>(urns.parse("urn:abcdefghijklmnopqrstuvwxyz0123456:x"));
+        test.assert_err<urns.Urn>(urns.parse("urn:a:x"));
+        test.assert_err<urns.Urn>(urns.parse("urn:-ab:x"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab-:x"));
+        test.assert_err<urns.Urn>(urns.parse("urn:a_b:x"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab"));
+    };
+
+    export let test_rejections = func {
+        test.assert(kind_of(test.assert_err<urns.Urn>(urns.parse(""))) == errors.ParseErrorKind.Empty);
+        test.assert(kind_of(test.assert_err<urns.Urn>(urns.parse("uri:ab:x"))) == errors.ParseErrorKind.Syntax);
+        // Empty NSS, NSS starting with '/', a bare '?', empty r- and q-components.
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:/x"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:x?y"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:x?+"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:x?="));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:x?+?=q"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:x?=q?+r#f#g"));
+        // q-component before r-component: "?+r" is then part of the q-component, which is valid.
+        test.assert_equal_string("q?+r", test.assert_some<string>(parse("urn:ab:x?=q?+r").q_component));
+        // Characters outside pchar, and bad percent-encoding.
+        last space = test.assert_err<urns.Urn>(urns.parse("urn:ab:a b"));
+        test.assert(kind_of(space) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:a%2"));
+        test.assert_err<urns.Urn>(urns.parse("urn:ab:é"));
+    };
+);
