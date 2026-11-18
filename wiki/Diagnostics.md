@@ -365,6 +365,27 @@ Errors about application forms and their build limits.
 | [E1014](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1014.md) | invalid static document structure |
 | [E1015](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1015.md) | template or stylesheet exceeds a limit |
 
+## E10xx: Application projects
+
+Errors about projects and their artifacts.
+
+| Code | Error |
+| --- | --- |
+| [E1020](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1020.md) | malformed project manifest |
+| [E1021](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1021.md) | unsupported manifest schema or language version |
+| [E1022](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1022.md) | lock file missing or out of date |
+| [E1023](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1023.md) | invalid target |
+| [E1024](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1024.md) | entry module without the required entry |
+| [E1025](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1025.md) | path outside the project |
+| [E1026](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1026.md) | content does not match its digest |
+| [E1027](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1027.md) | capability used but not declared |
+| [E1028](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1028.md) | limit out of range |
+| [E1029](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1029.md) | bundle cannot be written |
+| [E1030](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1030.md) | module not available to this package or target |
+| [E1031](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1031.md) | unknown or incompatible provider |
+| [E1032](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1032.md) | dependency not pinned or not found |
+| [E1033](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1033.md) | package cannot be built here |
+
 ## E13xx: Reflection
 
 Codes reported for `Std.Reflect` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Reflect030.md)).

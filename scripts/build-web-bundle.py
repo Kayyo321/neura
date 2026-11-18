@@ -240,7 +240,8 @@ def build(args):
 
     manifest = {
         'base': args.base,
-        'capabilities': sorted(['clock', 'console', 'entropy', 'ui', *(['http_client'] if http_client else [])]),
+        # The console, clock and entropy groups are always granted and never listed (Projects030.md).
+        'capabilities': sorted(['ui', *(['http_client'] if http_client else [])]),
         'contracts': [],
         'csp': csp,
         'files': [{'bytes': len(data), 'initial': path not in deferred,
@@ -249,6 +250,7 @@ def build(args):
         'id': args.id,
         'image': {'digest': digest(image), 'path': image_path},
         'kind': 'web',
+        'language': '0.3',
         'limits': {'W-1': FILE_LIMIT},
         'name': args.name,
         'origins': {'connect': connect} if connect else {},

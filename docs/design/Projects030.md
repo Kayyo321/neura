@@ -4,7 +4,7 @@ This note fixes the project system before it is implemented: the project manifes
 
 The owner approved the A0 design decisions on 2026-11-17. Rows marked *proposed* await implementation and qualification in A6. Later changes to a row are made here, with the reason.
 
-The repository has no project manifest and no TOML reader today. Single-file `neura build`, `neura run` and `neura test` keep working exactly as they do; a project is something a directory opts into by containing `neura.toml`.
+The same TOML reader handles the manifest and lock file. Single-file `neura build`, `neura run` and `neura test` keep working exactly as they do. A project is something a directory opts into by containing `neura.toml`.
 
 ```text
 stock/
@@ -86,45 +86,100 @@ capabilities = ["desktop", "http_client"]
 [targets.desktop.bridge]
 operations = ["parts.export"]
 
-[targets.desktop.package]
+[targets.desktop.packaging]
 icon = "desktop/icon.png"
 formats = ["deb", "tar.gz"]
 ```
 
 | Rule | Status |
 | --- | --- |
-| The manifest is a strict subset of TOML: tables, arrays of tables, basic double-quoted strings, decimal integers, booleans, arrays of strings or integers, and comments. Floats, dates, inline tables, literal and multi-line strings are `E1020`. The reader is new code in `src/project/toml.cpp`. | proposed |
-| An unknown key, a key of the wrong type, and a missing required key are `E1020`, each with the key's position. Nothing is ignored. | proposed |
-| `schema` is 1; another value is `E1021`. `project.language` is the language version the sources are written for, `"0.3"`; a compiler that does not implement it is `E1021`. | proposed |
-| `project.name` is lowercase letters, digits and hyphens. `project.id` is a reverse-domain identifier and names the desktop application, its origin and its data directory. `project.version` is three decimal numbers. | proposed |
-| A package is a source root: `root`, optional `assets` roots, and `depends`, the packages whose modules it may import. Every path is relative to the manifest, uses `/`, and stays inside the project directory (`E1025`). Dependencies form no cycle. | proposed |
-| A module belongs to the package whose root contains its file. An import of a module in a package that is not the importer's own, not `Std`, and not in its `depends` closure is `E1030`. This is how a server module is kept out of a browser bundle: the `ui` package does not depend on `server`. | proposed |
-| An external package is `[dependencies.name]` with `path` (a directory outside the project) or `archive` (a file inside it), and `digest`. There is no registry and no network fetch in 0.3.0; an unpinned or unresolved dependency is `E1032`. | proposed |
-| A target has `kind` (`web`, `server` or `desktop`), `package`, `entry`, `capabilities`, and by kind the tables below. A `desktop` target has `ui`, the name of a `web` target of the same project, whose built bundle it embeds unchanged (`E1023` otherwise). | proposed |
-| The entry module exports the function its kind requires: `start: func(web.Context) -> Result<Unit>`, `serve: func(app.Context) -> Result<Unit>`, or `start: func(desktop.Context) -> Result<Unit>` (`E1024`). | proposed |
-| `capabilities` lists the capability groups the target's image may use, from those its kind allows ([overview](Apps030.md#capability-groups)); the console, clock and entropy groups are always available and are not listed. A host service of a group that is not listed, or that the kind does not allow, reachable from the entry, is `E1027` at build; at run time the host grants only the listed groups. | proposed |
-| `providers` lists the provider components a server or desktop target links; a name the installed target component does not have, or a version outside what it supports, is `E1031`. | proposed |
-| `[targets.name.limits]` sets limits by their identifier ([overview](Apps030.md#finite-limits)). A value above the maximum, below 1, or for a limit of another target kind is `E1028`. | proposed |
-| `[targets.name.origins]` lists absolute origins by use: `connect` (fetch), `load` (images and media), `style` (remote stylesheets), `external` (links a desktop application opens in the system browser). Each is a scheme, host and optional port; a path or a wildcard is `E1020`. Anything not listed is not reachable. | proposed |
-| A manifest contains no command, script or hook. No tool runs anything a manifest names, except the signing tools of `neura package --sign`. | proposed |
+| The manifest uses the grammar of [TOML 1.0](https://toml.io/en/v1.0.0) for bare, basic double-quoted and dotted keys, tables, arrays of tables, basic double-quoted strings, signed 64-bit decimal integers, booleans, homogeneous arrays of strings or integers, and comments. Files use UTF-8 with LF or CRLF line endings. Floats, dates, inline tables, literal and multi-line strings, and other array element types are `E1020`. The reader lives in `src/project/toml.cpp`. | syntax reader implemented |
+| An unknown key or a key of the wrong type is `E1020` at the key. A missing required key is `E1020` at its containing table unless a more specific rule below applies. | manifest model implemented |
+| `schema` is 1. Another value is `E1021`. `project.language` is the language version the sources are written for, `"0.3"`. A compiler that does not implement it reports `E1021`. | manifest model implemented |
+| `project.name` is lowercase letters, digits and hyphens. `project.id` is a lowercase reverse-domain identifier and names the desktop application, its origin and its data directory. `project.version` has three decimal components with no redundant leading zeroes. | manifest model implemented |
+| A package is a source root with `root`, optional `assets` roots and optional `depends`. The dependency names refer to project packages or declared external dependencies. Local project paths are relative to the manifest, use `/` and stay inside the project directory (`E1025`). Internal package dependencies form no cycle. | manifest model and declared path resolution implemented |
+| A module belongs to the package whose root contains its file. An import of a module in a package that is not the importer's own, not `Std`, and not in its `depends` closure is `E1030`. This is how a server module is kept out of a browser bundle: the `ui` package does not depend on `server`. | implemented in `neura build --target` and `neura check` ([Projects](../apps/Projects.md#packages-and-entries)): the check follows imports from the entry, or the checked files, through the project's packages before the compiler runs |
+| An external package is `[dependencies.name]` with `path` (a relative path to a directory outside the project) or `archive` (a relative path to a file inside it), and `digest`. Its name is distinct from project package names. There is no registry and no network fetch in 0.3.0. An unpinned or unresolved dependency reports `E1032`. | manifest declaration, location resolution and hashing implemented |
+| A target has `kind` (`web`, `server` or `desktop`), `package`, `entry`, `capabilities`, and by kind the tables below. A `desktop` target has `ui`, the name of a `web` target of the same project, whose built bundle it embeds unchanged (`E1023` otherwise). A shared-package project may omit `[targets]` or leave it empty. | manifest model implemented |
+| The entry module exports the function its kind requires: `start: func(web.Context) -> Result<Unit>`, `serve: func(app.Context) -> Result<Unit>`, or `start: func(desktop.Context) -> Result<Unit>` (`E1024`). | partial: the entry is a program module (`main`) of the target's package, and an entry with no file is `E1024`; the entry functions are not checked |
+| `capabilities` lists the capability groups the target's image may use, from those its kind allows ([overview](Apps030.md#capability-groups)). The console, clock and entropy groups are always available. A manifest cannot list them. An unknown or disallowed entry in the list reports `E1020`. A host service of a group that is not listed, or that the kind does not allow, reachable from the entry, is `E1027` at build. At run time the host grants only the listed groups in addition to the groups that are always available. | declaration check implemented; `E1027` checks the image's host imports of web and server targets at the `entry` span (a superset of what is reachable), not a desktop target's native child; the server host is given `--allow-fs`, `--allow-net` and `--allow-env` from the list |
+| `providers` lists the provider components a server or desktop target links; a name the installed target component does not have, or a version outside what it supports, is `E1031`. | implemented for names: `sqlite` always, `postgresql` and `tls` in builds with them |
+| `[targets.name.limits]` sets limits by their identifier ([overview](Apps030.md#finite-limits)). A single bound takes an integer. S-10, S-12 and S-13 take an array of exactly two integers in the order listed in the overview. U and W limits belong to web targets, S to server, D to desktop, and C to all three. A desktop bundle inherits the embedded web bundle's U and W limits. A value above its maximum, below 1, or for a limit of another target kind reports `E1028`. | manifest model implemented, enforcement proposed |
+| `[targets.name.origins]` lists absolute origins by use. `connect` governs fetch, `load` images and media, `style` remote stylesheets, and `external` links a desktop application opens in the system browser. Each has a scheme, a DNS host or IP literal, and an optional decimal port. An IPv6 literal uses brackets. A path or a wildcard reports `E1020`. Anything outside the lists is unreachable. | shape check implemented, host enforcement proposed |
+| A manifest contains no command, script or hook. No tool runs anything a manifest names, except the signing tools of `neura package --sign`. | implemented: the manifest model has no such key, and `--sign` is refused in 0.3.0 |
 
 | Kind | Further keys |
 | --- | --- |
 | `web` | `styles` (global stylesheets, in order), `routing` (`"hash"` or `"history"`), `origins`, `limits` |
 | `server` | `http` (`listen`, `tls_listen`, `admin_listen`, `trusted_proxies`), `sql.<pool>` (`provider`, `migrations`, `migrate`), `config` (`prefix`, `expose`), `providers`, `limits` |
-| `desktop` | `ui`, `bridge.operations`, `origins`, `package` (`icon`, `formats`, `sign_identity`), `sql.<pool>`, `providers`, `limits` |
+| `desktop` | `ui`, `bridge.operations`, `origins`, `packaging` (`icon`, `formats`, `sign_identity`), `sql.<pool>`, `providers`, `limits` |
 
 ## The lock file
 
 `neura.lock` is written by the tools and committed. It is the same TOML subset.
 
+```toml
+schema = 1
+language = "0.3"
+contracts_digest = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+
+[dependencies]
+"charts" = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+[components."server"."postgresql"]
+version = "18.7"
+digest = "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+
+[components."web"."browser-runtime"]
+version = "0.3.0"
+digest = "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+```
+
+Every digest is a SHA-256 string of 64 lowercase hexadecimal digits. The keys in
+`[dependencies]` match the external dependency aliases in the manifest. Their
+digests match the manifest pins. A component table
+`[components.<target>.<component>]` records the name, version and digest of each
+component resolved for that target. Its version starts with an ASCII letter or digit
+and can also contain dots, underscores, plus signs and hyphens. An explicit
+`[components.<target>]` represents a target whose resolution uses no components.
+`contracts_digest` is present exactly when the resolver supplies a digest for
+`contracts.lock`.
+
+The canonical writer emits the root keys in the order shown above, followed by
+the dependencies and the component tables. It sorts decoded dependency,
+target and component names by byte order, writes dynamic names as basic quoted
+strings, and uses LF line endings with a final newline.
+
 | Rule | Status |
 | --- | --- |
-| It records `schema = 1`, the language version, each external dependency with its digest, each target component a target uses (the browser runtime, the desktop engine, each provider) with its version and digest, and the digest of `contracts.lock`. | proposed |
-| It records nothing about the project's own sources, no time, no path outside the project and no machine name. | proposed |
-| `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, or one that disagrees with the manifest or with an installed component, is `E1022`, with the entry. | proposed |
-| `neura build --update-lock` and `neura new` write it. `neura dev` writes it only when it is missing. | proposed |
-| A digest that differs from the content found is `E1026`. A build never downloads anything. | proposed |
+| It records `schema = 1`, the language version, each external dependency with its digest, each target component a target uses (the browser runtime, the desktop engine, each provider) with its version and digest, and the digest of `contracts.lock`. It records no source state, paths, timestamps or machine names. | lock model implemented |
+| `neura build`, `neura package` and `neura contracts --check` read it and change nothing. A missing lock, a missing or extra entry, or a mismatch with a manifest pin or installed component metadata reports `E1022`. | `neura build` and `neura package` implemented; component metadata is the identity digest of each component (decision 12) |
+| `neura build --update-lock` and `neura new` write it. `neura dev` writes it only when it is missing. | `neura build --update-lock` and `neura new` implemented |
+| A digest that differs from resolved dependency or `contracts.lock` content reports `E1026`, with the expected and found digests. A build never downloads anything. | file resolution and lock comparison implemented, command integration proposed |
+
+The resolver anchors path resolution at the manifest's canonical parent directory. It
+resolves declared source, asset and migration roots to existing directories,
+and declared stylesheets, icons, contract manifests and vendored archives to
+existing regular files. Each component of a declared project path must resolve
+inside the project. A symlink alias to another location inside the project
+uses its canonical destination. An external dependency directory must be
+disjoint from the project directory, including its ancestors. Component
+availability and generated `contracts.lock` discovery belong to the caller.
+The resolver hashes the caller's project-relative generated lock path if the
+file is present. Archive and generated lock pins are SHA-256 of their raw bytes.
+
+An external directory pin is SHA-256 of the ASCII bytes
+`neura-project-tree-v1` followed by LF and then its entries in increasing
+root-relative UTF-8 byte order. Each entry is encoded as a kind byte (`D` for
+directory or `F` for regular file), an unsigned 64-bit little-endian path-byte
+count, and the slash-separated path bytes. A file then adds its unsigned
+64-bit little-endian byte count and 64 ASCII lowercase hexadecimal digits
+of its SHA-256. Empty directories get entries. The root name, permissions,
+timestamps and inode identifiers are absent. A regular hard link contributes
+a record for its logical path and file bytes. Symlinks, repeated directory
+identities, non-regular files, and names lacking an unambiguous UTF-8 spelling
+fail resolution. The entry sort makes the pin independent of traversal order.
+Keep the input tree stable while resolving it.
 
 ## Bundles
 
@@ -143,16 +198,16 @@ dist/web/                          dist/server/
 
 | Rule | Status |
 | --- | --- |
-| `bundle.json` is canonical JSON: `schema` (1), `kind`, `id`, `name`, `version`, `language`, `image` (path and digest), `files` (each with path, SHA-256, byte length, media type, and `initial` for what the first commit needs), `requires` (the version of every axis the bundle depends on, and each provider with its version), `capabilities`, `origins`, `limits`, `contracts` (id and version), and for a desktop bundle `ui` (the digest of the embedded web bundle's `bundle.json`). It holds no time and no absolute path. | proposed |
-| The identity of a bundle is the SHA-256 of `bundle.json`. | proposed |
-| Every file of the directory is listed, and every listed file exists with its digest. A host checks each file before using it. A missing, extra or changed file, an unknown `schema`, or a required version the host does not have is a refusal before any image runs, naming the entry. | proposed |
-| Every file name except `bundle.json`, `index.html` and `404.html` contains its digest, so a static host can cache it forever. References between files are relative, so a bundle works under any path. | proposed |
-| A bundle contains no `.nra`, no template or stylesheet source, and no source map or name table unless the build was asked for them (`--source-map`), in which case they are separate files the image does not need. | proposed |
-| A web bundle's `index.html` is generated: the stylesheet links in their fixed order, the element the entry mounts on, the script that loads `nvm.js`, a message for browsers outside the matrix, and a content-security policy as a `meta` element: `default-src 'none'`, `script-src 'self' 'wasm-unsafe-eval'`, `style-src 'self'` plus the `style` origins, `img-src 'self'` plus the `load` origins, `font-src 'self'`, `connect-src 'self'` plus the `connect` origins, `base-uri 'none'` and `form-action 'none'`. The same text is in `bundle.json` for hosts that can send it as a header. | proposed |
-| The build verifies a web bundle before writing `bundle.json`: no file of a package outside the target's closure, no host service among the image's imports outside the groups a web target may have, no provider, no configuration value not marked `expose`, and no development endpoint (`E1029`). | proposed |
-| `nvm.js` instantiates `nvm.wasm` by streaming when the host sends `application/wasm`, and from bytes otherwise, so a host with a wrong media type still works. | proposed |
-| A file over `W-1` is `E1029`. | proposed |
-| A packaged archive is a bundle directory in a container; a host extracts and validates it as a directory. An arbitrary directory, or one whose `bundle.json` fails validation, is never executed. | proposed |
+| `bundle.json` is canonical JSON: `schema` (1), `kind`, `id`, `name`, `version`, `language`, `image` (path and digest), `files` (each with path, SHA-256, byte length, media type, and `initial` for what the first commit needs), `requires` (the version of every axis the bundle depends on, and each provider with its version), `capabilities`, `origins`, `limits`, `contracts` (id and version), and for a desktop bundle `ui` (the digest of the embedded web bundle's `bundle.json`). It holds no time and no absolute path. | implemented ([Projects](../apps/Projects.md#bundlejson)); `contracts` is always empty and a web bundle adds `routing` and `base` |
+| The identity of a bundle is the SHA-256 of `bundle.json`. | implemented |
+| Every file of the directory is listed, and every listed file exists with its digest. A host checks each file before using it. A missing, extra or changed file, an unknown `schema`, or a required version the host does not have is a refusal before any image runs, naming the entry. | implemented in `neura run` and the desktop host |
+| Every file name except `bundle.json`, `index.html` and `404.html` contains its digest, so a static host can cache it forever. References between files are relative, so a bundle works under any path. | implemented for web bundles; a server bundle's `server.json` and migrations and a desktop bundle's `desktop.json`, `registry.json` and embedded `web/` keep fixed names (decision 13) |
+| A bundle contains no `.nra`, no template or stylesheet source, and no source map or name table unless the build was asked for them (`--source-map`), in which case they are separate files the image does not need. | implemented without `--source-map`, which a project build refuses in 0.3.0 |
+| A web bundle's `index.html` is generated: the stylesheet links in their fixed order, the element the entry mounts on, the script that loads `nvm.js`, a message for browsers outside the matrix, and a content-security policy as a `meta` element: `default-src 'none'`, `script-src 'self' 'wasm-unsafe-eval'`, `style-src 'self'` plus the `style` origins, `img-src 'self'` plus the `load` origins, `font-src 'self'`, `connect-src 'self'` plus the `connect` origins, `base-uri 'none'` and `form-action 'none'`. The same text is in `bundle.json` for hosts that can send it as a header. | implemented |
+| The build verifies a web bundle before writing `bundle.json`: no file of a package outside the target's closure, no host service among the image's imports outside the groups a web target may have, no provider, no configuration value not marked `expose`, and no development endpoint (`E1029`). | partial: host imports outside the web groups are `E1027`, native code and callbacks are refused; the package closure is `E1030` before the compiler runs; configuration and development endpoint checks are not implemented |
+| `nvm.js` instantiates `nvm.wasm` by streaming when the host sends `application/wasm`, and from bytes otherwise, so a host with a wrong media type still works. | implemented by the browser runtime |
+| A file over `W-1` is `E1029`. | implemented |
+| A packaged archive is a bundle directory in a container; a host extracts and validates it as a directory. An arbitrary directory, or one whose `bundle.json` fails validation, is never executed. | implemented for the server package, whose `run` verifies the bundle through `neura-run`; the desktop package's host verifies the embedded web bundle |
 
 ## Commands
 
@@ -169,12 +224,12 @@ Each command is a tool of its own, reachable as `neura <command>` and directly, 
 
 | Rule | Status |
 | --- | --- |
-| Every command is direct and in the foreground. None contacts, starts or needs `neurad`, whether or not one is running; `neura run --runtime=auto` and `required` apply to a bundle as to an image. | proposed |
-| Builds are reproducible: the same sources, manifest, lock and components give the same bundle bytes on any supported host. | proposed |
-| `neura dev` owns what it starts: a watcher that compares digests every 250 ms, a static HTTP server on `127.0.0.1` for a web target (port 4310 unless `--port`; a busy port is an error, `--port 0` asks the system for one), the server host for a server target, the desktop host for a desktop target. On exit, on end of input and on an interrupt it stops and reaps them all. It registers nothing with the system. | proposed |
-| On a change, `neura dev` rebuilds and then reloads the page, or restarts the host. A change to stylesheet files alone replaces the stylesheet links in place, in their fixed order. State of the running program is not kept; replacing live Neura state is outside 0.3.0. | proposed |
-| A build made by `neura dev` is marked `dev` in `bundle.json` and carries the reload endpoint. `neura package` refuses a `dev` bundle (`E1029`). | proposed |
-| `neura check`, the editor and `neura docs` understand a project: a file inside a project directory is checked with its package's roots and its target's rules, without `--project`. | proposed |
+| Every command is direct and in the foreground. None contacts, starts or needs `neurad`, whether or not one is running; `neura run --runtime=auto` and `required` apply to a bundle as to an image. | implemented, except that `neura run` of a bundle takes no `--runtime` option |
+| Builds are reproducible: the same sources, manifest, lock and components give the same bundle bytes on any supported host. | checked on this machine from two directories (`project-build`); not yet on a hosted runner |
+| `neura dev` owns what it starts: a watcher that compares digests every 250 ms, a static HTTP server on `127.0.0.1` for a web target (port 4310 unless `--port`; a busy port is an error, `--port 0` asks the system for one), the server host for a server target, the desktop host for a desktop target. On exit, on end of input and on an interrupt it stops and reaps them all. It registers nothing with the system. | implemented ([Developing](../apps/Projects.md#developing)): the watcher hashes the declared inputs; each host runs in its own process group, which is ended and reaped |
+| On a change, `neura dev` rebuilds and then reloads the page, or restarts the host. A change to stylesheet files alone replaces the stylesheet links in place, in their fixed order. State of the running program is not kept; replacing live Neura state is outside 0.3.0. | implemented |
+| A build made by `neura dev` is marked `dev` in `bundle.json` and carries the reload endpoint. `neura package` refuses a `dev` bundle (`E1029`). | `neura package` and `neura run` refuse a `dev` bundle |
+| `neura check`, the editor and `neura docs` understand a project: a file inside a project directory is checked with its package's roots and its target's rules, without `--project`. | `neura check` implemented: without `-I`, a file in a package of the nearest `neura.toml` above it gets its package's import roots and the `E1030` check; the editor, `neura docs` and the target's capability rules are not project-aware yet |
 
 ## Lowering and artifacts
 
@@ -259,6 +314,8 @@ Rejected:
 
 One project, built by `neura new --template fullstack` and kept in `examples/apps/stock/`, is the fixture every milestone's acceptance and every budget uses.
 
+Status (2026-11-18): `examples/apps/stock` is the `fullstack` template of `neura new` as far as the libraries allow: `Contracts.Parts` (starting parts and the name rule), a page with a counter over the contract, a server answering `GET /parts` and `POST /parts?name=` with the shared rule, and a desktop child with one window and `parts.export` as CSV. The records, `PartsApi`, generated adapter, SQL repository, migrations, sessions and the journeys below are not implemented.
+
 | Part | Content |
 | --- | --- |
 | Contracts | `Part` (an `int64` id, a name, an `int32` count, a position), a page record holding a `FrozenList<Part>`, replies with a `Rejected` variant, the interface `PartsApi` with `list`, `add`, `rename`, `restock`, `move` and `export`, shared validation of names |
@@ -282,6 +339,8 @@ The integration milestone (A6). Each step is one commit with its targeted tests.
 | 6 | `neura dev` for the three kinds | Cases 14, 15, 45; process-tree checks |
 | 7 | `neura package` for server and desktop | With [Desktop](Desktop030.md#order-of-work) steps 7 and 8 |
 | 8 | The reference application and its journeys in CI: browsers, both databases, desktop under Xvfb | The journeys above |
+
+Status of steps 8 and 9 (2026-11-18): the reference page built by `neura build --target web` and by `neura dev` mounts in headless Chromium and Firefox from a deep path and with a wrong `.wasm` media type (`project-web-browser`); the server answers its routes from a bundle and from a server package; the desktop bundle and its `.tar.gz` package start under Xvfb. The journeys, both databases, the budgets of step 9 and a hosted-runner reproducibility check are not done. The new tools are in the tool registry, the install components and `packaging/qualify.sh`.
 | 9 | Every budget measured and recorded; the tools in the tool registry, install components and `packaging/qualify.sh` | Case 18; the budget scripts |
 
 ## Gate and acceptance
@@ -293,7 +352,7 @@ The integration milestone (A6). Each step is one commit with its targeted tests.
 - A web bundle contains no file, import, value or endpoint the verifier forbids, checked by a second, independent scan of the output in CI.
 - `neura dev` leaves no process, socket or registration behind, however it is stopped.
 - The journeys pass from packaged artifacts, with sources and maps stripped, on every row of the matrices that a runner or this machine can reach; the rest are listed as unqualified.
-- The minimal SDK and the runtime-only installation contain no browser engine, database driver or TLS library; those are in target components, measured apart (budgets B-W1 to B-D3).
+- The minimal SDK and the runtime-only installation contain no browser engine, database driver or TLS library; those are in target components, measured apart (budgets B-W1 to B-D3). *Superseded by the owner on 2026-11-18:* the server host, the SQL providers and TLS stay in the core component; the browser engine stays outside the SDK.
 
 ## Migration
 
@@ -311,3 +370,16 @@ No 0.2 workflow changes: a directory without `neura.toml` behaves as before. A m
 8. Limits are set by their identifiers under `[targets.name.limits]`.
 9. A manifest can name no command.
 10. The reference application is a stock list in `examples/apps/stock/`, with CSV export as its native operation.
+11. A desktop target's `package` key selects its source package. Desktop deployment settings use `[targets.name.packaging]`. TOML gives each key a single definition, so using the same key for the source string and the settings table is invalid.
+
+## Decisions taken without the owner
+
+Taken by the A6 lane on 2026-11-18, awaiting owner confirmation:
+
+12. A target component's lock digest is the SHA-256 of `neura-component-v1`, its target kind, name and version, each followed by LF. Target components carry no installed metadata in 0.3.0; the bytes of the browser runtime are pinned by each bundle's file table instead. A component's version is the SDK's (the desktop engine's, 45.3.3), so an SDK update makes a lock out of date (`E1022`) until `--update-lock`.
+13. Files a host finds by name keep their names: a server bundle's `server.json` (the manifest's host settings) and `migrations/<pool>/NNNN_name.sql` (the host orders migrations by number), and a desktop bundle's `desktop.json`, `registry.json` and embedded `web/` directory, which together are the package directory the desktop host loads. A desktop bundle's `image` is its native child, `bin/app-<sha256>`.
+14. The import root of a package is the parent of its root, so modules are named from the root's own name (`ui/main.nra` is `Ui.Main`) and a project needs no extra directory level. The entry is a program module with `main` until the entry functions of the table above are implemented.
+15. `bundle.json` names host interfaces `browser_adapter`, `ui_host`, `server_host`, `desktop_host` and `provider.<name>`, all at version 1.
+16. A server package is a `.tar.gz` of `<name>-<version>/` holding `bundle/`, `bin/neura-run`, `bin/neura-server-host`, `lib/neura/libneura-core-<version>` (which holds the providers) and a `run` script that serves the bundle through `neura-run run`, so the bundle is verified at every start. The gzip stream uses stored deflate blocks: it is reproducible without a compression library, and larger than a compressed one.
+17. A desktop package is built by the desktop packager of A5 (`scripts/package-desktop.py`, installed in `share/neura/scripts`) from the desktop bundle, which is the package directory the host loads; the target's `packaging.icon` and the engine named by `NEURA_DESKTOP_ENGINE` are its inputs.
+18. `neura dev` writes its bundles to `dist/dev/<target>`, so a development build never replaces a release build in `dist/<target>`. A desktop target's embedded web bundle is not marked `dev` (the desktop host refuses one); the host is restarted after a build instead. The reload endpoint is `/__neura/dev` on the development server, polled by the bundle's `neura-dev.js` every 250 ms.

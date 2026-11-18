@@ -362,6 +362,27 @@ Errors about application forms and their build limits.
 | [E1014](E1014.md) | invalid static document structure |
 | [E1015](E1015.md) | template or stylesheet exceeds a limit |
 
+## E10xx: Application projects
+
+Errors about projects and their artifacts.
+
+| Code | Error |
+| --- | --- |
+| [E1020](E1020.md) | malformed project manifest |
+| [E1021](E1021.md) | unsupported manifest schema or language version |
+| [E1022](E1022.md) | lock file missing or out of date |
+| [E1023](E1023.md) | invalid target |
+| [E1024](E1024.md) | entry module without the required entry |
+| [E1025](E1025.md) | path outside the project |
+| [E1026](E1026.md) | content does not match its digest |
+| [E1027](E1027.md) | capability used but not declared |
+| [E1028](E1028.md) | limit out of range |
+| [E1029](E1029.md) | bundle cannot be written |
+| [E1030](E1030.md) | module not available to this package or target |
+| [E1031](E1031.md) | unknown or incompatible provider |
+| [E1032](E1032.md) | dependency not pinned or not found |
+| [E1033](E1033.md) | package cannot be built here |
+
 ## E13xx: Reflection
 
 Codes reported for `Std.Reflect` ([design](../design/Reflect030.md)).

@@ -1001,6 +1001,17 @@ install(FILES third_party/whatwg-html/LICENSE DESTINATION share/doc/neura
 if(NEURA_SDK)
     install(DIRECTORY stdlib/ DESTINATION share/neura/stdlib OPTIONAL COMPONENT sdk
         FILES_MATCHING PATTERN "*.nra")
+    # What `neura build --target` puts in a web bundle and `neura run` starts a desktop bundle with
+    # (docs/design/Projects030.md): the page modules of the browser runtime, its nvm.wasm and nvm.mjs when
+    # this build has them, and the desktop host's main.js and preload.js.
+    set(NEURA_WEB_RUNTIME_DIR "${CMAKE_CURRENT_SOURCE_DIR}/build/wasm-runtime" CACHE PATH
+        "Directory holding nvm.wasm and nvm.mjs for the browser checks")
+    install(FILES hosts/web/boot.mjs hosts/web/dom.mjs hosts/web/fetch.mjs hosts/web/nvm.js hosts/web/ui.mjs
+        hosts/web/ui-wire.mjs DESTINATION share/neura/web COMPONENT sdk)
+    if(EXISTS "${NEURA_WEB_RUNTIME_DIR}/nvm.wasm" AND EXISTS "${NEURA_WEB_RUNTIME_DIR}/nvm.mjs")
+        install(FILES "${NEURA_WEB_RUNTIME_DIR}/nvm.wasm" "${NEURA_WEB_RUNTIME_DIR}/nvm.mjs"
+            DESTINATION share/neura/web COMPONENT sdk)
+    endif()
 endif()
 
 include(CTest)
@@ -1032,6 +1043,52 @@ if(BUILD_TESTING)
         add_test(NAME kernels-${suite}
             COMMAND neura_kernel_tests ${suite} "${CMAKE_CURRENT_SOURCE_DIR}")
     endforeach()
+endif()
+
+add_library(neura_project STATIC EXCLUDE_FROM_ALL
+    src/project/toml.cpp
+    src/project/manifest.cpp
+    src/project/lock.cpp
+    src/project/resolve.cpp
+    src/project/bundle.cpp
+)
+target_include_directories(neura_project PUBLIC src)
+target_link_libraries(neura_project PRIVATE neura_hash)
+neura_target_defaults(neura_project)
+
+# The project tools' shared layer (docs/design/Projects030.md): `neura build
+# --project`, `neura run <bundle>`, and the neura-new, neura-dev and
+# neura-package tools.
+add_library(neura_app STATIC EXCLUDE_FROM_ALL src/app/project.cpp src/app/run_bundle.cpp src/app/build_command.cpp
+    src/app/closure.cpp)
+target_include_directories(neura_app PUBLIC src PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/generated")
+target_link_libraries(neura_app PUBLIC neura_project PRIVATE neura_hash)
+if(NEURA_ENABLE_POSTGRES)
+    target_compile_definitions(neura_app PRIVATE NEURA_HAS_POSTGRES_PROVIDER)
+endif()
+if(NEURA_ENABLE_SERVER_TLS)
+    target_compile_definitions(neura_app PRIVATE NEURA_HAS_TLS_PROVIDER)
+endif()
+neura_target_defaults(neura_app)
+target_link_libraries(neura-run PRIVATE neura_app)
+if(TARGET neurac)
+    target_link_libraries(neurac PRIVATE neura_app)
+endif()
+if(NEURA_SDK)
+    # `neura new` (src/app/new.cpp) and the project templates it copies.
+    neura_add_tool(neura-new sdk src/app/new.cpp neura_core_library neura_app)
+    add_dependencies(neura neura-new)
+    install(DIRECTORY templates/ DESTINATION share/neura/templates COMPONENT sdk)
+    # `neura package` (src/app/package.cpp); a desktop package goes through the desktop packager, which finds
+    # the desktop host in hosts/desktop beside its own parent directory, as in this repository.
+    neura_add_tool(neura-package sdk src/app/package.cpp neura_core_library neura_app)
+    add_dependencies(neura neura-package)
+    # `neura dev` (src/app/dev.cpp): build, run and rebuild in the foreground.
+    neura_add_tool(neura-dev sdk src/app/dev.cpp neura_core_library neura_app)
+    add_dependencies(neura neura-dev)
+    install(FILES scripts/package-desktop.py DESTINATION share/neura/scripts COMPONENT sdk)
+    install(FILES hosts/desktop/main.js hosts/desktop/preload.js DESTINATION share/neura/hosts/desktop COMPONENT sdk)
+    install(FILES LICENSE DESTINATION share/neura COMPONENT sdk)
 endif()
 
 # The server host (docs/design/Backend030.md): listeners, TLS when
@@ -1104,6 +1161,55 @@ if(BUILD_TESTING AND NEURA_SDK)
             target_link_libraries(neura_http2_test_client PRIVATE neura_nghttp2)
             neura_target_defaults(neura_http2_test_client)
         endif()
+    endif()
+
+    add_executable(neura_project_toml_tests tests/project/toml_tests.cpp)
+    target_link_libraries(neura_project_toml_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_toml_tests)
+    add_test(NAME project-toml COMMAND neura_project_toml_tests "${CMAKE_CURRENT_SOURCE_DIR}/tests/project")
+
+    add_executable(neura_project_manifest_tests tests/project/manifest_tests.cpp)
+    target_link_libraries(neura_project_manifest_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_manifest_tests)
+    add_test(NAME project-manifest
+        COMMAND neura_project_manifest_tests "${CMAKE_CURRENT_SOURCE_DIR}/docs/design/Projects030.md")
+
+    add_executable(neura_project_lock_tests tests/project/lock_tests.cpp)
+    target_link_libraries(neura_project_lock_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_lock_tests)
+    add_test(NAME project-lock
+        COMMAND neura_project_lock_tests "${CMAKE_CURRENT_SOURCE_DIR}/docs/design/Projects030.md")
+
+    add_executable(neura_project_resolve_tests tests/project/resolve_tests.cpp)
+    target_link_libraries(neura_project_resolve_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_resolve_tests)
+    add_test(NAME project-resolve COMMAND neura_project_resolve_tests)
+
+    add_executable(neura_project_bundle_tests tests/project/bundle_tests.cpp)
+    target_link_libraries(neura_project_bundle_tests PRIVATE neura_project)
+    neura_target_defaults(neura_project_bundle_tests)
+    add_test(NAME project-bundle COMMAND neura_project_bundle_tests)
+
+    # Project builds end to end: every target kind, two paths compared, the refusals of
+    # docs/design/Projects030.md and `neura run` of a bundle (tests/project/build.py).
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    add_test(NAME project-build COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/build.py"
+        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-build-tests")
+    set_tests_properties(project-build PROPERTIES TIMEOUT 900)
+    # `neura new` and its templates (tests/project/new.py).
+    add_test(NAME project-new COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/new.py"
+        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-new-tests")
+    set_tests_properties(project-new PROPERTIES TIMEOUT 900)
+    # `neura dev` (tests/project/dev.py): reloads, stylesheet swaps, restarts and process-tree checks.
+    add_test(NAME project-dev COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/dev.py"
+        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-dev-tests")
+    set_tests_properties(project-dev PROPERTIES TIMEOUT 600)
+    # `neura package` (tests/project/package.py); the desktop package only with the pinned engine.
+    add_test(NAME project-package COMMAND "${Python3_EXECUTABLE}" "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/package.py"
+        "$<TARGET_FILE:neura>" "${CMAKE_CURRENT_SOURCE_DIR}" "${CMAKE_CURRENT_BINARY_DIR}/project-package-tests")
+    set_tests_properties(project-package PROPERTIES TIMEOUT 900)
+    if(NEURA_DESKTOP_ENGINE)
+        set_tests_properties(project-package PROPERTIES ENVIRONMENT "NEURA_DESKTOP_ENGINE=${NEURA_DESKTOP_ENGINE}")
     endif()
 
     if(TARGET neura_launcher)
@@ -1427,6 +1533,12 @@ if(BUILD_TESTING AND NEURA_SDK)
             "${CMAKE_CURRENT_SOURCE_DIR}/tests/apps/web/backend-check.py" --neura "$<TARGET_FILE:neura>"
             --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
         set_tests_properties(app-web-backend PROPERTIES TIMEOUT 300 SKIP_RETURN_CODE 77)
+        # The reference project's page from `neura build --target web` and from `neura dev`, at a deep path and
+        # with a wrong media type for nvm.wasm (tests/project/browser-check.py).
+        add_test(NAME project-web-browser COMMAND "${Python3_EXECUTABLE}"
+            "${CMAKE_CURRENT_SOURCE_DIR}/tests/project/browser-check.py" --neura "$<TARGET_FILE:neura>"
+            --wasm "${NEURA_WEB_RUNTIME_DIR}" --browser chromium --browser firefox)
+        set_tests_properties(project-web-browser PROPERTIES TIMEOUT 600 SKIP_RETURN_CODE 77)
     endif()
 
     # Diagnostics: the core's unit tests, and one UI test per area under

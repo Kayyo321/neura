@@ -46,7 +46,7 @@ endif()
 # scope, are checked as programs of their own.
 set(concurrency_examples ${examples})
 list(FILTER concurrency_examples INCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
-list(FILTER examples EXCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+)/")
+list(FILTER examples EXCLUDE REGEX "/examples/(concurrency|apps/web-[^/]+|apps/stock)/")
 if(NOT concurrency_examples)
     message(FATAL_ERROR "No concurrency examples were found")
 endif()
@@ -54,6 +54,12 @@ list(SORT examples)
 run_success(unused check ${examples})
 foreach(example IN LISTS concurrency_examples)
     run_success(unused check "${example}")
+endforeach()
+
+# The reference project (docs/apps/Projects.md): each target's entry with the project as its import root.
+set(stock "${SOURCE_DIR}/examples/apps/stock")
+foreach(entry IN ITEMS ui/main.nra server/main.nra desktop/main.nra)
+    run_success(unused check -I "${stock}" "${stock}/${entry}")
 endforeach()
 
 set(multi_file "${SOURCE_DIR}/examples/modules/multi-file")

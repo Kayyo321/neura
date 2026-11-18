@@ -1,0 +1,50 @@
+# The project of tests/project/build.py: a web, a server and a desktop target.
+schema = 1
+
+[project]
+name = "counter"
+id = "example.counter"
+version = "1.0.0"
+language = "0.3"
+
+[packages.ui]
+root = "ui"
+assets = ["ui/assets"]
+
+[packages.server]
+root = "server"
+
+[packages.desktop]
+root = "desktop"
+
+[targets.web]
+kind = "web"
+package = "ui"
+entry = "Ui.Main"
+styles = ["ui/base.css"]
+capabilities = ["ui"]
+
+[targets.server]
+kind = "server"
+package = "server"
+entry = "Server.Main"
+capabilities = ["http_server", "app", "sql"]
+providers = ["sqlite"]
+
+[targets.server.http]
+listen = "127.0.0.1:8080"
+
+[targets.server.sql.main]
+provider = "sqlite"
+migrations = "server/migrations"
+migrate = "on_start"
+
+[targets.desktop]
+kind = "desktop"
+package = "desktop"
+ui = "web"
+entry = "Desktop.Main"
+capabilities = ["desktop"]
+
+[targets.desktop.bridge]
+operations = ["counter.rename"]

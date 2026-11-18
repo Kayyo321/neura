@@ -83,6 +83,8 @@ GENERATED: dict[str, str] = {
     "docs/runtime/Sql.md": "Sql",
     "docs/runtime/Providers.md": "Providers",
     "docs/apps/Desktop.md": "Apps-Desktop",
+    "docs/apps/Projects.md": "Apps-Projects",
+    "docs/apps/FirstProject.md": "FirstProject",
     "docs/style/CodingStyle.md": "CodingStyle",
 }
 
