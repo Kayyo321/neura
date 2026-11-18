@@ -74,6 +74,7 @@ MODES = [
 ]
 STATS = re.compile(r'^stats: steps (\d+), peak heap cells (\d+)', re.M)
 NATIVE = re.compile(r'^tier: native programs (\d+) ', re.M)
+NATIVE_BY_DEFAULT = sys.platform.startswith('linux') and os.uname().machine in ('x86_64', 'amd64')
 DEOPTIMIZED = re.compile(r'^tier: native deoptimized (\d+) times', re.M)
 DEOPTIMIZED_AT = re.compile(r'^tier: native deoptimized \d+ times at function (\d+) block', re.M)
 FUNCTION = re.compile(r'^function f(\d+)\(.*// provenance: (.+)$', re.M)
@@ -100,6 +101,12 @@ def main():
             status = int(status_path.read_text()) if status_path.exists() else 0
             deopt_path = expected_path.with_suffix('.deopt')
             deopt_modes = set(deopt_path.read_text().split()) if deopt_path.exists() else set()
+            # A mode that leaves NEURA_TIER3 unset has native tier 3 only where
+            # it is the default, x86-64 Linux (docs/runtime/NVM.md); elsewhere
+            # it forms no programs, so only the modes that name tier 3 expect one.
+            if not NATIVE_BY_DEFAULT:
+                deopt_modes = {mode for mode in deopt_modes if 'NEURA_TIER3' in dict(
+                    (name, environment) for name, environment, _ in MODES).get(mode, {})}
             within_path = expected_path.with_suffix('.deopt-in')
             within = within_path.read_text().strip() if within_path.exists() else None
             skip_path = expected_path.with_suffix('.skip')
