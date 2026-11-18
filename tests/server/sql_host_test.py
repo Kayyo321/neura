@@ -179,6 +179,10 @@ def probe_journey(args, port, label):
     check(status == 200 and body == b"none", f"{label} sql settings are not configuration: {status} {body!r}")
     status, body = call(args, port, "GET", "/config?sql.main.password")
     check(status == 200 and body == b"none", f"{label} passwords are not configuration: {status} {body!r}")
+    status, body = call(args, port, "GET", "/big?1000")
+    check(status == 200 and body == b"1000", f"{label} a 1,000-byte parameter: {status} {body!r}")
+    status, body = call(args, port, "GET", "/big?1100000")
+    check(status == 200 and body == b"sql.too_large", f"{label} a parameter beyond the channel's frame: {status} {body!r}")
     status, body = call(args, port, "GET", "/pool?main")
     check(status == 200, f"{label} pool lookup: {status} {body!r}")
     status, body = call(args, port, "GET", "/pool?other")
@@ -218,10 +222,22 @@ def test_sqlite_probes(args):
         path.unlink()
     env = {**os.environ, "SQLPROBE_sql.main.url": "leak", "SQLPROBE_sql.main.password": "leak"}
     host = Host(args, image, "--request-timeout", "2", "--sql-pool", f"main=sqlite:{database}",
-                "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=2",
+                "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=1",
                 "--config-env-prefix", "SQLPROBE_", env=env)
     try:
         probe_journey(args, host.port, "sqlite")
+        started = time.time()
+        status, body = call(args, host.port, "GET", "/two")
+        elapsed = time.time() - started
+        check(status == 200 and body == b"sql.timed_out" and 0.8 < elapsed < 10,
+              f"an acquire on an exhausted pool times out after S-10: {status} {body!r} {elapsed:.1f}s")
+    finally:
+        host.stop()
+    host = Host(args, image, "--sql-pool", f"main=sqlite:{database}", "--config", "sql.main.max_connections=1",
+                "--config", "sql.main.max_waiting=0")
+    try:
+        status, body = call(args, host.port, "GET", "/two")
+        check(status == 200 and body == b"sql.pool_exhausted", f"no acquire may wait: {status} {body!r}")
     finally:
         host.stop()
 
@@ -418,7 +434,7 @@ def test_postgres(args):
 
             host = Host(args, probe, "--request-timeout", "2", "--sql-pool", f"main={server.url('probe')}",
                         "--config", "sql.main.password_env=NEURA_SQL_TEST_PASSWORD",
-                        "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=2",
+                        "--config", "sql.main.max_connections=1", "--config", "sql.main.acquire_timeout=1",
                         "--config", "probe.db=postgresql", env=env)
             try:
                 probe_journey(args, host.port, label)

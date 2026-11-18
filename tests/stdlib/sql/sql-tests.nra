@@ -129,6 +129,12 @@ let SqlTests = module (
         test.assert_equal<int>(2, limited.size());
         last over = page_error(pool.query_page("SELECT 1", 1001));
         test.assert(kind(over) == sql.ErrorKind.TooLarge);
+        // A page must fit the worker channel's frame: about 1 MB of values.
+        last fits = test.assert_ok<sql.Row>(pool.query_one("SELECT zeroblob(999000) AS b"));
+        test.assert_equal<int>(999000, test.assert_ok<uint8[list]>(fits.bytes("b")).length);
+        last huge = test.assert_err<sql.Row>(pool.query_one("SELECT zeroblob(1000001) AS b"));
+        test.assert(kind(huge) == sql.ErrorKind.TooLarge);
+        test.assert(strings.contains(detail(huge), "cursor"));
     };
 
     export let test_placeholders = func() -> void {

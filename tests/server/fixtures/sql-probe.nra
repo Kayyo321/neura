@@ -8,10 +8,14 @@
 //   GET  /count       the number of rows in probe
 //   GET  /slow        a statement that does not end by itself (probe.db=postgresql: pg_sleep(60))
 //   GET  /pool?NAME   200 when the host has the pool NAME, 404 otherwise
+//   GET  /big?N       a statement with a text parameter of N bytes: its length, or the error's code
+//   GET  /two         holds a connection and acquires a second: the second acquire's error code
 let app = import:Std.App;
 let errors = import:Std.Core.Error;
 let program = import:Std.Program;
 let sql = import:Std.Data.Sql;
+let strings = import:Std.Text.Strings;
+let integers = import:Std.Core.Int32;
 let.promote optional = import:Std.Core.Optional;
 let.promote _ = import:Std.Core.Result;
 let.promote _ = import:Std.Core.Unit;
@@ -80,6 +84,45 @@ let SqlProbe = module:program.Entry (
             return match (sql.pool(request.query)) {
                 Result.Ok(_) => Result<app.Response>.Ok(app.text(200, "found")),
                 Result.Err(problem) => Result<app.Response>.Ok(app.text(404, errors.message(problem))),
+            };
+        }
+        if (request.path == "/two") {
+            match (pool.acquire()) {
+                Result.Err(problem) => {
+                    return Result<app.Response>.Err(problem);
+                },
+                Result.Ok(held) => {
+                    last second = pool.acquire();
+                    match (held.close()) {
+                        Result.Ok(_) => {},
+                        Result.Err(problem) => {
+                            return Result<app.Response>.Err(problem);
+                        },
+                    }
+                    return match (second) {
+                        Result.Ok(_) => Result<app.Response>.Ok(app.text(200, "acquired")),
+                        Result.Err(problem) => Result<app.Response>.Ok(app.text(200, match (problem) {
+                            errors.Error.Custom(detail) => detail.code(),
+                            _ => errors.message(problem),
+                        })),
+                    };
+                },
+            }
+        }
+        if (request.path == "/big") {
+            last size = match (integers.parse(request.query)) {
+                Result.Ok(number) => number,
+                Result.Err(_) => 0,
+            };
+            return match (pool.query_one("SELECT length($1) AS n", strings.repeat("x", size))) {
+                Result.Ok(row) => Result<app.Response>.Ok(app.text(200, match (row.int64("n")) {
+                    Result.Ok(count) => count.to_string(),
+                    Result.Err(problem) => errors.message(problem),
+                })),
+                Result.Err(problem) => Result<app.Response>.Ok(app.text(200, match (problem) {
+                    errors.Error.Custom(detail) => detail.code(),
+                    _ => errors.message(problem),
+                })),
             };
         }
         return Result<app.Response>.Ok(app.text(404, "not found"));
