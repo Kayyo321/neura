@@ -42,6 +42,23 @@ inline int poll_until(std::span<pollfd> entries, ConnectionClock::time_point dea
     }
 }
 
+// Waits for `events` on `descriptor`, or for `wake` (when not -1) to become
+// readable first, which answers Woken.
+inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time_point deadline, int wake) {
+    if (wake < 0) {
+        pollfd entry{descriptor, events, 0};
+        const int ready = poll_until(std::span(&entry, 1), deadline);
+        if (ready == 0) return StreamStatus::TimedOut;
+        return ready < 0 || (entry.revents & POLLNVAL) ? StreamStatus::Failed : StreamStatus::Ready;
+    }
+    pollfd entries[2] = {{descriptor, events, 0}, {wake, POLLIN, 0}};
+    const int ready = poll_until(std::span(entries, 2), deadline);
+    if (ready == 0) return StreamStatus::TimedOut;
+    if (ready < 0 || (entries[0].revents & POLLNVAL)) return StreamStatus::Failed;
+    if (entries[0].revents == 0 && entries[1].revents != 0) return StreamStatus::Woken;
+    return StreamStatus::Ready;
+}
+
 inline StreamStatus wait_for(int descriptor, short events, ConnectionClock::time_point deadline) {
     pollfd entry{descriptor, events, 0};
     const int ready = poll_until(std::span(&entry, 1), deadline);

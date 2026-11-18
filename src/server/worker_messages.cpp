@@ -111,13 +111,17 @@ std::vector<std::uint8_t> encode_head(const ResponseHead& head) {
     Writer out;
     out.u32(head.status);
     out.pairs(head.headers);
+    out.i64(head.body_length);
     return std::move(out.bytes);
 }
 
 std::optional<ResponseHead> decode_head(std::span<const std::uint8_t> body) {
     Reader in(body);
     ResponseHead head;
-    if (!in.u32(head.status) || !in.pairs(head.headers) || !in.done()) return std::nullopt;
+    if (!in.u32(head.status) || !in.pairs(head.headers) || !in.i64(head.body_length) || head.body_length < -1 ||
+        !in.done()) {
+        return std::nullopt;
+    }
     return head;
 }
 
@@ -135,6 +139,17 @@ int wait_milliseconds(Clock::time_point deadline) {
     if (left <= Clock::duration::zero()) return 0;
     const auto milliseconds = std::chrono::ceil<std::chrono::milliseconds>(left).count();
     return milliseconds > INT_MAX ? INT_MAX : static_cast<int>(milliseconds);
+}
+
+// Polls one entry until the deadline: 1 ready, 0 timed out, -1 failed.
+int poll_until(pollfd& entry, Clock::time_point deadline) {
+    for (;;) {
+        entry.revents = 0;
+        const int ready = ::poll(&entry, 1, wait_milliseconds(deadline));
+        if (ready > 0) return (entry.revents & POLLNVAL) ? -1 : 1;
+        if (ready == 0) return 0;
+        if (errno != EINTR) return -1;
+    }
 }
 
 // Waits for `events` until the deadline: 1 ready, 0 timed out, -1 failed.
@@ -189,6 +204,19 @@ Channel::Status Channel::send(FrameKind kind, std::span<const std::uint8_t> body
         }
         if (written < 0 && errno == EINTR) continue;
         if (written < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
+            if (read_while_sending_ && !peer_closed_) {
+                pollfd entry{descriptor_, POLLOUT | POLLIN, 0};
+                const int ready = poll_until(entry, deadline);
+                if (ready == 0) return status_ = Status::TimedOut;
+                if (ready < 0) return status_ = Status::Failed;
+                if (entry.revents & POLLIN) {
+                    std::uint8_t chunk[64 * 1024];
+                    const auto got = ::recv(descriptor_, chunk, sizeof chunk, MSG_DONTWAIT);
+                    if (got > 0) buffer_.insert(buffer_.end(), chunk, chunk + got);
+                    else if (got == 0) peer_closed_ = true;
+                }
+                continue;
+            }
             const int ready = wait_for(descriptor_, POLLOUT, deadline);
             if (ready == 0) return status_ = Status::TimedOut;
             if (ready < 0) return status_ = Status::Failed;
@@ -199,11 +227,12 @@ Channel::Status Channel::send(FrameKind kind, std::span<const std::uint8_t> body
     return Status::Ok;
 }
 
-Channel::Status Channel::fill(Clock::time_point deadline) {
+Channel::Status Channel::fill(Clock::time_point deadline, bool wait) {
     if (offset_ == buffer_.size()) {
         buffer_.clear();
         offset_ = 0;
     }
+    if (peer_closed_) return Status::Closed;
     std::uint8_t chunk[64 * 1024];
     for (;;) {
         const auto got = ::recv(descriptor_, chunk, sizeof chunk, MSG_DONTWAIT);
@@ -214,15 +243,23 @@ Channel::Status Channel::fill(Clock::time_point deadline) {
         if (got == 0) return Status::Closed;
         if (errno == EINTR) continue;
         if (errno != EAGAIN && errno != EWOULDBLOCK) return Status::Failed;
+        if (!wait) return Status::TimedOut;
         const int ready = wait_for(descriptor_, POLLIN, deadline);
         if (ready == 0) return Status::TimedOut;
         if (ready < 0) return Status::Failed;
     }
 }
 
-std::optional<Frame> Channel::receive(Clock::time_point deadline) {
+std::optional<Frame> Channel::receive(Clock::time_point deadline) { return receive(deadline, true); }
+
+std::optional<Frame> Channel::receive_ready() { return receive(Clock::now(), false); }
+
+std::optional<Frame> Channel::receive(Clock::time_point deadline, bool wait) {
     if (status_ != Status::Ok) return std::nullopt;
-    Frame frame{FrameKind::Hello, {}};
+    // A frame partly decoded when a nonblocking receive stopped is kept in
+    // `partial_` until the rest arrives.
+    Frame frame = std::move(partial_);
+    partial_ = Frame{FrameKind::Hello, {}};
     for (;;) {
         const std::span<const std::uint8_t> unread(buffer_.data() + offset_, buffer_.size() - offset_);
         const auto result = decoder_.consume(unread);
@@ -255,7 +292,11 @@ std::optional<Frame> Channel::receive(Clock::time_point deadline) {
             status_ = Status::Closed;
             return std::nullopt;
         case FrameEvent::NeedInput: {
-            const auto filled = fill(deadline);
+            const auto filled = fill(deadline, wait);
+            if (!wait && filled == Status::TimedOut) {
+                partial_ = std::move(frame);
+                return std::nullopt;
+            }
             if (filled == Status::Closed) {
                 const auto end = decoder_.finish_input();
                 if (end.event == FrameEvent::Rejected) {

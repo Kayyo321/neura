@@ -172,7 +172,11 @@ AcceptedConnection::~AcceptedConnection() = default;
 std::string_view AcceptedConnection::peer_address() const { return state_ ? std::string_view(state_->peer) : std::string_view{}; }
 bool AcceptedConnection::secure() const { return state_ && state_->tls; }
 
-ServeResult AcceptedConnection::serve(const BufferedResponder& respond) && {
+std::size_t AcceptedConnection::response_bytes() const {
+    return state_ ? state_->limits.http.response_bytes : ConnectionLimits{}.response_bytes;
+}
+
+ServeResult AcceptedConnection::serve(const Responder& respond) && {
     auto state = std::move(state_);
     if (!state) throw std::logic_error("the accepted HTTP connection was already consumed");
 #ifdef NEURA_SERVER_TLS_ENABLED

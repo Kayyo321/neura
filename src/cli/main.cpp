@@ -8,6 +8,7 @@
 #include "decompiler/assembly.hpp"
 #include "decompiler/decompile.hpp"
 #include "gpu_run.hpp"
+#include "serve.hpp"
 #include "neura/version.hpp"
 #include "ir-optimization/optimizer.hpp"
 #include "launcher/container.hpp"
@@ -112,6 +113,7 @@ void usage(std::ostream& out) {
            "                  [--tier-stats] [capabilities]\n"
            "                  [--gpu=auto|always|off] [--no-gpu]\n"
            "                  [--require-gpu] [--gpu-software] [--gpu-verify] <file.nra>...\n"
+           "       neura serve [-I source-root] <file.nra>... | <file.nvr> [neura-server-host options]\n"
            "       neura disassemble <file.nvr> [-o <file.nvra>]\n"
            "       neura assemble <file.nvra> -o <file.nvr>\n"
            "       neura decompile [--no-provenance] <file.nvr> [-o <file>]\n"
@@ -2030,6 +2032,7 @@ int main(int argc, char** argv) {
     if (tooling_command == "lsp" || tooling_command == "fmt" || tooling_command == "debug" || tooling_command == "capabilities" || tooling_command == "inspect-image") {
         try {
             std::vector<std::string> arguments;
+    if (tooling_command == "serve") return neura::cli::run_serve(argc, argv);
             for (int i = 2; i < argc; ++i) arguments.emplace_back(argv[i]);
             if (tooling_command == "lsp") return neura::tooling::run_lsp(arguments);
             if (tooling_command == "fmt") return neura::tooling::run_formatter(arguments);

@@ -393,6 +393,7 @@ file(CONFIGURE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/generated/neura/diagnostic_pa
 
 add_executable(neura src/cli/main.cpp src/cli/argument_lists.cpp src/cli/explain.cpp src/cli/gpu_run.cpp src/cli/lifecycle.cpp
     src/launcher/descriptor.cpp src/tooling/debug.cpp src/tooling/inspect.cpp)
+    src/cli/serve.cpp
 target_link_libraries(neura PRIVATE neura_compiler neura_runner neura_decompiler neura_lifecycle)
 if(NEURA_PORTABLE_RELEASE AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
     target_link_options(neura PRIVATE -static-libstdc++ -static-libgcc)

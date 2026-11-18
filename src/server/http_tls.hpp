@@ -26,7 +26,13 @@ struct TlsConnectionEnd {
 // Takes ownership of the accepted POSIX socket and a snapshot of its context.
 // The HTTP head deadline starts once the bounded TLS handshake is complete.
 TlsConnectionEnd serve_tls_connection(int descriptor, TlsContextHandle context,
-                                     const BufferedResponder& respond, const ConnectionLimits& limits = {},
+                                     const Responder& respond, const ConnectionLimits& limits = {},
                                      std::chrono::milliseconds handshake_timeout = std::chrono::seconds{10});
+inline TlsConnectionEnd serve_tls_connection(int descriptor, TlsContextHandle context,
+                                            const BufferedResponder& respond, const ConnectionLimits& limits = {},
+                                            std::chrono::milliseconds handshake_timeout = std::chrono::seconds{10}) {
+    return serve_tls_connection(descriptor, std::move(context), buffered(respond, limits.response_bytes), limits,
+                                handshake_timeout);
+}
 
 } // namespace neura::server::http

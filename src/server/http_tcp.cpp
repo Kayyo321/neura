@@ -16,13 +16,17 @@ public:
     ~TcpStream() override { ::close(descriptor_); }
 
     StreamRead read(std::span<char> output, ConnectionClock::time_point deadline) override {
+        return read(output, deadline, -1);
+    }
+
+    StreamRead read(std::span<char> output, ConnectionClock::time_point deadline, int wake) override {
         while (ConnectionClock::now() < deadline) {
             const auto count = ::recv(descriptor_, output.data(), output.size(), 0);
             if (count > 0) return {StreamStatus::Ready, static_cast<std::size_t>(count)};
             if (count == 0) return {StreamStatus::End};
             if (errno == EINTR) continue;
             if (errno != EAGAIN && errno != EWOULDBLOCK) return {StreamStatus::Failed};
-            const auto status = socket_io::wait_for(descriptor_, POLLIN, deadline);
+            const auto status = socket_io::wait_for(descriptor_, POLLIN, deadline, wake);
             if (status != StreamStatus::Ready) return {status};
         }
         return {StreamStatus::TimedOut};
@@ -65,7 +69,7 @@ private:
 
 } // namespace
 
-ConnectionEnd serve_tcp_connection(int descriptor, const BufferedResponder& respond, const ConnectionLimits& limits) {
+ConnectionEnd serve_tcp_connection(int descriptor, const Responder& respond, const ConnectionLimits& limits) {
     TcpStream stream(descriptor);
     if (!socket_io::configure(descriptor)) return ConnectionEnd::StreamFailure;
     return serve_connection(stream, respond, limits);

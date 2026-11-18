@@ -48,6 +48,16 @@ bool valid_header_name(std::string_view name) {
     });
 }
 
+bool valid_metric_name(std::string_view name) {
+    if (name.empty() || name.size() > 128) return false;
+    for (std::size_t i = 0; i < name.size(); ++i) {
+        const char c = name[i];
+        const bool letter = (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || c == '_' || c == ':';
+        if (!letter && !(i > 0 && c >= '0' && c <= '9')) return false;
+    }
+    return true;
+}
+
 bool valid_header_value(std::string_view value) {
     return std::none_of(value.begin(), value.end(), [](char c) {
         const auto byte = static_cast<unsigned char>(c);
@@ -97,16 +107,15 @@ ApplicationServices::ApplicationServices(ServerExchange* exchange, bool http_ser
         if (!state->assigned) return fail(host_error::invalid_input);
         const auto max = as_int32(request.arguments.at(0));
         if (max < 1) return fail(host_error::invalid_input);
-        return HostCompletion::ok(bytes_value(state->exchange->read_body(
-            std::min<std::size_t>(static_cast<std::size_t>(max), max_read_bytes))));
+        std::string chunk;
+        const auto code = state->exchange->read_body(std::min<std::size_t>(static_cast<std::size_t>(max), max_read_bytes),
+                                                     chunk);
+        if (code != 0) return fail(code);
+        return HostCompletion::ok(bytes_value(std::move(chunk)));
     });
 
-    // Counts body bytes against S-7 before anything is sent.
-    const auto admit = [state](std::size_t bytes) {
-        if (bytes > state->response_bytes - std::min(state->sent, state->response_bytes)) return false;
-        state->sent += bytes;
-        return true;
-    };
+    // A complete body is the buffered response of S-7.
+    const auto admit = [state](std::size_t bytes) { return bytes <= state->response_bytes; };
 
     add(signature("neura.http.server.respond", {uint32(), header_list(), byte_list(), boolean()}, void_type()),
         [state, admit](const HostRequest& request) {
@@ -116,19 +125,18 @@ ApplicationServices::ApplicationServices(ServerExchange* exchange, bool http_ser
             const auto headers = pairs_of(request.arguments.at(1), true);
             if (status < 100 || status > 599 || !headers) return fail(host_error::invalid_input);
             const auto& body = request.arguments.at(2).bytes;
-            if (!admit(body.size())) return fail(host_error::too_large);
             const bool complete = as_bool(request.arguments.at(3));
+            if (complete && !admit(body.size())) return fail(host_error::too_large);
             state->response = complete ? State::Response::Ended : State::Response::Head;
             const auto code = state->exchange->respond(status, *headers, body, complete);
             return code == 0 ? HostCompletion::ok() : fail(code);
         });
 
     add(signature("neura.http.server.body.write", {byte_list()}, void_type()),
-        [state, admit](const HostRequest& request) {
+        [state](const HostRequest& request) {
             if (!state->http_server) return denied();
             if (state->response != State::Response::Head) return fail(host_error::invalid_input);
             const auto& bytes = request.arguments.at(0).bytes;
-            if (!admit(bytes.size())) return fail(host_error::too_large);
             const auto code = state->exchange->write_body(bytes);
             return code == 0 ? HostCompletion::ok() : fail(code);
         });
@@ -157,6 +165,18 @@ ApplicationServices::ApplicationServices(ServerExchange* exchange, bool http_ser
             state->exchange->log(level, request.arguments.at(1).bytes, *fields);
             return HostCompletion::ok();
         });
+
+    add(signature("neura.app.metric", {text(), uint32(), int64()}, void_type()), [state](const HostRequest& request) {
+        if (!state->app) return denied();
+        const auto& name = request.arguments.at(0).bytes;
+        const auto kind = static_cast<std::uint32_t>(request.arguments.at(1).bits);
+        const auto value = static_cast<std::int64_t>(request.arguments.at(2).bits);
+        if (!valid_metric_name(name) || (kind != 1 && kind != 2) || (kind == 1 && value < 0)) {
+            return fail(host_error::invalid_input);
+        }
+        const auto code = state->exchange->metric(name, kind, value);
+        return code == 0 ? HostCompletion::ok() : fail(code);
+    });
 }
 
 void ApplicationServices::register_all(HostRegistry& registry) {

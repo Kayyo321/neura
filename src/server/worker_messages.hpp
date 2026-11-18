@@ -25,10 +25,13 @@ std::vector<std::uint8_t> encode_assign(const nvm::ServerRequest& request);
 std::optional<nvm::ServerRequest> decode_assign(std::span<const std::uint8_t> body);
 
 // Head, version 1: uint32 status, uint32 header count, that many
-// (text name, text value).
+// (text name, text value), int64 body length: the exact byte count of a
+// complete body, sent with Content-Length, or -1 for a body streamed with
+// chunked transfer coding.
 struct ResponseHead {
     std::uint32_t status = 0;
     nvm::HeaderPairs headers;
+    std::int64_t body_length = -1;
 };
 std::vector<std::uint8_t> encode_head(const ResponseHead& head);
 std::optional<ResponseHead> decode_head(std::span<const std::uint8_t> body);
@@ -56,6 +59,9 @@ public:
     Status send(FrameKind kind, std::span<const std::uint8_t> body, Clock::time_point deadline);
     // The next complete frame; on any other status, nothing.
     std::optional<Frame> receive(Clock::time_point deadline);
+    // The next frame if it is complete without waiting; nothing otherwise,
+    // and the status changes only when the channel ended or failed.
+    std::optional<Frame> receive_ready();
     Status status() const { return status_; }
     ProtocolFailure failure() const { return sequence_.failure(); }
     const ChannelSequence& sequence() const { return sequence_; }
@@ -64,8 +70,15 @@ public:
     // Sends this side's Hello and checks the peer's.
     Status greet(const Hello& hello, Clock::time_point deadline);
 
+    // While a send waits for the peer to read, read what the peer sends into
+    // the receive buffer, so two endpoints that both send cannot block each
+    // other. The worker sets it: what it buffers is bounded by the request
+    // body the host sends (S-6).
+    void read_while_sending(bool enabled) { read_while_sending_ = enabled; }
+
 private:
-    Status fill(Clock::time_point deadline);
+    Status fill(Clock::time_point deadline, bool wait = true);
+    std::optional<Frame> receive(Clock::time_point deadline, bool wait);
 
     int descriptor_;
     PeerRole role_;
@@ -74,6 +87,9 @@ private:
     std::vector<std::uint8_t> buffer_;
     std::size_t offset_ = 0;
     Status status_ = Status::Ok;
+    bool read_while_sending_ = false;
+    Frame partial_{FrameKind::Hello, {}};
+    bool peer_closed_ = false;
 };
 
 // The provider map both sides of a server channel expect.

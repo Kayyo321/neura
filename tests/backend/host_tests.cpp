@@ -1068,10 +1068,14 @@ NEURA_TEST(host, application_services_check_order_and_limits) {
             request.body_length = 5;
             return request;
         }
-        std::string read_body(std::size_t max) override {
-            auto chunk = body.substr(0, max);
-            body.erase(0, chunk.size());
-            return chunk;
+        std::uint32_t read_body(std::size_t max, std::string& out) override {
+            out = body.substr(0, max);
+            body.erase(0, out.size());
+            return 0;
+        }
+        std::uint32_t metric(std::string_view name, std::uint32_t kind, std::int64_t value) override {
+            metrics.push_back(std::string(name) + ":" + std::to_string(kind) + ":" + std::to_string(value));
+            return 0;
         }
         std::uint32_t respond(std::uint32_t code, const nvm::HeaderPairs& fields, std::string_view content,
                               bool complete) override {
@@ -1132,15 +1136,16 @@ NEURA_TEST(host, application_services_check_order_and_limits) {
     expect_error(call("neura.http.server.respond", {i32(200), flat({"X"}), bytes(""), boolean(true)}),
                  host_error::invalid_input, "odd field list");
     expect_error(call("neura.http.server.respond", {i32(200), flat({}), bytes("01234567890"), boolean(true)}),
-                 host_error::too_large, "body over the limit");
+                 host_error::too_large, "complete body over S-7");
+    // A streamed body is not buffered, so S-7 does not count it.
     expect_ok(call("neura.http.server.respond", {i32(201), flat({"X-A", "1"}), bytes("0123"), boolean(false)}),
               "respond with an open body");
-    expect_ok(call("neura.http.server.body.write", {bytes("456789")}), "write up to the limit");
-    expect_error(call("neura.http.server.body.write", {bytes("x")}), host_error::too_large, "one byte over");
+    expect_ok(call("neura.http.server.body.write", {bytes("456789")}), "write up to S-7");
+    expect_ok(call("neura.http.server.body.write", {bytes("x")}), "a streamed body past S-7");
     expect_ok(call("neura.http.server.body.close", {}), "close");
     expect_error(call("neura.http.server.body.write", {bytes("")}), host_error::invalid_input, "write after close");
     check_equal(exchange.status, std::uint32_t{201}, "status sent");
-    check_equal(exchange.sent, std::string("0123456789"), "body sent");
+    check_equal(exchange.sent, std::string("0123456789x"), "body sent");
     check(exchange.ended && exchange.headers.size() == 1, "ended with one field");
     const auto found = call("neura.app.config", {text("k")});
     check(found.success && found.value.elements.at(0).bits == 1 && found.value.elements.at(1).bytes == "v", "config");
@@ -1254,6 +1259,7 @@ NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
             }
             const auto id = accepted.value.elements.at(0);
             served.push_back(accepted.value.elements.at(1).bytes);
+        std::vector<std::string> metrics;
             const auto got = server.call("neura.net.tls.read", {id, i32(64), i64(5'000'000'000)});
             server.call("neura.net.tls.write", {id, bytes("pong:" + got.value.bytes)});
             server.call("neura.net.tls.close", {id});
@@ -1295,3 +1301,10 @@ NEURA_TEST(host, tls_streams_verify_peers_and_negotiate_alpn) {
 
 } // namespace
 } // namespace neura::testing
+    expect_ok(call("neura.app.metric", {text("orders_total"), i32(1), i64(3)}), "counter");
+    expect_ok(call("neura.app.metric", {text("queue:depth"), i32(2), i64(-4)}), "gauge");
+    expect_error(call("neura.app.metric", {text("9lives"), i32(1), i64(1)}), host_error::invalid_input, "metric name");
+    expect_error(call("neura.app.metric", {text("bad-name"), i32(1), i64(1)}), host_error::invalid_input, "dash");
+    expect_error(call("neura.app.metric", {text("x"), i32(3), i64(1)}), host_error::invalid_input, "metric kind");
+    expect_error(call("neura.app.metric", {text("x"), i32(1), i64(-1)}), host_error::invalid_input, "counter down");
+    check(exchange.metrics == std::vector<std::string>{"orders_total:1:3", "queue:depth:2:-4"}, "metrics forwarded");

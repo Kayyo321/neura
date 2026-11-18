@@ -42,8 +42,13 @@ public:
 
     std::string_view peer_address() const;
     bool secure() const;
+    std::size_t response_bytes() const;
     // Consumes the socket and holds its S-4 slot until the exchange ends.
-    ServeResult serve(const BufferedResponder& respond) &&;
+    ServeResult serve(const Responder& respond) &&;
+    ServeResult serve(const BufferedResponder& respond) && {
+        const auto bytes = response_bytes();
+        return std::move(*this).serve(buffered(respond, bytes));
+    }
 
 private:
     friend class ListenerSet;

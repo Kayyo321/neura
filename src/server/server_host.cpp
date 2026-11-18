@@ -12,6 +12,7 @@
 #include "util/sha256.hpp"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cerrno>
 #include <charconv>
@@ -27,6 +28,7 @@
 #include <map>
 #include <mutex>
 #include <optional>
+#include <poll.h>
 #include <random>
 #include <set>
 #include <spawn.h>
@@ -62,6 +64,8 @@ constexpr std::string_view usage =
     "  --listen <address>:<port>      plain HTTP listener (repeatable; port 0 asks for one)\n"
     "  --tls-listen <address>:<port>  HTTPS listener; needs --cert and --key (repeatable)\n"
     "  --cert <file> --key <file>     PEM certificate chain and private key, reread on SIGHUP\n"
+    "  --admin-listen <address>:<port> admin listener for GET /livez, /readyz and /metrics\n"
+    "                                 (default: none; give it a loopback address)\n"
     "  --config <key>=<value>         a configuration value for neura.app.config (repeatable)\n"
     "  --config-file <file>           key=value lines; # starts a comment\n"
     "  --config-env-prefix <prefix>   environment variables <prefix><key> override both\n"
@@ -74,6 +78,10 @@ constexpr std::string_view usage =
     "  --max-response-bytes N         S-7 (default 8388608)\n"
     "  --request-timeout SECONDS      S-8 (default 30)\n"
     "  --drain-timeout SECONDS        S-12 drain (default 30)\n"
+    "  --max-steps N                  NVM steps one request's execution may take (default 100000000);\n"
+    "                                 past it the execution traps and the request is answered 500\n"
+    "  --worker-tier 0|1|2            highest execution tier of a worker (default: the runner's, 2)\n"
+    "  --worker-jit off|on|auto       native compilation of a worker's tier-2 regions (default auto)\n"
     "  --allow-fs[=prefix,...], --allow-net, --allow-env\n"
     "                                 grant the workers that group (default: none)\n"
     "  --record-dir <directory>       record each request's host requests to <id>.trace\n"
@@ -87,6 +95,7 @@ constexpr std::string_view usage =
 struct HostOptions {
     fs::path image;
     std::vector<http::ListenEndpoint> endpoints;
+    std::vector<http::ListenEndpoint> admin_endpoints;
     std::optional<fs::path> certificate;
     std::optional<fs::path> key;
     std::map<std::string, std::string, std::less<>> config;
@@ -100,6 +109,9 @@ struct HostOptions {
     neura::nvm::Capabilities capabilities;
     std::optional<fs::path> record_directory;
     bool startup_check = true;
+    std::optional<std::uint64_t> max_steps;
+    std::optional<std::uint8_t> worker_tier;
+    std::optional<std::string> worker_jit;
 };
 
 std::uint64_t parse_count(std::string_view option, std::string_view text, std::uint64_t low, std::uint64_t high) {
@@ -168,6 +180,8 @@ HostOptions read_options(int argc, char** argv) {
         } else if (is(arg, "--tls-listen")) {
             tls_endpoints.push_back(options.endpoints.size());
             options.endpoints.push_back(parse_endpoint("--tls-listen", value_of(i, arg, "--tls-listen")));
+        } else if (is(arg, "--admin-listen")) {
+            options.admin_endpoints.push_back(parse_endpoint("--admin-listen", value_of(i, arg, "--admin-listen")));
         } else if (is(arg, "--cert")) {
             options.certificate = value_of(i, arg, "--cert");
         } else if (is(arg, "--key")) {
@@ -200,6 +214,14 @@ HostOptions read_options(int argc, char** argv) {
                 std::chrono::seconds(parse_count(arg, value_of(i, arg, "--request-timeout"), 1, 3600));
         } else if (is(arg, "--drain-timeout")) {
             options.drain_timeout = std::chrono::seconds(parse_count(arg, value_of(i, arg, "--drain-timeout"), 0, 3600));
+        } else if (is(arg, "--worker-tier")) {
+            options.worker_tier = static_cast<std::uint8_t>(parse_count(arg, value_of(i, arg, "--worker-tier"), 0, 2));
+        } else if (is(arg, "--worker-jit")) {
+            auto mode = value_of(i, arg, "--worker-jit");
+            if (mode != "off" && mode != "on" && mode != "auto") throw std::runtime_error("--worker-jit expects off, on or auto");
+            options.worker_jit = std::move(mode);
+        } else if (is(arg, "--max-steps")) {
+            options.max_steps = parse_count(arg, value_of(i, arg, "--max-steps"), 1, std::uint64_t{1} << 62);
         } else if (arg == "--allow-fs") {
             options.capabilities.fs = true;
             options.capabilities.fs_prefixes.clear();
@@ -309,7 +331,8 @@ public:
         const auto timeout = std::chrono::duration_cast<std::chrono::nanoseconds>(options_.limits.http.request_timeout);
         request.deadline = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch()).count() + timeout.count();
-        const auto outcome = exchange(*worker, request, {}, Clock::now() + options_.limits.http.request_timeout);
+        RecordingWriter writer;
+        const auto outcome = exchange(*worker, request, nullptr, writer, Clock::now() + options_.limits.http.request_timeout);
         const pid_t pid = worker->pid;
         worker->channel.reset();
         int status = 0;
@@ -319,24 +342,31 @@ public:
             live_.erase(pid);
         }
         const bool exited = WIFEXITED(status) && WEXITSTATUS(status) == 0;
-        if (!outcome.done || outcome.status >= 400 || !exited) {
+        if (!outcome.done || writer.status >= 400 || !exited) {
             log(4, request.request_id, "startup check failed",
-                {{"status", std::to_string(outcome.status)}, {"worker_exit", describe_exit(status)}});
+                {{"status", std::to_string(writer.status)}, {"worker_exit", describe_exit(status)}});
             return false;
         }
+        ready_for_requests_ = true;
         return true;
     }
 
-    // The responder of one connection.
-    http::BufferedResponse handle(const http::RequestHead& head, std::string_view body, const std::string& peer,
-                                  bool secure) {
+    // The responder of one connection, called at the end of a request's
+    // head. The worker is assigned at once and the body streams to it; S-8
+    // runs from the end of the head. The response streams back to the client
+    // as the worker produces it, after the request body has been received.
+    void handle(const http::RequestHead& head, http::RequestBody& body, http::ResponseWriter& writer,
+                http::ConnectionClock::time_point head_deadline, const std::string& peer, bool secure) {
         // Paired with response_written(), which the connection calls once
         // this response has been written or has failed.
         ++in_flight_;
-        const auto started = Clock::now();
-        const auto deadline = started + options_.limits.http.request_timeout - 50ms;
-        if (draining.load()) return unavailable();
-        if (!admit(deadline)) return unavailable();
+        const auto deadline = head_deadline - 50ms;
+        if (draining.load() || !admit(deadline)) {
+            count_response(503);
+            ++metrics_.rejected;
+            write_buffered(writer, unavailable());
+            return;
+        }
         struct Release {
             Host& host;
             ~Release() { host.release(); }
@@ -347,39 +377,98 @@ public:
         request.method = head.method;
         request.target = head.target;
         for (const auto& header : head.headers) request.headers.emplace_back(header.name, header.value);
-        request.body_length = static_cast<std::int64_t>(body.size());
+        request.body_length = head.framing == http::BodyFraming::ContentLength ? static_cast<std::int64_t>(head.content_length)
+                              : head.framing == http::BodyFraming::Chunked     ? -1
+                                                                               : 0;
         request.peer = peer;
         request.scheme = secure ? "https" : "http";
         const auto left = std::chrono::duration_cast<std::chrono::nanoseconds>(deadline - Clock::now());
         request.deadline = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch()).count() + left.count();
 
-        auto worker = take_worker();
+        // A worker that provably ran nothing (its channel ended before it
+        // took the Assign) is replaced once; no request is run twice.
+        Outcome outcome;
+        std::optional<Worker> worker;
+        for (int attempt = 0; attempt < 2; ++attempt) {
+            worker = attempt == 0 ? take_worker() : spawn();
+            if (!worker) break;
+            outcome = exchange(*worker, request, &body, writer, deadline);
+            if (!outcome.unassigned) break;
+            log(3, request.request_id, "a ready worker had ended before its assignment; using a new one");
+            ++metrics_.retried;
+            ::kill(worker->pid, SIGKILL);
+            worker->channel.reset();
+            hand_to_reaper(worker->pid, {}, false);
+            worker.reset();
+        }
         if (!worker) {
             log(4, request.request_id, "could not start a request worker");
-            return error_response(500);
+            count_response(500);
+            if (!writer.started()) write_buffered(writer, error_response(500));
+            return;
         }
-        auto outcome = exchange(*worker, request, body, deadline);
         const pid_t pid = worker->pid;
-        // A worker past its deadline, or one that broke the protocol, is
-        // killed; one that closed its channel is left its grace period to exit.
-        if (outcome.timed_out || worker->channel->status() == Channel::Status::Failed) ::kill(pid, SIGKILL);
+        // A worker past its deadline, one that broke the protocol, one whose
+        // client or request body failed, is killed; one that closed its
+        // channel is left its grace period to exit.
+        if (outcome.timed_out || outcome.body_failed || outcome.client_failed || outcome.too_large ||
+            worker->channel->status() == Channel::Status::Failed) {
+            ::kill(pid, SIGKILL);
+        }
         worker->channel.reset();
         hand_to_reaper(pid, request.request_id, outcome.done);
         if (outcome.timed_out) {
+            ++metrics_.timeouts;
             log(4, request.request_id, "request deadline passed; worker killed");
-            return error_response(504);
+        } else if (outcome.too_large) {
+            log(4, request.request_id, "response body exceeds S-7");
+        } else if (outcome.body_failed) {
+            log(3, request.request_id, "the request body could not be read; worker killed");
+        } else if (outcome.client_failed) {
+            log(3, request.request_id, "the client stopped receiving the response; worker killed");
+        } else if (!outcome.done) {
+            log(4, request.request_id, writer.started() ? "worker ended inside its response; connection closed"
+                                                        : "worker ended without a response");
         }
-        if (!outcome.done) {
-            log(4, request.request_id, outcome.too_large ? "response body exceeds S-7" : "worker ended without a response");
-            return error_response(500);
+        if (writer.started()) {
+            count_response(outcome.done ? static_cast<int>(outcome.status) : 500);
+            return;
         }
+        if (outcome.body_failed) return; // The connection answers the body's failure.
+        const int status = outcome.timed_out ? 504 : 500;
+        count_response(status);
+        write_buffered(writer, error_response(status));
+    }
+
+    // GET /livez, /readyz and /metrics on the admin listener.
+    http::BufferedResponse admin(const http::RequestHead& head) {
         http::BufferedResponse response;
-        response.status = static_cast<int>(outcome.status);
-        response.body = std::move(outcome.body);
-        for (auto& [name, value] : outcome.headers) response.headers.push_back({std::move(name), std::move(value)});
+        response.headers.push_back({"Content-Type", "text/plain; charset=utf-8"});
+        response.headers.push_back({"Cache-Control", "no-store"});
+        const auto path = std::string_view(head.target).substr(0, head.target.find('?'));
+        if (head.method != "GET" && head.method != "HEAD") {
+            response.status = 405;
+            response.headers.push_back({"Allow", "GET, HEAD"});
+            return response;
+        }
+        if (path == "/livez") {
+            response.body = "ok\n";
+        } else if (path == "/readyz") {
+            const bool ready = ready_for_requests_.load() && !draining.load();
+            response.status = ready ? 200 : 503;
+            response.body = ready ? "ready\n" : (draining.load() ? "draining\n" : "starting\n");
+        } else if (path == "/metrics") {
+            response.headers[0].value = "text/plain; version=0.0.4; charset=utf-8";
+            response.body = metrics_text();
+        } else {
+            response.status = 404;
+            response.body = "not found\n";
+        }
         return response;
     }
+
+    void mark_ready() { ready_for_requests_ = true; }
 
     void log(std::uint32_t level, std::string_view id, std::string_view message,
              const neura::nvm::HeaderPairs& fields = {}) {
@@ -401,10 +490,31 @@ private:
         bool done = false;
         bool timed_out = false;
         bool too_large = false;
+        bool unassigned = false;    // The channel ended before the Assign was taken.
+        bool body_failed = false;   // The request body could not be read to its end.
+        bool client_failed = false; // The response could not be written to the client.
         std::uint32_t status = 0;
-        neura::nvm::HeaderPairs headers;
-        std::string body;
     };
+
+    // The response of a startup check, which goes to no client.
+    struct RecordingWriter final : http::ResponseWriter {
+        http::StreamStatus start(int code, const std::vector<http::Header>&, std::optional<std::uint64_t>) override {
+            status = code;
+            begun = true;
+            return http::StreamStatus::Ready;
+        }
+        http::StreamStatus write(std::string_view) override { return http::StreamStatus::Ready; }
+        http::StreamStatus finish() override { return http::StreamStatus::Ready; }
+        bool started() const override { return begun; }
+        int status = 0;
+        bool begun = false;
+    };
+
+    static void write_buffered(http::ResponseWriter& writer, const http::BufferedResponse& response) {
+        if (writer.start(response.status, response.headers, response.body.size()) != http::StreamStatus::Ready) return;
+        if (writer.write(response.body) != http::StreamStatus::Ready) return;
+        (void)writer.finish();
+    }
 
     static void nvr_check(const std::vector<std::uint8_t>& bytes) {
         try {
@@ -499,6 +609,9 @@ private:
         if (caps.env) arguments.emplace_back("--allow-env");
         if (options_.record_directory) arguments.push_back("--record-dir=" + options_.record_directory->string());
         arguments.push_back("--max-response-bytes=" + std::to_string(options_.limits.http.response_bytes));
+        if (options_.max_steps) arguments.push_back("--max-steps=" + std::to_string(*options_.max_steps));
+        if (options_.worker_tier) arguments.push_back("--tier=" + std::to_string(*options_.worker_tier));
+        if (options_.worker_jit) arguments.push_back("--jit=" + *options_.worker_jit);
         arguments.push_back(options_.image.string());
         std::vector<char*> argv;
         for (auto& argument : arguments) argv.push_back(argument.data());
@@ -521,6 +634,7 @@ private:
             std::lock_guard lock(pids_mutex_);
             live_.insert(pid);
         }
+        ++metrics_.starts;
         Worker worker{pid, std::make_unique<Channel>(pair[0], worker::PeerRole::Host, worker::server_identity(image_digest_))};
         worker::Hello hello;
         hello.role = worker::PeerRole::Host;
@@ -535,18 +649,28 @@ private:
         return worker;
     }
 
+    // A ready worker, or a new one. A ready worker whose channel is readable
+    // has ended (it sends nothing after its greeting) and is discarded.
     std::optional<Worker> take_worker() {
-        {
-            std::lock_guard lock(ready_mutex_);
-            if (!ready_.empty()) {
-                auto worker = std::move(ready_.front());
-                ready_.pop_front();
-                ready_changed_.notify_all();
-                return worker;
+        for (;;) {
+            std::optional<Worker> worker;
+            {
+                std::lock_guard lock(ready_mutex_);
+                if (!ready_.empty()) {
+                    worker = std::move(ready_.front());
+                    ready_.pop_front();
+                }
             }
+            ready_changed_.notify_all();
+            if (!worker) return spawn();
+            pollfd entry{worker->channel->descriptor(), POLLIN, 0};
+            if (::poll(&entry, 1, 0) == 0) return worker;
+            log(3, {}, "a ready worker had ended; discarding it");
+            ++metrics_.retried;
+            ::kill(worker->pid, SIGKILL);
+            worker->channel.reset();
+            hand_to_reaper(worker->pid, {}, false);
         }
-        ready_changed_.notify_all();
-        return spawn();
     }
 
     // Keeps S-2 greeted workers that have executed nothing.
@@ -569,60 +693,121 @@ private:
         }
     }
 
-    // Sends the assignment and the body, then reads the response, answering
-    // configuration calls, until Done, the deadline or the end of the channel.
-    Outcome exchange(Worker& worker, const neura::nvm::ServerRequest& request, std::string_view body,
-                     Clock::time_point deadline) {
+    // Sends the assignment, then the request body as the client sends it,
+    // then forwards the response to `writer` frame by frame, answering
+    // calls, until Done, the deadline or the end of the channel.
+    Outcome exchange(Worker& worker, const neura::nvm::ServerRequest& request, http::RequestBody* body,
+                     http::ResponseWriter& writer, Clock::time_point deadline) {
         Outcome outcome;
         auto& channel = *worker.channel;
+        const auto failed = [&] {
+            outcome.timed_out = channel.status() == Channel::Status::TimedOut;
+            return outcome;
+        };
         const auto assign = worker::encode_assign(request);
         if (channel.send(FrameKind::Assign, assign, deadline) != Channel::Status::Ok) {
-            outcome.timed_out = channel.status() == Channel::Status::TimedOut;
-            return outcome;
+            outcome.unassigned = channel.status() != Channel::Status::TimedOut;
+            return failed();
         }
-        for (std::string_view rest = body; !rest.empty();) {
-            const auto size = std::min(rest.size(), worker::max_body_chunk_bytes);
-            const std::vector<std::uint8_t> chunk(rest.begin(), rest.begin() + static_cast<std::ptrdiff_t>(size));
-            if (channel.send(FrameKind::BodyChunk, chunk, deadline) != Channel::Status::Ok) {
-                outcome.timed_out = channel.status() == Channel::Status::TimedOut;
+        // While the body streams, the worker's calls are answered as they
+        // arrive; its first response frame waits until the body has ended.
+        std::optional<worker::Frame> stashed;
+        // Answers the calls that have arrived; false when the channel ended.
+        const auto answer_ready_calls = [&] {
+            while (!stashed) {
+                auto frame = channel.receive_ready();
+                if (!frame) return channel.status() == Channel::Status::Ok;
+                if (frame->kind == FrameKind::Call) {
+                    if (channel.send(FrameKind::Return, answer_call(frame->body), deadline) != Channel::Status::Ok) {
+                        return false;
+                    }
+                    continue;
+                }
+                stashed = std::move(frame);
+                body->wake_on(-1);
+            }
+            return true;
+        };
+        const auto channel_readable = [&] {
+            pollfd entry{channel.descriptor(), POLLIN, 0};
+            return ::poll(&entry, 1, 0) > 0;
+        };
+        if (body) body->wake_on(channel.descriptor());
+        while (body) {
+            const auto piece = body->read();
+            if (piece.status == http::RequestBody::Status::End) break;
+            if (piece.status == http::RequestBody::Status::Woken) {
+                if (!answer_ready_calls()) return failed();
+                continue;
+            }
+            if (piece.status != http::RequestBody::Status::Data) {
+                outcome.body_failed = true;
                 return outcome;
             }
-            rest.remove_prefix(size);
+            for (auto rest = piece.data; !rest.empty();) {
+                const auto size = std::min(rest.size(), worker::max_body_chunk_bytes);
+                const auto* bytes = reinterpret_cast<const std::uint8_t*>(rest.data());
+                if (channel.send(FrameKind::BodyChunk, std::span(bytes, size), deadline) != Channel::Status::Ok) {
+                    return failed();
+                }
+                rest.remove_prefix(size);
+            }
+            // A client that keeps sending never lets read() wait, so calls are
+            // also answered between pieces.
+            if (!stashed && channel_readable() && !answer_ready_calls()) return failed();
         }
-        if (channel.send(FrameKind::BodyEnd, {}, deadline) != Channel::Status::Ok) {
-            outcome.timed_out = channel.status() == Channel::Status::TimedOut;
-            return outcome;
-        }
+        if (body) body->wake_on(-1);
+        if (channel.send(FrameKind::BodyEnd, {}, deadline) != Channel::Status::Ok) return failed();
+        bool started = false;
         for (;;) {
-            auto frame = channel.receive(deadline);
+            auto frame = stashed ? std::move(stashed) : channel.receive(deadline);
+            stashed.reset();
             if (!frame) {
-                outcome.timed_out = channel.status() == Channel::Status::TimedOut;
                 if (channel.status() == Channel::Status::Failed) {
                     log(4, request.request_id, "request worker broke the protocol");
                 }
-                return outcome;
+                return failed();
             }
             switch (frame->kind) {
             case FrameKind::Head: {
                 auto head = worker::decode_head(frame->body);
-                if (!head) return outcome;
-                outcome.status = head->status;
-                outcome.headers = std::move(head->headers);
-                break;
-            }
-            case FrameKind::BodyChunk:
-                if (outcome.body.size() + frame->body.size() > options_.limits.http.response_bytes) {
+                if (!head || started) return outcome;
+                if (head->body_length > static_cast<std::int64_t>(options_.limits.http.response_bytes)) {
                     outcome.too_large = true;
                     return outcome;
                 }
-                outcome.body.append(frame->body.begin(), frame->body.end());
-                break;
-            case FrameKind::Call:
-                if (channel.send(FrameKind::Return, answer_call(frame->body), deadline) != Channel::Status::Ok) {
+                std::vector<http::Header> fields;
+                fields.reserve(head->headers.size());
+                for (auto& [name, value] : head->headers) fields.push_back({std::move(name), std::move(value)});
+                const auto length = head->body_length >= 0
+                    ? std::optional<std::uint64_t>(static_cast<std::uint64_t>(head->body_length)) : std::nullopt;
+                started = true;
+                outcome.status = head->status;
+                if (writer.start(static_cast<int>(head->status), fields, length) != http::StreamStatus::Ready) {
+                    outcome.client_failed = true;
                     return outcome;
                 }
                 break;
+            }
+            case FrameKind::BodyChunk:
+                if (!started) return outcome;
+                if (writer.write(std::string_view(reinterpret_cast<const char*>(frame->body.data()),
+                                                  frame->body.size())) != http::StreamStatus::Ready) {
+                    outcome.client_failed = true;
+                    return outcome;
+                }
+                break;
+            case FrameKind::Call:
+                if (channel.send(FrameKind::Return, answer_call(frame->body), deadline) != Channel::Status::Ok) {
+                    return failed();
+                }
+                break;
             case FrameKind::Done:
+                if (!started) return outcome;
+                if (writer.finish() != http::StreamStatus::Ready) {
+                    outcome.client_failed = true;
+                    return outcome;
+                }
                 outcome.done = true;
                 return outcome;
             default:
@@ -631,8 +816,9 @@ private:
         }
     }
 
-    // A configuration lookup: the file and command-line values, overridden
-    // by the environment variable <prefix><key>.
+    // A call of the worker: operation 1, a configuration lookup (the file and
+    // command-line values, overridden by the environment variable
+    // <prefix><key>); operation 2, a metric.
     std::vector<std::uint8_t> answer_call(const std::vector<std::uint8_t>& body) {
         const auto get = [&](std::size_t at) {
             std::uint32_t value = 0;
@@ -646,7 +832,39 @@ private:
         };
         const std::uint32_t call = body.size() >= 4 ? get(0) : 0;
         put(call);
-        if (body.size() < 12 || get(4) != 1 || body.size() != 12 + std::size_t{get(8)}) {
+        const std::uint32_t operation = body.size() >= 8 ? get(4) : 0;
+        if (operation == metric_operation) {
+            // uint32 kind, int64 value, text name.
+            if (body.size() < 24 || body.size() != 24 + std::size_t{get(20)}) {
+                put(neura::nvm::host_error::invalid_input);
+                return out;
+            }
+            const auto kind = get(8);
+            std::uint64_t bits = 0;
+            for (int i = 0; i < 8; ++i) bits |= static_cast<std::uint64_t>(body[12 + i]) << (8 * i);
+            const auto value = static_cast<std::int64_t>(bits);
+            const std::string name(reinterpret_cast<const char*>(body.data()) + 24, get(20));
+            if (!neura::nvm::valid_metric_name(name) || (kind != 1 && kind != 2) || (kind == 1 && value < 0)) {
+                put(neura::nvm::host_error::invalid_input);
+                return out;
+            }
+            std::lock_guard lock(metrics_mutex_);
+            auto& entry = application_metrics_[name];
+            if (entry.kind != 0 && entry.kind != kind) {
+                put(neura::nvm::host_error::invalid_input);
+                return out;
+            }
+            if (application_metrics_.size() > max_application_metrics) {
+                application_metrics_.erase(name);
+                put(neura::nvm::host_error::too_large);
+                return out;
+            }
+            entry.kind = kind;
+            entry.value = kind == 1 ? entry.value + value : value;
+            put(0);
+            return out;
+        }
+        if (body.size() < 12 || operation != config_operation || body.size() != 12 + std::size_t{get(8)}) {
             put(neura::nvm::host_error::invalid_input);
             out.push_back(0);
             put(0);
@@ -667,6 +885,73 @@ private:
             for (const char c : *value) out.push_back(static_cast<std::uint8_t>(c));
         }
         return out;
+    }
+
+    void count_response(int status) {
+        const auto index = static_cast<std::size_t>(std::clamp(status / 100, 1, 5) - 1);
+        ++metrics_.responses[index];
+    }
+
+    // The Prometheus text exposition of the host's counters and the
+    // application's metrics.
+    std::string metrics_text() {
+        std::string text;
+        const auto add = [&](std::string_view name, std::string_view type, std::string_view help,
+                             const std::vector<std::pair<std::string, std::uint64_t>>& samples) {
+            text += "# HELP ";
+            text += name;
+            text += ' ';
+            text += help;
+            text += "\n# TYPE ";
+            text += name;
+            text += ' ';
+            text += type;
+            text += '\n';
+            for (const auto& [labels, value] : samples) {
+                text += name;
+                text += labels;
+                text += ' ';
+                text += std::to_string(value);
+                text += '\n';
+            }
+        };
+        std::vector<std::pair<std::string, std::uint64_t>> classes;
+        for (std::size_t i = 0; i < metrics_.responses.size(); ++i) {
+            classes.emplace_back("{class=\"" + std::to_string(i + 1) + "xx\"}", metrics_.responses[i].load());
+        }
+        add("neura_http_responses_total", "counter", "Responses by status class.", classes);
+        add("neura_http_rejected_total", "counter", "Requests answered 503 by admission (S-1, S-3) or the drain.",
+            {{"", metrics_.rejected.load()}});
+        add("neura_http_timeouts_total", "counter", "Requests past their deadline (S-8).", {{"", metrics_.timeouts.load()}});
+        add("neura_worker_starts_total", "counter", "Request workers started.", {{"", metrics_.starts.load()}});
+        add("neura_worker_abnormal_exits_total", "counter", "Workers that trapped, failed or were killed.",
+            {{"", metrics_.abnormal.load()}});
+        add("neura_worker_retries_total", "counter", "Requests given a new worker because the ready one had ended.",
+            {{"", metrics_.retried.load()}});
+        std::size_t running = 0;
+        std::size_t waiting = 0;
+        {
+            std::lock_guard lock(admission_mutex_);
+            running = running_;
+            waiting = waiting_;
+        }
+        std::size_t ready = 0;
+        {
+            std::lock_guard lock(ready_mutex_);
+            ready = ready_.size();
+        }
+        add("neura_http_in_flight", "gauge", "Requests being answered.", {{"", in_flight_.load()}});
+        add("neura_workers_running", "gauge", "Requests holding a worker slot (S-1).", {{"", running}});
+        add("neura_workers_ready", "gauge", "Started workers waiting for a request (S-2).", {{"", ready}});
+        add("neura_requests_waiting", "gauge", "Requests waiting for a worker (S-3).", {{"", waiting}});
+        add("neura_ready", "gauge", "1 after the startup check while not draining.",
+            {{"", ready_for_requests_.load() && !draining.load() ? 1u : 0u}});
+        std::lock_guard lock(metrics_mutex_);
+        for (const auto& [name, entry] : application_metrics_) {
+            text += "# TYPE " + name + (entry.kind == 1 ? " counter\n" : " gauge\n");
+            text += name + ' ' + std::to_string(entry.value) + '\n';
+        }
+        return text;
     }
 
     struct Exiting {
@@ -708,6 +993,7 @@ private:
                     std::lock_guard lock(pids_mutex_);
                     live_.erase(entry.pid);
                 }
+                if (done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0)) ++metrics_.abnormal;
                 if (done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0) && !entry.id.empty()) {
                     log(entry.answered ? 3 : 4, entry.id, "request worker ended abnormally",
                         {{"worker_exit", describe_exit(status)}});
@@ -747,6 +1033,26 @@ private:
     std::condition_variable reap_changed_;
     std::vector<Exiting> exiting_;
 
+    struct Metrics {
+        std::array<std::atomic<std::uint64_t>, 5> responses{};
+        std::atomic<std::uint64_t> rejected{0};
+        std::atomic<std::uint64_t> timeouts{0};
+        std::atomic<std::uint64_t> starts{0};
+        std::atomic<std::uint64_t> abnormal{0};
+        std::atomic<std::uint64_t> retried{0};
+    };
+    struct ApplicationMetric {
+        std::uint32_t kind = 0; // 1 counter, 2 gauge
+        std::int64_t value = 0;
+    };
+    static constexpr std::uint32_t config_operation = 1;
+    static constexpr std::uint32_t metric_operation = 2;
+    static constexpr std::size_t max_application_metrics = 1024;
+    Metrics metrics_;
+    std::mutex metrics_mutex_;
+    std::map<std::string, ApplicationMetric, std::less<>> application_metrics_;
+    std::atomic<bool> ready_for_requests_{false};
+
     std::mutex log_mutex_;
     std::jthread reaper_;
     std::jthread spawner_;
@@ -778,9 +1084,70 @@ struct Active {
     std::shared_ptr<std::atomic<bool>> finished;
 };
 
+// Serves the admin listener on its own thread until the drain ends the
+// process: one short connection thread each, outside worker admission.
+class AdminListener {
+public:
+    AdminListener(std::span<const http::ListenEndpoint> endpoints, Host& host) : host_(host) {
+        http::ListenerLimits limits;
+        limits.connections = 16;
+        limits.http.request_timeout = 5s;
+        limits.http.head_timeout = 5s;
+        listeners_.emplace(endpoints, limits);
+        thread_ = std::jthread([this](std::stop_token stop) { run(stop); });
+    }
+
+    std::span<const http::BoundEndpoint> endpoints() const { return listeners_->endpoints(); }
+
+private:
+    void run(std::stop_token stop) {
+        while (!stop.stop_requested()) {
+            http::AcceptResult accepted;
+            try {
+                accepted = listeners_->accept_until(http::ConnectionClock::now() + 200ms);
+            } catch (const std::exception&) {
+                continue;
+            }
+            if (accepted.status != http::AcceptStatus::Accepted) continue;
+            std::thread([this, connection = std::move(*accepted.connection)]() mutable {
+                const http::BufferedResponder respond = [this](const http::RequestHead& head, std::string_view) {
+                    return host_.admin(head);
+                };
+                try {
+                    (void)std::move(connection).serve(respond);
+                } catch (const std::exception&) {
+                }
+            }).detach();
+        }
+    }
+
+    Host& host_;
+    std::optional<http::ListenerSet> listeners_;
+    std::jthread thread_;
+};
+
+void print_endpoint(std::string_view what, const http::BoundEndpoint& endpoint) {
+    const bool v6 = endpoint.address.find(':') != std::string::npos;
+    std::cout << "neura-server-host: " << what << ' ' << (endpoint.tls ? "https" : "http") << "://" << (v6 ? "[" : "")
+              << endpoint.address << (v6 ? "]" : "") << ':' << endpoint.port << '\n';
+}
+
 int serve(HostOptions options, const char* argv0) {
     install_signals();
     auto host = std::make_unique<Host>(options, host_executable(argv0));
+    // The admin listener answers /livez, and /readyz with 503, while the
+    // startup check runs.
+    std::unique_ptr<AdminListener> admin;
+    if (!options.admin_endpoints.empty()) {
+        try {
+            admin = std::make_unique<AdminListener>(options.admin_endpoints, *host);
+        } catch (const std::exception& error) {
+            std::cerr << "neura-server-host: admin listener: " << error.what() << '\n';
+            return 1;
+        }
+        for (const auto& endpoint : admin->endpoints()) print_endpoint("admin on", endpoint);
+        std::cout.flush();
+    }
     if (options.startup_check && !host->check_startup()) {
         std::cerr << "neura-server-host: the startup check failed; not listening\n";
         return 1;
@@ -794,11 +1161,8 @@ int serve(HostOptions options, const char* argv0) {
         std::cerr << "neura-server-host: " << error.what() << '\n';
         return 1;
     }
-    for (const auto& endpoint : listeners->endpoints()) {
-        const bool v6 = endpoint.address.find(':') != std::string::npos;
-        std::cout << "neura-server-host: listening on " << (endpoint.tls ? "https" : "http") << "://"
-                  << (v6 ? "[" : "") << endpoint.address << (v6 ? "]" : "") << ':' << endpoint.port << '\n';
-    }
+    host->mark_ready();
+    for (const auto& endpoint : listeners->endpoints()) print_endpoint("listening on", endpoint);
     std::cout << "neura-server-host: ready" << std::endl;
 
     std::vector<Active> active;
@@ -827,9 +1191,11 @@ int serve(HostOptions options, const char* argv0) {
         std::string peer(connection.peer_address());
         const bool secure = connection.secure();
         active.push_back({std::jthread([raw, finished, peer, secure, connection = std::move(connection)]() mutable {
-                              const http::BufferedResponder respond =
-                                  [raw, &peer, secure](const http::RequestHead& head, std::string_view body) {
-                                      return raw->handle(head, body, peer, secure);
+                              const http::Responder respond =
+                                  [raw, &peer, secure](const http::RequestHead& head, http::RequestBody& body,
+                                                       http::ResponseWriter& writer,
+                                                       http::ConnectionClock::time_point deadline) {
+                                      raw->handle(head, body, writer, deadline, peer, secure);
                                   };
                               try {
                                   (void)std::move(connection).serve(respond);
@@ -879,6 +1245,12 @@ int worker_main(int argc, char** argv) {
             options.record_directory = std::string(arg.substr(13));
         } else if (arg.starts_with("--max-response-bytes=")) {
             options.response_bytes = std::stoull(std::string(arg.substr(21)));
+        } else if (arg.starts_with("--max-steps=")) {
+            options.max_steps = std::stoull(std::string(arg.substr(12)));
+        } else if (arg.starts_with("--tier=")) {
+            options.tier = static_cast<std::uint8_t>(std::stoul(std::string(arg.substr(7))));
+        } else if (arg.starts_with("--jit=")) {
+            options.jit = std::string(arg.substr(6));
         } else {
             options.image = arg;
         }
