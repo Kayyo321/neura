@@ -94,6 +94,19 @@ The scripts need Python 3 and Git, and use no packages outside the Python standa
 
 [`release.yml`](../.github/workflows/release.yml) runs for a `v*` tag, and by hand for a branch as a trial that publishes nothing. For each supported target it builds the server components from their pinned, checksum-verified sources (a tag caches only the source archives; a trial started by hand may reuse the components an earlier trial built on the same runner image), builds and tests the tagged commit with them, packs the three archives of the target (Neura-sdk, Neura-runtime, and the legacy archive for 0.2 clients), and runs the lifecycle checks of [`packaging/qualify.sh`](../packaging/qualify.sh) on them on a second runner, including the update from the published 0.2 releases with their own clients. Its publishing job is the only job in the repository with a token that can write. It runs in the protected `release` environment, after a maintainer approves it. The [release process](ReleaseProcess.md) describes each job and check.
 
+### Time limits
+
+Every test's CTest time limit is set for a developer machine with the x86-64 JIT. The CMake cache variable `NEURA_TEST_TIMEOUT_SCALE` (a whole number, 1 by default) multiplies each limit, including CTest's default of 1,500 seconds for a test without one, and is passed to each test in its environment. `release.yml` sets it per target in its `timeout-scale` matrix value: 3 on x86-64 Linux, 8 on arm64 Linux and both macOS targets, where pure-Neura code runs without the JIT on runners with 3 or 4 cores. The build job's limit is 360 minutes, the most a hosted runner allows. The longest tests carry a CTest `COST`, so `ctest --parallel` starts them first.
+
+### Tests that run on fewer targets
+
+| Test or case | Where it runs | Why, and where the same code is covered |
+| --- | --- | --- |
+| `server-sql-postgres` | Linux | The PostgreSQL servers it starts run in Docker, which the macOS runners lack. The provider is built into every archive, and qualification check 15 shows it is present on every target. |
+| `server-host`: `test_refused_assignment` | Linux | Its test hook refuses the Assign with `shutdown(SHUT_RD)`, which makes the host's send fail on Linux only; on macOS the send succeeds and the request ends at its deadline. The retry it checks is the host's own code, the same on every system, and runs on both Linux targets. |
+| `server-host`: `test_dead_ready_worker`, `test_zygote_restart`, `test_process_bound`, the zygote cases | Linux | They read `/proc` or use the worker zygote, which is Linux-only ([server host](runtime/ServerHost.md)). |
+| `service-*` suites, `native-*` | Linux | The runtime service suites read `/proc` and use `memfd_create`; macOS has no native launcher. |
+
 `scripts/check-repository-settings.py` is not part of Tier 1. It compares the repository's GitHub settings with the files in `.github/settings` and needs a signed-in `gh`; see [repository settings](RepositorySettings.md).
 
 ## Workflow rules

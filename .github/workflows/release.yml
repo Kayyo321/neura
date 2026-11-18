@@ -69,14 +69,18 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           REF_TYPE: ${{ github.ref_type }}
           REF_NAME: ${{ github.ref_name }}
+          VERSION: ${{ steps.plan.outputs.version }}
         run: |
           # A trial builds a -dev version, which sorts before every published
-          # candidate of the same version, so it has nothing to update from.
+          # candidate of the same version: it updates from the most recent
+          # release of an earlier version, so check 9 runs in a trial as it
+          # does for a tag whose previous release is of an earlier version.
           if [ "$REF_TYPE" = tag ]; then
             tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
               --jq "[.[].tagName | select(. != \"$REF_NAME\")][0] // \"\"")
           else
-            tag=""
+            tag=$(gh release list --repo "$GITHUB_REPOSITORY" --exclude-drafts --limit 20 --json tagName \
+              --jq "[.[].tagName | select(startswith(\"v$VERSION\") | not)][0] // \"\"")
           fi
           echo "previous release: ${tag:-none}"
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
@@ -85,19 +89,27 @@ jobs:
     name: Build and test (${{ matrix.triple }})
     needs: plan
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 90
+    # The longest a hosted runner allows. Without the x86-64 JIT (aarch64
+    # and macOS) the suite takes hours on the 3- and 4-core runners
+    # (docs/ContinuousIntegration.md, "Time limits").
+    timeout-minutes: 360
     strategy:
       fail-fast: false
       matrix:
+        # timeout-scale multiplies every test's time limit
+        # (NEURA_TEST_TIMEOUT_SCALE); the limits are set for a developer
+        # machine with the JIT.
         include:
           - triple: x86_64-linux-gnu
             runner: ubuntu-24.04
             minimum: 180
             exclude: "^$"
+            timeout-scale: 3
           - triple: aarch64-linux-gnu
             runner: ubuntu-24.04-arm
             minimum: 180
             exclude: "^$"
+            timeout-scale: 8
           # macOS has no native launcher, so the six native-* tests are not
           # registered there. Its runners have no Docker, which the
           # PostgreSQL provider's test starts its servers in: there it is
@@ -106,16 +118,19 @@ jobs:
             runner: macos-15
             minimum: 174
             exclude: "^server-sql-postgres$"
+            timeout-scale: 8
           - triple: x86_64-apple-darwin
             runner: macos-15-intel
             minimum: 174
             exclude: "^server-sql-postgres$"
+            timeout-scale: 8
     env:
       NEURA_LIBCLANG_REQUIRED: "1"
       NEURA_USERNS_REQUIRED: "1"
       PRERELEASE: ${{ needs.plan.outputs.prerelease }}
       FULL: ${{ needs.plan.outputs.full }}
       TRIPLE: ${{ matrix.triple }}
+      TIMEOUT_SCALE: ${{ matrix.timeout-scale }}
     steps:
       - name: Check out the repository and its submodule
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -214,6 +229,7 @@ jobs:
           "-DNEURA_LIBPQ_BUILD=$SERVER_COMPONENTS/postgresql"
           "-DNEURA_COMPONENT_LICENSES=$SERVER_COMPONENTS/licenses"
           "-DNEURA_SERVER_TEST_OPENSSL=$SERVER_COMPONENTS/openssl/bin/openssl"
+          "-DNEURA_TEST_TIMEOUT_SCALE=$TIMEOUT_SCALE"
 
       # The build must compile against and link the pinned libraries, never a
       # system or Homebrew OpenSSL: FindOpenSSL may take the headers from the
@@ -434,7 +450,7 @@ jobs:
     name: Qualify the archive (${{ matrix.triple }})
     needs: [plan, build]
     runs-on: ${{ matrix.runner }}
-    timeout-minutes: 20
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
