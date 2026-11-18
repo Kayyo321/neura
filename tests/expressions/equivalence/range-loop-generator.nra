@@ -1,0 +1,31 @@
+// A generator may yield inside a for-each over a range literal: the loop
+// builds no array that would have to survive the yield (the previous
+// compiler rejected it with E0477). Docs: docs/lang/CoreLanguage.md, Loops.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let values = iterator(count: int) -> int {
+    for (let index in 0 .. count) {
+        yield index * index;
+    }
+    for (let index in count ..= count + 2) {
+        if (index == count + 1) {
+            continue;
+        }
+        yield index;
+    }
+    for (let index in 10 .. 0 : -4) {
+        yield index;
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let text = "";
+        for (let value: int in values(4)) {
+            text = text + " " + value.to_string();
+        }
+        console.print_line(text);
+        return program.ExitCode.Ok;
+    };
+);
