@@ -345,10 +345,12 @@ let CharacterTests = module (
     };
 
     // The get_name and code_point_of results below were printed by OpenJDK 17.0.21's Character.getName and
-    // codePointOf (tests/stdlib/character/generators/JavaNames.java and the probes recorded in Stdlib.md
-    // section 8.5), except the code points Unicode 13.0 did not assign, which follow the same rule; the
-    // unicode_name results are those of DerivedName.txt 17.0.0, which ICU 77 and Python 3.13's unicodedata
-    // agree with where they have the code point. names-tests.nra covers every code point.
+    // codePointOf (generators/JavaCodePointOf.java prints every one), except two kinds that follow the rule
+    // without a JDK result: the names of code points Unicode 13.0 did not assign (U+18D1E, U+13460), and the
+    // Unicode names that only this code_point_of accepts (marked below; the JDK rejects them). Every text in
+    // test_code_point_of_rejects is rejected by the JDK too. The unicode_name results are those of
+    // DerivedName.txt 17.0.0, which ICU 77 and Python 3.13's unicodedata agree with where they have the code
+    // point. names-tests.nra covers every code point.
     let name = func(code_point: uint32) -> string => optional.value_or(character.get_name(code_point), "<none>");
     let unicode = func(code_point: uint32) -> string =>
         optional.value_or(character.unicode_name(code_point), "<none>");
@@ -397,7 +399,7 @@ let CharacterTests = module (
         test.assert(found("cro" + character.to_string(223) + " mark") == 10060);
         test.assert(found(character.to_string(64257) + "gure dash") == 8210);
         test.assert(found("LATIN CAPITAL LETTER " + character.to_string(201)) == 4294967295);
-        // The Unicode names, which Java's codePointOf does not accept for these code points.
+        // The Unicode names, which the JDK's codePointOf rejects for these code points.
         test.assert(found("CJK UNIFIED IDEOGRAPH-4E00") == 19968 && found("hangul syllable ga") == 44032);
         test.assert(found("HANGUL SYLLABLE GAG") == 44033 && found("HANGUL SYLLABLE A") == 50500);
         test.assert(found("TANGUT IDEOGRAPH-18D00") == 101632 && found("TANGUT IDEOGRAPH-17000") == 94208);
