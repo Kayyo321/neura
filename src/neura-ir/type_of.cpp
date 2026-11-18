@@ -208,6 +208,14 @@ private:
     // first, each tested with ClassIs; nil (no test holds) is kind Nil.
     IrNode class_chain(const IrNode& value, const IrType& type, const Span& span) const {
         auto result = tuple({Kind::Nil, "nil", "nil"}, span);
+        // A non-nil object of a class no candidate names (one the program
+        // never allocates itself) is described by the static type.
+        if (valid(type.symbol)) {
+            auto test = make(IrOp::ClassIs, span, bool_type);
+            test.type_arguments.push_back(type);
+            test.operands.push_back(value);
+            result = select(std::move(test), tuple(describe(type), span), std::move(result), span);
+        }
         const bool any_class = type.symbol == root_ || !valid(type.symbol);
         for (auto it = classes_.rbegin(); it != classes_.rend(); ++it) {
             if (!any_class && !dispatch_.derives(*it, type.symbol)) continue;

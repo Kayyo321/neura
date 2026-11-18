@@ -98,7 +98,7 @@ FEATURES = [
     "int-widths", "loops", "recursion", "mutual-recursion", "classes", "uninitialized-field", "destroy",
     "interfaces", "closures", "arrays", "lists", "index-fault", "text", "slice", "kernel", "floats", "nan",
     "tasks", "channels", "fault-path", "nan-payloads", "nan-stores", "nan-to-bits", "nan-negate-abs",
-    "sqrt-special", "tuples", "enums", "class-hooks", "any",
+    "sqrt-special", "tuples", "enums", "class-hooks", "any", "expressions",
 ]
 
 
@@ -1216,6 +1216,64 @@ let s${k}_run = func(size: int32, faults: int32) -> int64 {
     p.calls.append(k)
 
 
+def section_expressions(p, k):
+    """The 0.3.0 expression forms (docs/design/Expressions030.md): string chains and `..=` over runtime text,
+    escapes and a character literal, a stepped inclusive range, `not`, `is not`, a narrowing `if`, `!==`,
+    `typeof`, `return if` and `return ... unless`; on the fault path, a chain whose middle operand indexes past
+    its array, so the operands after it never run."""
+    p.feature("expressions", "text")
+    bit = p.fault("chain-operand")
+    low = p.between(0, 5)
+    p.declarations.append(fill("""let S${k}Base = class (
+    export let level: int32 = $low;
+);
+
+let S${k}Leaf = class : S${k}Base (
+    export let extra: int32 = $step;
+);
+
+let s${k}_grade = func(value: int32) -> string {
+    return "low" unless value > $mid;
+    return if (value > $top) -> "top"; else -> "mid";
+};
+
+let s${k}_level = func(item: S${k}Base) -> int32 {
+    if (item is leaf: S${k}Leaf && leaf.extra > 0) {
+        return leaf.level + leaf.extra;
+    }
+    return item is not S${k}Leaf ? item.level : -1;
+};
+
+let s${k}_run = func(size: int32, faults: int32) -> int64 {
+    let names: string[] = ["a\\u{e9}", "b", "c\\x41", "d\\'"];
+    let text = "s$k:";
+    let check: int64 = 0;
+    for (let i in $low ..= $high : $step) {
+        text ..= names[i % 4] .. "-" .. s${k}_grade(i + size);
+        check = mix(check, i as int64);
+    }
+    let marker: byte = '$letter';
+    let items: S${k}Base[list] = new();
+    items.append(new S${k}Base());
+    items.append(new S${k}Leaf());
+    for (let item in items) {
+        check = mix(check, s${k}_level(item) as int64);
+        text = text .. "|" .. typeof(item).name;
+    }
+    if (not (text.byte_length == 0) && typeof(items[0]) !== typeof(items[1])) {
+        check = mix(check, marker as int64);
+    }
+    if ($fault) {
+        text = text .. names[size + 4] .. s${k}_grade(size);
+    }
+    console.println("s$k {} {}", text, check);
+    return mix(check, text.byte_length as int64);
+};
+""", k=k, low=low, high=low + p.between(0, 9), step=p.between(1, 3), mid=p.between(2, 8), top=p.between(9, 14),
+                               letter=p.pick("ABCDEFGHXYZ"), fault=fault_test(bit)))
+    p.calls.append(k)
+
+
 def build_program(seed, *, class_hooks=True, any_values=True):
     """The program for a seed: its source text and the argument list to run it with."""
     p = Program(seed)
@@ -1280,6 +1338,15 @@ def build_program(seed, *, class_hooks=True, any_values=True):
         k = p.next_id
         p.next_id += 1
         section_any(p, k)
+        p.calls.remove(k)
+        p.calls.insert(0, k)
+    # The 0.3.0 expression forms, from their own random stream; an older oracle, which lacks them as it lacks
+    # `any`, omits them with --without-any-values.
+    p.random = random.Random(f"expressions {seed}")
+    if any_values and p.chance(50):
+        k = p.next_id
+        p.next_id += 1
+        section_expressions(p, k)
         p.calls.remove(k)
         p.calls.insert(0, k)
     imports = "\n".join(f"let {alias} = import:{IMPORTS[alias]};" for alias in p.imports)

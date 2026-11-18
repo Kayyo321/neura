@@ -1,0 +1,23 @@
+// typeof edge cases (docs/design/Expressions030.md, typeof): an anonymous
+// class held as its base, a nil interface value, a class constructed only in a
+// static initializer, and a singleton held as an interface and as class.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Named = interface ( export let label = func -> string; );
+let Base = class ( export let n: int = 0; );
+let Only = class : Base ( );
+let Holder = class (
+    export static let kept: Base = new Only();
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let anon: Base = new class : Base ( export let extra: int = 1; )();
+        let named: Named = nil;
+        console.print_line(typeof(anon).kind.to_string() + " " + typeof(anon).name);
+        console.print_line(typeof(named).kind.to_string() + " " + typeof(named).name);
+        console.print_line(typeof(Holder.kept).kind.to_string() + " " + typeof(Holder.kept).name);
+        return program.ExitCode.Ok;
+    };
+);
