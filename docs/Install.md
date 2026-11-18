@@ -110,6 +110,7 @@ A refusal changes nothing. Installing a different version beside an existing one
 <root>/neura-install.txt        the marker
 <root>/versions/<version>/      a normal prefix
     bin/neura
+    bin/neura-server-host                 on Linux and macOS (Server host, docs/runtime/ServerHost.md)
     share/neura/stdlib/...
     share/doc/neura/LICENSE
     lib/neura/launchers/<target>/...      where the platform has launchers

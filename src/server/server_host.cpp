@@ -56,7 +56,7 @@ using worker::FrameKind;
 constexpr std::string_view usage =
     "usage: neura-server-host [options] <image.nvr>\n"
     "\n"
-    "Serves a server image over HTTP/1.1 (docs/apps/Server.md). Each request runs in a fresh\n"
+    "Serves a server image over HTTP/1.1 (docs/runtime/ServerHost.md). Each request runs in a fresh\n"
     "worker process that executes the whole image once.\n"
     "\n"
     "  --listen <address>:<port>      plain HTTP listener (repeatable; port 0 asks for one)\n"

@@ -1,4 +1,4 @@
-// A server image: neura-server-host runs it once for each request (docs/apps/Server.md).
+// A server image: neura-server-host runs it once for each request (docs/runtime/ServerHost.md).
 //
 //   neura build examples/server/hello-server.nra -o hello-server.nvr
 //   neura-server-host --listen 127.0.0.1:8080 --config greeting=hello hello-server.nvr

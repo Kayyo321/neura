@@ -100,16 +100,16 @@ The host sends `Assign`, the request body as `BodyChunk` frames of at most 64 Ki
 
 | Rule | Status |
 | --- | --- |
-| Each request is executed by one worker: an operating-system process that loads the server image into a fresh NVM, runs the whole program from its startup, handles that one request, and exits, whether it answers, fails or traps. | proposed |
-| `context.serve(router)` takes the one request the host assigned, dispatches it, sends the response and returns. The program is written without a loop and holds nothing between requests. Data that must outlive a request is in the database. | proposed |
-| The host keeps `S-2` ready workers that have loaded and verified the image and bound its services and have executed nothing: no global initializer, no `static scope`, no entry. A request is given to a ready worker, or to a new one, up to `S-1`; beyond that it waits, up to `S-3`. | proposed |
-| A worker is never reused. A reuse would need a proved reset of the NVM, which 0.3.0 does not have; startup cost is measured (budget B-S1), not hidden. | proposed |
-| A worker is the runner (`src/runner/runner.cpp`) with a host registry whose services forward to the host over one inherited channel. It has no listener, no database connection and no file or network capability of its own beyond what the manifest grants the target. | proposed |
-| A trap ends that worker and every task in it. The host answers 500 with the framework envelope if no byte of the response was sent, and otherwise closes the connection. It revokes the worker's leases, logs the request identifier and the trap, and starts a ready worker for later requests. Other requests are unaffected. | proposed |
-| Nothing is replayed: not a request whose worker died, not a statement, not a commit. | proposed |
-| If the host itself fails, the application ends. Neither it nor `neurad` restarts it; a deployment's supervisor may, by its own policy. | proposed |
-| The host runs in the foreground: `neura run dist/server` or `neura-server-host dist/server`. Under `neura run --runtime=required` the whole tree is one application of the service. | proposed |
-| Before it accepts, the host runs one worker with a *startup check* request. `serve` runs as usual, the router answers the check without calling a route, and migrations and configuration are verified. Readiness is true only after it succeeds. | proposed |
+| Each request is executed by one worker: an operating-system process that loads the server image into a fresh NVM, runs the whole program from its startup, handles that one request, and exits, whether it answers, fails or traps. | implemented (`neura-server-host`) |
+| `context.serve(router)` takes the one request the host assigned, dispatches it, sends the response and returns. The program is written without a loop and holds nothing between requests. Data that must outlive a request is in the database. | implemented: `Context.serve` takes an `app.Handler`, which the router implements |
+| The host keeps `S-2` ready workers that have loaded and verified the image and bound its services and have executed nothing: no global initializer, no `static scope`, no entry. A request is given to a ready worker, or to a new one, up to `S-1`; beyond that it waits, up to `S-3`. | implemented |
+| A worker is never reused. A reuse would need a proved reset of the NVM, which 0.3.0 does not have; startup cost is measured (budget B-S1), not hidden. | implemented; B-S1 not yet measured |
+| A worker is the runner (`src/runner/runner.cpp`) with a host registry whose services forward to the host over one inherited channel. It has no listener, no database connection and no file or network capability of its own beyond what the manifest grants the target. | implemented: `neura-server-host --worker` over a socket pair |
+| A trap ends that worker and every task in it. The host answers 500 with the framework envelope if no byte of the response was sent, and otherwise closes the connection. It revokes the worker's leases, logs the request identifier and the trap, and starts a ready worker for later requests. Other requests are unaffected. | implemented: always 500, because responses are buffered; no leases exist yet |
+| Nothing is replayed: not a request whose worker died, not a statement, not a commit. | implemented |
+| If the host itself fails, the application ends. Neither it nor `neurad` restarts it; a deployment's supervisor may, by its own policy. | implemented |
+| The host runs in the foreground: `neura run dist/server` or `neura-server-host dist/server`. Under `neura run --runtime=required` the whole tree is one application of the service. | partly: `neura-server-host <image.nvr>`; bundles and `neura run dist/server` wait for the project build |
+| Before it accepts, the host runs one worker with a *startup check* request. `serve` runs as usual, the router answers the check without calling a route, and migrations and configuration are verified. Readiness is true only after it succeeds. | implemented, without migrations |
 
 ### Request-worker protocol
 
@@ -150,15 +150,15 @@ Calls may overlap. Each `Return` requires an outstanding `Call`, and call and re
 
 | Rule | Status |
 | --- | --- |
-| The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS. HTTP/2 and HTTP/3 are terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | proposed |
-| The host rejects before any worker: a head over `S-5` (431), more than 100 header fields (431), a body over `S-6` (413), both `Content-Length` and `Transfer-Encoding` (400), a transfer coding other than `chunked` (501), a folded header line, a missing or repeated `Host` (400), and a method it does not know (501). A head that takes more than 10 s is closed. | proposed |
-| Requests on one connection are served one at a time, in order. | proposed |
+| The host speaks HTTP/1.1 with keep-alive and chunked bodies, over TCP and over TLS. HTTP/2 and HTTP/3 are terminated by a reverse proxy the operator runs. There is no upgrade and no WebSocket in 0.3.0 (501). | implemented for HTTP/1.1 over TCP and TLS |
+| The host rejects before any worker: a head over `S-5` (431), more than 100 header fields (431), a body over `S-6` (413), both `Content-Length` and `Transfer-Encoding` (400), a transfer coding other than `chunked` (501), a folded header line, a missing or repeated `Host` (400), and a method it does not know (501). A head that takes more than 10 s is closed. | implemented (A4 decoder) and tested through the host |
+| Requests on one connection are served one at a time, in order. | implemented |
 | `http.Request` is immutable: `method`, `path`, `query`, `headers`, `client`, `scheme`, `request_id`, and the body, which is read whole within `S-6` (`body()`) or in chunks under a `using` owner (`open_body()`). | proposed |
 | `http.Response` is a status, headers and a body: bytes within `S-7`, or a stream written under a `using` owner with backpressure. `http.json(status, value, codec)` is the usual constructor. | proposed |
 | `http.Router`: `get`, `post`, `put`, `patch`, `delete` each take a path pattern (`/parts/{id}`; segments only) and a handler `func(http.Request, http.Params) -> Result<http.Response>`. `mount` adds a generated adapter's routes. Two routes with one method and equal patterns are an error of the startup check. | proposed |
 | Matching is exact on method and segment count; a literal segment beats a parameter. No match is 404; a path that matches under another method is 405 with `Allow`. `HEAD` is answered from the `GET` route without its body. | proposed |
 | Middleware is `func(http.Request, http.Next) -> Result<http.Response>`. `router.use` middlewares run in the order they were added, then those of the route, then the handler; responses return through them in reverse. | proposed |
-| A handler's `Err`, and a middleware's, becomes 500 with the framework envelope and no detail; the error is logged with the request identifier. A handler never sees another request's data. | proposed |
+| A handler's `Err`, and a middleware's, becomes 500 with the framework envelope and no detail; the error is logged with the request identifier. A handler never sees another request's data. | implemented in `Std.App.Context.serve` |
 | The client's deadline and disconnection cancel the request's scope. A handler that ignores cancellation is killed `S-12` grace seconds after `S-8`. | proposed |
 | `request.client` and `request.scheme` come from the connection. `Forwarded` and `X-Forwarded-*` are used only when the peer's address is in the manifest's `trusted_proxies`, which is empty by default. | proposed |
 | Authentication is `http.Authenticator`: `authenticate(http.Request) -> Result<Optional<http.Principal>>`, used by `http.require(authenticator)`. The library ships two: bearer tokens checked by a function the application supplies, and server-side sessions (`http.SqlSessions`: a 256-bit random identifier from the entropy service, stored in SQL, sent as a `Secure`, `HttpOnly`, `SameSite=Lax` cookie). It defines no cipher, signature or token format. | proposed |
@@ -175,9 +175,9 @@ A provider is trusted host code behind host services. The ABI is today's `nvm::H
 | A provider call that can wait is *overlapping* and *cancellable*: the task parks, other tasks run, and cancelling its scope completes it with `cancelled`. | proposed |
 | `PendingOperation` keeps `attempt`, `expire` and `deadline`. `WaitSource` has four forms: none (try at each check), POSIX descriptor and events, a level-signaled Windows handle, and a signal token from the embedding loop. `PendingRequests` waits with `poll` or `WaitForMultipleObjects` and offers a nonblocking poll to embedders. See [NVM](../runtime/NVM.md#host-services) for the signal and deadline rules. This is the only change to the interface. | implemented in the wait queue |
 | Completions are applied in the order they become ready, and by request sequence among those ready at one check, as the driver does today. | proposed |
-| Every request and completion is in the trace. Under replay no provider is constructed and none of its code runs. | proposed |
-| Error codes extend the existing table ([Stdlib](../lang/Stdlib.md#45-host-services)): 16 `TooLarge`, 17 `Busy`, 18 `OutcomeUnknown`, 19 `PoolExhausted`, 20 `VersionMismatch`, 21 `ConstraintViolation`, 22 `Serialization`. The library maps them to new `IoErrorKind` values of the same names. | proposed |
-| Capability groups are added to `nvm::Capabilities`, all denied by default: `ui`, `http_client`, `bridge`, `http_server`, `sql`, `app`, `desktop`. Which target kind may list which is the table of [the overview](Apps030.md#capability-groups). A target's manifest lists the groups and their scope (origins, pool names, operations); the host grants exactly those. A denied service binds and answers 14, as today. | proposed |
+| Every request and completion is in the trace. Under replay no provider is constructed and none of its code runs. | implemented: `--record-dir`, replayed by `neura run --replay` |
+| Error codes extend the existing table ([Stdlib](../lang/Stdlib.md#45-host-services)): 16 `TooLarge`, 17 `Busy`, 18 `OutcomeUnknown`, 19 `PoolExhausted`, 20 `VersionMismatch`, 21 `ConstraintViolation`, 22 `Serialization`. The library maps them to new `IoErrorKind` values of the same names. | codes defined; the library maps them to `Other` |
+| Capability groups are added to `nvm::Capabilities`, all denied by default: `ui`, `http_client`, `bridge`, `http_server`, `sql`, `app`, `desktop`. Which target kind may list which is the table of [the overview](Apps030.md#capability-groups). A target's manifest lists the groups and their scope (origins, pool names, operations); the host grants exactly those. A denied service binds and answers 14, as today. | partly: `http_server` and `app` |
 | Handles (connections, statements, transactions, bodies) are numbers valid for one execution, checked against a generation; a forged or stale one is `invalid_input`. | proposed |
 | `import:c` and dynamic native calls stay unusable together with tasks, as today. A provider is not a way around that rule. | proposed |
 
@@ -210,10 +210,10 @@ A service that waits is overlapping and cancellable.
 
 | Rule | Status |
 | --- | --- |
-| The host terminates TLS with OpenSSL 3.5, linked statically into the server target component. TLS 1.2 and 1.3 with the library's default cipher list; nothing older. | proposed |
-| Certificate and key are files named in the host's configuration, read at start and on `SIGHUP`. A missing or mismatched pair fails the start. | proposed |
+| The host terminates TLS with OpenSSL 3.5, linked statically into the server target component. TLS 1.2 and 1.3 with the library's default cipher list; nothing older. | implemented with the pinned 3.5.9 when built with `NEURA_ENABLE_SERVER_TLS` |
+| Certificate and key are files named in the host's configuration, read at start and on `SIGHUP`. A missing or mismatched pair fails the start. | implemented (`--cert`, `--key`, `SIGHUP`) |
 | An outgoing `https` fetch verifies the peer against the system trust store, or a bundle the configuration names. Verification cannot be turned off from Neura code. | proposed |
-| Plain HTTP and HTTPS can listen together, each on its own address. | proposed |
+| Plain HTTP and HTTPS can listen together, each on its own address. | implemented |
 
 The [server component lock](../../packaging/server-components.lock.toml) pins OpenSSL 3.5.9. It records the source archive digest, the upstream release-signing key and the bundled license. The server component links the static libraries. The standalone TLS tests also run with a system installation of OpenSSL 3.5.
 
@@ -253,8 +253,8 @@ The [server component lock](../../packaging/server-components.lock.toml) pins Op
 | Configuration is the bundle's defaults overlaid by a file the operator names and by environment variables with the prefix the manifest declares. It is validated in full before the host listens: unknown keys, wrong types, missing secrets and unreadable files each fail the start with every problem listed. | proposed |
 | A secret (a database password, a key file) exists only in the server host's configuration. `context.config` exposes the keys the manifest marks `expose`, and no secret can be marked so for a `web` target. | proposed |
 | The host answers `/livez` (the process is running) and `/readyz` (the startup check passed, pools are connected, it is not draining) itself, on an admin listener bound to loopback by default. `/metrics` on the same listener gives the counters of `neura.app.metric` and the host's own in the Prometheus text format. | proposed |
-| Logs are JSON lines on standard error: time, level, request identifier, `traceparent` if the request carried one, message, and named fields, within `S-13`. | proposed |
-| On `SIGTERM`, `SIGINT`, or a console close event, the host stops accepting, answers 503 to waiting requests, cancels no worker yet, and waits up to `S-12` for workers to finish; then it cancels the rest, waits the grace period, kills what remains, reports each, and exits. `context.on_shutdown` callbacks do not exist: a request sees only its own cancellation. | proposed |
+| Logs are JSON lines on standard error: time, level, request identifier, `traceparent` if the request carried one, message, and named fields, within `S-13`. | implemented, without `traceparent` |
+| On `SIGTERM`, `SIGINT`, or a console close event, the host stops accepting, answers 503 to waiting requests, cancels no worker yet, and waits up to `S-12` for workers to finish; then it cancels the rest, waits the grace period, kills what remains, reports each, and exits. `context.on_shutdown` callbacks do not exist: a request sees only its own cancellation. | partly: stops accepting, 503 for new requests, waits S-12, then kills; no cancel or grace step |
 | This drain is the host's own control event. `neurad stop` keeps its meaning of external termination. | proposed |
 
 ## Lowering and artifacts

@@ -170,6 +170,12 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Net.TcpListener`](Stdlib-Net-TcpListener) | [Contracts](Stdlib-Net-TcpListener#detailed-contracts) | [Declarations](Stdlib-Net-TcpListener#exported-declarations) |
 | [`Std.Net.TcpStream`](Stdlib-Net-TcpStream) | [Contracts](Stdlib-Net-TcpStream#detailed-contracts) | [Declarations](Stdlib-Net-TcpStream#exported-declarations) |
 
+### `Std.App`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.App`](Stdlib-App) | [Contracts](Stdlib-App#detailed-contracts) | [Declarations](Stdlib-App#exported-declarations) |
+
 ### `Std.Program`
 
 | Module | Detailed contracts | Exported declarations |

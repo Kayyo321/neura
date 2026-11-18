@@ -41,6 +41,7 @@
 - [NeuraIR optimization](IrOptimization)
 - [NeuraIR format](NirFormat)
 - [NVR format](NVR)
+- [Server host](Server-Host)
 - [Neura Virtual Machine](NVM)
 - [Kernels](Kernels)
 - [Wall-clock benchmarks](Benchmarks)

@@ -19,6 +19,11 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Added
 
+- `neura-server-host` serves a Neura server image over HTTP/1.1 and, in builds with `NEURA_ENABLE_SERVER_TLS`, HTTPS with the pinned OpenSSL 3.5.9. Each request runs in a fresh worker process that executes the whole image once; the host keeps ready workers, limits running and waiting requests (503 with `Retry-After`), kills a request past its deadline (504), answers 500 for a trap or a handler error, runs a startup check before it listens, logs JSON lines, drains on `SIGTERM` and reloads TLS on `SIGHUP` ([Server host](docs/runtime/ServerHost.md)).
+- `Std.App`: `run`, `Context` (`serve`, `config`, `log`), `Request`, `Response`, `Handler` and `handler_of`, the entry of a server image. Under `neura run` its services fail with `CapabilityDenied`.
+- Host services `neura.http.server.*`, `neura.app.config` and `neura.app.log` in the new `http_server` and `app` capability groups, granted only to the server host's workers; error codes 16 to 22 for the application providers.
+- Socket host services for the `Std.Net` library: UDP (`neura.net.udp.*`), Unix-domain streams and datagrams with the Linux abstract namespace (`neura.net.unix.*`), socket options (`neura.net.option.set`, `get`), system name resolution (`neura.net.resolve`) and `neura.net.send_file` ([NVM](docs/runtime/NVM.md#host-services)).
+
 - `E0449`: a tuple of more than 64 value words, which names the shape and its size ([E0449](docs/diagnostics/E0449.md)).
 - NVR 1.7 aggregate elements: the aggregate type (kind 11), whose elements are a fixed run of typed words, and the state operations `read-component` and `write-component`; arrays and lists of aggregates store their words inline, count one cell per word, are traced component by component, and run in tiers 2 and 3 ([format](docs/runtime/NVR.md#aggregate-elements-17)). This is a format and runtime capability; the compiler emits it for arrays and lists of tuples (see Changed).
 - NVR 1.7 storage regions add the `enter-region`, `release-region`, `region-object`, `region-collection`, `region-repeat` and `move-to-region` state operations. The runtime frees a region's entries at release or when its frame, task or run ends. `neura run --stats` reports `peak stack cells` for images that use regions. `--max-stack-cells` bounds this usage, with `stack limit exceeded` if the program crosses the limit. The runtime traps on released storage or invalid region operations. Tiers 2 and 3 use function-program helpers for region operations and release frame-owned regions on return. ([NVR format](docs/runtime/NVR.md#storage-regions-17))
@@ -38,6 +43,7 @@ A pull request that changes observable behavior adds a line to **Unreleased** un
 
 ### Changed
 
+- `neura.entropy.fill` reads only the operating system's cryptographic generator and fails with code 100 when it cannot, instead of falling back to `std::random_device`.
 - Primitive references borrow local or explicitly owned storage. A borrow of a local or value parameter cannot escape, and accessing an instance-field borrow after destroying its owner traps. Escaping capturing lambdas use `new func`. Escaping bound methods use `new bound(receiver.method)`.
 
 - Local arrays use lexical regions and count against the stack-cell limit. Fresh array results transfer to the caller. An array that escapes its owner produces E0451. Use an explicitly constructed list for storage that must outlive the activation.
