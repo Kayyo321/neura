@@ -29,11 +29,11 @@ export let Timer = module (
         /// @brief The outcome of a wait that a select committed. Used by the select statement.
         #[Hidden, Pure]
         export let wait_selected = func(code: uint32) -> TimerOutcome {
-            if (code == 0) {
-                return TimerOutcome.Fired;
-            }
-            return TimerOutcome.Cancelled;
+            return if (code == 0) -> TimerOutcome.Fired else -> TimerOutcome.Cancelled;
         };
+
+        /// @brief Names the timer.
+        export let.override to_string = func -> string => "Timer";
     );
 
     /// @brief A timer that fires once the duration has passed. Needs the clock capability.

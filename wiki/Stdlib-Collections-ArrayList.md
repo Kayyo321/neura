@@ -95,13 +95,13 @@ The following public declarations are taken from the module source; each links t
   Folds the element hashes in list order from 1, multiplying by 31 before each addition with 32-bit wraparound.
 - **ArrayList.ArrayList** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L360)
   Formats the list as `[a, b, c]`. The list prints "(this collection)" where its own text reaches it again.
-- **ArrayList** · [`export let create = func<T> -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L409)
+- **ArrayList** · [`export let create = func<T> -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L413)
   Creates an empty list with independent backing storage.
-- **ArrayList** · [`export let of = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L415)
+- **ArrayList** · [`export let of = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L419)
   Copies `items`.
-- **ArrayList** · [`export let filled = func<T>(count: int, value: T) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L427)
+- **ArrayList** · [`export let filled = func<T>(count: int, value: T) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L431)
   `count` copies of `value`. Traps with "invalid argument: negative count".
-- **ArrayList** · [`export let wrap = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L441)
+- **ArrayList** · [`export let wrap = func<T>(items: T[list]) -> ArrayList<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/array-list.nra#L445)
   Adopts `items` as the live backing list shared with the wrapper.
 <!-- END SOURCE API -->
 

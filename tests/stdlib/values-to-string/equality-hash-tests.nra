@@ -1,0 +1,59 @@
+let big_decimal = import:Std.Math.BigDecimal;
+let big_integer = import:Std.Math.BigInteger;
+let byte_buffer = import:Std.Io.ByteBuffer;
+let digest_crc32 = import:Std.Digest.Crc32;
+let digest_sha256 = import:Std.Digest.Sha256;
+let events = import:Std.Events.Event;
+let path = import:Std.Fs.Path;
+let regex = import:Std.Text.Regex;
+let test = import:Std.Test;
+let uuid = import:Std.Random.Uuid;
+
+let EqualityHashTests = module (
+    let agree = func(a: class, b: class) -> void {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+    };
+
+    export let test_math_values_agree = func() -> void {
+        agree(big_integer.of_int64(-12345), test.assert_ok(big_integer.parse("-12345")));
+        agree(big_decimal.of_int64(7), big_decimal.of_int64(7));
+        test.assert(not big_integer.of_int64(1).equals(big_integer.of_int64(2)));
+        test.assert(not big_integer.of_int64(1).equals(big_decimal.of_int64(1)));
+    };
+
+    export let test_path_and_uuid_agree = func() -> void {
+        agree(path.of("a/b"), path.of("a/b"));
+        test.assert(not path.of("a/b").equals(path.of("a/c")));
+        last text = "123e4567-e89b-42d3-a456-426614174000";
+        agree(test.assert_ok(uuid.parse(text)), test.assert_ok(uuid.parse(text)));
+        test.assert_equal_string(text, test.assert_ok(uuid.parse(text)).to_string());
+    };
+
+    export let test_regex_values_agree = func() -> void {
+        last a = test.assert_ok(regex.compile("a+b"));
+        last b = test.assert_ok(regex.compile("a+b"));
+        agree(a, b);
+        agree(new regex.RegexFlags(), new regex.RegexFlags());
+        test.assert(not a.equals(test.assert_ok(regex.compile("a+c"))));
+    };
+
+    export let test_byte_buffer_agrees = func() -> void {
+        last a = byte_buffer.create();
+        last b = byte_buffer.create();
+        agree(a, b);
+        test.assert(not a.equals(path.of("x")));
+    };
+
+    export let test_handles_have_names = func() -> void {
+        test.assert_equal_string("Crc32", digest_crc32.create().to_string());
+        test.assert_equal_string("Sha256", digest_sha256.create().to_string());
+        last event = new events.Event<int>();
+        test.assert_equal_string("Event(0 registrations)", event.to_string());
+        last token = event.subscribe(new func(value: int) {});
+        test.assert_equal_string("Event(1 registrations)", event.to_string());
+        test.assert_equal_string("Subscription(attached)", token.to_string());
+        test.assert_equal_string("EventView", event.view().to_string());
+    };
+);

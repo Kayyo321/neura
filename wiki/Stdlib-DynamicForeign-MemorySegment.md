@@ -97,14 +97,14 @@ The following public declarations are taken from the module source; each links t
   Sets every byte to `value`.
 - **MemorySegment.MemorySegment** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L190)
   Segments are equal when their addresses and sizes are. Reading the argument can run its class hook.
-- **MemorySegment.MemorySegment** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L200)
+- **MemorySegment.MemorySegment** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L199)
   Hashes the address and size. Tagged `#Pure`.
-- **MemorySegment.MemorySegment** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L204)
+- **MemorySegment.MemorySegment** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L203)
   `MemorySegment(address, size)` with the address in hexadecimal. Tagged `#Pure`.
-- **MemorySegment.MemorySegment** · [`export let check = func(offset: int64, size: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L209)
+- **MemorySegment.MemorySegment** · [`export let check = func(offset: int64, size: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L208)
   Traps unless the scope is open and `size` bytes at `offset` lie inside the segment. Tagged `#Pure`.
-- **MemorySegment** · [`export let null_segment = func -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L238)
+- **MemorySegment** · [`export let null_segment = func -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L237)
   The null address, with size 0.
-- **MemorySegment** · [`export let of_address = func(address: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L242)
+- **MemorySegment** · [`export let of_address = func(address: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L241)
   A segment of size 0 at a raw address in the global scope (Java's MemorySegment.ofAddress). Use reinterpret to give it a size.
 <!-- END SOURCE API -->

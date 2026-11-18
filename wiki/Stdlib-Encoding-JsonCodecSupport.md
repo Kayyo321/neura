@@ -18,60 +18,60 @@ The following public declarations are taken from the module source; each links t
 
 - **JsonCodecSupport** · [`export let parse = func(text: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L24)
   Parses codec input with a 16 MiB bound and retains repeated member names in order. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_bool = func(value: bool, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L57)
+- **JsonCodecSupport** · [`export let encode_bool = func(value: bool, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L55)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_bool = func(value: json.JsonValue, path: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L60)
+- **JsonCodecSupport** · [`export let decode_bool = func(value: json.JsonValue, path: string) -> Result<bool>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L58)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_string = func(value: string, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L66)
+- **JsonCodecSupport** · [`export let encode_string = func(value: string, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L64)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_string = func(value: json.JsonValue, path: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L69)
+- **JsonCodecSupport** · [`export let decode_string = func(value: json.JsonValue, path: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L67)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_int8 = func(value: int8, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L75)
+- **JsonCodecSupport** · [`export let encode_int8 = func(value: int8, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L73)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_int8 = func(value: json.JsonValue, path: string) -> Result<int8>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L78)
+- **JsonCodecSupport** · [`export let decode_int8 = func(value: json.JsonValue, path: string) -> Result<int8>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L76)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_int16 = func(value: int16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L84)
+- **JsonCodecSupport** · [`export let encode_int16 = func(value: int16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L82)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_int16 = func(value: json.JsonValue, path: string) -> Result<int16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L87)
+- **JsonCodecSupport** · [`export let decode_int16 = func(value: json.JsonValue, path: string) -> Result<int16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L85)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_int32 = func(value: int32, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L93)
+- **JsonCodecSupport** · [`export let encode_int32 = func(value: int32, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L91)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_int32 = func(value: json.JsonValue, path: string) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L96)
+- **JsonCodecSupport** · [`export let decode_int32 = func(value: json.JsonValue, path: string) -> Result<int32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L94)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_int64 = func(value: int64, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L102)
+- **JsonCodecSupport** · [`export let encode_int64 = func(value: int64, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L100)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_int64 = func(value: json.JsonValue, path: string) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L105)
+- **JsonCodecSupport** · [`export let decode_int64 = func(value: json.JsonValue, path: string) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L103)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_uint8 = func(value: uint8, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L111)
+- **JsonCodecSupport** · [`export let encode_uint8 = func(value: uint8, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L109)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_uint8 = func(value: json.JsonValue, path: string) -> Result<uint8>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L114)
+- **JsonCodecSupport** · [`export let decode_uint8 = func(value: json.JsonValue, path: string) -> Result<uint8>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L112)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_uint16 = func(value: uint16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L120)
+- **JsonCodecSupport** · [`export let encode_uint16 = func(value: uint16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L118)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_uint16 = func(value: json.JsonValue, path: string) -> Result<uint16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L123)
+- **JsonCodecSupport** · [`export let decode_uint16 = func(value: json.JsonValue, path: string) -> Result<uint16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L121)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_uint32 = func(value: uint32, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L129)
+- **JsonCodecSupport** · [`export let encode_uint32 = func(value: uint32, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L127)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_uint32 = func(value: json.JsonValue, path: string) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L132)
+- **JsonCodecSupport** · [`export let decode_uint32 = func(value: json.JsonValue, path: string) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L130)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_uint64 = func(value: uint64, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L138)
+- **JsonCodecSupport** · [`export let encode_uint64 = func(value: uint64, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L136)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_uint64 = func(value: json.JsonValue, path: string) -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L141)
+- **JsonCodecSupport** · [`export let decode_uint64 = func(value: json.JsonValue, path: string) -> Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L139)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_float16 = func(value: float16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L147)
+- **JsonCodecSupport** · [`export let encode_float16 = func(value: float16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L145)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_float16 = func(value: json.JsonValue, path: string) -> Result<float16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L155)
+- **JsonCodecSupport** · [`export let decode_float16 = func(value: json.JsonValue, path: string) -> Result<float16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L151)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_bfloat16 = func(value: bfloat16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L165)
+- **JsonCodecSupport** · [`export let encode_bfloat16 = func(value: bfloat16, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L159)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_bfloat16 = func(value: json.JsonValue, path: string) -> Result<bfloat16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L173)
+- **JsonCodecSupport** · [`export let decode_bfloat16 = func(value: json.JsonValue, path: string) -> Result<bfloat16>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L165)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_float32 = func(value: float32, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L183)
+- **JsonCodecSupport** · [`export let encode_float32 = func(value: float32, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L173)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_float32 = func(value: json.JsonValue, path: string) -> Result<float32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L191)
+- **JsonCodecSupport** · [`export let decode_float32 = func(value: json.JsonValue, path: string) -> Result<float32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L179)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let encode_float64 = func(value: float64, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L201)
+- **JsonCodecSupport** · [`export let encode_float64 = func(value: float64, path: string) -> Result<json.JsonValue>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L187)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **JsonCodecSupport** · [`export let decode_float64 = func(value: json.JsonValue, path: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L209)
+- **JsonCodecSupport** · [`export let decode_float64 = func(value: json.JsonValue, path: string) -> Result<float64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/encoding/json-codec-support.nra#L193)
   Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->

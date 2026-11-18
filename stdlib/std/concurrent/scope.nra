@@ -63,6 +63,9 @@ export let Scope = module (
             set_scope_deadline(id, at);
             return result.Result<Unit>.Ok(Unit.Value);
         };
+
+        /// @brief Names the scope and its identifier.
+        export let.override to_string = func -> string => "Scope(" .. id.to_string() .. ")";
     );
 
     let cancel_scope = func(scope: uint64) scheduler("scope.cancel");

@@ -49,10 +49,10 @@ export let FunctionDescriptor = module (
         /// @brief Descriptors with the same layouts are equal.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FunctionDescriptor)) {
+            if (other is not that: FunctionDescriptor) {
                 return false;
             }
-            return to_string() == (other as FunctionDescriptor).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief Hashes the text form.
@@ -66,7 +66,7 @@ export let FunctionDescriptor = module (
             for (let layout in arguments) {
                 text = text + layout.to_string();
             }
-            return text + ")" + match (result) {
+            return text .. ")" .. match (result) {
                 Optional.Some(layout) => layout.to_string(),
                 Optional.None => "v",
             };

@@ -1,3 +1,4 @@
+let hashing = import:Std.Core.Hash;
 /// @brief Multicore computation over isolated work (Concurrency.md section 12). A map means what calling the
 /// worker on each item in index order would return; more workers may change only wall time and peak process
 /// memory.
@@ -25,6 +26,22 @@ export let Parallel = module (
             max_steps = steps;
             max_heap_cells = heap_cells;
         };
+
+        /// @brief Limits are equal when both bounds are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ItemLimits) {
+                return false;
+            }
+            return max_steps == that.max_steps && max_heap_cells == that.max_heap_cells;
+        };
+
+        /// @brief Combines both bounds into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(17, max_steps.hash_code()), max_heap_cells.hash_code());
+
+        /// @brief Formats the limits with both bounds.
+        export let.override to_string = func -> string =>
+            "ItemLimits(" .. max_steps.to_string() .. " steps, " .. max_heap_cells.to_string() .. " heap cells)";
     );
 
     /// @brief Limits of the given steps and heap cells for each item.

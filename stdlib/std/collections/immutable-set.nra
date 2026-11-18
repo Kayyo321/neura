@@ -45,10 +45,9 @@ export let ImmutableSet = module (
         /// @brief Another ImmutableSet of the same size whose elements this set all
         /// contains.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ImmutableSet<T>)) {
+            if (other is not that: ImmutableSet<T>) {
                 return false;
             }
-            last that = other as ImmutableSet<T>;
             if (that.size() != elements.size()) {
                 return false;
             }
@@ -56,9 +55,7 @@ export let ImmutableSet = module (
             last count = items.length;
             let i = 0;
             while (i < count) {
-                if (!elements.contains(items[i])) {
-                    return false;
-                }
+                return false unless elements.contains(items[i]);
                 i += 1;
             }
             return true;

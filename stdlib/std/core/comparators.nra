@@ -26,10 +26,7 @@ export let Comparators = module (
         -> func(T, T) -> Ordering {
         return new func(a: T, b: T) -> Ordering {
             last order = first(a, b);
-            if (order != Ordering.Equal) {
-                return order;
-            }
-            return second(a, b);
+            return if (order != Ordering.Equal) -> order else -> second(a, b);
         };
     };
 );

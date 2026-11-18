@@ -111,10 +111,7 @@ export let Strings = module (
         if (order < 0) {
             return ordering.Ordering.Less;
         }
-        if (order > 0) {
-            return ordering.Ordering.Greater;
-        }
-        return ordering.Ordering.Equal;
+        return if (order > 0) -> ordering.Ordering.Greater else -> ordering.Ordering.Equal;
     };
 
     /// @brief Tests whether the string starts with the literal prefix.
@@ -429,10 +426,7 @@ export let Strings = module (
         if (lead < 224) {
             return 2;
         }
-        if (lead < 240) {
-            return 3;
-        }
-        return 4;
+        return if (lead < 240) -> 3 else -> 4;
     };
 
     /// @brief The first occurrence at or after `from`, searched in windows of the neura.text.index_of kernel
@@ -488,10 +482,7 @@ export let Strings = module (
             trap_with_message("invalid argument: pad is not one scalar value");
         }
         last missing = width - scalar_count(s);
-        if (missing < 0) {
-            return 0;
-        }
-        return missing;
+        return if (missing < 0) -> 0 else -> missing;
     };
 
     /// @brief Appends the requested number of copies of the pad text.
@@ -522,7 +513,7 @@ export let Strings = module (
     /// @brief Text from bytes this module built from whole characters.
     let text_of = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
-        if (!valid) {
+        if (not valid) {
             trap_with_message("invalid state: built text is not UTF-8");
         }
         return text;

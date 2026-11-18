@@ -13,6 +13,9 @@ export let Build = module (
     export let Builder = class (
         /// The slot evaluated last; each slot's `next` is the one evaluated before it.
         export let last_slot: storage.Slot = nil;
+
+        /// @brief Names the builder.
+        export let.override to_string = func -> string => "Builder";
     );
 
     #NotThreadSafe
@@ -23,12 +26,18 @@ export let Build = module (
         export let next: Item = nil;
 
         export let init = func(key: string, view: ui.View) => set;
+
+        /// @brief Names the item and its key.
+        export let.override to_string = func -> string => "Item(" .. key .. ")";
     );
 
     #NotThreadSafe
     export let Items = class (
         /// The last item in iteration order. Walk the items in order with `items_in_order`.
         export let last_item: Item = nil;
+
+        /// @brief Names the list.
+        export let.override to_string = func -> string => "Items";
     );
 
     export let begin = func -> Builder => new Builder();

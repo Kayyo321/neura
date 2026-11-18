@@ -1,3 +1,4 @@
+let hashing = import:Std.Core.Hash;
 let build = import:Std.Ui.Internal.Build;
 let channels = import:Std.Concurrent.Channel;
 let console = import:Std.Io.Console;
@@ -29,7 +30,7 @@ export let Ui = module (
         #Internal
         export let init = func(descriptor: string, fragment: uint32, last_slot: storage.Slot) => set;
 
-        export let.override to_string = func -> string => "View(fragment " + fragment.to_string() + ")";
+        export let.override to_string = func -> string => "View(fragment " .. fragment.to_string() .. ")";
     );
 
     /// @brief A URL checked for use in a template attribute.
@@ -40,6 +41,26 @@ export let Ui = module (
 
         #Internal
         export let init = func(text: string) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Url) {
+                return false;
+            }
+            return text == that.text;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, text.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "Url(text=" ..
+            text ..
+            ")";
     );
 
     /// @brief A numeric CSS custom property value and its unit.
@@ -52,6 +73,30 @@ export let Ui = module (
 
         #Internal
         export let init = func(value: float64, unit: string) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: CssValue) {
+                return false;
+            }
+            return value == that.value &&
+                unit == that.unit;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, value.hash_code());
+            code = hashing.combine(code, unit.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "CssValue(value=" ..
+            value.to_string() ..
+            ", unit=" ..
+            unit ..
+            ")";
     );
 
     /// @brief A stylesheet that the build wrote beside the image, named by the SHA-256 of its text.
@@ -67,15 +112,15 @@ export let Ui = module (
         export let init = func(digest: string) => set;
 
         /// @brief The bundle path of the file, `styles/<digest>.css`.
-        export let path = func -> string => "styles/" + digest + ".css";
+        export let path = func -> string => "styles/" .. digest .. ".css";
 
-        export let.override to_string = func -> string => "Stylesheet(" + digest + ")";
+        export let.override to_string = func -> string => "Stylesheet(" .. digest .. ")";
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Stylesheet)) {
+            if (other is not that: Stylesheet) {
                 return false;
             }
-            return (other as Stylesheet).digest == digest;
+            return that.digest == digest;
         };
 
         export let.override hash_code = func -> uint32 => digest.hash_code();
@@ -94,15 +139,15 @@ export let Ui = module (
         export let init = func(digest: string) => set;
 
         /// @brief The bundle path of the file, `styles/<digest>.css`.
-        export let path = func -> string => "styles/" + digest + ".css";
+        export let path = func -> string => "styles/" .. digest .. ".css";
 
-        export let.override to_string = func -> string => "StyleModule(" + digest + ")";
+        export let.override to_string = func -> string => "StyleModule(" .. digest .. ")";
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is StyleModule)) {
+            if (other is not that: StyleModule) {
                 return false;
             }
-            return (other as StyleModule).digest == digest;
+            return that.digest == digest;
         };
 
         export let.override hash_code = func -> uint32 => digest.hash_code();
@@ -140,10 +185,9 @@ export let Ui = module (
 
         /// @brief Another diagnostic with equal fields.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Diagnostic)) {
+            if (other is not that: Diagnostic) {
                 return false;
             }
-            last that = other as Diagnostic;
             return kind == that.kind && message == that.message && slot == that.slot && index == that.index
                 && key == that.key;
         };
@@ -228,6 +272,38 @@ export let Ui = module (
 
         #Internal
         export let init = func(alt: bool, ctrl: bool, meta: bool, shift: bool) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Modifiers) {
+                return false;
+            }
+            return alt == that.alt &&
+                ctrl == that.ctrl &&
+                meta == that.meta &&
+                shift == that.shift;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, alt.hash_code());
+            code = hashing.combine(code, ctrl.hash_code());
+            code = hashing.combine(code, meta.hash_code());
+            code = hashing.combine(code, shift.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "Modifiers(alt=" ..
+            alt.to_string() ..
+            ", ctrl=" ..
+            ctrl.to_string() ..
+            ", meta=" ..
+            meta.to_string() ..
+            ", shift=" ..
+            shift.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -240,6 +316,42 @@ export let Ui = module (
 
         #Internal
         export let init = func(button: uint8, x: float64, y: float64, modifiers: Modifiers, detail: int32) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ClickEvent) {
+                return false;
+            }
+            return button == that.button &&
+                x == that.x &&
+                y == that.y &&
+                modifiers.equals(that.modifiers) &&
+                detail == that.detail;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, button.hash_code());
+            code = hashing.combine(code, x.hash_code());
+            code = hashing.combine(code, y.hash_code());
+            code = hashing.combine(code, modifiers.hash_code());
+            code = hashing.combine(code, detail.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "ClickEvent(button=" ..
+            button.to_string() ..
+            ", x=" ..
+            x.to_string() ..
+            ", y=" ..
+            y.to_string() ..
+            ", modifiers=" ..
+            modifiers.to_string() ..
+            ", detail=" ..
+            detail.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -250,6 +362,34 @@ export let Ui = module (
 
         #Internal
         export let init = func(value: string, checked: bool, composing: bool) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: InputEvent) {
+                return false;
+            }
+            return value == that.value &&
+                checked == that.checked &&
+                composing == that.composing;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, value.hash_code());
+            code = hashing.combine(code, checked.hash_code());
+            code = hashing.combine(code, composing.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "InputEvent(value=" ..
+            value ..
+            ", checked=" ..
+            checked.to_string() ..
+            ", composing=" ..
+            composing.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -259,6 +399,30 @@ export let Ui = module (
 
         #Internal
         export let init = func(value: string, checked: bool) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ChangeEvent) {
+                return false;
+            }
+            return value == that.value &&
+                checked == that.checked;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, value.hash_code());
+            code = hashing.combine(code, checked.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "ChangeEvent(value=" ..
+            value ..
+            ", checked=" ..
+            checked.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -267,6 +431,26 @@ export let Ui = module (
 
         #Internal
         export let init = func(submitter: string) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: SubmitEvent) {
+                return false;
+            }
+            return submitter == that.submitter;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, submitter.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "SubmitEvent(submitter=" ..
+            submitter ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -278,10 +462,50 @@ export let Ui = module (
 
         #Internal
         export let init = func(key: string, code: string, modifiers: Modifiers, repeat: bool) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: KeyEvent) {
+                return false;
+            }
+            return key == that.key &&
+                code == that.code &&
+                modifiers.equals(that.modifiers) &&
+                repeat == that.repeat;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, key.hash_code());
+            code = hashing.combine(code, code.hash_code());
+            code = hashing.combine(code, modifiers.hash_code());
+            code = hashing.combine(code, repeat.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "KeyEvent(key=" ..
+            key ..
+            ", code=" ..
+            code ..
+            ", modifiers=" ..
+            modifiers.to_string() ..
+            ", repeat=" ..
+            repeat.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
     export let FocusEvent = class (
+        /// @brief Every focus event is equal: it carries no data.
+        export let.override equals = func(other: class) -> bool => other is FocusEvent;
+
+        /// @brief A constant, as every focus event is equal.
+        export let.override hash_code = func -> uint32 => 41;
+
+        /// @brief Names the event.
+        export let.override to_string = func -> string => "FocusEvent";
     );
 
     #[Final, Immutable]
@@ -294,6 +518,42 @@ export let Ui = module (
 
         #Internal
         export let init = func(x: float64, y: float64, button: uint8, kind: PointerKind, modifiers: Modifiers) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: PointerEvent) {
+                return false;
+            }
+            return x == that.x &&
+                y == that.y &&
+                button == that.button &&
+                kind == that.kind &&
+                modifiers.equals(that.modifiers);
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, x.hash_code());
+            code = hashing.combine(code, y.hash_code());
+            code = hashing.combine(code, button.hash_code());
+            code = hashing.combine(code, kind.hash_code());
+            code = hashing.combine(code, modifiers.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "PointerEvent(x=" ..
+            x.to_string() ..
+            ", y=" ..
+            y.to_string() ..
+            ", button=" ..
+            button.to_string() ..
+            ", kind=" ..
+            kind.to_string() ..
+            ", modifiers=" ..
+            modifiers.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -303,6 +563,30 @@ export let Ui = module (
 
         #Internal
         export let init = func(top: float64, left: float64) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ScrollEvent) {
+                return false;
+            }
+            return top == that.top &&
+                left == that.left;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, top.hash_code());
+            code = hashing.combine(code, left.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "ScrollEvent(top=" ..
+            top.to_string() ..
+            ", left=" ..
+            left.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -311,6 +595,26 @@ export let Ui = module (
 
         #Internal
         export let init = func(open: bool) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ToggleEvent) {
+                return false;
+            }
+            return open == that.open;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, open.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "ToggleEvent(open=" ..
+            open.to_string() ..
+            ")";
     );
 
     #[Final, Immutable]
@@ -319,6 +623,26 @@ export let Ui = module (
 
         #Internal
         export let init = func(return_value: string) => set;
+
+        /// @brief Equal when every component is equal.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: CloseEvent) {
+                return false;
+            }
+            return return_value == that.return_value;
+        };
+
+        /// @brief Combines every component into a hash that agrees with equals.
+        export let.override hash_code = func -> uint32 {
+            let code = hashing.combine(17, return_value.hash_code());
+            return code;
+        };
+
+        /// @brief Formats the component values.
+        export let.override to_string = func -> string =>
+            "CloseEvent(return_value=" ..
+            return_value ..
+            ")";
     );
 
     // State, components and roots (docs/apps/Components.md).
@@ -354,7 +678,7 @@ export let Ui = module (
         export let init = func(handle: Subscription, listener: func(T) -> void) => set;
 
         /// @brief `Subscriber(` and its subscription `)`.
-        export let.override to_string = func -> string => "Subscriber(" + handle.to_string() + ")";
+        export let.override to_string = func -> string => "Subscriber(" .. handle.to_string() .. ")";
     );
 
     /// @brief One value of a deeply immutable type, observed by subscribers in one task.
@@ -460,7 +784,7 @@ export let Ui = module (
         };
 
         /// @brief `State(` and the value's text `)`.
-        export let.override to_string = func -> string => "State(" + value.to_string() + ")";
+        export let.override to_string = func -> string => "State(" .. value.to_string() .. ")";
     );
 
     /// @brief A state holding `initial` whose updates notify only when `same(old, new)` is false. `same` is retained.
@@ -576,9 +900,9 @@ export let Ui = module (
         /// @brief `Component(generation N, mounted)` or `Component(generation N)`.
         export let.override to_string = func -> string {
             if (owner != nil) {
-                return "Component(generation " + generation_count.to_string() + ", mounted)";
+                return "Component(generation " .. generation_count.to_string() .. ", mounted)";
             }
-            return "Component(generation " + generation_count.to_string() + ")";
+            return "Component(generation " .. generation_count.to_string() .. ")";
         };
     );
 
@@ -613,7 +937,7 @@ export let Ui = module (
         export let init = func(component: Component, view: View) => set;
 
         /// @brief `Rendered(` the component `)`.
-        export let.override to_string = func -> string => "Rendered(" + component.to_string() + ")";
+        export let.override to_string = func -> string => "Rendered(" .. component.to_string() .. ")";
     );
 
     /// @brief The renders of one turn, parents before children, sent to the host as one request. A host that
@@ -630,7 +954,7 @@ export let Ui = module (
 
         /// @brief `Commit(` the sequence number and the number of renders `)`.
         export let.override to_string = func -> string =>
-            "Commit(" + sequence.to_string() + ", " + rendered.length.to_string() + " renders)";
+            "Commit(" .. sequence.to_string() .. ", " .. rendered.length.to_string() .. " renders)";
     );
 
     /// @brief The services a root needs from the document or window that shows it. The web, desktop
@@ -665,15 +989,14 @@ export let Ui = module (
 
         /// @brief Every count, by name.
         export let.override to_string = func -> string =>
-            "nodes " + nodes.to_string() + ", listeners " + listeners.to_string() + ", templates "
-            + templates.to_string() + ", queued " + queued.to_string();
+            "nodes " .. nodes.to_string() .. ", listeners " .. listeners.to_string() .. ", templates "
+            .. templates.to_string() .. ", queued " .. queued.to_string();
 
         /// @brief Other stats with equal counts.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is HostStats)) {
+            if (other is not that: HostStats) {
                 return false;
             }
-            last that = other as HostStats;
             return nodes == that.nodes && listeners == that.listeners && templates == that.templates
                 && queued == that.queued;
         };
@@ -699,9 +1022,9 @@ export let Ui = module (
         /// @brief `QueuedEvent(` the listener, or the overflow count `)`.
         export let.override to_string = func -> string {
             if (overflow > 0) {
-                return "QueuedEvent(overflow " + overflow.to_string() + ")";
+                return "QueuedEvent(overflow " .. overflow.to_string() .. ")";
             }
-            return "QueuedEvent(listener " + listener.to_string() + ")";
+            return "QueuedEvent(listener " .. listener.to_string() .. ")";
         };
     );
 
@@ -717,7 +1040,7 @@ export let Ui = module (
         export let init = func(ticket: uint64) => set;
 
         /// @brief `Launch(` the ticket `)`.
-        export let.override to_string = func -> string => "Launch(" + ticket.to_string() + ")";
+        export let.override to_string = func -> string => "Launch(" .. ticket.to_string() .. ")";
     );
 
     /// One command run registered with a root.
@@ -735,7 +1058,7 @@ export let Ui = module (
 
         /// Asks the run to cancel, once.
         export let stop = func {
-            if (!stopped) {
+            if (not stopped) {
                 stopped = true;
                 last request = cancel;
                 request();
@@ -743,7 +1066,7 @@ export let Ui = module (
         };
 
         /// @brief `Ticket(` the id `)`.
-        export let.override to_string = func -> string => "Ticket(" + id.to_string() + ")";
+        export let.override to_string = func -> string => "Ticket(" .. id.to_string() .. ")";
     );
 
     /// What one turn's renders changed in the component tree, so that a refused commit can undo it.
@@ -788,8 +1111,8 @@ export let Ui = module (
 
         /// @brief `Journal(` the numbers of renders, mounts and unmounts `)`.
         export let.override to_string = func -> string =>
-            "Journal(" + nodes.length.to_string() + " renders, " + attached.length.to_string() + " mounted, "
-            + removed.length.to_string() + " unmounted)";
+            "Journal(" .. nodes.length.to_string() .. " renders, " .. attached.length.to_string() .. " mounted, "
+            .. removed.length.to_string() .. " unmounted)";
     );
 
     /// @brief Counts that show what a root holds and has done.
@@ -810,16 +1133,16 @@ export let Ui = module (
 
         /// @brief Every count, by name.
         export let.override to_string = func -> string =>
-            "components " + components.to_string() + ", subscriptions " + subscriptions.to_string() + ", queued "
-            + queued.to_string() + ", turns " + turns.to_string() + ", renders " + renders.to_string() + ", commits "
-            + commits.to_string() + ", dropped " + dropped.to_string() + ", discarded " + discarded.to_string();
+            "components " .. components.to_string() .. ", subscriptions " .. subscriptions.to_string() .. ", queued "
+            .. queued.to_string() .. ", turns " .. turns.to_string() .. ", renders " .. renders.to_string() .. ", commits "
+            .. commits.to_string() .. ", dropped " .. dropped.to_string() .. ", discarded " .. discarded.to_string();
 
         /// @brief Other stats with equal counts.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RootStats)) {
+            if (other is not that: RootStats) {
                 return false;
             }
-            return to_string() == (other as RootStats).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the counts' text.
@@ -873,7 +1196,7 @@ export let Ui = module (
             instance.handle = handle;
             instance.top = top;
             failure_handler = new func(failure: RenderFailure) {
-                console.print_line("neura.ui: render failure: " + describe_failure(failure));
+                console.print_line("neura.ui: render failure: " .. describe_failure(failure));
             };
             overflow_handler = new func(event: RootEvent) {};
         };
@@ -967,11 +1290,11 @@ export let Ui = module (
             if (closed || faulted) {
                 return false;
             }
-            if (queue.length == 0 && !host.wait(instance)) {
+            if (queue.length == 0 && not host.wait(instance)) {
                 return false;
             }
             if (queue.length == 0) {
-                return !closed;
+                return not closed;
             }
             last event = queue[0];
             queue.remove_at(0);
@@ -994,7 +1317,7 @@ export let Ui = module (
                     resynchronized = new;
                 }
                 flush();
-                return !closed;
+                return not closed;
             }
             if (event.target != nil && (event.target.owner != instance || event.target.generation() != event.generation)) {
                 discarded_total += 1;
@@ -1003,7 +1326,7 @@ export let Ui = module (
             last deliver = event.deliver;
             deliver();
             flush();
-            return !closed && !faulted;
+            return not closed && not faulted;
         };
 
         /// @brief Runs turns until the root is closed or faulted, or the host has no more events. A root
@@ -1014,7 +1337,7 @@ export let Ui = module (
                 if (launches.length > 0) {
                     trap_with_message("a command needs Std.Ui.Commands.run(root)");
                 }
-                if (!turn()) {
+                if (not turn()) {
                     return;
                 }
             }
@@ -1078,7 +1401,7 @@ export let Ui = module (
             tickets = new;
             for (let i = 0; i < remaining.length; i++) {
                 last finish = remaining[i].finish;
-                if (!finish(remaining[i].id)) {
+                if (not finish(remaining[i].id)) {
                     stale_total += 1;
                 }
             }
@@ -1247,7 +1570,7 @@ export let Ui = module (
             }
             turn_total += 1;
             last finish = ticket.finish;
-            if (!finish(id)) {
+            if (not finish(id)) {
                 stale_total += 1;
             }
             flush();
@@ -1317,12 +1640,12 @@ export let Ui = module (
             // A component invalidated while the turn rendered, after it had rendered, renders in a further commit
             // of the same turn; at most four, so that a render that keeps invalidating cannot hold the root.
             let again = 0;
-            while (invalidated_while_rendering && again < 4 && !closed && !faulted) {
+            while (invalidated_while_rendering && again < 4 && not closed && not faulted) {
                 again += 1;
                 commit_renders();
             }
             invalidated_while_rendering = false;
-            if (pending_focus != "" && !closed && !faulted) {
+            if (pending_focus != "" && not closed && not faulted) {
                 last element = pending_focus;
                 pending_focus = "";
                 if (host is FocusHost) {
@@ -1343,7 +1666,7 @@ export let Ui = module (
             // At most four further passes, so that a render that keeps asking cannot hold the root. A component
             // rendered twice commits its last view only.
             let passes = 0;
-            while (render_before_commit && passes < 4 && !closed) {
+            while (render_before_commit && passes < 4 && not closed) {
                 render_before_commit = false;
                 passes += 1;
                 render_tree(top, rendered, journal);
@@ -1407,13 +1730,13 @@ export let Ui = module (
                 children_of(view, found);
                 for (let i = 0; i < node.children.length; i++) {
                     last old = node.children[i];
-                    if (!contains_component(found, old)) {
+                    if (not contains_component(found, old)) {
                         journal.removed.append(old);
                     }
                 }
                 for (let i = 0; i < found.length; i++) {
                     last child = found[i];
-                    if (!contains_component(node.children, child)) {
+                    if (not contains_component(node.children, child)) {
                         if (child.owner == nil) {
                             child.attach_to(instance);
                             journal.attached.append(child);
@@ -1433,14 +1756,14 @@ export let Ui = module (
 
         /// @brief `Root(handle N)` with its state.
         export let.override to_string = func -> string {
-            let text = "Root(handle " + handle.to_string();
+            let text = "Root(handle " .. handle.to_string();
             if (closed) {
-                text = text + ", closed";
+                text ..= ", closed";
             }
             if (faulted) {
-                text = text + ", faulted";
+                text ..= ", faulted";
             }
-            return text + ")";
+            return text .. ")";
         };
     );
 
@@ -1472,8 +1795,8 @@ export let Ui = module (
     };
 
     let describe_failure = func(failure: RenderFailure) -> string => match (failure) {
-        RenderFailure.Invalid(diagnostic) => "invalid commit: " + diagnostic.to_string(),
-        RenderFailure.Fault(problem) => "host fault: " + error.message(problem),
+        RenderFailure.Invalid(diagnostic) => "invalid commit: " .. diagnostic.to_string(),
+        RenderFailure.Fault(problem) => "host fault: " .. error.message(problem),
     };
 
     // Commands and the optional host services (docs/apps/Components.md#commands).

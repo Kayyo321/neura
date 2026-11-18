@@ -111,6 +111,9 @@ export let BufferedReader = module (
         /// @brief Creates the error for EOF before an exact byte count is available.
         let unexpected_end = func -> errors.Error =>
             bytes.io(errors.IoErrorKind.UnexpectedEnd, "unexpected end of stream", "");
+
+        /// @brief Names the reader and its buffer capacity.
+        export let.override to_string = func -> string => "BufferedReader(capacity " .. capacity.to_string() .. ")";
     );
 
     /// @brief A reader holding up to 8,192 bytes.

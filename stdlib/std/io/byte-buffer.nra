@@ -38,10 +38,9 @@ export let ByteBuffer = module (
         /// the buffer's equality or hash.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ByteBuffer)) {
+            if (other is not buffer: ByteBuffer) {
                 return false;
             }
-            last buffer = other as ByteBuffer;
             return data === buffer.data;
         };
 

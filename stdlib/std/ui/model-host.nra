@@ -29,7 +29,7 @@ export let ModelHost = module (
         export let init = func(listener: uint64, target: ui.Component, coalesce: bool, deliver: func() -> void) => set;
 
         /// @brief `Step(listener N)`.
-        export let.override to_string = func -> string => "Step(listener " + listener.to_string() + ")";
+        export let.override to_string = func -> string => "Step(listener " .. listener.to_string() .. ")";
     );
 
     /// @brief The steps posted by one `wait`.
@@ -40,7 +40,7 @@ export let ModelHost = module (
         export let barrier: bool = false;
 
         /// @brief `Batch(` the number of steps `)`.
-        export let.override to_string = func -> string => "Batch(" + steps.length.to_string() + " steps)";
+        export let.override to_string = func -> string => "Batch(" .. steps.length.to_string() .. " steps)";
     );
 
     /// @brief A host whose document is memory and whose events are scripted.
@@ -192,10 +192,10 @@ export let ModelHost = module (
             let text = "";
             for (let i = 0; i < entries.length; i++) {
                 if (i > 0) {
-                    text = text + " ";
+                    text ..= " ";
                 }
                 if (i == position) {
-                    text = text + "[" + entries[i] + "]";
+                    text ..= "[" .. entries[i] .. "]";
                 } else {
                     text = text + entries[i];
                 }
@@ -226,7 +226,7 @@ export let ModelHost = module (
                 }
                 position = next;
             }
-            log.append("navigation to " + entries[position]);
+            log.append("navigation to " .. entries[position]);
             root.post_navigation(entries[position]);
         };
 
@@ -253,27 +253,24 @@ export let ModelHost = module (
         export let push_location = func(path: string) -> string {
             ensure_history();
             push_entry(path);
-            log.append("push " + path);
+            log.append("push " .. path);
             return entries[position];
         };
 
         export let replace_location = func(path: string) -> string {
             ensure_history();
             entries[position] = path;
-            log.append("replace " + path);
+            log.append("replace " .. path);
             return path;
         };
 
         export let link = func(path: string) -> string {
-            if (hash_routing) {
-                return "#" + path;
-            }
-            return path;
+            return if (hash_routing) -> "#" .. path else -> path;
         };
 
         export let focus = func(root: uint64, element_id: string) -> bool {
             focused = element_id;
-            log.append("focus #" + element_id + " on root " + root.to_string());
+            log.append("focus #" .. element_id .. " on root " .. root.to_string());
             return true;
         };
 
@@ -321,14 +318,14 @@ export let ModelHost = module (
             for (let i = 0; i < targets.length; i++) {
                 if (open_roots[i]) {
                     if (targets[i] == target) {
-                        log.append("open " + target + ": refused, the target has a root");
+                        log.append("open " .. target .. ": refused, the target has a root");
                         return result.Result<uint64>.Err(error.custom("ui.target", "the target already has a root"));
                     }
                     live += 1;
                 }
             }
             if (live >= root_limit) {
-                log.append("open " + target + ": refused, too many roots");
+                log.append("open " .. target .. ": refused, too many roots");
                 return result.Result<uint64>.Err(error.custom("ui.roots", "too many live roots"));
             }
             // A closed root's handle is reused, so mount and unmount cycles do not grow the host.
@@ -351,7 +348,7 @@ export let ModelHost = module (
             }
             last handle = (index + 1) as uint64;
             if (logging) {
-                log.append("open " + target + ": root " + handle.to_string());
+                log.append("open " .. target .. ": root " .. handle.to_string());
             }
             return result.Result<uint64>.Ok(handle);
         };
@@ -359,17 +356,17 @@ export let ModelHost = module (
         export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome> {
             let line = "";
             if (logging) {
-                line = "commit " + batch.sequence.to_string() + " on root " + root.to_string() + ": "
-                    + batch.rendered.length.to_string() + (batch.rendered.length == 1 ? " render" : " renders");
+                line = "commit " .. batch.sequence.to_string() .. " on root " .. root.to_string() .. ": "
+                    .. batch.rendered.length.to_string() .. (batch.rendered.length == 1 ? " render" : " renders");
             }
             if (fail_next) {
                 fail_next = false;
-                log.append(line + ", host failure");
+                log.append(line .. ", host failure");
                 return result.Result<ui.RenderOutcome>.Err(error.custom("ui.host", "the host failed while applying"));
             }
             if (invalid_next) {
                 invalid_next = false;
-                log.append(line + ", refused");
+                log.append(line .. ", refused");
                 last diagnostic = new ui.Diagnostic(invalid_kind, "refused by the model host", 0, -1, "");
                 return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(diagnostic));
             }
@@ -377,12 +374,12 @@ export let ModelHost = module (
                 last reconciler = reconcilers[(root as int) - 1];
                 last plan = reconciler.prepare_turn(batch.top, batch.rendered);
                 if (plan.diagnostic != nil) {
-                    log.append(line + ", invalid: " + plan.diagnostic.message);
+                    log.append(line .. ", invalid: " .. plan.diagnostic.message);
                     return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Invalid(plan.diagnostic));
                 }
-                log.append(line + ", " + plan.operations.length.to_string() + " operations");
+                log.append(line .. ", " .. plan.operations.length.to_string() .. " operations");
                 for (let operation in plan.operations) {
-                    log.append("  " + operation.to_string());
+                    log.append("  " .. operation.to_string());
                 }
                 reconciler.accept(plan);
                 return result.Result<ui.RenderOutcome>.Ok(ui.RenderOutcome.Committed);
@@ -408,7 +405,7 @@ export let ModelHost = module (
 
         export let stats = func(root: uint64) -> ui.HostStats {
             last index = (root as int) - 1;
-            if (index < 0 || index >= open_roots.length || !open_roots[index] || index >= reconcilers.length) {
+            if (index < 0 || index >= open_roots.length || not open_roots[index] || index >= reconcilers.length) {
                 return new ui.HostStats(0, 0, 0, 0);
             }
             last reconciler = reconcilers[index];
@@ -427,7 +424,7 @@ export let ModelHost = module (
         };
 
         export let resynchronize = func(root: ui.Root) {
-            log.append("resynchronize root " + root.host_handle().to_string());
+            log.append("resynchronize root " .. root.host_handle().to_string());
             last batch = resync;
             resync = new;
             post_all(root, batch);
@@ -437,7 +434,7 @@ export let ModelHost = module (
             if (reconciling && (root as int) <= reconcilers.length) {
                 reconcilers[(root as int) - 1].reset();
             }
-            log.append("reset root " + root.to_string());
+            log.append("reset root " .. root.to_string());
         };
 
         export let close = func(root: uint64) {
@@ -446,7 +443,7 @@ export let ModelHost = module (
                 reconcilers[(root as int) - 1] = new reconcile.Reconciler();
             }
             if (logging) {
-                log.append("close root " + root.to_string());
+                log.append("close root " .. root.to_string());
             }
         };
 
@@ -456,13 +453,13 @@ export let ModelHost = module (
                 if (step.is_special) {
                     last special = step.special;
                     special(root);
-                } else if (!root.post(step.listener, step.target, step.coalesce, step.deliver)) {
+                } else if (not root.post(step.listener, step.target, step.coalesce, step.deliver)) {
                     refused += 1;
                 }
             }
         };
 
         /// @brief `ModelHost(` the number of roots opened `)`.
-        export let.override to_string = func -> string => "ModelHost(" + targets.length.to_string() + " roots)";
+        export let.override to_string = func -> string => "ModelHost(" .. targets.length.to_string() .. " roots)";
     );
 );

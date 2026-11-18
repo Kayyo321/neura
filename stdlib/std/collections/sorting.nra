@@ -60,7 +60,7 @@ export let Sorting = module (
                 right_end = count;
             }
             let copy_only = middle == right_end;
-            if (!copy_only) {
+            if (not copy_only) {
                 // A pair that is already in order is copied without merging.
                 last order = c(source[source_start + middle - 1], source[source_start + middle]);
                 if (items.version != version) {
@@ -132,7 +132,7 @@ export let Sorting = module (
             } else {
                 merge_pass<T>(items, start, buffer, 0, count, width, c, items, version);
             }
-            in_buffer = !in_buffer;
+            in_buffer = not in_buffer;
             if (width > count / 2) {
                 width = count;
             } else {

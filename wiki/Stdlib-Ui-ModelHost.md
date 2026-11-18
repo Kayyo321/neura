@@ -63,26 +63,26 @@ The following public declarations are taken from the module source; each links t
 - **ModelHost.Host** · [`export let push_location = func(path: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L253)
 - **ModelHost.Host** · [`export let replace_location = func(path: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L260)
 - **ModelHost.Host** · [`export let link = func(path: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L267)
-- **ModelHost.Host** · [`export let focus = func(root: uint64, element_id: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L274)
-- **ModelHost.Host** · [`export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L280)
-- **ModelHost.Host** · [`export let stop_logging = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L297)
+- **ModelHost.Host** · [`export let focus = func(root: uint64, element_id: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L271)
+- **ModelHost.Host** · [`export let wait_with = func(root: ui.Root, completions: channels.Receiver<uint64>) -> ui.Wake`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L277)
+- **ModelHost.Host** · [`export let stop_logging = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L294)
   Stops recording the lines of opens, commits that the host neither refuses nor reconciles, and closes, which a long measurement such as budget B-W9 does not read: building each line copies text byte by byte and dominated the cost of a turn. Other requests are still recorded.
-- **ModelHost.Host** · [`export let clear_log = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L302)
+- **ModelHost.Host** · [`export let clear_log = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L299)
   Forgets the recorded lines.
-- **ModelHost.Host** · [`export let fail_next_commit = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L309)
+- **ModelHost.Host** · [`export let fail_next_commit = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L306)
   Makes the next commit fail as a host failure while applying.
-- **ModelHost.Host** · [`export let refuse_next_commit = func(kind: ui.DiagnosticKind)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L314)
+- **ModelHost.Host** · [`export let refuse_next_commit = func(kind: ui.DiagnosticKind)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L311)
   Makes the next commit be refused with a diagnostic of `kind`.
-- **ModelHost.Host** · [`export let open = func(target: string) -> result.Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L319)
-- **ModelHost.Host** · [`export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L359)
-- **ModelHost.Host** · [`export let dispatch_click = func(root: ui.Root, handler: uint64, event: ui.ClickEvent) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L398)
+- **ModelHost.Host** · [`export let open = func(target: string) -> result.Result<uint64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L316)
+- **ModelHost.Host** · [`export let commit = func(root: uint64, batch: ui.Commit) -> result.Result<ui.RenderOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L356)
+- **ModelHost.Host** · [`export let dispatch_click = func(root: ui.Root, handler: uint64, event: ui.ClickEvent) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L395)
   Delivers `event` to the listener `handler` of the reconciled tree of `root`, through the root's queue, as the browser host does. False when no mounted listener has that handler.
-- **ModelHost.Host** · [`export let stats = func(root: uint64) -> ui.HostStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L409)
-- **ModelHost.Host** · [`export let wait = func(root: ui.Root) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L419)
-- **ModelHost.Host** · [`export let resynchronize = func(root: ui.Root)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L429)
-- **ModelHost.Host** · [`export let reset = func(root: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L436)
-- **ModelHost.Host** · [`export let close = func(root: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L443)
-- **ModelHost.Host** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L466)
+- **ModelHost.Host** · [`export let stats = func(root: uint64) -> ui.HostStats`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L406)
+- **ModelHost.Host** · [`export let wait = func(root: ui.Root) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L416)
+- **ModelHost.Host** · [`export let resynchronize = func(root: ui.Root)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L426)
+- **ModelHost.Host** · [`export let reset = func(root: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L433)
+- **ModelHost.Host** · [`export let close = func(root: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L440)
+- **ModelHost.Host** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/model-host.nra#L463)
   `ModelHost(` the number of roots opened `)`.
 <!-- END SOURCE API -->
 

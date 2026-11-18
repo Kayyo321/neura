@@ -23,11 +23,13 @@ The following public declarations are taken from the module source; each links t
   Initializes the reader with a byte source and an empty buffer.
 - **Utf8Reader.Utf8Reader** · [`export let read_scalar = func -> result.Result<Optional<uint32>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L30)
   The next Unicode scalar value; None at the end of the stream. An invalid or truncated sequence fails with InvalidData; the bytes before the offending byte are consumed and that byte is not. Tagged `#NoDiscard`.
-- **Utf8Reader.Utf8Reader** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L92)
+- **Utf8Reader.Utf8Reader** · [`export let read_line = func -> result.Result<Optional<string>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L88)
   The next line without its LF or a CR before it; None at the end of the stream. A final line without an LF is returned. Invalid UTF-8 fails with InvalidData and consumes the line. Tagged `#NoDiscard`.
-- **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L121)
+- **Utf8Reader.Utf8Reader** · [`export let read_to_end = func -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L117)
   The rest of the stream as text. Tagged `#NoDiscard`.
-- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L184)
+- **Utf8Reader.Utf8Reader** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L174)
+  Names the reader.
+- **Utf8Reader** · [`export let create = func(source: func(int) -> result.Result<uint8[list]>) -> Utf8Reader`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/io/utf8-reader.nra#L179)
   Creates a UTF-8 reader over the supplied byte source. Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

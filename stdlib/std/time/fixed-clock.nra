@@ -53,6 +53,9 @@ export let FixedClock = module (
             current = current.plus(span);
             elapsed = elapsed.plus(span);
         };
+
+        /// @brief Names the clock and its current reading.
+        export let.override to_string = func -> string => "FixedClock(" .. current.to_string() .. ")";
     );
 
     /// @brief Creates a clock starting at the supplied instant.

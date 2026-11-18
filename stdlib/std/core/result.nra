@@ -36,7 +36,7 @@ export let Result = module (
                 return value;
             },
             Result.Err(failure) => {
-                trap_with_message(detail + ": " + error.message(failure));
+                trap_with_message(detail .. ": " .. error.message(failure));
             },
         }
     };
@@ -102,7 +102,7 @@ export let Result = module (
 
     /// @brief Formats the success value or the error with its variant name.
     export let to_string = func<T>(r: Result<T>) -> string => match (r) {
-        Result.Ok(value) => "Ok(" + value.to_string() + ")",
-        Result.Err(failure) => "Err(" + error.message(failure) + ")",
+        Result.Ok(value) => "Ok(" .. value.to_string() .. ")",
+        Result.Err(failure) => "Err(" .. error.message(failure) .. ")",
     };
 );

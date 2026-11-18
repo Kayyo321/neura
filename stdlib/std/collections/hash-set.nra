@@ -133,7 +133,7 @@ export let HashSet = module (
             last length = live.length;
             let entry = 0;
             while (entry < length) {
-                if (live[entry] && !other.contains(elements[entry])) {
+                if (live[entry] && not other.contains(elements[entry])) {
                     return false;
                 }
                 entry += 1;
@@ -195,10 +195,9 @@ export let HashSet = module (
         /// @brief Another HashSet of the same size whose elements this set all
         /// contains.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is HashSet<T>)) {
+            if (other is not that: HashSet<T>) {
                 return false;
             }
-            last that = other as HashSet<T>;
             if (that.size() != core.count) {
                 return false;
             }
@@ -206,9 +205,7 @@ export let HashSet = module (
             last count = items.length;
             let i = 0;
             while (i < count) {
-                if (!contains(items[i])) {
-                    return false;
-                }
+                return false unless contains(items[i]);
                 i += 1;
             }
             return true;
@@ -238,7 +235,7 @@ export let HashSet = module (
             printing = true;
             last text = to_list().to_string();
             printing = false;
-            return "{" + text.slice(1, text.byte_length - 1) + "}";
+            return "{" .. text.slice(1, text.byte_length - 1) .. "}";
         };
 
         /// @brief Creates an empty set with the same hash and equality functions.
@@ -376,7 +373,7 @@ export let HashSet = module (
                 trap_with_message("collection modified during iteration");
             }
             last live = core.live;
-            while (position < live.length && !live[position]) {
+            while (position < live.length && not live[position]) {
                 position += 1;
             }
             return position < live.length;
@@ -384,13 +381,16 @@ export let HashSet = module (
 
         /// @brief Returns the next element and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> T {
-            if (!has_next()) {
+            if (not has_next()) {
                 trap_with_message("no such element");
             }
             last value = source[position];
             position += 1;
             return value;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string => "HashSetIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty set using `equals` and `hash_code` for its elements.

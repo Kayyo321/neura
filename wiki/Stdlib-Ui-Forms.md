@@ -29,74 +29,74 @@ The following public declarations are taken from the module source; each links t
   `FieldState(` the draft, and `touched` and the message when they apply `)`.
 - **Forms.FieldState** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L40)
   Another state with equal fields.
-- **Forms.FieldState** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L49)
+- **Forms.FieldState** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L48)
   Combines the hashes of the fields.
-- **Forms** · [`export let Validated = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L54)
+- **Forms** · [`export let Validated = interface`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L53)
   What a form needs from each of its fields, whatever its value type.
-- **Forms** · [`export let Field = class<T> implements Validated`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L67)
+- **Forms** · [`export let Field = class<T> implements Validated`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L66)
   One input: an element `id`, a label, the draft in a `ui.State<FieldState>`, and `parse`, which turns the draft into a `T` or an error whose message the field shows. `parse` runs on every change of the draft and must not keep state. Tagged `#Final`, `#NotThreadSafe`.
-- **Forms.Field** · [`export last state: ui.State<FieldState>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L73)
+- **Forms.Field** · [`export last state: ui.State<FieldState>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L72)
   The field's state, which its control renders.
-- **Forms.Field** · [`export let init = func(id: string, label: string, initial: string, parse: func(string) -> result.Result<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L77)
+- **Forms.Field** · [`export let init = func(id: string, label: string, initial: string, parse: func(string) -> result.Result<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L76)
   A field whose element has the `id` `id` (letters, digits, `-` and `_`), labelled `label`, starting with the draft `initial`. `parse` is retained.
-- **Forms.Field** · [`export let element_id = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L87)
-- **Forms.Field** · [`export let label = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L90)
+- **Forms.Field** · [`export let element_id = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L86)
+- **Forms.Field** · [`export let label = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L89)
   The label text.
-- **Forms.Field** · [`export let draft = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L93)
+- **Forms.Field** · [`export let draft = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L92)
   The current draft.
-- **Forms.Field** · [`export let set_draft = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L96)
+- **Forms.Field** · [`export let set_draft = func(text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L95)
   Replaces the draft, as typing does; the field keeps whether it was touched.
-- **Forms.Field** · [`export let touch = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L101)
+- **Forms.Field** · [`export let touch = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L100)
   Marks the field touched, as leaving it does, so that it shows its error.
-- **Forms.Field** · [`export let value = func -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L108)
+- **Forms.Field** · [`export let value = func -> result.Result<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L107)
   The draft parsed: `Ok` with the value, or the parse error.
-- **Forms.Field** · [`export let validate = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L113)
-- **Forms.Field** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L118)
-- **Forms.Field** · [`export let on_input = func -> func(ui.InputEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L123)
+- **Forms.Field** · [`export let validate = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L112)
+- **Forms.Field** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L117)
+- **Forms.Field** · [`export let on_input = func -> func(ui.InputEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L122)
   A handler for the element's `input` event: it sets the draft to the element's value.
-- **Forms.Field** · [`export let on_change = func -> func(ui.ChangeEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L131)
+- **Forms.Field** · [`export let on_change = func -> func(ui.ChangeEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L130)
   A handler for the element's `change` event (a `select`): it sets the draft and touches the field.
-- **Forms.Field** · [`export let on_blur = func -> func(ui.FocusEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L140)
+- **Forms.Field** · [`export let on_blur = func -> func(ui.FocusEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L139)
   A handler for the element's `blur` event: it touches the field.
-- **Forms.Field** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L160)
+- **Forms.Field** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L159)
   `Field(` the id and the state `)`.
-- **Forms** · [`export let FormState = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L166)
+- **Forms** · [`export let FormState = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L165)
   What a form has done: the submits attempted, those that were valid, and the `id` of the first invalid field of the last attempt (empty when it was valid or none was made). Tagged `#Final`, `#Immutable`.
-- **Forms.FormState** · [`export last attempts: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L167)
-- **Forms.FormState** · [`export last submitted: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L168)
-- **Forms.FormState** · [`export last first_invalid: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L169)
-- **Forms.FormState** · [`export let init = func(attempts: int32, submitted: int32, first_invalid: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L172)
-- **Forms.FormState** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L175)
+- **Forms.FormState** · [`export last attempts: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L166)
+- **Forms.FormState** · [`export last submitted: int32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L167)
+- **Forms.FormState** · [`export last first_invalid: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L168)
+- **Forms.FormState** · [`export let init = func(attempts: int32, submitted: int32, first_invalid: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L171)
+- **Forms.FormState** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L174)
   `FormState(` the counts and the first invalid field `)`.
-- **Forms.FormState** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L180)
+- **Forms.FormState** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L179)
   Another state with equal fields.
-- **Forms.FormState** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L189)
+- **Forms.FormState** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L187)
   Combines the hashes of the fields.
-- **Forms** · [`export let Form = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L197)
+- **Forms** · [`export let Form = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L195)
   Fields that are submitted together. `submit` validates every field, so each shows its error, and either calls the submit action or asks the root of the form's component to focus the first invalid field after the turn's commit. Tagged `#Final`, `#NotThreadSafe`.
-- **Forms.Form** · [`export last state: ui.State<FormState> = new ui.State<FormState>(new FormState(0, 0, ""))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L201)
+- **Forms.Form** · [`export last state: ui.State<FormState> = new ui.State<FormState>(new FormState(0, 0, ""))`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L199)
   What the form has done.
-- **Forms.Form** · [`export let add = func(field: Validated)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L204)
+- **Forms.Form** · [`export let add = func(field: Validated)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L202)
   Adds a field, after the ones added before; the first invalid field in this order gets the focus.
-- **Forms.Form** · [`export let bind = func(component: ui.Component)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L209)
+- **Forms.Form** · [`export let bind = func(component: ui.Component)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L207)
   The component whose root moves the focus. `Std.Ui.Controls.form` binds it.
-- **Forms.Form** · [`export let submit = func(action: func() -> void) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L216)
+- **Forms.Form** · [`export let submit = func(action: func() -> void) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L214)
   Validates every field. When all are valid it records a submit and calls `action`; otherwise it records the first invalid field and asks for the focus to move there. Returns whether the form was valid.
-- **Forms.Form** · [`export let on_submit = func(action: func() -> void) -> func(ui.SubmitEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L238)
+- **Forms.Form** · [`export let on_submit = func(action: func() -> void) -> func(ui.SubmitEvent) -> void`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L236)
   A handler for the form element's `submit` event, bound with `on:submit.prevent_default`. `action` is retained and runs when the form is valid.
-- **Forms.Form** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L246)
+- **Forms.Form** · [`export let reset = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L244)
   Resets every field and the counts.
-- **Forms.Form** · [`export let field_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L254)
+- **Forms.Form** · [`export let field_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L252)
   The number of fields.
-- **Forms.Form** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L257)
+- **Forms.Form** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L255)
   `Form(` the number of fields and the state `)`.
-- **Forms** · [`export let any_text = func -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L262)
+- **Forms** · [`export let any_text = func -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L260)
   A parser that accepts any text as it is.
-- **Forms** · [`export let required_text = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L266)
+- **Forms** · [`export let required_text = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L264)
   A parser that accepts text with something other than spaces, trimmed; otherwise `message`.
-- **Forms** · [`export let integer = func(min: int64, max: int64, message: string) -> func(string) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L277)
+- **Forms** · [`export let integer = func(min: int64, max: int64, message: string) -> func(string) -> result.Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L275)
   A parser of a whole decimal number from `min` to `max`, with optional spaces around it; otherwise `message`.
-- **Forms** · [`export let email = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L317)
+- **Forms** · [`export let email = func(message: string) -> func(string) -> result.Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/ui/forms.nra#L315)
   A parser of an e-mail address by its shape only: one `@` with text before it, a domain after it with a dot inside, and no spaces; trimmed. Otherwise `message`. Whether the address exists is for the server to find out.
 <!-- END SOURCE API -->
 

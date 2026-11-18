@@ -13,10 +13,7 @@ export let Ordering = module (
         if (o == Ordering.Less) {
             return Ordering.Greater;
         }
-        if (o == Ordering.Greater) {
-            return Ordering.Less;
-        }
-        return Ordering.Equal;
+        return if (o == Ordering.Greater) -> Ordering.Less else -> Ordering.Equal;
     };
 
     /// @brief `first` unless it is Equal, for comparing by several keys.

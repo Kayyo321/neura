@@ -85,14 +85,17 @@ export let Linker = module (
                 carrier = Carrier.Float64;
             } else if (index == 8) {
                 carrier = Carrier.Address;
-            } else if (index == 9 || (index == 10 && !wide_signed())) {
+            } else if (index == 9 || (index == 10 && not wide_signed())) {
                 carrier = unsigned_of(size);
             }
             return value_sized(carrier, size, alignment);
         };
 
         /// @brief Whether wchar_t is signed: it is on Linux and macOS, and unsigned on Windows.
-        let wide_signed = func -> bool => !strings.ends_with(native.triple(), "windows-msvc");
+        let wide_signed = func -> bool => not strings.ends_with(native.triple(), "windows-msvc");
+
+        /// @brief Names the linker.
+        export let.override to_string = func -> string => "Linker";
     );
 
     /// @brief The signed carrier of a size in bytes.

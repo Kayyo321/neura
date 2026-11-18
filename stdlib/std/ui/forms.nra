@@ -22,26 +22,25 @@ export let Forms = module (
         export let init = func(draft: string, touched: bool, valid: bool, message: string) => set;
 
         /// @brief Reports whether the field shows its error: it is touched and not valid.
-        export let shows_error = func -> bool => touched && !valid;
+        export let shows_error = func -> bool => touched && not valid;
 
         /// @brief `FieldState(` the draft, and `touched` and the message when they apply `)`.
         export let.override to_string = func -> string {
-            let text = "FieldState(\"" + draft + "\"";
+            let text = "FieldState(\"" .. draft .. "\"";
             if (touched) {
-                text = text + ", touched";
+                text ..= ", touched";
             }
-            if (!valid) {
-                text = text + ", " + message;
+            if (not valid) {
+                text ..= ", " .. message;
             }
-            return text + ")";
+            return text .. ")";
         };
 
         /// @brief Another state with equal fields.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FieldState)) {
+            if (other is not that: FieldState) {
                 return false;
             }
-            last that = other as FieldState;
             return draft == that.draft && touched == that.touched && valid == that.valid && message == that.message;
         };
 
@@ -99,7 +98,7 @@ export let Forms = module (
 
         /// @brief Marks the field touched, as leaving it does, so that it shows its error.
         export let touch = func {
-            if (!state.get().touched) {
+            if (not state.get().touched) {
                 state.set(evaluate(state.get().draft, true));
             }
         };
@@ -157,7 +156,7 @@ export let Forms = module (
         };
 
         /// @brief `Field(` the id and the state `)`.
-        export let.override to_string = func -> string => "Field(" + id + ", " + state.get().to_string() + ")";
+        export let.override to_string = func -> string => "Field(" .. id .. ", " .. state.get().to_string() .. ")";
     );
 
     /// @brief What a form has done: the submits attempted, those that were valid, and the `id` of the
@@ -173,15 +172,14 @@ export let Forms = module (
 
         /// @brief `FormState(` the counts and the first invalid field `)`.
         export let.override to_string = func -> string =>
-            "FormState(" + attempts.to_string() + " attempts, " + submitted.to_string() + " submitted, invalid '"
-            + first_invalid + "')";
+            "FormState(" .. attempts.to_string() .. " attempts, " .. submitted.to_string() .. " submitted, invalid '"
+            .. first_invalid .. "')";
 
         /// @brief Another state with equal fields.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is FormState)) {
+            if (other is not that: FormState) {
                 return false;
             }
-            last that = other as FormState;
             return attempts == that.attempts && submitted == that.submitted && first_invalid == that.first_invalid;
         };
 
@@ -216,7 +214,7 @@ export let Forms = module (
         export let submit = func(action: func() -> void) -> bool {
             let first = "";
             for (let i = 0; i < fields.length; i++) {
-                if (!fields[i].validate() && first == "") {
+                if (not fields[i].validate() && first == "") {
                     first = fields[i].element_id();
                 }
             }
@@ -255,7 +253,7 @@ export let Forms = module (
 
         /// @brief `Form(` the number of fields and the state `)`.
         export let.override to_string = func -> string =>
-            "Form(" + fields.length.to_string() + " fields, " + state.get().to_string() + ")";
+            "Form(" .. fields.length.to_string() .. " fields, " .. state.get().to_string() .. ")";
     );
 
     /// @brief A parser that accepts any text as it is.
@@ -299,7 +297,7 @@ export let Forms = module (
                 }
                 value = value * 10 - digit;
             }
-            if (!negative) {
+            if (not negative) {
                 if (value == -9223372036854775807 - 1) {
                     return result.Result<int64>.Err(error.custom("ui.integer", message));
                 }
@@ -338,8 +336,8 @@ export let Forms = module (
             last byte = id.byte_at(i);
             last letter = (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
             last other = (byte >= 48 && byte <= 57) || byte == 45 || byte == 95;
-            if (!letter && !(other && i > 0)) {
-                trap_with_message("invalid field id '" + id + "': use letters, digits, '-' and '_', starting with a letter");
+            if (not letter && not (other && i > 0)) {
+                trap_with_message("invalid field id '" .. id .. "': use letters, digits, '-' and '_', starting with a letter");
             }
         }
     };

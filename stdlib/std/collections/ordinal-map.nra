@@ -110,10 +110,7 @@ export let OrdinalMap = module (
         /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: int, fallback: V) -> V {
             last slot = position[key];
-            if (slot < 0) {
-                return fallback;
-            }
-            return dense_values[slot];
+            return if (slot < 0) -> fallback else -> dense_values[slot];
         };
 
         /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
@@ -322,10 +319,9 @@ export let OrdinalMap = module (
 
         /// @brief Reports whether `other` is an OrdinalMap with the same value type and equal associations. The permitted key limits may differ.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is OrdinalMap<V>)) {
+            if (other is not that: OrdinalMap<V>) {
                 return false;
             }
-            last that = other as OrdinalMap<V>;
             if (that.size() != dense_keys.length) {
                 return false;
             }
@@ -335,7 +331,7 @@ export let OrdinalMap = module (
                     return false;
                 }
                 last slot = position[key];
-                if (slot < 0 || !dense_values[slot].equals(entry[1])) {
+                if (slot < 0 || not dense_values[slot].equals(entry[1])) {
                     return false;
                 }
             }
@@ -370,16 +366,16 @@ export let OrdinalMap = module (
             while (key < limit) {
                 last slot = position[key];
                 if (slot >= 0) {
-                    if (!first) {
-                        text = text + ", ";
+                    if (not first) {
+                        text ..= ", ";
                     }
-                    text = text + key.to_string() + ": " + dense_values[slot].to_string();
+                    text ..= key.to_string() .. ": " .. dense_values[slot].to_string();
                     first = false;
                 }
                 key += 1;
             }
             printing = false;
-            return text + "}";
+            return text .. "}";
         };
     );
 
@@ -433,6 +429,9 @@ export let OrdinalMap = module (
             skip_absent();
             return entry;
         };
+
+        /// @brief Names the iterator and the next key it examines.
+        export let.override to_string = func -> string => "OrdinalMapIterator(key " .. key.to_string() .. ")";
     );
 
     /// @brief An empty map for the keys 0 through `size` - 1. Traps with "invalid

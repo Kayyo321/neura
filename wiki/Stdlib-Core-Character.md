@@ -119,151 +119,151 @@ The following public declarations are taken from the module source; each links t
   The number of UTF-16 code units, 1 or 2. Tagged `#Pure`.
 - **Character.Character** · [`export let utf8_length = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L226)
   The number of UTF-8 bytes, 1 through 4. Tagged `#Pure`.
-- **Character** · [`export let of = func(code_point: uint32) -> Character`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L410)
+- **Character** · [`export let of = func(code_point: uint32) -> Character`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L359)
   The Character of a Unicode scalar value. Traps with "invalid argument: not a Unicode scalar value" for a surrogate or a value above 0x10FFFF. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let try_of = func(code_point: uint32) -> Optional<Character>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L414)
+- **Character** · [`export let try_of = func(code_point: uint32) -> Optional<Character>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L363)
   The Character of a Unicode scalar value, or None for a surrogate or a value above 0x10FFFF. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let from_text = func(text: string) -> Optional<Character>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L419)
+- **Character** · [`export let from_text = func(text: string) -> Optional<Character>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L368)
   The Character of a string that holds exactly one scalar value, or None. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_string = func(code_point: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L432)
+- **Character** · [`export let to_string = func(code_point: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L381)
   The one-character string of a scalar value (Java's toString(int)). Traps as `of` does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let hash = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L436)
+- **Character** · [`export let hash = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L385)
   The code point as its hash, as for a uint32 (Java's hashCode(char)). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let compare = func(left: uint32, right: uint32) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L440)
+- **Character** · [`export let compare = func(left: uint32, right: uint32) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L389)
   Orders two code points numerically. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let get_type = func(code_point: uint32) -> GeneralCategory`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L446)
+- **Character** · [`export let get_type = func(code_point: uint32) -> GeneralCategory`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L395)
   The General_Category; Surrogate for U+D800 through U+DFFF and Unassigned above 0x10FFFF. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let category_code = func(category: GeneralCategory) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L450)
+- **Character** · [`export let category_code = func(category: GeneralCategory) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L399)
   The two-letter abbreviation of a category, such as "Lu". Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let get_directionality = func(code_point: uint32) -> BidiClass`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L456)
+- **Character** · [`export let get_directionality = func(code_point: uint32) -> BidiClass`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L405)
   The Bidi_Class of a defined code point (Java's getDirectionality); Undefined for a code point whose category is Unassigned, including noncharacters, and above 0x10FFFF. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let bidi_class = func(code_point: uint32) -> BidiClass`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L462)
+- **Character** · [`export let bidi_class = func(code_point: uint32) -> BidiClass`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L411)
   The Bidi_Class, including the default the UCD gives unassigned code points (for example RightToLeft in the Hebrew block and BoundaryNeutral for noncharacters); Undefined above 0x10FFFF. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let bidi_code = func(bidi: BidiClass) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L466)
+- **Character** · [`export let bidi_code = func(bidi: BidiClass) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L415)
   The abbreviation of a bidi class, such as "AL"; an empty string for Undefined. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_upper = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L470)
+- **Character** · [`export let is_upper = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L419)
   Tests the Uppercase property: category Lu or Other_Uppercase (Java's isUpperCase). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_lower = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L474)
+- **Character** · [`export let is_lower = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L423)
   Tests the Lowercase property: category Ll or Other_Lowercase (Java's isLowerCase). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_title_case = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L478)
+- **Character** · [`export let is_title_case = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L427)
   Tests for category Lt, such as U+01C5 (Java's isTitleCase). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_letter = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L482)
+- **Character** · [`export let is_letter = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L431)
   Tests for category Lu, Ll, Lt, Lm, or Lo (Java's isLetter). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_digit = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L486)
+- **Character** · [`export let is_digit = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L435)
   Tests for category Nd (Java's isDigit). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_letter_or_digit = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L490)
+- **Character** · [`export let is_letter_or_digit = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L439)
   Tests for a letter or category Nd (Java's isLetterOrDigit). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_alphabetic = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L494)
+- **Character** · [`export let is_alphabetic = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L443)
   Tests the Alphabetic property: letters, category Nl, and Other_Alphabetic (Java's isAlphabetic). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_alpha = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L498)
+- **Character** · [`export let is_alpha = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L447)
   Tests for a letter, the same set as is_letter (Python's str.isalpha). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_numeric = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L504)
+- **Character** · [`export let is_numeric = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L453)
   Tests for a Unicode Numeric_Value, any Numeric_Type other than None (Python's str.isnumeric). Includes decimal digits, other digits, fractions, Roman numerals, and the CJK ideographs with numeric values in Unihan. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_alpha_numeric = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L508)
+- **Character** · [`export let is_alpha_numeric = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L457)
   Tests is_alpha or is_numeric (Python's str.isalnum). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_whitespace = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L515)
+- **Character** · [`export let is_whitespace = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L464)
   Tests Java's white space: category Zs, Zl, or Zp except the no-break spaces U+00A0, U+2007, and U+202F, and U+0009 through U+000D and U+001C through U+001F (Java's isWhitespace). The String companion's strip and indentation use the same set. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_space_char = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L519)
+- **Character** · [`export let is_space_char = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L468)
   Tests for category Zs, Zl, or Zp (Java's isSpaceChar). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_space = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L525)
+- **Character** · [`export let is_space = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L474)
   Tests the Unicode White_Space property: U+0009 through U+000D, U+0020, U+0085, U+00A0, and the separators of categories Zs, Zl, and Zp. Unlike is_whitespace it includes the no-break spaces and NEL and excludes U+001C through U+001F. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_iso_control = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L529)
+- **Character** · [`export let is_iso_control = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L478)
   Tests for U+0000 through U+001F and U+007F through U+009F (Java's isISOControl). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_defined = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L534)
+- **Character** · [`export let is_defined = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L483)
   Tests whether the category is not Unassigned (Java's isDefined). Surrogates and private use code points are defined; noncharacters are not. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_ideographic = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L538)
+- **Character** · [`export let is_ideographic = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L487)
   Tests the Ideographic property (Java's isIdeographic). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_mirrored = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L542)
+- **Character** · [`export let is_mirrored = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L491)
   Tests the Bidi_Mirrored property (Java's isMirrored). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_identifier_start = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L547)
+- **Character** · [`export let is_identifier_start = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L496)
   Tests whether a code point may start a Unicode identifier: ID_Start or U+2E2F VERTICAL TILDE (Java's isUnicodeIdentifierStart, its profile of UAX #31). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_identifier_part = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L552)
+- **Character** · [`export let is_identifier_part = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L501)
   Tests whether a code point may continue a Unicode identifier: ID_Continue, U+2E2F, or is_identifier_ignorable (Java's isUnicodeIdentifierPart). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_identifier_ignorable = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L557)
+- **Character** · [`export let is_identifier_ignorable = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L506)
   Tests U+0000 through U+0008, U+000E through U+001B, U+007F through U+009F, and category Cf (Java's isIdentifierIgnorable). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_java_identifier_start = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L563)
+- **Character** · [`export let is_java_identifier_start = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L512)
   Tests whether a code point may start a Java identifier: a letter or category Nl, Sc, or Pc (Java's isJavaIdentifierStart). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_java_identifier_part = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L569)
+- **Character** · [`export let is_java_identifier_part = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L518)
   Tests whether a code point may continue a Java identifier: a letter, category Sc, Pc, Nd, Nl, Mc, or Mn, or is_identifier_ignorable (Java's isJavaIdentifierPart). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_emoji = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L573)
+- **Character** · [`export let is_emoji = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L522)
   Tests the Emoji property of UTS #51 (Java's isEmoji). Digits, `#`, and `*` have it. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_emoji_presentation = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L577)
+- **Character** · [`export let is_emoji_presentation = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L526)
   Tests the Emoji_Presentation property (Java's isEmojiPresentation). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_emoji_modifier = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L582)
+- **Character** · [`export let is_emoji_modifier = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L531)
   Tests the Emoji_Modifier property, the skin tone modifiers (Java's isEmojiModifier). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_emoji_modifier_base = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L586)
+- **Character** · [`export let is_emoji_modifier_base = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L535)
   Tests the Emoji_Modifier_Base property (Java's isEmojiModifierBase). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_emoji_component = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L591)
+- **Character** · [`export let is_emoji_component = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L540)
   Tests the Emoji_Component property (Java's isEmojiComponent). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_extended_pictographic = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L595)
+- **Character** · [`export let is_extended_pictographic = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L544)
   Tests the Extended_Pictographic property (Java's isExtendedPictographic). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_upper = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L603)
+- **Character** · [`export let to_upper = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L552)
   The simple uppercase mapping of UnicodeData.txt; the code point itself when it has none (Java's toUpperCase(int)). U+00DF maps to itself; to_upper_string gives "SS". Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_lower = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L607)
+- **Character** · [`export let to_lower = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L556)
   The simple lowercase mapping; the code point itself when it has none (Java's toLowerCase(int)). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_title = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L612)
+- **Character** · [`export let to_title = func(code_point: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L561)
   The simple titlecase mapping, which is the uppercase mapping where UnicodeData.txt gives none (Java's toTitleCase(int)). U+01C6 maps to U+01C5. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_upper_string = func(code_point: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L617)
+- **Character** · [`export let to_upper_string = func(code_point: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L566)
   The full uppercase mapping with the root rules of String.to_upper_case, which can be several characters: U+00DF gives "SS". Traps as `of` does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_lower_string = func(code_point: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L627)
+- **Character** · [`export let to_lower_string = func(code_point: uint32) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L576)
   The full lowercase mapping with the root rules of String.to_lower_case: U+0130 gives "i" followed by U+0307. A lone U+03A3 has no letter before it, so it maps to U+03C3, not the final sigma. Traps as `of` does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let digit = func(code_point: uint32, radix: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L640)
+- **Character** · [`export let digit = func(code_point: uint32, radix: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L589)
   The value of a digit in a radix (Java's digit(int, int)): the decimal digit value of a category Nd code point, or 10 through 35 for A through Z and a through z in ASCII or fullwidth form, when the value is below the radix; otherwise -1. Unlike Java, a radix outside 2 through 36 traps with "invalid argument: radix outside 2 through 36" (Stdlib.md section 5.1). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let for_digit = func(value: int, radix: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L646)
+- **Character** · [`export let for_digit = func(value: int, radix: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L595)
   The lowercase ASCII digit for a value from 0 through radix - 1 (Java's forDigit). Unlike Java, which returns U+0000, a radix outside 2 through 36 traps as in digit and a value outside the radix traps with "invalid argument: digit out of range", as Scalars.from_digit does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let numeric_value = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L653)
+- **Character** · [`export let numeric_value = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L602)
   Java's getNumericValue over the Unicode Numeric_Value property: 10 through 35 for A through Z and a through z in ASCII or fullwidth form; the value when it is an integer from 0 through 2^31 - 1, such as 50 for U+216C ROMAN NUMERAL FIFTY; -2 for a fraction, a negative value, or a larger value; and -1 when there is none. The CJK ideographs with Unihan numeric values have them, such as 5 for U+4E94. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let numeric_value_text = func(code_point: uint32) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L658)
+- **Character** · [`export let numeric_value_text = func(code_point: uint32) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L607)
   The exact Unicode Numeric_Value as text, an integer or a fraction such as "1/2" or "-1/2", or None when there is none. Latin letters have none. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let get_name = func(code_point: uint32) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L677)
+- **Character** · [`export let get_name = func(code_point: uint32) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L626)
   Java's getName: the name of a code point, or None when it is unassigned or above 0x10FFFF. A code point listed by name in UnicodeData.txt has its Unicode Name, such as `LATIN SMALL LETTER A`, `GRINNING FACE`, or `CJK COMPATIBILITY IDEOGRAPH-F900`. A control has Java's name for it, its Unicode 1.0 name such as `NULL` and `LINE FEED (LF)`, with `BEL` for U+0007 and the aliases `PADDING CHARACTER`, `HIGH OCTET PRESET`, and `SINGLE GRAPHIC CHARACTER INTRODUCER` for U+0080, U+0081, and U+0099. Every other assigned code point, the CJK unified ideographs, Hangul syllables, Tangut ideographs, surrogates, private use, and U+0084, has Java's block form: the block name in capitals with spaces for its spaces, hyphens, and underscores, a space, and the code point in uppercase hex without leading zeros, such as `CJK UNIFIED IDEOGRAPHS 4E00`, `HANGUL SYLLABLES AC00`, and `LATIN 1 SUPPLEMENT 84`. unicode_name gives the Unicode Name instead. Unlike Java, which throws, a value above 0x10FFFF gives None. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let unicode_name = func(code_point: uint32) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L691)
+- **Character** · [`export let unicode_name = func(code_point: uint32) -> Optional<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L640)
   The Unicode Name property (Python's unicodedata.name), or None when the code point has none: controls, surrogates, private use, noncharacters, unassigned code points, and values above 0x10FFFF. The names of Hangul syllables and of the patterned ranges are generated: `HANGUL SYLLABLE GAG`, `CJK UNIFIED IDEOGRAPH-4E00`, `TANGUT IDEOGRAPH-17000`, `KHITAN SMALL SCRIPT CHARACTER-18B00`, `NUSHU CHARACTER-1B170`, `EGYPTIAN HIEROGLYPH-13460`, and `CJK COMPATIBILITY IDEOGRAPH-F900`. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let code_point_of = func(name: string) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L705)
+- **Character** · [`export let code_point_of = func(name: string) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L654)
   Java's codePointOf: the code point with a name that get_name or unicode_name returns, compared after removing leading and trailing characters up to U+0020 and uppercasing with the root rules, so `" latin small letter a "` gives U+0061. Name aliases other than Java's control names, the loose matching of UAX #44, and named sequences are not accepted. Traps with "invalid argument: not a Unicode character name" for any other text; try_code_point_of returns None instead. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let try_code_point_of = func(name: string) -> Optional<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L715)
+- **Character** · [`export let try_code_point_of = func(name: string) -> Optional<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L664)
   code_point_of, with None for a text that is not a name. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_valid_code_point = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L724)
+- **Character** · [`export let is_valid_code_point = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L673)
   Tests whether a value is at most 0x10FFFF (Java's isValidCodePoint). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_scalar_value = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L728)
+- **Character** · [`export let is_scalar_value = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L677)
   Tests for a Unicode scalar value: at most 0x10FFFF and not a surrogate. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_bmp = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L732)
+- **Character** · [`export let is_bmp = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L681)
   Tests for a code point below U+10000 (Java's isBmpCodePoint). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_supplementary = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L736)
+- **Character** · [`export let is_supplementary = func(code_point: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L685)
   Tests for U+10000 through U+10FFFF (Java's isSupplementaryCodePoint). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_surrogate = func(unit: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L741)
+- **Character** · [`export let is_surrogate = func(unit: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L690)
   Tests for U+D800 through U+DFFF (Java's isSurrogate). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_high_surrogate = func(unit: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L745)
+- **Character** · [`export let is_high_surrogate = func(unit: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L694)
   Tests for U+D800 through U+DBFF (Java's isHighSurrogate). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_low_surrogate = func(unit: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L749)
+- **Character** · [`export let is_low_surrogate = func(unit: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L698)
   Tests for U+DC00 through U+DFFF (Java's isLowSurrogate). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let is_surrogate_pair = func(high: uint32, low: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L753)
+- **Character** · [`export let is_surrogate_pair = func(high: uint32, low: uint32) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L702)
   Tests a high surrogate followed by a low surrogate (Java's isSurrogatePair). Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_code_point = func(high: uint32, low: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L759)
+- **Character** · [`export let to_code_point = func(high: uint32, low: uint32) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L708)
   The supplementary code point of a surrogate pair (Java's toCodePoint). Unlike Java, which does not validate, a pair that is not one traps with "invalid argument: not a surrogate pair". Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let high_surrogate = func(code_point: uint32) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L769)
+- **Character** · [`export let high_surrogate = func(code_point: uint32) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L718)
   The high surrogate of a supplementary code point (Java's highSurrogate). Unlike Java, which returns an unspecified unit, another value traps with "invalid argument: not a supplementary code point". Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let low_surrogate = func(code_point: uint32) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L776)
+- **Character** · [`export let low_surrogate = func(code_point: uint32) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L725)
   The low surrogate of a supplementary code point (Java's lowSurrogate). Traps as high_surrogate. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let char_count = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L784)
+- **Character** · [`export let char_count = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L733)
   The number of UTF-16 code units of a code point: 2 from U+10000, otherwise 1. Like Java's charCount it does not validate the value. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_chars = func(code_point: uint32) -> uint16[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L790)
+- **Character** · [`export let to_chars = func(code_point: uint32) -> uint16[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L739)
   The UTF-16 code units of a code point, one for a BMP code point (a surrogate code point gives itself) and a surrogate pair from U+10000 (Java's toChars). A value above 0x10FFFF traps with "invalid argument: not a Unicode code point". Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let utf8_length = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L806)
+- **Character** · [`export let utf8_length = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L755)
   The number of UTF-8 bytes of a scalar value, 1 through 4. Traps as `of` does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let utf16_length = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L813)
+- **Character** · [`export let utf16_length = func(code_point: uint32) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L762)
   The number of UTF-16 code units of a scalar value, 1 or 2. Traps as `of` does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let to_utf8 = func(code_point: uint32) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L820)
+- **Character** · [`export let to_utf8 = func(code_point: uint32) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L769)
   The UTF-8 bytes of a scalar value. Traps as `of` does. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let code_point_at = func(units: uint16[list], index: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L826)
+- **Character** · [`export let code_point_at = func(units: uint16[list], index: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L775)
   The code point at a UTF-16 index: a surrogate pair's code point when a high surrogate there is followed by a low surrogate, otherwise the unit itself (Java's codePointAt). An index outside the list traps as a list read does. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let code_point_before = func(units: uint16[list], index: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L840)
+- **Character** · [`export let code_point_before = func(units: uint16[list], index: int) -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L789)
   The code point that ends before a UTF-16 index (Java's codePointBefore): a surrogate pair's code point when the units at index - 2 and index - 1 form one, otherwise the unit at index - 1. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let code_point_count = func(units: uint16[list], start: int, end: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L855)
+- **Character** · [`export let code_point_count = func(units: uint16[list], start: int, end: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L804)
   The number of code points in units start through end - 1, a surrogate pair counting once and an unpaired surrogate counting as one code point (Java's codePointCount). Traps with "invalid argument: range outside the list" unless 0 <= start <= end <= the length. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let offset_by_code_points = func(units: uint16[list], index: int, offset: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L877)
+- **Character** · [`export let offset_by_code_points = func(units: uint16[list], index: int, offset: int) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L826)
   The UTF-16 index `offset` code points away from `index`, forward for a positive offset and backward for a negative one (Java's offsetByCodePoints). Traps with "invalid argument: offset outside the list" when the move leaves the list. Tagged `#Pure`, `#ThreadSafe`.
-- **Character** · [`export let reverse_bytes = func(unit: uint16) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L902)
+- **Character** · [`export let reverse_bytes = func(unit: uint16) -> uint16`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/character.nra#L851)
   The unit with its two bytes swapped (Java's reverseBytes(char)). Tagged `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

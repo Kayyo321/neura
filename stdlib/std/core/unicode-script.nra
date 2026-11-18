@@ -139,178 +139,112 @@ export let UnicodeScript = module (
                     if (index < 10) {
                         if (index < 5) {
                             if (index < 2) {
-                                if (index < 1) {
-                                    return UnicodeScript.Adlam;
-                                }
-                                return UnicodeScript.Ahom;
+                                return if (index < 1) -> UnicodeScript.Adlam else -> UnicodeScript.Ahom;
                             }
                             if (index < 3) {
                                 return UnicodeScript.AnatolianHieroglyphs;
                             }
-                            if (index < 4) {
-                                return UnicodeScript.Arabic;
-                            }
-                            return UnicodeScript.Armenian;
+                            return if (index < 4) -> UnicodeScript.Arabic else -> UnicodeScript.Armenian;
                         }
                         if (index < 7) {
-                            if (index < 6) {
-                                return UnicodeScript.Avestan;
-                            }
-                            return UnicodeScript.Balinese;
+                            return if (index < 6) -> UnicodeScript.Avestan else -> UnicodeScript.Balinese;
                         }
                         if (index < 8) {
                             return UnicodeScript.Bamum;
                         }
-                        if (index < 9) {
-                            return UnicodeScript.BassaVah;
-                        }
-                        return UnicodeScript.Batak;
+                        return if (index < 9) -> UnicodeScript.BassaVah else -> UnicodeScript.Batak;
                     }
                     if (index < 15) {
                         if (index < 12) {
-                            if (index < 11) {
-                                return UnicodeScript.Bengali;
-                            }
-                            return UnicodeScript.BeriaErfe;
+                            return if (index < 11) -> UnicodeScript.Bengali else -> UnicodeScript.BeriaErfe;
                         }
                         if (index < 13) {
                             return UnicodeScript.Bhaiksuki;
                         }
-                        if (index < 14) {
-                            return UnicodeScript.Bopomofo;
-                        }
-                        return UnicodeScript.Brahmi;
+                        return if (index < 14) -> UnicodeScript.Bopomofo else -> UnicodeScript.Brahmi;
                     }
                     if (index < 18) {
                         if (index < 16) {
                             return UnicodeScript.Braille;
                         }
-                        if (index < 17) {
-                            return UnicodeScript.Buginese;
-                        }
-                        return UnicodeScript.Buhid;
+                        return if (index < 17) -> UnicodeScript.Buginese else -> UnicodeScript.Buhid;
                     }
                     if (index < 19) {
                         return UnicodeScript.CanadianAboriginal;
                     }
-                    if (index < 20) {
-                        return UnicodeScript.Carian;
-                    }
-                    return UnicodeScript.CaucasianAlbanian;
+                    return if (index < 20) -> UnicodeScript.Carian else -> UnicodeScript.CaucasianAlbanian;
                 }
                 if (index < 32) {
                     if (index < 26) {
                         if (index < 23) {
-                            if (index < 22) {
-                                return UnicodeScript.Chakma;
-                            }
-                            return UnicodeScript.Cham;
+                            return if (index < 22) -> UnicodeScript.Chakma else -> UnicodeScript.Cham;
                         }
                         if (index < 24) {
                             return UnicodeScript.Cherokee;
                         }
-                        if (index < 25) {
-                            return UnicodeScript.Chorasmian;
-                        }
-                        return UnicodeScript.Common;
+                        return if (index < 25) -> UnicodeScript.Chorasmian else -> UnicodeScript.Common;
                     }
                     if (index < 29) {
                         if (index < 27) {
                             return UnicodeScript.Coptic;
                         }
-                        if (index < 28) {
-                            return UnicodeScript.Cuneiform;
-                        }
-                        return UnicodeScript.Cypriot;
+                        return if (index < 28) -> UnicodeScript.Cuneiform else -> UnicodeScript.Cypriot;
                     }
                     if (index < 30) {
                         return UnicodeScript.CyproMinoan;
                     }
-                    if (index < 31) {
-                        return UnicodeScript.Cyrillic;
-                    }
-                    return UnicodeScript.Deseret;
+                    return if (index < 31) -> UnicodeScript.Cyrillic else -> UnicodeScript.Deseret;
                 }
                 if (index < 37) {
                     if (index < 34) {
-                        if (index < 33) {
-                            return UnicodeScript.Devanagari;
-                        }
-                        return UnicodeScript.DivesAkuru;
+                        return if (index < 33) -> UnicodeScript.Devanagari else -> UnicodeScript.DivesAkuru;
                     }
                     if (index < 35) {
                         return UnicodeScript.Dogra;
                     }
-                    if (index < 36) {
-                        return UnicodeScript.Duployan;
-                    }
-                    return UnicodeScript.EgyptianHieroglyphs;
+                    return if (index < 36) -> UnicodeScript.Duployan else -> UnicodeScript.EgyptianHieroglyphs;
                 }
                 if (index < 40) {
                     if (index < 38) {
                         return UnicodeScript.Elbasan;
                     }
-                    if (index < 39) {
-                        return UnicodeScript.Elymaic;
-                    }
-                    return UnicodeScript.Ethiopic;
+                    return if (index < 39) -> UnicodeScript.Elymaic else -> UnicodeScript.Ethiopic;
                 }
                 if (index < 41) {
                     return UnicodeScript.Garay;
                 }
-                if (index < 42) {
-                    return UnicodeScript.Georgian;
-                }
-                return UnicodeScript.Glagolitic;
+                return if (index < 42) -> UnicodeScript.Georgian else -> UnicodeScript.Glagolitic;
             }
             if (index < 65) {
                 if (index < 54) {
                     if (index < 48) {
                         if (index < 45) {
-                            if (index < 44) {
-                                return UnicodeScript.Gothic;
-                            }
-                            return UnicodeScript.Grantha;
+                            return if (index < 44) -> UnicodeScript.Gothic else -> UnicodeScript.Grantha;
                         }
                         if (index < 46) {
                             return UnicodeScript.Greek;
                         }
-                        if (index < 47) {
-                            return UnicodeScript.Gujarati;
-                        }
-                        return UnicodeScript.GunjalaGondi;
+                        return if (index < 47) -> UnicodeScript.Gujarati else -> UnicodeScript.GunjalaGondi;
                     }
                     if (index < 51) {
                         if (index < 49) {
                             return UnicodeScript.Gurmukhi;
                         }
-                        if (index < 50) {
-                            return UnicodeScript.GurungKhema;
-                        }
-                        return UnicodeScript.Han;
+                        return if (index < 50) -> UnicodeScript.GurungKhema else -> UnicodeScript.Han;
                     }
                     if (index < 52) {
                         return UnicodeScript.Hangul;
                     }
-                    if (index < 53) {
-                        return UnicodeScript.HanifiRohingya;
-                    }
-                    return UnicodeScript.Hanunoo;
+                    return if (index < 53) -> UnicodeScript.HanifiRohingya else -> UnicodeScript.Hanunoo;
                 }
                 if (index < 59) {
                     if (index < 56) {
-                        if (index < 55) {
-                            return UnicodeScript.Hatran;
-                        }
-                        return UnicodeScript.Hebrew;
+                        return if (index < 55) -> UnicodeScript.Hatran else -> UnicodeScript.Hebrew;
                     }
                     if (index < 57) {
                         return UnicodeScript.Hiragana;
                     }
-                    if (index < 58) {
-                        return UnicodeScript.ImperialAramaic;
-                    }
-                    return UnicodeScript.Inherited;
+                    return if (index < 58) -> UnicodeScript.ImperialAramaic else -> UnicodeScript.Inherited;
                 }
                 if (index < 62) {
                     if (index < 60) {
@@ -324,337 +258,214 @@ export let UnicodeScript = module (
                 if (index < 63) {
                     return UnicodeScript.Kaithi;
                 }
-                if (index < 64) {
-                    return UnicodeScript.Kannada;
-                }
-                return UnicodeScript.Katakana;
+                return if (index < 64) -> UnicodeScript.Kannada else -> UnicodeScript.Katakana;
             }
             if (index < 76) {
                 if (index < 70) {
                     if (index < 67) {
-                        if (index < 66) {
-                            return UnicodeScript.Kawi;
-                        }
-                        return UnicodeScript.KayahLi;
+                        return if (index < 66) -> UnicodeScript.Kawi else -> UnicodeScript.KayahLi;
                     }
                     if (index < 68) {
                         return UnicodeScript.Kharoshthi;
                     }
-                    if (index < 69) {
-                        return UnicodeScript.KhitanSmallScript;
-                    }
-                    return UnicodeScript.Khmer;
+                    return if (index < 69) -> UnicodeScript.KhitanSmallScript else -> UnicodeScript.Khmer;
                 }
                 if (index < 73) {
                     if (index < 71) {
                         return UnicodeScript.Khojki;
                     }
-                    if (index < 72) {
-                        return UnicodeScript.Khudawadi;
-                    }
-                    return UnicodeScript.KiratRai;
+                    return if (index < 72) -> UnicodeScript.Khudawadi else -> UnicodeScript.KiratRai;
                 }
                 if (index < 74) {
                     return UnicodeScript.Lao;
                 }
-                if (index < 75) {
-                    return UnicodeScript.Latin;
-                }
-                return UnicodeScript.Lepcha;
+                return if (index < 75) -> UnicodeScript.Latin else -> UnicodeScript.Lepcha;
             }
             if (index < 81) {
                 if (index < 78) {
-                    if (index < 77) {
-                        return UnicodeScript.Limbu;
-                    }
-                    return UnicodeScript.LinearA;
+                    return if (index < 77) -> UnicodeScript.Limbu else -> UnicodeScript.LinearA;
                 }
                 if (index < 79) {
                     return UnicodeScript.LinearB;
                 }
-                if (index < 80) {
-                    return UnicodeScript.Lisu;
-                }
-                return UnicodeScript.Lycian;
+                return if (index < 80) -> UnicodeScript.Lisu else -> UnicodeScript.Lycian;
             }
             if (index < 84) {
                 if (index < 82) {
                     return UnicodeScript.Lydian;
                 }
-                if (index < 83) {
-                    return UnicodeScript.Mahajani;
-                }
-                return UnicodeScript.Makasar;
+                return if (index < 83) -> UnicodeScript.Mahajani else -> UnicodeScript.Makasar;
             }
             if (index < 85) {
                 return UnicodeScript.Malayalam;
             }
-            if (index < 86) {
-                return UnicodeScript.Mandaic;
-            }
-            return UnicodeScript.Manichaean;
+            return if (index < 86) -> UnicodeScript.Mandaic else -> UnicodeScript.Manichaean;
         }
         if (index < 131) {
             if (index < 109) {
                 if (index < 98) {
                     if (index < 92) {
                         if (index < 89) {
-                            if (index < 88) {
-                                return UnicodeScript.Marchen;
-                            }
-                            return UnicodeScript.MasaramGondi;
+                            return if (index < 88) -> UnicodeScript.Marchen else -> UnicodeScript.MasaramGondi;
                         }
                         if (index < 90) {
                             return UnicodeScript.Medefaidrin;
                         }
-                        if (index < 91) {
-                            return UnicodeScript.MeeteiMayek;
-                        }
-                        return UnicodeScript.MendeKikakui;
+                        return if (index < 91) -> UnicodeScript.MeeteiMayek else -> UnicodeScript.MendeKikakui;
                     }
                     if (index < 95) {
                         if (index < 93) {
                             return UnicodeScript.MeroiticCursive;
                         }
-                        if (index < 94) {
-                            return UnicodeScript.MeroiticHieroglyphs;
-                        }
-                        return UnicodeScript.Miao;
+                        return if (index < 94) -> UnicodeScript.MeroiticHieroglyphs else -> UnicodeScript.Miao;
                     }
                     if (index < 96) {
                         return UnicodeScript.Modi;
                     }
-                    if (index < 97) {
-                        return UnicodeScript.Mongolian;
-                    }
-                    return UnicodeScript.Mro;
+                    return if (index < 97) -> UnicodeScript.Mongolian else -> UnicodeScript.Mro;
                 }
                 if (index < 103) {
                     if (index < 100) {
-                        if (index < 99) {
-                            return UnicodeScript.Multani;
-                        }
-                        return UnicodeScript.Myanmar;
+                        return if (index < 99) -> UnicodeScript.Multani else -> UnicodeScript.Myanmar;
                     }
                     if (index < 101) {
                         return UnicodeScript.Nabataean;
                     }
-                    if (index < 102) {
-                        return UnicodeScript.NagMundari;
-                    }
-                    return UnicodeScript.Nandinagari;
+                    return if (index < 102) -> UnicodeScript.NagMundari else -> UnicodeScript.Nandinagari;
                 }
                 if (index < 106) {
                     if (index < 104) {
                         return UnicodeScript.NewTaiLue;
                     }
-                    if (index < 105) {
-                        return UnicodeScript.Newa;
-                    }
-                    return UnicodeScript.Nko;
+                    return if (index < 105) -> UnicodeScript.Newa else -> UnicodeScript.Nko;
                 }
                 if (index < 107) {
                     return UnicodeScript.Nushu;
                 }
-                if (index < 108) {
-                    return UnicodeScript.NyiakengPuachueHmong;
-                }
-                return UnicodeScript.Ogham;
+                return if (index < 108) -> UnicodeScript.NyiakengPuachueHmong else -> UnicodeScript.Ogham;
             }
             if (index < 120) {
                 if (index < 114) {
                     if (index < 111) {
-                        if (index < 110) {
-                            return UnicodeScript.OlChiki;
-                        }
-                        return UnicodeScript.OlOnal;
+                        return if (index < 110) -> UnicodeScript.OlChiki else -> UnicodeScript.OlOnal;
                     }
                     if (index < 112) {
                         return UnicodeScript.OldHungarian;
                     }
-                    if (index < 113) {
-                        return UnicodeScript.OldItalic;
-                    }
-                    return UnicodeScript.OldNorthArabian;
+                    return if (index < 113) -> UnicodeScript.OldItalic else -> UnicodeScript.OldNorthArabian;
                 }
                 if (index < 117) {
                     if (index < 115) {
                         return UnicodeScript.OldPermic;
                     }
-                    if (index < 116) {
-                        return UnicodeScript.OldPersian;
-                    }
-                    return UnicodeScript.OldSogdian;
+                    return if (index < 116) -> UnicodeScript.OldPersian else -> UnicodeScript.OldSogdian;
                 }
                 if (index < 118) {
                     return UnicodeScript.OldSouthArabian;
                 }
-                if (index < 119) {
-                    return UnicodeScript.OldTurkic;
-                }
-                return UnicodeScript.OldUyghur;
+                return if (index < 119) -> UnicodeScript.OldTurkic else -> UnicodeScript.OldUyghur;
             }
             if (index < 125) {
                 if (index < 122) {
-                    if (index < 121) {
-                        return UnicodeScript.Oriya;
-                    }
-                    return UnicodeScript.Osage;
+                    return if (index < 121) -> UnicodeScript.Oriya else -> UnicodeScript.Osage;
                 }
                 if (index < 123) {
                     return UnicodeScript.Osmanya;
                 }
-                if (index < 124) {
-                    return UnicodeScript.PahawhHmong;
-                }
-                return UnicodeScript.Palmyrene;
+                return if (index < 124) -> UnicodeScript.PahawhHmong else -> UnicodeScript.Palmyrene;
             }
             if (index < 128) {
                 if (index < 126) {
                     return UnicodeScript.PauCinHau;
                 }
-                if (index < 127) {
-                    return UnicodeScript.PhagsPa;
-                }
-                return UnicodeScript.Phoenician;
+                return if (index < 127) -> UnicodeScript.PhagsPa else -> UnicodeScript.Phoenician;
             }
             if (index < 129) {
                 return UnicodeScript.PsalterPahlavi;
             }
-            if (index < 130) {
-                return UnicodeScript.Rejang;
-            }
-            return UnicodeScript.Runic;
+            return if (index < 130) -> UnicodeScript.Rejang else -> UnicodeScript.Runic;
         }
         if (index < 153) {
             if (index < 142) {
                 if (index < 136) {
                     if (index < 133) {
-                        if (index < 132) {
-                            return UnicodeScript.Samaritan;
-                        }
-                        return UnicodeScript.Saurashtra;
+                        return if (index < 132) -> UnicodeScript.Samaritan else -> UnicodeScript.Saurashtra;
                     }
                     if (index < 134) {
                         return UnicodeScript.Sharada;
                     }
-                    if (index < 135) {
-                        return UnicodeScript.Shavian;
-                    }
-                    return UnicodeScript.Siddham;
+                    return if (index < 135) -> UnicodeScript.Shavian else -> UnicodeScript.Siddham;
                 }
                 if (index < 139) {
                     if (index < 137) {
                         return UnicodeScript.Sidetic;
                     }
-                    if (index < 138) {
-                        return UnicodeScript.SignWriting;
-                    }
-                    return UnicodeScript.Sinhala;
+                    return if (index < 138) -> UnicodeScript.SignWriting else -> UnicodeScript.Sinhala;
                 }
                 if (index < 140) {
                     return UnicodeScript.Sogdian;
                 }
-                if (index < 141) {
-                    return UnicodeScript.SoraSompeng;
-                }
-                return UnicodeScript.Soyombo;
+                return if (index < 141) -> UnicodeScript.SoraSompeng else -> UnicodeScript.Soyombo;
             }
             if (index < 147) {
                 if (index < 144) {
-                    if (index < 143) {
-                        return UnicodeScript.Sundanese;
-                    }
-                    return UnicodeScript.Sunuwar;
+                    return if (index < 143) -> UnicodeScript.Sundanese else -> UnicodeScript.Sunuwar;
                 }
                 if (index < 145) {
                     return UnicodeScript.SylotiNagri;
                 }
-                if (index < 146) {
-                    return UnicodeScript.Syriac;
-                }
-                return UnicodeScript.Tagalog;
+                return if (index < 146) -> UnicodeScript.Syriac else -> UnicodeScript.Tagalog;
             }
             if (index < 150) {
                 if (index < 148) {
                     return UnicodeScript.Tagbanwa;
                 }
-                if (index < 149) {
-                    return UnicodeScript.TaiLe;
-                }
-                return UnicodeScript.TaiTham;
+                return if (index < 149) -> UnicodeScript.TaiLe else -> UnicodeScript.TaiTham;
             }
             if (index < 151) {
                 return UnicodeScript.TaiViet;
             }
-            if (index < 152) {
-                return UnicodeScript.TaiYo;
-            }
-            return UnicodeScript.Takri;
+            return if (index < 152) -> UnicodeScript.TaiYo else -> UnicodeScript.Takri;
         }
         if (index < 164) {
             if (index < 158) {
                 if (index < 155) {
-                    if (index < 154) {
-                        return UnicodeScript.Tamil;
-                    }
-                    return UnicodeScript.Tangsa;
+                    return if (index < 154) -> UnicodeScript.Tamil else -> UnicodeScript.Tangsa;
                 }
                 if (index < 156) {
                     return UnicodeScript.Tangut;
                 }
-                if (index < 157) {
-                    return UnicodeScript.Telugu;
-                }
-                return UnicodeScript.Thaana;
+                return if (index < 157) -> UnicodeScript.Telugu else -> UnicodeScript.Thaana;
             }
             if (index < 161) {
                 if (index < 159) {
                     return UnicodeScript.Thai;
                 }
-                if (index < 160) {
-                    return UnicodeScript.Tibetan;
-                }
-                return UnicodeScript.Tifinagh;
+                return if (index < 160) -> UnicodeScript.Tibetan else -> UnicodeScript.Tifinagh;
             }
             if (index < 162) {
                 return UnicodeScript.Tirhuta;
             }
-            if (index < 163) {
-                return UnicodeScript.Todhri;
-            }
-            return UnicodeScript.TolongSiki;
+            return if (index < 163) -> UnicodeScript.Todhri else -> UnicodeScript.TolongSiki;
         }
         if (index < 169) {
             if (index < 166) {
-                if (index < 165) {
-                    return UnicodeScript.Toto;
-                }
-                return UnicodeScript.TuluTigalari;
+                return if (index < 165) -> UnicodeScript.Toto else -> UnicodeScript.TuluTigalari;
             }
             if (index < 167) {
                 return UnicodeScript.Ugaritic;
             }
-            if (index < 168) {
-                return UnicodeScript.Unknown;
-            }
-            return UnicodeScript.Vai;
+            return if (index < 168) -> UnicodeScript.Unknown else -> UnicodeScript.Vai;
         }
         if (index < 172) {
             if (index < 170) {
                 return UnicodeScript.Vithkuqi;
             }
-            if (index < 171) {
-                return UnicodeScript.Wancho;
-            }
-            return UnicodeScript.WarangCiti;
+            return if (index < 171) -> UnicodeScript.Wancho else -> UnicodeScript.WarangCiti;
         }
         if (index < 173) {
             return UnicodeScript.Yezidi;
         }
-        if (index < 174) {
-            return UnicodeScript.Yi;
-        }
-        return UnicodeScript.ZanabazarSquare;
+        return if (index < 174) -> UnicodeScript.Yi else -> UnicodeScript.ZanabazarSquare;
     };
 );

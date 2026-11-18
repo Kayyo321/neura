@@ -37,23 +37,23 @@ The following public declarations are taken from the module source; each links t
   Appends the primitive text representation of a floating-point value.
 - **StringBuilder.StringBuilder** · [`export let append_bool = func(v: bool) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L95)
   Appends lowercase Boolean text.
-- **StringBuilder.StringBuilder** · [`export let append_value = func<T>(value: T) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L103)
+- **StringBuilder.StringBuilder** · [`export let append_value = func<T>(value: T) -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L100)
   Appends `value.to_string()`.
-- **StringBuilder.StringBuilder** · [`export let byte_length: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L108)
+- **StringBuilder.StringBuilder** · [`export let byte_length: int { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L105)
   The number of accumulated UTF-8 bytes. The getter reads the byte list, so the field itself holds nothing. Since 0.2.0.
-- **StringBuilder.StringBuilder** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L113)
+- **StringBuilder.StringBuilder** · [`export let is_empty = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L110)
   Reports whether there are any accumulated bytes. Tagged `#Pure`.
-- **StringBuilder.StringBuilder** · [`export let truncate = func(new_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L117)
+- **StringBuilder.StringBuilder** · [`export let truncate = func(new_length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L114)
   Keeps the first `new_length` bytes. The length must be between 0 and the current byte length and fall on a character boundary.
-- **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L138)
+- **StringBuilder.StringBuilder** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L135)
   Removes all accumulated bytes.
-- **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L144)
+- **StringBuilder.StringBuilder** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L141)
   The current UTF-8 bytes determine equality and hashing. Reading the argument can run its class hook.
-- **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L154)
+- **StringBuilder.StringBuilder** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L150)
   Hashes the current text contents. Tagged `#Pure`.
-- **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L158)
+- **StringBuilder.StringBuilder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L154)
   The accumulated text. The builder stays usable. Tagged `#Pure`.
-- **StringBuilder** · [`export let create = func -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L178)
+- **StringBuilder** · [`export let create = func -> StringBuilder`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/string-builder.nra#L174)
   A new, empty builder. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`. Since 0.1.0.
 <!-- END SOURCE API -->
 

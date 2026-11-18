@@ -19,9 +19,7 @@ export let Collection = module (
         /// @brief Reports whether each item passes the collection's membership test.
         let contains_all = func(items: T[list]) -> bool {
             for (let item in items) {
-                if (!contains(item)) {
-                    return false;
-                }
+                return false unless contains(item);
             }
             return true;
         };

@@ -33,47 +33,47 @@ The following public declarations are taken from the module source; each links t
   Returns the associated value as `Some`, or `None` when the key is absent. Tagged `#NoDiscard`.
 - **StringMap.StringMap** · [`export let get_or = func(key: string, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L65)
   Returns the associated value, or `fallback` when the key is absent.
-- **StringMap.StringMap** · [`export let require = func(key: string) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L74)
+- **StringMap.StringMap** · [`export let require = func(key: string) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L71)
   Returns the associated value. Traps with `no such element` when the key is absent.
-- **StringMap.StringMap** · [`export let set = func(key: string, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L83)
+- **StringMap.StringMap** · [`export let set = func(key: string, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L80)
   Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
-- **StringMap.StringMap** · [`export let put = func(key: string, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L94)
+- **StringMap.StringMap** · [`export let put = func(key: string, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L91)
   Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
-- **StringMap.StringMap** · [`export let delete = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L108)
+- **StringMap.StringMap** · [`export let delete = func(key: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L105)
   Removes the entry for `key`. Returns true if an entry was present.
-- **StringMap.StringMap** · [`export let remove = func(key: string) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L118)
+- **StringMap.StringMap** · [`export let remove = func(key: string) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L115)
   Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
-- **StringMap.StringMap** · [`export let keys = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L129)
+- **StringMap.StringMap** · [`export let keys = func -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L126)
   Copies the keys to a new built-in list in insertion order.
-- **StringMap.StringMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L144)
+- **StringMap.StringMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L141)
   Copies the values to a new built-in list in insertion order.
-- **StringMap.StringMap** · [`export let entries = func -> [string, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L159)
+- **StringMap.StringMap** · [`export let entries = func -> [string, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L156)
   Copies the `[key, value]` tuples to a new built-in list in insertion order.
-- **StringMap.StringMap** · [`export let iterator = func -> Iterator<[string, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L175)
+- **StringMap.StringMap** · [`export let iterator = func -> Iterator<[string, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L172)
   Returns a fail-fast iterator over `[key, value]` tuples in insertion order.
-- **StringMap.StringMap** · [`export let put_all = func(other: StringMap<V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L179)
+- **StringMap.StringMap** · [`export let put_all = func(other: StringMap<V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L176)
   Sets each entry of `other` in its iteration order.
-- **StringMap.StringMap** · [`export let for_each = func(action: func(string, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L192)
+- **StringMap.StringMap** · [`export let for_each = func(action: func(string, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L189)
   Calls `action` with the key and value of each entry in insertion order. The action leaves the map structure unchanged.
-- **StringMap.StringMap** · [`export let remove_if = func(drop: func(string, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L209)
+- **StringMap.StringMap** · [`export let remove_if = func(drop: func(string, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L206)
   Calls `drop` once per entry in insertion order, then removes the matches and compacts at most once. The predicate leaves the map structure unchanged. The number of removed entries.
-- **StringMap.StringMap** · [`export let get_or_put = func(key: string, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L241)
+- **StringMap.StringMap** · [`export let get_or_put = func(key: string, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L238)
   Returns the associated value, or calls `make` once, stores its result, and returns it when absent. The factory leaves the map structure unchanged.
-- **StringMap.StringMap** · [`export let merge = func(key: string, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L258)
+- **StringMap.StringMap** · [`export let merge = func(key: string, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L255)
   Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`. The combiner leaves the map structure unchanged.
-- **StringMap.StringMap** · [`export let compute = func(key: string, f: func(string, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L278)
+- **StringMap.StringMap** · [`export let compute = func(key: string, f: func(string, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L275)
   Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`. The callback leaves the map structure unchanged. The result of the callback.
-- **StringMap.StringMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L308)
+- **StringMap.StringMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L305)
   Tests whether `value.equals(held_value)` is true for any entry.
-- **StringMap.StringMap** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L322)
+- **StringMap.StringMap** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L319)
   Compacts to the smallest table that holds the live entries and invalidates iterators.
-- **StringMap.StringMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L328)
+- **StringMap.StringMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L325)
   Traps with "invalid state: ..." on a broken table invariant or when a live key's hash differs from its cached hash.
-- **StringMap.StringMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L345)
+- **StringMap.StringMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L342)
   Another StringMap with the same size in which, for each of its entries, this map holds an equal value for the key.
-- **StringMap.StringMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L369)
+- **StringMap.StringMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L365)
   The wrapping sum over entries of the key hash exclusive-or the value hash.
-- **StringMap.StringMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L386)
+- **StringMap.StringMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L382)
   Formats entries as `{k: v, k2: v2}` in iteration order. The map prints "(this collection)" where its own text reaches it again.
 - **StringMap** · [`export let create = func<V> -> StringMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/string-map.nra#L517)
   Creates an empty map with the default table size.

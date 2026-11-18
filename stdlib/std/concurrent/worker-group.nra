@@ -71,6 +71,9 @@ export let WorkerGroup = module (
                 }
             }
         };
+
+        /// @brief Names the group and its worker count.
+        export let.override to_string = func -> string => "WorkerGroup(" .. workers.to_string() .. " workers)";
     );
 
     /// @brief Starts `workers` tasks that take jobs from a queue of `capacity` jobs and run `work` on each; runs
@@ -102,7 +105,7 @@ export let WorkerGroup = module (
     // Takes jobs until the queue is closed and empty, or this task is cancelled, then reports that it stopped.
     let run_worker = func<T>(work: func(T) -> void, next_job: channels.Receiver<T>, stops: channels.Sender<int>, index: int) {
         let running = true;
-        while (running && !cancellation.requested()) {
+        while (running && not cancellation.requested()) {
             match (next_job.receive()) {
                 channels.Received.Value(job) => {
                     work(job);

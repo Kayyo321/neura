@@ -67,7 +67,7 @@ export let KernelStatus = module (
             return [ParseErrorKind.InvalidCharacter, "invalid character"];
         }
         if (status == 35) {
-            return [ParseErrorKind.OutOfRange, "value out of range for " + type_name];
+            return [ParseErrorKind.OutOfRange, "value out of range for " .. type_name];
         }
         trap_with_message("invalid state: unknown kernel status");
     };

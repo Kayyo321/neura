@@ -23,7 +23,9 @@ The following public declarations are taken from the module source; each links t
   The value currently stored in the shared slot.
 - **Cell.Cell** · [`export let init = func(initial: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L13)
   Initializes the slot with the supplied value.
-- **Cell** · [`export let of = func<T>(value: T) -> Cell<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L19)
+- **Cell.Cell** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L18)
+  Names the cell and shows its current value.
+- **Cell** · [`export let of = func<T>(value: T) -> Cell<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/core/cell.nra#L22)
   Creates a new, independent cell containing the value.
 <!-- END SOURCE API -->
 
