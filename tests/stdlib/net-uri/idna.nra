@@ -1,0 +1,124 @@
+let errors = import:Std.Core.Error;
+let idna = import:Std.Net.Core.Idna;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// IDNA domain-name conversion: Python-generated vectors, dot variants, length and hyphen rules.
+let IdnaTests = module (
+    let ascii = func(domain: string) -> string => test.assert_ok<string>(idna.to_ascii(domain));
+
+    let unicode = func(domain: string) -> string => test.assert_ok<string>(idna.to_unicode(domain));
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    // Generated with python3 -I -c "print('bücher.example'.encode('idna'))" and the same for each name. Python's
+    // codec is IDNA 2003 (nameprep), which is the identity on these lowercase NFC inputs without ß, ς, ZWJ or
+    // ZWNJ, so its output is the expected A-label form.
+    export let test_python_vectors_to_ascii = func {
+        test.assert_equal_string("xn--bcher-kva.example", ascii("bücher.example"));
+        test.assert_equal_string("xn--mnchen-3ya.de", ascii("münchen.de"));
+        test.assert_equal_string("xn--r8jz45g.xn--zckzah", ascii("例え.テスト"));
+        test.assert_equal_string("xn--80aealotwbjpid2k.xn--p1ai", ascii("правительство.рф"));
+        test.assert_equal_string("xn--bcher-kva.example", ascii("xn--bcher-kva.example"));
+        test.assert_equal_string("a.b.c.", ascii("a.b.c."));
+        test.assert_equal_string("ex_ample.com", ascii("ex_ample.com"));
+        // 'ü-.com' gives b'xn----dha.com' in Python, which applies no hyphen rule; UTS 46 CheckHyphens rejects
+        // the U-label because it ends with '-'.
+        test.assert_err<string>(idna.to_ascii("ü-.com"));
+    };
+
+    // Generated with python3 -I -c "print('bücher。example'.encode('idna'))" (also with U+FF0E and U+FF61):
+    // each gives b'xn--bcher-kva.example'.
+    export let test_dot_variants = func {
+        test.assert_equal_string("xn--bcher-kva.example", ascii("bücher。example"));
+        test.assert_equal_string("xn--bcher-kva.example", ascii("bücher．example"));
+        test.assert_equal_string("xn--bcher-kva.example", ascii("bücher｡example"));
+        test.assert_equal_string("bücher.example", unicode("bücher｡example"));
+    };
+
+    // Generated with python3 -I -c "print(b'xn--r8jz45g.xn--zckzah'.decode('idna'))" and the same for each name.
+    export let test_python_vectors_to_unicode = func {
+        test.assert_equal_string("bücher.example", unicode("xn--bcher-kva.example"));
+        test.assert_equal_string("例え.テスト", unicode("xn--r8jz45g.xn--zckzah"));
+        test.assert_equal_string("правительство.рф", unicode("xn--80aealotwbjpid2k.xn--p1ai"));
+        // Python keeps 'BüCHER.example' for b'XN--BCHER-KVA.example'; this library lowercases ASCII first.
+        test.assert_equal_string("bücher.example", unicode("XN--BCHER-KVA.example"));
+        test.assert_err<string>(idna.to_unicode("xn--b!.example"));
+        // A final root dot is kept, as in to_ascii.
+        test.assert_equal_string("a.b.c.", unicode("a.b.c."));
+        test.assert_equal_string("bücher.example.", unicode("xn--bcher-kva.example。"));
+    };
+
+    export let test_ascii_lowercase = func {
+        // Python's IDNA 2003 codec keeps 'EXAMPLE.com' as it is; UTS 46 maps ASCII to lowercase.
+        test.assert_equal_string("example.com", ascii("EXAMPLE.com"));
+        test.assert_equal_string("www.xn--bcher-kva.de", ascii("WWW.bücher.de"));
+    };
+
+    export let test_lengths = func {
+        last label63 = strings.repeat("a", 63);
+        // python3 -I: (63 * 'a' + '.com').encode('idna') succeeds; 64 'a' fails with "label too long".
+        test.assert_equal_string(label63 + ".com", ascii(label63 + ".com"));
+        last long_label = test.assert_err<string>(idna.to_ascii(label63 + "a.com"));
+        test.assert(kind_of(long_label) == errors.ParseErrorKind.OutOfRange);
+        // Four 63-byte labels make 255 bytes, over 253; three labels and a 61-byte one make exactly 253.
+        last too_long = label63 + "." + label63 + "." + label63 + "." + label63;
+        test.assert(kind_of(test.assert_err<string>(idna.to_ascii(too_long))) == errors.ParseErrorKind.OutOfRange);
+        last longest = label63 + "." + label63 + "." + label63 + "." + strings.repeat("b", 61);
+        test.assert_equal<int>(253, ascii(longest).byte_length);
+        // The final root dot is not counted.
+        test.assert_equal<int>(254, ascii(longest + ".").byte_length);
+        // A non-ASCII label is measured after encoding: 60 'ü' encode to more than 63 bytes.
+        test.assert_err<string>(idna.to_ascii(strings.repeat("ü", 60) + ".de"));
+    };
+
+    export let test_empty_labels = func {
+        test.assert(kind_of(test.assert_err<string>(idna.to_ascii(""))) == errors.ParseErrorKind.Empty);
+        // python3 -I: '..com'.encode('idna') fails with "label empty".
+        last empty = test.assert_err<string>(idna.to_ascii("a..com"));
+        test.assert(kind_of(empty) == errors.ParseErrorKind.Empty);
+        test.assert_equal<int>(2, offset_of(empty));
+        test.assert_err<string>(idna.to_ascii(".com"));
+    };
+
+    export let test_hyphen_rules = func {
+        test.assert_err<string>(idna.to_ascii("-abc.com"));
+        test.assert_err<string>(idna.to_ascii("abc-.com"));
+        test.assert_err<string>(idna.to_ascii("ab--c.com"));
+        test.assert_err<string>(idna.to_ascii("üb--c.com"));
+        test.assert_equal_string("a-b-c.com", ascii("a-b-c.com"));
+    };
+
+    export let test_ace_labels_are_checked = func {
+        // Not Punycode at all.
+        test.assert(kind_of(test.assert_err<string>(idna.to_ascii("xn--b!.com"))) == errors.ParseErrorKind.Syntax);
+        // Valid Punycode of an all-ASCII label is not an A-label: "abc-" encodes to "abc-" (no non-ASCII).
+        test.assert_err<string>(idna.to_ascii("xn--abc-.com"));
+        // Uppercase digits are lowercased first, so the canonical form is accepted.
+        test.assert_equal_string("xn--bcher-kva.com", ascii("XN--BCHER-KVA.com"));
+    };
+
+    export let test_unmapped_input_is_rejected = func {
+        // Uppercase Latin-1 needs UTS 46 mapping, which needs the data tables.
+        last upper = test.assert_err<string>(idna.to_ascii("BÜCHER.de"));
+        test.assert(kind_of(upper) == errors.ParseErrorKind.InvalidCharacter);
+        // Fullwidth letters and Cyrillic capitals.
+        test.assert_err<string>(idna.to_ascii("ｅxample.com"));
+        test.assert_err<string>(idna.to_ascii("Рф.ru"));
+        // A control character.
+        test.assert_err<string>(idna.to_ascii("a\tb.com"));
+    };
+
+    export let test_std3_rules = func {
+        test.assert_err<string>(idna.to_ascii_strict("ex_ample.com"));
+        test.assert_equal_string("xn--bcher-kva.example", test.assert_ok<string>(idna.to_ascii_strict("bücher.example")));
+    };
+);

@@ -1,0 +1,108 @@
+let h3 = import:Std.Net.Http.H3;
+let test = import:Std.Test;
+
+// Std.Net.Http.H3 wire data. The varint samples are RFC 9000 Appendix A.1 (0xc2197c5eff14e88c decodes to
+// 151,288,809,941,952,652; 0x9d7f3e7d to 494,878,333; 0x7bbd to 15,293; 0x25 and 0x4025 to 37). The other
+// vectors come from this encoder of RFC 9000 section 16:
+// python3 -I -c 'def vi(v):
+//     for n, p in ((1,0),(2,1),(4,2),(8,3)):
+//         if v < 1 << (8*n-2): return list(((p << (8*n-2)) | v).to_bytes(n, "big"))
+// print(vi(63), vi(64), vi(16383), vi(16384), vi(1073741823), vi(1073741824), vi((1<<62)-1))
+// print(vi(6)+vi(16384)+vi(8)+vi(1)+vi(0x21)+vi(0), vi(4)+vi(8), vi(0x21)+vi(300))'
+// -> [63] [64, 64] [127, 255] [128, 0, 64, 0] [191, 255, 255, 255] [192, 0, 0, 0, 64, 0, 0, 0]
+//    [255, 255, 255, 255, 255, 255, 255, 255]; [6, 128, 0, 64, 0, 8, 1, 33, 0] [4, 8] [33, 65, 44].
+let H3Tests = module (
+    let bytes = func(values: int[]) -> uint8[list] {
+        last list: uint8[list] = new;
+        for (let v in values) {
+            list.append(v as uint8);
+        }
+        return list;
+    };
+
+    let assert_bytes = func(expected: uint8[list], actual: uint8[list]) {
+        test.assert_equal<int>(expected.length, actual.length);
+        for (let i = 0; i < expected.length; i++) {
+            test.assert_equal<uint8>(expected[i], actual[i]);
+        }
+    };
+
+    let value_of = func(wire: uint8[list]) -> uint64 => test.assert_ok<h3.Decoded>(h3.decode_varint(wire, 0)).value;
+
+    export let test_rfc9000_samples = func {
+        test.assert_equal<uint64>(151288809941952652, value_of(bytes([194, 25, 124, 94, 255, 20, 232, 140])));
+        test.assert_equal<uint64>(494878333, value_of(bytes([157, 127, 62, 125])));
+        test.assert_equal<uint64>(15293, value_of(bytes([123, 189])));
+        test.assert_equal<uint64>(37, value_of(bytes([37])));
+        test.assert_equal<uint64>(37, value_of(bytes([64, 37])));
+        assert_bytes(bytes([194, 25, 124, 94, 255, 20, 232, 140]), h3.encode_varint(151288809941952652));
+        assert_bytes(bytes([157, 127, 62, 125]), h3.encode_varint(494878333));
+        assert_bytes(bytes([123, 189]), h3.encode_varint(15293));
+        assert_bytes(bytes([37]), h3.encode_varint(37));
+    };
+
+    export let test_varint_boundaries = func {
+        assert_bytes(bytes([63]), h3.encode_varint(63));
+        assert_bytes(bytes([64, 64]), h3.encode_varint(64));
+        assert_bytes(bytes([127, 255]), h3.encode_varint(16383));
+        assert_bytes(bytes([128, 0, 64, 0]), h3.encode_varint(16384));
+        assert_bytes(bytes([191, 255, 255, 255]), h3.encode_varint(1073741823));
+        assert_bytes(bytes([192, 0, 0, 0, 64, 0, 0, 0]), h3.encode_varint(1073741824));
+        assert_bytes(bytes([255, 255, 255, 255, 255, 255, 255, 255]), h3.encode_varint(h3.MaxVarint));
+        test.assert_equal<uint64>(h3.MaxVarint, value_of(bytes([255, 255, 255, 255, 255, 255, 255, 255])));
+        last decoded = test.assert_ok<h3.Decoded>(h3.decode_varint(bytes([9, 128, 0, 64, 0, 1]), 1));
+        test.assert_equal<uint64>(16384, decoded.value);
+        test.assert_equal<int>(5, decoded.next);
+        test.assert_err<h3.Decoded>(h3.decode_varint(bytes([128, 0, 64]), 0));
+        test.assert_err<h3.Decoded>(h3.decode_varint(bytes([]), 0));
+        test.assert_err<h3.Decoded>(h3.decode_varint(bytes([1]), 1));
+    };
+
+    export let test_frame_header = func {
+        assert_bytes(bytes([4, 8]), h3.encode_frame_header(h3.FrameSettings, 8));
+        assert_bytes(bytes([33, 65, 44]), h3.encode_frame_header(33, 300));
+        last header = test.assert_ok<h3.FrameHeader>(h3.decode_frame_header(bytes([33, 65, 44, 0]), 0));
+        test.assert_equal<uint64>(33, header.frame_type);
+        test.assert_equal<uint64>(300, header.length);
+        test.assert_equal<int>(3, header.payload_offset);
+        test.assert(h3.is_grease(header.frame_type));
+        test.assert_err<h3.FrameHeader>(h3.decode_frame_header(bytes([4]), 0));
+    };
+
+    export let test_settings = func {
+        last settings = new h3.Settings();
+        settings.add(h3.SettingMaxFieldSectionSize, 16384);
+        settings.add(h3.SettingEnableConnectProtocol, 1);
+        settings.add(33, 0);
+        last wire = h3.encode_settings(settings);
+        assert_bytes(bytes([6, 128, 0, 64, 0, 8, 1, 33, 0]), wire);
+        last back = test.assert_ok<h3.Settings>(h3.decode_settings(wire));
+        test.assert(back.equals(settings));
+        test.assert_equal<uint64>(1, back.get_or(h3.SettingEnableConnectProtocol, 0));
+        test.assert_equal<uint64>(0, back.get_or(h3.SettingH3Datagram, 0));
+        test.assert_equal_string("Settings{6=16384, 8=1, 33=0}", back.to_string());
+    };
+
+    export let test_settings_errors = func {
+        // A repeated identifier, the reserved HTTP/2 identifiers, and a truncated pair (RFC 9114 sections
+        // 7.2.4, 11.2.2).
+        test.assert_err<h3.Settings>(h3.decode_settings(bytes([6, 1, 6, 2])));
+        test.assert_err<h3.Settings>(h3.decode_settings(bytes([2, 0])));
+        test.assert_err<h3.Settings>(h3.decode_settings(bytes([5, 0])));
+        test.assert_err<h3.Settings>(h3.decode_settings(bytes([0, 0])));
+        test.assert_err<h3.Settings>(h3.decode_settings(bytes([6])));
+        test.assert(!h3.is_reserved_setting(1));
+        test.assert(!h3.is_reserved_setting(6));
+    };
+
+    export let test_grease_and_codes = func {
+        test.assert(h3.is_grease(33));
+        test.assert(h3.is_grease(64));
+        test.assert(!h3.is_grease(65));
+        test.assert(!h3.is_grease(32));
+        test.assert_equal<uint64>(256, h3.ErrorNoError);
+        test.assert_equal<uint64>(272, h3.ErrorVersionFallback);
+        test.assert_equal<uint64>(13, h3.FrameMaxPushId);
+        test.assert_equal<uint64>(51, h3.SettingH3Datagram);
+    };
+);

@@ -1,0 +1,97 @@
+let masque = import:Std.Net.Http.Masque;
+let test = import:Std.Test;
+
+// Std.Net.Http.Masque. Request vectors: RFC 9298 section 3.4 Figure 5 (:path
+// /.well-known/masque/udp/192.0.2.6/443/, :authority example.org, capsule-protocol ?1), RFC 9298 section 3
+// ("2001:db8::42" is encoded as "2001%3Adb8%3A%3A42"), RFC 9484 section 4.4 Figure 4 (:path
+// /.well-known/masque/ip/*/*/). Other expansions from (run verbatim):
+// python3 -I -c 'import urllib.parse as u; print(u.quote("2001:db8::42", safe=""), u.quote("192.0.2.0/24", safe=""), u.quote("2001:db8::/32", safe=""), u.quote("caf\u00e9.example", safe=""), u.quote("a b~c", safe=""), u.quote("**", safe=""))'
+// -> 2001%3Adb8%3A%3A42 192.0.2.0%2F24 2001%3Adb8%3A%3A%2F32 caf%C3%A9.example a%20b~c %2A%2A.
+// Datagram vectors are Context ID 0 or 2 as a one-byte varint (RFC 9000 section 16) followed by the payload.
+let MasqueTests = module (
+    export let test_rfc9298_figure_5 = func {
+        last request = test.assert_ok<masque.ConnectRequest>(masque.udp_request("example.org", "192.0.2.6", 443));
+        test.assert_equal_string("CONNECT", request.method);
+        test.assert_equal_string("connect-udp", request.protocol);
+        test.assert_equal_string("https", request.scheme);
+        test.assert_equal_string("/.well-known/masque/udp/192.0.2.6/443/", request.path);
+        test.assert_equal_string("example.org", request.authority);
+        test.assert_equal_string("?1", test.assert_some<string>(request.fields.get("capsule-protocol")));
+        test.assert_equal_string(
+            ":method = CONNECT; :protocol = connect-udp; :scheme = https; "
+                + ":path = /.well-known/masque/udp/192.0.2.6/443/; :authority = example.org; capsule-protocol = ?1",
+            request.to_string());
+        last again = test.assert_ok<masque.ConnectRequest>(masque.udp_request("example.org", "192.0.2.6", 443));
+        test.assert(request.equals(again));
+        test.assert_equal<int>(5, request.pseudo_names().length);
+    };
+
+    export let test_rfc9484_figure_4 = func {
+        last request = test.assert_ok<masque.ConnectRequest>(masque.ip_request("example.org", "*", "*"));
+        test.assert_equal_string("connect-ip", request.protocol);
+        test.assert_equal_string("/.well-known/masque/ip/*/*/", request.path);
+        test.assert_equal_string("CONNECT", request.pseudo_values()[0]);
+    };
+
+    export let test_expansion = func {
+        test.assert_equal_string("/.well-known/masque/udp/2001%3Adb8%3A%3A42/53/",
+            test.assert_ok<string>(masque.udp_path("2001:db8::42", 53)));
+        test.assert_equal_string("/.well-known/masque/ip/192.0.2.0%2F24/17/",
+            test.assert_ok<string>(masque.ip_path("192.0.2.0/24", "17")));
+        test.assert_equal_string("/.well-known/masque/ip/2001%3Adb8%3A%3A%2F32/*/",
+            test.assert_ok<string>(masque.ip_path("2001:db8::/32", "*")));
+        test.assert_equal_string("/.well-known/masque/ip/example.com/6/",
+            test.assert_ok<string>(masque.ip_path("example.com", "6")));
+        test.assert_equal_string("caf%C3%A9.example", masque.expand("café.example"));
+        test.assert_equal_string("a%20b~c", masque.expand("a b~c"));
+        test.assert_equal_string("*", masque.expand("*"));
+        test.assert_equal_string("%2A%2A", masque.expand("**"));
+        test.assert_equal_string("", masque.expand(""));
+    };
+
+    export let test_validation = func {
+        test.assert_err<string>(masque.udp_path("", 443));
+        test.assert_err<string>(masque.udp_path("example.org", 0));
+        test.assert_err<string>(masque.udp_path("example.org", 65536));
+        test.assert_ok<string>(masque.udp_path("example.org", 65535));
+        test.assert_err<string>(masque.udp_path("fe80::1%eth0", 443));
+        test.assert_err<string>(masque.udp_path("[2001:db8::42]", 443));
+        test.assert_err<string>(masque.udp_path("café.example", 443));
+        test.assert_err<string>(masque.udp_path("*", 443));
+        test.assert_err<string>(masque.ip_path("192.0.2.0/33", "*"));
+        test.assert_ok<string>(masque.ip_path("192.0.2.0/32", "*"));
+        test.assert_ok<string>(masque.ip_path("2001:db8::/128", "*"));
+        test.assert_err<string>(masque.ip_path("2001:db8::/129", "*"));
+        test.assert_err<string>(masque.ip_path("192.0.2.0/", "*"));
+        test.assert_err<string>(masque.ip_path("", "*"));
+        test.assert_err<string>(masque.ip_path("*", "256"));
+        test.assert_err<string>(masque.ip_path("*", ""));
+        test.assert_err<string>(masque.ip_path("*", "0x6"));
+        test.assert_ok<string>(masque.ip_path("*", "255"));
+        test.assert_err<masque.ConnectRequest>(masque.udp_request("example.org", "", 443));
+        test.assert_err<masque.ConnectRequest>(masque.ip_request("example.org", "*", "-1"));
+    };
+
+    let bytes = func(values: int[]) -> uint8[list] {
+        last list: uint8[list] = new;
+        for (let v in values) {
+            list.append(v as uint8);
+        }
+        return list;
+    };
+
+    export let test_udp_datagrams = func {
+        last encoded = masque.encode_udp_datagram(bytes([1, 2, 3]));
+        test.assert_equal<int>(4, encoded.length);
+        test.assert_equal<uint8>(0, encoded[0]);
+        test.assert_equal<uint8>(3, encoded[3]);
+        last payload = test.assert_ok<uint8[list]>(masque.decode_udp_datagram(encoded));
+        test.assert_equal<int>(3, payload.length);
+        test.assert_equal<uint8>(2, payload[1]);
+        // An empty payload is allowed; another Context ID or no Context ID is an error.
+        test.assert_equal<int>(0, test.assert_ok<uint8[list]>(masque.decode_udp_datagram(bytes([0]))).length);
+        test.assert_err<uint8[list]>(masque.decode_udp_datagram(bytes([2, 9])));
+        test.assert_err<uint8[list]>(masque.decode_udp_datagram(bytes([])));
+        test.assert_err<uint8[list]>(masque.decode_udp_datagram(bytes([64])));
+    };
+);

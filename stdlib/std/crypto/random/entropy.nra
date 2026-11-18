@@ -13,7 +13,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// with the operating system's generator (`getrandom` on Linux, the platform equivalent elsewhere). It needs the
 /// entropy capability. Hardware instructions (RDSEED, RNDR) and fork or VM-clone detection need host operations
 /// the runtime does not have yet; those members are stubs (docs/design/Crypto030.md, "Runtime needs").
-/// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Entropy)
+/// @see [Std.Crypto.Random.Entropy](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-Entropy)
 #Since("0.3.0")
 export let Entropy = module (
     /// @brief Carries the provider's entropy bytes or error code.

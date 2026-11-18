@@ -1,7 +1,7 @@
 let.promote _ = import:Std.Crypto.Algorithm;
 
 /// @brief The contract of a message authentication code (Stdlib.md section 21.5).
-/// @see [Std.Crypto.Mac.Authenticator](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Authenticator)
+/// @see [Std.Crypto.Mac.Authenticator](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Authenticator)
 #Since("0.3.0")
 export let Authenticator = module (
     /// @brief A MAC bound to its key at construction. `verify` is the only comparison the library offers: it

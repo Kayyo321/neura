@@ -1,0 +1,87 @@
+let contexts = import:Std.Net.Mesh.TraceContext;
+let.promote _ = import:Std.Net.Filter;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Random.Random;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief A filter that propagates the W3C trace context: it extracts `traceparent`, `tracestate` and `baggage`
+/// from each request, makes a child span id, and injects the headers into the request it passes on.
+///
+/// The filter is generic over the request type through two functions, so one implementation serves HTTP
+/// (`Std.Net.Http.Message.HttpRequest`, reading with `headers.joined` and writing with `headers.set`, or
+/// `headers.remove` for the empty value that means "remove the field"), RPC
+/// (`Std.Net.Rpc.Call.RpcRequest` metadata) and a WebSocket opening handshake, which is an HTTP request. For each
+/// request it calls `TraceContext.extract`, then `next_hop` with the injected random source, then `inject`, and
+/// calls the next service with the result. A request without a valid `traceparent` starts a new trace, sampled
+/// when `sample_new` is set; this is the "restart" the spec recommends and it drops any `tracestate`. The span id
+/// is drawn from the injected `Std.Random.Random`, so tests are deterministic; use `Random.from_entropy()` in
+/// production. The filter records the context it sent last, for the application's own spans and logs.
+/// @see [Std.Net.Mesh.TracePropagationFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-TracePropagationFilter)
+#Since("0.3.0")
+export let TracePropagationFilter = module (
+    /// @brief Propagates the trace context of each request to the next service.
+    #[Final, NotThreadSafe]
+    export let TracePropagationFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief Reads a header value (several fields combined with commas).
+        last get_header: func(Req, string) -> Optional<string>;
+        /// @brief Returns the request with a header set, replacing earlier fields of the name; an empty value
+        /// removes the field.
+        last with_header: func(Req, string, string) -> Req;
+        /// @brief The source of span and trace ids.
+        last random: Random;
+        /// @brief Whether a newly started trace is sampled.
+        last sample_new: bool;
+        /// @brief The context sent with the last request.
+        let sent: contexts.TraceContext = contexts.empty();
+        /// @brief Requests that continued a received trace.
+        let continued_count: int64 = 0;
+        /// @brief Requests that started a new trace.
+        let started_count: int64 = 0;
+
+        /// @brief A filter over the two header functions and a random source.
+        export let init = func(reader: func(Req, string) -> Optional<string>, writer: func(Req, string, string) -> Req,
+            source: Random, sample: bool) {
+            get_header = reader;
+            with_header = writer;
+            random = source;
+            sample_new = sample;
+        };
+
+        /// @brief Extracts, continues or starts, injects, and calls `next`.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            last received = contexts.extract<Req>(request, get_header);
+            if (received.has_parent()) {
+                continued_count++;
+            } else {
+                started_count++;
+            }
+            sent = received.next_hop(random, sample_new);
+            return next.call(contexts.inject<Req>(sent, request, with_header));
+        };
+
+        /// @brief The context sent with the last request (empty before the first).
+        #NoDiscard
+        export let last_sent = func -> contexts.TraceContext => sent;
+
+        /// @brief Requests that continued a received trace so far.
+        #NoDiscard
+        export let continued = func -> int64 => continued_count;
+
+        /// @brief Requests that started a new trace so far.
+        #NoDiscard
+        export let started = func -> int64 => started_count;
+
+        /// @brief Text such as "TracePropagationFilter(3 continued, 1 started)".
+        export let.override to_string = func -> string => "TracePropagationFilter(" + continued_count.to_string()
+            + " continued, " + started_count.to_string() + " started)";
+    );
+
+    /// @brief A filter reading headers with `get_header`, writing them with `with_header`, drawing ids from
+    /// `random`, and sampling new traces when `sample_new`.
+    #NoDiscard
+    export let of = func<Req, Resp>(get_header: func(Req, string) -> Optional<string>,
+        with_header: func(Req, string, string) -> Req, random: Random, sample_new: bool)
+        -> TracePropagationFilter<Req, Resp> =>
+        new TracePropagationFilter<Req, Resp>(get_header, with_header, random, sample_new);
+);

@@ -14,7 +14,8 @@ the repository. For each entry of `GENERATED` this script writes
     are unchanged, and so is everything inside a code span or fenced block.
 
 `HAND_WRITTEN` lists the wiki pages that are maintained by hand, plus the
-`Stdlib-<Area>-<Module>.md` module pages, which `update-stdlib-wiki-api.py`
+`Stdlib-<Area>-<Module>.md` module pages (one level more for each
+subdirectory, as in `Stdlib-Net-Core-Uri.md`), which `update-stdlib-wiki-api.py`
 refreshes. A wiki page that is neither generated nor hand-written is an error.
 
 By default the script writes the pages. `--check` writes nothing, and exits 1
@@ -107,6 +108,7 @@ REPOSITORY_ONLY = (
     "docs/design/Backend030.md",
     "docs/design/Desktop030.md",
     "docs/design/Projects030.md",
+    "docs/design/Net030.md",
     "docs/design/Standalone.md",
     "docs/design/Stdlib.md",
 )
@@ -121,7 +123,7 @@ REPOSITORY_ONLY_PATTERNS = (
 # Wiki pages written by hand. The standard-library module pages, which
 # `update-stdlib-wiki-api.py` maintains, are matched by MODULE_PAGE.
 HAND_WRITTEN = frozenset({"Home", "_Sidebar", "Neurons-and-Circuits", "Stdlib"})
-MODULE_PAGE = re.compile(r"^Stdlib-[A-Z][A-Za-z0-9]*(?:-[A-Z][A-Za-z0-9]*)?$")
+MODULE_PAGE = re.compile(r"^Stdlib-[A-Z][A-Za-z0-9]*(?:-[A-Z][A-Za-z0-9]*){0,4}$")
 
 # The generated-file comment, and the header under each title.
 COMMENT = "<!-- Generated from {path} by scripts/generate-wiki.py. Edit that file, not this one. -->"

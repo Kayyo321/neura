@@ -1,0 +1,120 @@
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let wire = import:Std.Net.Http.Wire;
+
+// Std.Net.Http.Wire.HeadReader: incremental head collection, the head limit
+// while bytes arrive, and the bytes after the head.
+let HeadReaderTests = module (
+    // RFC 9110 section 3.9, the client request, followed by five body bytes.
+    const Message: string = "GET /hello.txt HTTP/1.1\r\nUser-Agent: curl/7.64.1\r\nHost: www.example.com\r\n"
+        + "Accept-Language: en, mi\r\n\r\nhello";
+
+    let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
+    };
+
+    let feed = func(reader: wire.HeadReader, bytes: uint8[list]) -> bool => test.assert_ok<bool>(reader.feed(bytes));
+
+    let feed_status = func(reader: wire.HeadReader, bytes: uint8[list]) -> int =>
+        wire.rejection_status(test.assert_err<bool>(reader.feed(bytes)));
+
+    export let test_byte_by_byte = func {
+        last bytes = strings.to_bytes(Message);
+        last head_length = bytes.length - 5;
+        last reader = new wire.HeadReader();
+        for (let i = 0; i < bytes.length; i++) {
+            last done = feed(reader, slice(bytes, i, i + 1));
+            test.assert_equal_bool(i >= head_length - 1, done);
+        }
+        test.assert(reader.is_complete());
+        test.assert_equal<int>(head_length, reader.head_bytes().length);
+        test.assert_equal_string("hello", strings.from_bytes_lossy(reader.remainder()));
+        last head = test.assert_ok<wire.RequestHead>(reader.request_head());
+        test.assert_equal_string("/hello.txt", head.target);
+    };
+
+    // Every split of the message into two feeds gives the same head and remainder.
+    export let test_every_split = func {
+        last bytes = strings.to_bytes(Message);
+        last expected = test.assert_ok<wire.RequestHead>(wire.parse_request_head(slice(bytes, 0, bytes.length - 5)));
+        for (let split = 0; split <= bytes.length; split++) {
+            last reader = new wire.HeadReader();
+            last first = feed(reader, slice(bytes, 0, split));
+            test.assert_equal_bool(split >= bytes.length - 5, first);
+            test.assert(feed(reader, slice(bytes, split, bytes.length)));
+            test.assert(expected.equals(test.assert_ok<wire.RequestHead>(reader.request_head())));
+            test.assert_equal_string("hello", strings.from_bytes_lossy(reader.remainder()));
+        }
+    };
+
+    // A short head followed by a large body in one feed is complete; the body
+    // does not count toward the head limit.
+    export let test_large_remainder = func {
+        last bytes = strings.to_bytes("POST / HTTP/1.1\r\nHost: h\r\nContent-Length: 20000\r\n\r\n" + strings.repeat("b", 20000));
+        last reader = new wire.HeadReader();
+        test.assert(feed(reader, bytes));
+        test.assert_equal<int>(20000, reader.remainder().length);
+        test.assert(feed(reader, strings.to_bytes("more")));
+        test.assert_equal<int>(20004, reader.remainder().length);
+    };
+
+    // An endless head fails at the limit plus one byte, and stays failed.
+    export let test_endless_head = func {
+        last reader = new wire.HeadReader(new wire.Limits(64, 100, 1000));
+        test.assert(!feed(reader, strings.to_bytes("GET / HTTP/1.1\r\nX: " + strings.repeat("a", 44))));
+        test.assert(!feed(reader, strings.to_bytes("a")));
+        test.assert_equal<int>(431, feed_status(reader, strings.to_bytes("a")));
+        test.assert_equal<int>(431, feed_status(reader, strings.to_bytes("\r\n\r\n")));
+        last default_reader = new wire.HeadReader();
+        test.assert(!feed(default_reader, strings.to_bytes(strings.repeat("a", 16384))));
+        test.assert_equal<int>(431, feed_status(default_reader, strings.to_bytes("a")));
+    };
+
+    // A head of exactly the limit is accepted; one byte more is 431 even when
+    // it arrives in one feed with its end.
+    export let test_limit_boundary = func {
+        last limits = new wire.Limits(32, 100, 1000);
+        // "GET / HTTP/1.1\r\nHost: " is 22 bytes and the end is 4.
+        last exact = "GET / HTTP/1.1\r\nHost: " + strings.repeat("h", 6) + "\r\n\r\n";
+        test.assert_equal<int>(32, exact.byte_length);
+        last reader = new wire.HeadReader(limits);
+        test.assert(feed(reader, strings.to_bytes(exact + "rest")));
+        test.assert_equal_string("hhhhhh", test.assert_some<string>(test.assert_ok<wire.RequestHead>(reader.request_head()).headers.get("host")));
+        test.assert_equal_string("rest", strings.from_bytes_lossy(reader.remainder()));
+        last over = new wire.HeadReader(limits);
+        test.assert_equal<int>(431, feed_status(over, strings.to_bytes("GET / HTTP/1.1\r\nHost: " + strings.repeat("h", 7) + "\r\n\r\n")));
+    };
+
+    // Empty lines before the start-line do not end the head (RFC 9112 section 2.2).
+    export let test_leading_empty_lines = func {
+        last reader = new wire.HeadReader();
+        test.assert(!feed(reader, strings.to_bytes("\r\n\r\n\n")));
+        test.assert(feed(reader, strings.to_bytes("GET /x HTTP/1.1\r\nHost: h\n\nbody")));
+        test.assert_equal_string("/x", test.assert_ok<wire.RequestHead>(reader.request_head()).target);
+        test.assert_equal_string("body", strings.from_bytes_lossy(reader.remainder()));
+    };
+
+    export let test_response_reader = func {
+        last reader = new wire.HeadReader();
+        test.assert(feed(reader, strings.to_bytes("HTTP/1.1 200 OK\r\nContent-Length: 2\r\n\r\nhi")));
+        last head = test.assert_ok<wire.ResponseHead>(reader.response_head());
+        test.assert_equal<int>(200, head.status);
+        test.assert_equal_string(wire.BodyFraming.Length(2).to_string(),
+            test.assert_ok<wire.BodyFraming>(wire.response_body_length(head, "GET")).to_string());
+        test.assert_equal_string("hi", strings.from_bytes_lossy(reader.remainder()));
+        test.assert(strings.starts_with(reader.to_string(), "HeadReader{"));
+        test.assert(strings.starts_with(new wire.Limits().to_string(), "Limits{head=16384, fields=100, body=1048576"));
+        last defaults = new wire.Limits();
+        last same = new wire.Limits(16384, 100, 1048576, 4096, 16384, true,
+            ["GET", "HEAD", "POST", "PUT", "DELETE", "CONNECT", "OPTIONS", "TRACE", "PATCH"]);
+        test.assert(defaults.equals(same));
+        test.assert_equal<uint32>(defaults.hash_code(), same.hash_code());
+        test.assert(!defaults.equals(new wire.Limits(16384, 100, 1048576, 4096, 16384, false, ["GET"])));
+        test.assert(defaults.equals(new wire.Limits(16384, 100, 1048576)));
+    };
+);

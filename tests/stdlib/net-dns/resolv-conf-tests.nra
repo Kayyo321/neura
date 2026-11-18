@@ -1,0 +1,137 @@
+let ips = import:Std.Net.Core.IpAddr;
+let resolv = import:Std.Net.Dns.ResolvConf;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// The resolv.conf parser, following resolv.conf(5) (`man 5 resolv.conf`): comments, nameservers (at most 3),
+// last search/domain wins, options with caps, unknown options, and defaults.
+let ResolvConfTests = module (
+    let servers_text = func(conf: resolv.ResolvConf) -> string {
+        last names: string[list] = new;
+        for (let ip in conf.nameservers()) {
+            names.append(ips.to_string(ip));
+        }
+        return strings.join(names, ",");
+    };
+
+    export let test_typical_file = func {
+        last conf = resolv.parse(
+            "# generated\n"
+            + "; another comment\n"
+            + "nameserver 10.0.0.1\n"
+            + "nameserver 2001:db8::53\n"
+            + "search corp.example example.com\n"
+            + "options ndots:2 timeout:3 attempts:4 rotate edns0\n");
+        test.assert_equal_string("10.0.0.1,2001:db8::53", servers_text(conf));
+        test.assert_equal<int>(2, conf.search().length);
+        test.assert_equal_string("corp.example", conf.domain());
+        test.assert_equal_string("example.com", conf.search()[1]);
+        test.assert_equal<int>(2, conf.ndots);
+        test.assert_equal<int>(3, conf.timeout_seconds);
+        test.assert_equal<int>(4, conf.attempts);
+        test.assert(conf.rotate);
+        test.assert(conf.edns0);
+        test.assert_equal<int>(0, conf.problems().length);
+        test.assert_equal<int>(0, conf.unknown_options().length);
+        last addresses = conf.nameserver_addresses(resolv.DnsPort);
+        test.assert_equal_string("10.0.0.1:53", addresses[0].to_string());
+        test.assert_equal_string("[2001:db8::53]:53", addresses[1].to_string());
+        test.assert_equal_string(
+            "ResolvConf(nameservers [10.0.0.1, 2001:db8::53], search [corp.example, example.com], ndots 2, "
+            + "timeout 3, attempts 4, rotate, edns0)", conf.to_string());
+    };
+
+    export let test_last_domain_or_search_wins = func {
+        last search_last = resolv.parse("domain a.example\nsearch b.example c.example\n");
+        test.assert_equal<int>(2, search_last.search().length);
+        test.assert_equal_string("b.example", search_last.domain());
+        last domain_last = resolv.parse("search b.example c.example\ndomain a.example\n");
+        test.assert_equal<int>(1, domain_last.search().length);
+        test.assert_equal_string("a.example", domain_last.domain());
+        last two_searches = resolv.parse("search x.example\nsearch y.example\n");
+        test.assert_equal_string("y.example", two_searches.domain());
+        test.assert_equal<int>(1, two_searches.search().length);
+    };
+
+    export let test_defaults_and_empty = func {
+        last conf = resolv.parse("");
+        test.assert(conf.equals(resolv.defaults()));
+        test.assert_equal<uint32>(conf.hash_code(), resolv.defaults().hash_code());
+        test.assert_equal<int>(1, conf.ndots);
+        test.assert_equal<int>(5, conf.timeout_seconds);
+        test.assert_equal<int>(2, conf.attempts);
+        test.assert(!conf.rotate);
+        test.assert(!conf.edns0);
+        test.assert_equal<int>(0, conf.nameservers().length);
+        test.assert_equal<int>(0, conf.search().length);
+        test.assert_equal_string("", conf.domain());
+        // With no nameserver the local machine's server is used.
+        last effective = conf.effective_nameservers();
+        test.assert_equal<int>(1, effective.length);
+        test.assert_equal_string("127.0.0.1", ips.to_string(effective[0]));
+        test.assert_equal_string("127.0.0.1:53", conf.nameserver_addresses(53)[0].to_string());
+    };
+
+    export let test_option_caps = func {
+        last conf = resolv.parse("options ndots:99 timeout:120 attempts:6\n");
+        test.assert_equal<int>(15, conf.ndots);
+        test.assert_equal<int>(30, conf.timeout_seconds);
+        test.assert_equal<int>(5, conf.attempts);
+        last zero = resolv.parse("options ndots:0\n");
+        test.assert_equal<int>(0, zero.ndots);
+        last huge = resolv.parse("options timeout:99999999999999999999999\n");
+        test.assert_equal<int>(30, huge.timeout_seconds);
+    };
+
+    export let test_unknown_and_invalid_options = func {
+        last conf = resolv.parse("options inet6 ndots:x single-request timeout: attempts:-1 rotate\n");
+        test.assert_equal<int>(2, conf.unknown_options().length);
+        test.assert_equal_string("inet6", conf.unknown_options()[0]);
+        test.assert_equal_string("single-request", conf.unknown_options()[1]);
+        test.assert_equal<int>(3, conf.problems().length);
+        test.assert_equal_string("line 1: invalid option ndots:x", conf.problems()[0]);
+        test.assert_equal_string("line 1: invalid option timeout:", conf.problems()[1]);
+        test.assert_equal_string("line 1: invalid option attempts:-1", conf.problems()[2]);
+        test.assert_equal<int>(1, conf.ndots);
+        test.assert(conf.rotate);
+    };
+
+    export let test_nameserver_limit_and_invalid = func {
+        last conf = resolv.parse(
+            "nameserver 10.0.0.1\n"
+            + "nameserver not-an-address\n"
+            + "nameserver 10.0.0.2\n"
+            + "nameserver\n"
+            + "nameserver 10.0.0.3\n"
+            + "nameserver 10.0.0.4\n");
+        test.assert_equal_string("10.0.0.1,10.0.0.2,10.0.0.3", servers_text(conf));
+        last problems = conf.problems();
+        test.assert_equal<int>(3, problems.length);
+        test.assert_equal_string("line 2: invalid nameserver address not-an-address", problems[0]);
+        test.assert_equal_string("line 4: nameserver without an address", problems[1]);
+        test.assert_equal_string("line 6: more than 3 nameservers; 10.0.0.4 ignored", problems[2]);
+    };
+
+    export let test_comments_only_in_first_column = func {
+        // `#` or `;` in the first column makes a comment; the keyword must start the line; unknown keywords
+        // such as sortlist are ignored.
+        last conf = resolv.parse(
+            "#nameserver 10.9.9.9\n;nameserver 10.8.8.8\n\tnameserver 10.7.7.7\nnameserver 10.0.0.5 # note\nsortlist 10.0.0.0\n");
+        test.assert_equal_string("10.0.0.5", servers_text(conf));
+        test.assert_equal<int>(1, conf.problems().length);
+        test.assert_equal_string("line 3: the keyword must start the line", conf.problems()[0]);
+    };
+
+    export let test_constructor_caps_and_equality = func {
+        last servers: ips.IpAddr[list] = new;
+        servers.append(test.assert_ok<ips.IpAddr>(ips.parse("192.0.2.53")));
+        last search: string[list] = new;
+        search.append("corp.example");
+        last built = new resolv.ResolvConf(servers, search, 40, 5, 2, false, true, new, new);
+        test.assert_equal<int>(15, built.ndots);
+        last parsed = resolv.parse("nameserver 192.0.2.53\ndomain corp.example\noptions ndots:15 edns0\n");
+        test.assert(built.equals(parsed));
+        test.assert_equal<uint32>(built.hash_code(), parsed.hash_code());
+        test.assert(!built.equals(resolv.defaults()));
+    };
+);

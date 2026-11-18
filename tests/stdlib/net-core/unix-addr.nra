@@ -1,0 +1,85 @@
+let errors = import:Std.Core.Error;
+let net = import:Std.Net.Core.NetAddress;
+let test = import:Std.Test;
+let unix = import:Std.Net.Core.UnixAddr;
+
+// UnixAddr: paths and Linux abstract names, the 108-byte sun_path limit of unix(7) (107 bytes plus the NUL for a
+// path; 107 bytes after the leading NUL for an abstract name).
+let UnixAddrTests = module (
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    let repeated = func(count: int) -> string {
+        let text = "";
+        for (let i = 0; i < count; i++) {
+            text += "a";
+        }
+        return text;
+    };
+
+    // "a", NUL, "b" for the abstract case; "/tmp/a", NUL, "b" for the path case.
+    let with_nul = func(prefix: string) -> string {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < prefix.byte_length; i++) {
+            bytes.append(prefix.byte_at(i));
+        }
+        bytes.append(0);
+        bytes.append(98);
+        let [valid, text] = string.from_utf8(bytes);
+        test.assert(valid);
+        return text;
+    };
+
+    export let test_paths = func {
+        last a = unix.of_path("/run/app.sock");
+        test.assert_equal_string("/run/app.sock", a.to_string());
+        test.assert_equal_string("/run/app.sock", a.path);
+        test.assert(!a.is_abstract);
+        test.assert(a.family() == net.AddressFamily.Unix);
+        test.assert(a.equals(test.assert_ok<unix.UnixAddr>(unix.parse("/run/app.sock"))));
+        test.assert(test.assert_ok<unix.UnixAddr>(unix.parse("relative.sock")).equals(unix.of_path("relative.sock")));
+        last longest = "/" + repeated(106);
+        test.assert_equal_int64(107, longest.byte_length as int64);
+        test.assert_equal_string(longest, unix.of_path(longest).to_string());
+        test.assert_equal_string(longest, test.assert_ok<unix.UnixAddr>(unix.parse(longest)).path);
+    };
+
+    export let test_abstract_names = func {
+        last a = unix.abstract_name("my-service");
+        test.assert(a.is_abstract);
+        test.assert_equal_string("my-service", a.path);
+        test.assert_equal_string("@my-service", a.to_string());
+        last parsed = test.assert_ok<unix.UnixAddr>(unix.parse("@my-service"));
+        test.assert(parsed.is_abstract);
+        test.assert(parsed.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, parsed.hash_code() as int64);
+        // The same text as a path and as an abstract name are different addresses.
+        test.assert(!a.equals(unix.of_path("my-service")));
+        last longest = repeated(107);
+        test.assert_equal_string("@" + longest, unix.abstract_name(longest).to_string());
+        test.assert(test.assert_ok<unix.UnixAddr>(unix.parse("@" + longest)).is_abstract);
+        // An abstract name may hold a NUL byte; a path may not.
+        test.assert_equal_int64(3, unix.abstract_name(with_nul("a")).path.byte_length as int64);
+    };
+
+    export let test_rejections = func {
+        test.assert(kind_of(test.assert_err<unix.UnixAddr>(unix.parse(""))) == errors.ParseErrorKind.Empty);
+        test.assert(kind_of(test.assert_err<unix.UnixAddr>(unix.parse("@"))) == errors.ParseErrorKind.Empty);
+        last long_path = test.assert_err<unix.UnixAddr>(unix.parse("/" + repeated(107)));
+        test.assert(kind_of(long_path) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal_int64(107, offset_of(long_path) as int64);
+        last long_name = test.assert_err<unix.UnixAddr>(unix.parse("@" + repeated(108)));
+        test.assert(kind_of(long_name) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal_int64(108, offset_of(long_name) as int64);
+        last nul = test.assert_err<unix.UnixAddr>(unix.parse(with_nul("/tmp/a")));
+        test.assert(kind_of(nul) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert_equal_int64(6, offset_of(nul) as int64);
+    };
+);

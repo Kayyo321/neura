@@ -1,0 +1,144 @@
+let slices = import:Std.Net.Core.IoSlice;
+
+/// @brief A fixed-capacity byte ring buffer for socket I/O: bytes are written at the tail and read from the
+/// head, and the readable bytes are exposed as one or two `IoSlice` views for a gather write.
+///
+/// The storage is one `uint8[list]` filled once to the capacity; writing and reading move indexes and copy
+/// only the bytes passed in or taken out. `readable_slices` returns views over that storage without copying
+/// (0 views when empty, otherwise 1, or 2 when the readable bytes wrap around the end). The views are valid
+/// only until the next `write`, `write_slice`, `read`, `skip` or `clear`: after that they may show other
+/// bytes. Hand them to `IoSlice.write_gather` and then `skip` the count written. The ring is an ordinary
+/// heap object reclaimed by the tracing collector; nothing is reference-counted. It is not synchronized:
+/// share it between tasks only behind a lock.
+/// @see [Std.Net.Core.ByteRing](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Core-ByteRing)
+#Since("0.3.0")
+export let ByteRing = module (
+    /// @brief A mutable ring buffer of bytes with a fixed capacity.
+    #[Final, NoDiscard, Since("0.3.0")]
+    export let ByteRing = class (
+        /// @brief The ring storage, `capacity` bytes long.
+        last storage: uint8[list];
+        /// @brief The index of the first readable byte.
+        let head: int = 0;
+        /// @brief The number of readable bytes.
+        let used: int = 0;
+
+        /// @brief Creates an empty ring of `capacity_bytes` bytes; traps below 1.
+        export let init = func(capacity_bytes: int) {
+            if (capacity_bytes < 1) {
+                trap_with_message("ByteRing: capacity must be at least 1");
+            }
+            storage = new;
+            for (let i = 0; i < capacity_bytes; i++) {
+                storage.append(0);
+            }
+        };
+
+        /// @brief The fixed capacity in bytes.
+        export let capacity = func -> int => storage.length;
+
+        /// @brief The number of readable bytes.
+        export let length = func -> int => used;
+
+        /// @brief The number of bytes `write` can take now.
+        export let writable_space = func -> int => storage.length - used;
+
+        /// @brief Tests whether no byte is readable.
+        export let is_empty = func -> bool => used == 0;
+
+        /// @brief Tests whether no byte can be written.
+        export let is_full = func -> bool => used == storage.length;
+
+        /// @brief Copies as many bytes from the front of `bytes` as fit and returns that count.
+        export let write = func(bytes: uint8[list]) -> int => write_slice(slices.of(bytes));
+
+        /// @brief Copies as many bytes from the front of the view as fit and returns that count.
+        export let write_slice = func(slice: slices.IoSlice) -> int {
+            last space = storage.length - used;
+            last taken = slice.length() < space ? slice.length() : space;
+            let tail = (head + used) % storage.length;
+            for (let i = 0; i < taken; i++) {
+                storage[tail] = slice.byte_at(i);
+                tail++;
+                if (tail == storage.length) {
+                    tail = 0;
+                }
+            }
+            used += taken;
+            return taken;
+        };
+
+        /// @brief Removes and returns up to `max` bytes from the head; traps when `max` is negative.
+        export let read = func(max: int) -> uint8[list] {
+            last bytes = peek(max);
+            advance(bytes.length);
+            return bytes;
+        };
+
+        /// @brief Returns a copy of up to `max` bytes from the head without removing them; traps when `max` is
+        /// negative.
+        export let peek = func(max: int) -> uint8[list] {
+            if (max < 0) {
+                trap_with_message("ByteRing.peek: negative count");
+            }
+            last bytes: uint8[list] = new;
+            last wanted = max < used ? max : used;
+            let index = head;
+            for (let i = 0; i < wanted; i++) {
+                bytes.append(storage[index]);
+                index++;
+                if (index == storage.length) {
+                    index = 0;
+                }
+            }
+            return bytes;
+        };
+
+        /// @brief Discards up to `count` bytes from the head and returns how many were discarded; traps when
+        /// `count` is negative.
+        export let skip = func(count: int) -> int {
+            if (count < 0) {
+                trap_with_message("ByteRing.skip: negative count");
+            }
+            last skipped = count < used ? count : used;
+            advance(skipped);
+            return skipped;
+        };
+
+        /// @brief Views of the readable bytes in order: none when empty, one, or two when they wrap. Valid until
+        /// the ring next changes.
+        export let readable_slices = func -> slices.IoSlice[list] {
+            last views: slices.IoSlice[list] = new;
+            if (used == 0) {
+                return views;
+            }
+            last to_end = storage.length - head;
+            if (used <= to_end) {
+                views.append(slices.view(storage, head, used));
+            } else {
+                views.append(slices.view(storage, head, to_end));
+                views.append(slices.view(storage, 0, used - to_end));
+            }
+            return views;
+        };
+
+        /// @brief Discards every readable byte.
+        export let clear = func {
+            head = 0;
+            used = 0;
+        };
+
+        /// @brief `ByteRing(length N, capacity M)`; the bytes are not shown.
+        export let.override to_string = func -> string =>
+            "ByteRing(length " + used.to_string() + ", capacity " + storage.length.to_string() + ")";
+
+        /// @brief Moves the head past `count` readable bytes.
+        let advance = func(count: int) {
+            head = (head + count) % storage.length;
+            used -= count;
+            if (used == 0) {
+                head = 0;
+            }
+        };
+    );
+);

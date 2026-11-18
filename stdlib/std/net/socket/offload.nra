@@ -1,0 +1,56 @@
+/// @brief Zero-copy and kernel-offload support: the pure segmentation rules of UDP Generic Segmentation Offload
+/// (`UDP_SEGMENT`) and Generic Receive Offload (`UDP_GRO`), and where each offload lives.
+///
+/// The transfers themselves are methods of the sockets: `TcpSocket.send_file` (`sendfile(2)`),
+/// `TcpSocket.splice_to` (`splice(2)`), `TcpSocket.send_zerocopy` (`MSG_ZEROCOPY`), `UdpSocket.send_segmented`
+/// (GSO) and `UdpSocket.receive_coalesced` (GRO). Each needs a host service: `send_file` uses `neura.net.send_file`;
+/// the others are not offered by any runtime yet, so they trap in Neura 0.3.0. The
+/// functions here are real: with GSO the kernel cuts one buffer into datagrams of the segment size with a
+/// shorter last one, and with GRO it hands back datagrams of one segment size joined end to end, which `split`
+/// takes apart the same way. The NVM copies host values at the boundary, so "zero-copy" here means the kernel
+/// side only; no runtime guarantee about the Neura heap is implied.
+/// @see [Std.Net.Socket.Offload](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-Offload)
+#Since("0.3.0")
+export let Offload = module (
+    /// @brief The largest UDP payload over IPv4: 65,535 bytes minus the 8-byte UDP and 20-byte IPv4 headers.
+    export const MaxUdpPayload: int = 65507;
+
+    /// @brief The number of datagrams a buffer of `length` bytes becomes with segments of `segment_size`
+    /// bytes. A segment size below 1 or a negative length traps with "invalid argument".
+    #Pure
+    export let segment_count = func(length: int, segment_size: int) -> int {
+        check(length, segment_size);
+        return (length + segment_size - 1) / segment_size;
+    };
+
+    /// @brief Cuts `data` into datagrams of `segment_size` bytes; the last holds the rest. An empty buffer gives
+    /// no datagrams. A segment size below 1 or above `MaxUdpPayload` traps with "invalid argument".
+    #NoDiscard
+    export let split = func(data: uint8[list], segment_size: int) -> uint8[list][list] {
+        check(data.length, segment_size);
+        let out: uint8[list][list] = new;
+        let start = 0;
+        while (start < data.length) {
+            last end = start + segment_size < data.length ? start + segment_size : data.length;
+            let part: uint8[list] = new;
+            let i = start;
+            while (i < end) {
+                part.append(data[i]);
+                i++;
+            }
+            out.append(part);
+            start = end;
+        }
+        return out;
+    };
+
+    /// @brief Traps unless the length and segment size are usable.
+    let check = func(length: int, segment_size: int) {
+        if (segment_size < 1 || segment_size > MaxUdpPayload) {
+            trap_with_message("invalid argument: segment size");
+        }
+        if (length < 0) {
+            trap_with_message("invalid argument: negative length");
+        }
+    };
+);

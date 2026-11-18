@@ -8,7 +8,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The accumulator is five 26-bit limbs in uint64 words, so every product and sum stays below 2^60, and the
 /// final reduction selects between h and h - p with a mask rather than a branch.
-/// @see [Std.Crypto.Mac.Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Poly1305)
+/// @see [Std.Crypto.Mac.Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Poly1305)
 #Since("0.3.0")
 export let Poly1305 = module (
     /// @brief Poly1305 under a 32-byte one-time key (r, then s). A key must never authenticate two messages;

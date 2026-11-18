@@ -1,0 +1,313 @@
+let balancers = import:Std.Net.Resilience.LoadBalancer;
+let base64 = import:Std.Encoding.Base64;
+let caches = import:Std.Net.Dns.DnsCache;
+let doh = import:Std.Net.Dns.DohTransport;
+let doq = import:Std.Net.Dns.DoqTransport;
+let errors = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let hex = import:Std.Encoding.Hex;
+let hosts_files = import:Std.Net.Dns.HostsFile;
+let http = import:Std.Net.Http;
+let instant = import:Std.Time.Instant;
+let ips = import:Std.Net.Core.IpAddr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let mdns = import:Std.Net.Dns.Mdns;
+let messages = import:Std.Net.Dns.Message;
+let naptr = import:Std.Net.Dns.NaptrLookup;
+let names = import:Std.Net.Dns.Name;
+let optional = import:Std.Core.Optional;
+let random = import:Std.Random.Random;
+let resolv_confs = import:Std.Net.Dns.ResolvConf;
+let resolvers = import:Std.Net.Dns.StubResolver;
+let result = import:Std.Core.Result;
+let round_robin = import:Std.Net.Resilience.RoundRobin;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let srv = import:Std.Net.Dns.SrvLookup;
+let system = import:Std.Net.Dns.SystemResolver;
+let test = import:Std.Test;
+let transports = import:Std.Net.Dns.DnsTransport;
+
+// DoH (RFC 8484) over a fake HTTP transport, DoQ framing, SRV and NAPTR selection, mDNS message bits.
+let DiscoveryTests = module (
+    let name_of = func(text: string) -> names.DnsName => test.assert_ok<names.DnsName>(names.parse(text));
+
+    // Answers every DoH request from a MemoryTransport, recording the request.
+    let FakeHttp = class implements http.Transport (
+        last zone: transports.MemoryTransport;
+        export let last_method: string = "";
+        export let last_url: string = "";
+        export let last_body: uint8[list] = new;
+        export let last_accept: string = "";
+        export let last_content_type: string = "";
+        export let status: int = 200;
+        export let media_type: string = "application/dns-message";
+
+        export let init = func(server: transports.MemoryTransport) {
+            zone = server;
+        };
+
+        export let fetch = func(request: http.ClientRequest) -> result.Result<http.Response> {
+            last_method = request.method;
+            last_url = request.url;
+            last_body = request.body();
+            last_accept = optional.value_or<string>(request.headers.get("Accept"), "");
+            last_content_type = optional.value_or<string>(request.headers.get("Content-Type"), "");
+            let wire = request.body();
+            if (request.method == "GET") {
+                last at = request.url.byte_length;
+                last marker = "dns=";
+                last start = find(request.url, marker) + marker.byte_length;
+                wire = test.assert_ok<uint8[list]>(base64_url(request.url.slice(start, at)));
+            }
+            last query = messages.decode(wire)?;
+            last answer = zone.exchange(query)?;
+            last fields = new http.Headers();
+            fields.set("Content-Type", media_type);
+            return result.Result<http.Response>.Ok(new http.Response(status, fields, messages.encode(answer)?));
+        };
+    );
+
+    let find = func(text: string, needle: string) -> int {
+        for (let i = 0; i + needle.byte_length <= text.byte_length; i++) {
+            if (text.slice(i, i + needle.byte_length) == needle) {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    let base64_url = func(text: string) -> result.Result<uint8[list]> =>
+        base64.decode_url_unpadded(text);
+
+    // RFC 8484 section 4.1.1: the query for www.example.com IN A with ID 0 and RD set is the 33 bytes
+    // 00 00 01 00 00 01 00 00 00 00 00 00 03 77 77 77 07 65 78 61 6d 70 6c 65 03 63 6f 6d 00 00 01 00 01,
+    // and its GET form is dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB.
+    export let test_rfc8484_vectors = func {
+        last query = messages.query(4660, name_of("www.example.com"), messages.TypeA);
+        test.assert_equal_string("00000100000100000000000003777777076578616d706c6503636f6d0000010001",
+            hex.encode(test.assert_ok<uint8[list]>(doh.wire_query(query))));
+        test.assert_equal_string("https://dnsserver.example.net/dns-query?dns=AAABAAABAAAAAAAAA3d3dwdleGFtcGxlA2NvbQAAAQAB",
+            test.assert_ok<string>(doh.get_url("https://dnsserver.example.net/dns-query", query)));
+        // The second example: base64url ('-', no padding) for a 62-character label.
+        last long = messages.query(0, name_of("a.62characterlabel-makes-base64url-distinct-from-standard-base64.example.com"),
+            messages.TypeA);
+        test.assert_equal_string("https://d/q?dns=AAABAAABAAAAAAAAAWE-NjJjaGFyYWN0ZXJsYWJlbC1tYWtlcy1iYXNlNjR1cmwtZGlzdGluY3QtZnJvbS1zdGFuZGFyZC1iYXNlNjQHZXhhbXBsZQNjb20AAAEAAQ",
+            test.assert_ok<string>(doh.get_url("https://d/q", long)));
+    };
+
+    let zone_with_www = func -> transports.MemoryTransport {
+        last server = new transports.MemoryTransport("doh", true);
+        server.add(new messages.ResourceRecord(name_of("www.example.com"), messages.TypeA, messages.ClassIn, 300,
+            messages.RecordData.A(ipv4.of(192, 0, 2, 1))));
+        return server;
+    };
+
+    export let test_doh_post_and_get_exchange = func {
+        last fake = new FakeHttp(zone_with_www());
+        last client = new http.Client(fake);
+        last post = new doh.DohTransport(client, "https://dns.example/dns-query", false);
+        last query = messages.query(4660, name_of("www.example.com"), messages.TypeA);
+        last answer = test.assert_ok<messages.Message>(post.exchange(query));
+        test.assert_equal<int>(4660, answer.header.id);
+        test.assert_equal<int>(1, answer.answers.length);
+        test.assert_equal_string("POST", fake.last_method);
+        test.assert_equal_string("application/dns-message", fake.last_accept);
+        test.assert_equal_string("application/dns-message", fake.last_content_type);
+        test.assert_equal<int>(0, fake.last_body[0] as int);
+        test.assert_equal<int>(0, fake.last_body[1] as int);
+        last get = new doh.DohTransport(client, "https://dns.example/dns-query", true);
+        test.assert_equal<int>(1, test.assert_ok<messages.Message>(get.exchange(query)).answers.length);
+        test.assert_equal_string("GET", fake.last_method);
+        test.assert(find(fake.last_url, "https://dns.example/dns-query?dns=") == 0);
+        // Through the resolver: a DoH upstream is a stream transport.
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(post));
+        last resolver = new resolvers.StubResolver(resolv_confs.defaults(), hosts_files.empty(),
+            new caches.DnsCache(fixed_clock.of(instant.of_epoch_seconds(0, 0))), list, random.seeded(3));
+        test.assert_equal_string("192.0.2.1", ips.to_string(
+            test.assert_ok<ips.IpAddr[list]>(resolver.resolve("www.example.com."))[0]));
+    };
+
+    export let test_doh_rejects_bad_status_and_media_type = func {
+        last fake = new FakeHttp(zone_with_www());
+        last transport = new doh.DohTransport(new http.Client(fake), "https://dns.example/dns-query", false);
+        last query = messages.query(1, name_of("www.example.com"), messages.TypeA);
+        fake.status = 502;
+        test.assert_equal_string("DoH server answered status 502",
+            errors.message(test.assert_err<messages.Message>(transport.exchange(query))));
+        fake.status = 200;
+        fake.media_type = "text/html";
+        test.assert_equal_string("DoH response is not application/dns-message",
+            errors.message(test.assert_err<messages.Message>(transport.exchange(query))));
+        fake.media_type = "Application/DNS-Message; charset=binary";
+        test.assert_ok<messages.Message>(transport.exchange(query));
+    };
+
+    export let test_doq_stream_payload = func {
+        // RFC 9250 section 4.2: ID 0 and a two-byte length; the 33-byte message of RFC 8484 section 4.1.1.
+        last query = messages.query(4660, name_of("www.example.com"), messages.TypeA);
+        test.assert_equal_string("002100000100000100000000000003777777076578616d706c6503636f6d0000010001",
+            hex.encode(test.assert_ok<uint8[list]>(doq.stream_payload(query))));
+    };
+
+    let srv_record = func(owner: string, priority: int, weight: int, port: int, target: string)
+        -> messages.ResourceRecord => new messages.ResourceRecord(name_of(owner), messages.TypeSrv, messages.ClassIn,
+            300, messages.RecordData.Srv { priority: priority, weight: weight, port: port, target: name_of(target) });
+
+    let targets = func(specs: int[list]) -> srv.SrvTarget[list] {
+        last out: srv.SrvTarget[list] = new;
+        for (let i = 0; i + 1 < specs.length; i = i + 2) {
+            out.append(new srv.SrvTarget(specs[i], specs[i + 1], 1000 + i, name_of("h" + i.to_string() + ".example")));
+        }
+        return out;
+    };
+
+    // RFC 2782 "Weight": lower priorities first; within a priority, weighted random order.
+    export let test_srv_order_priority_and_weight = func {
+        last source = random.seeded(42);
+        let heavy_first = 0;
+        let zero_first = 0;
+        for (let run = 0; run < 400; run++) {
+            // Priority 20 (one), priority 10 with weights 0, 10, 90.
+            last specs: int[list] = new;
+            for (let v in [20, 5, 10, 0, 10, 10, 10, 90]) {
+                specs.append(v);
+            }
+            last ordered = srv.order_targets(targets(specs), source);
+            test.assert_equal<int>(4, ordered.length);
+            test.assert_equal<int>(10, ordered[0].priority);
+            test.assert_equal<int>(10, ordered[2].priority);
+            test.assert_equal<int>(20, ordered[3].priority);
+            if (ordered[0].weight == 90) {
+                heavy_first++;
+            }
+            if (ordered[0].weight == 0) {
+                zero_first++;
+            }
+        }
+        // Expected first-pick shares: weight 90 with 90/101, weight 0 with 1/101.
+        test.assert(heavy_first > 320 && heavy_first < 390);
+        test.assert(zero_first < 20);
+        // The same seed gives the same order.
+        last again: int[list] = new;
+        for (let v in [1, 3, 1, 3, 1, 3, 2, 0]) {
+            again.append(v);
+        }
+        last first = srv.order_targets(targets(again), random.seeded(9));
+        last second = srv.order_targets(targets(again), random.seeded(9));
+        for (let i = 0; i < first.length; i++) {
+            test.assert(first[i].equals(second[i]));
+        }
+    };
+
+    let srv_resolver = func(server: transports.MemoryTransport) -> resolvers.StubResolver {
+        last list: resolvers.Upstream[list] = new;
+        list.append(new resolvers.Upstream(server));
+        return new resolvers.StubResolver(resolv_confs.defaults(), hosts_files.empty(),
+            new caches.DnsCache(fixed_clock.of(instant.of_epoch_seconds(0, 0))), list, random.seeded(5));
+    };
+
+    export let test_srv_lookup_feeds_round_robin = func {
+        last server = new transports.MemoryTransport("srv", true);
+        server.add(srv_record("_http._tcp.example.com", 10, 0, 8080, "a.example.com"));
+        server.add(srv_record("_http._tcp.example.com", 20, 0, 8081, "b.example.com"));
+        server.add(new messages.ResourceRecord(name_of("a.example.com"), messages.TypeA, messages.ClassIn, 300,
+            messages.RecordData.A(ipv4.of(192, 0, 2, 10))));
+        server.add(new messages.ResourceRecord(name_of("b.example.com"), messages.TypeA, messages.ClassIn, 300,
+            messages.RecordData.A(ipv4.of(192, 0, 2, 20))));
+        last lookup = new srv.SrvLookup(srv_resolver(server), random.seeded(1));
+        test.assert_equal_string("_http._tcp.example.com.", srv.service_name("http", "tcp", "example.com"));
+        last addresses = test.assert_ok<socket_addr.SocketAddr[list]>(lookup.socket_addresses("http", "tcp",
+            "example.com"));
+        test.assert_equal<int>(2, addresses.length);
+        test.assert_equal_string("192.0.2.10:8080", addresses[0].to_string());
+        test.assert_equal_string("192.0.2.20:8081", addresses[1].to_string());
+        last balancer = new round_robin.RoundRobin<socket_addr.SocketAddr>(addresses);
+        last picked = test.assert_ok<balancers.Selection<socket_addr.SocketAddr>>(
+            balancer.pick());
+        test.assert_equal_string("192.0.2.10:8080", picked.endpoint.to_string());
+        // A single "." target: the service is decidedly not available.
+        server.add(srv_record("_none._tcp.example.com", 0, 0, 0, "."));
+        test.assert_equal<int>(0, test.assert_ok<srv.SrvTarget[list]>(lookup.lookup("none", "tcp",
+            "example.com")).length);
+    };
+
+    let naptr_record = func(owner: string, order: int, preference: int, flags: string, services: string,
+        regexp: string, replacement: string) -> messages.ResourceRecord => new messages.ResourceRecord(name_of(owner),
+            messages.TypeNaptr, messages.ClassIn, 300, messages.RecordData.Naptr { order: order,
+                preference: preference, flags: flags, services: services, regexp: regexp,
+                replacement: name_of(replacement) });
+
+    // RFC 3403 section 4.1: ORDER then PREFERENCE; once a rule of some order matches, other orders are not used.
+    export let test_naptr_order_preference_and_follow = func {
+        last server = new transports.MemoryTransport("naptr", true);
+        server.add(naptr_record("example.com", 100, 50, "S", "SIP+D2T", "", "_sip._tcp.example.com"));
+        server.add(naptr_record("example.com", 100, 10, "S", "SIP+D2U", "", "_sip._udp.example.com"));
+        server.add(naptr_record("example.com", 90, 10, "", "SIP+D2U", "", "next.example.com"));
+        server.add(naptr_record("example.com", 200, 10, "S", "SIP+D2S", "", "_sips._tcp.example.com"));
+        server.add(naptr_record("next.example.com", 10, 10, "S", "SIP+D2U", "", "_sip._udp.next.example.com"));
+        server.add(naptr_record("regex.example.com", 10, 10, "U", "E2U+sip", "!^.*$!sip:info@example.com!", "."));
+        last lookup = new naptr.NaptrLookup(srv_resolver(server));
+        last rules = test.assert_ok<naptr.NaptrRule[list]>(lookup.lookup("example.com."));
+        test.assert_equal<int>(4, rules.length);
+        test.assert_equal<int>(90, rules[0].order);
+        test.assert_equal<int>(10, rules[1].preference);
+        test.assert_equal<int>(50, rules[2].preference);
+        test.assert_equal<int>(200, rules[3].order);
+        // For SIP+D2T only order 100 matches; for SIP+D2U the order-90 rule wins and order 100 is not considered.
+        test.assert_equal<int>(1, naptr.select(rules, "SIP+D2T").length);
+        last udp = naptr.select(rules, "sip+d2u");
+        test.assert_equal<int>(1, udp.length);
+        test.assert_equal<int>(90, udp[0].order);
+        // Following the non-terminal rule reaches next.example.com's terminal rule.
+        last terminal = test.assert_ok<naptr.NaptrRule>(lookup.follow("example.com.", "SIP+D2U"));
+        test.assert(terminal.is_terminal());
+        test.assert_equal_string("_sip._udp.next.example.com.", terminal.replacement.to_string());
+        // A regexp-only rule is reported, not evaluated.
+        test.assert_equal_string("only regexp rules match; REGEXP is not evaluated in Neura 0.3.0",
+            errors.message(test.assert_err<naptr.NaptrRule>(lookup.follow("regex.example.com.", "E2U+sip"))));
+    };
+
+    // RFC 6762 sections 3, 5.4, 10.2 and 18.
+    export let test_mdns_message_bits = func {
+        test.assert(mdns.is_local_name(name_of("printer.local")));
+        test.assert(mdns.is_local_name(name_of("4.3.254.169.in-addr.arpa")));
+        test.assert(!mdns.is_local_name(name_of("printer.example")));
+        test.assert(!mdns.is_local_name(name_of("notlocal")));
+        test.assert_equal_string("224.0.0.251", mdns.ipv4_group().to_string());
+        test.assert_equal_string("ff02::fb", mdns.ipv6_group().to_string());
+        last q = mdns.question(name_of("printer.local"), messages.TypeA, true);
+        test.assert(mdns.wants_unicast(q));
+        test.assert_equal<int>(1, mdns.question_class(q));
+        test.assert_equal<int>(32769, q.qclass);
+        last message = mdns.query(name_of("printer.local"), messages.TypeA, true);
+        last wire = test.assert_ok<uint8[list]>(messages.encode(message));
+        // ID 0, flags 0, one question; QCLASS 0x8001 at the end. From python3 -I -c "import struct;
+        // n=lambda *ls: b''.join(bytes([len(l)])+l for l in ls)+b'\0';
+        // print((struct.pack('>HHHHHH',0,0,1,0,0,0)+n(b'printer',b'local')+struct.pack('>HH',1,0x8001)).hex())"
+        test.assert_equal_string("00000000000100000000000007707269" + "6e746572056c6f63616c0000018001", hex.encode(wire));
+        last record = new messages.ResourceRecord(name_of("printer.local"), messages.TypeA, messages.ClassIn, 120,
+            messages.RecordData.A(ipv4.of(169, 254, 1, 2)));
+        last flushed = mdns.with_cache_flush(record, true);
+        test.assert(mdns.is_cache_flush(flushed));
+        test.assert_equal<int>(1, mdns.record_class(flushed));
+        test.assert(!mdns.is_cache_flush(mdns.with_cache_flush(flushed, false)));
+        last answers: messages.ResourceRecord[list] = new;
+        answers.append(flushed);
+        last reply = test.assert_ok<messages.Message>(messages.decode(test.assert_ok<uint8[list]>(
+            messages.encode(mdns.response(answers)))));
+        test.assert(reply.header.is_response && reply.header.authoritative);
+        test.assert_equal<int>(0, reply.header.id);
+        test.assert(mdns.is_cache_flush(reply.answers[0]));
+    };
+
+    export let test_system_resolver_parsing = func {
+        last texts: string[list] = new;
+        texts.append("192.0.2.1");
+        texts.append("not an address");
+        texts.append("2001:db8::1");
+        last parsed = system.parse_all(texts);
+        test.assert_equal<int>(2, parsed.length);
+        test.assert_equal_string("2001:db8::1", ips.to_string(parsed[1]));
+    };
+);

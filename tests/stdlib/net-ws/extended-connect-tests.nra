@@ -1,0 +1,95 @@
+let errors = import:Std.Core.Error;
+let extended = import:Std.Net.Realtime.Ws.ExtendedConnect;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let optional = import:Std.Core.Optional;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+
+// RFC 8441 and RFC 9220 extended CONNECT request and response shapes.
+let ExtendedConnectTests = module (
+    let protocols = func -> string[list] => new(["chat", "superchat"]);
+
+    let render = func(headers: handshake.Header[list]) -> string {
+        last lines: string[list] = new;
+        for (let header in headers) {
+            lines.append(header.name + " = " + header.value);
+        }
+        return strings.join(lines, "\n");
+    };
+
+    // RFC 8441 section 5.1, "Example": the client's HEADERS.
+    export let test_rfc8441_example_request = func {
+        last headers = extended.request_headers(true, "server.example.com", "/chat", protocols(), "",
+            "http://www.example.com");
+        test.assert_equal_string(":method = CONNECT\n:protocol = websocket\n:scheme = https\n:path = /chat\n"
+            + ":authority = server.example.com\nsec-websocket-protocol = chat, superchat\n"
+            + "origin = http://www.example.com\nsec-websocket-version = 13", render(headers));
+        last offer = test.assert_ok<handshake.ClientOffer>(extended.validate_request(headers));
+        test.assert_equal_string("/chat", offer.path);
+        test.assert_equal_string("server.example.com", offer.host);
+        test.assert_equal_string("", offer.key);
+        test.assert_equal<int>(2, offer.protocols.length);
+        // The server answers :status 200 with the chosen subprotocol, and the client accepts it.
+        last chosen = handshake.choose_protocol(offer.protocols, protocols());
+        last answer = extended.response_headers(chosen, "");
+        test.assert_equal_string(":status = 200\nsec-websocket-protocol = chat", render(answer));
+        last accepted = test.assert_ok<handshake.ServerAcceptance>(extended.validate_response(protocols(), "", answer));
+        test.assert_equal_string("chat", test.assert_some<string>(accepted.protocol));
+        // The ws scheme maps to http.
+        last plain = extended.request_headers(false, "a", "/", new, "", "");
+        test.assert_equal_string("http", plain[2].value);
+        test.assert_equal<int>(6, plain.length);
+    };
+
+    let with_field = func(name: string, value: string) -> handshake.Header[list] {
+        last headers = extended.request_headers(true, "h", "/p", protocols(), "", "");
+        last changed: handshake.Header[list] = new;
+        let replaced = false;
+        for (let header in headers) {
+            if (header.name == name) {
+                changed.append(new handshake.Header(name, value));
+                replaced = true;
+            } else {
+                changed.append(header);
+            }
+        }
+        if (!replaced) {
+            changed.append(new handshake.Header(name, value));
+        }
+        return changed;
+    };
+
+    let rejected = func(headers: handshake.Header[list], fragment: string) {
+        last message = errors.message(test.assert_err<handshake.ClientOffer>(extended.validate_request(headers)));
+        test.assert_with(strings.contains(message, fragment), "message was: " + message);
+    };
+
+    export let test_request_rejections = func {
+        rejected(with_field(":method", "GET"), "CONNECT");
+        rejected(with_field(":protocol", "webtransport"), "\"webtransport\"");
+        rejected(with_field(":scheme", "ftp"), ":scheme");
+        rejected(with_field(":path", ""), ":path");
+        rejected(with_field(":authority", ""), ":authority");
+        rejected(with_field("sec-websocket-version", "8"), "13");
+        rejected(with_field("connection", "Upgrade"), "connection");
+        rejected(with_field("upgrade", "websocket"), "upgrade");
+        rejected(with_field("Origin", "x"), "lowercase");
+    };
+
+    export let test_response_rules_and_setting = func {
+        last bad_status: handshake.Header[list] = new;
+        bad_status.append(new handshake.Header(":status", "404"));
+        test.assert_err<handshake.ServerAcceptance>(extended.validate_response(protocols(), "", bad_status));
+        test.assert_err<handshake.ServerAcceptance>(extended.validate_response(protocols(), "",
+            extended.response_headers(optional.Optional<string>.Some("other"), "")));
+        test.assert_err<handshake.ServerAcceptance>(extended.validate_response(protocols(), "",
+            extended.response_headers(optional.Optional<string>.None, "permessage-deflate")));
+        test.assert_ok<handshake.ServerAcceptance>(extended.validate_response(protocols(), "permessage-deflate",
+            extended.response_headers(optional.Optional<string>.None, "permessage-deflate")));
+        // RFC 8441 section 3 and RFC 9220 section 3: the setting is 0x08 and takes 0 or 1.
+        test.assert_equal<int>(8, extended.SettingsEnableConnectProtocol);
+        test.assert(test.assert_ok<bool>(extended.enables_extended_connect(1)));
+        test.assert(!test.assert_ok<bool>(extended.enables_extended_connect(0)));
+        test.assert_err<bool>(extended.enables_extended_connect(2));
+    };
+);

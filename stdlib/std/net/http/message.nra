@@ -1,0 +1,113 @@
+let header_maps = import:Std.Net.Http.Headers;
+let methods = import:Std.Net.Http.Method;
+let.promote _ = import:Std.Core.Optional;
+let statuses = import:Std.Net.Http.Status;
+
+/// @brief The protocol-agnostic HTTP message model: `HttpRequest<Body>` and `HttpResponse<Body>` over any body
+/// type, the same for HTTP/1.1, HTTP/2 and HTTP/3 (RFC 9110 section 6).
+///
+/// A message is a method or status, a header map and a body of the caller's choosing: `uint8[list]` for a
+/// whole body, or a reader type for a streamed one. `Version` records which protocol carried it; `of_alpn`
+/// maps an ALPN protocol id (`Std.Net.Http.Alpn`) to it. `Std.Net.Http` converts between these messages and
+/// its server-side `Request` and `Response` (`to_message`, `from_message`, `response_to_message`,
+/// `response_from_message`).
+/// @see [Std.Net.Http.Message](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Http-Message)
+#Since("0.3.0")
+export let Message = module (
+    /// @brief The protocol a message travels on.
+    export let Version = enum (Http10, Http11, Http2, Http3);
+
+    /// @brief The version's text: "HTTP/1.0", "HTTP/1.1", "HTTP/2", "HTTP/3".
+    #[Pure, ThreadSafe]
+    export let version_text = func(v: Version) -> string => match (v) {
+        Version.Http10 => "HTTP/1.0",
+        Version.Http11 => "HTTP/1.1",
+        Version.Http2 => "HTTP/2",
+        Version.Http3 => "HTTP/3",
+    };
+
+    /// @brief The version named by an ALPN protocol id: "http/1.1", "h2", "h3" (RFC 7301, RFC 9113 section 3.1,
+    /// RFC 9114 section 3.1); None for any other id.
+    #[NoDiscard, Pure, ThreadSafe]
+    export let of_alpn = func(protocol_id: string) -> Optional<Version> {
+        if (protocol_id == "http/1.1") {
+            return Optional<Version>.Some(Version.Http11);
+        }
+        if (protocol_id == "h2") {
+            return Optional<Version>.Some(Version.Http2);
+        }
+        if (protocol_id == "h3") {
+            return Optional<Version>.Some(Version.Http3);
+        }
+        return Optional<Version>.None;
+    };
+
+    /// @brief A request: method, request target, header map and body.
+    #[Final, NotThreadSafe]
+    export let HttpRequest = class<Body> (
+        /// @brief The method.
+        export last method: methods.HttpMethod;
+        /// @brief The request target as sent: origin form `/path?query`, or absolute, authority or `*` form.
+        export last target: string;
+        /// @brief The header fields; a mutable map owned by the message.
+        export last headers: header_maps.Headers;
+        /// @brief The body.
+        export last body: Body;
+        /// @brief The protocol that carried or will carry the message.
+        export last version: Version;
+
+        /// @brief A request over the given protocol.
+        export let init = func(request_method: methods.HttpMethod, request_target: string, fields: header_maps.Headers,
+            content: Body, protocol: Version) {
+            method = request_method;
+            target = request_target;
+            headers = fields;
+            body = content;
+            version = protocol;
+        };
+
+        /// @brief The method's token.
+        export let method_name = func -> string => methods.name(method);
+
+        /// @brief The text "HttpRequest(METHOD target VERSION)".
+        export let.override to_string = func -> string =>
+            "HttpRequest(" + methods.name(method) + " " + target + " " + version_text(version) + ")";
+    );
+
+    /// @brief A response: status, header map and body.
+    #[Final, NotThreadSafe]
+    export let HttpResponse = class<Body> (
+        /// @brief The status code, 100 through 599.
+        export last status: int;
+        /// @brief The header fields; a mutable map owned by the message.
+        export last headers: header_maps.Headers;
+        /// @brief The body.
+        export last body: Body;
+        /// @brief The protocol that carried or will carry the message.
+        export last version: Version;
+
+        /// @brief A response over the given protocol. A status outside 100 through 599 traps with "invalid argument:
+        /// status".
+        export let init = func(code: int, fields: header_maps.Headers, content: Body, protocol: Version) {
+            check_status(code);
+            status = code;
+            headers = fields;
+            body = content;
+            version = protocol;
+        };
+
+        /// @brief The status's reason phrase (RFC 9110 section 15), or "".
+        export let reason = func -> string => statuses.reason_phrase(status);
+
+        /// @brief The text "HttpResponse(STATUS VERSION)".
+        export let.override to_string = func -> string =>
+            "HttpResponse(" + status.to_string() + " " + version_text(version) + ")";
+    );
+
+    /// @brief Traps unless `code` is a status code.
+    let check_status = func(code: int) {
+        if (!statuses.is_valid(code)) {
+            trap_with_message("invalid argument: status");
+        }
+    };
+);

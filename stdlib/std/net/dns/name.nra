@@ -1,0 +1,334 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+
+/// @brief Domain names (RFC 1035 sections 2.3.4, 3.1 and 5.1): a sequence of labels of 1 to 63 bytes whose wire
+/// form, length bytes and the final root byte included, is at most 255 bytes.
+///
+/// A `DnsName` is always absolute (it ends at the root). Labels are bytes; comparison, hashing and suffix tests
+/// ignore ASCII case (RFC 1035 section 2.3.3) and keep the case as written. The text form is the master-file
+/// form with a trailing dot: a `.`, `\` or a byte outside 33-126 inside a label is escaped as `\.`, `\\` or
+/// `\DDD` (three decimal digits), and `parse` accepts the same escapes. The wire codec with compression is
+/// `Std.Net.Dns.Wire`.
+/// @see [Std.Net.Dns.Name](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Name)
+#Since("0.3.0")
+export let Name = module (
+    /// @brief The longest label in bytes (RFC 1035 section 2.3.4).
+    export const MaxLabelLength: int = 63;
+    /// @brief The longest name in wire bytes, length bytes and root byte included (RFC 1035 section 2.3.4).
+    export const MaxNameLength: int = 255;
+
+    /// @brief An absolute domain name.
+    #Final
+    export let DnsName = class (
+        /// @brief The labels from the leftmost; empty for the root.
+        last parts: uint8[list][list];
+
+        /// @brief A name of `labels` (leftmost first; empty for the root). An empty label, a label above 63
+        /// bytes or a name above 255 wire bytes traps with "invalid argument: dns name"; use `from_labels` to
+        /// get an error instead.
+        export let init = func(labels: uint8[list][list]) {
+            if (problem_of(labels) != "") {
+                trap_with_message("invalid argument: dns name");
+            }
+            last copy: uint8[list][list] = new;
+            for (let label in labels) {
+                copy.append(copy_bytes(label));
+            }
+            parts = copy;
+        };
+
+        /// @brief The number of labels; 0 for the root.
+        #NoDiscard
+        export let label_count = func -> int => parts.length;
+
+        /// @brief The bytes of label `index` (a copy). An index out of range traps.
+        #NoDiscard
+        export let label = func(index: int) -> uint8[list] => copy_bytes(parts[index]);
+
+        /// @brief Label `index` as escaped text.
+        #NoDiscard
+        export let label_text = func(index: int) -> string => escape_label(parts[index]);
+
+        /// @brief The labels (copies).
+        #NoDiscard
+        export let labels = func -> uint8[list][list] {
+            last copy: uint8[list][list] = new;
+            for (let part in parts) {
+                copy.append(copy_bytes(part));
+            }
+            return copy;
+        };
+
+        /// @brief Whether this is the root name.
+        #NoDiscard
+        export let is_root = func -> bool => parts.length == 0;
+
+        /// @brief The length of the uncompressed wire form.
+        #NoDiscard
+        export let wire_length = func -> int {
+            let total = 1;
+            for (let part in parts) {
+                total = total + 1 + part.length;
+            }
+            return total;
+        };
+
+        /// @brief The name without its leftmost `count` labels; the root when `count` is the label count. A
+        /// count out of range traps with "invalid argument: count".
+        #NoDiscard
+        export let suffix = func(count: int) -> DnsName {
+            if (count < 0 || count > parts.length) {
+                trap_with_message("invalid argument: count");
+            }
+            last rest: uint8[list][list] = new;
+            for (let i = count; i < parts.length; i++) {
+                rest.append(parts[i]);
+            }
+            return new DnsName(rest);
+        };
+
+        /// @brief This name followed by `origin` (this name's labels, then the origin's). Err when the result is
+        /// longer than 255 bytes.
+        #NoDiscard
+        export let concat = func(origin: DnsName) -> Result<DnsName> {
+            last joined: uint8[list][list] = new;
+            for (let part in parts) {
+                joined.append(part);
+            }
+            for (let i = 0; i < origin.label_count(); i++) {
+                joined.append(origin.label(i));
+            }
+            return from_labels(joined);
+        };
+
+        /// @brief Whether this name is `other` or lies below it, label by label and ignoring ASCII case:
+        /// `a.corp.example.` is within `corp.example.`, `notcorp.example.` is not.
+        #NoDiscard
+        export let is_within = func(other: DnsName) -> bool {
+            last count = other.label_count();
+            if (count > parts.length) {
+                return false;
+            }
+            last skip = parts.length - count;
+            for (let i = 0; i < count; i++) {
+                if (!same_label(parts[skip + i], other.label(i))) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief The name with ASCII letters lowered.
+        #NoDiscard
+        export let to_lower = func -> DnsName {
+            last lowered: uint8[list][list] = new;
+            for (let part in parts) {
+                lowered.append(lower_bytes(part));
+            }
+            return new DnsName(lowered);
+        };
+
+        /// @brief The lowered text form: a key for maps that ignores case.
+        #NoDiscard
+        export let key = func -> string => strings.to_ascii_lower(to_string());
+
+        /// @brief Equal when the labels match ignoring ASCII case.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is DnsName)) {
+                return false;
+            }
+            last that = other as DnsName;
+            if (that.label_count() != parts.length) {
+                return false;
+            }
+            for (let i = 0; i < parts.length; i++) {
+                if (!same_label(parts[i], that.label(i))) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief The hash of the lowered labels.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 31;
+            for (let part in parts) {
+                hash = hashing.combine(hash, part.length as uint32);
+                for (let b in part) {
+                    hash = hashing.combine(hash, lower_byte(b) as uint32);
+                }
+            }
+            return hash;
+        };
+
+        /// @brief The master-file text with a trailing dot ("www.example.com."); "." for the root.
+        export let.override to_string = func -> string {
+            if (parts.length == 0) {
+                return ".";
+            }
+            let text = "";
+            for (let part in parts) {
+                text = text + escape_label(part) + ".";
+            }
+            return text;
+        };
+    );
+
+    /// @brief The root name.
+    #NoDiscard
+    export let root = func -> DnsName => new DnsName(new);
+
+    /// @brief A name of `labels`; Err (Parse, OutOfRange) for an empty label, a label above 63 bytes or a name above
+    /// 255 wire bytes.
+    #NoDiscard
+    export let from_labels = func(labels: uint8[list][list]) -> Result<DnsName> {
+        last problem = problem_of(labels);
+        if (problem != "") {
+            return Result<DnsName>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.OutOfRange, offset: 0,
+                message: problem });
+        }
+        return Result<DnsName>.Ok(new DnsName(labels));
+    };
+
+    /// @brief Parses master-file text: labels separated by dots, an optional trailing dot, `\.`, `\\` and `\DDD`
+    /// escapes. "" and "." are the root. Err (Parse) for an empty label, a bad escape, a label above 63 bytes or a
+    /// name above 255 wire bytes.
+    #NoDiscard
+    export let parse = func(text: string) -> Result<DnsName> {
+        last labels: uint8[list][list] = new;
+        if (text == "" || text == ".") {
+            return Result<DnsName>.Ok(root());
+        }
+        let current: uint8[list] = new;
+        let i = 0;
+        last n = text.byte_length;
+        while (i < n) {
+            last b = text.byte_at(i);
+            if (b == 46) {
+                // '.'
+                if (current.length == 0) {
+                    return parse_error(errors.ParseErrorKind.Syntax, i, "empty label");
+                }
+                labels.append(current);
+                current = new;
+                i++;
+                if (i == n) {
+                    return from_labels(labels);
+                }
+                continue;
+            }
+            if (b == 92) {
+                // '\'
+                if (i + 1 >= n) {
+                    return parse_error(errors.ParseErrorKind.UnexpectedEnd, i, "escape at end");
+                }
+                last next = text.byte_at(i + 1);
+                if (next >= 48 && next <= 57) {
+                    if (i + 3 >= n) {
+                        return parse_error(errors.ParseErrorKind.UnexpectedEnd, i, "short \\DDD escape");
+                    }
+                    let value = 0;
+                    for (let k = 1; k <= 3; k++) {
+                        last digit = text.byte_at(i + k);
+                        if (digit < 48 || digit > 57) {
+                            return parse_error(errors.ParseErrorKind.InvalidCharacter, i + k, "bad \\DDD escape");
+                        }
+                        value = value * 10 + ((digit - 48) as int);
+                    }
+                    if (value > 255) {
+                        return parse_error(errors.ParseErrorKind.OutOfRange, i, "\\DDD escape above 255");
+                    }
+                    current.append(value as uint8);
+                    i = i + 4;
+                } else {
+                    current.append(next);
+                    i = i + 2;
+                }
+                continue;
+            }
+            current.append(b);
+            i++;
+        }
+        labels.append(current);
+        return from_labels(labels);
+    };
+
+    /// @brief Whether two labels are equal ignoring ASCII case.
+    #NoDiscard
+    export let same_label = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (lower_byte(a[i]) != lower_byte(b[i])) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief The reason labels do not form a valid name, or "".
+    let problem_of = func(labels: uint8[list][list]) -> string {
+        let total = 1;
+        for (let label in labels) {
+            if (label.length == 0) {
+                return "empty label";
+            }
+            if (label.length > MaxLabelLength) {
+                return "label longer than 63 bytes";
+            }
+            total = total + 1 + label.length;
+        }
+        if (total > MaxNameLength) {
+            return "name longer than 255 bytes";
+        }
+        return "";
+    };
+
+    /// @brief A parse error.
+    let parse_error = func(kind: errors.ParseErrorKind, at: int, text: string) -> Result<DnsName> =>
+        Result<DnsName>.Err(errors.Error.Parse { kind: kind, offset: at, message: text });
+
+    /// @brief An ASCII letter lowered.
+    let lower_byte = func(b: uint8) -> uint8 => (b >= 65 && b <= 90) ? b + 32 : b;
+
+    /// @brief A copy with ASCII letters lowered.
+    let lower_bytes = func(bytes: uint8[list]) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let b in bytes) {
+            out.append(lower_byte(b));
+        }
+        return out;
+    };
+
+    /// @brief A copy of a byte list.
+    let copy_bytes = func(bytes: uint8[list]) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let b in bytes) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    /// @brief The master-file text of one label.
+    let escape_label = func(label: uint8[list]) -> string {
+        last kept: uint8[list] = new;
+        for (let b in label) {
+            if (b == 46 || b == 92) {
+                kept.append(92);
+                kept.append(b);
+            } else if (b < 33 || b > 126) {
+                last value = b as int;
+                kept.append(92);
+                kept.append((48 + value / 100) as uint8);
+                kept.append((48 + (value / 10) % 10) as uint8);
+                kept.append((48 + value % 10) as uint8);
+            } else {
+                kept.append(b);
+            }
+        }
+        return strings.from_bytes_lossy(kept);
+    };
+);

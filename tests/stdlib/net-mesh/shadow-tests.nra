@@ -1,0 +1,138 @@
+// test-options: --virtual-time
+let atomics = import:Std.Concurrent.AtomicInt64;
+let channels = import:Std.Concurrent.Channel;
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let filters = import:Std.Net.Filter;
+let random = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let services = import:Std.Net.Service;
+let shadows = import:Std.Net.Mesh.ShadowFilter;
+let system_clock = import:Std.Time.SystemClock;
+let test = import:Std.Test;
+let timers = import:Std.Concurrent.Timer;
+
+// Traffic mirroring. The tests run under virtual time (each test's clock starts at zero and jumps to the next timer
+// when every task waits), so elapsed times show exactly whether the primary path waited for the shadow. Every
+// closure of type func(string) -> Result<string> in this file captures only transferable values (an AtomicInt64),
+// so the shadow functions can run in tasks. Expected selections are computed by replaying the same seed.
+let ShadowTests = module (
+    let pause = func(millis: int64) -> bool => match (timers.after(durations.of_millis(millis))) {
+        result.Result.Ok(timer) => timer.wait() == timers.TimerOutcome.Fired,
+        result.Result.Err(e) => false,
+    };
+
+    let elapsed = func -> int64 => test.assert_ok<durations.Duration>(system_clock.create().monotonic()).to_nanos();
+
+    // The primary service: 10 ms, answers "primary <request>".
+    let primary = func(request: string) -> result.Result<string> {
+        pause(10);
+        return result.Result<string>.Ok("primary " + request);
+    };
+
+    // A shadow that takes `millis` and counts its calls, failing when `fail` is set.
+    let shadow = func(calls: atomics.AtomicInt64, millis: int64, fail: bool) -> func(string) -> result.Result<string> =>
+        new func(request: string) -> result.Result<string> {
+            calls.add(1);
+            pause(millis);
+            if (fail) {
+                return result.Result<string>.Err(errors.custom("shadow.down", request));
+            }
+            return result.Result<string>.Ok("shadow " + request);
+        };
+
+    // How many of `count` draws from seed `seed` fall below `basis_points`.
+    let expected_selections = func(seed: uint64, count: int, basis_points: int) -> int {
+        last replay = random.seeded(seed);
+        let selected = 0;
+        for (let i = 0; i < count; i++) {
+            if (replay.next_int_below(10000) < basis_points) {
+                selected++;
+            }
+        }
+        return selected;
+    };
+
+    export let test_queue_drops_when_full_without_waiting = func {
+        last ends = channels.open<string>(2);
+        last filter = shadows.of_percent<string, string>(ends[0], 100, random.seeded(1));
+        last service = filters.bind<string, string, string, string>(filter, services.of<string, string>(primary));
+        for (let i = 0; i < 5; i++) {
+            test.assert_equal_string("primary r" + i.to_string(), test.assert_ok<string>(service.call("r" + i.to_string())));
+        }
+        // No worker runs: two requests fill the channel and three are dropped; the primary path never waited.
+        test.assert_equal<int64>(2, filter.mirrored());
+        test.assert_equal<int64>(3, filter.dropped());
+        test.assert_equal<int64>(50000000, elapsed());
+        test.assert_equal_string("ShadowFilter(10000 bp, 2 mirrored, 3 dropped)", filter.to_string());
+        // A closed channel also drops.
+        ends[2].close();
+        test.assert_ok<string>(service.call("late"));
+        test.assert_equal<int64>(4, filter.dropped());
+    };
+
+    export let test_queue_worker_mirrors_the_selected_share = func {
+        last calls = atomics.create(0);
+        last ends = channels.open<string>(64);
+        last receiver = ends[1];
+        last body = shadow(calls, 50, false);
+        last filter = new shadows.ShadowFilter<string, string>(ends[0], 3000, random.seeded(3));
+        last service = filters.bind<string, string, string, string>(filter, services.of<string, string>(primary));
+        last expected = expected_selections(3, 40, 3000);
+        scope {
+            last worker = spawn shadows.run_worker<string, string>(receiver, body);
+            for (let i = 0; i < 40; i++) {
+                test.assert_ok<string>(service.call("r" + i.to_string()));
+            }
+            // 40 primary calls of 10 ms: the shadow (50 ms each, in the worker) never delayed them.
+            test.assert_equal<int64>(400000000, elapsed());
+            ends[2].close();
+            last report = worker.join();
+            test.assert_equal<int64>(expected as int64, report.handled);
+            test.assert_equal<int64>(0, report.failed);
+        }
+        test.assert_equal<int64>(expected as int64, filter.mirrored());
+        test.assert_equal<int64>(0, filter.dropped());
+        test.assert_equal<int64>(expected as int64, calls.load());
+        test.assert_with(expected > 0 && expected < 40, "the seed selects some but not all requests");
+    };
+
+    export let test_concurrent_shadow_runs_beside_the_primary = func {
+        last calls = atomics.create(0);
+        last filter = shadows.concurrent_percent<string, string>(shadow(calls, 50, false), 100, random.seeded(4));
+        last service = filters.bind<string, string, string, string>(filter, services.of<string, string>(primary));
+        test.assert_equal_string("primary x", test.assert_ok<string>(service.call("x")));
+        // Both ran at once: the call took the shadow's 50 ms, not 10 + 50 ms.
+        test.assert_equal<int64>(50000000, elapsed());
+        test.assert_equal<int64>(1, calls.load());
+        test.assert_equal<int64>(1, filter.mirrored());
+        test.assert_equal<int64>(0, filter.shadow_failures());
+    };
+
+    export let test_concurrent_shadow_failure_does_not_reach_the_caller = func {
+        last calls = atomics.create(0);
+        last filter = shadows.concurrent_percent<string, string>(shadow(calls, 5, true), 100, random.seeded(4));
+        last service = filters.bind<string, string, string, string>(filter, services.of<string, string>(primary));
+        test.assert_equal_string("primary y", test.assert_ok<string>(service.call("y")));
+        test.assert_equal<int64>(10000000, elapsed());
+        test.assert_equal<int64>(1, filter.shadow_failures());
+        test.assert_equal_string("ConcurrentShadowFilter(10000 bp, 1 mirrored, 1 failed)", filter.to_string());
+    };
+
+    export let test_concurrent_rate_is_drawn_per_request = func {
+        last calls = atomics.create(0);
+        last filter = new shadows.ConcurrentShadowFilter<string, string>(shadow(calls, 1, false), 2500, random.seeded(8));
+        last service = filters.bind<string, string, string, string>(filter, services.of<string, string>(primary));
+        for (let i = 0; i < 20; i++) {
+            test.assert_ok<string>(service.call("r"));
+        }
+        last expected = expected_selections(8, 20, 2500) as int64;
+        test.assert_equal<int64>(expected, filter.mirrored());
+        test.assert_equal<int64>(expected, calls.load());
+        // A rate of zero mirrors nothing.
+        last none = new shadows.ConcurrentShadowFilter<string, string>(shadow(calls, 1, false), 0, random.seeded(8));
+        test.assert_ok<string>(filters.bind<string, string, string, string>(none, services.of<string, string>(primary)).call("r"));
+        test.assert_equal<int64>(0, none.mirrored());
+        test.assert_equal_string("WorkerReport(2 handled, 1 failed)", new shadows.WorkerReport(2, 1).to_string());
+    };
+);

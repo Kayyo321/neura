@@ -1,0 +1,12 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Realtime\.WebTransport\.Session\.quic_open_stream is not implemented in Neura 0\.3\.0
+let program = import:Std.Program;
+let session = import:Std.Net.Realtime.WebTransport.Session;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last value = new session.WebTransportSession(0, 0, true);
+        let _ = value.open_stream(true);
+        return program.ExitCode.Ok;
+    };
+);

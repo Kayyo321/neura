@@ -1,0 +1,91 @@
+let limits = import:Std.Net.Resilience.AdaptiveLimit;
+let.promote _ = import:Std.Time.Clock;
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Net.Filter;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Service;
+
+/// @brief A filter that sheds load above an `AdaptiveLimit` and feeds the limit with latency samples.
+///
+/// A request that arrives while `in_flight >= limit.limit()` does not reach the service and returns the `Custom`
+/// error with the code `resilience.limit_exceeded` and the message "concurrency limit of N reached". Otherwise the
+/// filter counts it in flight, reads the injected clock's monotonic time before and after calling the service, and
+/// reports the elapsed time to the limit with the in-flight count at the start (this request included) and whether
+/// the result is a drop by the classifier (by default every `Err`). A zero elapsed time is not a usable sample and
+/// is not reported. A clock failure is returned as the request's error.
+///
+/// In-flight requests are those that entered the filter and have not returned, which includes nested calls in one
+/// task; tasks cannot share the filter (it is `#NotThreadSafe`).
+/// @see [Std.Net.Resilience.ConcurrencyLimitFilter](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Resilience-ConcurrencyLimitFilter)
+#Since("0.3.0")
+export let ConcurrencyLimitFilter = module (
+    /// @brief The error code of a request shed by the limit.
+    export const ExceededCode = "resilience.limit_exceeded";
+
+    /// @brief Sheds load above an adaptive limit.
+    #[Final, NotThreadSafe]
+    export let ConcurrencyLimitFilter = class<Req, Resp> implements SimpleFilter<Req, Resp> (
+        /// @brief The adaptive limit.
+        last limit: limits.AdaptiveLimit;
+        /// @brief Whether a result counts as a drop.
+        last is_drop: func(Result<Resp>) -> bool;
+        /// @brief The clock latencies are measured on.
+        last clock: Clock;
+        /// @brief Requests in flight.
+        let active: int = 0;
+        /// @brief Requests shed so far.
+        let shed: int64 = 0;
+
+        /// @brief A filter over `adaptive` measuring on `source`.
+        export let init = func(adaptive: limits.AdaptiveLimit, drop_if: func(Result<Resp>) -> bool, source: Clock) {
+            limit = adaptive;
+            is_drop = drop_if;
+            clock = source;
+        };
+
+        /// @brief Calls `next` unless the limit is reached, and samples its latency.
+        export let apply = func(request: Req, next: Service<Req, Resp>) -> Result<Resp> {
+            last allowed = limit.limit();
+            if (active >= allowed) {
+                shed++;
+                return Result<Resp>.Err(errors.custom(ExceededCode,
+                    "concurrency limit of " + allowed.to_string() + " reached"));
+            }
+            last start = clock.monotonic()?;
+            active++;
+            last started_with = active;
+            last outcome = next.call(request);
+            active--;
+            last end = clock.monotonic()?;
+            last elapsed = end.minus(start);
+            if (elapsed.to_nanos() > 0) {
+                limit.on_sample(elapsed, started_with, is_drop(outcome));
+            }
+            return outcome;
+        };
+
+        /// @brief The requests in flight now.
+        export let in_flight = func -> int => active;
+
+        /// @brief The requests shed so far.
+        export let rejected = func -> int64 => shed;
+
+        /// @brief Text such as "ConcurrencyLimitFilter(VegasLimit(limit 20), 0 in flight)".
+        export let.override to_string = func -> string =>
+            "ConcurrencyLimitFilter(" + limit.to_string() + ", " + active.to_string() + " in flight)";
+    );
+
+    /// @brief A filter that counts every `Err` as a drop.
+    #NoDiscard
+    export let of = func<Req, Resp>(limit: limits.AdaptiveLimit, clock: Clock) -> ConcurrencyLimitFilter<Req, Resp> =>
+        new ConcurrencyLimitFilter<Req, Resp>(limit, func(outcome: Result<Resp>) -> bool => match (outcome) {
+            Result.Ok(value) => false,
+            Result.Err(e) => true,
+        }, clock);
+
+    /// @brief A filter with a drop classifier.
+    #NoDiscard
+    export let classified = func<Req, Resp>(limit: limits.AdaptiveLimit, is_drop: func(Result<Resp>) -> bool,
+        clock: Clock) -> ConcurrencyLimitFilter<Req, Resp> =>
+        new ConcurrencyLimitFilter<Req, Resp>(limit, is_drop, clock);
+);

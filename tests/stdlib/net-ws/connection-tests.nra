@@ -1,0 +1,413 @@
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let duration = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let fixed_clock = import:Std.Time.FixedClock;
+let framed = import:Std.Net.FramedTransport;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let heartbeat = import:Std.Net.Realtime.Ws.Heartbeat;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let messages = import:Std.Net.Realtime.Ws.Message;
+let optional = import:Std.Core.Optional;
+let random = import:Std.Random.Random;
+let result = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let transports = import:Std.Net.Transport;
+let unit = import:Std.Core.Unit;
+let ws = import:Std.Net.Realtime.Ws.WebSocket;
+
+// A WebSocket connection over an in-memory byte transport whose peer is scripted.
+let ConnectionTests = module (
+    // Hands out preloaded chunks, then the end of the stream; records what is sent.
+    let Scripted = class implements transports.Transport<uint8[list], uint8[list]> (
+        last inbox: uint8[list][list] = new;
+        let next_chunk: int = 0;
+        export last sent: uint8[list] = new;
+        export let closed: bool = false;
+        // Before handing out this chunk index, answer one TimedOut read.
+        export let timeout_before: int = -1;
+
+        export let add = func(bytes: uint8[list]) {
+            inbox.append(bytes);
+        };
+
+        export let receive = func -> result.Result<optional.Optional<uint8[list]>> {
+            if (next_chunk == timeout_before) {
+                timeout_before = -1;
+                return result.Result<optional.Optional<uint8[list]>>.Err(errors.Error.Io {
+                    kind: errors.IoErrorKind.TimedOut, message: "stream read failed", path: "" });
+            }
+            if (next_chunk >= inbox.length) {
+                return result.Result<optional.Optional<uint8[list]>>.Ok(optional.Optional<uint8[list]>.None);
+            }
+            last chunk = inbox[next_chunk];
+            next_chunk++;
+            return result.Result<optional.Optional<uint8[list]>>.Ok(optional.Optional<uint8[list]>.Some(chunk));
+        };
+
+        export let send = func(data: uint8[list]) -> result.Result<unit.Unit> {
+            if (closed) {
+                return result.Result<unit.Unit>.Err(errors.custom("test.closed", "send after close"));
+            }
+            for (let b in data) {
+                sent.append(b);
+            }
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+
+        export let close = func -> result.Result<unit.Unit> {
+            closed = true;
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+
+        export let.override to_string = func -> string => "Scripted";
+    );
+
+    let bytes_of = func(text: string) -> uint8[list] => test.assert_ok<uint8[list]>(hex.decode(text));
+
+    let server_frame = func(frame: frames.Frame) -> uint8[list] =>
+        test.assert_ok<uint8[list]>(frames.encode(frame, optional.Optional<uint8[list]>.None));
+
+    let client_frame = func(frame: frames.Frame) -> uint8[list] =>
+        test.assert_ok<uint8[list]>(frames.encode(frame, optional.Optional<uint8[list]>.Some(bytes_of("37fa213d"))));
+
+    let text_frame = func(text: string) -> frames.Frame => frames.of(frames.Text, strings.to_bytes(text));
+
+    let close_frame = func(code: int, reason: string) -> frames.Frame =>
+        frames.of(frames.Close, test.assert_ok<uint8[list]>(close_status.encode_body(code, reason)));
+
+    // The frames in `bytes` from `start` on, decoded as the given receiver.
+    let frames_in = func(bytes: uint8[list], start: int, receiver: frames.Role) -> frames.Frame[list] {
+        last decoder = new frames.FrameDecoder(receiver, 1048576, 0);
+        last tail: uint8[list] = new;
+        for (let i = start; i < bytes.length; i++) {
+            tail.append(bytes[i]);
+        }
+        decoder.push(tail);
+        last list: frames.Frame[list] = new;
+        while (true) {
+            match (test.assert_ok<optional.Optional<frames.Frame>>(decoder.next())) {
+                optional.Optional.Some(frame) => {
+                    list.append(frame);
+                },
+                optional.Optional.None => {
+                    test.assert_equal<int>(0, decoder.buffered());
+                    return list;
+                },
+            }
+        }
+        return list;
+    };
+
+    let receive_text = func(socket: ws.WebSocket) -> string {
+        last message = test.assert_some<messages.Message>(
+            test.assert_ok<optional.Optional<messages.Message>>(socket.receive()));
+        return match (message) {
+            messages.Message.Text(text) => text,
+            messages.Message.Binary(_) => "<binary>",
+        };
+    };
+
+    let protocols = func -> string[list] => new(["chat", "superchat"]);
+
+    let request = func(seed: uint64) -> handshake.ClientRequest =>
+        handshake.client_request("server.example.com", "/chat", random.seeded(seed), protocols(), "");
+
+    let response_for = func(request_value: handshake.ClientRequest, protocol: string) -> uint8[list] {
+        last headers: handshake.Header[list] = new;
+        headers.append(new handshake.Header("Upgrade", "websocket"));
+        headers.append(new handshake.Header("Connection", "Upgrade"));
+        headers.append(new handshake.Header("Sec-WebSocket-Accept", handshake.accept_key(request_value.key)));
+        if (protocol.byte_length > 0) {
+            headers.append(new handshake.Header("Sec-WebSocket-Protocol", protocol));
+        }
+        return strings.to_bytes(handshake.response_text(101, "Switching Protocols", headers));
+    };
+
+    export let test_client_session = func {
+        last peer = new Scripted();
+        last req = request(1);
+        // The response head and the first frame arrive in one chunk.
+        last first = response_for(req, "chat");
+        for (let b in server_frame(text_frame("Hello"))) {
+            first.append(b);
+        }
+        peer.add(first);
+        peer.add(server_frame(frames.of(frames.Ping, strings.to_bytes("are you there"))));
+        peer.add(server_frame(new frames.Frame(false, false, false, false, frames.Binary, bytes_of("0102"))));
+        peer.add(server_frame(frames.of(frames.Pong, bytes_of(""))));
+        peer.add(server_frame(new frames.Frame(true, false, false, false, frames.Continuation, bytes_of("03"))));
+        peer.add(server_frame(close_frame(1000, "bye")));
+        last socket = test.assert_ok<ws.WebSocket>(ws.connect(peer, req, random.seeded(2), ws.default_options()));
+        test.assert_equal_string("chat", test.assert_some<string>(socket.protocol));
+        test.assert_equal_string(req.to_text(), strings.from_bytes_lossy(slice(peer.sent, 0, req.to_text().byte_length)));
+        test.assert_equal_string("Hello", receive_text(socket));
+        // The binary message spans a ping (answered) and a pong (counted).
+        last binary = test.assert_some<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(socket.receive()));
+        test.assert_equal_string("010203", hex.encode(messages.bytes_of(binary)));
+        test.assert_equal<int>(1, socket.pongs);
+        // The close frame ends the stream; the client echoes the status.
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(socket.receive()));
+        test.assert(socket.state == ws.ReadyState.Closed);
+        test.assert(test.assert_some<close_status.CloseReason>(socket.peer_close).equals(new close_status.CloseReason(1000, "bye")));
+        test.assert(peer.closed);
+        last written = frames_in(peer.sent, req.to_text().byte_length, frames.Role.Server);
+        test.assert_equal<int>(2, written.length);
+        test.assert_equal<int>(frames.Pong, written[0].opcode);
+        test.assert_equal_string("are you there", strings.from_bytes_lossy(written[0].payload));
+        test.assert_equal<int>(frames.Close, written[1].opcode);
+        test.assert_equal_string("03e8", hex.encode(written[1].payload));
+        // After the close, receive keeps answering None and send fails.
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(socket.receive()));
+        test.assert_err<unit.Unit>(socket.send(messages.Message.Text("late")));
+    };
+
+    let slice = func(bytes: uint8[list], start: int, end: int) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let i = start; i < end; i++) {
+            out.append(bytes[i]);
+        }
+        return out;
+    };
+
+    // The client handshake of RFC 6455 section 1.2.
+    let rfc_request = func -> string =>
+        "GET /chat HTTP/1.1\r\nHost: server.example.com\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n"
+        + "Sec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nOrigin: http://example.com\r\n"
+        + "Sec-WebSocket-Protocol: chat, superchat\r\nSec-WebSocket-Version: 13\r\n\r\n";
+
+    export let test_server_session = func {
+        last peer = new Scripted();
+        peer.add(strings.to_bytes(rfc_request()));
+        // RFC 6455 section 5.7: a single-frame masked text message "Hello".
+        peer.add(bytes_of("818537fa213d7f9f4d5158"));
+        peer.add(client_frame(new frames.Frame(false, false, false, false, frames.Text, strings.to_bytes("ab"))));
+        peer.add(client_frame(new frames.Frame(true, false, false, false, frames.Continuation, strings.to_bytes("c"))));
+        peer.add(client_frame(frames.of(frames.Close, bytes_of(""))));
+        last supported: string[list] = new(["superchat"]);
+        last socket = test.assert_ok<ws.WebSocket>(ws.accept(peer, supported, random.seeded(3), ws.default_options()));
+        test.assert_equal_string("superchat", test.assert_some<string>(socket.protocol));
+        last response = strings.from_bytes_lossy(peer.sent);
+        test.assert(strings.starts_with(response, "HTTP/1.1 101 Switching Protocols\r\n"));
+        test.assert(strings.contains(response, "Sec-WebSocket-Accept: s3pPLMBiTxaQ9kYGzzhZRbK+xOo=\r\n"));
+        last head_length = response.byte_length;
+        test.assert_equal_string("Hello", receive_text(socket));
+        test.assert_equal_string("abc", receive_text(socket));
+        // A close frame without a status is answered without one.
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(socket.receive()));
+        test.assert_equal<int>(1005, test.assert_some<close_status.CloseReason>(socket.peer_close).code);
+        last written = frames_in(peer.sent, head_length, frames.Role.Client);
+        test.assert_equal<int>(1, written.length);
+        test.assert_equal<int>(0, written[0].payload.length);
+    };
+
+    export let test_send_fragments_and_masks = func {
+        last peer = new Scripted();
+        last socket = ws.over_upgraded(peer, frames.Role.Client, random.seeded(4), new ws.WebSocketOptions(1024, 4096, 3),
+            optional.Optional<string>.None);
+        test.assert_ok<unit.Unit>(socket.send(messages.Message.Text("Hello")));
+        test.assert_ok<unit.Unit>(socket.ping(strings.to_bytes("p")));
+        // Masked frames: the second byte has its top bit set.
+        test.assert(peer.sent[1] >= 128);
+        last written = frames_in(peer.sent, 0, frames.Role.Server);
+        test.assert_equal<int>(3, written.length);
+        test.assert(!written[0].fin && written[0].opcode == frames.Text);
+        test.assert(written[1].fin && written[1].opcode == frames.Continuation);
+        test.assert_equal_string("Hello", strings.from_bytes_lossy(written[0].payload) + strings.from_bytes_lossy(written[1].payload));
+        test.assert_equal<int>(frames.Ping, written[2].opcode);
+        // A server does not mask.
+        last server_peer = new Scripted();
+        last server = ws.over_upgraded(server_peer, frames.Role.Server, random.seeded(4), ws.default_options(),
+            optional.Optional<string>.None);
+        test.assert_ok<unit.Unit>(server.send(messages.Message.Binary(bytes_of("00ff"))));
+        test.assert_equal_string("820200ff", hex.encode(server_peer.sent));
+    };
+
+    let failure_status = func(socket: ws.WebSocket) -> int =>
+        close_status.status_of(test.assert_err<optional.Optional<messages.Message>>(socket.receive()));
+
+    let server_over = func(chunk: uint8[list], peer: Scripted) -> ws.WebSocket {
+        peer.add(chunk);
+        return ws.over_upgraded(peer, frames.Role.Server, random.seeded(5), new ws.WebSocketOptions(256, 512, 512),
+            optional.Optional<string>.None);
+    };
+
+    export let test_protocol_failures_send_close = func {
+        // An unmasked frame from a client: 1002, answered with a close frame carrying 1002.
+        last first_peer = new Scripted();
+        last first = server_over(bytes_of("810548656c6c6f"), first_peer);
+        test.assert_equal<int>(1002, failure_status(first));
+        test.assert_equal_string("880203ea", hex.encode(first_peer.sent));
+        test.assert(first_peer.closed);
+        test.assert(first.state == ws.ReadyState.Closed);
+        // Text that is not UTF-8: 1007.
+        last second_peer = new Scripted();
+        last second = server_over(client_frame(frames.of(frames.Text, bytes_of("c328"))), second_peer);
+        test.assert_equal<int>(1007, failure_status(second));
+        test.assert_equal_string("880203ef", hex.encode(second_peer.sent));
+        // A frame over the limit: 1009.
+        last third_peer = new Scripted();
+        last big: uint8[list] = new;
+        for (let i = 0; i < 300; i++) {
+            big.append(1);
+        }
+        last third = server_over(client_frame(frames.of(frames.Binary, big)), third_peer);
+        test.assert_equal<int>(1009, failure_status(third));
+        // A close frame with a reserved status: 1002.
+        last fourth_peer = new Scripted();
+        last fourth = server_over(client_frame(frames.of(frames.Close, bytes_of("03ed"))), fourth_peer);
+        test.assert_equal<int>(1002, failure_status(fourth));
+        // The end of the stream without a close frame: 1006, and nothing is sent.
+        last fifth_peer = new Scripted();
+        last fifth = server_over(bytes_of(""), fifth_peer);
+        test.assert_equal<int>(1006, failure_status(fifth));
+        test.assert_equal<int>(0, fifth_peer.sent.length);
+    };
+
+    export let test_close_handshake_from_this_end = func {
+        last peer = new Scripted();
+        // The peer sends a data message before its close reply; close discards it.
+        peer.add(server_frame(text_frame("late data")));
+        peer.add(server_frame(close_frame(1000, "")));
+        last socket = ws.over_upgraded(peer, frames.Role.Client, random.seeded(6), ws.default_options(),
+            optional.Optional<string>.None);
+        test.assert_err<unit.Unit>(socket.close_with(1005, ""));
+        test.assert_err<unit.Unit>(socket.close_with(1000, strings.repeat("r", 124)));
+        test.assert_ok<unit.Unit>(socket.close_with(4000, "done"));
+        test.assert(socket.state == ws.ReadyState.Closed);
+        test.assert(peer.closed);
+        last written = frames_in(peer.sent, 0, frames.Role.Server);
+        test.assert_equal<int>(1, written.length);
+        last sent_reason = test.assert_ok<close_status.CloseReason>(close_status.decode_body(written[0].payload));
+        test.assert_equal_string("4000 done", sent_reason.to_string());
+        test.assert_ok<unit.Unit>(socket.close());
+        // A peer that just drops the connection still lets close finish.
+        last silent = new Scripted();
+        last other = ws.over_upgraded(silent, frames.Role.Client, random.seeded(6), ws.default_options(),
+            optional.Optional<string>.None);
+        test.assert_ok<unit.Unit>(other.close());
+        test.assert(other.state == ws.ReadyState.Closed);
+    };
+
+    export let test_handshake_failures = func {
+        // A wrong Sec-WebSocket-Accept fails the client and closes the transport.
+        last peer = new Scripted();
+        last req = request(7);
+        peer.add(response_for(request(8), ""));
+        test.assert_err<ws.WebSocket>(ws.connect(peer, req, random.seeded(2), ws.default_options()));
+        test.assert(peer.closed);
+        // A response that agrees to an extension fails with 1010.
+        last extended_peer = new Scripted();
+        last extended_req = handshake.client_request("h", "/", random.seeded(9), protocols(), "permessage-deflate");
+        last head = strings.replace(strings.from_bytes_lossy(response_for(extended_req, "")), "\r\n\r\n",
+            "\r\nSec-WebSocket-Extensions: permessage-deflate\r\n\r\n");
+        extended_peer.add(strings.to_bytes(head));
+        test.assert_equal<int>(1010, close_status.status_of(test.assert_err<ws.WebSocket>(
+            ws.connect(extended_peer, extended_req, random.seeded(2), ws.default_options()))));
+        // A request with version 8 gets 426 and the supported version.
+        last server_peer = new Scripted();
+        server_peer.add(strings.to_bytes(strings.replace(rfc_request(), "Version: 13", "Version: 8")));
+        last supported: string[list] = new;
+        test.assert_err<ws.WebSocket>(ws.accept(server_peer, supported, random.seeded(3), ws.default_options()));
+        last answer = strings.from_bytes_lossy(server_peer.sent);
+        test.assert(strings.starts_with(answer, "HTTP/1.1 426 Upgrade Required\r\nSec-WebSocket-Version: 13\r\n"));
+        // A request that is not a WebSocket request gets 400.
+        last plain_peer = new Scripted();
+        plain_peer.add(strings.to_bytes("GET / HTTP/1.1\r\nHost: x\r\n\r\n"));
+        test.assert_err<ws.WebSocket>(ws.accept(plain_peer, supported, random.seeded(3), ws.default_options()));
+        test.assert(strings.starts_with(strings.from_bytes_lossy(plain_peer.sent), "HTTP/1.1 400 Bad Request\r\n"));
+        // The stream ends inside the head.
+        last cut_peer = new Scripted();
+        cut_peer.add(strings.to_bytes("GET / HTTP/1.1\r\n"));
+        test.assert_err<ws.WebSocket>(ws.accept(cut_peer, supported, random.seeded(3), ws.default_options()));
+    };
+
+    export let test_web_socket_is_a_framed_transport = func {
+        last peer = new Scripted();
+        peer.add(server_frame(text_frame("x")));
+        peer.add(server_frame(close_frame(1001, "")));
+        last transport: framed.FramedTransport<messages.Message> = ws.over_upgraded(peer, frames.Role.Client,
+            random.seeded(1), ws.default_options(), optional.Optional<string>.None);
+        test.assert_ok<unit.Unit>(transport.send(messages.Message.Text("y")));
+        test.assert(optional.is_some<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(transport.receive())));
+        test.assert_none<messages.Message>(test.assert_ok<optional.Optional<messages.Message>>(transport.receive()));
+        test.assert_ok<unit.Unit>(transport.close());
+    };
+
+    // A read timeout returns to the caller and leaves the connection open; the heartbeat can then run.
+    export let test_read_timeout_keeps_the_connection = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(0, 0));
+        last peer = new Scripted();
+        peer.add(server_frame(text_frame("after the timeout")));
+        peer.timeout_before = 0;
+        last socket = ws.over_upgraded(peer, frames.Role.Client, random.seeded(1), ws.default_options(),
+            optional.Optional<string>.None);
+        socket.supervise(new heartbeat.Heartbeat(seconds(5), seconds(2), seconds(0)), clock);
+        last problem = test.assert_err<optional.Optional<messages.Message>>(socket.receive());
+        test.assert_equal_string("TimedOut: stream read failed", errors.message(problem));
+        test.assert(socket.state == ws.ReadyState.Open);
+        test.assert(!peer.closed);
+        clock.advance(seconds(5));
+        test.assert(test.assert_ok<heartbeat.HeartbeatAction>(socket.check_heartbeat()) == heartbeat.HeartbeatAction.SendPing);
+        test.assert_equal_string("after the timeout", receive_text(socket));
+        // A timeout while close waits for the peer closes the transport and reports the timeout.
+        peer.timeout_before = 1;
+        test.assert_err<unit.Unit>(socket.close());
+        test.assert(socket.state == ws.ReadyState.Closed);
+        test.assert(peer.closed);
+    };
+
+    let seconds = func(n: int64) -> duration.Duration => duration.of_seconds(n);
+
+    export let test_heartbeat_state_machine = func {
+        last beat = new heartbeat.Heartbeat(seconds(30), seconds(10), seconds(0));
+        test.assert(beat.poll(seconds(29)) == heartbeat.HeartbeatAction.Wait);
+        test.assert_equal<int64>(30, beat.next_deadline().to_seconds());
+        test.assert(beat.poll(seconds(30)) == heartbeat.HeartbeatAction.SendPing);
+        test.assert(beat.awaiting_pong());
+        test.assert_equal<int64>(40, beat.next_deadline().to_seconds());
+        // One ping per interval: no second ping while waiting.
+        test.assert(beat.poll(seconds(35)) == heartbeat.HeartbeatAction.Wait);
+        beat.record_activity(seconds(36));
+        test.assert(!beat.awaiting_pong());
+        test.assert(beat.poll(seconds(65)) == heartbeat.HeartbeatAction.Wait);
+        test.assert(beat.poll(seconds(66)) == heartbeat.HeartbeatAction.SendPing);
+        test.assert(beat.poll(seconds(75)) == heartbeat.HeartbeatAction.Wait);
+        test.assert(beat.poll(seconds(76)) == heartbeat.HeartbeatAction.PeerDead);
+        // Dead stays dead, even when something arrives later.
+        beat.record_activity(seconds(77));
+        test.assert(beat.poll(seconds(78)) == heartbeat.HeartbeatAction.PeerDead);
+        test.assert_equal<int>(2, beat.pings);
+    };
+
+    export let test_heartbeat_over_a_connection = func {
+        last clock = fixed_clock.of(instant.of_epoch_seconds(0, 0));
+        last peer = new Scripted();
+        peer.add(server_frame(frames.of(frames.Pong, strings.to_bytes("1"))));
+        last socket = ws.over_upgraded(peer, frames.Role.Client, random.seeded(1), ws.default_options(),
+            optional.Optional<string>.None);
+        socket.supervise(new heartbeat.Heartbeat(seconds(5), seconds(2), seconds(0)), clock);
+        test.assert(test.assert_ok<heartbeat.HeartbeatAction>(socket.check_heartbeat()) == heartbeat.HeartbeatAction.Wait);
+        clock.advance(seconds(5));
+        test.assert(test.assert_ok<heartbeat.HeartbeatAction>(socket.check_heartbeat()) == heartbeat.HeartbeatAction.SendPing);
+        last pinged = frames_in(peer.sent, 0, frames.Role.Server);
+        test.assert_equal<int>(frames.Ping, pinged[0].opcode);
+        // The pong arrives at 6 s; the stream then ends (1006) but the pong was noted first.
+        clock.advance(seconds(1));
+        test.assert_err<optional.Optional<messages.Message>>(socket.receive());
+        test.assert_equal<int>(1, socket.pongs);
+        // A second connection whose peer never answers is declared dead and closed.
+        last quiet = new Scripted();
+        last lonely = ws.over_upgraded(quiet, frames.Role.Client, random.seeded(1), ws.default_options(),
+            optional.Optional<string>.None);
+        lonely.supervise(new heartbeat.Heartbeat(seconds(5), seconds(2), seconds(6)), clock);
+        clock.advance(seconds(5));
+        test.assert(test.assert_ok<heartbeat.HeartbeatAction>(lonely.check_heartbeat()) == heartbeat.HeartbeatAction.SendPing);
+        clock.advance(seconds(2));
+        test.assert(test.assert_ok<heartbeat.HeartbeatAction>(lonely.check_heartbeat()) == heartbeat.HeartbeatAction.PeerDead);
+        test.assert(lonely.state == ws.ReadyState.Closed);
+        test.assert(quiet.closed);
+    };
+);

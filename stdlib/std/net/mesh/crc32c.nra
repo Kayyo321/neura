@@ -1,0 +1,37 @@
+/// @brief CRC32C, the Castagnoli CRC of RFC 3720 appendix B.4 and RFC 4960 appendix B, as used by the
+/// PROXY protocol v2 `PP2_TYPE_CRC32C` TLV.
+///
+/// The CRC is reflected, uses the polynomial 0x82F63B78 (reversed form of 0x1EDC6F41), starts from all ones and
+/// is complemented at the end. RFC 3720 prints the result as the four bytes sent on the wire, least significant
+/// byte first: the CRC of 32 zero bytes is printed `aa 36 91 8a`, which is the value 0x8A9136AA here. The loop is
+/// bitwise (eight steps a byte, no table), which is enough for headers of a few hundred bytes.
+/// @see [Std.Net.Mesh.Crc32c](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-Crc32c)
+#Since("0.3.0")
+export let Crc32c = module (
+    /// @brief The reflected polynomial 0x82F63B78 (`python3 -I -c "print(0x82F63B78)"` prints 2197175160).
+    export const Polynomial: uint32 = 2197175160;
+
+    /// @brief All ones, the initial register and the final complement mask (0xFFFFFFFF).
+    const AllOnes: uint32 = 4294967295;
+
+    /// @brief The CRC32C of every byte of `bytes`.
+    #NoDiscard
+    export let of = func(bytes: uint8[list]) -> uint32 => of_range(bytes, 0, bytes.length);
+
+    /// @brief The CRC32C of `bytes[start]` up to but not including `bytes[end]`. Traps with "invalid argument:
+    /// range" unless 0 <= start <= end <= length.
+    #NoDiscard
+    export let of_range = func(bytes: uint8[list], start: int, end: int) -> uint32 {
+        if (start < 0 || end < start || end > bytes.length) {
+            trap_with_message("invalid argument: range");
+        }
+        let crc: uint32 = AllOnes;
+        for (let i = start; i < end; i++) {
+            crc = crc ^ (bytes[i] as uint32);
+            for (let k = 0; k < 8; k++) {
+                crc = (crc & 1) == 1 ? (crc >> 1) ^ Polynomial : crc >> 1;
+            }
+        }
+        return crc ^ AllOnes;
+    };
+);

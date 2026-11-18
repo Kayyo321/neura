@@ -1,0 +1,105 @@
+let dates = import:Std.Net.Http.Date;
+let instant = import:Std.Time.Instant;
+let.promote _ = import:Std.Core.Error;
+let test = import:Std.Test;
+
+// Std.Net.Http.Date. The three example texts are RFC 9110 section 5.6.7; the Expires example is RFC 9111
+// section 5.3. Expected epoch seconds and weekdays come from (run verbatim):
+// python3 -I -c 'import calendar,datetime; g=lambda *a: calendar.timegm(datetime.datetime(*a).timetuple()); print(g(1994,11,6,8,49,37), g(1994,12,1,16), g(2026,11,17), g(2076,11,6), g(2076,11,17), g(1976,11,18), g(1999,12,31), g(2026,1,1), g(2000,2,29), g(2016,12,31,23,59,59), g(1,1,1)); print([datetime.date(*d).strftime("%A") for d in [(2076,11,6),(2076,11,17),(1976,11,18),(2076,11,18),(1999,12,31),(2026,1,1),(2000,2,29),(2016,12,31),(1,1,1)]])'
+// -> 784111777 786297600 1794873600 3371846400 3372796800 217123200 946598400 1767225600 951782400 1483228799
+//    -62135596800
+//    ['Friday', 'Tuesday', 'Thursday', 'Wednesday', 'Friday', 'Thursday', 'Tuesday', 'Saturday', 'Monday']
+let DateTests = module (
+    // 2026-11-17T00:00:00Z, the reference for two-digit years.
+    let reference = func -> instant.Instant => instant.of_epoch_seconds(1794873600, 0);
+
+    let seconds_of = func(text: string) -> int64 =>
+        test.assert_ok<instant.Instant>(dates.parse(text, reference())).epoch_seconds;
+
+    let kind_of = func(text: string) -> ParseErrorKind {
+        return match (test.assert_err<instant.Instant>(dates.parse(text, reference()))) {
+            Error.Parse { kind, offset: _, message: _ } => kind,
+            _ => ParseErrorKind.Syntax,
+        };
+    };
+
+    export let test_three_formats_rfc9110 = func {
+        test.assert_equal<int64>(784111777, seconds_of("Sun, 06 Nov 1994 08:49:37 GMT"));
+        test.assert_equal<int64>(784111777, seconds_of("Sunday, 06-Nov-94 08:49:37 GMT"));
+        test.assert_equal<int64>(784111777, seconds_of("Sun Nov  6 08:49:37 1994"));
+        // date3 also allows a two-digit day.
+        test.assert_equal<int64>(784111777, seconds_of("Sun Nov 06 08:49:37 1994"));
+        test.assert_equal<int64>(786297600, seconds_of("Thu, 01 Dec 1994 16:00:00 GMT"));
+        test.assert_equal<int64>(784111777,
+            test.assert_ok<instant.Instant>(dates.parse_imf_fixdate("Sun, 06 Nov 1994 08:49:37 GMT")).epoch_seconds);
+        test.assert_err<instant.Instant>(dates.parse_imf_fixdate("Sun Nov  6 08:49:37 1994"));
+    };
+
+    export let test_format_round_trips = func {
+        test.assert_equal_string("Sun, 06 Nov 1994 08:49:37 GMT",
+            test.assert_ok<string>(dates.format(instant.of_epoch_seconds(784111777, 999999999))));
+        test.assert_equal_string("Thu, 01 Jan 1970 00:00:00 GMT", test.assert_ok<string>(dates.format(instant.Epoch)));
+        test.assert_equal_string("Mon, 01 Jan 0001 00:00:00 GMT",
+            test.assert_ok<string>(dates.format(instant.of_epoch_seconds(-62135596800, 0))));
+        test.assert_equal_string("Tue, 29 Feb 2000 00:00:00 GMT",
+            test.assert_ok<string>(dates.format(instant.of_epoch_seconds(951782400, 0))));
+        test.assert_equal<int64>(951782400, seconds_of("Tue, 29 Feb 2000 00:00:00 GMT"));
+        test.assert_equal<int64>(-62135596800, seconds_of("Mon, 01 Jan 0001 00:00:00 GMT"));
+        test.assert_ok<string>(dates.format(instant.of_epoch_seconds(dates.MaxEpochSeconds, 0)));
+        test.assert_err<string>(dates.format(instant.of_epoch_seconds(dates.MaxEpochSeconds + 1, 0)));
+        test.assert_err<string>(dates.format(instant.of_epoch_seconds(dates.MinEpochSeconds - 1, 0)));
+    };
+
+    export let test_two_digit_year_pivot = func {
+        // The latest year ending in the digits that is not after 2076-11-17T00:00:00Z.
+        test.assert_equal<int64>(3371846400, seconds_of("Friday, 06-Nov-76 00:00:00 GMT"));
+        test.assert_equal<int64>(3372796800, seconds_of("Tuesday, 17-Nov-76 00:00:00 GMT"));
+        test.assert_equal<int64>(217123200, seconds_of("Thursday, 18-Nov-76 00:00:00 GMT"));
+        test.assert_equal<int64>(946598400, seconds_of("Friday, 31-Dec-99 00:00:00 GMT"));
+        test.assert_equal<int64>(1767225600, seconds_of("Thursday, 01-Jan-26 00:00:00 GMT"));
+        // 2076-11-18 is a Wednesday, but the year resolves to 1976, a Thursday.
+        test.assert(kind_of("Wednesday, 18-Nov-76 00:00:00 GMT") == ParseErrorKind.OutOfRange);
+    };
+
+    export let test_leap_second_reads_as_59 = func {
+        test.assert_equal<int64>(1483228799, seconds_of("Sat, 31 Dec 2016 23:59:60 GMT"));
+        test.assert(kind_of("Sat, 31 Dec 2016 23:59:61 GMT") == ParseErrorKind.OutOfRange);
+    };
+
+    export let test_case_rules = func {
+        test.assert(kind_of("sun, 06 Nov 1994 08:49:37 GMT") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sun, 06 NOV 1994 08:49:37 gmt") == ParseErrorKind.InvalidCharacter);
+        last loose = dates.parse_ignoring_case("sun, 06 NOV 1994 08:49:37 gmt", reference());
+        test.assert_equal<int64>(784111777, test.assert_ok<instant.Instant>(loose).epoch_seconds);
+        last loose_old = dates.parse_ignoring_case("SUNDAY, 06-nov-94 08:49:37 Gmt", reference());
+        test.assert_equal<int64>(784111777, test.assert_ok<instant.Instant>(loose_old).epoch_seconds);
+    };
+
+    export let test_invalid_texts_are_errors = func {
+        test.assert(kind_of("") == ParseErrorKind.Empty);
+        test.assert(kind_of("0") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("-1") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Mon, 06 Nov 1994 08:49:37 GMT") == ParseErrorKind.OutOfRange);
+        test.assert(kind_of("Thu, 30 Feb 2017 08:49:37 GMT") == ParseErrorKind.OutOfRange);
+        test.assert(kind_of("Sun, 06 Nov 1994 24:00:00 GMT") == ParseErrorKind.OutOfRange);
+        test.assert(kind_of("Sun, 06 Nov 1994 08:60:00 GMT") == ParseErrorKind.OutOfRange);
+        test.assert(kind_of("Sun, 06 Nov 1994 08:49:37 UTC") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sun, 06 Nov 1994 08:49:37 GMT ") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sun, 06 Nov 1994 08:49:37 GMTé") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sun, 06 Nov 1994 08:49") == ParseErrorKind.UnexpectedEnd);
+        test.assert(kind_of("Sun,  6 Nov 1994 08:49:37 GMT") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sun, 06 Nov 94 08:49:37 GMT") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("é, 06 Nov 1994 08:49:37 GMT") == ParseErrorKind.Syntax);
+        test.assert(kind_of("Sun Nov  6 08:49:37 94") == ParseErrorKind.UnexpectedEnd);
+        test.assert(kind_of("Sun Nov 6 08:49:37 1994") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sunday, 06-Nov-1994 08:49:37 GMT") == ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of("Sun, 99 Nov 1994 08:49:37 GMT") == ParseErrorKind.OutOfRange);
+    };
+
+    export let test_reference_out_of_range = func {
+        last far = instant.of_epoch_seconds(dates.MaxEpochSeconds, 0);
+        test.assert_err<instant.Instant>(dates.parse("Sunday, 06-Nov-94 08:49:37 GMT", far));
+        // Formats without a two-digit year do not use the reference.
+        let _ = test.assert_ok<instant.Instant>(dates.parse("Sun, 06 Nov 1994 08:49:37 GMT", far));
+    };
+);

@@ -8,7 +8,7 @@ let sp800_185 = import:Std.Crypto.Internal.Sp800185;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief KMAC128 and KMAC256 of NIST SP 800-185, section 4, and their XOF forms (Stdlib.md section 21.5).
-/// @see [Std.Crypto.Mac.Kmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kmac)
+/// @see [Std.Crypto.Mac.Kmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Kmac)
 #Since("0.3.0")
 export let Kmac = module (
     /// @brief The cSHAKE sponge of KMAC primed with bytepad(encode_string(key), rate).

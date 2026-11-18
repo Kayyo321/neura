@@ -9,7 +9,7 @@ let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 /// Std.Crypto.Symmetric for data. The library offers no ECB or CBC mode. The S-box is a table indexed by
 /// secret bytes, so this code is not constant-time on cached hardware, and the runtime promises no constant
 /// time anyway.
-/// @see [Std.Crypto.Symmetric.AesBlock](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-AesBlock)
+/// @see [Std.Crypto.Symmetric.AesBlock](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-AesBlock)
 #Since("0.3.0")
 export let AesBlock = module (
     /// @brief An expanded AES-128, AES-192 or AES-256 key.

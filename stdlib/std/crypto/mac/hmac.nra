@@ -6,7 +6,7 @@ let.promote _ = import:Std.Crypto.StreamingDigest;
 let words = import:Std.Crypto.Internal.Words;
 
 /// @brief HMAC (FIPS 198-1, RFC 2104) over any StreamingDigest (Stdlib.md section 21.5).
-/// @see [Std.Crypto.Mac.Hmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hmac)
+/// @see [Std.Crypto.Mac.Hmac](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Mac-Hmac)
 #Since("0.3.0")
 export let Hmac = module (
     /// @brief HMAC with the digest H, such as `Hmac<Sha256>`. A key longer than H's block is hashed first; a

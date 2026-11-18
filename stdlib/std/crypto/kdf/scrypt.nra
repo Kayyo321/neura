@@ -9,7 +9,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// The working memory is 128 * r * N bytes, held as 32-bit words; a call whose memory would exceed 1 GiB traps
 /// before allocating.
-/// @see [Std.Crypto.Kdf.Scrypt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Scrypt)
+/// @see [Std.Crypto.Kdf.Scrypt](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Scrypt)
 #Since("0.3.0")
 export let Scrypt = module (
     /// @brief `length` bytes derived from the password and salt with cost N (a power of two above 1), block size

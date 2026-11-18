@@ -1,0 +1,87 @@
+let ebpf = import:Std.Net.Mesh.Ebpf;
+let errors = import:Std.Core.Error;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let.promote _ = import:Std.Core.Unit;
+
+// eBPF socket interception: the types and the validation that runs before any host call. Loading, attaching and
+// map updates need a host eBPF service that Neura 0.3.0 lacks; traps/ebpf-load-stub.nra checks that load traps.
+// The bytecode below is an arbitrary byte pattern of whole instructions: validation checks shape, not meaning.
+let EbpfTests = module (
+    let code = func(instructions: int) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < instructions * 8; i++) {
+            bytes.append((i % 256) as uint8);
+        }
+        return bytes;
+    };
+
+    let expect_invalid = func(outcome: errors.Error, fragment: string) {
+        match (outcome) {
+            errors.Error.Io { kind, message, path } => {
+                test.assert_equal_bool(true, kind == errors.IoErrorKind.InvalidInput);
+                test.assert_with(strings.contains(message, fragment), message);
+            },
+            _ => {
+                test.assert_with(false, "expected an InvalidInput Io error");
+            },
+        }
+    };
+
+    export let test_program_validation = func {
+        last good = new ebpf.EbpfProgram("redirect_msg", ebpf.AttachPoint.SkMsg, "GPL", code(4));
+        test.assert_ok<Unit>(ebpf.validate(good));
+        test.assert_equal<int>(4, good.instruction_count());
+        test.assert_equal_string("EbpfProgram(redirect_msg, SkMsg, 4 instructions)", good.to_string());
+        test.assert_equal_bool(true, good.equals(new ebpf.EbpfProgram("redirect_msg", ebpf.AttachPoint.SkMsg, "GPL", code(4))));
+        test.assert_equal_bool(false, good.equals(new ebpf.EbpfProgram("redirect_msg", ebpf.AttachPoint.SkMsg, "GPL", code(5))));
+        expect_invalid(test.assert_err<Unit>(ebpf.validate(new ebpf.EbpfProgram("", ebpf.AttachPoint.SockOps, "GPL", code(1)))),
+            "program name");
+        expect_invalid(test.assert_err<Unit>(ebpf.validate(new ebpf.EbpfProgram("a_name_that_is_too_long", ebpf.AttachPoint.SockOps,
+            "GPL", code(1)))), "program name");
+        expect_invalid(test.assert_err<Unit>(ebpf.validate(new ebpf.EbpfProgram("ops", ebpf.AttachPoint.SockOps, "", code(1)))),
+            "license");
+        last ragged = code(1);
+        ragged.append(0);
+        expect_invalid(test.assert_err<Unit>(ebpf.validate(new ebpf.EbpfProgram("ops", ebpf.AttachPoint.SockOps, "GPL", ragged))),
+            "8-byte");
+        expect_invalid(test.assert_err<Unit>(ebpf.validate(new ebpf.EbpfProgram("ops", ebpf.AttachPoint.SockOps, "GPL", code(0)))),
+            "8-byte");
+        // Load reports a validation failure without reaching the host stub.
+        expect_invalid(test.assert_err<ebpf.LoadedProgram>(ebpf.load(new ebpf.EbpfProgram("bad name", ebpf.AttachPoint.SkLookup,
+            "GPL", code(2)))), "program name");
+    };
+
+    export let test_map_validation = func {
+        test.assert_ok<Unit>(ebpf.validate_map(new ebpf.RedirectMap("socks", ebpf.MapKind.SockMap, 4, 1024)));
+        test.assert_ok<Unit>(ebpf.validate_map(new ebpf.RedirectMap("flows", ebpf.MapKind.SockHash, 12, 65536)));
+        expect_invalid(test.assert_err<Unit>(ebpf.validate_map(new ebpf.RedirectMap("socks", ebpf.MapKind.SockMap, 8, 1024))),
+            "key size 8");
+        expect_invalid(test.assert_err<Unit>(ebpf.validate_map(new ebpf.RedirectMap("flows", ebpf.MapKind.SockHash, 0, 1))),
+            "key size 0");
+        expect_invalid(test.assert_err<Unit>(ebpf.validate_map(new ebpf.RedirectMap("flows", ebpf.MapKind.SockHash, 4, 0))),
+            "at least one entry");
+        expect_invalid(test.assert_err<ebpf.LoadedMap>(ebpf.create_map(new ebpf.RedirectMap("x/y", ebpf.MapKind.SockMap, 4, 1))),
+            "map name");
+        last map = new ebpf.RedirectMap("flows", ebpf.MapKind.SockHash, 12, 64);
+        test.assert_equal_string("RedirectMap(flows, SockHash, key 12 bytes, 64 entries)", map.to_string());
+        test.assert_equal_bool(true, map.equals(new ebpf.RedirectMap("flows", ebpf.MapKind.SockHash, 12, 64)));
+        test.assert_equal<uint32>(map.hash_code(), new ebpf.RedirectMap("flows", ebpf.MapKind.SockHash, 12, 64).hash_code());
+    };
+
+    export let test_attach_checks_before_the_host = func {
+        // Handles as the host would return them; these calls fail validation before any host call.
+        last ops = new ebpf.LoadedProgram(7, ebpf.AttachPoint.SockOps);
+        last msg = new ebpf.LoadedProgram(8, ebpf.AttachPoint.SkMsg);
+        last map = new ebpf.LoadedMap(9, new ebpf.RedirectMap("socks", ebpf.MapKind.SockMap, 4, 16));
+        expect_invalid(test.assert_err<Unit>(ebpf.attach_map(ops, map)), "SockOps program cannot attach as SkMsg");
+        expect_invalid(test.assert_err<Unit>(ebpf.attach_cgroup(msg, "/sys/fs/cgroup")), "cannot attach as SockOps");
+        expect_invalid(test.assert_err<Unit>(ebpf.attach_cgroup(ops, "sys/fs/cgroup")), "absolute");
+        expect_invalid(test.assert_err<Unit>(ebpf.attach_netns(ops, "/proc/self/ns/net")), "cannot attach as SkLookup");
+        last key: uint8[list] = new;
+        key.append(1);
+        expect_invalid(test.assert_err<Unit>(ebpf.map_update(map, key, 3)), "key is 1 bytes");
+        test.assert_equal_string("LoadedProgram(7, SockOps)", ops.to_string());
+        test.assert_equal_string("LoadedMap(9, socks)", map.to_string());
+    };
+);

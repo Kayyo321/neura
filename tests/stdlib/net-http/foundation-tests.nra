@@ -1,0 +1,94 @@
+let header_maps = import:Std.Net.Http.Headers;
+let methods = import:Std.Net.Http.Method;
+let optional = import:Std.Core.Optional;
+let statuses = import:Std.Net.Http.Status;
+let test = import:Std.Test;
+
+// Std.Net.Http.Headers, Method and Status. Reason phrases from RFC 9110 section 15 and RFC 6585; safe and
+// idempotent methods from RFC 9110 sections 9.2.1 and 9.2.2; list syntax from RFC 9110 section 5.6.1.
+let FoundationTests = module (
+    export let test_case_insensitive_multi_value = func {
+        last map = new header_maps.Headers();
+        map.add("Accept", "text/html");
+        map.add("accept", " application/json ");
+        map.add("Host", "example.com");
+        test.assert_equal_string("text/html", test.assert_some<string>(map.get("ACCEPT")));
+        test.assert_equal<int>(2, map.get_all("Accept").length);
+        test.assert_equal_string("application/json", map.get_all("Accept")[1]);
+        test.assert_equal_string("text/html, application/json", test.assert_some<string>(map.joined("accept")));
+        test.assert_equal<int>(3, map.size());
+        map.set("ACCEPT", "*/*");
+        test.assert_equal<int>(2, map.size());
+        test.assert_equal_string("ACCEPT", map.name_at(0));
+        test.assert_equal_string("Host", map.name_at(1));
+        test.assert_equal<int>(1, map.remove("host"));
+        test.assert(!map.contains("Host"));
+        test.assert_none<string>(map.get("Host"));
+        test.assert_equal<int>(0, map.remove("Host"));
+    };
+
+    export let test_list_elements = func {
+        last map = new header_maps.Headers();
+        map.add("Cache-Control", "no-cache, private=\"a, b\"");
+        map.add("Cache-Control", " ,max-age=5,");
+        last elements = map.list_elements("cache-control");
+        test.assert_equal<int>(3, elements.length);
+        test.assert_equal_string("private=\"a, b\"", elements[1]);
+        test.assert(map.has_token("Cache-Control", "NO-CACHE"));
+        test.assert(!map.has_token("Cache-Control", "no-store"));
+    };
+
+    export let test_equality_and_copy = func {
+        last a = header_maps.of(new(["A", "b"]), new(["1", "2"]));
+        last b = new header_maps.Headers();
+        b.add("a", "1");
+        b.add("B", "2");
+        test.assert(a.equals(b));
+        test.assert(a.hash_code() == b.hash_code());
+        last c = a.copy();
+        c.add("C", "3");
+        test.assert(!a.equals(c));
+        test.assert_equal_string("Headers{A: 1; b: 2}", a.to_string());
+        test.assert_equal<int>(2, a.lower_names().length);
+    };
+
+    export let test_token_and_value_rules = func {
+        test.assert(header_maps.is_token("X-Custom_1!"));
+        test.assert(!header_maps.is_token(""));
+        test.assert(!header_maps.is_token("Bad Name"));
+        test.assert(!header_maps.is_token("a:b"));
+        test.assert(header_maps.is_valid_value("a\tb"));
+        test.assert(!header_maps.is_valid_value("a\r\nb"));
+        test.assert_equal_string("x y", header_maps.trim_value(" \tx y\t "));
+    };
+
+    export let test_methods = func {
+        test.assert_equal_string("GET", methods.name(test.assert_some<methods.HttpMethod>(methods.parse("GET"))));
+        test.assert_equal_string("PURGE", methods.name(test.assert_some<methods.HttpMethod>(methods.parse("PURGE"))));
+        test.assert_none<methods.HttpMethod>(methods.parse("BAD METHOD"));
+        // Methods are case-sensitive: "get" is an extension method.
+        test.assert_equal_string("get", methods.name(test.assert_some<methods.HttpMethod>(methods.parse("get"))));
+        test.assert(methods.is_safe(methods.HttpMethod.Head));
+        test.assert(!methods.is_safe(methods.HttpMethod.Put));
+        test.assert(methods.is_idempotent(methods.HttpMethod.Put));
+        test.assert(methods.is_idempotent(methods.HttpMethod.Delete));
+        test.assert(methods.is_idempotent(methods.HttpMethod.Options));
+        test.assert(!methods.is_idempotent(methods.HttpMethod.Post));
+        test.assert(!methods.is_idempotent(methods.HttpMethod.Patch));
+        test.assert(!methods.is_idempotent(methods.HttpMethod.Extension("PURGE")));
+    };
+
+    export let test_statuses = func {
+        test.assert_equal_string("OK", statuses.reason_phrase(200));
+        test.assert_equal_string("Content Too Large", statuses.reason_phrase(413));
+        test.assert_equal_string("Request Header Fields Too Large", statuses.reason_phrase(431));
+        test.assert_equal_string("Unprocessable Content", statuses.reason_phrase(422));
+        test.assert_equal_string("", statuses.reason_phrase(306));
+        test.assert_equal_string("", statuses.reason_phrase(299));
+        test.assert(statuses.has_no_content(304));
+        test.assert(statuses.is_heuristically_cacheable(404));
+        test.assert(!statuses.is_heuristically_cacheable(302));
+        test.assert(!statuses.is_valid(600));
+        test.assert(statuses.is_server_error(504));
+    };
+);

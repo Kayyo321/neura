@@ -1,0 +1,208 @@
+let.promote _ = import:Std.Net.Connector;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Net.Listener;
+let.promote _ = import:Std.Core.Optional;
+let pp = import:Std.Net.Mesh.ProxyProtocol;
+let.promote _ = import:Std.Core.Result;
+let sockets = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief PROXY protocol listeners and connectors: a `Std.Net.Listener` wrapper that reads and removes the
+/// header a load balancer sends first and reports the real client address, and a `Std.Net.Connector` wrapper that
+/// writes a header before anything else (proxy-protocol.txt sections 2.1 and 2.2).
+///
+/// The wrappers work over any listener or connector; they reach the connection's bytes through functions the
+/// program gives: `read(connection, n)` returns at most `n` bytes (an empty list at end of stream), `write` sends
+/// bytes, and `close_connection` closes one. `accept` asks `read` for exactly the bytes `ProxyDecoder.needed`
+/// names, so with a `read` that honours its limit nothing after the header is consumed; any bytes a `read` returns
+/// past the header are kept as the connection's `prefix`, to be handled before further reads. A header that is
+/// invalid, or a stream that ends before the header is complete, closes that connection and fails `accept` with
+/// the `Custom` error `mesh.proxy_header_invalid` (the text says the receiver must abort such a connection), so an
+/// accept loop can log it and accept again; a `read` failure also closes the connection and is returned as it is.
+/// There is no read timeout here: a client that sends nothing holds `accept` until the transport's own timeout.
+/// @see [Std.Net.Mesh.ProxyProtocolListener](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Mesh-ProxyProtocolListener)
+#Since("0.3.0")
+export let ProxyProtocolListener = module (
+    /// @brief The `Custom` error code for a connection whose PROXY header is invalid or incomplete.
+    export const InvalidCode = "mesh.proxy_header_invalid";
+
+    /// @brief An accepted connection with the PROXY header already read.
+    #[Final, NotThreadSafe]
+    export let ProxiedConnection = class<C> (
+        /// @brief The underlying connection, positioned after the header (and after `prefix`).
+        export last connection: C;
+        /// @brief The header the peer sent.
+        export last header: pp.ProxyHeader;
+        /// @brief Bytes read past the header, which belong to the application stream before any further read.
+        export last prefix: uint8[list];
+
+        /// @brief Pairs a connection with its header and the bytes read past it.
+        export let init = func(conn: C, received: pp.ProxyHeader, extra: uint8[list]) {
+            connection = conn;
+            header = received;
+            prefix = extra;
+        };
+
+        /// @brief The real client address, or None for LOCAL, UNKNOWN, Unix and UNSPEC headers, where the
+        /// connection's own peer address applies.
+        #NoDiscard
+        export let source = func -> Optional<sockets.SocketAddr> => header.source();
+
+        /// @brief The address the client originally connected to, when the header carries one.
+        #NoDiscard
+        export let destination = func -> Optional<sockets.SocketAddr> => header.destination();
+
+        /// @brief The client address if the header gives one, else `peer` (the connection's own peer address).
+        #NoDiscard
+        export let client_or = func(peer: sockets.SocketAddr) -> sockets.SocketAddr => match (header.source()) {
+            Optional.Some(address) => address,
+            Optional.None => peer,
+        };
+
+        /// @brief Text such as "ProxiedConnection(ProxyHeader(...), 0 prefix bytes)".
+        export let.override to_string = func -> string =>
+            "ProxiedConnection(" + header.to_string() + ", " + prefix.length.to_string() + " prefix bytes)";
+    );
+
+    /// @brief A listener whose connections start with a PROXY header (version 1 or 2).
+    #[Final, NotThreadSafe]
+    export let ProxyProtocolListener = class<A, C> implements Listener<A, ProxiedConnection<C>> (
+        /// @brief The wrapped listener.
+        last inner: Listener<A, C>;
+        /// @brief Reads at most the given number of bytes; an empty list is the end of the stream.
+        last read: func(C, int) -> Result<uint8[list]>;
+        /// @brief Closes a connection that sent no valid header.
+        last close_connection: func(C) -> Result<Unit>;
+
+        /// @brief Wraps `listener`, reading through `reader` and closing rejected connections with `closer`.
+        export let init = func(listener: Listener<A, C>, reader: func(C, int) -> Result<uint8[list]>,
+            closer: func(C) -> Result<Unit>) {
+            inner = listener;
+            read = reader;
+            close_connection = closer;
+        };
+
+        /// @brief The wrapped listener's address.
+        export let address = func -> A => inner.address();
+
+        /// @brief Accepts the next connection and reads its PROXY header, as the module describes.
+        export let accept = func -> Result<ProxiedConnection<C>> {
+            last conn = inner.accept()?;
+            last decoder = new pp.ProxyDecoder();
+            while (true) {
+                match (decoder.next()) {
+                    Result.Ok(step) => {
+                        match (step) {
+                            Optional.Some(header) => {
+                                return Result<ProxiedConnection<C>>.Ok(
+                                    new ProxiedConnection<C>(conn, header, decoder.remaining()));
+                            },
+                            Optional.None => {
+                            },
+                        }
+                    },
+                    Result.Err(e) => {
+                        return reject(conn, "invalid PROXY header: " + message(e));
+                    },
+                }
+                match (read(conn, decoder.needed())) {
+                    Result.Ok(chunk) => {
+                        if (chunk.length == 0) {
+                            return reject(conn, "the stream ended inside the PROXY header after "
+                                + decoder.buffered().to_string() + " bytes");
+                        }
+                        decoder.push(chunk);
+                    },
+                    Result.Err(e) => {
+                        close_connection(conn);
+                        return Result<ProxiedConnection<C>>.Err(e);
+                    },
+                }
+            }
+            return reject(conn, "unreachable");
+        };
+
+        /// @brief Closes the wrapped listener.
+        export let close = func -> Result<Unit> => inner.close();
+
+        /// @brief The fixed text "ProxyProtocolListener".
+        export let.override to_string = func -> string => "ProxyProtocolListener";
+
+        /// @brief Closes `conn` and fails with `InvalidCode`.
+        let reject = func(conn: C, text: string) -> Result<ProxiedConnection<C>> {
+            close_connection(conn);
+            return Result<ProxiedConnection<C>>.Err(custom(InvalidCode, text));
+        };
+    );
+
+    /// @brief A connector that writes a PROXY header on each new connection before returning it.
+    #[Final, NotThreadSafe]
+    export let ProxyProtocolConnector = class<A, C> implements Connector<A, C> (
+        /// @brief The wrapped connector.
+        last inner: Connector<A, C>;
+        /// @brief The header bytes for a new connection (`ProxyProtocol.encode` builds them).
+        last header_for: func(C) -> Result<uint8[list]>;
+        /// @brief Writes all of the given bytes.
+        last write: func(C, uint8[list]) -> Result<Unit>;
+        /// @brief Closes a connection whose header could not be built or written.
+        last close_connection: func(C) -> Result<Unit>;
+
+        /// @brief Wraps `connector`; `header` gives each connection's header bytes.
+        export let init = func(connector: Connector<A, C>, header: func(C) -> Result<uint8[list]>,
+            writer: func(C, uint8[list]) -> Result<Unit>, closer: func(C) -> Result<Unit>) {
+            inner = connector;
+            header_for = header;
+            write = writer;
+            close_connection = closer;
+        };
+
+        /// @brief The wrapped connector's address.
+        export let address = func -> A => inner.address();
+
+        /// @brief Connects and writes the header first. If building or writing the header fails, the connection
+        /// is closed and the failure returned.
+        export let connect = func -> Result<C> {
+            last conn = inner.connect()?;
+            match (header_for(conn)) {
+                Result.Ok(bytes) => {
+                    match (write(conn, bytes)) {
+                        Result.Ok(done) => {
+                            return Result<C>.Ok(conn);
+                        },
+                        Result.Err(e) => {
+                            close_connection(conn);
+                            return Result<C>.Err(e);
+                        },
+                    }
+                },
+                Result.Err(e) => {
+                    close_connection(conn);
+                    return Result<C>.Err(e);
+                },
+            }
+        };
+
+        /// @brief The fixed text "ProxyProtocolConnector".
+        export let.override to_string = func -> string => "ProxyProtocolConnector";
+    );
+
+    /// @brief The header bytes of a fixed `header` (in its own version, version 2 with a CRC32C when
+    /// `with_crc`), as a `header_for` function that ignores the connection.
+    #NoDiscard
+    export let fixed_header = func<C>(header: pp.ProxyHeader, with_crc: bool) -> func(C) -> Result<uint8[list]> {
+        last encoded = pp.encode(header, with_crc);
+        return new func(conn: C) -> Result<uint8[list]> => match (encoded) {
+            Result.Ok(bytes) => Result<uint8[list]>.Ok(copy(bytes)),
+            Result.Err(e) => Result<uint8[list]>.Err(e),
+        };
+    };
+
+    /// @brief A copy of `bytes`, so each connection gets its own list.
+    let copy = func(bytes: uint8[list]) -> uint8[list] {
+        last out: uint8[list] = new;
+        for (let b in bytes) {
+            out.append(b);
+        }
+        return out;
+    };
+);

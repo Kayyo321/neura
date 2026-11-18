@@ -17,7 +17,7 @@ let.promote _ = import:Std.Crypto.Algorithm;
 /// a stream cut short: the final flag is part of the last segment's nonce, so a stream truncated at a segment
 /// boundary has no segment that opens as last. The prefix must be random or unique per stream under one key,
 /// and a stream holds at most 2^32 segments.
-/// @see [Std.Crypto.Symmetric.OnlineCipher](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-OnlineCipher)
+/// @see [Std.Crypto.Symmetric.OnlineCipher](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-OnlineCipher)
 #Since("0.3.0")
 export let OnlineCipher = module (
     /// @brief The nonce of segment `index`.

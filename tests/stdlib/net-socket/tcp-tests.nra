@@ -1,0 +1,152 @@
+// test-options: --allow-net
+let connector = import:Std.Net.Connector;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let listener = import:Std.Net.Listener;
+let optional = import:Std.Core.Optional;
+let result = import:Std.Core.Result;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let stream_socket = import:Std.Net.Socket.StreamSocket;
+let tcp_connector = import:Std.Net.Socket.TcpConnector;
+let tcp_server = import:Std.Net.Socket.TcpServer;
+let tcp_socket = import:Std.Net.Socket.TcpSocket;
+let test = import:Std.Test;
+let transport = import:Std.Net.Transport;
+let unit = import:Std.Core.Unit;
+
+// TcpSocket, TcpServer and TcpConnector over real sockets on the loopback interface.
+let TcpTests = module (
+    let kind_of = func(e: error.Error) -> error.IoErrorKind {
+        return match (e) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+    };
+
+    let address = func(text: string) -> socket_addr.SocketAddr =>
+        test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse(text));
+
+    let serve = func() -> tcp_server.TcpServer =>
+        test.assert_ok<tcp_server.TcpServer>(tcp_server.bind(address("127.0.0.1:0")));
+
+    let bytes_of = func(text: string) -> uint8[list] {
+        let out: uint8[list] = new;
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i++;
+        }
+        return out;
+    };
+
+    let text_of = func(data: uint8[list]) -> string {
+        let [valid, text] = string.from_utf8(data);
+        test.assert(valid);
+        return text;
+    };
+
+    let received = func(socket: transport.Transport<uint8[list], uint8[list]>) -> string =>
+        text_of(test.assert_some<uint8[list]>(test.assert_ok<optional.Optional<uint8[list]>>(socket.receive())));
+
+    export let test_server_reports_the_chosen_port = func {
+        last server = serve();
+        test.assert(server.local_port() > 0);
+        test.assert_equal_string("127.0.0.1:" + server.local_port().to_string(), server.address().to_string());
+        test.assert_equal_string("TcpServer(" + server.address().to_string() + ")", server.to_string());
+        test.assert_ok<unit.Unit>(server.close());
+        // The address stays readable after close.
+        test.assert(server.address().port > 0);
+    };
+
+    export let test_round_trip_through_the_contracts = func {
+        last server = serve();
+        last dialer: connector.Connector<socket_addr.SocketAddr, tcp_socket.TcpSocket> =
+            tcp_connector.create(server.address(), duration.of_seconds(5));
+        test.assert(dialer.address().equals(server.address()));
+        last client = test.assert_ok<tcp_socket.TcpSocket>(dialer.connect());
+        last accepting: listener.Listener<socket_addr.SocketAddr, tcp_socket.TcpSocket> = server;
+        last accepted = test.assert_ok<tcp_socket.TcpSocket>(accepting.accept());
+        last client_side: stream_socket.StreamSocket<socket_addr.SocketAddr> = client;
+        last server_side: transport.Transport<uint8[list], uint8[list]> = accepted;
+        test.assert_ok<unit.Unit>(client_side.send(bytes_of("ping é")));
+        test.assert_equal_string("ping é", received(server_side));
+        test.assert_ok<unit.Unit>(server_side.send(bytes_of("pong")));
+        test.assert_equal_string("pong", received(client));
+        test.assert_ok<unit.Unit>(accepted.close());
+        // The peer closed: the end of its data is None, unlike an empty unit.
+        test.assert_none<uint8[list]>(test.assert_ok<optional.Optional<uint8[list]>>(client.receive()));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(server.close());
+    };
+
+    export let test_addresses = func {
+        last server = serve();
+        last client = test.assert_ok<tcp_socket.TcpSocket>(tcp_socket.connect(server.address(), duration.of_seconds(5)));
+        last accepted = test.assert_ok<tcp_socket.TcpSocket>(server.accept());
+        // The dialing side knows its peer; the host reports no peer for an accepted connection.
+        test.assert(test.assert_some<socket_addr.SocketAddr>(client.peer_address()).equals(server.address()));
+        test.assert_none<socket_addr.SocketAddr>(accepted.peer_address());
+        // An accepted socket of a server bound to 127.0.0.1 has the server's address.
+        test.assert(test.assert_ok<socket_addr.SocketAddr>(accepted.local_address()).equals(server.address()));
+        test.assert_equal<int>(server.local_port(), test.assert_ok<int>(accepted.local_port()));
+        last client_port = test.assert_ok<int>(client.local_port());
+        test.assert(client_port > 0);
+        test.assert(client_port != server.local_port());
+        test.assert_equal_string("TcpSocket(to " + server.address().to_string() + ")", client.to_string());
+        test.assert_equal_string("TcpSocket(accepted on " + server.address().to_string() + ")", accepted.to_string());
+        test.assert(!client.multipath);
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(accepted.close());
+        test.assert_ok<unit.Unit>(server.close());
+    };
+
+    export let test_read_and_write_with_a_timeout = func {
+        last server = serve();
+        last client = test.assert_ok<tcp_socket.TcpSocket>(tcp_socket.connect(server.address(), duration.of_seconds(5)));
+        last accepted = test.assert_ok<tcp_socket.TcpSocket>(server.accept());
+        test.assert_equal_int64(0, accepted.read_timeout().to_nanos());
+        accepted.set_read_timeout(duration.of_millis(30));
+        test.assert_equal_int64(30000000, accepted.read_timeout().to_nanos());
+        last failure = test.assert_err<uint8[list]>(accepted.read(16));
+        test.assert(kind_of(failure) == error.IoErrorKind.TimedOut);
+        test.assert_ok<unit.Unit>(client.write(bytes_of("late")));
+        test.assert_equal_string("late", text_of(test.assert_ok<uint8[list]>(accepted.read(16))));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_equal<int>(0, test.assert_ok<uint8[list]>(accepted.read(16)).length);
+        test.assert_ok<unit.Unit>(accepted.close());
+        test.assert_ok<unit.Unit>(server.close());
+    };
+
+    export let test_closed_sockets_and_servers = func {
+        last server = serve();
+        last client = test.assert_ok<tcp_socket.TcpSocket>(tcp_socket.connect(server.address(), duration.of_seconds(5)));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert(kind_of(test.assert_err<unit.Unit>(client.send(bytes_of("x")))) == error.IoErrorKind.Closed);
+        test.assert(kind_of(test.assert_err<optional.Optional<uint8[list]>>(client.receive())) == error.IoErrorKind.Closed);
+        test.assert(kind_of(test.assert_err<int>(client.local_port())) == error.IoErrorKind.Closed);
+        test.assert(kind_of(test.assert_err<socket_addr.SocketAddr>(client.local_address())) == error.IoErrorKind.Closed);
+        test.assert(kind_of(test.assert_err<unit.Unit>(client.shutdown(stream_socket.Shutdown.Write)))
+            == error.IoErrorKind.Closed);
+        test.assert_ok<unit.Unit>(server.close());
+        test.assert_ok<unit.Unit>(server.close());
+        last failure = test.assert_err<tcp_socket.TcpSocket>(server.accept());
+        test.assert(kind_of(failure) == error.IoErrorKind.Closed);
+    };
+
+    export let test_connection_refused = func {
+        last server = serve();
+        last target = server.address();
+        test.assert_ok<unit.Unit>(server.close());
+        last failure = test.assert_err<tcp_socket.TcpSocket>(tcp_connector.create(target, duration.of_seconds(5)).connect());
+        test.assert(kind_of(failure) == error.IoErrorKind.ConnectionRefused);
+        test.assert_equal_string("ConnectionRefused: connect failed (" + target.to_string() + ")", error.message(failure));
+    };
+
+    export let test_port_in_use = func {
+        last server = serve();
+        last failure = test.assert_err<tcp_server.TcpServer>(tcp_server.bind(server.address()));
+        test.assert(kind_of(failure) == error.IoErrorKind.AlreadyExists);
+        test.assert_ok<unit.Unit>(server.close());
+    };
+);

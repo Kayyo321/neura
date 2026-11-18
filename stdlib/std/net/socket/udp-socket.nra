@@ -1,0 +1,191 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Net.Socket.DatagramSocket;
+let.promote _ = import:Std.Time.Duration;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let offload = import:Std.Net.Socket.Offload;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.SocketOptions;
+let support = import:Std.Net.Socket.Internal.Support;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief A UDP socket: a `DatagramSocket` of `Std.Net.Core.SocketAddr`, with options and UDP segmentation
+/// offload. Needs the net capability.
+///
+/// `bind` calls the host's `neura.net.udp.bind`.
+/// Options are given at bind, because `SO_REUSEADDR` and `SO_REUSEPORT` must precede bind(2): a set holding either
+/// is passed to a host service that binds with options, which no runtime offers yet; other options (broadcast,
+/// buffers) are applied after the bind with the host's option service. `send_segmented` (GSO) and
+/// `receive_coalesced` (GRO) need host services that no runtime offers yet; `Std.Net.Socket.Offload` holds their
+/// pure rules. The host takes and reports numeric addresses only. After close every operation except close fails
+/// with Closed.
+/// @see [Std.Net.Socket.UdpSocket](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Socket-UdpSocket)
+#Since("0.3.0")
+export let UdpSocket = module (
+    /// @brief One bound UDP socket.
+    #[Final, NoDiscard(reason: "a socket must be closed"), NotThreadSafe]
+    export let UdpSocket = class implements DatagramSocket<SocketAddr> (
+        /// @brief The host's socket ID.
+        last id: int64;
+        /// @brief The bound address with the port the host chose.
+        last bound: SocketAddr;
+        /// @brief The read timeout in nanoseconds; zero waits without limit.
+        let timeout_nanos: int64 = 0;
+        /// @brief Tracks whether the socket may still use the host ID.
+        let open_now: bool = true;
+
+        /// @brief Use `bind`; the ID comes from the library.
+        export let init = func(opened: int64, address: SocketAddr) {
+            id = opened;
+            bound = address;
+        };
+
+        /// @brief The bound address; its port is the one the host chose for a bind to port 0.
+        #NoDiscard
+        export let local_address = func -> Result<SocketAddr> {
+            if (!open_now) {
+                return Result<SocketAddr>.Err(bytes.closed("socket", bound.to_string()));
+            }
+            return Result<SocketAddr>.Ok(bound);
+        };
+
+        /// @brief Sends `data` as one datagram to `target`; the count the host sent.
+        #NoDiscard
+        export let send_to = func(data: uint8[list], target: SocketAddr) -> Result<int> {
+            if (!open_now) {
+                return Result<int>.Err(bytes.closed("socket", bound.to_string()));
+            }
+            return counted(host.udp_send_to(id, target.host_text(), target.port, data), target.to_string());
+        };
+
+        /// @brief One datagram of at most `max` bytes (longer ones are truncated), waiting up to the read
+        /// timeout; TimedOut when none arrives. A maximum below 1 traps.
+        #NoDiscard
+        export let receive_from = func(max: int) -> Result<Datagram<SocketAddr>> {
+            bytes.check_maximum(max);
+            if (!open_now) {
+                return Result<Datagram<SocketAddr>>.Err(bytes.closed("socket", bound.to_string()));
+            }
+            return match (host.udp_receive_from(id, max, timeout_nanos)) {
+                host.DatagramOutcome.Ok(received) => datagram_of(received),
+                host.DatagramOutcome.Error(code) => Result<Datagram<SocketAddr>>.Err(
+                    host_error.io(code, "receive failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Sends `data` to `target` as datagrams of `segment_size` bytes in one call with UDP GSO
+        /// (`UDP_SEGMENT`); the count sent. The cut is `Offload.split`. A segment size below 1 or above
+        /// `Offload.MaxUdpPayload` traps. Traps in Neura 0.3.0: no runtime offers a GSO service.
+        #NoDiscard
+        export let send_segmented = func(data: uint8[list], segment_size: int, target: SocketAddr) -> Result<int> {
+            offload.segment_count(data.length, segment_size);
+            if (!open_now) {
+                return Result<int>.Err(bytes.closed("socket", bound.to_string()));
+            }
+            return counted(host.udp_send_segmented(id, target.host_text(), target.port, data, segment_size),
+                target.to_string());
+        };
+
+        /// @brief Receives datagrams the kernel coalesced with UDP GRO, split back into datagrams with
+        /// `Offload.split`. Traps in Neura 0.3.0: no runtime offers a GRO service.
+        #NoDiscard
+        export let receive_coalesced = func(max: int) -> Result<uint8[list][list]> {
+            bytes.check_maximum(max);
+            if (!open_now) {
+                return Result<uint8[list][list]>.Err(bytes.closed("socket", bound.to_string()));
+            }
+            return match (host.udp_receive_coalesced(id, max, timeout_nanos)) {
+                host.CoalescedOutcome.Ok(received) => Result<uint8[list][list]>.Ok(split_coalesced(received)),
+                host.CoalescedOutcome.Error(code) => Result<uint8[list][list]>.Err(
+                    host_error.io(code, "receive failed", bound.to_string())),
+            };
+        };
+
+        /// @brief The longest a receive waits; zero waits without limit.
+        export let read_timeout = func -> Duration => of_nanos(timeout_nanos);
+
+        /// @brief Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
+        export let set_read_timeout = func(timeout: Duration) {
+            timeout_nanos = support.timeout_nanos(timeout);
+        };
+
+        /// @brief Releases the socket. Closing again returns Ok.
+        export let close = func -> Result<Unit> {
+            if (!open_now) {
+                return bytes.ok();
+            }
+            open_now = false;
+            return match (host.close(id)) {
+                host.DoneOutcome.Ok => bytes.ok(),
+                host.DoneOutcome.Error(code) => Result<Unit>.Err(
+                    host_error.io(code, "close failed", bound.to_string())),
+            };
+        };
+
+        /// @brief Text such as "UdpSocket(127.0.0.1:5353)".
+        export let.override to_string = func -> string => "UdpSocket(" + bound.to_string() + ")";
+    );
+
+    /// @brief Binds a UDP socket to `address` (port 0 asks for a free port) with no options.
+    #NoDiscard
+    export let bind = func(address: SocketAddr) -> Result<UdpSocket> => bind_with(address, none(SocketKind.Udp));
+
+    /// @brief Binds with an option set built for `SocketKind.Udp` (another kind traps with "invalid argument").
+    #NoDiscard
+    export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<UdpSocket> {
+        support.check_kind(options, SocketKind.Udp);
+        last text = address.to_string();
+        last at_bind = support.needs_bind_time(options);
+        last outcome = at_bind ? host.udp_bind_with_options(address.host_text(), address.port,
+                support.numbers(options), support.values(options))
+            : host.udp_bind(address.host_text(), address.port);
+        let id: int64 = 0;
+        match (outcome) {
+            host.IdOutcome.Ok(opened) => {
+                id = opened;
+            },
+            host.IdOutcome.Error(code) => {
+                return Result<UdpSocket>.Err(host_error.io(code, "bind failed", text));
+            },
+        }
+        if (!at_bind && !options.is_empty()) {
+            match (support.apply(id, options, text)) {
+                Result.Ok(_) => {},
+                Result.Err(problem) => {
+                    host.close(id);
+                    return Result<UdpSocket>.Err(problem);
+                },
+            }
+        }
+        match (host.local_port(id)) {
+            host.CountOutcome.Ok(port) => {
+                return Result<UdpSocket>.Ok(new UdpSocket(id, new SocketAddr(address.ip, port)));
+            },
+            host.CountOutcome.Error(code) => {
+                host.close(id);
+                return Result<UdpSocket>.Err(host_error.io(code, "bind failed", text));
+            },
+        }
+    };
+
+    /// @brief A count result, or the host error.
+    let counted = func(outcome: host.CountOutcome, target: string) -> Result<int> => match (outcome) {
+        host.CountOutcome.Ok(count) => Result<int>.Ok(count),
+        host.CountOutcome.Error(code) => Result<int>.Err(host_error.io(code, "send failed", target)),
+    };
+
+    /// @brief A datagram from the host's [bytes, address, port].
+    let datagram_of = func(received: [uint8[list], string, int]) -> Result<Datagram<SocketAddr>> {
+        let [data, text, port] = received;
+        last sender = support.socket_address(text, port)?;
+        return Result<Datagram<SocketAddr>>.Ok(new Datagram<SocketAddr>(data, Optional<SocketAddr>.Some(sender)));
+    };
+
+    /// @brief The datagrams of a coalesced receive.
+    let split_coalesced = func(received: [uint8[list], string, int, int]) -> uint8[list][list] {
+        let [data, text, port, segment_size] = received;
+        return offload.split(data, segment_size);
+    };
+);

@@ -1,0 +1,894 @@
+let errors = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let.promote _ = import:Std.Net.Core.Ipv4Addr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let.promote _ = import:Std.Net.Core.Ipv6Addr;
+let ipv6 = import:Std.Net.Core.Ipv6Addr;
+let names = import:Std.Net.Dns.Name;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let strings = import:Std.Text.Strings;
+let wire = import:Std.Net.Dns.Wire;
+
+/// @brief DNS messages (RFC 1035 section 4): the header, questions, resource records, and the codec.
+///
+/// Record data is decoded for A, NS, CNAME, SOA, PTR, MX, TXT (RFC 1035 section 3.3), AAAA (RFC 3596), SRV
+/// (RFC 2782), NAPTR (RFC 3403) and OPT (EDNS(0), RFC 6891 section 6.1); every other type, class-independent, is
+/// kept as raw bytes (RFC 3597). An OPT record in the additional section is lifted into `Message.edns` on decode
+/// and written back last on encode. On encode, names are compressed in the owner names and questions and in the
+/// rdata of NS, CNAME, SOA, PTR and MX (the RFC 1035 types RFC 3597 section 4 allows); SRV targets (RFC 2782) and
+/// NAPTR replacements (RFC 3403 section 4.1) and unknown types are never compressed. On decode, compressed names are
+/// accepted wherever a name appears in a known type. Classes and TTLs are kept raw (class as 16 bits, TTL as an
+/// unsigned 32-bit value in an `int64`), so mDNS can use the top class bit. Each record's rdata must use exactly
+/// its RDLENGTH; any violation is a `Parse` error with the offset, never a trap.
+/// @see [Std.Net.Dns.Message](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-Message)
+#Since("0.3.0")
+export let Message = module (
+    /// @brief Type A, an IPv4 address.
+    export const TypeA: int = 1;
+    /// @brief Type NS, an authoritative name server.
+    export const TypeNs: int = 2;
+    /// @brief Type CNAME, the canonical name of an alias.
+    export const TypeCname: int = 5;
+    /// @brief Type SOA, the start of a zone of authority.
+    export const TypeSoa: int = 6;
+    /// @brief Type PTR, a domain name pointer.
+    export const TypePtr: int = 12;
+    /// @brief Type MX, a mail exchange.
+    export const TypeMx: int = 15;
+    /// @brief Type TXT, text strings.
+    export const TypeTxt: int = 16;
+    /// @brief Type AAAA, an IPv6 address (RFC 3596).
+    export const TypeAaaa: int = 28;
+    /// @brief Type SRV, a service location (RFC 2782).
+    export const TypeSrv: int = 33;
+    /// @brief Type NAPTR, a naming authority pointer (RFC 3403).
+    export const TypeNaptr: int = 35;
+    /// @brief Type OPT, the EDNS(0) pseudo-record (RFC 6891).
+    export const TypeOpt: int = 41;
+    /// @brief QTYPE ANY (`*`).
+    export const TypeAny: int = 255;
+    /// @brief Class IN, the Internet.
+    export const ClassIn: int = 1;
+    /// @brief Opcode QUERY.
+    export const OpcodeQuery: int = 0;
+    /// @brief RCODE NOERROR.
+    export const RcodeNoError: int = 0;
+    /// @brief RCODE FORMERR.
+    export const RcodeFormatError: int = 1;
+    /// @brief RCODE SERVFAIL.
+    export const RcodeServerFailure: int = 2;
+    /// @brief RCODE NXDOMAIN, the name does not exist.
+    export const RcodeNameError: int = 3;
+    /// @brief RCODE NOTIMP.
+    export const RcodeNotImplemented: int = 4;
+    /// @brief RCODE REFUSED.
+    export const RcodeRefused: int = 5;
+    /// @brief The largest UDP message without EDNS (RFC 1035 section 2.3.4).
+    export const MaxUdpSize: int = 512;
+    /// @brief The header length.
+    export const HeaderLength: int = 12;
+
+    /// @brief One EDNS option: a code and its bytes (RFC 6891 section 6.1.2).
+    #Final
+    export let EdnsOption = class (
+        /// @brief The option code.
+        export last code: int;
+        /// @brief The option data.
+        export last data: uint8[list];
+
+        /// @brief An option; a code outside 0-65535 traps with "invalid argument: option code".
+        export let init = func(option_code: int, option_data: uint8[list]) {
+            if (option_code < 0 || option_code > 65535) {
+                trap_with_message("invalid argument: option code");
+            }
+            code = option_code;
+            data = option_data;
+        };
+
+        /// @brief Equal when code and bytes are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is EdnsOption)) {
+                return false;
+            }
+            last that = other as EdnsOption;
+            return code == that.code && same_bytes(data, that.data);
+        };
+
+        /// @brief Combines the code and the bytes.
+        export let.override hash_code = func -> uint32 => hash_bytes(hashing.combine(41, code as uint32), data);
+
+        /// @brief Text such as "EdnsOption(10, 8 bytes)".
+        export let.override to_string = func -> string =>
+            "EdnsOption(" + code.to_string() + ", " + data.length.to_string() + " bytes)";
+    );
+
+    /// @brief The EDNS(0) parameters an OPT record carries (RFC 6891 section 6.1.3).
+    #Final
+    export let Edns = class (
+        /// @brief The requester's UDP payload size (the OPT CLASS field).
+        export last udp_payload_size: int;
+        /// @brief The upper 8 bits of the 12-bit RCODE.
+        export last extended_rcode: int;
+        /// @brief The EDNS version (0).
+        export last version: int;
+        /// @brief The DO bit (RFC 3225).
+        export last dnssec_ok: bool;
+        /// @brief The options.
+        export last options: EdnsOption[list];
+
+        /// @brief EDNS parameters. Fields out of range trap with "invalid argument: edns".
+        export let init = func(payload_size: int, rcode_high: int, edns_version: int, dnssec: bool,
+            edns_options: EdnsOption[list]) {
+            if (payload_size < 0 || payload_size > 65535 || rcode_high < 0 || rcode_high > 255 || edns_version < 0
+                || edns_version > 255) {
+                trap_with_message("invalid argument: edns");
+            }
+            udp_payload_size = payload_size;
+            extended_rcode = rcode_high;
+            version = edns_version;
+            dnssec_ok = dnssec;
+            options = edns_options;
+        };
+
+        /// @brief The TTL field of the OPT record.
+        #NoDiscard
+        export let ttl_field = func -> int64 =>
+            (extended_rcode as int64) * 16777216 + (version as int64) * 65536 + (dnssec_ok ? 32768 : 0);
+
+        /// @brief Equal when every field and option is.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Edns)) {
+                return false;
+            }
+            last that = other as Edns;
+            if (udp_payload_size != that.udp_payload_size || extended_rcode != that.extended_rcode
+                || version != that.version || dnssec_ok != that.dnssec_ok || options.length != that.options.length) {
+                return false;
+            }
+            for (let i = 0; i < options.length; i++) {
+                if (!options[i].equals(that.options[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief Combines the fields.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(43, udp_payload_size as uint32);
+            hash = hashing.combine(hash, (ttl_field() % 4294967296) as uint32);
+            for (let option in options) {
+                hash = hashing.combine(hash, option.hash_code());
+            }
+            return hash;
+        };
+
+        /// @brief Text such as "Edns(udp 1232, version 0, do false, 0 options)".
+        export let.override to_string = func -> string => "Edns(udp " + udp_payload_size.to_string() + ", version "
+            + version.to_string() + ", do " + dnssec_ok.to_string() + ", " + options.length.to_string() + " options)";
+    );
+
+    /// @brief EDNS(0) with a UDP payload size, version 0, no DO bit and no options.
+    #NoDiscard
+    export let edns_of = func(payload_size: int) -> Edns => new Edns(payload_size, 0, 0, false, new);
+
+    /// @brief The data of one resource record.
+    export let RecordData = enum (
+        A(Ipv4Addr),
+        Aaaa(Ipv6Addr),
+        Ns(names.DnsName),
+        Cname(names.DnsName),
+        Ptr(names.DnsName),
+        Mx { preference: int, exchange: names.DnsName },
+        Txt(uint8[list][list]),
+        Soa { mname: names.DnsName, rname: names.DnsName, serial: int64, refresh: int64, retry: int64, expire: int64,
+            minimum: int64 },
+        Srv { priority: int, weight: int, port: int, target: names.DnsName },
+        Naptr { order: int, preference: int, flags: string, services: string, regexp: string,
+            replacement: names.DnsName },
+        Opt(EdnsOption[list]),
+        Unknown(uint8[list])
+    );
+
+    /// @brief One question: a name, a QTYPE and a raw QCLASS (16 bits; mDNS uses the top bit).
+    #Final
+    export let Question = class (
+        /// @brief The name asked about.
+        export last name: names.DnsName;
+        /// @brief The QTYPE.
+        export last qtype: int;
+        /// @brief The raw QCLASS.
+        export last qclass: int;
+
+        /// @brief A question; a type or class outside 0-65535 traps with "invalid argument: question".
+        export let init = func(asked: names.DnsName, question_type: int, question_class: int) {
+            if (question_type < 0 || question_type > 65535 || question_class < 0 || question_class > 65535) {
+                trap_with_message("invalid argument: question");
+            }
+            name = asked;
+            qtype = question_type;
+            qclass = question_class;
+        };
+
+        /// @brief Equal when the name (ignoring case), type and class are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is Question)) {
+                return false;
+            }
+            last that = other as Question;
+            return qtype == that.qtype && qclass == that.qclass && name.equals(that.name);
+        };
+
+        /// @brief Combines the name, type and class.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(name.hash_code(), qtype as uint32), qclass as uint32);
+
+        /// @brief Text such as "www.example.com. IN A".
+        export let.override to_string = func -> string =>
+            name.to_string() + " " + class_name(qclass) + " " + type_name(qtype);
+    );
+
+    /// @brief One resource record: owner name, type, raw class, TTL (unsigned 32-bit) and data.
+    #Final
+    export let ResourceRecord = class (
+        /// @brief The owner name.
+        export last name: names.DnsName;
+        /// @brief The TYPE.
+        export last rtype: int;
+        /// @brief The raw CLASS (16 bits).
+        export last rclass: int;
+        /// @brief The TTL in seconds, 0 to 2^32-1.
+        export last ttl: int64;
+        /// @brief The data.
+        export last data: RecordData;
+
+        /// @brief A record. A type or class outside 0-65535, or a TTL outside 0 to 2^32-1, traps with "invalid
+        /// argument: record".
+        export let init = func(owner: names.DnsName, record_type: int, record_class: int, time_to_live: int64,
+            record_data: RecordData) {
+            if (record_type < 0 || record_type > 65535 || record_class < 0 || record_class > 65535 || time_to_live < 0
+                || time_to_live > 4294967295) {
+                trap_with_message("invalid argument: record");
+            }
+            name = owner;
+            rtype = record_type;
+            rclass = record_class;
+            ttl = time_to_live;
+            data = record_data;
+        };
+
+        /// @brief The same record with another TTL.
+        #NoDiscard
+        export let with_ttl = func(time_to_live: int64) -> ResourceRecord =>
+            new ResourceRecord(name, rtype, rclass, time_to_live, data);
+
+        /// @brief Equal when owner (ignoring case), type, class, TTL and data are.
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is ResourceRecord)) {
+                return false;
+            }
+            last that = other as ResourceRecord;
+            return rtype == that.rtype && rclass == that.rclass && ttl == that.ttl && name.equals(that.name)
+                && same_data(data, that.data);
+        };
+
+        /// @brief Combines the owner, type, class, TTL and the data's text.
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(name.hash_code(), rtype as uint32);
+            hash = hashing.combine(hash, rclass as uint32);
+            hash = hashing.combine(hash, hashing.of_int64(ttl));
+            return hashing.combine(hash, strings.hash(strings.to_ascii_lower(data_text(data))));
+        };
+
+        /// @brief Master-file-like text: "www.example.com. 300 IN A 192.0.2.1".
+        export let.override to_string = func -> string => name.to_string() + " " + ttl.to_string() + " "
+            + class_name(rclass) + " " + type_name(rtype) + " " + data_text(data);
+    );
+
+    /// @brief The header fields (RFC 1035 section 4.1.1). The section counts are filled by `decode` and
+    /// recomputed by `encode`.
+    #[Final, NotThreadSafe]
+    export let Header = class (
+        /// @brief The 16-bit ID.
+        export let id: int = 0;
+        /// @brief QR: a response.
+        export let is_response: bool = false;
+        /// @brief The 4-bit opcode.
+        export let opcode: int = 0;
+        /// @brief AA: an authoritative answer.
+        export let authoritative: bool = false;
+        /// @brief TC: truncated.
+        export let truncated: bool = false;
+        /// @brief RD: recursion desired.
+        export let recursion_desired: bool = false;
+        /// @brief RA: recursion available.
+        export let recursion_available: bool = false;
+        /// @brief The Z bit (bit 9; must be zero).
+        export let z: bool = false;
+        /// @brief AD: authentic data (RFC 4035).
+        export let authentic_data: bool = false;
+        /// @brief CD: checking disabled (RFC 4035).
+        export let checking_disabled: bool = false;
+        /// @brief The 4-bit RCODE (the low bits of the extended RCODE with EDNS).
+        export let rcode: int = 0;
+        /// @brief QDCOUNT as decoded.
+        export let question_count: int = 0;
+        /// @brief ANCOUNT as decoded.
+        export let answer_count: int = 0;
+        /// @brief NSCOUNT as decoded.
+        export let authority_count: int = 0;
+        /// @brief ARCOUNT as decoded (the OPT record included).
+        export let additional_count: int = 0;
+
+        /// @brief A header with ID 0 and every flag clear.
+        export let init = func {
+        };
+
+        /// @brief The 16-bit flags word.
+        #NoDiscard
+        export let flags = func -> int {
+            if (opcode < 0 || opcode > 15 || rcode < 0 || rcode > 15) {
+                trap_with_message("invalid argument: opcode or rcode");
+            }
+            let word = opcode * 2048 + rcode;
+            word = word + (is_response ? 32768 : 0) + (authoritative ? 1024 : 0) + (truncated ? 512 : 0);
+            word = word + (recursion_desired ? 256 : 0) + (recursion_available ? 128 : 0) + (z ? 64 : 0);
+            return word + (authentic_data ? 32 : 0) + (checking_disabled ? 16 : 0);
+        };
+
+        /// @brief Sets every flag from a 16-bit flags word.
+        export let set_flags = func(word: int) {
+            is_response = (word / 32768) % 2 == 1;
+            opcode = (word / 2048) % 16;
+            authoritative = (word / 1024) % 2 == 1;
+            truncated = (word / 512) % 2 == 1;
+            recursion_desired = (word / 256) % 2 == 1;
+            recursion_available = (word / 128) % 2 == 1;
+            z = (word / 64) % 2 == 1;
+            authentic_data = (word / 32) % 2 == 1;
+            checking_disabled = (word / 16) % 2 == 1;
+            rcode = word % 16;
+        };
+
+        /// @brief Text such as "Header(id 4660, flags 0x0100)".
+        export let.override to_string = func -> string =>
+            "Header(id " + id.to_string() + ", flags " + flags().to_string() + ")";
+    );
+
+    /// @brief A whole DNS message.
+    #[Final, NotThreadSafe]
+    export let Message = class (
+        /// @brief The header.
+        export last header: Header = new;
+        /// @brief The question section.
+        export last questions: Question[list] = new;
+        /// @brief The answer section.
+        export last answers: ResourceRecord[list] = new;
+        /// @brief The authority section.
+        export last authorities: ResourceRecord[list] = new;
+        /// @brief The additional section without the OPT record.
+        export last additionals: ResourceRecord[list] = new;
+        /// @brief The EDNS(0) parameters, from or for the OPT record.
+        export let edns: Optional<Edns> = Optional<Edns>.None;
+
+        /// @brief An empty message (ID 0, a query).
+        export let init = func {
+        };
+
+        /// @brief The full RCODE: the header's 4 bits plus EDNS's upper 8 bits.
+        #NoDiscard
+        export let rcode = func -> int => match (edns) {
+            Optional.Some(extra) => extra.extended_rcode * 16 + header.rcode,
+            Optional.None => header.rcode,
+        };
+
+        /// @brief The first question; traps with "invalid argument: no question" when there is none.
+        #NoDiscard
+        export let question = func -> Question {
+            if (questions.length == 0) {
+                trap_with_message("invalid argument: no question");
+            }
+            return questions[0];
+        };
+
+        /// @brief Text listing the header and section sizes.
+        export let.override to_string = func -> string => "Message(id " + header.id.to_string() + ", rcode "
+            + rcode().to_string() + ", " + questions.length.to_string() + "/" + answers.length.to_string() + "/"
+            + authorities.length.to_string() + "/" + additionals.length.to_string() + ")";
+    );
+
+    /// @brief A recursive query for `name` and `qtype` in class IN with `id`.
+    #NoDiscard
+    export let query = func(id: int, name: names.DnsName, qtype: int) -> Message {
+        last message = new Message();
+        message.header.id = id;
+        message.header.recursion_desired = true;
+        message.questions.append(new Question(name, qtype, ClassIn));
+        return message;
+    };
+
+    /// @brief A response to `request`: same ID, opcode, RD and questions, QR set, the given RCODE.
+    #NoDiscard
+    export let response_to = func(request: Message, rcode: int) -> Message {
+        last message = new Message();
+        message.header.id = request.header.id;
+        message.header.is_response = true;
+        message.header.opcode = request.header.opcode;
+        message.header.recursion_desired = request.header.recursion_desired;
+        message.header.rcode = rcode;
+        for (let q in request.questions) {
+            message.questions.append(q);
+        }
+        return message;
+    };
+
+    /// @brief Encodes a message. Err (Custom `dns.too_large`) when it would exceed 65,535 bytes or a section
+    /// exceeds 65,535 entries.
+    #NoDiscard
+    export let encode = func(message: Message) -> Result<uint8[list]> {
+        last writer = new wire.WireWriter();
+        last header = message.header;
+        last has_opt = is_some<Edns>(message.edns);
+        last additional_total = message.additionals.length + (has_opt ? 1 : 0);
+        if (message.questions.length > 65535 || message.answers.length > 65535 || message.authorities.length > 65535
+            || additional_total > 65535) {
+            return Result<uint8[list]>.Err(errors.custom("dns.too_large", "a section has more than 65535 entries"));
+        }
+        if (header.id < 0 || header.id > 65535) {
+            trap_with_message("invalid argument: id");
+        }
+        writer.write_u16(header.id);
+        writer.write_u16(header.flags());
+        writer.write_u16(message.questions.length);
+        writer.write_u16(message.answers.length);
+        writer.write_u16(message.authorities.length);
+        writer.write_u16(additional_total);
+        for (let q in message.questions) {
+            writer.write_name(q.name, true);
+            writer.write_u16(q.qtype);
+            writer.write_u16(q.qclass);
+        }
+        for (let record in message.answers) {
+            write_record(writer, record)?;
+        }
+        for (let record in message.authorities) {
+            write_record(writer, record)?;
+        }
+        for (let record in message.additionals) {
+            write_record(writer, record)?;
+        }
+        match (message.edns) {
+            Optional.Some(extra) => {
+                write_record(writer, new ResourceRecord(names.root(), TypeOpt, extra.udp_payload_size,
+                    extra.ttl_field(), RecordData.Opt(extra.options)))?;
+            },
+            Optional.None => {
+            },
+        }
+        if (writer.length() > 65535) {
+            return Result<uint8[list]>.Err(errors.custom("dns.too_large", "message longer than 65535 bytes"));
+        }
+        return Result<uint8[list]>.Ok(writer.bytes());
+    };
+
+    /// @brief Decodes a message. Err (Parse) for a truncated or malformed message, a bad name, rdata that does
+    /// not use exactly RDLENGTH, more than one OPT record or trailing bytes.
+    #NoDiscard
+    export let decode = func(bytes: uint8[list]) -> Result<Message> {
+        last reader = new wire.WireReader(bytes);
+        last message = new Message();
+        last header = message.header;
+        header.id = reader.read_u16()?;
+        header.set_flags(reader.read_u16()?);
+        header.question_count = reader.read_u16()?;
+        header.answer_count = reader.read_u16()?;
+        header.authority_count = reader.read_u16()?;
+        header.additional_count = reader.read_u16()?;
+        for (let i = 0; i < header.question_count; i++) {
+            last name = reader.read_name()?;
+            last qtype = reader.read_u16()?;
+            last qclass = reader.read_u16()?;
+            message.questions.append(new Question(name, qtype, qclass));
+        }
+        for (let i = 0; i < header.answer_count; i++) {
+            message.answers.append(read_record(reader)?);
+        }
+        for (let i = 0; i < header.authority_count; i++) {
+            message.authorities.append(read_record(reader)?);
+        }
+        for (let i = 0; i < header.additional_count; i++) {
+            last record = read_record(reader)?;
+            if (record.rtype == TypeOpt) {
+                if (is_some<Edns>(message.edns)) {
+                    return Result<Message>.Err(parse_error(reader.offset(), "more than one OPT record"));
+                }
+                last options = match (record.data) {
+                    RecordData.Opt(list) => list,
+                    _ => new,
+                };
+                last ttl = record.ttl;
+                message.edns = Optional<Edns>.Some(new Edns(record.rclass, (ttl / 16777216) as int,
+                    ((ttl / 65536) % 256) as int, (ttl / 32768) % 2 == 1, options));
+            } else {
+                message.additionals.append(record);
+            }
+        }
+        if (reader.remaining() != 0) {
+            return Result<Message>.Err(parse_error(reader.offset(), "trailing bytes after the message"));
+        }
+        return Result<Message>.Ok(message);
+    };
+
+    /// @brief The record data as raw bytes, as RFC 3597 section 5 writes it for an unknown type (uncompressed).
+    #NoDiscard
+    export let rdata_bytes = func(data: RecordData) -> Result<uint8[list]> {
+        last writer = new wire.WireWriter();
+        write_data(writer, data, false)?;
+        return Result<uint8[list]>.Ok(writer.bytes());
+    };
+
+    /// @brief The character-strings of TXT data as text (invalid UTF-8 replaced); empty for other data.
+    #NoDiscard
+    export let txt_strings = func(data: RecordData) -> string[list] {
+        last texts: string[list] = new;
+        match (data) {
+            RecordData.Txt(parts) => {
+                for (let part in parts) {
+                    texts.append(strings.from_bytes_lossy(part));
+                }
+            },
+            _ => {
+            },
+        }
+        return texts;
+    };
+
+    /// @brief TXT data of text strings; a string above 255 bytes traps with "invalid argument: character-string".
+    #NoDiscard
+    export let txt_of = func(texts: string[list]) -> RecordData {
+        last parts: uint8[list][list] = new;
+        for (let text in texts) {
+            last bytes = strings.to_bytes(text);
+            if (bytes.length > 255) {
+                trap_with_message("invalid argument: character-string");
+            }
+            parts.append(bytes);
+        }
+        return RecordData.Txt(parts);
+    };
+
+    /// @brief The mnemonic of a type ("A", "AAAA", ...), or "TYPEn" (RFC 3597 section 5).
+    #NoDiscard
+    export let type_name = func(rtype: int) -> string {
+        if (rtype == TypeA) {
+            return "A";
+        } else if (rtype == TypeNs) {
+            return "NS";
+        } else if (rtype == TypeCname) {
+            return "CNAME";
+        } else if (rtype == TypeSoa) {
+            return "SOA";
+        } else if (rtype == TypePtr) {
+            return "PTR";
+        } else if (rtype == TypeMx) {
+            return "MX";
+        } else if (rtype == TypeTxt) {
+            return "TXT";
+        } else if (rtype == TypeAaaa) {
+            return "AAAA";
+        } else if (rtype == TypeSrv) {
+            return "SRV";
+        } else if (rtype == TypeNaptr) {
+            return "NAPTR";
+        } else if (rtype == TypeOpt) {
+            return "OPT";
+        } else if (rtype == TypeAny) {
+            return "ANY";
+        }
+        return "TYPE" + rtype.to_string();
+    };
+
+    /// @brief "IN" for class 1, otherwise "CLASSn" (RFC 3597 section 5).
+    #NoDiscard
+    export let class_name = func(rclass: int) -> string => rclass == ClassIn ? "IN" : "CLASS" + rclass.to_string();
+
+    /// @brief The master-file-like text of record data; unknown data as `\# length hex` (RFC 3597 section 5).
+    #NoDiscard
+    export let data_text = func(data: RecordData) -> string => match (data) {
+        RecordData.A(address) => address.to_string(),
+        RecordData.Aaaa(address) => address.to_string(),
+        RecordData.Ns(target) => target.to_string(),
+        RecordData.Cname(target) => target.to_string(),
+        RecordData.Ptr(target) => target.to_string(),
+        RecordData.Mx { preference, exchange } => preference.to_string() + " " + exchange.to_string(),
+        RecordData.Txt(parts) => quoted(parts),
+        RecordData.Soa { mname, rname, serial, refresh, retry, expire, minimum } => mname.to_string() + " "
+            + rname.to_string() + " " + serial.to_string() + " " + refresh.to_string() + " " + retry.to_string() + " "
+            + expire.to_string() + " " + minimum.to_string(),
+        RecordData.Srv { priority, weight, port, target } => priority.to_string() + " " + weight.to_string() + " "
+            + port.to_string() + " " + target.to_string(),
+        RecordData.Naptr { order, preference, flags, services, regexp, replacement } => order.to_string() + " "
+            + preference.to_string() + " \"" + flags + "\" \"" + services + "\" \"" + regexp + "\" "
+            + replacement.to_string(),
+        RecordData.Opt(options) => options.length.to_string() + " options",
+        RecordData.Unknown(bytes) => "\\# " + bytes.length.to_string() + " " + hex_text(bytes),
+    };
+
+    /// @brief Writes one record.
+    let write_record = func(writer: wire.WireWriter, record: ResourceRecord) -> Result<int> {
+        writer.write_name(record.name, true);
+        writer.write_u16(record.rtype);
+        writer.write_u16(record.rclass);
+        writer.write_u32(record.ttl);
+        last length_at = writer.length();
+        writer.write_u16(0);
+        write_data(writer, record.data, true)?;
+        last length = writer.length() - length_at - 2;
+        if (length > 65535) {
+            return Result<int>.Err(errors.custom("dns.too_large", "rdata longer than 65535 bytes"));
+        }
+        writer.patch_u16(length_at, length);
+        return Result<int>.Ok(length);
+    };
+
+    /// @brief Writes record data; `compress` allows compression for the RFC 1035 types.
+    let write_data = func(writer: wire.WireWriter, data: RecordData, compress: bool) -> Result<int> {
+        match (data) {
+            RecordData.A(address) => {
+                writer.write_bytes(address.octets());
+            },
+            RecordData.Aaaa(address) => {
+                writer.write_bytes(address.octets());
+            },
+            RecordData.Ns(target) => {
+                writer.write_name(target, compress);
+            },
+            RecordData.Cname(target) => {
+                writer.write_name(target, compress);
+            },
+            RecordData.Ptr(target) => {
+                writer.write_name(target, compress);
+            },
+            RecordData.Mx { preference, exchange } => {
+                writer.write_u16(preference);
+                writer.write_name(exchange, compress);
+            },
+            RecordData.Txt(parts) => {
+                for (let part in parts) {
+                    if (part.length > 255) {
+                        return Result<int>.Err(errors.custom("dns.bad_record", "TXT string longer than 255 bytes"));
+                    }
+                    writer.write_character_string(part);
+                }
+            },
+            RecordData.Soa { mname, rname, serial, refresh, retry, expire, minimum } => {
+                writer.write_name(mname, compress);
+                writer.write_name(rname, compress);
+                writer.write_u32(serial);
+                writer.write_u32(refresh);
+                writer.write_u32(retry);
+                writer.write_u32(expire);
+                writer.write_u32(minimum);
+            },
+            RecordData.Srv { priority, weight, port, target } => {
+                writer.write_u16(priority);
+                writer.write_u16(weight);
+                writer.write_u16(port);
+                writer.write_name(target, false);
+            },
+            RecordData.Naptr { order, preference, flags, services, regexp, replacement } => {
+                writer.write_u16(order);
+                writer.write_u16(preference);
+                for (let text in [flags, services, regexp]) {
+                    last bytes = strings.to_bytes(text);
+                    if (bytes.length > 255) {
+                        return Result<int>.Err(errors.custom("dns.bad_record", "NAPTR string longer than 255 bytes"));
+                    }
+                    writer.write_character_string(bytes);
+                }
+                writer.write_name(replacement, false);
+            },
+            RecordData.Opt(options) => {
+                for (let option in options) {
+                    writer.write_u16(option.code);
+                    if (option.data.length > 65535) {
+                        return Result<int>.Err(errors.custom("dns.too_large", "EDNS option longer than 65535 bytes"));
+                    }
+                    writer.write_u16(option.data.length);
+                    writer.write_bytes(option.data);
+                }
+            },
+            RecordData.Unknown(bytes) => {
+                writer.write_bytes(bytes);
+            },
+        }
+        return Result<int>.Ok(0);
+    };
+
+    /// @brief Reads one record and checks that its data uses exactly RDLENGTH.
+    let read_record = func(reader: wire.WireReader) -> Result<ResourceRecord> {
+        last owner = reader.read_name()?;
+        last rtype = reader.read_u16()?;
+        last rclass = reader.read_u16()?;
+        last ttl = reader.read_u32()?;
+        last length = reader.read_u16()?;
+        last start = reader.offset();
+        if (length > reader.remaining()) {
+            return Result<ResourceRecord>.Err(parse_error(start, "rdata runs past the message"));
+        }
+        last data = read_data(reader, rtype, length)?;
+        if (reader.offset() != start + length) {
+            return Result<ResourceRecord>.Err(parse_error(start, type_name(rtype) + " rdata does not match RDLENGTH"));
+        }
+        return Result<ResourceRecord>.Ok(new ResourceRecord(owner, rtype, rclass, ttl, data));
+    };
+
+    /// @brief Reads the data of a record of `rtype` spanning `length` bytes.
+    let read_data = func(reader: wire.WireReader, rtype: int, length: int) -> Result<RecordData> {
+        last start = reader.offset();
+        last end = start + length;
+        if (rtype == TypeA) {
+            if (length != 4) {
+                return Result<RecordData>.Err(parse_error(start, "A rdata is not 4 bytes"));
+            }
+            last bytes = reader.read_bytes(4)?;
+            return Result<RecordData>.Ok(RecordData.A(ipv4.from_bytes(bytes, 0)));
+        }
+        if (rtype == TypeAaaa) {
+            if (length != 16) {
+                return Result<RecordData>.Err(parse_error(start, "AAAA rdata is not 16 bytes"));
+            }
+            last bytes = reader.read_bytes(16)?;
+            return Result<RecordData>.Ok(RecordData.Aaaa(ipv6.from_bytes(bytes, 0)));
+        }
+        if (rtype == TypeNs) {
+            return Result<RecordData>.Ok(RecordData.Ns(reader.read_name()?));
+        }
+        if (rtype == TypeCname) {
+            return Result<RecordData>.Ok(RecordData.Cname(reader.read_name()?));
+        }
+        if (rtype == TypePtr) {
+            return Result<RecordData>.Ok(RecordData.Ptr(reader.read_name()?));
+        }
+        if (rtype == TypeMx) {
+            last preference = reader.read_u16()?;
+            last exchange = reader.read_name()?;
+            return Result<RecordData>.Ok(RecordData.Mx { preference: preference, exchange: exchange });
+        }
+        if (rtype == TypeTxt) {
+            last parts: uint8[list][list] = new;
+            if (length == 0) {
+                return Result<RecordData>.Err(parse_error(start, "TXT rdata is empty"));
+            }
+            while (reader.offset() < end) {
+                parts.append(reader.read_character_string()?);
+            }
+            return Result<RecordData>.Ok(RecordData.Txt(parts));
+        }
+        if (rtype == TypeSoa) {
+            last mname = reader.read_name()?;
+            last rname = reader.read_name()?;
+            last serial = reader.read_u32()?;
+            last refresh = reader.read_u32()?;
+            last retry = reader.read_u32()?;
+            last expire = reader.read_u32()?;
+            last minimum = reader.read_u32()?;
+            return Result<RecordData>.Ok(RecordData.Soa { mname: mname, rname: rname, serial: serial,
+                refresh: refresh, retry: retry, expire: expire, minimum: minimum });
+        }
+        if (rtype == TypeSrv) {
+            last priority = reader.read_u16()?;
+            last weight = reader.read_u16()?;
+            last port = reader.read_u16()?;
+            last target = reader.read_name()?;
+            return Result<RecordData>.Ok(RecordData.Srv { priority: priority, weight: weight, port: port,
+                target: target });
+        }
+        if (rtype == TypeNaptr) {
+            last order = reader.read_u16()?;
+            last preference = reader.read_u16()?;
+            last flags = strings.from_bytes_lossy(reader.read_character_string()?);
+            last services = strings.from_bytes_lossy(reader.read_character_string()?);
+            last regexp = strings.from_bytes_lossy(reader.read_character_string()?);
+            last replacement = reader.read_name()?;
+            return Result<RecordData>.Ok(RecordData.Naptr { order: order, preference: preference, flags: flags,
+                services: services, regexp: regexp, replacement: replacement });
+        }
+        if (rtype == TypeOpt) {
+            last options: EdnsOption[list] = new;
+            while (reader.offset() < end) {
+                last code = reader.read_u16()?;
+                last size = reader.read_u16()?;
+                if (reader.offset() + size > end) {
+                    return Result<RecordData>.Err(parse_error(reader.offset(), "EDNS option runs past the rdata"));
+                }
+                options.append(new EdnsOption(code, reader.read_bytes(size)?));
+            }
+            return Result<RecordData>.Ok(RecordData.Opt(options));
+        }
+        return Result<RecordData>.Ok(RecordData.Unknown(reader.read_bytes(length)?));
+    };
+
+    /// @brief Whether two record data values are equal (names ignoring case).
+    let same_data = func(a: RecordData, b: RecordData) -> bool {
+        last left = rdata_bytes(a);
+        last right = rdata_bytes(b);
+        return match (left) {
+            Result.Ok(x) => match (right) {
+                Result.Ok(y) => same_kind(a, b) && strings.to_ascii_lower(hex_text(x)) == strings.to_ascii_lower(
+                    hex_text(y)) && strings.to_ascii_lower(data_text(a)) == strings.to_ascii_lower(data_text(b)),
+                Result.Err(_) => false,
+            },
+            Result.Err(_) => false,
+        };
+    };
+
+    /// @brief Whether two data values are the same variant.
+    let same_kind = func(a: RecordData, b: RecordData) -> bool => kind_of(a) == kind_of(b);
+
+    /// @brief The variant number of record data.
+    let kind_of = func(data: RecordData) -> int => match (data) {
+        RecordData.A(_) => 1,
+        RecordData.Aaaa(_) => 2,
+        RecordData.Ns(_) => 3,
+        RecordData.Cname(_) => 4,
+        RecordData.Ptr(_) => 5,
+        RecordData.Mx { preference, exchange } => 6,
+        RecordData.Txt(_) => 7,
+        RecordData.Soa { mname, rname, serial, refresh, retry, expire, minimum } => 8,
+        RecordData.Srv { priority, weight, port, target } => 9,
+        RecordData.Naptr { order, preference, flags, services, regexp, replacement } => 10,
+        RecordData.Opt(_) => 11,
+        RecordData.Unknown(_) => 12,
+    };
+
+    /// @brief Character-strings in double quotes.
+    let quoted = func(parts: uint8[list][list]) -> string {
+        let text = "";
+        for (let i = 0; i < parts.length; i++) {
+            if (i > 0) {
+                text = text + " ";
+            }
+            text = text + "\"" + strings.from_bytes_lossy(parts[i]) + "\"";
+        }
+        return text;
+    };
+
+    /// @brief Lowercase hexadecimal.
+    let hex_text = func(bytes: uint8[list]) -> string {
+        last digits = "0123456789abcdef";
+        last out: uint8[list] = new;
+        for (let b in bytes) {
+            out.append(digits.byte_at((b / 16) as int));
+            out.append(digits.byte_at((b % 16) as int));
+        }
+        return strings.from_bytes_lossy(out);
+    };
+
+    /// @brief Whether two byte lists are equal.
+    let same_bytes = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Folds bytes into a hash.
+    let hash_bytes = func(seed: uint32, bytes: uint8[list]) -> uint32 {
+        let hash = seed;
+        for (let b in bytes) {
+            hash = hashing.combine(hash, b as uint32);
+        }
+        return hash;
+    };
+
+    /// @brief A parse error at `at`.
+    let parse_error = func(at: int, text: string) -> errors.Error =>
+        errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: at, message: text };
+);

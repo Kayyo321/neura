@@ -1,0 +1,134 @@
+// test-options: --allow-net
+// host-dependent-counts: the Unix names carry an ephemeral UDP port, whose digits vary between runs
+let datagram_socket = import:Std.Net.Socket.DatagramSocket;
+let duration = import:Std.Time.Duration;
+let error = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let test = import:Std.Test;
+let udp = import:Std.Net.Socket.UdpSocket;
+let unit = import:Std.Core.Unit;
+let unix_addr = import:Std.Net.Core.UnixAddr;
+let unix_datagram = import:Std.Net.Socket.UnixDatagram;
+let unix_listener = import:Std.Net.Socket.UnixListener;
+let unix_stream = import:Std.Net.Socket.UnixStream;
+
+// UdpSocket, UnixDatagram, UnixListener and UnixStream over real sockets: UDP on the loopback interface, Unix
+// sockets in the Linux abstract namespace (named after a fresh UDP port, so parallel runs do not collide).
+let DatagramUnixTests = module (
+    let kind_of = func(e: error.Error) -> error.IoErrorKind {
+        return match (e) {
+            error.Error.Io { kind, message, path } => kind,
+            _ => error.IoErrorKind.Other,
+        };
+    };
+
+    let address = func(text: string) -> socket_addr.SocketAddr =>
+        test.assert_ok<socket_addr.SocketAddr>(socket_addr.parse(text));
+
+    let udp_socket = func -> udp.UdpSocket {
+        last socket = test.assert_ok<udp.UdpSocket>(udp.bind(address("127.0.0.1:0")));
+        socket.set_read_timeout(duration.of_seconds(5));
+        return socket;
+    };
+
+    let bytes_of = func(text: string) -> uint8[list] {
+        let out: uint8[list] = new;
+        let i = 0;
+        while (i < text.byte_length) {
+            out.append(text.byte_at(i));
+            i++;
+        }
+        return out;
+    };
+
+    let text_of = func(data: uint8[list]) -> string {
+        let [valid, text] = string.from_utf8(data);
+        test.assert(valid);
+        return text;
+    };
+
+    // An abstract name no other run holds: the port of a UDP socket bound for the purpose.
+    let unique_name = func(role: string) -> unix_addr.UnixAddr {
+        last holder = udp_socket();
+        last port = test.assert_ok<socket_addr.SocketAddr>(holder.local_address()).port;
+        test.assert_ok<unit.Unit>(holder.close());
+        return unix_addr.abstract_name("neura-net-test-" + role + "-" + port.to_string());
+    };
+
+    export let test_udp_round_trip_on_loopback = func {
+        last receiver = udp_socket();
+        last sender = udp_socket();
+        last target = test.assert_ok<socket_addr.SocketAddr>(receiver.local_address());
+        test.assert(target.port > 0);
+        test.assert_equal<int>(5, test.assert_ok<int>(sender.send_to(bytes_of("hello"), target)));
+        last datagram = test.assert_ok<datagram_socket.Datagram<socket_addr.SocketAddr>>(receiver.receive_from(64));
+        test.assert_equal_string("hello", text_of(datagram.data));
+        last from = test.assert_some<socket_addr.SocketAddr>(datagram.sender);
+        test.assert(from.equals(test.assert_ok<socket_addr.SocketAddr>(sender.local_address())));
+        // A longer datagram is truncated to the maximum.
+        test.assert_ok<int>(sender.send_to(bytes_of("truncated"), target));
+        test.assert_equal_string("trunc", text_of(test.assert_ok<datagram_socket.Datagram<socket_addr.SocketAddr>>(
+            receiver.receive_from(5)).data));
+        test.assert_ok<unit.Unit>(sender.close());
+        test.assert_ok<unit.Unit>(receiver.close());
+        test.assert(kind_of(test.assert_err<datagram_socket.Datagram<socket_addr.SocketAddr>>(receiver.receive_from(8))) == error.IoErrorKind.Closed);
+        test.assert_ok<unit.Unit>(receiver.close());
+    };
+
+    export let test_udp_receive_times_out = func {
+        last socket = udp_socket();
+        socket.set_read_timeout(duration.of_millis(50));
+        test.assert(kind_of(test.assert_err<datagram_socket.Datagram<socket_addr.SocketAddr>>(socket.receive_from(16))) == error.IoErrorKind.TimedOut);
+        test.assert_ok<unit.Unit>(socket.close());
+    };
+
+    export let test_unix_datagram_round_trip = func {
+        last name = unique_name("datagram");
+        last receiver = test.assert_ok<unix_datagram.UnixDatagram>(unix_datagram.bind(name));
+        receiver.set_read_timeout(duration.of_seconds(5));
+        last sender_name = unique_name("sender");
+        last sender = test.assert_ok<unix_datagram.UnixDatagram>(unix_datagram.bind(sender_name));
+        test.assert_equal<int>(4, test.assert_ok<int>(sender.send_to(bytes_of("ping"), name)));
+        last datagram = test.assert_ok<datagram_socket.Datagram<unix_addr.UnixAddr>>(receiver.receive_from(64));
+        test.assert_equal_string("ping", text_of(datagram.data));
+        test.assert(test.assert_some<unix_addr.UnixAddr>(datagram.sender).equals(sender_name));
+        // An unnamed sender can send, and its datagram has no sender address.
+        last anonymous = test.assert_ok<unix_datagram.UnixDatagram>(unix_datagram.unbound());
+        test.assert_ok<int>(anonymous.send_to(bytes_of("anon"), name));
+        last unnamed = test.assert_ok<datagram_socket.Datagram<unix_addr.UnixAddr>>(receiver.receive_from(64));
+        test.assert_equal_string("anon", text_of(unnamed.data));
+        test.assert_none<unix_addr.UnixAddr>(unnamed.sender);
+        test.assert_ok<unit.Unit>(anonymous.close());
+        test.assert_ok<unit.Unit>(sender.close());
+        test.assert_ok<unit.Unit>(receiver.close());
+    };
+
+    export let test_unix_stream_round_trip = func {
+        last name = unique_name("stream");
+        last listener = test.assert_ok<unix_listener.UnixListener>(unix_listener.bind(name));
+        test.assert(listener.address().equals(name));
+        last client = test.assert_ok<unix_stream.UnixStream>(unix_stream.connect(name));
+        last served = test.assert_ok<unix_stream.UnixStream>(listener.accept());
+        client.set_read_timeout(duration.of_seconds(5));
+        served.set_read_timeout(duration.of_seconds(5));
+        test.assert(test.assert_some<unix_addr.UnixAddr>(client.peer_address()).equals(name));
+        test.assert(test.assert_ok<unix_addr.UnixAddr>(served.local_address()).equals(name));
+        test.assert_ok<unit.Unit>(client.write(bytes_of("question")));
+        test.assert_equal_string("question", text_of(test.assert_ok<uint8[list]>(served.read(64))));
+        test.assert_ok<unit.Unit>(served.write(bytes_of("answer")));
+        test.assert_equal_string("answer", text_of(test.assert_ok<uint8[list]>(client.read(64))));
+        test.assert_ok<unit.Unit>(served.close());
+        // The peer closed: the stream ends.
+        test.assert_none<uint8[list]>(test.assert_ok<optional.Optional<uint8[list]>>(client.receive()));
+        test.assert_ok<unit.Unit>(client.close());
+        test.assert_ok<unit.Unit>(listener.close());
+        // The abstract name is free again once the listener is closed.
+        last again = test.assert_ok<unix_listener.UnixListener>(unix_listener.bind(name));
+        test.assert_ok<unit.Unit>(again.close());
+    };
+
+    export let test_unix_connect_without_listener_fails = func {
+        test.assert_err<unix_stream.UnixStream>(unix_stream.connect(unique_name("absent")));
+    };
+);

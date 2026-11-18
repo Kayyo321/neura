@@ -1,0 +1,114 @@
+let error = import:Std.Core.Error;
+let h2 = import:Std.Net.Http.H2;
+let test = import:Std.Test;
+
+// Std.Net.Http.H2 wire data. The preface bytes are the hex of RFC 9113 section 3.4; constants are RFC 9113
+// sections 4.1, 6, 6.5.2, 7 and RFC 8441 section 3. Frame header and SETTINGS vectors from:
+// python3 -I -c 'import struct
+// print(list(struct.pack(">I",16384)[1:]+bytes([1,5])+struct.pack(">I",3)))
+// print(list(struct.pack(">I",16777215)[1:]+bytes([0,0])+struct.pack(">I",2147483647)))
+// print(list(b"".join(struct.pack(">HI",i,v) for i,v in [(3,100),(4,65535),(5,16777215),(8,1)])))'
+// -> [0, 64, 0, 1, 5, 0, 0, 0, 3]; [255, 255, 255, 0, 0, 127, 255, 255, 255];
+//    [0, 3, 0, 0, 0, 100, 0, 4, 0, 0, 255, 255, 0, 5, 0, 255, 255, 255, 0, 8, 0, 0, 0, 1].
+let H2Tests = module (
+    let bytes = func(values: int[]) -> uint8[list] {
+        last list: uint8[list] = new;
+        for (let v in values) {
+            list.append(v as uint8);
+        }
+        return list;
+    };
+
+    let assert_bytes = func(expected: uint8[list], actual: uint8[list]) {
+        test.assert_equal<int>(expected.length, actual.length);
+        for (let i = 0; i < expected.length; i++) {
+            test.assert_equal<uint8>(expected[i], actual[i]);
+        }
+    };
+
+    let code_of = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "other",
+    };
+
+    export let test_preface = func {
+        assert_bytes(
+            bytes([80, 82, 73, 32, 42, 32, 72, 84, 84, 80, 47, 50, 46, 48, 13, 10, 13, 10, 83, 77, 13, 10, 13, 10]),
+            h2.preface_bytes());
+        test.assert_equal<int>(24, h2.Preface.byte_length);
+    };
+
+    export let test_frame_header_round_trip = func {
+        last header = new h2.FrameHeader(16384, h2.FrameHeaders, h2.FlagEndStream | h2.FlagEndHeaders, 3);
+        last wire = h2.encode_frame_header(header);
+        assert_bytes(bytes([0, 64, 0, 1, 5, 0, 0, 0, 3]), wire);
+        last back = test.assert_ok<h2.FrameHeader>(h2.decode_frame_header(wire, 0));
+        test.assert(back.equals(header));
+        test.assert(back.has_flag(h2.FlagEndHeaders));
+        test.assert(!back.has_flag(h2.FlagPadded));
+        last largest = new h2.FrameHeader(16777215, h2.FrameData, 0, 2147483647);
+        assert_bytes(bytes([255, 255, 255, 0, 0, 127, 255, 255, 255]), h2.encode_frame_header(largest));
+        test.assert_equal_string("FrameHeader{length=16384, type=1, flags=5, stream=3}", header.to_string());
+    };
+
+    export let test_frame_header_decode_edges = func {
+        // The reserved bit is ignored on receipt (RFC 9113 section 4.1).
+        last reserved = test.assert_ok<h2.FrameHeader>(h2.decode_frame_header(bytes([0, 0, 8, 6, 1, 128, 0, 0, 1]), 0));
+        test.assert_equal<int64>(1, reserved.stream_id);
+        test.assert_equal<int>(h2.FramePing, reserved.frame_type);
+        test.assert_equal<int>(8, reserved.length);
+        // At an offset, and truncated.
+        last padded = bytes([9, 9, 0, 0, 0, 4, 1, 0, 0, 0, 0]);
+        last shifted = test.assert_ok<h2.FrameHeader>(h2.decode_frame_header(padded, 2));
+        test.assert_equal<int>(h2.FrameSettings, shifted.frame_type);
+        test.assert(shifted.has_flag(h2.FlagAck));
+        test.assert_err<h2.FrameHeader>(h2.decode_frame_header(bytes([0, 0, 0, 4, 1, 0, 0, 0]), 0));
+        test.assert_err<h2.FrameHeader>(h2.decode_frame_header(bytes([0, 0, 0, 4, 1, 0, 0, 0, 0]), 1));
+    };
+
+    export let test_settings_round_trip = func {
+        last settings = new h2.Settings();
+        settings.add(h2.SettingMaxConcurrentStreams, 100);
+        settings.add(h2.SettingInitialWindowSize, 65535);
+        settings.add(h2.SettingMaxFrameSize, 16777215);
+        settings.add(h2.SettingEnableConnectProtocol, 1);
+        last wire = h2.encode_settings(settings);
+        assert_bytes(bytes([0, 3, 0, 0, 0, 100, 0, 4, 0, 0, 255, 255, 0, 5, 0, 255, 255, 255, 0, 8, 0, 0, 0, 1]), wire);
+        last back = test.assert_ok<h2.Settings>(h2.decode_settings(wire));
+        test.assert(back.equals(settings));
+        test.assert_equal<int64>(100, back.get_or(h2.SettingMaxConcurrentStreams, 0));
+        test.assert_equal<int64>(h2.InitialHeaderTableSize,
+            back.get_or(h2.SettingHeaderTableSize, h2.InitialHeaderTableSize));
+        test.assert_equal<int>(0, test.assert_ok<h2.Settings>(h2.decode_settings(new uint8[list]())).ids.length);
+        // Unknown identifiers are kept; a later value overrides an earlier one.
+        last repeated = bytes([0, 99, 0, 0, 0, 7, 0, 3, 0, 0, 0, 1, 0, 3, 0, 0, 0, 2]);
+        last later = test.assert_ok<h2.Settings>(h2.decode_settings(repeated));
+        test.assert_equal<int64>(7, later.get_or(99, 0));
+        test.assert_equal<int64>(2, later.get_or(h2.SettingMaxConcurrentStreams, 0));
+    };
+
+    export let test_settings_errors = func {
+        test.assert_equal_string("FRAME_SIZE_ERROR",
+            code_of(test.assert_err<h2.Settings>(h2.decode_settings(bytes([0, 3, 0, 0, 0])))));
+        test.assert_equal_string("PROTOCOL_ERROR",
+            code_of(test.assert_err<h2.Settings>(h2.decode_settings(bytes([0, 2, 0, 0, 0, 2])))));
+        test.assert_equal_string("PROTOCOL_ERROR",
+            code_of(test.assert_err<h2.Settings>(h2.decode_settings(bytes([0, 8, 0, 0, 0, 2])))));
+        test.assert_equal_string("FLOW_CONTROL_ERROR",
+            code_of(test.assert_err<h2.Settings>(h2.decode_settings(bytes([0, 4, 128, 0, 0, 0])))));
+        test.assert_equal_string("PROTOCOL_ERROR",
+            code_of(test.assert_err<h2.Settings>(h2.decode_settings(bytes([0, 5, 0, 0, 63, 255])))));
+        test.assert_equal_string("PROTOCOL_ERROR",
+            code_of(test.assert_err<h2.Settings>(h2.decode_settings(bytes([0, 5, 1, 0, 0, 0])))));
+        // The boundary values are accepted.
+        test.assert_ok<h2.Settings>(h2.decode_settings(bytes([0, 4, 127, 255, 255, 255, 0, 5, 0, 0, 64, 0])));
+    };
+
+    export let test_constants = func {
+        test.assert_equal<int>(9, h2.FrameContinuation);
+        test.assert_equal<int>(8, h2.FrameWindowUpdate);
+        test.assert_equal<int>(13, h2.ErrorHttp11Required);
+        test.assert_equal<int>(8, h2.SettingEnableConnectProtocol);
+        test.assert_equal<int64>(16384, h2.MinMaxFrameSize);
+    };
+);

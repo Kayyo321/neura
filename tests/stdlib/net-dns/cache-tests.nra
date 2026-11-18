@@ -1,0 +1,166 @@
+let caches = import:Std.Net.Dns.DnsCache;
+let duration = import:Std.Time.Duration;
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let test = import:Std.Test;
+
+// The TTL cache: clamps, aging, RFC 2308 negative caching and LRU eviction, over a FixedClock.
+let CacheTests = module (
+    let name_of = func(text: string) -> names.DnsName => test.assert_ok<names.DnsName>(names.parse(text));
+
+    let question = func(name: string, qtype: int) -> messages.Question =>
+        new messages.Question(name_of(name), qtype, messages.ClassIn);
+
+    let a_record = func(name: string, ttl: int64) -> messages.ResourceRecord =>
+        new messages.ResourceRecord(name_of(name), messages.TypeA, messages.ClassIn, ttl,
+            messages.RecordData.A(ipv4.of(192, 0, 2, 1)));
+
+    let soa = func(ttl: int64, minimum: int64) -> messages.ResourceRecord[list] {
+        last list: messages.ResourceRecord[list] = new;
+        list.append(new messages.ResourceRecord(name_of("example.com"), messages.TypeSoa, messages.ClassIn, ttl,
+            messages.RecordData.Soa { mname: name_of("ns1.example.com"), rname: name_of("hostmaster.example.com"),
+                serial: 1, refresh: 7200, retry: 900, expire: 1209600, minimum: minimum }));
+        return list;
+    };
+
+    let one = func(record: messages.ResourceRecord) -> messages.ResourceRecord[list] {
+        last list: messages.ResourceRecord[list] = new;
+        list.append(record);
+        return list;
+    };
+
+    let clock = func -> fixed_clock.FixedClock => fixed_clock.of(instant.of_epoch_seconds(1700000000, 0));
+
+    let answer_ttl = func(found: caches.CacheResult) -> int64 => match (found) {
+        caches.CacheResult.Answer(records) => records[0].ttl,
+        _ => -1,
+    };
+
+    let is_miss = func(found: caches.CacheResult) -> bool => match (found) {
+        caches.CacheResult.Miss => true,
+        _ => false,
+    };
+
+    let is_name_error = func(found: caches.CacheResult) -> bool => match (found) {
+        caches.CacheResult.NameError => true,
+        _ => false,
+    };
+
+    let is_no_data = func(found: caches.CacheResult) -> bool => match (found) {
+        caches.CacheResult.NoData => true,
+        _ => false,
+    };
+
+    export let test_positive_ttl_ages_and_expires = func {
+        last time = clock();
+        last cache = new caches.DnsCache(time);
+        last q = question("www.example.com", messages.TypeA);
+        test.assert(is_miss(cache.get(q)));
+        test.assert_equal<int64>(300, cache.put_answer(q, one(a_record("www.example.com", 300))));
+        test.assert_equal<int64>(300, answer_ttl(cache.get(q)));
+        time.advance(duration.of_seconds(100));
+        test.assert_equal<int64>(200, answer_ttl(cache.get(q)));
+        // Case does not matter.
+        test.assert_equal<int64>(200, answer_ttl(cache.get(question("WWW.EXAMPLE.COM", messages.TypeA))));
+        time.advance(duration.of_seconds(200));
+        test.assert(is_miss(cache.get(q)));
+        test.assert_equal<int>(0, cache.size());
+        test.assert_equal<int>(3, cache.hits());
+        test.assert_equal<int>(2, cache.misses());
+    };
+
+    export let test_ttl_clamps = func {
+        last time = clock();
+        last cache = new caches.DnsCache(time, 16, 60, 3600, 900);
+        last low = question("low.example.com", messages.TypeA);
+        last high = question("high.example.com", messages.TypeA);
+        // The smallest TTL of the set is used, then clamped.
+        last mixed: messages.ResourceRecord[list] = new;
+        mixed.append(a_record("low.example.com", 5));
+        mixed.append(a_record("low.example.com", 30));
+        test.assert_equal<int64>(60, cache.put_answer(low, mixed));
+        test.assert_equal<int64>(3600, cache.put_answer(high, one(a_record("high.example.com", 86400))));
+        time.advance(duration.of_seconds(59));
+        test.assert(!is_miss(cache.get(low)));
+        time.advance(duration.of_seconds(1));
+        test.assert(is_miss(cache.get(low)));
+        time.advance(duration.of_seconds(3539));
+        test.assert(!is_miss(cache.get(high)));
+        time.advance(duration.of_seconds(1));
+        test.assert(is_miss(cache.get(high)));
+    };
+
+    // RFC 2308 section 5: the negative TTL is the smaller of the SOA record's TTL and its MINIMUM.
+    export let test_negative_ttl_soa_minimum_versus_soa_ttl = func {
+        test.assert_equal<int64>(300, caches.negative_ttl(soa(3600, 300)));
+        test.assert_equal<int64>(60, caches.negative_ttl(soa(60, 300)));
+        test.assert_equal<int64>(-1, caches.negative_ttl(new));
+        last time = clock();
+        last cache = new caches.DnsCache(time);
+        test.assert_equal<int64>(300, cache.put_negative(question("gone.example.com", messages.TypeA), true,
+            soa(3600, 300)));
+        test.assert_equal<int64>(60, cache.put_negative(question("empty.example.com", messages.TypeMx), false,
+            soa(60, 300)));
+        // The cap on negative TTLs.
+        last capped = new caches.DnsCache(time, 16, 0, 86400, 120);
+        test.assert_equal<int64>(120, capped.put_negative(question("x.example.com", messages.TypeA), true,
+            soa(86400, 86400)));
+    };
+
+    export let test_nxdomain_covers_every_type_nodata_only_its_type = func {
+        last time = clock();
+        last cache = new caches.DnsCache(time);
+        cache.put_negative(question("gone.example.com", messages.TypeA), true, soa(3600, 300));
+        test.assert(is_name_error(cache.get(question("gone.example.com", messages.TypeAaaa))));
+        test.assert(is_name_error(cache.get(question("gone.example.com", messages.TypeMx))));
+        cache.put_negative(question("empty.example.com", messages.TypeMx), false, soa(3600, 300));
+        test.assert(is_no_data(cache.get(question("empty.example.com", messages.TypeMx))));
+        test.assert(is_miss(cache.get(question("empty.example.com", messages.TypeA))));
+        time.advance(duration.of_seconds(300));
+        test.assert(is_miss(cache.get(question("gone.example.com", messages.TypeA))));
+        test.assert(is_miss(cache.get(question("empty.example.com", messages.TypeMx))));
+    };
+
+    export let test_negative_without_soa_not_cached = func {
+        last cache = new caches.DnsCache(clock());
+        test.assert_equal<int64>(-1, cache.put_negative(question("gone.example.com", messages.TypeA), true, new));
+        test.assert_equal<int>(0, cache.size());
+    };
+
+    export let test_lru_eviction = func {
+        last time = clock();
+        last cache = new caches.DnsCache(time, 2, 0, 86400, 10800);
+        last a = question("a.example.com", messages.TypeA);
+        last b = question("b.example.com", messages.TypeA);
+        last c = question("c.example.com", messages.TypeA);
+        cache.put_answer(a, one(a_record("a.example.com", 300)));
+        cache.put_answer(b, one(a_record("b.example.com", 300)));
+        // Using a makes b the least recently used.
+        test.assert(!is_miss(cache.get(a)));
+        cache.put_answer(c, one(a_record("c.example.com", 300)));
+        test.assert_equal<int>(2, cache.size());
+        test.assert_equal<int>(1, cache.evictions());
+        test.assert(is_miss(cache.get(b)));
+        test.assert(!is_miss(cache.get(a)));
+        test.assert(!is_miss(cache.get(c)));
+    };
+
+    export let test_expired_entries_go_before_live_ones = func {
+        last time = clock();
+        last cache = new caches.DnsCache(time, 2, 0, 86400, 10800);
+        last a = question("a.example.com", messages.TypeA);
+        last b = question("b.example.com", messages.TypeA);
+        last c = question("c.example.com", messages.TypeA);
+        cache.put_answer(a, one(a_record("a.example.com", 600)));
+        cache.put_answer(b, one(a_record("b.example.com", 10)));
+        time.advance(duration.of_seconds(20));
+        cache.put_answer(c, one(a_record("c.example.com", 300)));
+        // b had expired, so a (the least recently used live entry) stays.
+        test.assert_equal<int>(0, cache.evictions());
+        test.assert(!is_miss(cache.get(a)));
+        test.assert(!is_miss(cache.get(c)));
+    };
+);

@@ -14,7 +14,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// A nonce must never repeat under one key. For random nonces use XChaCha20Poly1305, whose 192-bit nonces do
 /// not collide in practice.
-/// @see [Std.Crypto.Symmetric.ChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-ChaCha20Poly1305)
+/// @see [Std.Crypto.Symmetric.ChaCha20Poly1305](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-ChaCha20Poly1305)
 #Since("0.3.0")
 export let ChaCha20Poly1305 = module (
     /// @brief The AEAD under a 32-byte key.

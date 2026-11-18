@@ -17,7 +17,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// key, and returns the following `count` bytes. A key therefore never produces output twice, and the state
 /// after a call cannot recompute that call's output. scripts/crypto-vectors/gen-drbg.py is an independent
 /// Python reference of it.
-/// @see [Std.Crypto.Random.ChaCha20Drbg](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-ChaCha20Drbg)
+/// @see [Std.Crypto.Random.ChaCha20Drbg](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Random-ChaCha20Drbg)
 #Since("0.3.0")
 export let ChaCha20Drbg = module (
     /// @brief The SHA-256 of the label followed by the parts.

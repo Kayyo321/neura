@@ -16,7 +16,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// length with radix^length >= 1,000,000 (the Rev. 1 domain-size requirement). The tweak may be any length
 /// and should differ by context (for example the table and column). FF1 is deterministic: equal plaintexts
 /// under one key and tweak give equal ciphertexts. Numeral strings are converted with Std.Math.BigInteger.
-/// @see [Std.Crypto.Symmetric.Ff1](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Ff1)
+/// @see [Std.Crypto.Symmetric.Ff1](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Symmetric-Ff1)
 #Since("0.3.0")
 export let Ff1 = module (
     /// @brief The alphabet of the text forms: the first `radix` characters, for radix 2 to 36.

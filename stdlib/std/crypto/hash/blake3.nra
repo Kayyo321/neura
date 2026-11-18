@@ -8,7 +8,7 @@ let words = import:Std.Crypto.Internal.Words;
 /// This is the specification's serial reference algorithm (chunks of 1024 bytes, a stack of chaining values,
 /// 7-round compression) in Neura code. The SIMD and multi-threaded tree evaluation of the specification is not
 /// provided: the result is the same, computed one chunk at a time.
-/// @see [Std.Crypto.Hash.Blake3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Blake3)
+/// @see [Std.Crypto.Hash.Blake3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Blake3)
 #Since("0.3.0")
 export let Blake3 = module (
     /// @brief The initial value: the SHA-256 initial words.

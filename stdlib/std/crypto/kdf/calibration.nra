@@ -10,7 +10,7 @@ let.promote _ = import:Std.Time.Duration;
 /// The time comes from the clock's monotonic reading, so the result depends on the host and its load; pass
 /// a Std.Time.SystemClock in production and a fixed clock in tests. Measuring runs Argon2id several times,
 /// so a calibration takes a few times the target.
-/// @see [Std.Crypto.Kdf.Calibration](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Calibration)
+/// @see [Std.Crypto.Kdf.Calibration](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Kdf-Calibration)
 #Since("0.3.0")
 export let Calibration = module (
     /// @brief The most passes the calibration tries.

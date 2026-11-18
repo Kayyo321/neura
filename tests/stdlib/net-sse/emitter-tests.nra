@@ -1,0 +1,107 @@
+let emitter = import:Std.Net.Realtime.Sse.Emitter;
+let errors = import:Std.Core.Error;
+let optional = import:Std.Core.Optional;
+let parser = import:Std.Net.Realtime.Sse.Parser;
+let result = import:Std.Core.Result;
+let sse_event = import:Std.Net.Realtime.Sse.SseEvent;
+let strings = import:Std.Text.Strings;
+let test = import:Std.Test;
+let unit = import:Std.Core.Unit;
+
+// The event-stream emitter, the writers, and round trips through the parser.
+let EmitterTests = module (
+    let none_id = func -> optional.Optional<string> => optional.Optional<string>.None;
+
+    let none_retry = func -> optional.Optional<int64> => optional.Optional<int64>.None;
+
+    export let test_format_shapes = func {
+        test.assert_equal_string("data: hi\n\n", test.assert_ok<string>(emitter.format(sse_event.message("hi"))));
+        test.assert_equal_string("event: add\nid: 7\ndata: 1\ndata: 2\n\n",
+            test.assert_ok<string>(emitter.format(sse_event.of("add", "1\n2", "7"))));
+        test.assert_equal_string("id\nretry: 10\ndata: \n\n", test.assert_ok<string>(emitter.format_fields("message", "",
+            optional.Optional<string>.Some(""), optional.Optional<int64>.Some(10))));
+        test.assert_equal_string("data: a\ndata: b\ndata: c\ndata: \n\n",
+            test.assert_ok<string>(emitter.format(sse_event.message("a\r\nb\rc\n"))));
+        test.assert_equal_string(": one\n: two\n", emitter.comment("one\ntwo"));
+        test.assert_equal_string(":\n", emitter.keep_alive());
+        test.assert_equal_string("retry: 5000\n\n", test.assert_ok<string>(emitter.retry_only(5000)));
+    };
+
+    export let test_rejections = func {
+        last bad_type = test.assert_err<string>(emitter.format(sse_event.of("a\nb", "x", "")));
+        test.assert(strings.contains(errors.message(bad_type), "event type"));
+        test.assert_err<string>(emitter.format(sse_event.of("a", "x", "1\r2")));
+        last nul_bytes: uint8[list] = new([49, 0, 50]);
+        last nul_id = test.assert_ok<string>(strings.from_bytes(nul_bytes));
+        test.assert_err<string>(emitter.format(sse_event.of("a", "x", nul_id)));
+        test.assert_err<string>(emitter.format_fields("a", "x", none_id(), optional.Optional<int64>.Some(-1)));
+        test.assert_err<string>(emitter.retry_only(-1));
+    };
+
+    let round_trip = func(event: sse_event.SseEvent) -> sse_event.SseEvent {
+        last text = test.assert_ok<string>(emitter.format(event));
+        last p = parser.create();
+        last events = test.assert_ok<sse_event.SseEvent[list]>(p.feed(strings.to_bytes(text)));
+        test.assert_equal<int>(1, events.length);
+        return events[0];
+    };
+
+    export let test_round_trips = func {
+        last samples: string[list] = new(["", "plain", " leading space", "  two", "trailing\n", "\n", "a\nb\nc",
+            "colon: inside", ": looks like a comment", "data: nested", "é ü ✓", "x\r\ny"]);
+        for (let data in samples) {
+            last back = round_trip(sse_event.of("token", data, "id-1"));
+            test.assert_equal_string("token", back.event_type);
+            test.assert_equal_string("id-1", back.id);
+            // CR and CRLF become LF; everything else survives.
+            test.assert_equal_string(strings.replace(strings.replace(data, "\r\n", "\n"), "\r", "\n"), back.data);
+        }
+        last with_retry = new sse_event.SseEvent("message", "r", "9", optional.Optional<int64>.Some(1234));
+        test.assert(with_retry.equals(round_trip(with_retry)));
+    };
+
+    // A typed writer for model tokens: each token becomes a `token` event; empty tokens are refused.
+    let Token = class (
+        export last index: int;
+        export last text: string;
+
+        export let init = func(position: int, value: string) {
+            index = position;
+            text = value;
+        };
+
+        export let.override to_string = func -> string => "Token";
+    );
+
+    let encode_token = func(token: Token) -> result.Result<sse_event.SseEvent> {
+        if (token.text.byte_length == 0) {
+            return result.Result<sse_event.SseEvent>.Err(errors.custom("test.empty", "empty token"));
+        }
+        return result.Result<sse_event.SseEvent>.Ok(sse_event.of("token", token.text, token.index.to_string()));
+    };
+
+    export let test_writers = func {
+        last written: uint8[list] = new;
+        last sink = new func(bytes: uint8[list]) -> result.Result<unit.Unit> {
+            for (let b in bytes) {
+                written.append(b);
+            }
+            return result.Result<unit.Unit>.Ok(unit.Unit.Value);
+        };
+        last writer = new emitter.EventWriter(sink);
+        test.assert_ok<unit.Unit>(writer.send_comment("hello"));
+        test.assert_ok<unit.Unit>(writer.send_data("first"));
+        last typed = new emitter.TypedEventWriter<Token>(writer, encode_token);
+        test.assert_ok<unit.Unit>(typed.send(new Token(1, "Hel")));
+        test.assert_ok<unit.Unit>(typed.send(new Token(2, "lo")));
+        test.assert_err<unit.Unit>(typed.send(new Token(3, "")));
+        test.assert_ok<unit.Unit>(writer.send_keep_alive());
+        test.assert_err<unit.Unit>(writer.send(sse_event.of("a\nb", "x", "")));
+        test.assert_equal_string(": hello\ndata: first\n\nevent: token\nid: 1\ndata: Hel\n\nevent: token\nid: 2\ndata: lo\n\n:\n",
+            strings.from_bytes_lossy(written));
+        last events = test.assert_ok<sse_event.SseEvent[list]>(parser.create().feed(written));
+        test.assert_equal<int>(3, events.length);
+        test.assert_equal_string("lo", events[2].data);
+        test.assert_equal_string("2", events[2].id);
+    };
+);

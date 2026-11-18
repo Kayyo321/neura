@@ -1,0 +1,183 @@
+let.promote _ = import:Std.Net.Quic.CongestionController;
+let.promote _ = import:Std.Time.Duration;
+
+/// @brief LEDBAT, Low Extra Delay Background Transport (RFC 6817 section 2.4.2), as a QUIC congestion
+/// controller for background transfers that yield to other traffic.
+///
+/// Each acknowledgment carries a one-way delay sample (`delay_nanos`), kept in microseconds. The current delay
+/// is the minimum of the last `CurrentFilter` (4) samples (a MIN filter, which section 2.4.2 allows); the base
+/// delay is the minimum of `BaseHistory` (10) per-minute minima, a new minute (by `now_nanos` / 60 s) starting a
+/// new entry. With queuing_delay = current - base and off_target = (TARGET - queuing_delay) / TARGET, an
+/// acknowledgment of `acked` bytes changes the window by GAIN * off_target * acked * MSS / cwnd with GAIN 1,
+/// computed as ((TARGET - queuing_delay) * acked / TARGET) * MSS / cwnd with each division truncated toward zero;
+/// the window is then kept at most flightsize + ALLOWED_INCREASE (1) * MSS, where flightsize is the bytes in
+/// flight before the acknowledgment, and at least MIN_CWND (2) * MSS. The window starts at INIT_CWND (2) * MSS
+/// (section 2.5). A loss, at most once per recovery period (RFC 9002), sets cwnd = min(cwnd, max(cwnd / 2,
+/// MIN_CWND * MSS)); persistent congestion is treated as the congestion timeout of section 2.4.2 and sets the
+/// window to 1 MSS. An ECN-CE congestion event is handled like a loss. TARGET is at most 100 ms (section 2.5).
+/// The window does not grow while the sender is application-limited.
+/// @see [Std.Net.Quic.Ledbat](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Quic-Ledbat)
+#Since("0.3.0")
+export let Ledbat = module (
+    /// @brief CURRENT_FILTER: the delay samples the MIN filter keeps.
+    export const CurrentFilter: int = 4;
+    /// @brief BASE_HISTORY: the per-minute minima kept.
+    export const BaseHistory: int = 10;
+    /// @brief INIT_CWND and MIN_CWND, in segments.
+    export const MinSegments: int64 = 2;
+    /// @brief One minute in nanoseconds.
+    const MinuteNanos: int64 = 60000000000;
+
+    /// @brief One connection's LEDBAT state.
+    #[Final, NotThreadSafe]
+    export let Ledbat = class implements CongestionController (
+        /// @brief The MSS (maximum datagram size) in bytes.
+        export last max_datagram_size: int64;
+        /// @brief TARGET in microseconds.
+        export last target_micros: int64;
+        /// @brief The congestion window.
+        let cwnd: int64;
+        /// @brief The bytes in flight.
+        let in_flight: int64 = 0;
+        /// @brief The last delay samples, oldest first, in microseconds.
+        let current_delays: int64[list] = new;
+        /// @brief Per-minute delay minima, oldest first, in microseconds.
+        let base_delays: int64[list] = new;
+        /// @brief The minute of the newest base-delay entry, or -1.
+        let last_rollover: int64 = -1;
+        /// @brief When the current recovery period started, or -1.
+        let recovery_start: int64 = -1;
+        /// @brief True while application- or flow-control-limited.
+        let app_limited: bool = false;
+
+        /// @brief A controller with this MSS (1,200 through 65,527 bytes) and TARGET (1 microsecond through 100
+        /// ms, else "invalid argument: target").
+        export let init = func(datagram_size: int64, target: Duration) {
+            check_datagram_size(datagram_size);
+            if (target.to_micros() < 1 || target.to_nanos() > 100000000) {
+                trap_with_message("invalid argument: target");
+            }
+            max_datagram_size = datagram_size;
+            target_micros = target.to_micros();
+            cwnd = MinSegments * datagram_size;
+        };
+
+        /// @brief The congestion window.
+        export let window = func -> int64 => cwnd;
+
+        /// @brief The bytes in flight.
+        export let bytes_in_flight = func -> int64 => in_flight;
+
+        /// @brief True when `bytes` more fit in the window.
+        export let can_send = func(bytes: int64) -> bool => in_flight + bytes <= cwnd;
+
+        /// @brief The filtered current delay minus the base delay in microseconds; 0 before any sample.
+        #Pure
+        export let queuing_delay_micros = func -> int64 {
+            if (current_delays.length == 0) {
+                return 0;
+            }
+            return minimum(current_delays) - minimum(base_delays);
+        };
+
+        /// @brief Adds a sent packet to the bytes in flight.
+        export let on_packet_sent = func(bytes: int64, sent_nanos: int64) {
+            check_event(bytes, sent_nanos);
+            in_flight += bytes;
+        };
+
+        /// @brief "on acknowledgement" of section 2.4.2; `delay_nanos` is the one-way delay sample.
+        export let on_packet_acked = func(bytes: int64, sent_nanos: int64, now_nanos: int64, delay_nanos: int64) {
+            check_event(bytes, now_nanos);
+            if (delay_nanos < 0) {
+                trap_with_message("invalid argument: negative delay");
+            }
+            last flight_size = in_flight;
+            in_flight = remove_in_flight(in_flight, bytes);
+            last delay = delay_nanos / 1000;
+            update_base_delay(delay, now_nanos);
+            current_delays.append(delay);
+            if (current_delays.length > CurrentFilter) {
+                current_delays.remove_at(0);
+            }
+            if (app_limited) {
+                return;
+            }
+            last scaled = (target_micros - queuing_delay_micros()) * bytes / target_micros;
+            cwnd = cwnd + scaled * max_datagram_size / cwnd;
+            last max_allowed = flight_size + max_datagram_size;
+            if (cwnd > max_allowed) {
+                cwnd = max_allowed;
+            }
+            last floor = MinSegments * max_datagram_size;
+            if (cwnd < floor) {
+                cwnd = floor;
+            }
+            cwnd = capped(cwnd);
+        };
+
+        /// @brief "on data loss" of section 2.4.2, once per recovery period.
+        export let on_packets_lost = func(bytes: int64, latest_sent_nanos: int64, now_nanos: int64) {
+            check_event(bytes, now_nanos);
+            in_flight = remove_in_flight(in_flight, bytes);
+            on_congestion_event(latest_sent_nanos, now_nanos);
+        };
+
+        /// @brief Halves the window, at most once per recovery period.
+        export let on_congestion_event = func(sent_nanos: int64, now_nanos: int64) {
+            check_event(0, now_nanos);
+            if (sent_nanos <= recovery_start) {
+                return;
+            }
+            recovery_start = now_nanos;
+            last floor = MinSegments * max_datagram_size;
+            last half = cwnd / 2 > floor ? cwnd / 2 : floor;
+            if (half < cwnd) {
+                cwnd = half;
+            }
+        };
+
+        /// @brief The congestion timeout: one MSS.
+        export let on_persistent_congestion = func {
+            cwnd = max_datagram_size;
+            recovery_start = -1;
+        };
+
+        /// @brief Whether the sender is application- or flow-control-limited.
+        export let set_app_limited = func(limited: bool) {
+            app_limited = limited;
+        };
+
+        /// @brief "Ledbat".
+        export let name = func -> string => "Ledbat";
+
+        /// @brief Text such as "Ledbat(window 2400, in flight 0)".
+        export let.override to_string = func -> string =>
+            "Ledbat(window " + cwnd.to_string() + ", in flight " + in_flight.to_string() + ")";
+
+        /// @brief update_base_delay of section 2.4.2.
+        let update_base_delay = func(delay: int64, now_nanos: int64) {
+            last minute = now_nanos / MinuteNanos;
+            if (minute != last_rollover) {
+                last_rollover = minute;
+                base_delays.append(delay);
+                if (base_delays.length > BaseHistory) {
+                    base_delays.remove_at(0);
+                }
+            } else if (delay < base_delays[base_delays.length - 1]) {
+                base_delays[base_delays.length - 1] = delay;
+            }
+        };
+    );
+
+    /// @brief The smallest element of a non-empty list.
+    let minimum = func(values: int64[list]) -> int64 {
+        let low = values[0];
+        for (let v in values) {
+            if (v < low) {
+                low = v;
+            }
+        }
+        return low;
+    };
+);

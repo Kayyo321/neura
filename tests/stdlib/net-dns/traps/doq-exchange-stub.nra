@@ -1,0 +1,16 @@
+// status: 134
+// stderr: unsupported: Std\.Net\.Dns\.DoqTransport\.quic_exchange is not implemented in Neura 0\.3\.0
+let doq = import:Std.Net.Dns.DoqTransport;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let program = import:Std.Program;
+let socket_addr = import:Std.Net.Core.SocketAddr;
+let ipv4 = import:Std.Net.Core.Ipv4Addr;
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last transport = new doq.DoqTransport(socket_addr.of_v4(ipv4.localhost(), 853), "dns.example");
+        let _ = transport.exchange(messages.query(1, names.root(), messages.TypeNs));
+        return program.ExitCode.Ok;
+    };
+);

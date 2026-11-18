@@ -1,0 +1,71 @@
+let acme = import:Std.Net.Tls.Acme;
+let error = import:Std.Core.Error;
+let test = import:Std.Test;
+
+// Std.Net.Tls.Acme: the challenge computations of RFC 8555, RFC 7638 and RFC 8737.
+let AcmeTests = module (
+    // RFC 7638 section 3.1: the RSA key of the example and its thumbprint.
+    const RsaModulus: string = "0vx7agoebGcQSuuPiLJXZptN9nndrQmbXEps2aiAFbWhM78LhWx4cbbfAAtVT86zwu1RK7aPFFxuhDR1L6tSoc_BJECPebWKRXjBZCiFV4n3oknjhMstn64tZ_2W-5JsGY4Hc5n9yBXArwl93lqt7_RN5w6Cf0h4QyQ5v-65YGjQR0_FDW2QvzqY368QQMicAtaSqzs8KJZgnYb9c7d0zgdAZHzu6qMQvRL5hajrn1n91CbOpbISD08qNLyrdkt-bFTWhAI4vMQFh6WeZu0fM4lFd2NcRwr3XPksINHaQ-G_xBniIqbw0Ls1jF44-csFCur-kEgU8awapJzKnqDKgw";
+    const RsaThumbprint: string = "NzbLsXh8uDCcd-6MNwXF4W_7noWXFZAfHkxZsRGC9Xs";
+    // RFC 8555 section 8.4: the dns-01 challenge token of the example.
+    const Token: string = "evaGxfADs6pSRb2LAv9IZf17Dt3juxGJ-PCt92wr-oA";
+
+    export let test_rsa_thumbprint_rfc7638 = func {
+        test.assert_equal_string(RsaThumbprint, acme.rsa_thumbprint(RsaModulus, "AQAB"));
+    };
+
+    // Script: /home/dev/neura-gate/030/std-net/vectors-socket-tls-quic/acme_vec.py.
+    // Generated with python3 -I: base64.urlsafe_b64encode(hashlib.sha256(('{"crv":"P-256","kty":"EC","x":"%s",
+    // "y":"%s"}' % (x, y)).encode()).digest()).rstrip(b"=") for the x and y below.
+    export let test_ec_thumbprint = func {
+        test.assert_equal_string("oKIywvGUpTVTyxMQ3bwIIeQUudfr_CkLMjCE19ECD-U", acme.ec_thumbprint("P-256",
+            "f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU", "x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0"));
+    };
+
+    export let test_key_authorization_and_http01 = func {
+        last ka = test.assert_ok<string>(acme.key_authorization(Token, RsaThumbprint));
+        test.assert_equal_string(Token + "." + RsaThumbprint, ka);
+        last client = new acme.AcmeClient("https://ca.example/directory", RsaThumbprint);
+        test.assert_equal_string(ka, test.assert_ok<string>(client.key_authorization_for(Token)));
+        test.assert_equal_string("AcmeClient(https://ca.example/directory)", client.to_string());
+        test.assert_equal_string("/.well-known/acme-challenge/" + Token, test.assert_ok<string>(acme.http01_path(Token)));
+    };
+
+    // Script: /home/dev/neura-gate/030/std-net/vectors-socket-tls-quic/acme_vec.py.
+    // Generated with python3 -I: ka = token + "." + thumbprint;
+    // base64.urlsafe_b64encode(hashlib.sha256(ka.encode()).digest()).rstrip(b"=") and
+    // list(bytes([4, 32]) + hashlib.sha256(ka.encode()).digest()).
+    export let test_dns01_and_tls_alpn01 = func {
+        last ka = test.assert_ok<string>(acme.key_authorization(Token, RsaThumbprint));
+        test.assert_equal_string("_acme-challenge.www.example.org", acme.dns01_record_name("www.example.org"));
+        test.assert_equal_string("ZTRx1Ckl1-tM05o5zaizTTA0yUy5AGereMgSNWC6Ll8", acme.dns01_txt_value(ka));
+        last expected: uint8[list] = new([4, 32, 101, 52, 113, 212, 41, 37, 215, 235, 76, 211, 154, 57, 205, 168, 179,
+            77, 48, 52, 201, 76, 185, 0, 103, 171, 120, 200, 18, 53, 96, 186, 46, 95]);
+        last value = acme.tls_alpn01_extension_value(ka);
+        test.assert_equal<int>(34, value.length);
+        let i = 0;
+        while (i < 34) {
+            test.assert_equal<uint8>(expected[i], value[i]);
+            i++;
+        }
+        test.assert_equal_string("acme-tls/1", acme.AcmeTlsAlpn);
+    };
+
+    export let test_challenge_type_names = func {
+        test.assert_equal_string("http-01", acme.type_name(acme.ChallengeType.Http01));
+        test.assert_equal_string("dns-01", acme.type_name(acme.ChallengeType.Dns01));
+        test.assert_equal_string("tls-alpn-01", acme.type_name(acme.ChallengeType.TlsAlpn01));
+    };
+
+    export let test_tokens_must_be_base64url = func {
+        for (let bad in ["", "a.b", "a+b", "a/b", "abc="]) {
+            last failure = test.assert_err<string>(acme.key_authorization(bad, RsaThumbprint));
+            last code = match (failure) {
+                error.Error.Custom(detail) => detail.code(),
+                _ => "",
+            };
+            test.assert_equal_string("acme.token", code);
+        }
+        test.assert_err<string>(acme.http01_path("../etc"));
+    };
+);

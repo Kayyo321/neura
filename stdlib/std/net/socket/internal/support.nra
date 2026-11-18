@@ -1,0 +1,96 @@
+let bytes = import:Std.Io.Internal.Bytes;
+let.promote _ = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let host = import:Std.Net.Socket.Internal.HostCalls;
+let host_error = import:Std.Core.Internal.HostError;
+let ips = import:Std.Net.Core.IpAddr;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let.promote _ = import:Std.Net.Socket.SocketOptions;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Shared helpers of `Std.Net.Socket` and `Std.Net.Tls`: option application, timeouts and address
+/// conversion. Library use only.
+#Since("0.3.0")
+export let Support = module (
+    /// @brief Converts a nonnegative duration to the host's timeout argument; a negative one traps with
+    /// "invalid argument: negative timeout", as in Std.Net.TcpStream.
+    export let timeout_nanos = func(timeout: Duration) -> int64 {
+        last nanos = timeout.to_nanos();
+        if (nanos < 0) {
+            trap_with_message("invalid argument: negative timeout");
+        }
+        return nanos;
+    };
+
+    /// @brief Traps with "invalid argument: options for <kind>" unless the set was built for `kind`.
+    export let check_kind = func(options: SocketOptions, kind: SocketKind) {
+        if (options.kind != kind) {
+            trap_with_message("invalid argument: options for " + options.kind.to_string() + " given to a "
+                + kind.to_string() + " socket");
+        }
+    };
+
+    /// @brief Sets every option of the set on an open socket, in option-number order, stopping at the first
+    /// host error.
+    #NoDiscard
+    export let apply = func(id: int64, options: SocketOptions, address: string) -> Result<Unit> {
+        for (let pair in options.settings()) {
+            let [number, value] = pair;
+            match (host.set_option(id, number, value)) {
+                host.DoneOutcome.Ok => {},
+                host.DoneOutcome.Error(code) => {
+                    return Result<Unit>.Err(host_error.io(code, "setting socket option " + number.to_string()
+                        + " failed", address));
+                },
+            }
+        }
+        return bytes.ok();
+    };
+
+    /// @brief True when the set holds an option that must be set before bind: 1 `SO_REUSEADDR`, 2 `SO_REUSEPORT`
+    /// or 4 `TCP_FASTOPEN`.
+    #Pure
+    export let needs_bind_time = func(options: SocketOptions) -> bool =>
+        options.value_of(1) >= 0 || options.value_of(2) >= 0 || options.value_of(4) >= 0;
+
+    /// @brief The option numbers of a set, for the bind-time host calls.
+    #NoDiscard
+    export let numbers = func(options: SocketOptions) -> int[list] {
+        let out: int[list] = new;
+        for (let pair in options.settings()) {
+            let [number, value] = pair;
+            out.append(number);
+        }
+        return out;
+    };
+
+    /// @brief The option values of a set, in the order of `numbers`.
+    #NoDiscard
+    export let values = func(options: SocketOptions) -> int64[list] {
+        let out: int64[list] = new;
+        for (let pair in options.settings()) {
+            let [number, value] = pair;
+            out.append(value);
+        }
+        return out;
+    };
+
+    /// @brief A socket address from a host's [address text, port] pair.
+    #NoDiscard
+    export let reported_address = func(reported: [string, int]) -> Result<SocketAddr> {
+        let [text, port] = reported;
+        return socket_address(text, port);
+    };
+
+    /// @brief A socket address from a host's numeric address text and port; InvalidData when the host's text
+    /// is not a numeric address.
+    #NoDiscard
+    export let socket_address = func(text: string, port: int) -> Result<SocketAddr> {
+        return match (ips.parse(text)) {
+            Result.Ok(ip) => Result<SocketAddr>.Ok(new SocketAddr(ip, port)),
+            Result.Err(_) => Result<SocketAddr>.Err(bytes.io(errors.IoErrorKind.InvalidData,
+                "the host reported an address that is not numeric: " + text, text)),
+        };
+    };
+);

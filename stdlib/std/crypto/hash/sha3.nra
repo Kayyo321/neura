@@ -14,7 +14,7 @@ let words = import:Std.Crypto.Internal.Words;
 ///
 /// Every function is the Keccak-p[1600] sponge in Neura code, with no hardware acceleration. Each digest checks the
 /// current Std.Crypto.Core.CryptoPolicy when it is created.
-/// @see [Std.Crypto.Hash.Sha3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Sha3)
+/// @see [Std.Crypto.Hash.Sha3](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Sha3)
 #Since("0.3.0")
 export let Sha3 = module (
     /// @brief A running SHA3-224 digest: 28 bytes of output, 144-byte rate.

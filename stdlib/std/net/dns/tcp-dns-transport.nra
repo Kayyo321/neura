@@ -1,0 +1,117 @@
+let durations = import:Std.Time.Duration;
+let errors = import:Std.Core.Error;
+let messages = import:Std.Net.Dns.Message;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Net.Core.SocketAddr;
+let tcp = import:Std.Net.TcpStream;
+let transports = import:Std.Net.Dns.DnsTransport;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief DNS over TCP (RFC 1035 section 4.2.2): each message is preceded by its length as two bytes, most
+/// significant first. Real, over the base runtime's `Std.Net.TcpStream`.
+///
+/// `TcpDnsTransport` opens one connection per exchange, writes the framed query, reads one framed response, and
+/// closes. `write_framed`, `read_framed` and `exchange_on` take the stream's bound `read` and `write` methods, so
+/// the same framing serves `DotTransport` (RFC 7858 section 3.3) and tests over in-memory byte sources.
+///
+/// Waiting: `connect`, `read` and `write` of `Std.Net.TcpStream` overlap, so in a program with tasks an exchange
+/// waits in its own task while other tasks run, and cancelling the task's scope ends a waiting exchange with
+/// Cancelled. Name resolution inside `connect` is not used (the address is numeric).
+/// @see [Std.Net.Dns.TcpDnsTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-TcpDnsTransport)
+#Since("0.3.0")
+export let TcpDnsTransport = module (
+    /// @brief The DNS port.
+    export const DnsPort: int = 53;
+
+    /// @brief A DNS transport over one TCP connection per exchange.
+    #[Final, NotThreadSafe]
+    export let TcpDnsTransport = class implements transports.DnsTransport (
+        /// @brief The server.
+        export last server: SocketAddr;
+        /// @brief The longest the connection and each read may take (zero: no limit).
+        export last timeout: durations.Duration;
+
+        /// @brief A transport to `address` with a timeout.
+        export let init = func(address: SocketAddr, limit: durations.Duration) {
+            server = address;
+            timeout = limit;
+        };
+
+        /// @brief A stream transport.
+        export let is_stream = func -> bool => true;
+
+        /// @brief Connects, sends the framed query, reads the framed response and closes.
+        export let exchange = func(query: messages.Message) -> Result<messages.Message> {
+            last stream = tcp.connect(server.host_text(), server.port, timeout)?;
+            stream.read_timeout = timeout;
+            last outcome = exchange_on(stream.read, stream.write, query);
+            last closed = stream.close();
+            return match (closed) {
+                Result.Err(problem) => match (outcome) {
+                    Result.Ok(_) => Result<messages.Message>.Err(problem),
+                    Result.Err(_) => outcome,
+                },
+                Result.Ok(_) => outcome,
+            };
+        };
+
+        /// @brief Text such as "TcpDnsTransport(192.0.2.53:53)".
+        export let.override to_string = func -> string => "TcpDnsTransport(" + server.to_string() + ")";
+    );
+
+    /// @brief Encodes `query`, writes it framed, and reads and decodes one framed response.
+    #NoDiscard
+    export let exchange_on = func(read: func(int) -> Result<uint8[list]>, write: func(uint8[list]) -> Result<Unit>,
+        query: messages.Message) -> Result<messages.Message> {
+        write_framed(write, messages.encode(query)?)?;
+        return messages.decode(read_framed(read)?);
+    };
+
+    /// @brief Writes the two-byte length and the message in one write. A message above 65,535 bytes traps with
+    /// "invalid argument: message length".
+    export let write_framed = func(write: func(uint8[list]) -> Result<Unit>, message: uint8[list]) -> Result<Unit> =>
+        write(frame(message));
+
+    /// @brief The two-byte length followed by the message.
+    #NoDiscard
+    export let frame = func(message: uint8[list]) -> uint8[list] {
+        if (message.length > 65535) {
+            trap_with_message("invalid argument: message length");
+        }
+        last out: uint8[list] = new;
+        out.append((message.length / 256) as uint8);
+        out.append((message.length % 256) as uint8);
+        for (let b in message) {
+            out.append(b);
+        }
+        return out;
+    };
+
+    /// @brief Reads one framed message, however the bytes are split across reads. Err (Io UnexpectedEnd) when the
+    /// stream ends inside the length or the message.
+    #NoDiscard
+    export let read_framed = func(read: func(int) -> Result<uint8[list]>) -> Result<uint8[list]> {
+        last prefix = read_exactly(read, 2)?;
+        last length = (prefix[0] as int) * 256 + (prefix[1] as int);
+        return read_exactly(read, length);
+    };
+
+    /// @brief Exactly `count` bytes from `read`.
+    let read_exactly = func(read: func(int) -> Result<uint8[list]>, count: int) -> Result<uint8[list]> {
+        last out: uint8[list] = new;
+        while (out.length < count) {
+            last chunk = read(count - out.length)?;
+            if (chunk.length == 0) {
+                return Result<uint8[list]>.Err(errors.Error.Io { kind: errors.IoErrorKind.UnexpectedEnd,
+                    message: "dns stream ended after " + out.length.to_string() + " of " + count.to_string()
+                        + " bytes", path: "" });
+            }
+            for (let b in chunk) {
+                if (out.length < count) {
+                    out.append(b);
+                }
+            }
+        }
+        return Result<uint8[list]>.Ok(out);
+    };
+);

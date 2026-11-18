@@ -10,7 +10,7 @@ let.promote _ = import:Std.Crypto.StreamingDigest;
 /// `Sha256` runs the kernel of `Std.Digest.Sha256`, so both modules share one implementation; the others are
 /// Neura code. No hardware acceleration (SHA-NI, AVX-512) is used. Each digest checks the current
 /// Std.Crypto.Core.CryptoPolicy when it is created.
-/// @see [Std.Crypto.Hash.Sha2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Sha2)
+/// @see [Std.Crypto.Hash.Sha2](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Hash-Sha2)
 #Since("0.3.0")
 export let Sha2 = module (
     /// @brief A running SHA-224 digest. `finish` returns 28 bytes; an `update` or `finish` after it

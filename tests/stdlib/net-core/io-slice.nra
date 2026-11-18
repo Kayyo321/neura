@@ -1,0 +1,119 @@
+let errors = import:Std.Core.Error;
+let io = import:Std.Net.Core.IoSlice;
+let.promote _ = import:Std.Core.Result;
+let test = import:Std.Test;
+
+// IoSlice views over one backing list, IoSliceList, and the writev-style gather write with short writes.
+let IoSliceTests = module (
+    let bytes_of = func(text: string) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        for (let i = 0; i < text.byte_length; i++) {
+            bytes.append(text.byte_at(i));
+        }
+        return bytes;
+    };
+
+    let text_of = func(bytes: uint8[list]) -> string {
+        let [valid, text] = string.from_utf8(bytes);
+        test.assert(valid);
+        return text;
+    };
+
+    export let test_views = func {
+        last backing = bytes_of("GET /index.html HTTP/1.1");
+        last whole = io.of(backing);
+        test.assert_equal_int64(24, whole.length() as int64);
+        last target = whole.slice(4, 15);
+        test.assert_equal_string("/index.html", text_of(target.to_list()));
+        test.assert_equal_int64(4, target.offset() as int64);
+        test.assert_equal_int64(47, target.byte_at(0) as int64);
+        test.assert_equal_int64(6, target.index_of(46) as int64);
+        test.assert_equal_int64(-1, target.index_of(32) as int64);
+        last extension = target.slice(6, 11);
+        test.assert_equal_string(".html", text_of(extension.to_list()));
+        test.assert_equal_int64(10, extension.offset() as int64);
+        test.assert(target.starts_with(bytes_of("/index")));
+        test.assert(!target.starts_with(bytes_of("index")));
+        test.assert(!extension.starts_with(bytes_of(".html!")));
+        test.assert(extension.equals_bytes(bytes_of(".html")));
+        test.assert(!extension.equals_bytes(bytes_of(".htm")));
+        test.assert(extension.content_equals(io.of(bytes_of(".html"))));
+        test.assert(!extension.content_equals(io.of(bytes_of(".HTML"))));
+        test.assert_equal_int64(0, whole.slice(3, 3).length() as int64);
+        test.assert_equal_string("IoSlice(offset 4, length 11)", target.to_string());
+    };
+
+    // A view shares the backing list: a change to the list shows through, and to_list is a copy that does not.
+    export let test_no_copy_until_to_list = func {
+        last backing = bytes_of("abcdef");
+        last view = io.view(backing, 2, 3);
+        last copy = view.to_list();
+        backing[3] = 68;
+        test.assert_equal_string("cDe", text_of(view.to_list()));
+        test.assert_equal_string("cde", text_of(copy));
+        // backing() is the list itself, not a copy.
+        view.backing()[5] = 70;
+        test.assert_equal_int64(70, backing[5] as int64);
+        last appended = bytes_of(">");
+        view.append_to(appended);
+        test.assert_equal_string(">cDe", text_of(appended));
+    };
+
+    export let test_gather = func {
+        last list = new io.IoSliceList();
+        list.add(io.of(bytes_of("HTTP/1.1 200 OK\r\n")));
+        list.add(io.view(bytes_of("xxContent-Length: 0\r\nyy"), 2, 19));
+        list.add(io.of(bytes_of("")));
+        list.add(io.of(bytes_of("\r\n")));
+        test.assert_equal_int64(4, list.count() as int64);
+        test.assert_equal_int64(38, list.total_length() as int64);
+        test.assert_equal_string("HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n", text_of(list.gather()));
+        test.assert_equal_int64(38, io.total_length(list.slices()) as int64);
+        test.assert_equal_string(text_of(list.gather()), text_of(io.gather(list.slices())));
+        test.assert_equal_int64(2, list.get(3).length() as int64);
+        test.assert_equal_string("IoSliceList(4 slices, 38 bytes)", list.to_string());
+    };
+
+    // A writer that takes 1, 2 or 3 bytes per call in turn: the gather write resumes inside each view.
+    export let test_short_writes = func {
+        last list = new io.IoSliceList();
+        list.add(io.of(bytes_of("hello, ")));
+        list.add(io.of(bytes_of("")));
+        list.add(io.view(bytes_of("--world--"), 2, 5));
+        list.add(io.of(bytes_of("!")));
+        last sink: uint8[list] = new;
+        last calls: int[list] = new;
+        last writer = func(slice: io.IoSlice) -> Result<int> {
+            test.assert(slice.length() > 0);
+            last limit = calls.length % 3 + 1;
+            last taken = slice.length() < limit ? slice.length() : limit;
+            slice.slice(0, taken).append_to(sink);
+            calls.append(taken);
+            return Result<int>.Ok(taken);
+        };
+        last written = test.assert_ok<int>(list.write_to(writer));
+        test.assert_equal_int64(13, written as int64);
+        test.assert_equal_string("hello, world!", text_of(sink));
+        // "hello, " takes 1+2+3+1, "world" 2+3, "!" 1 (the counter keeps cycling).
+        test.assert_equal_int64(7, calls.length as int64);
+    };
+
+    export let test_writer_errors = func {
+        last parts: io.IoSlice[list] = new;
+        parts.append(io.of(bytes_of("abc")));
+        last zero = test.assert_err<int>(io.write_gather(parts, func(slice: io.IoSlice) -> Result<int> =>
+            Result<int>.Ok(0)));
+        test.assert(match (zero) {
+            errors.Error.Io { kind, message, path } => kind == errors.IoErrorKind.Other,
+            _ => false,
+        });
+        test.assert_err<int>(io.write_gather(parts, func(slice: io.IoSlice) -> Result<int> => Result<int>.Ok(4)));
+        last failure = errors.Error.Io { kind: errors.IoErrorKind.ConnectionReset, message: "reset", path: "" };
+        last passed = test.assert_err<int>(io.write_gather(parts, func(slice: io.IoSlice) -> Result<int> =>
+            Result<int>.Err(failure)));
+        test.assert(errors.equals(failure, passed));
+        last empty: io.IoSlice[list] = new;
+        test.assert_equal_int64(0, test.assert_ok<int>(io.write_gather(empty, func(slice: io.IoSlice) -> Result<int> =>
+            Result<int>.Ok(0))) as int64);
+    };
+);

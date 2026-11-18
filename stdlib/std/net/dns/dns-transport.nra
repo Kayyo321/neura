@@ -1,0 +1,154 @@
+let errors = import:Std.Core.Error;
+let messages = import:Std.Net.Dns.Message;
+let names = import:Std.Net.Dns.Name;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+/// @brief The contract of a DNS transport (a query message in, the response message out) and `MemoryTransport`,
+/// an in-memory authoritative fake for tests.
+///
+/// A transport carries one exchange and does not check the response: the resolver matches the ID and question.
+/// A datagram transport (`is_stream` false) may return a truncated response (TC set), after which the resolver
+/// retries over a stream transport. Implementations: `TcpDnsTransport` (RFC 1035 section 4.2.2, real),
+/// `UdpDnsTransport` (needs `neura.net.udp.*`), `DohTransport` (RFC 8484 over `Std.Net.Http.Client`),
+/// `DotTransport` (RFC 7858) and `DoqTransport` (RFC 9250).
+/// @see [Std.Net.Dns.DnsTransport](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Dns-DnsTransport)
+#Since("0.3.0")
+export let DnsTransport = module (
+    /// @brief Sends a query and returns the response.
+    export let DnsTransport = interface (
+        /// @brief One exchange. Err for a transport failure (timeout, connection error, undecodable reply).
+        #NoDiscard
+        let exchange = func(query: messages.Message) -> Result<messages.Message>;
+        /// @brief Whether the transport is a stream (TCP, TLS, HTTPS, QUIC), whose responses are never truncated
+        /// for size.
+        #NoDiscard
+        let is_stream = func -> bool;
+    );
+
+    /// @brief An authoritative in-memory server over a list of records, for tests.
+    ///
+    /// For a question it answers the records whose owner and type match; otherwise a CNAME at the owner (without
+    /// following it, so the resolver's chasing is exercised); otherwise NODATA when the owner has other records and
+    /// NXDOMAIN when it has none, each with the zone SOA (if set) in the authority section. Every response passes
+    /// through `Message.encode` and `decode`. As a datagram transport it truncates (TC set, sections emptied) a
+    /// response longer than 512 bytes, or the query's EDNS payload size. It can be told to fail the next exchanges
+    /// with TimedOut, to answer with a wrong ID, or to answer with a fixed RCODE.
+    #[Final, NotThreadSafe]
+    export let MemoryTransport = class implements DnsTransport (
+        /// @brief The zone data.
+        last zone: messages.ResourceRecord[list] = new;
+        /// @brief Whether this behaves as a stream.
+        last stream: bool;
+        /// @brief The name used in `to_string`.
+        export last label: string;
+        /// @brief The SOA record for negative answers.
+        let soa: Optional<messages.ResourceRecord> = Optional<messages.ResourceRecord>.None;
+        /// @brief The queries received, in order.
+        export last received: messages.Message[list] = new;
+        /// @brief Exchanges still to fail with TimedOut.
+        export let fail_next: int = 0;
+        /// @brief Exchanges still to answer with the query's ID plus one.
+        export let wrong_id_next: int = 0;
+        /// @brief An RCODE to answer every query with instead of the zone data; -1 for none.
+        export let forced_rcode: int = -1;
+
+        /// @brief A transport named `name`; a stream when `is_stream_transport` is true.
+        export let init = func(name: string, is_stream_transport: bool) {
+            label = name;
+            stream = is_stream_transport;
+        };
+
+        /// @brief Adds a record to the zone.
+        export let add = func(record: messages.ResourceRecord) {
+            zone.append(record);
+        };
+
+        /// @brief Sets the SOA record for negative answers (it must hold SOA data).
+        export let set_soa = func(record: messages.ResourceRecord) {
+            soa = Optional<messages.ResourceRecord>.Some(record);
+        };
+
+        /// @brief The number of queries received.
+        #NoDiscard
+        export let query_count = func -> int => received.length;
+
+        /// @brief Whether this behaves as a stream.
+        export let is_stream = func -> bool => stream;
+
+        /// @brief Answers from the zone.
+        export let exchange = func(query: messages.Message) -> Result<messages.Message> {
+            // Exercise the codec on the way in too.
+            last wire_query = messages.decode(messages.encode(query)?)?;
+            received.append(wire_query);
+            if (fail_next > 0) {
+                fail_next--;
+                return Result<messages.Message>.Err(errors.Error.Io { kind: errors.IoErrorKind.TimedOut,
+                    message: "dns exchange timed out", path: label });
+            }
+            last response = messages.response_to(wire_query, messages.RcodeNoError);
+            response.header.authoritative = true;
+            response.header.recursion_available = true;
+            if (wrong_id_next > 0) {
+                wrong_id_next--;
+                response.header.id = (wire_query.header.id + 1) % 65536;
+            }
+            if (forced_rcode >= 0) {
+                response.header.rcode = forced_rcode;
+            } else if (wire_query.questions.length == 1) {
+                answer(wire_query.question(), response);
+            }
+            let bytes = messages.encode(response)?;
+            last limit = match (wire_query.edns) {
+                Optional.Some(extra) => extra.udp_payload_size < messages.MaxUdpSize ? messages.MaxUdpSize
+                    : extra.udp_payload_size,
+                Optional.None => messages.MaxUdpSize,
+            };
+            if (!stream && bytes.length > limit) {
+                last cut = messages.response_to(wire_query, response.header.rcode);
+                cut.header.authoritative = true;
+                cut.header.recursion_available = true;
+                cut.header.truncated = true;
+                cut.header.id = response.header.id;
+                bytes = messages.encode(cut)?;
+            }
+            return messages.decode(bytes);
+        };
+
+        /// @brief Text such as "MemoryTransport(primary, 3 records)".
+        export let.override to_string = func -> string =>
+            "MemoryTransport(" + label + ", " + zone.length.to_string() + " records)";
+
+        /// @brief Fills the sections of `response` for `question`.
+        let answer = func(question: messages.Question, response: messages.Message) {
+            let owner_known = false;
+            for (let record in zone) {
+                if (record.name.equals(question.name)) {
+                    owner_known = true;
+                    if (record.rtype == question.qtype || question.qtype == messages.TypeAny) {
+                        response.answers.append(record);
+                    }
+                }
+            }
+            if (response.answers.length > 0) {
+                return;
+            }
+            for (let record in zone) {
+                if (record.name.equals(question.name) && record.rtype == messages.TypeCname) {
+                    response.answers.append(record);
+                    return;
+                }
+            }
+            if (!owner_known) {
+                response.header.rcode = messages.RcodeNameError;
+            }
+            match (soa) {
+                Optional.Some(record) => {
+                    response.authorities.append(record);
+                },
+                Optional.None => {
+                },
+            }
+        };
+    );
+);

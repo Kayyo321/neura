@@ -1,0 +1,279 @@
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let sse_event = import:Std.Net.Realtime.Sse.SseEvent;
+let.promote _ = import:Std.Net.Realtime.Sse.SseEvent;
+let strings = import:Std.Text.Strings;
+
+/// @brief The `text/event-stream` parser, incremental over byte chunks (WHATWG HTML sections 9.2.5 and 9.2.6).
+///
+/// The parser strips one leading UTF-8 byte order mark, splits lines at CRLF, LF or CR (a CR at the end of one
+/// chunk and an LF at the start of the next are one line end), and decodes each line as UTF-8, replacing
+/// ill-formed sequences with U+FFFD. It then follows the interpretation rules: a blank line dispatches, a line
+/// starting with a colon is a comment, the field name is the text before the first colon and one space after it
+/// is dropped, `data` appends to the data buffer, `event` sets the type, `id` sets the last event ID unless it
+/// contains U+0000, `retry` sets the reconnection time when it is all ASCII digits, and every other field is
+/// ignored. A block whose data buffer is empty dispatches no event but still updates `last_event_id`. A block
+/// not ended by a blank line is never dispatched.
+///
+/// Each byte is examined once, and a line is copied once, so the cost grows linearly with the input. A line
+/// longer than `max_line_bytes`, or an event whose data exceeds `max_event_bytes`, fails `feed` with a Custom
+/// error of code `sse.limit`; the stream should then be abandoned. A `retry` value above `MaxRetryMillis`
+/// saturates at it.
+/// @see [Std.Net.Realtime.Sse.Parser](https://github.com/Kayyo321/neura/wiki/Stdlib-Net-Realtime-Sse-Parser)
+#Since("0.3.0")
+export let Parser = module (
+    /// @brief The default longest line, in bytes: 1 MiB.
+    export const DefaultMaxLineBytes: int = 1048576;
+    /// @brief The default largest event data, in bytes: 16 MiB.
+    export const DefaultMaxEventBytes: int = 16777216;
+    /// @brief The largest reconnection time a `retry` field can set, in milliseconds (10^12, about 31.7
+    /// years); longer digit strings saturate here instead of overflowing.
+    export const MaxRetryMillis: int64 = 1000000000000;
+    /// @brief The error code of a limit failure.
+    export const LimitErrorCode: string = "sse.limit";
+
+    /// @brief An incremental event-stream parser holding the WHATWG data, event type and last event ID buffers.
+    #[Final, NotThreadSafe]
+    export let EventStreamParser = class (
+        /// @brief The longest line accepted, in bytes.
+        export last max_line_bytes: int;
+        /// @brief The largest data of one event accepted, in bytes.
+        export last max_event_bytes: int;
+        /// @brief The last event ID string: the ID buffer as of the most recent dispatch.
+        export let last_event_id: string;
+            | get: last_event_id;
+
+        /// @brief The reconnection time in milliseconds that the latest valid `retry` field set, if any.
+        export let reconnection_time: Optional<int64> = Optional<int64>.None;
+            | get: reconnection_time;
+
+        /// @brief The bytes of the current, unfinished line.
+        let line: uint8[list] = new;
+        /// @brief Whether an LF that follows immediately is the second half of a CRLF.
+        let after_cr: bool = false;
+        /// @brief Whether the byte-order-mark check at the start of the stream is done.
+        let bom_checked: bool = false;
+        /// @brief The first bytes held while checking for a byte order mark.
+        let head: uint8[list] = new;
+        /// @brief The values of the `data` lines of the current block.
+        let data_lines: string[list] = new;
+        /// @brief The total size of the data buffer of the current block, in bytes.
+        let data_size: int = 0;
+        /// @brief The event type buffer.
+        let type_buffer: string = "";
+        /// @brief The last event ID buffer.
+        let id_buffer: string;
+        /// @brief The reconnection time a `retry` field of the current block set.
+        let block_retry: Optional<int64> = Optional<int64>.None;
+        /// @brief Events dispatched during the current `feed`.
+        let ready: SseEvent[list] = new;
+        /// @brief The first limit failure of the current `feed`, if any.
+        let failure: string = "";
+
+        /// @brief A parser with the limits whose ID buffer starts as `initial_id` (empty for a new source).
+        /// A limit below 1 traps with "invalid argument: limit below 1".
+        export let init = func(initial_id: string, line_limit: int, event_limit: int) {
+            if (line_limit < 1 || event_limit < 1) {
+                trap_with_message("invalid argument: limit below 1");
+            }
+            max_line_bytes = line_limit;
+            max_event_bytes = event_limit;
+            last_event_id = initial_id;
+            id_buffer = initial_id;
+        };
+
+        /// @brief Parses the chunk and returns the events it completes, in order, or a `sse.limit` error.
+        #NoDiscard
+        export let feed = func(chunk: uint8[list]) -> Result<SseEvent[list]> {
+            ready = new;
+            for (let b in chunk) {
+                if (bom_checked) {
+                    take(b);
+                } else {
+                    check_bom(b);
+                }
+                if (failure.byte_length > 0) {
+                    last message = failure;
+                    failure = "";
+                    line = new;
+                    return Result<SseEvent[list]>.Err(errors.custom(LimitErrorCode, message));
+                }
+            }
+            last events = ready;
+            ready = new;
+            return Result<SseEvent[list]>.Ok(events);
+        };
+
+        /// @brief Ends the stream: the unfinished line and the undispatched block are discarded, and the parser
+        /// is ready for a new stream with the same last event ID.
+        export let finish = func {
+            line = new;
+            after_cr = false;
+            bom_checked = false;
+            head = new;
+            data_lines = new;
+            data_size = 0;
+            type_buffer = "";
+            id_buffer = last_event_id;
+            block_retry = Optional<int64>.None;
+        };
+
+        /// @brief Holds the first bytes until they are known to be, or not to be, a UTF-8 byte order mark
+        /// (0xEF 0xBB 0xBF).
+        let check_bom = func(b: uint8) {
+            head.append(b);
+            last n = head.length;
+            last expected: uint8 = n == 1 ? 239 : (n == 2 ? 187 : 191);
+            if (b != expected) {
+                bom_checked = true;
+                last held = head;
+                head = new;
+                for (let h in held) {
+                    take(h);
+                }
+                return;
+            }
+            if (n == 3) {
+                bom_checked = true;
+                head = new;
+            }
+        };
+
+        /// @brief Adds one byte of the stream after the byte order mark.
+        let take = func(b: uint8) {
+            if (b == 10) {
+                if (after_cr) {
+                    after_cr = false;
+                    return;
+                }
+                end_line();
+                return;
+            }
+            after_cr = false;
+            if (b == 13) {
+                after_cr = true;
+                end_line();
+                return;
+            }
+            if (line.length >= max_line_bytes) {
+                if (failure.byte_length == 0) {
+                    failure = "line longer than " + max_line_bytes.to_string() + " bytes";
+                }
+                return;
+            }
+            line.append(b);
+        };
+
+        /// @brief Processes the finished line.
+        let end_line = func {
+            if (line.length == 0) {
+                dispatch();
+                return;
+            }
+            last text = strings.from_bytes_lossy(line);
+            line = new;
+            if (text.byte_at(0) == 58) {
+                return;
+            }
+            last colon = strings.index_of(text, ":");
+            if (colon < 0) {
+                field(text, "");
+                return;
+            }
+            let start = colon + 1;
+            if (start < text.byte_length && text.byte_at(start) == 32) {
+                start = start + 1;
+            }
+            field(text.slice(0, colon), text.slice(start, text.byte_length));
+        };
+
+        /// @brief Processes one field; names compare exactly.
+        let field = func(name: string, value: string) {
+            if (name == "data") {
+                data_size = data_size + value.byte_length + 1;
+                if (data_size > max_event_bytes) {
+                    if (failure.byte_length == 0) {
+                        failure = "event data longer than " + max_event_bytes.to_string() + " bytes";
+                    }
+                    return;
+                }
+                data_lines.append(value);
+            } else if (name == "event") {
+                type_buffer = value;
+            } else if (name == "id") {
+                if (!has_nul(value)) {
+                    id_buffer = value;
+                }
+            } else if (name == "retry") {
+                match (parse_retry(value)) {
+                    Optional.Some(millis) => {
+                        reconnection_time = Optional<int64>.Some(millis);
+                        block_retry = Optional<int64>.Some(millis);
+                    },
+                    Optional.None => {},
+                }
+            }
+        };
+
+        /// @brief Dispatches the current block (WHATWG HTML section 9.2.6, "dispatch the event").
+        let dispatch = func {
+            last_event_id = id_buffer;
+            if (data_lines.length == 0) {
+                type_buffer = "";
+                block_retry = Optional<int64>.None;
+                return;
+            }
+            last kind = type_buffer.byte_length == 0 ? sse_event.DefaultType : type_buffer;
+            ready.append(new SseEvent(kind, strings.join(data_lines, "\n"), last_event_id, block_retry));
+            data_lines = new;
+            data_size = 0;
+            type_buffer = "";
+            block_retry = Optional<int64>.None;
+        };
+    );
+
+    /// @brief Whether the text contains U+0000.
+    let has_nul = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 0) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief A parser for a new stream with the default limits and no last event ID.
+    #NoDiscard
+    export let create = func -> EventStreamParser => new EventStreamParser("", DefaultMaxLineBytes, DefaultMaxEventBytes);
+
+    /// @brief A parser for a resumed stream: its ID buffer starts as `last_event_id`, so an event without an
+    /// `id` field keeps the cursor.
+    #NoDiscard
+    export let resuming = func(last_event_id: string) -> EventStreamParser =>
+        new EventStreamParser(last_event_id, DefaultMaxLineBytes, DefaultMaxEventBytes);
+
+    /// @brief The value of a `retry` field: one or more ASCII digits read in base ten, saturating at
+    /// `MaxRetryMillis`; `None` for anything else, including the empty value.
+    #[NoDiscard, Pure]
+    export let parse_retry = func(value: string) -> Optional<int64> {
+        last length = value.byte_length;
+        if (length == 0) {
+            return Optional<int64>.None;
+        }
+        let total: int64 = 0;
+        for (let i = 0; i < length; i++) {
+            last digit = value.byte_at(i);
+            if (digit < 48 || digit > 57) {
+                return Optional<int64>.None;
+            }
+            if (total < MaxRetryMillis) {
+                total = total * 10 + ((digit - 48) as int64);
+                if (total > MaxRetryMillis) {
+                    total = MaxRetryMillis;
+                }
+            }
+        }
+        return Optional<int64>.Some(total);
+    };
+);

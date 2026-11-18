@@ -1,0 +1,110 @@
+let errors = import:Std.Core.Error;
+let ips = import:Std.Net.Core.IpAddr;
+let v4 = import:Std.Net.Core.Ipv4Addr;
+let v6 = import:Std.Net.Core.Ipv6Addr;
+let net = import:Std.Net.Core.NetAddress;
+let sockets = import:Std.Net.Core.SocketAddr;
+let test = import:Std.Test;
+
+// IpAddr (either family) and SocketAddr (address and port, RFC 5952 section 6 bracket form).
+let SocketAddrTests = module (
+    let ip = func(text: string) -> ips.IpAddr => test.assert_ok<ips.IpAddr>(ips.parse(text));
+
+    let socket = func(text: string) -> sockets.SocketAddr => test.assert_ok<sockets.SocketAddr>(sockets.parse(text));
+
+    let kind_of = func(e: errors.Error) -> errors.ParseErrorKind => match (e) {
+        errors.Error.Parse { kind, offset, message } => kind,
+        _ => errors.ParseErrorKind.Empty,
+    };
+
+    let offset_of = func(e: errors.Error) -> int => match (e) {
+        errors.Error.Parse { kind, offset, message } => offset,
+        _ => -100,
+    };
+
+    // Canonical texts as printed by python3 -I -c "import ipaddress; print(ipaddress.ip_address(t))" for t in
+    // 192.0.2.1, 2001:DB8:0:0::1, 0:0:0:0:0:ffff:192.0.2.1, fe80::1%eth0 (Python 3.13.5): 192.0.2.1, 2001:db8::1,
+    // ::ffff:192.0.2.1 (the RFC 5952 section 5 example), fe80::1%eth0.
+    export let test_ip_addr = func {
+        test.assert_equal_string("192.0.2.1", ips.to_string(ip("192.0.2.1")));
+        test.assert_equal_string("2001:db8::1", ips.to_string(ip("2001:DB8:0:0::1")));
+        test.assert_equal_string("::ffff:192.0.2.1", ips.to_string(ip("0:0:0:0:0:ffff:192.0.2.1")));
+        test.assert_equal_string("fe80::1%eth0", ips.to_string(ip("fe80::1%eth0")));
+        test.assert(ips.family(ip("192.0.2.1")) == net.AddressFamily.Ipv4);
+        test.assert(ips.family(ip("::")) == net.AddressFamily.Ipv6);
+        test.assert_equal_int64(4, ips.octets(ip("192.0.2.1")).length as int64);
+        test.assert_equal_int64(16, ips.octets(ip("::1")).length as int64);
+        test.assert(ips.equals(ip("10.0.0.1"), ips.IpAddr.V4(v4.of(10, 0, 0, 1))));
+        test.assert(!ips.equals(ip("10.0.0.1"), ip("::ffff:10.0.0.1")));
+        test.assert(!ips.equals(ip("::1"), ip("::1%lo")));
+        test.assert_equal_int64(ips.hash(ip("::1")) as int64, ips.hash(ip("0::1")) as int64);
+        test.assert(ips.is_loopback(ip("127.8.9.10")));
+        test.assert(ips.is_loopback(ip("::1")));
+        test.assert(!ips.is_loopback(ip("::ffff:127.0.0.1")));
+        test.assert(kind_of(test.assert_err<ips.IpAddr>(ips.parse(""))) == errors.ParseErrorKind.Empty);
+        test.assert_err<ips.IpAddr>(ips.parse("1.2.3"));
+        test.assert_err<ips.IpAddr>(ips.parse("1::2::3"));
+        test.assert_err<ips.IpAddr>(ips.parse("example.com"));
+    };
+
+    // Text forms from RFC 5952 section 6 ("[2001:db8::1]:80") and RFC 3986-style host:port for IPv4.
+    export let test_socket_text = func {
+        last a = socket("192.0.2.1:80");
+        test.assert_equal_string("192.0.2.1:80", a.to_string());
+        test.assert_equal_string("192.0.2.1", a.host_text());
+        test.assert_equal_int64(80, a.port as int64);
+        test.assert(a.family() == net.AddressFamily.Ipv4);
+        last b = socket("[2001:db8::1]:80");
+        test.assert_equal_string("[2001:db8::1]:80", b.to_string());
+        test.assert_equal_string("2001:db8::1", b.host_text());
+        test.assert(b.family() == net.AddressFamily.Ipv6);
+        test.assert_equal_string("[2001:db8::1]:443", socket("[2001:0DB8:0:0:0:0:0:1]:443").to_string());
+        test.assert_equal_string("[fe80::1%eth0]:8080", socket("[fe80::1%eth0]:8080").to_string());
+        test.assert_equal_string("fe80::1%eth0", socket("[fe80::1%eth0]:8080").host_text());
+        test.assert_equal_string("[::ffff:192.0.2.1]:0", socket("[::ffff:192.0.2.1]:0").to_string());
+        test.assert_equal_string("0.0.0.0:65535", socket("0.0.0.0:65535").to_string());
+        test.assert_equal_string("127.0.0.1:9", sockets.of_v4(v4.localhost(), 9).to_string());
+        test.assert_equal_string("[::1]:443", sockets.of_v6(v6.localhost(), 443).to_string());
+    };
+
+    export let test_socket_equality = func {
+        test.assert(socket("[2001:db8::1]:80").equals(socket("[2001:DB8::0:1]:80")));
+        test.assert(!socket("[2001:db8::1]:80").equals(socket("[2001:db8::1]:81")));
+        test.assert(!socket("10.0.0.1:80").equals(socket("[::ffff:10.0.0.1]:80")));
+        test.assert(!socket("10.0.0.1:80").equals(v4.of(10, 0, 0, 1)));
+        test.assert_equal_int64(socket("[::1]:80").hash_code() as int64,
+            sockets.of_v6(v6.localhost(), 80).hash_code() as int64);
+    };
+
+    export let test_socket_rejections = func {
+        test.assert(kind_of(test.assert_err<sockets.SocketAddr>(sockets.parse(""))) == errors.ParseErrorKind.Empty);
+        last no_port = test.assert_err<sockets.SocketAddr>(sockets.parse("192.0.2.1"));
+        test.assert(kind_of(no_port) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(9, offset_of(no_port) as int64);
+        last empty_port = test.assert_err<sockets.SocketAddr>(sockets.parse("192.0.2.1:"));
+        test.assert(kind_of(empty_port) == errors.ParseErrorKind.UnexpectedEnd);
+        last big = test.assert_err<sockets.SocketAddr>(sockets.parse("192.0.2.1:65536"));
+        test.assert(kind_of(big) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal_int64(10, offset_of(big) as int64);
+        test.assert(kind_of(test.assert_err<sockets.SocketAddr>(sockets.parse("192.0.2.1:100000")))
+            == errors.ParseErrorKind.OutOfRange);
+        last zero = test.assert_err<sockets.SocketAddr>(sockets.parse("192.0.2.1:080"));
+        test.assert(kind_of(zero) == errors.ParseErrorKind.InvalidCharacter);
+        test.assert(kind_of(test.assert_err<sockets.SocketAddr>(sockets.parse("192.0.2.1:8a")))
+            == errors.ParseErrorKind.InvalidCharacter);
+        // RFC 5952 section 6 lists 2001:db8::1:80 as ambiguous; without brackets it is not a socket address.
+        test.assert_err<sockets.SocketAddr>(sockets.parse("2001:db8::1:80"));
+        last unclosed = test.assert_err<sockets.SocketAddr>(sockets.parse("[2001:db8::1:80"));
+        test.assert(kind_of(unclosed) == errors.ParseErrorKind.Syntax);
+        last bare = test.assert_err<sockets.SocketAddr>(sockets.parse("[::1]"));
+        test.assert(kind_of(bare) == errors.ParseErrorKind.Syntax);
+        test.assert_equal_int64(5, offset_of(bare) as int64);
+        last bad_v6 = test.assert_err<sockets.SocketAddr>(sockets.parse("[1::2::3]:80"));
+        test.assert_equal_int64(5, offset_of(bad_v6) as int64);
+        last bad_v4 = test.assert_err<sockets.SocketAddr>(sockets.parse("1.2.3.256:80"));
+        test.assert(kind_of(bad_v4) == errors.ParseErrorKind.OutOfRange);
+        test.assert_equal_int64(6, offset_of(bad_v4) as int64);
+        test.assert_err<sockets.SocketAddr>(sockets.parse("[192.0.2.1]:80"));
+        test.assert_err<sockets.SocketAddr>(sockets.parse("[::1] :80"));
+    };
+);
