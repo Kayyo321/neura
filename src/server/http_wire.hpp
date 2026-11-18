@@ -100,4 +100,14 @@ private:
     std::uint64_t decoded_bytes_ = 0;
 };
 
+// The head checks of RequestDecoder for a head that arrived in another
+// framing (HTTP/2): at most 100 fields (431), exactly one valid `host`
+// (400), a known method (501), an origin-form or "*" target (400),
+// Content-Length (400; over S-6, 413) and Expect (417). Returns 0 or the
+// status to answer. On success a Content-Length sets `framing` to
+// ContentLength and `content_length`, repeated equal lengths become one
+// field, and `expect_continue` is set. Names must already be lowercase;
+// HTTP/2 framing has refused Transfer-Encoding, Connection and Upgrade.
+int check_request_head(RequestHead& head, const RequestLimits& limits);
+
 } // namespace neura::server::http

@@ -35,7 +35,7 @@ A1–A6 remain pending. The [target matrix](#targets) identifies where each plat
 | Backend | `server` | The server image, the server host, the TLS and SQL providers the manifest selects | Foreground, or under a service manager the operator chooses. |
 | Shared package | none | Nothing by itself: its sources or NeuraIR are compiled into each target that imports it | Wherever its imports are available. |
 
-Outside 0.3.0: a native-widget renderer, mobile, server-side rendering and hydration, replacing live Neura state while it runs, HTTP/2 and HTTP/3 termination, ORM proxies, SQL syntax in the language, a generic IPC or `invoke(any)` bridge, and an application updater.
+Outside 0.3.0: a native-widget renderer, mobile, server-side rendering and hydration, replacing live Neura state while it runs, HTTP/3 termination (HTTP/2 is in 0.3.0 by the owner's amendment of decision 9; see [Backend030](Backend030.md#http2-and-decision-9)), ORM proxies, SQL syntax in the language, a generic IPC or `invoke(any)` bridge, and an application updater.
 
 ### Browsers
 
@@ -254,6 +254,7 @@ Every limit has a default, a manifest key under `[limits]` of the target ([Proje
 | S-11 | Rows of one materialized page | 1,000 | 1,000,000 | `Err(TooLarge)`; nothing is returned |
 | S-12 | Seconds to drain at shutdown, and of grace before a worker is killed | 30; 5 | 3,600; 60 | Remaining workers are killed and reported |
 | S-13 | Bytes of one log record, and records buffered | 16 KiB; 4,096 | 1 MiB; 1,000,000 | The record is truncated with a marker; the oldest is dropped and counted |
+| S-14 | Concurrent HTTP/2 streams on one connection (`SETTINGS_MAX_CONCURRENT_STREAMS`) | 100 | 1,000 | The stream is refused with `RST_STREAM(REFUSED_STREAM)`; each admitted stream still counts against S-1 and S-3 |
 | D-1 | Windows open | 8 | 64 | `Err` from `open_window` |
 | D-2 | Bridge calls in flight for one window | 32 | 1,024 | `Err(Busy)` |
 | D-3 | Bytes of one bridge frame | C-2 | C-2 | The frame is refused and the call fails with `TooLarge` |

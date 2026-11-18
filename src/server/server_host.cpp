@@ -11,6 +11,7 @@
 #include "server/request_worker.hpp"
 #include "server/sql_host.hpp"
 #include "server/worker_messages.hpp"
+#include "server/worker_zygote.hpp"
 #include "util/sha256.hpp"
 
 #include <algorithm>
@@ -42,6 +43,10 @@
 #include <unistd.h>
 #include <vector>
 
+#ifdef __linux__
+#include <sys/syscall.h>
+#endif
+
 #ifdef __APPLE__
 #include <mach-o/dyld.h>
 #endif
@@ -60,12 +65,15 @@ using worker::FrameKind;
 constexpr std::string_view usage =
     "usage: neura-server-host [options] <image.nvr>\n"
     "\n"
-    "Serves a server image over HTTP/1.1 (docs/runtime/ServerHost.md). Each request runs in a fresh\n"
-    "worker process that executes the whole image once.\n"
+    "Serves a server image over HTTP/1.1, and HTTP/2 in builds with it (docs/runtime/ServerHost.md).\n"
+    "Each request runs in a fresh worker process that executes the whole image once.\n"
     "\n"
     "  --listen <address>:<port>      plain HTTP listener (repeatable; port 0 asks for one)\n"
     "  --tls-listen <address>:<port>  HTTPS listener; needs --cert and --key (repeatable)\n"
     "  --cert <file> --key <file>     PEM certificate chain and private key, reread on SIGHUP\n"
+    "  --no-http2                     TLS listeners offer only http/1.1 (default: h2 and http/1.1)\n"
+    "  --h2c                          plain listeners also accept HTTP/2 with prior knowledge\n"
+    "  --max-streams N                S-14, concurrent HTTP/2 streams per connection (default 100)\n"
     "  --admin-listen <address>:<port> admin listener for GET /livez, /readyz and /metrics\n"
     "                                 (default: none; give it a loopback address)\n"
     "  --config <key>=<value>         a configuration value for neura.app.config (repeatable)\n"
@@ -84,6 +92,8 @@ constexpr std::string_view usage =
     "                                 past it the execution traps and the request is answered 500\n"
     "  --worker-tier 0|1|2            highest execution tier of a worker (default: the runner's, 2)\n"
     "  --worker-jit off|on|auto       native compilation of a worker's tier-2 regions (default auto)\n"
+    "  --worker-start zygote|exec     fork workers from a process that loaded the image once (zygote,\n"
+    "                                 the default on Linux), or start each with exec\n"
     "  --allow-fs[=prefix,...], --allow-net, --allow-env\n"
     "                                 grant the workers that group (default: none)\n"
     "  --record-dir <directory>       record each request's host requests to <id>.trace\n"
@@ -114,6 +124,7 @@ struct HostOptions {
     neura::nvm::Capabilities capabilities;
     std::optional<fs::path> record_directory;
     bool startup_check = true;
+    bool h2c = false;
     std::optional<std::uint64_t> max_steps;
     std::optional<std::uint8_t> worker_tier;
     std::optional<std::string> worker_jit;
@@ -122,6 +133,7 @@ struct HostOptions {
     std::vector<std::string> sql_pools;
     fs::path config_base = fs::current_path();
     bool migrate_only = false;
+    bool zygote = zygote_supported();
 };
 
 std::uint64_t parse_count(std::string_view option, std::string_view text, std::uint64_t low, std::uint64_t high) {
@@ -232,6 +244,13 @@ HostOptions read_options(int argc, char** argv) {
             auto mode = value_of(i, arg, "--worker-jit");
             if (mode != "off" && mode != "on" && mode != "auto") throw std::runtime_error("--worker-jit expects off, on or auto");
             options.worker_jit = std::move(mode);
+        } else if (is(arg, "--worker-start")) {
+            const auto mode = value_of(i, arg, "--worker-start");
+            if (mode != "zygote" && mode != "exec") throw std::runtime_error("--worker-start expects zygote or exec");
+            if (mode == "zygote" && !zygote_supported()) {
+                throw std::runtime_error("--worker-start zygote needs Linux");
+            }
+            options.zygote = mode == "zygote";
         } else if (is(arg, "--max-steps")) {
             options.max_steps = parse_count(arg, value_of(i, arg, "--max-steps"), 1, std::uint64_t{1} << 62);
         } else if (arg == "--allow-fs") {
@@ -257,6 +276,14 @@ HostOptions read_options(int argc, char** argv) {
             options.sql_pools.push_back(value_of(i, arg, "--sql-pool"));
         } else if (i == 1 && arg == "migrate") {
             options.migrate_only = true;
+        } else if (arg == "--no-http2") {
+            options.limits.http.http2.tls = false;
+        } else if (arg == "--h2c") {
+            options.h2c = true;
+            options.limits.http.http2.cleartext = true;
+        } else if (is(arg, "--max-streams")) {
+            options.limits.http.http2.max_concurrent_streams =
+                static_cast<std::uint32_t>(parse_count(arg, value_of(i, arg, "--max-streams"), 1, 1000));
         } else if (arg.starts_with('-')) {
             throw std::runtime_error("unknown option: " + std::string(arg) + "\n" + std::string(usage));
         } else if (!options.image.empty()) {
@@ -266,6 +293,9 @@ HostOptions read_options(int argc, char** argv) {
         }
     }
     if (options.image.empty()) throw std::runtime_error(std::string(usage));
+#ifndef NEURA_SERVER_HTTP2_ENABLED
+    if (options.h2c) throw std::runtime_error("--h2c: this server build has no HTTP/2");
+#endif
     if (options.endpoints.empty() && !options.migrate_only) {
         throw std::runtime_error("at least one --listen or --tls-listen is required");
     }
@@ -322,6 +352,16 @@ public:
         nvr_check(bytes);
         std::random_device device;
         id_prefix_ = (static_cast<std::uint64_t>(device()) << 32) | device();
+        if (const char* text = std::getenv("NEURA_SERVER_TEST_REFUSE_ASSIGN")) {
+            refusals_left_ = std::strtol(text, nullptr, 10);
+        }
+        worker_arguments_ = worker_arguments();
+        if (options_.zygote) start_zygote();
+        if (::pipe(wake_) != 0) throw std::runtime_error("cannot create the reaper's wake pipe");
+        for (const int end : wake_) {
+            ::fcntl(end, F_SETFD, FD_CLOEXEC);
+            ::fcntl(end, F_SETFL, ::fcntl(end, F_GETFL) | O_NONBLOCK);
+        }
         reaper_ = std::jthread([this](std::stop_token stop) { reap(stop); });
         if (options_.ready_workers > 0) spawner_ = std::jthread([this](std::stop_token stop) { keep_ready(stop); });
     }
@@ -330,8 +370,15 @@ public:
         spawner_.request_stop();
         ready_changed_.notify_all();
         if (spawner_.joinable()) spawner_.join();
-        std::lock_guard lock(ready_mutex_);
-        ready_.clear(); // Closing the channels ends the ready workers.
+        {
+            std::lock_guard lock(ready_mutex_);
+            ready_.clear(); // Closing the channels ends the ready workers.
+        }
+        reaper_.request_stop();
+        wake_reaper();
+        if (reaper_.joinable()) reaper_.join();
+        std::lock_guard lock(zygote_mutex_);
+        zygote_.reset();
     }
 
     // The startup check (Backend030): one worker runs `serve`, which answers
@@ -386,10 +433,16 @@ public:
             write_buffered(writer, unavailable());
             return;
         }
+        // The S-1 slot is held until the request's worker has been reaped:
+        // the reaper releases it then. Without a worker it is released here.
+        bool slot_held = true;
         struct Release {
             Host& host;
-            ~Release() { host.release(); }
-        } release{*this};
+            bool& held;
+            ~Release() {
+                if (held) host.release();
+            }
+        } release{*this, slot_held};
 
         neura::nvm::ServerRequest request;
         request.request_id = next_id();
@@ -405,20 +458,31 @@ public:
         request.deadline = std::chrono::duration_cast<std::chrono::nanoseconds>(
                                std::chrono::system_clock::now().time_since_epoch()).count() + left.count();
 
-        // A worker that provably ran nothing (its channel ended before it
-        // took the Assign) is replaced once; no request is run twice.
+        // A worker that provably ran nothing (its channel refused the
+        // Assign) is replaced once; no request is run twice. The refused
+        // worker is killed and reaped before its replacement starts, so the
+        // slot never stands for two processes.
         Outcome outcome;
         std::optional<Worker> worker;
+        // An HTTP/2 client that resets the stream cancels the request: the
+        // writer calls this, and the worker is killed at once.
+        std::atomic<bool> cancelled{false};
         for (int attempt = 0; attempt < 2; ++attempt) {
             worker = attempt == 0 ? take_worker() : spawn();
             if (!worker) break;
+            writer.on_cancel([pid = worker->pid, &cancelled] {
+                cancelled = true;
+                ::kill(pid, SIGKILL);
+            });
             outcome = exchange(*worker, request, &body, writer, deadline);
-            if (!outcome.unassigned) break;
-            log(3, request.request_id, "a ready worker had ended before its assignment; using a new one");
-            ++metrics_.retried;
-            ::kill(worker->pid, SIGKILL);
-            worker->channel.reset();
-            hand_to_reaper(worker->pid, {}, false);
+            writer.on_cancel({});
+            // A request the client cancelled is not given a new worker.
+            if (!outcome.unassigned || cancelled.load()) break;
+            log(attempt == 0 ? 3 : 4, request.request_id,
+                attempt == 0 ? "a worker refused its assignment; using a new one"
+                             : "the new worker refused its assignment too");
+            if (attempt == 0) ++metrics_.retried;
+            discard(*worker);
             worker.reset();
         }
         if (!worker) {
@@ -436,7 +500,12 @@ public:
             ::kill(pid, SIGKILL);
         }
         worker->channel.reset();
-        hand_to_reaper(pid, request.request_id, outcome.done);
+        hand_to_reaper(pid, request.request_id, outcome.done, true);
+        slot_held = false;
+        if (cancelled.load()) {
+            log(3, request.request_id, "the client cancelled the request; worker killed");
+            return;
+        }
         if (outcome.timed_out) {
             ++metrics_.timeouts;
             log(4, request.request_id, "request deadline passed; worker killed");
@@ -500,8 +569,12 @@ public:
     void response_written() { --in_flight_; }
 
     void kill_all() {
-        std::lock_guard lock(pids_mutex_);
-        for (const auto pid : live_) ::kill(pid, SIGKILL);
+        {
+            std::lock_guard lock(pids_mutex_);
+            for (const auto pid : live_) ::kill(pid, SIGKILL);
+        }
+        std::lock_guard lock(zygote_mutex_);
+        if (zygote_) ::kill(zygote_->pid(), SIGKILL);
     }
 
 private:
@@ -599,23 +672,9 @@ private:
         slot_free_.notify_one();
     }
 
-    std::optional<Worker> spawn() {
-        int pair[2];
-#ifdef SOCK_CLOEXEC
-        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) != 0) return std::nullopt;
-#else
-        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return std::nullopt;
-        ::fcntl(pair[0], F_SETFD, FD_CLOEXEC);
-        ::fcntl(pair[1], F_SETFD, FD_CLOEXEC);
-#endif
-        // dup2 onto the channel descriptor clears close-on-exec, except when
-        // the descriptor is already that number.
-        if (pair[1] == worker_channel_descriptor) {
-            const int moved = ::fcntl(pair[1], F_DUPFD_CLOEXEC, worker_channel_descriptor + 1);
-            ::close(pair[1]);
-            pair[1] = moved;
-        }
-        std::vector<std::string> arguments{executable_.string(), "--worker"};
+    // The worker's options after --worker or --zygote, without the image.
+    std::vector<std::string> worker_arguments() const {
+        std::vector<std::string> arguments;
         const auto& caps = options_.capabilities;
         if (caps.fs) {
             std::string option = "--allow-fs";
@@ -633,20 +692,84 @@ private:
         if (options_.worker_tier) arguments.push_back("--tier=" + std::to_string(*options_.worker_tier));
         if (options_.worker_jit) arguments.push_back("--jit=" + *options_.worker_jit);
         arguments.push_back(options_.image.string());
+        return arguments;
+    }
+
+    // Called with zygote_mutex_ held, or before any other thread runs.
+    void start_zygote() {
+        std::string problem;
+        zygote_ = ZygoteClient::start(executable_, worker_arguments_, problem);
+        if (!zygote_) log(4, {}, "the worker zygote did not start; starting workers with exec", {{"reason", problem}});
+    }
+
+    // The test hook NEURA_SERVER_TEST_REFUSE_ASSIGN=N: the first N workers
+    // started refuse their Assign (WorkerOptions::refuse_assign).
+    bool take_refusal() {
+        auto left = refusals_left_.load();
+        while (left > 0 && !refusals_left_.compare_exchange_weak(left, left - 1)) {}
+        return left > 0;
+    }
+
+    // A worker forked by the zygote, or -1. A zygote that has ended is
+    // replaced, up to three times; after that, or when a new one does not
+    // start, workers are started with exec.
+    pid_t fork_from_zygote(int channel, bool refuse) {
+        std::lock_guard lock(zygote_mutex_);
+        const unsigned char flags = refuse ? ZygoteClient::refuse_assign_flag : 0;
+        for (;;) {
+            if (!zygote_) return -1;
+            const pid_t pid = zygote_->fork_worker(channel, flags);
+            if (pid > 0 || !zygote_->failed()) return pid;
+            zygote_.reset();
+            if (++zygote_restarts_ > 3) {
+                log(4, {}, "the worker zygote ended again; starting workers with exec from now on");
+                return -1;
+            }
+            log(4, {}, "the worker zygote ended; starting a new one");
+            start_zygote();
+        }
+    }
+
+    pid_t exec_worker(int channel, bool refuse) {
+        std::vector<std::string> arguments{executable_.string(), "--worker"};
+        if (refuse) arguments.emplace_back("--test-refuse-assign");
+        arguments.insert(arguments.end(), worker_arguments_.begin(), worker_arguments_.end());
         std::vector<char*> argv;
         for (auto& argument : arguments) argv.push_back(argument.data());
         argv.push_back(nullptr);
 
         posix_spawn_file_actions_t actions;
         posix_spawn_file_actions_init(&actions);
-        posix_spawn_file_actions_adddup2(&actions, pair[1], worker_channel_descriptor);
+        posix_spawn_file_actions_adddup2(&actions, channel, worker_channel_descriptor);
         // The image's console output goes to the host's standard error.
         posix_spawn_file_actions_adddup2(&actions, 2, 1);
         pid_t pid = -1;
         const int error = ::posix_spawn(&pid, executable_.c_str(), &actions, nullptr, argv.data(), environ);
         posix_spawn_file_actions_destroy(&actions);
+        return error == 0 ? pid : -1;
+    }
+
+    std::optional<Worker> spawn() {
+        int pair[2];
+#ifdef SOCK_CLOEXEC
+        if (::socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair) != 0) return std::nullopt;
+#else
+        if (::socketpair(AF_UNIX, SOCK_STREAM, 0, pair) != 0) return std::nullopt;
+        ::fcntl(pair[0], F_SETFD, FD_CLOEXEC);
+        ::fcntl(pair[1], F_SETFD, FD_CLOEXEC);
+#endif
+        // dup2 onto the channel descriptor clears close-on-exec, except when
+        // the descriptor is already that number.
+        if (pair[1] == worker_channel_descriptor) {
+            const int moved = ::fcntl(pair[1], F_DUPFD_CLOEXEC, worker_channel_descriptor + 1);
+            ::close(pair[1]);
+            pair[1] = moved;
+        }
+        const bool refuse = take_refusal();
+        pid_t pid = fork_from_zygote(pair[1], refuse);
+        if (pid < 0) pid = exec_worker(pair[1], refuse);
         ::close(pair[1]);
-        if (error != 0) {
+        if (pid < 0) {
             ::close(pair[0]);
             return std::nullopt;
         }
@@ -661,12 +784,24 @@ private:
         hello.identity = worker::server_identity(image_digest_);
         if (worker.channel->greet(hello, Clock::now() + 10s) != Channel::Status::Ok) {
             log(4, {}, "request worker failed its greeting");
-            ::kill(pid, SIGKILL);
-            worker.channel.reset();
-            hand_to_reaper(pid, {}, false);
+            discard(worker);
             return std::nullopt;
         }
         return worker;
+    }
+
+    // Kills a worker that ran nothing and waits for it, here: it holds no
+    // slot of its own, so it is gone before anything replaces it.
+    void discard(Worker& worker) {
+        ::kill(worker.pid, SIGKILL);
+        worker.channel.reset();
+        int status = 0;
+        while (::waitpid(worker.pid, &status, 0) < 0 && errno == EINTR) {}
+        {
+            std::lock_guard lock(pids_mutex_);
+            live_.erase(worker.pid);
+        }
+        ++metrics_.abnormal;
     }
 
     // A ready worker, or a new one. A ready worker whose channel is readable
@@ -687,9 +822,7 @@ private:
             if (::poll(&entry, 1, 0) == 0) return worker;
             log(3, {}, "a ready worker had ended; discarding it");
             ++metrics_.retried;
-            ::kill(worker->pid, SIGKILL);
-            worker->channel.reset();
-            hand_to_reaper(worker->pid, {}, false);
+            discard(*worker);
         }
     }
 
@@ -979,7 +1112,8 @@ private:
             ready = ready_.size();
         }
         add("neura_http_in_flight", "gauge", "Requests being answered.", {{"", in_flight_.load()}});
-        add("neura_workers_running", "gauge", "Requests holding a worker slot (S-1).", {{"", running}});
+        add("neura_workers_running", "gauge", "Worker slots in use (S-1): a slot is held until its worker is reaped.",
+            {{"", running}});
         add("neura_workers_ready", "gauge", "Started workers waiting for a request (S-2).", {{"", ready}});
         add("neura_requests_waiting", "gauge", "Requests waiting for a worker (S-3).", {{"", waiting}});
         add("neura_ready", "gauge", "1 after the startup check while not draining.",
@@ -996,59 +1130,105 @@ private:
         pid_t pid;
         std::string id;
         bool answered;
+        bool slot; // Holds an S-1 slot until it is reaped.
         Clock::time_point kill_at;
+        int pidfd = -1;
+        bool killed = false;
     };
 
-    void hand_to_reaper(pid_t pid, std::string id, bool answered) {
+    void hand_to_reaper(pid_t pid, std::string id, bool answered, bool slot) {
         {
             std::lock_guard lock(reap_mutex_);
-            exiting_.push_back({pid, std::move(id), answered, Clock::now() + options_.grace});
+            exiting_.push_back({pid, std::move(id), answered, slot, Clock::now() + options_.grace});
         }
-        reap_changed_.notify_one();
+        wake_reaper();
     }
 
-    // Waits for every finished worker. A worker that answered and does not
-    // exit within the grace period is killed. Traps and failures are logged.
+    void wake_reaper() {
+        const char byte = 1;
+        (void)!::write(wake_[1], &byte, 1); // A full pipe already wakes it.
+    }
+
+    // A descriptor that becomes readable when `pid` exits, or -1 where the
+    // system has none (the reaper then looks every 2 ms).
+    static int open_pidfd(pid_t pid) {
+#if defined(__linux__) && defined(SYS_pidfd_open)
+        const long descriptor = ::syscall(SYS_pidfd_open, pid, 0);
+        if (descriptor >= 0) ::fcntl(static_cast<int>(descriptor), F_SETFD, FD_CLOEXEC);
+        return descriptor >= 0 ? static_cast<int>(descriptor) : -1;
+#else
+        (void)pid;
+        return -1;
+#endif
+    }
+
+    // Waits for every finished worker as it exits (on its pidfd), releases
+    // the S-1 slot it held, and logs traps and failures. A worker that does
+    // not exit within the grace period is killed.
     void reap(std::stop_token stop) {
+        std::vector<Exiting> pending;
+        std::vector<pollfd> watched;
         for (;;) {
-            std::vector<Exiting> batch;
             {
-                std::unique_lock lock(reap_mutex_);
-                reap_changed_.wait_for(lock, 20ms, [&] { return stop.stop_requested() || !exiting_.empty(); });
-                if (stop.stop_requested() && exiting_.empty()) return;
-                batch.swap(exiting_);
-            }
-            std::vector<Exiting> pending;
-            for (auto& entry : batch) {
-                int status = 0;
-                const auto done = ::waitpid(entry.pid, &status, WNOHANG);
-                if (done == 0) {
-                    if (Clock::now() >= entry.kill_at) ::kill(entry.pid, SIGKILL);
+                std::lock_guard lock(reap_mutex_);
+                for (auto& entry : exiting_) {
+                    entry.pidfd = open_pidfd(entry.pid);
                     pending.push_back(std::move(entry));
-                    continue;
                 }
-                {
-                    std::lock_guard lock(pids_mutex_);
-                    live_.erase(entry.pid);
-                }
-                if (done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0)) ++metrics_.abnormal;
-                if (done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0) && !entry.id.empty()) {
-                    log(entry.answered ? 3 : 4, entry.id, "request worker ended abnormally",
-                        {{"worker_exit", describe_exit(status)}});
-                }
+                exiting_.clear();
             }
-            if (!pending.empty()) {
-                std::unique_lock lock(reap_mutex_);
-                exiting_.insert(exiting_.end(), std::make_move_iterator(pending.begin()),
-                                std::make_move_iterator(pending.end()));
-                if (stop.stop_requested()) {
-                    for (auto& entry : exiting_) ::kill(entry.pid, SIGKILL);
+            const bool stopping = stop.stop_requested();
+            if (stopping && pending.empty()) return;
+            const auto now = Clock::now();
+            std::erase_if(pending, [&](Exiting& entry) {
+                if (!finish(entry)) {
+                    if (!entry.killed && (stopping || now >= entry.kill_at)) {
+                        ::kill(entry.pid, SIGKILL);
+                        entry.killed = true;
+                    }
+                    return false;
                 }
-                // Workers still exiting: look again shortly, not at once, or
-                // this thread spins on a core while they finish.
-                reap_changed_.wait_for(lock, 2ms, [&] { return stop.stop_requested(); });
+                if (entry.pidfd >= 0) ::close(entry.pidfd);
+                return true;
+            });
+            watched.assign(1, pollfd{wake_[0], POLLIN, 0});
+            auto next = now + 1s;
+            bool unwatched = false;
+            for (const auto& entry : pending) {
+                if (entry.pidfd >= 0) watched.push_back({entry.pidfd, POLLIN, 0});
+                else unwatched = true;
+                if (!entry.killed) next = std::min(next, entry.kill_at);
+            }
+            auto timeout = std::chrono::ceil<std::chrono::milliseconds>(next - Clock::now()).count();
+            if (unwatched) timeout = std::min<long long>(timeout, 2);
+            (void)::poll(watched.data(), watched.size(), static_cast<int>(std::max<long long>(0, timeout)));
+            if (watched[0].revents != 0) {
+                char drain[64];
+                while (::read(wake_[0], drain, sizeof drain) > 0) {}
             }
         }
+    }
+
+    // Reaps the worker if it has exited: true when it is gone.
+    bool finish(const Exiting& entry) {
+        int status = 0;
+        pid_t done = 0;
+        {
+            // With the pid set locked, kill_all never signals a reaped pid.
+            std::lock_guard lock(pids_mutex_);
+            do {
+                done = ::waitpid(entry.pid, &status, WNOHANG);
+            } while (done < 0 && errno == EINTR);
+            if (done == 0) return false;
+            live_.erase(entry.pid);
+        }
+        if (entry.slot) release();
+        const bool abnormal = done > 0 && !(WIFEXITED(status) && WEXITSTATUS(status) == 0);
+        if (abnormal) ++metrics_.abnormal;
+        if (abnormal && !entry.id.empty()) {
+            log(entry.answered ? 3 : 4, entry.id, "request worker ended abnormally", {{"worker_exit", describe_exit(status)}});
+        }
+        return true;
     }
 
     HostOptions options_;
@@ -1072,8 +1252,14 @@ private:
     std::set<pid_t> live_;
 
     std::mutex reap_mutex_;
-    std::condition_variable reap_changed_;
     std::vector<Exiting> exiting_;
+    int wake_[2] = {-1, -1};
+
+    std::vector<std::string> worker_arguments_;
+    std::mutex zygote_mutex_;
+    std::unique_ptr<ZygoteClient> zygote_;
+    int zygote_restarts_ = 0;
+    std::atomic<long> refusals_left_{0};
 
     struct Metrics {
         std::array<std::atomic<std::uint64_t>, 5> responses{};
@@ -1213,6 +1399,7 @@ int serve(HostOptions options, const char* argv0) {
     std::optional<http::ListenerSet> listeners;
     Host* counted = host.get();
     options.limits.http.response_finished = [counted] { counted->response_written(); };
+    options.limits.http.draining = &draining;
     try {
         listeners.emplace(options.endpoints, options.limits);
     } catch (const std::exception& error) {
@@ -1282,7 +1469,8 @@ int serve(HostOptions options, const char* argv0) {
     std::_Exit(left > 0 ? 1 : 0);
 }
 
-int worker_main(int argc, char** argv) {
+// The options of --worker and --zygote, which the host writes.
+WorkerOptions read_worker_options(int argc, char** argv) {
     WorkerOptions options;
     for (int i = 2; i < argc; ++i) {
         const std::string_view arg = argv[i];
@@ -1311,21 +1499,25 @@ int worker_main(int argc, char** argv) {
             options.tier = static_cast<std::uint8_t>(std::stoul(std::string(arg.substr(7))));
         } else if (arg.starts_with("--jit=")) {
             options.jit = std::string(arg.substr(6));
+        } else if (arg == "--test-refuse-assign") {
+            options.refuse_assign = true;
         } else {
             options.image = arg;
         }
     }
-    // The worker leaves signals to the host: it ends when its channel does.
+    // A worker leaves signals to the host: it ends when its channel does.
+    // A zygote's workers inherit this.
     ::signal(SIGINT, SIG_IGN);
     ::signal(SIGPIPE, SIG_IGN);
-    return run_request_worker(options);
+    return options;
 }
 
 } // namespace
 
 int main(int argc, char** argv) {
     try {
-        if (argc >= 2 && std::string_view(argv[1]) == "--worker") return worker_main(argc, argv);
+        if (argc >= 2 && std::string_view(argv[1]) == "--worker") return run_request_worker(read_worker_options(argc, argv));
+        if (argc >= 2 && std::string_view(argv[1]) == "--zygote") return run_worker_zygote(read_worker_options(argc, argv));
         // A core tool (docs/design/Products030.md): `--version` alone prints
         // the version line of `neura`, and a host started from an installed
         // generation holds that generation's lease while it serves.

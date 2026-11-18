@@ -490,6 +490,56 @@ ReadResult RequestDecoder::consume(string_view input) {
     }
 }
 
+int check_request_head(RequestHead& head, const RequestLimits& limits) {
+    if (head.headers.size() > max_header_fields) return 431;
+    std::size_t hosts = 0;
+    for (const auto& header : head.headers) {
+        if (header.name == "host" && (++hosts > 1 || !valid_authority(header.value))) return 400;
+    }
+    if (hosts != 1) return 400;
+    if (!known_method(head.method)) return 501;
+    // HTTP/2 carries the target in :path, which is origin-form or "*".
+    string_view absolute_authority;
+    if (head.target.empty() || (head.target != "*" && !head.target.starts_with('/')) ||
+        !parse_target(head.method, head.target, absolute_authority)) {
+        return 400;
+    }
+    std::optional<string_view> canonical_length;
+    bool unsupported_expectation = false;
+    head.expect_continue = false;
+    for (const auto& header : head.headers) {
+        if (header.name == "content-length") {
+            if (!parse_lengths(header.value, canonical_length)) return 400;
+        } else if (header.name == "expect") {
+            string_view expectations = header.value;
+            while (!expectations.empty()) {
+                const auto item = trim_ows(take_until(expectations, ','));
+                if (item.empty()) continue;
+                const bool supported = ascii_equal(item, "100-continue");
+                head.expect_continue |= supported;
+                unsupported_expectation |= !supported;
+            }
+        }
+    }
+    if (canonical_length) {
+        std::uint64_t length = 0;
+        for (char ch : *canonical_length) {
+            if (!append_digit(length, static_cast<unsigned>(ch - '0'), 10, limits.body_bytes)) return 413;
+        }
+        head.framing = BodyFraming::ContentLength;
+        head.content_length = length;
+    }
+    if (unsupported_expectation) return 417;
+    if (canonical_length) {
+        const std::string value(*canonical_length);
+        const auto is_length = [](const Header& header) { return header.name == "content-length"; };
+        auto first = std::ranges::find_if(head.headers, is_length);
+        first->value = value;
+        head.headers.erase(std::remove_if(first + 1, head.headers.end(), is_length), head.headers.end());
+    }
+    return 0;
+}
+
 ReadResult RequestDecoder::finish_input() {
     if (state_ == State::RequestLine && head_bytes_ == 0) {
         state_ = State::Closed;
