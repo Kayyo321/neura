@@ -494,6 +494,8 @@ private:
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
+    IrNode narrowing_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
+                        Names* after = nullptr);
     IrNode do_loop(const Statement& stmt, Context& context);
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
@@ -3699,6 +3701,10 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return lower_match(*expr.match, context, true, expected, call_argument);
     case ExprKind::TypeTest:
     case ExprKind::Cast: {
+        // The parser admits a narrowing only where narrowing_if lowers it.
+        if (expr.narrowing)
+            throw Diagnostic(*expr.narrowing, "a narrowing binding is allowed only in the condition of an 'if'")
+                .with_code("E0265");
         auto target = type(*expr.type, context);
         if (is_primitive_reference(target))
             throw Diagnostic(expr.type->span, "a primitive reference must be bound to storage").with_code("E0428");
@@ -4489,6 +4495,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return result;
     }
     case StmtKind::If: {
+        if (!stmt.bindings.empty()) return narrowing_if(stmt, context);
         auto result = node(IrOp::Branch, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
         result.body = body(stmt.body, context);
@@ -4836,6 +4843,20 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
 }
 
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
+    if (stmt.kind == StmtKind::If && stmt.negated_narrowing) {
+        // `if (x is not y: T) A` where A cannot complete binds `y` for the
+        // rest of the block (docs/design/Expressions030.md, Narrowing).
+        Names after;
+        auto lowered = narrowing_if(stmt, context, &instructions, &after);
+        auto& names = context.scopes.back();
+        for (const auto& [name, id] : after) {
+            if (names.contains(name))
+                throw duplicate_local(name_span(id), "duplicate local binding '" + name + "'", names.find(name)->second);
+        }
+        names.insert(after.begin(), after.end());
+        instructions.push_back(std::move(lowered));
+        return;
+    }
     if (stmt.kind == StmtKind::Destructure) {
         destructure(instructions, stmt, context);
     } else {

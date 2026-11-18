@@ -51,6 +51,12 @@ private:
     // Set when error_limit() errors have been recorded.
     bool stopped_ = false;
     unsigned block_depth_ = 0;
+    // Narrowing (docs/design/Expressions030.md): the cursor where the
+    // condition of the `if` being parsed starts, and whether the next cast
+    // operand may be the subject of a narrowing `x is y: T`. The flag is set
+    // at the start of the condition and after each `&&` of its top level.
+    std::size_t narrowing_root_ = static_cast<std::size_t>(-1);
+    bool narrowing_next_ = false;
     std::optional<Span> untyped_variadic_;
 
     const Token& current() const { return tokens_[cursor_]; }
@@ -1473,11 +1479,111 @@ private:
         return result;
     }
 
-    Expr condition() {
+    Expr condition(std::string_view keyword = {}) {
         expect("(");
-        auto result = expression();
-        expect(")");
-        return result;
+        try {
+            auto result = expression();
+            expect(")");
+            return result;
+        } catch (const Diagnostic&) {
+            misplaced_narrowing(keyword);
+        }
+    }
+
+    // The condition of an `if`, where narrowings may stand
+    // (docs/design/Expressions030.md, Narrowing).
+    Expr if_condition(Statement& statement) {
+        expect("(");
+        const auto saved_root = std::exchange(narrowing_root_, cursor_);
+        const auto saved_next = std::exchange(narrowing_next_, true);
+        std::optional<Expr> result;
+        try {
+            result = expression();
+        } catch (const Diagnostic&) {
+            narrowing_root_ = saved_root;
+            narrowing_next_ = saved_next;
+            misplaced_narrowing("if");
+        }
+        narrowing_root_ = saved_root;
+        narrowing_next_ = saved_next;
+        check_narrowings(*result, statement);
+        try {
+            expect(")");
+        } catch (const Diagnostic&) {
+            misplaced_narrowing("if");
+        }
+        return std::move(*result);
+    }
+
+    // Called while a condition's parse error propagates: when it failed at a
+    // ':' directly after `is name` or `is not name`, the source meant a
+    // narrowing where none may stand, and the error is E0265. Otherwise the
+    // error propagates unchanged.
+    [[noreturn]] void misplaced_narrowing(std::string_view keyword) const {
+        if (!keyword.empty() && at(":") && cursor_ >= 2 && tokens_[cursor_ - 1].kind == TokenKind::Identifier) {
+            const auto& before = tokens_[cursor_ - 2];
+            const bool test = before.kind == TokenKind::Keyword &&
+                (before.text == "is" || (before.text == "not" && cursor_ >= 3 &&
+                                         tokens_[cursor_ - 3].kind == TokenKind::Keyword &&
+                                         tokens_[cursor_ - 3].text == "is"));
+            if (test) throw misplaced_narrowing(tokens_[cursor_ - 1].span, tokens_[cursor_ - 1].text, keyword);
+        }
+        throw;
+    }
+
+    static Diagnostic misplaced_narrowing(const Span& name, const std::string& binding, std::string_view keyword) {
+        auto error = Diagnostic(name, "a narrowing binding is allowed only in the condition of an 'if'")
+            .with_code("E0265").label("'" + binding + "' cannot be bound here");
+        if (keyword == "if") {
+            error.note("a narrowing 'x is " + binding + ": T' must be the whole condition, or an operand of the "
+                       "'&&' chain that is the whole condition, outside parentheses");
+            error.help("move the narrowing to the top level of the condition, or test with 'is' here and "
+                       "narrow in an 'if' inside");
+        } else {
+            error.note("the condition of '" + std::string(keyword) + "' takes no narrowing binding");
+            error.help("test with 'is' in the condition and narrow with an 'if' inside the loop, as in "
+                       "'if (x is " + binding + ": T) { ... }'");
+        }
+        return error;
+    }
+
+    // Each narrowing must be a conjunct root of the condition; `is not` only
+    // the whole condition. Records the bound names on the statement.
+    void check_narrowings(const Expr& condition, Statement& statement) const {
+        std::vector<const Expr*> conjuncts;
+        const Expr* chain = &condition;
+        while (chain->kind == Expr::Kind::Binary && chain->text == "&&") {
+            conjuncts.insert(conjuncts.begin(), &chain->operands[1]);
+            chain = &chain->operands[0];
+        }
+        conjuncts.insert(conjuncts.begin(), chain);
+        std::vector<const Expr*> allowed;
+        for (const auto* conjunct : conjuncts) {
+            if (conjunct->kind == Expr::Kind::TypeTest && conjunct->narrowing) {
+                allowed.push_back(conjunct);
+            } else if (conjunct->kind == Expr::Kind::Unary && conjunct->is_not &&
+                       conjunct->operands.front().narrowing) {
+                const auto& test = conjunct->operands.front();
+                if (conjuncts.size() > 1)
+                    throw Diagnostic(*conjunct->operator_span, "an 'is not' narrowing inside an '&&' chain")
+                        .with_code("E0266").label("'" + test.binding + "' would be bound when the chain is false")
+                        .note("when the chain is false, any of its conjuncts may be the false one, so nothing "
+                              "proves that the type test failed")
+                        .help("make 'x is not " + test.binding + ": T' the whole condition, or test with 'is' and "
+                              "bind in the true branch");
+                allowed.push_back(&test);
+                statement.negated_narrowing = true;
+            }
+        }
+        const std::function<void(const Expr&)> visit = [&](const Expr& expr) {
+            if (expr.narrowing && std::ranges::find(allowed, &expr) == allowed.end())
+                throw misplaced_narrowing(*expr.narrowing, expr.binding, "if");
+            for (const auto& operand : expr.operands) visit(operand);
+        };
+        visit(condition);
+        for (const auto* test : allowed)
+            statement.bindings.push_back({TokenKind::Identifier, test->binding, *test->narrowing});
+        statement.constant_bindings = !allowed.empty();
     }
 
     Statement statement() {
@@ -1516,7 +1622,7 @@ private:
             result.body = block();
         } else if (match("if")) {
             result.kind = Statement::Kind::If;
-            result.expressions.push_back(condition());
+            result.expressions.push_back(if_condition(result));
             result.body = block();
             if (match("else")) {
                 if (at("if")) {
@@ -1529,13 +1635,13 @@ private:
             result = parse_match(false, start);
         } else if (match("while")) {
             result.kind = Statement::Kind::While;
-            result.expressions.push_back(condition());
+            result.expressions.push_back(condition("while"));
             result.body = block();
         } else if (match("do")) {
             result.kind = Statement::Kind::Do;
             result.body = block();
             if (match("while")) {
-                result.expressions.push_back(condition());
+                result.expressions.push_back(condition("do"));
                 expect(";");
             }
         } else if (match("for")) {
@@ -1935,9 +2041,15 @@ private:
             result.initializer.push_back(std::move(init));
         }
         if (!at(";")) {
-            result.expressions.push_back(expression());
+            try {
+                result.expressions.push_back(expression());
+                expect(";");
+            } catch (const Diagnostic&) {
+                misplaced_narrowing("for");
+            }
+        } else {
+            expect(";");
         }
-        expect(";");
         if (!at(")")) {
             const auto start = cursor_;
             auto step = simple_statement();
@@ -2021,6 +2133,8 @@ private:
             if (shift) {
                 op += advance().text;
             }
+            // Each top-level conjunct of an `if` condition may narrow.
+            if (op == "&&" && start == narrowing_root_ && minimum_precedence == 1) narrowing_next_ = true;
             auto right = expression(priority + 1, true, branch_keyword);
             if (op != "===" && (priority == equality_precedence || priority == ordering_precedence) &&
                 at_comparison_connector(branch_keyword)) {
@@ -2128,10 +2242,40 @@ private:
     // only `b`.
     Expr cast(std::string_view branch_keyword) {
         const auto start = cursor_;
-        return cast_tail(start, unary(branch_keyword));
+        const bool narrowing = std::exchange(narrowing_next_, false);
+        return cast_tail(start, unary(branch_keyword), narrowing);
     }
 
-    Expr cast_tail(std::size_t start, Expr result) {
+    // `is name :` or `is not name :` after a narrowing subject.
+    bool at_narrowing() const {
+        if (!at("is") || cursor_ + 3 >= tokens_.size()) return false;
+        if (tokens_[cursor_ + 1].kind == TokenKind::Identifier) return next_is(2, ":");
+        return next_is_keyword(1, "not") && tokens_[cursor_ + 2].kind == TokenKind::Identifier && next_is(3, ":");
+    }
+
+    Expr cast_tail(std::size_t start, Expr result, bool narrowing = false) {
+        if (narrowing && at_narrowing()) {
+            // `x is y: T` (docs/design/Expressions030.md, Narrowing).
+            advance();
+            std::optional<Span> negation;
+            if (at("not")) negation = advance().span;
+            const auto name = advance();
+            advance();
+            auto target = type();
+            auto test = make_expression(Expr::Kind::TypeTest, span_from(start));
+            test.type = std::move(target);
+            test.binding = name.text;
+            test.narrowing = name.span;
+            test.operands.push_back(std::move(result));
+            result = std::move(test);
+            if (negation) {
+                auto negated = make_expression(Expr::Kind::Unary, span_from(start), "!");
+                negated.spelled_not = negated.is_not = true;
+                negated.operator_span = negation;
+                negated.operands.push_back(std::move(result));
+                result = std::move(negated);
+            }
+        }
         while (at("as") || at("is")) {
             const bool test = advance().text == "is";
             // `x is not T` is `!(x is T)` (docs/design/Expressions030.md).

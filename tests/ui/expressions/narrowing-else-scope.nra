@@ -1,0 +1,17 @@
+// Edge case 7 of docs/design/Expressions030.md: the binding is unknown in the else branch.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let check = func(shape: Shape) -> int {
+    if (shape is circle: Circle) {
+        return circle.radius;
+    } else {
+        return circle.radius;
+    }
+};

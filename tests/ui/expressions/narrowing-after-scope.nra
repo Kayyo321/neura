@@ -1,0 +1,17 @@
+// Edge case 12 of docs/design/Expressions030.md: after an 'is not' whose true branch completes, the binding is unknown.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let log = func { };
+let check = func(shape: Shape) -> int {
+    if (shape is not circle: Circle) {
+        log();
+    }
+    return circle.radius;
+};

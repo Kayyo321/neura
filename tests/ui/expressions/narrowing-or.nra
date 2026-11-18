@@ -1,0 +1,16 @@
+// Edge case 9 of docs/design/Expressions030.md: a narrowing as an operand of '||' is E0265.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let check = func(shape: Shape, ready: bool) -> int {
+    if (shape is circle: Circle || ready) {
+        return 1;
+    }
+    return 0;
+};

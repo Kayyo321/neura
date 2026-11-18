@@ -126,6 +126,15 @@ let g=func(a:bool)->bool=>not   [a][0];"""
         self.assertIn('=> not a || not (a && b) || !not b || !a || s is not Circle;', formatted)
         self.assertIn('=> not [a][0];', formatted)
 
+    def test_narrowing_colon_spacing(self):
+        # docs/design/Expressions030.md, Tooling: `x is y: T`, and `?:` unchanged.
+        source = """let Shape=class();let Circle=class:Shape(export let radius:int=1;);
+let f=func(s:Shape,c:bool)->int{if(s is   c2 :Circle&&c2.radius>0){return c2.radius;}if(s is not c3:Circle){return 0;}if(c?s is Circle:c){return 1;}return 2;};"""
+        formatted = self.formatted(source)
+        self.assertIn('    if (s is c2: Circle && c2.radius > 0) {\n', formatted)
+        self.assertIn('    if (s is not c3: Circle) {\n', formatted)
+        self.assertIn('    if (c ? s is Circle : c) {\n', formatted)
+
     def test_for_header_and_overload_groups(self):
         source = '''let Example=module(export let run=func(){for(let i=0;i<10;i++){if(i==3){continue;}else{let last=i;last++;}}}or func(value:int){do{value--;}while(value>0);};);'''
         formatted = self.formatted(source)

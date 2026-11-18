@@ -188,8 +188,18 @@ private:
         auto no = fork(flow);
         yes.reachable &= condition.value_or(true);
         no.reachable &= !condition.value_or(false);
-        check_body(stmt.body, yes, in_loop);
-        check_body(stmt.alternative, no, in_loop);
+        // A narrowing's names (docs/design/Expressions030.md, Narrowing).
+        const auto narrowed = [&](const std::vector<Statement>& body, Flow& path, bool bound) {
+            names_.emplace_back();
+            if (bound)
+                for (const auto& binding : stmt.bindings) names_.back().insert(binding.text);
+            check_body(body, path, in_loop);
+            names_.pop_back();
+        };
+        narrowed(stmt.body, yes, !stmt.negated_narrowing);
+        narrowed(stmt.alternative, no, stmt.negated_narrowing);
+        if (stmt.negated_narrowing && !yes.reachable)
+            for (const auto& binding : stmt.bindings) names_.back().insert(binding.text);
         flow.reachable = false;
         merge(flow, yes);
         merge(flow, no);

@@ -60,6 +60,8 @@ Errors about declarations, scopes, and name resolution.
 | [E0231](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0231.md) | pattern form that is not supported |
 | [E0232](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0232.md) | postfix ? that needs parentheses |
 | [E0233](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0233.md) | malformed optional access |
+| [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md) | narrowing binding outside the condition of an if |
+| [E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md) | is not narrowing inside an && chain |
 | [E0301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0301.md) | duplicate local binding |
 | [E0302](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0302.md) | duplicate declaration |
 | [E0303](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0303.md) | duplicate parameter or field name |

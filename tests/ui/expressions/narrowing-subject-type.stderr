@@ -1,0 +1,9 @@
+error[E0411]: match.is cannot test a value of type <int32, int32>
+  --> $DIR/narrowing-subject-type.nra:12:9
+   |
+12 |     if (pair is first: int) {
+   |         ^^^^ the subject has type <int32, int32>
+   |
+   = help: use 'match' for a tuple
+
+For more information about this error, try `neura explain E0411`.

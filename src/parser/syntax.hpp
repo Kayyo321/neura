@@ -142,6 +142,12 @@ struct Expr {
     // operand is the TypeTest); `operator_span` is the word `not`.
     bool spelled_not{};
     bool is_not{};
+    // docs/design/Expressions030.md, Narrowing. A TypeTest written
+    // `x is name: T` binds `binding`, written at `narrowing`. The parser
+    // accepts it only as the whole condition of an `if` or a top-level
+    // conjunct of the `&&` chain that is the whole condition.
+    std::string binding{};
+    std::optional<Span> narrowing{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the
@@ -201,6 +207,12 @@ struct Statement {
     std::shared_ptr<const DocComment> documentation{};
     // `match.is (subject) { arms }` (docs/design/Matching030.md).
     bool match_is{};
+    // An `if` whose condition narrows (docs/design/Expressions030.md,
+    // Narrowing): `bindings` holds the names it binds, in written order, and
+    // `constant_bindings` is set. They are visible in `body`; for a negated
+    // narrowing, `if (x is not y: T)`, in `alternative` instead (and after
+    // the `if` when `body` cannot complete normally).
+    bool negated_narrowing{};
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};

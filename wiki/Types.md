@@ -395,6 +395,32 @@ let describe = func(value: class) -> string => match.is (value) {
 };
 ```
 
+### Narrowing
+
+`if (x is y: T)` tests `x` as `x is T` does and, where the test succeeded, binds `y`, a constant of type `T` made by the checked refinement of `x`, as the arm `y: T` of a `match.is` binds it ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#narrowing), implemented, proposed). A narrowing is allowed as the whole condition of an `if` (an `else if` included) or as a top-level operand of the `&&` chain that is the whole condition; anywhere else, including inside parentheses, under `!`, as an operand of `||`, and in loop conditions, it is [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md), and `x is y` followed by `:` keeps its meaning elsewhere, as in `c ? x is T : z`. The subject is evaluated once when its conjunct is reached, conjuncts run left to right and stop at the first false one, and the subject types and rejections are those of `match.is`. `y` is visible in the later conjuncts and in the true branch, not in `else` or after the `if`; it may hide an outer name, the subject included. Assigning `x` in the branch does not change `y`.
+
+`if (x is not y: T) A else B` binds `y` in `B`, and, when `A` cannot complete normally (it ends every path with `return`, `break`, `continue` or a trap), also for the rest of the enclosing block, which makes a guard clause. `is not` with a binding is allowed only as the whole condition ([E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md)). A narrowing `if` builds the same program as the `match.is` it stands for: `if (x is y: T && rest) A else B` as `match.is (x) { y: T if rest => A, _ => B }`.
+
+<!-- example: check -->
+```neura
+let Shape = class ( export let sides: int = 0; );
+let Circle = class : Shape ( export let radius: int = 1; );
+
+let describe = func(shape: Shape) -> string {
+    if (shape is circle: Circle && circle.radius > 0) {
+        return "circle of radius " + circle.radius.to_string();
+    }
+    return "a shape";
+};
+
+let radius = func(shape: Shape) -> int {
+    if (shape is not circle: Circle) {
+        return 0;
+    }
+    return circle.radius;
+};
+```
+
 ### Accessors
 
 An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.

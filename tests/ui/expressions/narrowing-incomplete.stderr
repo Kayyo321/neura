@@ -1,0 +1,8 @@
+error[E0202]: expected an identifier
+  --> $DIR/narrowing-incomplete.nra:12:25
+   |
+12 |     if (shape is circle:
+   |                         ^ expected an identifier here
+   |                         - found the end of the file
+
+For more information about this error, try `neura explain E0202`.

@@ -1,0 +1,30 @@
+// The program of narrowing-guard.if.nra written with match.is.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, limit: int) -> string {
+    match.is (shape) {
+        circle: Circle if circle.radius > limit && limit >= 0 => {
+            return "big circle " + circle.radius.to_string();
+        },
+        _ => {
+            return "other";
+        },
+    }
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), 0));
+        console.print_line(describe(new Circle(), 3));
+        console.print_line(describe(new Shape(), 0));
+        return program.ExitCode.Ok;
+    };
+);
