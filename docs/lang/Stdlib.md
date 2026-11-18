@@ -1709,3 +1709,17 @@ HashML-DSA dispatch follows the NIST Computer Security Objects Register and requ
 | `Biscuit` | Verifies v3.0 Ed25519 chains under a caller-selected root and checks the open or sealed proof. `authorize` evaluates bounded positive Datalog facts, rules, existential checks and ordered allow/deny policies. Attenuation blocks have separate scope and cannot grant authority to the authorizer. Unsupported fields, expressions, scopes, third-party blocks, and newer Datalog versions are refused. |
 
 JOSE support in this release uses compact serialization. JWE refuses RSA1_5 and RSA-OAEP with SHA-1. Macaroon serialization uses the v1 and v2 binary formats. Token authentication alone does not apply an application's authorization policy.
+
+### 21.12 `Std.Crypto.Enclave`
+
+| Module | Contract |
+| --- | --- |
+| `VersionedKeyStore` | Extends `KeyStoreProvider<Handle>` with exact key label and version resolution. A version identifies a key for its entire lifetime. The provider authenticates the associated data when it wraps and unwraps data keys. |
+| `MemoryKeyStore` | A task-local software store with isolated handles and nonrecycled key versions. It imports or generates AES-SIV wrapping keys and Ed25519 or HMAC-SHA256 signing keys. Deletion invalidates the handle. The store checks policy when resolving cached key versions. |
+| `CryptoSigner` | Adapts a provider and opaque handle to `Signer`. `try_sign` returns provider errors. |
+| `Envelope` | A versioned AES-256-GCM envelope with provider-wrapped data keys. Every cached data key has a random nonce prefix and a monotonic per-key counter. Expiration by use count, explicit cache clearing, key deletion, policy denial, and successful KEK rotation invalidate the cache as applicable. The complete header and the caller's associated data are authenticated. A live historical KEK can still open envelopes from its version. |
+| `Pkcs11`, `Tpm`, `CloudKms` | Versioned key-store interfaces. Their `open` entries need runtime PKCS #11, TPM, or authenticated KMS services and trap. |
+| `AttestationProvider` | An interface for requesting signed vendor evidence bound to application-supplied report data. |
+| `Nitro` | Parses bounded AWS Nitro COSE_Sign1 documents and verifies the exact signed bytes with ES384 under a caller-provisioned AWS root. Production verification checks report age, nonce, and the required PCR values. The device request entry traps without the Nitro Secure Module host service. |
+| `SevSnp` | Parses AMD version 2 reports with Milan VCEK signatures. Verification checks the ARK/ASK/VCEK path, chip ID and certificate TCB, exact report data and measurement, minimum TCB, VMPL 0, and the ECDSA-P384/SHA-384 report signature. It rejects migration agents and, by default, debug guests. The caller supplies an independently trusted ARK, the verification instant, and current revocation information for live-peer decisions. `parse_milan_ca` accepts the historical ASK's extra zero key-usage bit without modifying the signed bytes. The device request entry traps without an SEV-SNP host service. |
+| `Dcap` | Parses SGX v3 and TDX v4 ECDSA quotes and verifies the PCK chain against a provisioned Intel root, the QE report signature and attestation-key binding, and the quote signature. A platform decision additionally requires a caller-supplied `CollateralVerifier` and the expected measurements and report data. The request entry traps without an SGX or TDX quote-generation service. |

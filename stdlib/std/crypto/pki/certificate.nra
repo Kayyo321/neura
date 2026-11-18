@@ -217,7 +217,20 @@ export let Certificate = module (
 
     /// @brief Parses a DER certificate.
     #[NoDiscard, Since("0.3.0")]
-    export let parse = func(bytes: uint8[list]) -> Result<Certificate> {
+    export let parse = func(bytes: uint8[list]) -> Result<Certificate> => parse_certificate(bytes, false);
+
+    /// @brief Parses a historical AMD Milan CA certificate using its original signed bytes.
+    #[Hidden, NoDiscard, Since("0.3.0")]
+    export let parse_amd_milan_ca = func(bytes: uint8[list]) -> Result<Certificate> {
+        last cert = parse_certificate(bytes, true)?;
+        last names = cert.subject.common_names();
+        if (!cert.is_ca() || names.length != 1 || (names[0] != "SEV-Milan" && names[0] != "ARK-Milan")) {
+            return fail<Certificate>(0, "expected an AMD Milan ASK or ARK certificate");
+        }
+        return Result<Certificate>.Ok(cert);
+    };
+
+    let parse_certificate = func(bytes: uint8[list], amd_milan: bool) -> Result<Certificate> {
         last top = der.parse(bytes)?;
         if (!top.is_universal(der.TagSequence)) {
             return fail<Certificate>(0, "Certificate must be a SEQUENCE");
@@ -235,7 +248,7 @@ export let Certificate = module (
         p.signature = signature.bytes;
         p.signature_algorithm = Optional<AlgorithmIdentifier>.Some(outer_algorithm);
         p.tbs_bytes = tbs.encoded();
-        read_tbs(tbs, p)?;
+        read_tbs(tbs, p, amd_milan)?;
         match (p.tbs_signature_algorithm) {
             Optional.Some(inner) => {
                 if (!inner.equals(outer_algorithm)) {
@@ -259,7 +272,7 @@ export let Certificate = module (
         return Result<Certificate[list]>.Ok(out);
     };
 
-    let read_tbs = func(tbs: der.Element, p: CertificateParts) -> Result<Unit> {
+    let read_tbs = func(tbs: der.Element, p: CertificateParts, amd_milan: bool) -> Result<Unit> {
         let r = tbs.reader();
         match (r.optional_context(0)?) {
             Optional.Some(v) => {
@@ -319,7 +332,7 @@ export let Certificate = module (
                         }
                     }
                     p.extensions.append(ext);
-                    read_extension(ext, p, item.offset)?;
+                    read_extension(ext, p, item.offset, amd_milan)?;
                 }
                 if (p.extensions.length == 0) {
                     return fail<Unit>(list.offset, "Extensions must not be empty");
@@ -332,8 +345,8 @@ export let Certificate = module (
     };
 
     /// @brief Parses a known extension into its field; the error offset is the extension's.
-    let read_extension = func(ext: Extension, p: CertificateParts, at: int) -> Result<Unit> {
-        match (typed(ext, p)) {
+    let read_extension = func(ext: Extension, p: CertificateParts, at: int, amd_milan: bool) -> Result<Unit> {
+        match (typed(ext, p, amd_milan)) {
             Result.Ok(u) => {
                 return Result<Unit>.Ok(u);
             },
@@ -344,13 +357,19 @@ export let Certificate = module (
         return Result<Unit>.Ok(Unit.Value);
     };
 
-    let typed = func(ext: Extension, p: CertificateParts) -> Result<Unit> {
+    let typed = func(ext: Extension, p: CertificateParts, amd_milan: bool) -> Result<Unit> {
         last id = ext.oid.dotted;
         last v = ext.value;
         if (id == oids.BasicConstraints) {
             p.basic_constraints = Optional<BasicConstraints>.Some(extensions.parse_basic_constraints(v)?);
         } else if (id == oids.KeyUsage) {
-            p.key_usage = Optional<KeyUsage>.Some(extensions.parse_key_usage(v)?);
+            // The historical Milan ASK encodes keyCertSign with one extra trailing zero bit.
+            if (amd_milan && ext.critical && v.length == 4 && v[0] == 3 && v[1] == 2 && v[2] == 1 && v[3] == 4) {
+                last bits = (der.parse(v)?).bit_string()?;
+                p.key_usage = Optional<KeyUsage>.Some(new KeyUsage(bits, v));
+            } else {
+                p.key_usage = Optional<KeyUsage>.Some(extensions.parse_key_usage(v)?);
+            }
         } else if (id == oids.ExtKeyUsage) {
             p.extended_key_usage = Optional<ExtendedKeyUsage>.Some(extensions.parse_extended_key_usage(v)?);
         } else if (id == oids.SubjectAltName) {

@@ -1,0 +1,295 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Enclave.VersionedKeyStore;
+let aes_siv = import:Std.Crypto.Symmetric.AesSiv;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let secret = import:Std.Crypto.Core.SecretBytes;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Process-local software keys for envelope encryption and signing (Stdlib.md section 21.12).
+///
+/// Wraps with RFC 5297 AES-SIV under a 64-byte key and signs with Ed25519 or HMAC-SHA-256. Key material
+/// remains in the store once imported. Labels use 1 to 255 UTF-8 bytes and have one algorithm across all
+/// their versions. Versions start at 1 and are never reused within a store, even after deletion. A store
+/// disappears with the process and requires external provisioning after restart.
+/// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+#Since("0.3.0")
+export let MemoryKeyStore = module (
+    #Final
+    let Owner = class (
+        export let.override to_string = func -> string => "MemoryKeyStore.Owner";
+    );
+
+    /// @brief A versioned key capability scoped to the store that issued it.
+    /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+    #[Final, Since("0.3.0")]
+    export let MemoryKeyHandle = class (
+        last owner: Owner;
+
+        /// @brief The key's textual label.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export last label: string;
+
+        /// @brief The key's version under this label.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export last version: uint32;
+
+        /// @brief The key's algorithm.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export last algorithm: Algorithm;
+
+        #Internal
+        export let init = func(store: Owner, name: string, generation: uint32, use: Algorithm) {
+            owner = store;
+            label = name;
+            version = generation;
+            algorithm = use;
+        };
+
+        /// @brief Whether the handles identify the same key in the same store.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (!(other is MemoryKeyHandle)) {
+                return false;
+            }
+            last that = other as MemoryKeyHandle;
+            return owner.equals(that.owner) && label == that.label && version == that.version;
+        };
+
+        /// @brief The hash of the store identity, label and version.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(hashing.combine(owner.hash_code(), label.hash_code()), version);
+
+        /// @brief A fixed placeholder that hides key handles and labels.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "MemoryKeyHandle(<redacted>)";
+    );
+
+    #Final
+    let KeyRecord = class (
+        export last handle: MemoryKeyHandle;
+        export last material: secret.SecretBytes;
+
+        export let init = func(reference: MemoryKeyHandle, bytes: uint8[list]) {
+            handle = reference;
+            material = new(bytes);
+        };
+
+        export let.override to_string = func -> string => "MemoryKeyStore.KeyRecord(<redacted>)";
+    );
+
+    #Final
+    let LabelRecord = class (
+        export last label: string;
+        export last algorithm: Algorithm;
+        export let latest: uint32 = 0;
+
+        export let init = func(name: string, use: Algorithm) {
+            label = name;
+            algorithm = use;
+        };
+
+        export let.override to_string = func -> string => "MemoryKeyStore.LabelRecord(<redacted>)";
+    );
+
+    /// @brief An isolated in-memory store. An instance belongs to one task at a time.
+    /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let MemoryKeyStore = class implements VersionedKeyStore<MemoryKeyHandle> (
+        last owner: Owner = new;
+        last labels: LabelRecord[list] = new;
+        last keys: KeyRecord[list] = new;
+
+        /// @brief The provider name `memory`.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let provider_name = func -> string => "memory";
+
+        /// @brief Generates a fresh key using the operating system. Returns entropy or unsupported-algorithm errors.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let generate_key = func(algorithm: Algorithm, label: string) -> Result<MemoryKeyHandle> {
+            last size = validate(algorithm, label)?;
+            last material = entropy.os_bytes(size)?;
+            return add_generated(algorithm, label, material);
+        };
+
+        /// @brief Generates a fresh key with a caller-supplied generator.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let generate_key_with_drbg = func(algorithm: Algorithm, label: string, generator: drbg.ChaCha20Drbg)
+                -> Result<MemoryKeyHandle> {
+            last size = validate(algorithm, label)?;
+            return add_generated(algorithm, label, generator.fill(size));
+        };
+
+        /// @brief Imports a private copy and issues the next version. AES-SIV expects a 64-byte key and the
+        /// other supported algorithms expect 32 bytes. A wrong length or malformed label traps.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let import_key = func(algorithm: Algorithm, label: string, material: uint8[list])
+                -> Result<MemoryKeyHandle> {
+            last size = validate(algorithm, label)?;
+            if (material.length != size) {
+                trap_with_message("invalid argument: wrong key length for MemoryKeyStore");
+            }
+            return add_key(algorithm, label, material);
+        };
+
+        let add_generated = func(algorithm: Algorithm, label: string, material: uint8[list]) -> Result<MemoryKeyHandle> {
+            last result = add_key(algorithm, label, material);
+            words.wipe(material);
+            return result;
+        };
+
+        let add_key = func(algorithm: Algorithm, label: string, material: uint8[list]) -> Result<MemoryKeyHandle> {
+            let index = label_index(label);
+            if (index < 0) {
+                labels.append(new LabelRecord(label, algorithm));
+                index = labels.length - 1;
+            }
+            last group = labels[index];
+            last version = group.latest + 1;
+            last handle = new MemoryKeyHandle(owner, label, version, algorithm);
+            keys.append(new KeyRecord(handle, material));
+            group.latest = version;
+            return Result<MemoryKeyHandle>.Ok(handle);
+        };
+
+        let validate = func(algorithm: Algorithm, label: string) -> Result<int> {
+            if (label.byte_length == 0 || label.byte_length > 255) {
+                trap_with_message("invalid argument: a key label needs 1 to 255 UTF-8 bytes");
+            }
+            last size = match (algorithm) {
+                Algorithm.Aes512Siv => 64,
+                Algorithm.Ed25519 => 32,
+                Algorithm.Hmac => 32,
+                _ => 0,
+            };
+            if (size == 0) {
+                return failure<int>("crypto.unsupported", "the memory store does not provide this algorithm");
+            }
+            crypto_policy.require(algorithm);
+            if (algorithm == Algorithm.Hmac) {
+                crypto_policy.require(Algorithm.Sha256);
+            }
+            last index = label_index(label);
+            if (index >= 0 && (labels[index].algorithm != algorithm || labels[index].latest == 4294967295)) {
+                return failure<int>("crypto.key_version", "the label cannot issue another version for this algorithm");
+            }
+            return Result<int>.Ok(size);
+        };
+
+        /// @brief Resolves one live version under an exact label. Deleted or unknown keys return crypto.key; policy denial returns crypto.policy.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let resolve = func(label: string, version: uint32) -> Result<MemoryKeyHandle> {
+            for (let entry in keys) {
+                if (entry.handle.label == label && entry.handle.version == version) {
+                    if (!crypto_policy.allows(entry.handle.algorithm)) {
+                        return failure<MemoryKeyHandle>("crypto.policy", "the key algorithm is denied by the active policy");
+                    }
+                    return Result<MemoryKeyHandle>.Ok(entry.handle);
+                }
+            }
+            return failure<MemoryKeyHandle>("crypto.key", "no live key for this label and version");
+        };
+
+        /// @brief Ed25519 signature or HMAC-SHA-256 under a live signing key.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign = func(key: MemoryKeyHandle, message: uint8[list]) -> Result<uint8[list]> {
+            last record = find_key(key)?;
+            if (record.handle.algorithm == Algorithm.Ed25519) {
+                last private_key = new ed25519.Ed25519PrivateKey(record.material.expose());
+                last signature = new ed25519.Ed25519Signer(private_key).sign(message);
+                private_key.wipe();
+                return Result<uint8[list]>.Ok(signature);
+            }
+            if (record.handle.algorithm == Algorithm.Hmac) {
+                return Result<uint8[list]>.Ok(hmac.mac<sha2.Sha256>(record.material.expose(), message));
+            }
+            return failure<uint8[list]>("crypto.key_usage", "the key is not a signing key");
+        };
+
+        /// @brief AES-SIV wrapping with the supplied associated data under a live wrapping key.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let wrap_key = func(key: MemoryKeyHandle, data_key: uint8[list], associated_data: uint8[list])
+                -> Result<uint8[list]> {
+            last wrapping = wrapping_key(key)?;
+            return Result<uint8[list]>.Ok(wrapping.seal(new, data_key, associated_data));
+        };
+
+        /// @brief Authenticates and unwraps a data key under a live wrapping key.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let unwrap_key = func(key: MemoryKeyHandle, wrapped: uint8[list], associated_data: uint8[list])
+                -> Result<uint8[list]> {
+            last wrapping = wrapping_key(key)?;
+            return wrapping.open(new, wrapped, associated_data);
+        };
+
+        /// @brief Wipes the stored copy, removes the live key and retires that version.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #[NoDiscard, Since("0.3.0")]
+        export let delete_key = func(key: MemoryKeyHandle) -> Result<Unit> {
+            for (let i = 0; i < keys.length; i++) {
+                if (keys[i].handle.equals(key)) {
+                    keys[i].material.wipe();
+                    keys.remove_at(i);
+                    return Result<Unit>.Ok(Unit.Value);
+                }
+            }
+            return failure<Unit>("crypto.key", "no live key for this handle");
+        };
+
+        /// @brief A fixed placeholder for the store contents.
+        /// @see [Std.Crypto.Enclave.MemoryKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-MemoryKeyStore)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "MemoryKeyStore(<redacted>)";
+
+        let label_index = func(label: string) -> int {
+            for (let i = 0; i < labels.length; i++) {
+                if (labels[i].label == label) {
+                    return i;
+                }
+            }
+            return -1;
+        };
+
+        let find_key = func(key: MemoryKeyHandle) -> Result<KeyRecord> {
+            for (let entry in keys) {
+                if (entry.handle.equals(key)) {
+                    return Result<KeyRecord>.Ok(entry);
+                }
+            }
+            return failure<KeyRecord>("crypto.key", "no live key for this handle");
+        };
+
+        let wrapping_key = func(key: MemoryKeyHandle) -> Result<aes_siv.AesSiv> {
+            last record = find_key(key)?;
+            if (record.handle.algorithm != Algorithm.Aes512Siv) {
+                return failure<aes_siv.AesSiv>("crypto.key_usage", "the key is not a wrapping key");
+            }
+            return Result<aes_siv.AesSiv>.Ok(new aes_siv.AesSiv(record.material.expose()));
+        };
+    );
+
+    let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+);

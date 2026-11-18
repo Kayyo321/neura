@@ -1,0 +1,341 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Enclave.VersionedKeyStore;
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let secret = import:Std.Crypto.Core.SecretBytes;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Versioned envelope encryption over a wrapping-key provider (Stdlib.md section 21.12).
+///
+/// V1 stores NENV, version 1, suite 1 (AES-256-GCM), a one-byte label length, a big-endian uint32 KEK
+/// version, eight nonce-prefix bytes, the UTF-8 label, a big-endian uint32 nonce sequence and wrapped-key
+/// length, the wrapped DEK, then the ciphertext and 16-byte tag. The nonce is prefix || sequence.
+/// The wrapping AAD is "neura-envelope/wrap/v1" || the header through the label. The payload AAD is
+/// "neura-envelope/payload/v1" || len32(header) || header || len32(user_aad) || user_aad, in big-endian order.
+/// Each new DEK gets a fresh prefix and a sequence starting at 1. A DEK is discarded at its use limit,
+/// when its KEK version changes or is unavailable, or when the caller clears it. Opening always resolves
+/// the envelope's exact KEK version, including an older version while the provider keeps it live.
+/// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+#Since("0.3.0")
+export let Envelope = module (
+    const MaxKeyUses = 4096;
+    const MaxDataLength = 1048576;
+    const MaxWrappedLength = 4096;
+
+    /// @brief Encrypts and decrypts messages with associated data through a configured key store.
+    /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+    #Since("0.3.0")
+    export let EnvelopeCrypter = interface (
+        /// @brief Seals a message, using provider and entropy services as needed.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #Since("0.3.0")
+        let seal = func(plaintext: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>;
+
+        /// @brief Authenticates and opens an envelope with its original associated data.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #Since("0.3.0")
+        let open = func(envelope: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]>;
+    );
+
+    #Final
+    let CachedKey = class (
+        export last dek: secret.SecretBytes;
+        export last prefix: uint8[list];
+        export last metadata: uint8[list];
+        export last wrapped: uint8[list];
+        export let uses: uint32 = 0;
+
+        export let init = func(key: uint8[list], nonce_prefix: uint8[list],
+                header_metadata: uint8[list], wrapped_key: uint8[list]) {
+            dek = new(key);
+            prefix = nonce_prefix;
+            metadata = header_metadata;
+            wrapped = words.copy(wrapped_key);
+        };
+
+        export let.override to_string = func -> string => "Envelope.CachedKey(<redacted>)";
+    );
+
+    #Final
+    let Header = class (
+        export last version: uint32;
+        export last nonce: uint8[list];
+        export last metadata: uint8[list];
+        export last wrapped: uint8[list];
+        export last encoded: uint8[list];
+
+        export let init = func(key_version: uint32, data_nonce: uint8[list], wrap_metadata: uint8[list],
+                wrapped_key: uint8[list], header_bytes: uint8[list]) {
+            version = key_version;
+            nonce = data_nonce;
+            metadata = wrap_metadata;
+            wrapped = wrapped_key;
+            encoded = header_bytes;
+        };
+
+        export let.override to_string = func -> string => "Envelope.Header";
+    );
+
+    /// @brief An envelope engine bound to one key label and one task. Uses a single encryption DEK cache.
+    /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let Envelope = class<Handle> implements EnvelopeCrypter (
+        last store: VersionedKeyStore<Handle>;
+        last label: string;
+        last label_bytes: uint8[list];
+        last use_limit: uint32;
+        let active_version: uint32;
+        let cache = Optional<CachedKey>.None;
+
+        /// @brief Sets the initial KEK version and DEK use limit (1 to 4096). A zero key version, invalid label
+        /// (outside 1 to 255 UTF-8 bytes) or invalid limit traps.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #Since("0.3.0")
+        export let init = func(provider: VersionedKeyStore<Handle>, key_label: string, version: uint32,
+                uses_per_dek: int) {
+            crypto_policy.require(Algorithm.Aes256Gcm);
+            if (key_label.byte_length == 0 || key_label.byte_length > 255 || version == 0
+                    || uses_per_dek < 1 || uses_per_dek > MaxKeyUses) {
+                trap_with_message("invalid argument: invalid envelope label, key version or DEK use limit");
+            }
+            store = provider;
+            label = key_label;
+            label_bytes = words.utf8(key_label);
+            use_limit = uses_per_dek as uint32;
+            active_version = version;
+        };
+
+        /// @brief Starts using a newer live version of this label and wipes the cached DEK. An error leaves the
+        /// current encryption version in place. Older versions can still decrypt while live in the provider.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #[NoDiscard, Since("0.3.0")]
+        export let rotate_kek = func(version: uint32) -> Result<Unit> {
+            if (version <= active_version) {
+                return failure<Unit>("crypto.key_version", "envelope rotation needs a strictly newer version");
+            }
+            let _ = store.resolve(label, version)?;
+            forget_dek();
+            active_version = version;
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        /// @brief Wipes the cache's DEK and discards the current nonce sequence. The next seal needs a fresh DEK.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #Since("0.3.0")
+        export let forget_dek = func {
+            match (cache) {
+                Optional.Some(key) => {
+                    key.dek.wipe();
+                    cache = Optional<CachedKey>.None;
+                },
+                Optional.None => {},
+            }
+        };
+
+        /// @brief Seals under the current live KEK, using the OS to generate a DEK and nonce prefix on a cache miss.
+        /// Returns provider or entropy errors. A message or associated data over 1 MiB traps.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #[NoDiscard, Since("0.3.0")]
+        export let seal = func(plaintext: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]> =>
+            seal_using(plaintext, associated_data, func -> Result<uint8[list]> => entropy.os_bytes(40));
+
+        /// @brief Seals with a caller-supplied generator for a fresh DEK and nonce prefix on a cache miss.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #[NoDiscard, Since("0.3.0")]
+        export let seal_with_drbg = func(plaintext: uint8[list], associated_data: uint8[list],
+                generator: drbg.ChaCha20Drbg) -> Result<uint8[list]> =>
+            seal_using(plaintext, associated_data, new func -> Result<uint8[list]> =>
+                Result<uint8[list]>.Ok(generator.fill(40)));
+
+        /// @brief Deterministic DEK generation for tests. The 40 bytes are DEK || nonce prefix and are used only
+        /// on a cache miss. Other lengths trap. Each epoch under a repeated DEK needs a unique prefix.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #[NoDiscard, Since("0.3.0")]
+        export let seal_with_material = func(plaintext: uint8[list], associated_data: uint8[list],
+                material: uint8[list]) -> Result<uint8[list]> {
+            if (material.length != 40) {
+                trap_with_message("invalid argument: envelope DEK material must be 40 bytes");
+            }
+            return seal_using(plaintext, associated_data, new func -> Result<uint8[list]> =>
+                Result<uint8[list]>.Ok(words.copy(material)));
+        };
+
+        /// @brief Opens under the KEK version stated in the header. Wrong AAD, a missing key or failed
+        /// authentication returns crypto.authentication. A malformed header returns crypto.envelope.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #[NoDiscard, Since("0.3.0")]
+        export let open = func(envelope: uint8[list], associated_data: uint8[list]) -> Result<uint8[list]> {
+            check_data_length(associated_data);
+            last header = parse_header(envelope, label_bytes)?;
+            match (store.resolve(label, header.version)) {
+                Result.Ok(handle) => {
+                    return open_with(handle, header, envelope, associated_data);
+                },
+                Result.Err(_) => {
+                    return auth_failure();
+                },
+            }
+            return auth_failure();
+        };
+
+        let open_with = func(handle: Handle, header: Header, envelope: uint8[list], associated_data: uint8[list])
+                -> Result<uint8[list]> {
+            match (store.unwrap_key(handle, header.wrapped, wrap_aad(header.metadata))) {
+                Result.Ok(key) => {
+                    if (key.length != 32) {
+                        words.wipe(key);
+                        return auth_failure();
+                    }
+                    last cipher = new aes_gcm.AesGcm(key);
+                    words.wipe(key);
+                    return cipher.open(header.nonce, words.slice(envelope, header.encoded.length, envelope.length),
+                        content_aad(header.encoded, associated_data));
+                },
+                Result.Err(_) => {
+                    return auth_failure();
+                },
+            }
+            return auth_failure();
+        };
+
+        let seal_using = func(plaintext: uint8[list], associated_data: uint8[list],
+                fresh: func() -> Result<uint8[list]>) -> Result<uint8[list]> {
+            check_data_length(plaintext);
+            check_data_length(associated_data);
+            match (store.resolve(label, active_version)) {
+                Result.Ok(handle) => {
+                    match (cache) {
+                        Optional.Some(key) => {
+                            return Result<uint8[list]>.Ok(seal_cached(key, plaintext, associated_data));
+                        },
+                        Optional.None => {
+                            last random = fresh()?;
+                            last prepared = prepare(handle, random);
+                            words.wipe(random);
+                            last key = prepared?;
+                            cache = Optional<CachedKey>.Some(key);
+                            return Result<uint8[list]>.Ok(seal_cached(key, plaintext, associated_data));
+                        },
+                    }
+                },
+                Result.Err(cause) => {
+                    forget_dek();
+                    return Result<uint8[list]>.Err(cause);
+                },
+            }
+            return auth_failure();
+        };
+
+        let prepare = func(handle: Handle, material: uint8[list]) -> Result<CachedKey> {
+            last dek = words.slice(material, 0, 32);
+            last prefix = words.slice(material, 32, 40);
+            last metadata = make_metadata(label_bytes, active_version, prefix);
+            match (store.wrap_key(handle, dek, wrap_aad(metadata))) {
+                Result.Ok(wrapped) => {
+                    if (wrapped.length == 0 || wrapped.length > MaxWrappedLength) {
+                        words.wipe(dek);
+                        return failure<CachedKey>("crypto.envelope", "provider returned an invalid wrapped key length");
+                    }
+                    last key = new CachedKey(dek, prefix, metadata, wrapped);
+                    words.wipe(dek);
+                    return Result<CachedKey>.Ok(key);
+                },
+                Result.Err(cause) => {
+                    words.wipe(dek);
+                    return Result<CachedKey>.Err(cause);
+                },
+            }
+            return failure<CachedKey>("crypto.envelope", "the provider could not wrap the key");
+        };
+
+        let seal_cached = func(key: CachedKey, plaintext: uint8[list], associated_data: uint8[list]) -> uint8[list] {
+            key.uses += 1;
+            let header = words.copy(key.metadata);
+            words.append32_be(header, key.uses);
+            words.append32_be(header, key.wrapped.length as uint32);
+            words.append_all(header, key.wrapped);
+            last cipher = new aes_gcm.AesGcm(key.dek.expose());
+            last sealed = cipher.seal(make_nonce(key.prefix, key.uses), plaintext, content_aad(header, associated_data));
+            if (key.uses == use_limit) {
+                forget_dek();
+            }
+            words.append_all(header, sealed);
+            return header;
+        };
+
+        /// @brief A fixed placeholder that hides key and cache details.
+        /// @see [Std.Crypto.Enclave.Envelope](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Envelope)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Envelope(<redacted>)";
+    );
+
+    let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+
+    let auth_failure = func -> Result<uint8[list]> => failure<uint8[list]>("crypto.authentication", "authentication failed");
+
+    let invalid_header = func -> Result<Header> => failure<Header>("crypto.envelope", "invalid envelope header");
+
+    let check_data_length = func(bytes: uint8[list]) {
+        if (bytes.length > MaxDataLength) {
+            trap_with_message("invalid argument: envelope plaintext and associated data are limited to 1 MiB each");
+        }
+    };
+
+    let make_nonce = func(prefix: uint8[list], sequence: uint32) -> uint8[list] {
+        let nonce = words.copy(prefix);
+        words.append32_be(nonce, sequence);
+        return nonce;
+    };
+
+    let make_metadata = func(label: uint8[list], version: uint32, prefix: uint8[list]) -> uint8[list] {
+        let out: uint8[list] = new([78, 69, 78, 86, 1, 1, label.length as uint8]);
+        words.append32_be(out, version);
+        words.append_all(out, prefix);
+        words.append_all(out, label);
+        return out;
+    };
+
+    let wrap_aad = func(metadata: uint8[list]) -> uint8[list] =>
+        words.concat(words.utf8("neura-envelope/wrap/v1"), metadata);
+
+    let content_aad = func(header: uint8[list], associated_data: uint8[list]) -> uint8[list] {
+        let data = words.utf8("neura-envelope/payload/v1");
+        words.append32_be(data, header.length as uint32);
+        words.append_all(data, header);
+        words.append32_be(data, associated_data.length as uint32);
+        words.append_all(data, associated_data);
+        return data;
+    };
+
+    let parse_header = func(envelope: uint8[list], label: uint8[list]) -> Result<Header> {
+        // The fixed 19-byte metadata, label, two words, at least one wrapped byte, and a GCM tag.
+        last field_at = 19 + label.length;
+        if (envelope.length < field_at + 25 || envelope[0] != 78 || envelope[1] != 69
+                || envelope[2] != 78 || envelope[3] != 86 || envelope[4] != 1 || envelope[5] != 1
+                || envelope[6] != label.length as uint8
+                || !constant_time.ct_eq(words.slice(envelope, 19, field_at), label)) {
+            return invalid_header();
+        }
+        last version = words.load32_be(envelope, 7);
+        last sequence = words.load32_be(envelope, field_at);
+        last wrapped_length = words.load32_be(envelope, field_at + 4);
+        if (version == 0 || sequence == 0 || sequence > MaxKeyUses as uint32
+                || wrapped_length == 0 || wrapped_length > MaxWrappedLength as uint32) {
+            return invalid_header();
+        }
+        last body_at = field_at + 8 + wrapped_length as int;
+        if (envelope.length - body_at < 16 || envelope.length - body_at > MaxDataLength + 16) {
+            return invalid_header();
+        }
+        last nonce = make_nonce(words.slice(envelope, 11, 19), sequence);
+        return Result<Header>.Ok(new Header(version, nonce, words.slice(envelope, 0, field_at),
+            words.slice(envelope, field_at + 8, body_at), words.slice(envelope, 0, body_at)));
+    };
+);

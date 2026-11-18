@@ -1,0 +1,19 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.KeyStoreProvider;
+
+/// @brief Versioned lookup for providers used by envelope encryption (Stdlib.md section 21.12).
+/// @see [Std.Crypto.Enclave.VersionedKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-VersionedKeyStore)
+#Since("0.3.0")
+export let VersionedKeyStore = module (
+    /// @brief A provider that resolves a key label and a nonzero version to the same key for its entire lifetime.
+    /// Its wrapping keys accept 32-byte data keys, authenticate the supplied associated data, and return an
+    /// independent copy of any unwrapped key. The caller may overwrite that copy.
+    /// @see [Std.Crypto.Enclave.VersionedKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-VersionedKeyStore)
+    #Since("0.3.0")
+    export let VersionedKeyStore = interface<Handle>:KeyStoreProvider<Handle> (
+        /// @brief A live handle for the exact version or an error if the key no longer exists.
+        /// @see [Std.Crypto.Enclave.VersionedKeyStore](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-VersionedKeyStore)
+        #Since("0.3.0")
+        let resolve = func(label: string, version: uint32) -> Result<Handle>;
+    );
+);

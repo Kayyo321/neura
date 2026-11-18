@@ -1,0 +1,72 @@
+// test-options: --gpu=off --max-steps 100000000 --deny-entropy
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Crypto.Algorithm;
+let signer = import:Std.Crypto.Enclave.CryptoSigner;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let memory = import:Std.Crypto.Enclave.MemoryKeyStore;
+let test = import:Std.Test;
+let vectors = import:EnvelopeVectors;
+
+let MemoryKeyStoreTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let code = func(cause: Error) -> string => match (cause) {
+        Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_known_wrapping_and_signature_outputs = func {
+        last values = vectors.store;
+        last store = new memory.MemoryKeyStore();
+        last imported = bytes(values[0]);
+        last wrap = test.assert_ok(store.import_key(Algorithm.Aes512Siv, "encryption", imported));
+        imported[0] = 255;
+        last sealed = test.assert_ok(store.wrap_key(wrap, bytes(values[2]), bytes(values[3])));
+        test.assert_equal_string(values[4], hex.encode(sealed));
+        test.assert_equal_string(values[2], hex.encode(test.assert_ok(store.unwrap_key(wrap, sealed, bytes(values[3])))));
+        test.assert_equal_string("crypto.authentication", code(test.assert_err(store.unwrap_key(wrap, sealed, new))));
+        test.assert_equal_string("crypto.key_usage", code(test.assert_err(store.sign(wrap, new))));
+
+        last ed = test.assert_ok(store.import_key(Algorithm.Ed25519, "signature", bytes(values[5])));
+        last signing_key = new signer.CryptoSigner<memory.MemoryKeyHandle>(store, ed, Algorithm.Ed25519);
+        test.assert(signing_key.algorithm() == Algorithm.Ed25519);
+        test.assert_equal_string(values[7], hex.encode(signing_key.sign(bytes(values[6]))));
+        test.assert_equal_string("CryptoSigner(<redacted>)", signing_key.to_string());
+        test.assert_equal_string("crypto.key_usage", code(test.assert_err(store.wrap_key(ed, new, new))));
+        let _ = test.assert_ok(store.delete_key(ed));
+        test.assert_equal_string("crypto.key", code(test.assert_err(signing_key.try_sign(new))));
+        last mac = test.assert_ok(store.import_key(Algorithm.Hmac, "mac", bytes(values[8])));
+        test.assert_equal_string(values[9], hex.encode(test.assert_ok(store.sign(mac, bytes(values[6])))));
+    };
+
+    export let test_versions_handle_isolation_and_entropy = func {
+        last values = vectors.store;
+        last store = new memory.MemoryKeyStore();
+        test.assert_equal_string("memory", store.provider_name());
+        test.assert_equal_string("MemoryKeyStore(<redacted>)", store.to_string());
+        let _ = test.assert_err(store.generate_key(Algorithm.Aes512Siv, "encryption"));
+        last first = test.assert_ok(store.import_key(Algorithm.Aes512Siv, "encryption", bytes(values[0])));
+        test.assert_equal_int32(1, first.version as int32);
+        test.assert_equal_string("encryption", first.label);
+        test.assert(first.algorithm == Algorithm.Aes512Siv);
+        test.assert_equal_string("MemoryKeyHandle(<redacted>)", first.to_string());
+        last resolved = test.assert_ok(store.resolve(first.label, first.version));
+        test.assert(first.equals(resolved) && first.hash_code() == resolved.hash_code());
+
+        last other = new memory.MemoryKeyStore();
+        last alien = test.assert_ok(other.import_key(Algorithm.Aes512Siv, "encryption", bytes(values[0])));
+        test.assert(!first.equals(alien));
+        test.assert_equal_string("crypto.key", code(test.assert_err(store.wrap_key(alien, bytes(values[2]), new))));
+        test.assert_equal_string("crypto.key", code(test.assert_err(store.delete_key(alien))));
+        let _ = test.assert_ok(store.delete_key(first));
+        test.assert_equal_string("crypto.key", code(test.assert_err(store.resolve(first.label, first.version))));
+        test.assert_equal_string("crypto.key", code(test.assert_err(store.delete_key(first))));
+        last generator = new drbg.ChaCha20Drbg(bytes(values[2]));
+        last next = test.assert_ok(store.generate_key_with_drbg(Algorithm.Aes512Siv, "encryption", generator));
+        test.assert_equal_int32(2, next.version as int32);
+        test.assert_equal_string("crypto.key_version", code(test.assert_err(
+            store.import_key(Algorithm.Ed25519, "encryption", bytes(values[5])))));
+        test.assert_equal_string("crypto.unsupported", code(test.assert_err(store.generate_key(Algorithm.Sha256, "other"))));
+    };
+);
