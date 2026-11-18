@@ -12,9 +12,11 @@ using TlsContextHandle = std::shared_ptr<const TlsContext>;
 
 // Validates a PEM certificate chain and its private key in a new context.
 // Throws std::runtime_error on failure. Publishing a new handle leaves any
-// previously copied handles and their connections usable.
+// previously copied handles and their connections usable. With
+// `offer_http2`, in builds with NEURA_ENABLE_SERVER_HTTP2, ALPN prefers `h2`
+// and a connection that selects it is served as HTTP/2.
 TlsContextHandle load_tls_context(const std::filesystem::path& certificate_chain,
-                                  const std::filesystem::path& key);
+                                  const std::filesystem::path& key, bool offer_http2 = false);
 
 enum class TlsHandshake { Complete, TimedOut, Failed };
 

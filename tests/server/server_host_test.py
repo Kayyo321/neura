@@ -9,6 +9,7 @@ concurrent load of 1,000 requests, and the drain (docs/design/Backend030.md).
 
 import argparse
 import http.client
+import json
 import os
 import shutil
 import signal
@@ -22,6 +23,13 @@ import time
 from pathlib import Path
 
 FAILURES = []
+# "h2c" runs the suite with every host started with --h2c and request()
+# speaking HTTP/2 with prior knowledge through the test client
+# (tests/server/http2_test_client.cpp); raw sockets and http.client stay
+# HTTP/1.1 on the same listeners, and the admin listener is always HTTP/1.1.
+PROTOCOL = "http/1.1"
+HTTP2_CLIENT = None
+ADMIN_PORTS = set()
 
 
 def check(condition, message):
@@ -34,7 +42,8 @@ class Host:
     def __init__(self, args, image, *options, expect_ready=True, env=None):
         self.err_path = Path(tempfile.mkstemp(prefix="host-", suffix=".err", dir=args.work)[1])
         self.err = open(self.err_path, "w")
-        command = [args.host, "--listen", "127.0.0.1:0", *options, str(image)]
+        h2c = ["--h2c"] if PROTOCOL == "h2c" else []
+        command = [args.host, "--listen", "127.0.0.1:0", *h2c, *options, str(image)]
         self.process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=self.err, text=True,
                                         env=env)
         self.ports = {}
@@ -50,6 +59,7 @@ class Host:
                 self.ports.setdefault(scheme, int(rest.rsplit(":", 1)[1]))
             if "admin on" in line:
                 self.ports["admin"] = int(line.strip().rsplit(":", 1)[1])
+                ADMIN_PORTS.add(self.ports["admin"])
             if line.strip().endswith("ready"):
                 self.ready = True
                 break
@@ -66,15 +76,22 @@ class Host:
             self.err.flush()
         return self.err_path.read_text()
 
-    def children(self):
-        # Workers are children of whichever host thread spawned them.
+    def children(self, zygote=False):
+        # Workers are children of whichever host thread spawned them; a
+        # worker forked by the zygote is a child of the host too. The zygote
+        # is left out unless asked for.
         pids = []
         for task in Path(f"/proc/{self.process.pid}/task").glob("*"):
             try:
                 pids += [int(pid) for pid in (task / "children").read_text().split()]
             except OSError:
                 pass
-        return sorted(set(pids))
+        # Each thread's list is read at a different moment, so a worker
+        # reaped after one list was read can appear next to its replacement
+        # from a later one. Only the processes that still exist after every
+        # list has been read (zombies included) are counted: all of them
+        # existed at one moment, the end of the reading.
+        return sorted(pid for pid in set(pids) if exists(pid) and (comm(pid) == "neura-zygote") == zygote)
 
     def stop(self, sig=signal.SIGTERM, timeout=15):
         if self.process.poll() is None:
@@ -88,7 +105,48 @@ class Host:
         return self.process.returncode
 
 
+def exists(pid):
+    return Path(f"/proc/{pid}").exists()
+
+
+def comm(pid):
+    try:
+        return Path(f"/proc/{pid}/comm").read_text().strip()
+    except OSError:
+        return ""
+
+
+def metric(port, name):
+    status, _, body = request(port, "GET", "/metrics")
+    for line in body.decode().splitlines():
+        if line.startswith(name + " "):
+            return int(line.split()[1])
+    return None
+
+
+def h2(port, scenario, *options, body=None, timeout=60):
+    """Runs the HTTP/2 test client; its JSON result."""
+    command = [HTTP2_CLIENT, "--port", str(port), "--scenario", scenario, *[str(option) for option in options]]
+    if body is not None:
+        command += ["--body-stdin", "1"]
+    result = subprocess.run(command, input=body, capture_output=True, timeout=timeout)
+    if result.returncode != 0:
+        raise RuntimeError(f"http2 client: {result.returncode} {result.stderr.decode(errors='replace')}")
+    return json.loads(result.stdout)
+
+
 def request(port, method, path, body=None, headers=None, timeout=30):
+    if PROTOCOL == "h2c" and port not in ADMIN_PORTS:
+        options = ["--method", method, "--path", path, "--timeout-ms", int(timeout * 1000)]
+        for name, value in (headers or {}).items():
+            options += ["--header", f"{name.lower()}:{value}"]
+        if isinstance(body, str):
+            body = body.encode()
+        result = h2(port, "fetch", *options, body=body, timeout=timeout + 10)
+        stream = result["streams"][0]
+        if not stream["closed"] or (stream["status"] == 0):
+            raise ConnectionError(f"HTTP/2 stream ended without a response: {result}")
+        return stream["status"], stream["headers"], stream["body"].encode("latin-1")
     connection = http.client.HTTPConnection("127.0.0.1", port, timeout=timeout)
     connection.request(method, path, body=body, headers=headers or {})
     response = connection.getresponse()
@@ -257,7 +315,10 @@ def test_basic(args, image):
 
 
 def test_limits(args, image):
-    host = Host(args, image, "--max-workers", "1", "--max-queue", "0", "--ready-workers", "0",
+    # One slot and one place in the queue: a worker holds its slot until it
+    # has been reaped, so a request that follows a response at once waits
+    # for it instead of being refused.
+    host = Host(args, image, "--max-workers", "1", "--max-queue", "1", "--ready-workers", "0",
                 "--request-timeout", "2", "--max-response-bytes", "2000", "--max-body-bytes", "1024")
     try:
         port = host.port
@@ -275,13 +336,21 @@ def test_limits(args, image):
         def slow():
             results["slow"] = request(port, "GET", "/sleep")[0]
 
+        def queued():
+            results["queued"] = request(port, "GET", "/hello")[0]
+
         started = time.time()
         thread = threading.Thread(target=slow)
         thread.start()
         time.sleep(0.5)
+        waiting = threading.Thread(target=queued)
+        waiting.start()
+        time.sleep(0.3)
         status, headers, _ = request(port, "GET", "/hello")
         check(status == 503 and headers.get("retry-after") == "1", f"saturated: {status} {headers}")
         thread.join()
+        waiting.join()
+        check(results.get("queued") in (200, 503), f"queued behind the slow request: {results}")
         elapsed = time.time() - started
         check(results.get("slow") == 504 and elapsed < 6, f"deadline: {results} after {elapsed:.1f} s")
         time.sleep(0.5)
@@ -335,7 +404,9 @@ def test_streaming(args, image):
               f"12 MB streamed download: {status} {len(body)}")
 
         status, headers, body = request(port, "HEAD", "/stream?3")
-        check(status == 200 and body == b"" and headers.get("transfer-encoding") == "chunked",
+        # HTTP/2 has no transfer codings (RFC 9113, 8.2.2).
+        framing = "chunked" if PROTOCOL == "http/1.1" else None
+        check(status == 200 and body == b"" and headers.get("transfer-encoding") == framing,
               f"HEAD of a stream: {status} {headers}")
 
         # A producer that fails after sending bytes: the body ends without its last chunk.
@@ -489,6 +560,115 @@ def test_dead_ready_worker(args, image):
     check("a ready worker had ended" in host.stderr(), "the discarded worker is logged")
 
 
+def test_refused_assignment(args, image):
+    # A worker whose channel refuses the Assign has run nothing: the request
+    # goes to a new worker, once, and runs exactly once. The test hook
+    # NEURA_SERVER_TEST_REFUSE_ASSIGN=N makes the first N workers refuse.
+    for start in ("zygote", "exec"):
+        for ready in ("0", "1"):
+            env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="1")
+            host = Host(args, image, "--worker-start", start, "--ready-workers", ready, "--no-startup-check",
+                        "--admin-listen", "127.0.0.1:0", env=env)
+            label = f"{start}, {ready} ready"
+            try:
+                if ready == "1":
+                    # The ready worker took the refusal; it must be in the
+                    # pool before the request, or the request starts its own.
+                    deadline = time.time() + 10
+                    while metric(host.ports["admin"], "neura_workers_ready") != 1 and time.time() < deadline:
+                        time.sleep(0.01)
+                status, _, _ = request(host.port, "GET", "/metric")
+                check(status == 200, f"refused assignment ({label}): {status}")
+                admin = host.ports["admin"]
+                check(metric(admin, "test_requests_total") == 2, f"the request ran once ({label})")
+                check(metric(admin, "neura_worker_retries_total") == 1, f"one retry ({label})")
+                # A worker that took its Assign is never replaced.
+                status, _, _ = request(host.port, "GET", "/trap")
+                check(status == 500, f"trap after a retry ({label}): {status}")
+                check(metric(admin, "neura_worker_retries_total") == 1, f"a trap is not retried ({label})")
+            finally:
+                host.stop()
+            check("a worker refused its assignment; using a new one" in host.stderr(), f"retry logged ({label})")
+    # The new worker refuses too: no third worker, the client gets 500.
+    env = dict(os.environ, NEURA_SERVER_TEST_REFUSE_ASSIGN="2")
+    host = Host(args, image, "--ready-workers", "0", "--no-startup-check", "--admin-listen", "127.0.0.1:0", env=env)
+    try:
+        status, _, body = request(host.port, "GET", "/metric")
+        check(status == 500 and body == b'{"error":"internal"}', f"two refusals: {status} {body!r}")
+        check(metric(host.ports["admin"], "test_requests_total") is None, "nothing ran after two refusals")
+        check(metric(host.ports["admin"], "neura_worker_retries_total") == 1, "two refusals are one retry")
+        status, _, _ = request(host.port, "GET", "/hello")
+        check(status == 200, f"after two refusals: {status}")
+    finally:
+        host.stop()
+    check("the new worker refused its assignment too" in host.stderr(), "second refusal logged")
+
+
+def test_zygote_restart(args, image):
+    # A zygote that ends is replaced; requests are still served.
+    host = Host(args, image, "--ready-workers", "0")
+    try:
+        zygotes = host.children(zygote=True)
+        check(len(zygotes) == 1, f"one zygote: {zygotes}")
+        # The zygote forks with one thread: no lock or thread state of the
+        # image load can reach a worker.
+        for pid in zygotes:
+            threads = len(list(Path(f"/proc/{pid}/task").glob("*")))
+            check(threads == 1, f"the zygote has one thread: {threads}")
+        for pid in zygotes:
+            os.kill(pid, signal.SIGKILL)
+        time.sleep(0.2)
+        status, _, body = request(host.port, "GET", "/hello")
+        check(status == 200 and body == b"hello from http\n", f"after the zygote died: {status} {body!r}")
+        replaced = host.children(zygote=True)
+        check(len(replaced) == 1 and replaced != zygotes, f"a new zygote: {zygotes} then {replaced}")
+    finally:
+        host.stop()
+    check("the worker zygote ended; starting a new one" in host.stderr(), "the zygote restart is logged")
+
+
+def test_process_bound(args, image):
+    # A worker holds its S-1 slot until it has been reaped, so the workers,
+    # exited or not, never outnumber S-1 plus S-2 (B-S4).
+    for start in ("zygote", "exec"):
+        host = Host(args, image, "--worker-start", start, "--max-workers", "2", "--ready-workers", "1",
+                    "--max-queue", "256")
+        peak = [0]
+        stop = threading.Event()
+
+        def sample():
+            while not stop.is_set():
+                peak[0] = max(peak[0], len(host.children()))
+                time.sleep(0.002)
+
+        def load(statuses):
+            connection = http.client.HTTPConnection("127.0.0.1", host.port, timeout=30)
+            for _ in range(25):
+                connection.request("GET", "/info")
+                response = connection.getresponse()
+                response.read()
+                statuses.append(response.status)
+            connection.close()
+
+        try:
+            sampler = threading.Thread(target=sample)
+            sampler.start()
+            statuses = []
+            threads = [threading.Thread(target=load, args=(statuses,)) for _ in range(12)]
+            for thread in threads:
+                thread.start()
+            for thread in threads:
+                thread.join()
+            stop.set()
+            sampler.join()
+            check(statuses.count(200) == 300, f"bounded load ({start}): {sorted(set(statuses))} {len(statuses)}")
+            check(0 < peak[0] <= 3, f"workers at the peak ({start}): {peak[0]}, the bound is 3")
+            check(len(host.children(zygote=True)) == (1 if start == "zygote" else 0), f"zygote count ({start})")
+        finally:
+            stop.set()
+            host.stop()
+
+
 def test_step_limit(args, image):
     # --max-steps bounds each request's execution; past it the execution
     # traps, the client gets 500, and the next request runs in a new worker.
@@ -598,12 +778,15 @@ def test_tls(args, image):
                                      "curl body", f"https://127.0.0.1:{host.ports['https']}/echo"],
                                     capture_output=True, text=True, timeout=30)
             check(result.returncode == 0 and result.stdout == "curl body", f"curl POST: {result.stdout!r}")
-            # Approved decision 9: no HTTP/2. curl --http2 offers h2 and
-            # http/1.1 by ALPN; the host selects http/1.1.
+            # curl --http2 offers h2 and http/1.1 by ALPN. A build with
+            # HTTP/2 selects h2 (decision 9 as amended), one without it
+            # http/1.1.
+            expected = "2" if args.http2_client else "1.1"
             result = subprocess.run([args.curl, "-sS", "--http2", "--cacert", str(certificate), "-o", "/dev/null",
                                      "-w", "%{http_version}", f"https://127.0.0.1:{host.ports['https']}/hello"],
                                     capture_output=True, text=True, timeout=30)
-            check(result.returncode == 0 and result.stdout == "1.1", f"curl --http2 negotiates 1.1: {result.stdout!r}")
+            check(result.returncode == 0 and result.stdout == expected,
+                  f"curl --http2 negotiates {expected}: {result.stdout!r} {result.stderr}")
         # A plain HTTP request on the TLS port fails the handshake and leaves the host serving.
         raw(host.ports["https"], b"GET / HTTP/1.1\r\nHost: t\r\n\r\n", timeout=3)
         status, _, _ = request(host.port, "GET", "/hello")
@@ -615,7 +798,213 @@ def test_tls(args, image):
     check(missing.returncode == 1, f"missing certificate: {missing.returncode} {missing.stderr}")
 
 
+def tls_material(args, name="tls", subject="localhost"):
+    directory = Path(args.work) / name
+    directory.mkdir(exist_ok=True)
+    certificate = directory / "cert.pem"
+    key = directory / "key.pem"
+    subprocess.run([args.openssl, "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out",
+                    str(certificate), "-days", "2", "-subj", f"/CN={subject}", "-addext",
+                    "subjectAltName=IP:127.0.0.1,DNS:localhost"], check=True, capture_output=True)
+    return certificate, key
+
+
+def curl_version(args, url, *options, cafile=None):
+    command = [args.curl, "-sS", "-o", "-", "-w", "\n%{http_version}", *options]
+    if cafile:
+        command += ["--cacert", str(cafile)]
+    result = subprocess.run(command + [url], capture_output=True, text=True, timeout=30)
+    body, _, version = result.stdout.rpartition("\n")
+    return result.returncode, version, body
+
+
+def test_http2_curl(args, image):
+    # HTTP/2 by ALPN on TLS listeners (on by default, off with --no-http2),
+    # and h2c with prior knowledge only with --h2c (decision 9 as amended).
+    if not args.http2_client:
+        result = subprocess.run([args.host, "--listen", "127.0.0.1:0", "--h2c", str(image)], capture_output=True,
+                                text=True, timeout=60)
+        check(result.returncode == 1 and "no HTTP/2" in result.stderr, f"--h2c without HTTP/2: {result.stderr}")
+        return
+    if not args.curl:
+        print("skipped: no curl")
+        return
+    if args.tls:
+        certificate, key = tls_material(args, "h2-tls")
+        host = Host(args, image, "--tls-listen", "127.0.0.1:0", "--cert", str(certificate), "--key", str(key))
+        try:
+            url = f"https://127.0.0.1:{host.ports['https']}"
+            code, version, body = curl_version(args, url + "/hello", "--http2", cafile=certificate)
+            check(code == 0 and version == "2" and body == "hello from https\n", f"h2 by ALPN: {code} {version} {body!r}")
+            code, version, _ = curl_version(args, url + "/hello", "--http1.1", cafile=certificate)
+            check(code == 0 and version == "1.1", f"http/1.1 by ALPN beside h2: {code} {version}")
+            code, version, body = curl_version(args, url + "/echo", "--http2", "-X", "POST", "--data-binary",
+                                               "h2 body", cafile=certificate)
+            check(code == 0 and version == "2" and body == "h2 body", f"h2 POST: {code} {version} {body!r}")
+            code, version, body = curl_version(args, url + "/stream?3", "--http2", cafile=certificate)
+            check(code == 0 and version == "2" and body == "a" * 3000, f"h2 streamed response: {code} {len(body)}")
+            # The plain listener is not h2c without --h2c.
+            code, _, _ = curl_version(args, f"http://127.0.0.1:{host.port}/hello", "--http2-prior-knowledge")
+            check(code != 0, f"h2c refused without --h2c: {code}")
+        finally:
+            host.stop()
+        host = Host(args, image, "--tls-listen", "127.0.0.1:0", "--cert", str(certificate), "--key", str(key),
+                    "--no-http2")
+        try:
+            code, version, _ = curl_version(args, f"https://127.0.0.1:{host.ports['https']}/hello", "--http2",
+                                            cafile=certificate)
+            check(code == 0 and version == "1.1", f"--no-http2 negotiates 1.1: {code} {version}")
+        finally:
+            host.stop()
+    host = Host(args, image, "--h2c")
+    try:
+        url = f"http://127.0.0.1:{host.port}/hello"
+        code, version, body = curl_version(args, url, "--http2-prior-knowledge")
+        check(code == 0 and version == "2" and body == "hello from http\n", f"h2c: {code} {version} {body!r}")
+        code, version, body = curl_version(args, url, "--http1.1")
+        check(code == 0 and version == "1.1" and body == "hello from http\n", f"1.1 beside h2c: {code} {version}")
+        # No Upgrade: h2c (RFC 9113 deprecates it): served as HTTP/1.1.
+        code, version, _ = curl_version(args, url, "--http2")
+        check(code == 0 and version == "1.1", f"Upgrade: h2c is not taken: {code} {version}")
+    finally:
+        host.stop()
+
+
+def test_http2_streams(args, image):
+    # The HTTP/2 framing behaviors, with the scripted client over h2c.
+    if not args.http2_client:
+        return
+    host = Host(args, image, "--h2c", "--admin-listen", "127.0.0.1:0", "--max-workers", "8")
+    try:
+        port = host.port
+        # Interleaving: four 1 s requests on one connection run at once.
+        result = h2(port, "interleave", "--path", "/nap", "--count", 4)
+        streams = result["streams"]
+        last = max(stream["closed_ms"] for stream in streams)
+        check([stream["status"] for stream in streams] == [200] * 4 and all(s["body"] == "rested\n" for s in streams),
+              f"interleaved streams: {result}")
+        check(last < 2500, f"four 1 s streams on one connection took {last:.0f} ms")
+
+        # Flow control is the backpressure: with a 16 KiB window and no
+        # window update the response stops at the window, and another stream
+        # on the connection is still answered; once the window opens the
+        # whole body arrives.
+        result = h2(port, "stall", "--path", "/big?300000", "--window", 16384, "--hold-ms", 1500)
+        big = result["streams"][0]
+        check(result["bytes_at_hold_end"] == 16384, f"stalled at the window: {result['bytes_at_hold_end']}")
+        check(result.get("hello_during_stall") is True, f"another stream during the stall: {result}")
+        check(big["status"] == 200 and big["bytes"] == 300000 and big["closed"], f"after the stall: {big}")
+
+        # RST_STREAM cancels the stream's worker at once, and the
+        # connection goes on.
+        result = h2(port, "reset", "--path", "/sleep", "--after-ms", 500)
+        first, hello = result["streams"]
+        check(first["error"] == 8 and hello["status"] == 200, f"reset then hello: {result}")
+        deadline = time.time() + 5
+        while metric(host.ports["admin"], "neura_workers_running") != 0 and time.time() < deadline:
+            time.sleep(0.05)
+        check(metric(host.ports["admin"], "neura_workers_running") == 0, "the reset stream's worker is gone")
+        check("the client cancelled the request; worker killed" in host.stderr(), "the cancel is logged")
+
+        # S-5 applies to the decoded header list: 431.
+        result = h2(port, "headers", "--path", "/hello", "--header-bytes", 20000)
+        check(result["streams"][0]["status"] == 431, f"oversized header list: {result}")
+        result = h2(port, "headers", "--path", "/hello", "--header-bytes", 8000)
+        check(result["streams"][0]["status"] == 200, f"header list within S-5: {result}")
+    finally:
+        host.stop()
+
+    # Request bodies of many windows: the host reopens a stream's window as
+    # the worker reads, so uploads larger than 64 KiB never stall.
+    host = Host(args, image, "--h2c", "--config", "streamed_body=yes", "--max-body-bytes", "4000000")
+    try:
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/upload", body=b"u" * 2_000_000)
+        stream = result["streams"][0]
+        check(stream["status"] == 200 and stream["body"].startswith("received 2000000 in "),
+              f"2 MB streamed upload over h2: {stream['status']} {stream['body'][:80]!r}")
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/early", body=b"e" * 300_000)
+        stream = result["streams"][0]
+        check(stream["status"] == 200 and stream["body"] == "early\n", f"answer before the body over h2: {stream}")
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/upload", body=b"o" * 4_100_000)
+        check(result["streams"][0]["status"] == 413, f"streamed upload past S-6 over h2: {result['streams'][0]}")
+    finally:
+        host.stop()
+    host = Host(args, image, "--h2c")
+    try:
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/echo", body=b"y" * 500_000)
+        stream = result["streams"][0]
+        check(stream["status"] == 201 and stream["bytes"] == 500_000, f"500 KB echo over h2: {stream['status']}")
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/echo", body=b"y" * 1_100_000)
+        check(result["streams"][0]["status"] == 413, f"body past S-6 over h2: {result['streams'][0]['status']}")
+    finally:
+        host.stop()
+
+    # S-14: streams beyond --max-streams are refused (REFUSED_STREAM), even
+    # from a client that ignores the server's setting.
+    host = Host(args, image, "--h2c", "--max-streams", "2")
+    try:
+        result = h2(host.port, "streams", "--path", "/nap", "--count", 5)
+        statuses = [stream["status"] for stream in result["streams"]]
+        refused = [stream for stream in result["streams"] if stream["error"] == 7 and stream["status"] == 0]
+        check(statuses.count(200) == 2 and len(refused) == 3, f"too many streams: {result}")
+        status, _, _ = request(host.port, "GET", "/hello")
+        check(status == 200, f"after refused streams: {status}")
+    finally:
+        host.stop()
+
+    # Drain: SIGTERM sends GOAWAY; the streams in flight finish and no new
+    # stream is taken.
+    host = Host(args, image, "--h2c")
+    try:
+        result = h2(host.port, "drain", "--path", "/nap", "--count", 2, "--after-ms", 300,
+                    "--pid", host.process.pid)
+        statuses = [stream["status"] for stream in result["streams"][:2]]
+        check(result["goaway"] and result["goaway_error"] == 0 and statuses == [200, 200],
+              f"drain with streams in flight: {result}")
+        late = result["streams"][2:] if len(result["streams"]) > 2 else []
+        check(all(stream["status"] == 0 for stream in late), f"no stream after GOAWAY: {result}")
+        check(host.process.wait(30) == 0, "the host exits 0 after the drain")
+    finally:
+        host.stop()
+
+
+def test_http2_reload(args, image):
+    # SIGHUP rereads the certificate; h2 is still offered by the new context.
+    if not (args.http2_client and args.tls and args.openssl):
+        return
+    certificate, key = tls_material(args, "h2-reload", "first")
+    host = Host(args, image, "--tls-listen", "127.0.0.1:0", "--cert", str(certificate), "--key", str(key))
+    try:
+        port = host.ports["https"]
+
+        def handshake():
+            result = subprocess.run([args.openssl, "s_client", "-connect", f"127.0.0.1:{port}", "-alpn", "h2,http/1.1"],
+                                    input="", capture_output=True, text=True, timeout=30)
+            return result.stdout
+
+        before = handshake()
+        check("ALPN protocol: h2" in before and "CN=first" in before, "h2 with the first certificate")
+        fresh, fresh_key = tls_material(args, "h2-reload-next", "second")
+        shutil.copy(fresh, certificate)
+        shutil.copy(fresh_key, key)
+        host.process.send_signal(signal.SIGHUP)
+        deadline = time.time() + 10
+        after = ""
+        while time.time() < deadline:
+            after = handshake()
+            if "CN=second" in after:
+                break
+            time.sleep(0.2)
+        check("ALPN protocol: h2" in after and "CN=second" in after, "h2 with the reloaded certificate")
+        if args.curl:
+            code, version, body = curl_version(args, f"https://127.0.0.1:{port}/hello", "--http2", cafile=fresh)
+            check(code == 0 and version == "2" and body == "hello from https\n", f"h2 after SIGHUP: {code} {version}")
+    finally:
+        host.stop()
+
+
 def main():
+    global PROTOCOL, HTTP2_CLIENT  # noqa: PLW0603 - set once from the command line
     parser = argparse.ArgumentParser()
     parser.add_argument("--neura", required=True)
     parser.add_argument("--host", required=True)
@@ -625,7 +1014,14 @@ def main():
     parser.add_argument("--curl")
     parser.add_argument("--tls", action="store_true")
     parser.add_argument("--only")
+    parser.add_argument("--http2-client", help="tests/server/http2_test_client.cpp, in builds with HTTP/2")
+    parser.add_argument("--protocol", choices=["http/1.1", "h2c"], default="http/1.1")
     args = parser.parse_args()
+    PROTOCOL = args.protocol
+    HTTP2_CLIENT = args.http2_client
+    if PROTOCOL == "h2c" and not HTTP2_CLIENT:
+        print("--protocol h2c needs --http2-client")
+        return 1
     os.makedirs(args.work, exist_ok=True)
     image = Path(args.work) / "test-server.nvr"
     build = subprocess.run([args.neura, "build", str(Path(args.source) / "tests/server/fixtures/test-server.nra"),
@@ -634,10 +1030,14 @@ def main():
         print(build.stdout + build.stderr)
         return 1
     tests = [test_basic, test_limits, test_step_limit, test_streaming, test_streamed_request_body,
-             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls]
+             test_deadline_from_head, test_keep_alive_latency, test_admin, test_dead_ready_worker, test_refused_assignment, test_zygote_restart,
+             test_process_bound, test_drain_completes_responses, test_startup_check, test_record_replay, test_without_host, test_tls,
+             test_http2_curl, test_http2_streams, test_http2_reload]
     for test in tests:
         if args.only and args.only != test.__name__:
             continue
+        if PROTOCOL == "h2c" and test.__name__.startswith("test_http2"):
+            continue  # They choose their protocols themselves.
         print("--", test.__name__, flush=True)
         try:
             test(args, image)

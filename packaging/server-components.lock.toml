@@ -25,3 +25,21 @@ sha256 = "441dfae4280cae3e0425e5f876f80559fb0731c140f1aae22b3e5a54d0411bfd"
 license = "PostgreSQL"
 license_path = "postgresql-18.7/COPYRIGHT"
 license_sha256 = "3d6af92ff8a4c2cdf69afb1cf44edea727922f5cd0cf8b5f72b11cdecac8fdfd"
+
+# HTTP/2 framing and HPACK for the server host (Backend030, "HTTP/2 and
+# decision 9"). Built from this archive with
+#   ./configure --enable-lib-only --enable-static --disable-shared --with-pic CFLAGS="-O2 -fPIC"
+# and linked statically when NEURA_ENABLE_SERVER_HTTP2 is on. The signature is
+# made by the signing subkey of the release key; the archive digest is also
+# published in the release's checksums.txt.
+[providers.nghttp2]
+version = "1.71.0"
+source = "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/nghttp2-1.71.0.tar.xz"
+sha256 = "c0f55121d88650e4b9227aec28cebaf664d2417ca60fe70be0f8d38829f52116"
+checksums = "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/checksums.txt"
+signature = "https://github.com/nghttp2/nghttp2/releases/download/v1.71.0/nghttp2-1.71.0.tar.xz.asc"
+release_key = "F4F3B91474D1EB29889BD0EF7E8403D5D673C366"
+signing_subkey = "516B622918D15C478AB1EA3A5339A2BE82E07DEC"
+license = "MIT"
+license_path = "nghttp2-1.71.0/COPYING"
+license_sha256 = "6b94f3abc1aabd0c72a7c7d92a77f79dda7c8a0cb3df839a97890b4116a2de2a"

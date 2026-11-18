@@ -1,5 +1,8 @@
 #include "server/http_tls.hpp"
 #include "server/http_socket.hpp"
+#ifdef NEURA_SERVER_HTTP2_ENABLED
+#include "server/http2_connection.hpp"
+#endif
 
 #include <algorithm>
 #include <array>
@@ -82,11 +85,17 @@ const BIO_METHOD* socket_bio_method() {
 
 int refuse_password(char*, int, int, void*) { return 0; }
 
-int select_http11(SSL*, const unsigned char** output, unsigned char* size,
-                  const unsigned char* offered, unsigned offered_size, void*) {
-    static constexpr unsigned char protocols[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+// ALPN, in the server's order of preference: `h2` first when the context
+// offers HTTP/2 (a non-null argument), then `http/1.1`. A client that offers
+// neither gets no ALPN answer and is served HTTP/1.1.
+int select_protocol(SSL*, const unsigned char** output, unsigned char* size,
+                    const unsigned char* offered, unsigned offered_size, void* http2) {
+    static constexpr unsigned char with_h2[] = {2, 'h', '2', 8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
+    static constexpr unsigned char http11[] = {8, 'h', 't', 't', 'p', '/', '1', '.', '1'};
     unsigned char* selected = nullptr;
-    if (SSL_select_next_proto(&selected, size, protocols, sizeof protocols, offered, offered_size) !=
+    const auto* protocols = http2 ? with_h2 : http11;
+    const unsigned protocols_size = http2 ? sizeof with_h2 : sizeof http11;
+    if (SSL_select_next_proto(&selected, size, protocols, protocols_size, offered, offered_size) !=
         OPENSSL_NPN_NEGOTIATED) return SSL_TLSEXT_ERR_NOACK;
     *output = selected;
     return SSL_TLSEXT_ERR_OK;
@@ -150,6 +159,14 @@ public:
         return StreamStatus::Ready;
     }
 
+    // True when ALPN selected HTTP/2.
+    bool http2() const {
+        const unsigned char* protocol = nullptr;
+        unsigned size = 0;
+        SSL_get0_alpn_selected(ssl_.get(), &protocol, &size);
+        return size == 2 && protocol[0] == 'h' && protocol[1] == '2';
+    }
+
     void close_after_response() override {
         const auto deadline = ConnectionClock::now() + std::chrono::milliseconds{100};
         while (ConnectionClock::now() < deadline) {
@@ -192,7 +209,8 @@ private:
 
 } // namespace
 
-TlsContextHandle load_tls_context(const std::filesystem::path& certificate_chain, const std::filesystem::path& key) {
+TlsContextHandle load_tls_context(const std::filesystem::path& certificate_chain, const std::filesystem::path& key,
+                                  bool offer_http2) {
     ERR_clear_error();
     SslContext context(SSL_CTX_new(TLS_server_method()), SSL_CTX_free);
     if (!context) fail_context("could not create the server TLS context");
@@ -208,7 +226,12 @@ TlsContextHandle load_tls_context(const std::filesystem::path& certificate_chain
     // A raw socket EOF must not be reported to the decoder as a close alert.
     SSL_CTX_clear_options(context.get(), SSL_OP_IGNORE_UNEXPECTED_EOF);
     SSL_CTX_set_mode(context.get(), SSL_MODE_ENABLE_PARTIAL_WRITE);
-    SSL_CTX_set_alpn_select_cb(context.get(), select_http11, nullptr);
+#ifndef NEURA_SERVER_HTTP2_ENABLED
+    offer_http2 = false;
+#endif
+    // The callback's argument only marks whether `h2` is offered.
+    static int offered = 1;
+    SSL_CTX_set_alpn_select_cb(context.get(), select_protocol, offer_http2 ? &offered : nullptr);
     return std::make_shared<const TlsContext>(std::move(context));
 }
 
@@ -230,6 +253,13 @@ TlsConnectionEnd serve_tls_connection(int descriptor, TlsContextHandle context, 
     const auto handshake = stream.accept(deadline);
     if (handshake != TlsHandshake::Complete) return {handshake};
 
+#ifdef NEURA_SERVER_HTTP2_ENABLED
+    if (stream.http2()) {
+        const auto result = serve_http2_connection(stream, respond, limits);
+        stream.close_after_response();
+        return {handshake, result};
+    }
+#endif
     const auto result = serve_connection(stream, respond, limits);
     if (result == ConnectionEnd::PeerClosed || result == ConnectionEnd::TruncatedRequest ||
         result == ConnectionEnd::HeadTimeout) stream.close_after_response();

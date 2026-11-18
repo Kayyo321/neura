@@ -165,14 +165,28 @@ class Host:
                 break
 
     def tree(self):
-        # Workers are children of whichever host thread spawned them.
+        # Workers are children of whichever host thread spawned them (a
+        # worker forked by the zygote is a child of the host too). Each
+        # thread's list is read at a different moment, so only the processes
+        # that still exist after every list was read are counted: all of them
+        # existed at once, zombies included. The zygote counts.
         children = set()
         for task in Path(f"/proc/{self.process.pid}/task").glob("*"):
             try:
                 children.update((task / "children").read_text().split())
             except OSError:
                 pass
-        return 1 + len(children)
+        return 1 + sum(1 for pid in children if Path(f"/proc/{pid}").exists())
+
+    def cpu_seconds(self):
+        # The host's CPU time and that of the children it has reaped: every
+        # worker, whether started with exec or forked by the zygote.
+        try:
+            fields = Path(f"/proc/{self.process.pid}/stat").read_text().rsplit(")", 1)[1].split()
+        except OSError:
+            return 0.0
+        ticks = sum(int(fields[i]) for i in (11, 12, 13, 14))  # utime, stime, cutime, cstime
+        return ticks / os.sysconf("SC_CLK_TCK")
 
     def zombies(self):
         count = 0
@@ -232,7 +246,13 @@ def budget_s2(args, image):
     host = Host(args, image)
     try:
         Load(host.port, 0, args.connections, args.warmup, closed_loop=True).run()
+        cpu_before = host.cpu_seconds()
         result = Load(host.port, 0, args.connections, args.seconds, closed_loop=True).run()
+        # Workers still exiting are reaped within milliseconds.
+        time.sleep(0.5)
+        cpu = host.cpu_seconds() - cpu_before
+        result["host_cpu_ms_per_request"] = 1000 * cpu / max(1, result["completed"])
+        result["load_average"] = os.getloadavg()
     finally:
         host.stop()
     result["budget"] = ">= 1500 requests per second with no 503"
@@ -252,7 +272,7 @@ def budget_s4(args, image, rate):
         stop_event.set()
         sampler.join()
         host.stop()
-    limit = args.workers + 2 + 1 + 1  # S-1 + S-2 + 1, and the host itself.
+    limit = args.workers + 2 + 1 + 1  # S-1 + S-2, the zygote (or one spare with exec), and the host itself.
     result["rate"] = rate
     result["peak_processes"] = peak[0]
     result["zombies_at_peak"] = peak[1]
@@ -317,7 +337,8 @@ def budget_s6(args, image, rate):
     result["rss_kib"] = samples
     result["rate"] = rate
     result["budget"] = "RSS slope < 1%/min after minute 2; no descriptor or process left"
-    result["met"] = result.get("rss_slope_percent_per_minute", 0) < 1 and result["processes_after"] <= 1 + 2
+    # The host, its S-2 ready workers and, on Linux, the worker zygote.
+    result["met"] = result.get("rss_slope_percent_per_minute", 0) < 1 and result["processes_after"] <= 1 + 2 + 1
     return result
 
 
