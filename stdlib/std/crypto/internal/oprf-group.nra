@@ -1,0 +1,226 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Crypto.Algorithm;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let edwards = import:Std.Crypto.Internal.Edwards25519;
+let mp = import:Std.Crypto.Internal.Mp;
+let hash_to_curve = import:Std.Crypto.Internal.WeierstrassHashToCurve;
+let words = import:Std.Crypto.Internal.Words;
+let ristretto = import:Std.Crypto.Internal.Ristretto255Core;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
+
+/// @brief RFC 9497 ciphersuite operations for the shared OPRF protocol. Internal.
+/// Points are opaque to the caller and come from one selected group. Scalars are ordinary limbs.
+#Since("0.3.0")
+export let OprfGroup = module (
+    export let Suite = enum (Ristretto255Sha512, P256Sha256, P384Sha384, P521Sha512);
+
+    export let Group = interface (
+        let name = func -> string;
+
+        let scalar_length = func -> int;
+
+        let hash = func(input: uint8[list]) -> uint8[list];
+
+        let hash_to_scalar = func(input: uint8[list], dst: uint8[list]) -> uint32[list];
+
+        let hash_to_group = func(input: uint8[list], dst: uint8[list]) -> class;
+
+        let mask_candidate = func(bytes: uint8[list]);
+
+        let scalar_canonical = func(bytes: uint8[list]) -> Optional<uint32[list]>;
+
+        let scalar_bytes = func(scalar: uint32[list]) -> uint8[list];
+
+        let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list];
+
+        let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list];
+
+        let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list];
+
+        let scalar_invert = func(scalar: uint32[list]) -> uint32[list];
+
+        let identity = func -> class;
+
+        let base = func -> class;
+
+        let add = func(p: class, q: class) -> class;
+
+        let multiply = func(scalar: uint32[list], point: class) -> class;
+
+        let multiply_base = func(scalar: uint32[list]) -> class;
+
+        let multiply_two = func(a: uint32[list], p: class, b: uint32[list], q: class) -> class;
+
+        let is_identity = func(point: class) -> bool;
+
+        let encode = func(point: class) -> uint8[list];
+
+        let decode = func(bytes: uint8[list]) -> Optional<class>;
+    );
+
+    #Final
+    let RistrettoGroup = class implements Group (
+        last g: ristretto.Group = new;
+
+        export let name = func -> string => "ristretto255-SHA512";
+
+        export let scalar_length = func -> int => 32;
+
+        export let hash = func(input: uint8[list]) -> uint8[list] => sha2.sha512(input);
+
+        export let hash_to_scalar = func(input: uint8[list], dst: uint8[list]) -> uint32[list] {
+            let uniform = xmd.expand_sha512(input, dst, 64);
+            defer words.wipe(uniform);
+            return g.scalar_reduce(uniform);
+        };
+
+        export let hash_to_group = func(input: uint8[list], dst: uint8[list]) -> class => g.hash_to_group(input, dst);
+
+        export let mask_candidate = func(bytes: uint8[list]) {
+            bytes[31] &= 31;
+        };
+
+        export let scalar_canonical = func(bytes: uint8[list]) -> Optional<uint32[list]> => g.scalar_canonical(bytes);
+
+        export let scalar_bytes = func(scalar: uint32[list]) -> uint8[list] => g.scalar_bytes(scalar);
+
+        export let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] => g.scalar_add(a, b);
+
+        export let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list] => g.scalar_subtract(a, b);
+
+        export let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list] => g.scalar_multiply(a, b);
+
+        export let scalar_invert = func(scalar: uint32[list]) -> uint32[list] => g.scalar_invert(scalar);
+
+        export let identity = func -> class => g.identity();
+
+        export let base = func -> class => g.base();
+
+        export let add = func(p: class, q: class) -> class => g.add(p as edwards.Point, q as edwards.Point);
+
+        export let multiply = func(scalar: uint32[list], point: class) -> class => g.multiply(scalar, point as edwards.Point);
+
+        export let multiply_base = func(scalar: uint32[list]) -> class => g.multiply_base(scalar);
+
+        export let multiply_two = func(a: uint32[list], p: class, b: uint32[list], q: class) -> class => g.multiply_two(a, p as edwards.Point, b, q as edwards.Point);
+
+        export let is_identity = func(point: class) -> bool => g.is_identity(point as edwards.Point);
+
+        export let encode = func(point: class) -> uint8[list] => g.encode(point as edwards.Point);
+
+        export let decode = func(bytes: uint8[list]) -> Optional<class> => match (g.decode(bytes)) {
+            Optional.Some(point) => Optional<class>.Some(point),
+            Optional.None => Optional<class>.None,
+        };
+
+        export let.override to_string = func -> string => "OprfGroup.RistrettoGroup";
+    );
+
+    #Final
+    let WeierstrassGroup = class implements Group (
+        last g: weierstrass.Curve;
+
+        export let init = func(id: weierstrass.CurveId) {
+            if (id == weierstrass.CurveId.Secp256k1) {
+                trap_with_message("invalid argument: unsupported OPRF curve");
+            }
+            crypto_policy.require(match (id) {
+                weierstrass.CurveId.P256 => Algorithm.P256,
+                weierstrass.CurveId.P384 => Algorithm.P384,
+                _ => Algorithm.P521,
+            });
+            g = new(id);
+        };
+
+        export let name = func -> string => match (g.id) {
+            weierstrass.CurveId.P256 => "P256-SHA256",
+            weierstrass.CurveId.P384 => "P384-SHA384",
+            _ => "P521-SHA512",
+        };
+
+        export let scalar_length = func -> int => g.size;
+
+        export let hash = func(input: uint8[list]) -> uint8[list] => match (g.id) {
+            weierstrass.CurveId.P256 => sha2.sha256(input),
+            weierstrass.CurveId.P384 => sha2.sha384(input),
+            _ => sha2.sha512(input),
+        };
+
+        export let hash_to_scalar = func(input: uint8[list], dst: uint8[list]) -> uint32[list] {
+            let uniform = match (g.id) {
+                weierstrass.CurveId.P256 => xmd.expand<sha2.Sha256>(input, dst, 48),
+                weierstrass.CurveId.P384 => xmd.expand<sha2.Sha384>(input, dst, 72),
+                _ => xmd.expand_sha512(input, dst, 98),
+            };
+            defer words.wipe(uniform);
+            return g.order.reduce_bytes_be(uniform);
+        };
+
+        export let hash_to_group = func(input: uint8[list], dst: uint8[list]) -> class => hash_to_curve.hash_to_point(g, input, dst);
+
+        export let mask_candidate = func(bytes: uint8[list]) {
+            if (g.id == weierstrass.CurveId.P521) {
+                bytes[0] &= 1;
+            }
+        };
+
+        export let scalar_canonical = func(bytes: uint8[list]) -> Optional<uint32[list]> {
+            if (bytes.length != g.size) {
+                return Optional<uint32[list]>.None;
+            }
+            last scalar = mp.from_bytes_be(bytes, g.order.n);
+            if (mp.less(scalar, g.order.m) != 1) {
+                return Optional<uint32[list]>.None;
+            }
+            return Optional<uint32[list]>.Some(scalar);
+        };
+
+        export let scalar_bytes = func(scalar: uint32[list]) -> uint8[list] => mp.to_bytes_be(scalar, g.size);
+
+        export let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] => g.order.add(a, b);
+
+        export let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list] => g.order.sub(a, b);
+
+        export let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list] => g.order.mul(a, g.order.to_mont(b));
+
+        export let scalar_invert = func(scalar: uint32[list]) -> uint32[list] => g.order.from_mont(g.order.inv(g.order.to_mont(scalar)));
+
+        export let identity = func -> class => g.identity();
+
+        export let base = func -> class => g.generator();
+
+        export let add = func(p: class, q: class) -> class => g.add(p as weierstrass.Point, q as weierstrass.Point);
+
+        export let multiply = func(scalar: uint32[list], point: class) -> class => g.multiply(scalar, point as weierstrass.Point);
+
+        export let multiply_base = func(scalar: uint32[list]) -> class => g.multiply_generator(scalar);
+
+        export let multiply_two = func(a: uint32[list], p: class, b: uint32[list], q: class) -> class => g.multiply_two(a, p as weierstrass.Point, b, q as weierstrass.Point);
+
+        export let is_identity = func(point: class) -> bool => g.is_identity(point as weierstrass.Point);
+
+        export let encode = func(point: class) -> uint8[list] => g.encode(point as weierstrass.Point, true);
+
+        export let decode = func(bytes: uint8[list]) -> Optional<class> {
+            if (bytes.length != g.size + 1 || (bytes[0] != 2 && bytes[0] != 3)) {
+                return Optional<class>.None;
+            }
+            return match (g.decode(bytes)) {
+                Optional.Some(point) => Optional<class>.Some(point),
+                Optional.None => Optional<class>.None,
+            };
+        };
+
+        export let.override to_string = func -> string => "OprfGroup.WeierstrassGroup";
+    );
+
+    /// @brief Creates scratch arithmetic for one suite.
+    export let create = func(suite: Suite) -> Group => match (suite) {
+        Suite.Ristretto255Sha512 => new RistrettoGroup(),
+        Suite.P256Sha256 => new WeierstrassGroup(weierstrass.CurveId.P256),
+        Suite.P384Sha384 => new WeierstrassGroup(weierstrass.CurveId.P384),
+        Suite.P521Sha512 => new WeierstrassGroup(weierstrass.CurveId.P521),
+    };
+);

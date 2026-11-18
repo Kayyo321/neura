@@ -1,0 +1,194 @@
+// test-options: --gpu=off --deny-entropy --max-steps 3000000000
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let oprf = import:Std.Crypto.Advanced.Oprf;
+let strings = import:Std.Core.String;
+let test = import:Std.Test;
+let vectors = import:OprfSuitesVectors;
+
+let OprfSuitesTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let items = func(text: string) -> uint8[list][list] {
+        let output: uint8[list][list] = new;
+        for (let item in strings.split_regex(text, ",")) {
+            output.append(bytes(item));
+        }
+        return output;
+    };
+
+    let mode_of = func(name: string) -> oprf.Mode {
+        if (name == "OPRF") {
+            return oprf.Mode.Base;
+        }
+        return name == "VOPRF" ? oprf.Mode.Verifiable : oprf.Mode.Partial;
+    };
+
+    let assert_elements = func(expected, actual: uint8[list][list]) {
+        test.assert(expected.length == actual.length);
+        for (let i = 0; i < expected.length; i++) {
+            test.assert_equal_string(hex.encode(expected[i]), hex.encode(actual[i]));
+        }
+    };
+
+    let transcript = func(rows: string[], i: int, suite: oprf.Suite) {
+        last mode = mode_of(rows[i]);
+        last server = test.assert_ok(oprf.derive_key_pair(mode, bytes(rows[i + 1]), bytes(rows[i + 2]), suite));
+        defer server.wipe();
+        test.assert_equal_string(rows[i + 3], hex.encode(server.expose()));
+        if (mode != oprf.Mode.Base) {
+            test.assert_equal_string(rows[i + 4], hex.encode(server.public_key_bytes()));
+        }
+        last client = new oprf.Client(mode, bytes(rows[i + 4]), suite);
+        last inputs = items(rows[i + 5]);
+        last info = bytes(rows[i + 6]);
+        last state = test.assert_ok(client.blind_batch_with(inputs, info, items(rows[i + 7])));
+        last blinded = state.blinded_elements();
+        assert_elements(items(rows[i + 8]), blinded);
+        last evaluation = test.assert_ok(server.evaluate_batch_with(blinded, info, bytes(rows[i + 11])));
+        last evaluated = evaluation.evaluated_elements();
+        last proof = evaluation.encoded_proof();
+        assert_elements(items(rows[i + 9]), evaluated);
+        test.assert_equal_string(rows[i + 10], hex.encode(proof));
+        last outputs = test.assert_ok(state.finalize_batch(evaluated, proof));
+        assert_elements(items(rows[i + 12]), outputs);
+        test.assert(state.is_spent());
+        for (let j = 0; j < inputs.length; j++) {
+            last direct = test.assert_ok(server.full_evaluate(inputs[j], info));
+            test.assert_equal_string(hex.encode(outputs[j]), hex.encode(direct));
+        }
+    };
+
+    let transcripts = func(rows: string[], suite: oprf.Suite, start, finish: int) {
+        for (let i = start; i < finish; i++) {
+            transcript(rows, i * 13, suite);
+        }
+    };
+
+    export let test_rfc_9497_ristretto255_single_and_batch = func => transcripts(vectors.ristretto, oprf.Suite.Ristretto255Sha512, 0, 8);
+
+    export let test_rfc_9497_p256_single_and_batch = func => transcripts(vectors.p256, oprf.Suite.P256Sha256, 0, 8);
+
+    export let test_rfc_9497_p384_base_and_verifiable = func => transcripts(vectors.p384, oprf.Suite.P384Sha384, 0, 5);
+
+    export let test_rfc_9497_p384_partial = func => transcripts(vectors.p384, oprf.Suite.P384Sha384, 5, 8);
+
+    export let test_rfc_9497_p521_base = func => transcripts(vectors.p521, oprf.Suite.P521Sha512, 0, 2);
+
+    export let test_rfc_9497_p521_verifiable_single = func => transcripts(vectors.p521, oprf.Suite.P521Sha512, 2, 4);
+
+    export let test_rfc_9497_p521_verifiable_batch = func => transcript(vectors.p521, 4 * 13, oprf.Suite.P521Sha512);
+
+    export let test_rfc_9497_p521_partial_single = func => transcripts(vectors.p521, oprf.Suite.P521Sha512, 5, 7);
+
+    export let test_rfc_9497_p521_partial_batch = func => transcript(vectors.p521, 7 * 13, oprf.Suite.P521Sha512);
+
+    export let test_base_batch_with_drbg_and_copy_boundaries = func {
+        last suite = oprf.Suite.P521Sha512;
+        last random = new drbg.ChaCha20Drbg(bytes(vectors.p521[1]));
+        last server = test.assert_ok(oprf.generate_key_pair(oprf.Mode.Base, random, suite));
+        defer server.wipe();
+        last client = new oprf.Client(oprf.Mode.Base, new, suite);
+        let first: uint8[list] = new([1]);
+        last second: uint8[list] = new([2]);
+        last state = test.assert_ok(client.blind_batch(new([first, second]), new, random));
+        first[0] = 3;
+        let copy = state.blinded_elements();
+        copy[0][0] = 0;
+        last evaluation = test.assert_ok(server.evaluate_batch(state.blinded_elements(), new, random));
+        let result = evaluation.evaluated_elements();
+        result[1][0] = 0;
+        test.assert(evaluation.encoded_proof().length == 0);
+        last outputs = test.assert_ok(state.finalize_batch(evaluation.evaluated_elements(), new));
+        test.assert(state.is_spent());
+        assert_elements(new([
+        test.assert_ok(server.full_evaluate(new([1]), new)),
+        test.assert_ok(server.full_evaluate(second, new))]), outputs);
+
+        let _ = test.assert_err(oprf.generate_key_pair(oprf.Mode.Base, suite));
+        let _ = test.assert_err(client.blind_batch(new([first, second]), new));
+    };
+
+    export let test_batch_response_validation_is_atomic = func {
+        last rows = vectors.p256;
+        last i = 52;
+        last suite = oprf.Suite.P256Sha256;
+        last client = new oprf.Client(oprf.Mode.Verifiable, bytes(rows[i + 4]), suite);
+        last inputs = items(rows[i + 5]);
+        last blinds = items(rows[i + 7]);
+        last proof = bytes(rows[i + 10]);
+        last elements = items(rows[i + 9]);
+        last first = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
+        let _ = test.assert_err(first.finalize_batch(new([elements[1], elements[0]]), proof));
+        test.assert(first.is_spent());
+        last second = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
+        let _ = test.assert_err(second.finalize_batch(new([elements[0], elements[0]]), proof));
+        test.assert(second.is_spent());
+        last third = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
+        let _ = test.assert_err(third.finalize_batch(new([elements[0]]), proof));
+        test.assert(third.is_spent());
+        last fourth = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
+        let zero: uint8[list] = new;
+        for (let n = 0; n < proof.length; n++) {
+            zero.append(0);
+        }
+        let _ = test.assert_err(fourth.finalize_batch(elements, zero));
+        test.assert(fourth.is_spent());
+        last fifth = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
+        let _ = test.assert_err(fifth.finalize_batch(elements, new([1])));
+        test.assert(fifth.is_spent());
+
+        last sixth = test.assert_ok(client.blind_batch_with(inputs, new, blinds));
+        last noncanonical = bytes("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551" +
+        "0000000000000000000000000000000000000000000000000000000000000001");
+        let _ = test.assert_err(sixth.finalize_batch(elements, noncanonical));
+        test.assert(sixth.is_spent());
+        let _ = test.assert_err(client.blind_batch_with(inputs, new, new([blinds[0]])));
+        let _ = test.assert_err(client.blind_batch_with(new, new, new));
+    };
+
+    export let test_malformed_and_cross_suite_requests = func {
+        last rows = vectors.p256;
+        last i = 52;
+        last suite = oprf.Suite.P256Sha256;
+        last server = new oprf.Server(oprf.Mode.Verifiable, bytes(rows[i + 3]), suite);
+        defer server.wipe();
+        last good = items(rows[i + 8]);
+        last proof_nonce = bytes(rows[i + 11]);
+        last wrong_suite = items(vectors.p384[i + 8]);
+        let _ = test.assert_err(server.evaluate_batch_with(wrong_suite, new, proof_nonce));
+        let _ = test.assert_err(server.evaluate_batch_with(new([good[0], new([0])]), new, proof_nonce));
+        let _ = test.assert_err(server.evaluate_batch_with(new, new, proof_nonce));
+        let _ = test.assert_err(server.evaluate_batch_with(good, new([1]), proof_nonce));
+        last field_modulus = bytes("02ffffffff00000001000000000000000000000000ffffffffffffffffffffffff");
+        let _ = test.assert_err(server.evaluate_batch_with(new([good[0], field_modulus]), new, proof_nonce));
+        last uncompressed = bytes("046b17d1f2e12c4247f8bce6e563a440f277037d812deb33a0f4a13945d898c2964fe342e2fe1a7f9b8ee7eb4a7c0f9e162bce33576b315ececbb6406837bf51f5");
+        let _ = test.assert_err(server.evaluate_batch_with(new([good[0], uncompressed]), new, proof_nonce));
+    };
+
+    export let test_partial_batch_info_and_input_bounds = func {
+        last rows = vectors.p256;
+        last i = 91;
+        last suite = oprf.Suite.P256Sha256;
+        last client = new oprf.Client(oprf.Mode.Partial, bytes(rows[i + 4]), suite);
+        last server = new oprf.Server(oprf.Mode.Partial, bytes(rows[i + 3]), suite);
+        defer server.wipe();
+        last inputs = items(rows[i + 5]);
+        last blinds = items(rows[i + 7]);
+        last correct_info = bytes(rows[i + 6]);
+        last wrong_info: uint8[list] = new([1]);
+        last state = test.assert_ok(client.blind_batch_with(inputs, wrong_info, blinds));
+        let _ = test.assert_err(state.finalize_batch(items(rows[i + 9]), bytes(rows[i + 10])));
+        test.assert(state.is_spent());
+
+        let too_long: uint8[list] = new;
+        for (let n = 0; n < 65535; n++) {
+            too_long.append(0);
+        }
+        let _ = test.assert_err(client.blind_with(too_long, correct_info, blinds[0]));
+        let _ = test.assert_err(client.blind_batch_with(inputs, too_long, blinds));
+        let _ = test.assert_err(server.evaluate_batch_with(items(rows[i + 8]), too_long, bytes(rows[i + 11])));
+        let _ = test.assert_err(server.full_evaluate(too_long, correct_info));
+    };
+
+);

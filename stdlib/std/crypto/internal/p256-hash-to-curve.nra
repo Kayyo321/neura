@@ -1,69 +1,15 @@
-let.promote _ = import:Std.Crypto.Algorithm;
-let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
-let mp = import:Std.Crypto.Internal.Mp;
-let sha2 = import:Std.Crypto.Hash.Sha2;
+let common = import:Std.Crypto.Internal.WeierstrassHashToCurve;
 let weierstrass = import:Std.Crypto.Internal.Weierstrass;
-let words = import:Std.Crypto.Internal.Words;
-let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 
-/// @brief RFC 9380 P256_XMD:SHA-256_SSWU_RO_. Internal. Field and point arithmetic are Montgomery-form.
+/// @brief RFC 9380 P256_XMD:SHA-256_SSWU_RO_. Internal.
 #Since("0.3.0")
 export let P256HashToCurve = module (
-    // One square root of -Z = 10 modulo the P-256 field prime. The final sign step specifies which root to use.
-    const SqrtTen = "da538e3be1d89b99c978fc675180aab27b8d1ff84c55d5b62ccd3427e433c47f";
-
     /// @brief Hash to P-256 using sections 5.2 and 8.2 and Appendix F.2 of RFC 9380.
     export let hash_to_point = func(curve: weierstrass.Curve, message: uint8[list], dst: uint8[list])
         -> weierstrass.Point {
-        crypto_policy.require(Algorithm.P256);
         if (curve.id != weierstrass.CurveId.P256) {
             trap_with_message("invalid argument: P-256 hash-to-curve needs the P-256 group");
         }
-        last field = curve.field;
-        last b = curve.coefficient_b();
-        last z = field.neg(field.to_mont(mp.small(10, field.n)));
-        last exponent = mp.shift_right_small(mp.plain_sub(field.m, mp.small(3, field.n)), 2);
-        last root = field.to_mont(mp.from_hex(SqrtTen, field.n));
-        // Two field elements of L = 48 bytes, interpreted as big-endian integers before reduction.
-        last expanded = xmd.expand<sha2.Sha256>(message, dst, 96);
-        last first = field.reduce_bytes_be(words.slice(expanded, 0, 48));
-        last second = field.reduce_bytes_be(words.slice(expanded, 48, 96));
-        last q0 = map(curve, first, b, z, exponent, root);
-        last q1 = map(curve, second, b, z, exponent, root);
-        // The P-256 cofactor is one.
-        return curve.add(q0, q1);
-    };
-
-    /// @brief Simplified SWU, Appendix F.2. Returns (X:Y:Z) with affine coordinates (X/Z, Y/Z).
-    let map = func(curve: weierstrass.Curve, input: uint32[list], b: uint32[list], z: uint32[list],
-        exponent: uint32[list], root: uint32[list]) -> weierstrass.Point {
-        last field = curve.field;
-        last u = field.to_mont(input);
-        last zu2 = field.mul(z, field.sqr(u));
-        last term = field.add(field.sqr(zu2), zu2);
-        last x1 = field.mul(b, field.add(term, field.one));
-        last denominator = curve.mul_a(mp.select(mp.is_zero(term), z, field.neg(term)));
-
-        last denominator2 = field.sqr(denominator);
-        last denominator3 = field.mul(denominator2, denominator);
-        last gx_numerator = field.add(field.mul(field.add(field.sqr(x1), curve.mul_a(denominator2)), x1),
-            field.mul(b, denominator3));
-        const [first_is_square, y1] = sqrt_ratio(field, gx_numerator, denominator3, exponent, root);
-        last x = mp.select(first_is_square, x1, field.mul(zu2, x1));
-        last y = mp.select(first_is_square, y1, field.mul(field.mul(zu2, u), y1));
-        last sign_difference = (input[0] ^ field.from_mont(y)[0]) & 1;
-        last signed_y = mp.select(sign_difference, field.neg(y), y);
-        return new weierstrass.Point(x, field.mul(signed_y, denominator), denominator);
-    };
-
-    /// @brief Appendix F.2.1.2 for q = 3 mod 4. Returns the residue flag and the appropriate square root.
-    let sqrt_ratio = func(field: mp.Modulus, numerator: uint32[list], denominator: uint32[list],
-        exponent: uint32[list], root_negative_z: uint32[list]) -> [uint32, uint32[list]] {
-        last uv = field.mul(numerator, denominator);
-        last uv3 = field.mul(field.sqr(denominator), uv);
-        last y1 = field.mul(field.pow(uv3, exponent), uv);
-        last y2 = field.mul(y1, root_negative_z);
-        last is_square = mp.equal(field.mul(field.sqr(y1), denominator), numerator);
-        return [is_square, mp.select(is_square, y1, y2)];
+        return common.hash_to_point(curve, message, dst);
     };
 );

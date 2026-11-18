@@ -1,10 +1,10 @@
-let p256 = import:Std.Crypto.Internal.P256HashToCurve;
 let ristretto = import:Std.Crypto.Internal.Ristretto255Core;
 let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+let nist = import:Std.Crypto.Internal.WeierstrassHashToCurve;
 let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 
-/// @brief RFC 9380 hash-to-curve suites for ristretto255 and P-256, plus SHA-512 XMD.
-/// The P-256 mapping uses branch-free field selection in source; the runtime does not guarantee constant time.
+/// @brief RFC 9380 hash-to-curve suites for ristretto255, P-256, P-384, and P-521, plus SHA-512 XMD.
+/// The NIST mappings uses branch-free field selection in source; the runtime does not guarantee constant time.
 /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
 #Since("0.3.0")
 export let HashToCurve = module (
@@ -32,12 +32,35 @@ export let HashToCurve = module (
     #[NoDiscard, Since("0.3.0")]
     export let hash_to_p256 = func(message: uint8[list], dst: uint8[list]) -> uint8[list] =>
         hash_to_p256(message, dst, false)
-        or func(message: uint8[list], dst: uint8[list], compressed: bool) -> uint8[list] {
-            last curve = new weierstrass.Curve(weierstrass.CurveId.P256);
-            last point = p256.hash_to_point(curve, message, dst);
-            if (curve.is_identity(point)) {
-                return new([0]);
-            }
-            return curve.encode(point, compressed);
-        };
+        or func(message: uint8[list], dst: uint8[list], compressed: bool) -> uint8[list] =>
+            encode_nist(weierstrass.CurveId.P256, message, dst, compressed);
+
+    /// @brief The RFC 9380 P384_XMD:SHA-384_SSWU_RO_ suite with the protocol's nonempty domain separation tag.
+    /// Returns SEC1 uncompressed by default or compressed when requested. The identity is encoded as 0x00.
+    /// An empty domain tag traps.
+    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
+    #[NoDiscard, Since("0.3.0")]
+    export let hash_to_p384 = func(message: uint8[list], dst: uint8[list]) -> uint8[list] =>
+        hash_to_p384(message, dst, false)
+        or func(message: uint8[list], dst: uint8[list], compressed: bool) -> uint8[list] =>
+            encode_nist(weierstrass.CurveId.P384, message, dst, compressed);
+
+    /// @brief The RFC 9380 P521_XMD:SHA-512_SSWU_RO_ suite with the protocol's nonempty domain separation tag.
+    /// Returns SEC1 uncompressed by default or compressed when requested. The identity is encoded as 0x00.
+    /// An empty domain tag traps.
+    /// @see [Std.Crypto.Advanced.HashToCurve](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-HashToCurve)
+    #[NoDiscard, Since("0.3.0")]
+    export let hash_to_p521 = func(message: uint8[list], dst: uint8[list]) -> uint8[list] =>
+        hash_to_p521(message, dst, false)
+        or func(message: uint8[list], dst: uint8[list], compressed: bool) -> uint8[list] =>
+            encode_nist(weierstrass.CurveId.P521, message, dst, compressed);
+
+    let encode_nist = func(id: weierstrass.CurveId, message, dst: uint8[list], compressed: bool) -> uint8[list] {
+        last curve = new weierstrass.Curve(id);
+        last point = nist.hash_to_point(curve, message, dst);
+        if (curve.is_identity(point)) {
+            return new([0]);
+        }
+        return curve.encode(point, compressed);
+    };
 );

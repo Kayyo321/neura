@@ -5,17 +5,14 @@ let.promote _ = import:Std.Crypto.PrivateKey;
 let constant_time = import:Std.Crypto.Core.ConstantTime;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
 let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
-let edwards = import:Std.Crypto.Internal.Edwards25519;
 let entropy = import:Std.Crypto.Random.Entropy;
 let error = import:Std.Core.Error;
 let mp = import:Std.Crypto.Internal.Mp;
-let ristretto = import:Std.Crypto.Internal.Ristretto255Core;
+let groups = import:Std.Crypto.Internal.OprfGroup;
 let secret = import:Std.Crypto.Core.SecretBytes;
-let sha2 = import:Std.Crypto.Hash.Sha2;
 let words = import:Std.Crypto.Internal.Words;
-let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
 
-/// @brief Oblivious PRFs in RFC 9497 using the ristretto255-SHA512 ciphersuite and single-element evaluation.
+/// @brief Oblivious PRFs in RFC 9497 with four prime-order ciphersuites and batched evaluation.
 /// Context and wire data are bound to the selected mode. Bind a verifiable client to an authenticated
 /// server public key. The runtime does not guarantee constant-time interpretation of these operations.
 /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
@@ -26,25 +23,53 @@ export let Oprf = module (
     #Since("0.3.0")
     export let Mode = enum (Base, Verifiable, Partial);
 
+    /// @brief The RFC 9497 ciphersuites implemented by this module.
+    /// The overloads without a suite use Ristretto255Sha512.
+    /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+    #Since("0.3.0")
+    export let Suite = groups.Suite;
+
+    let make_group = func(suite: Suite) -> groups.Group {
+        crypto_policy.require(Algorithm.Oprf);
+        return groups.create(suite);
+    };
+
     let fail = func<T>(reason: string) -> Result<T> => Result<T>.Err(error.custom("crypto.oprf", reason));
 
-    let context = func(purpose: string, mode: Mode) -> uint8[list] {
+    let context = func(group: groups.Group, purpose: string, mode: Mode) -> uint8[list] {
         let out = words.utf8(purpose + "OPRFV1-");
         out.append((mode as int) as uint8);
-        words.append_all(out, words.utf8("-ristretto255-SHA512"));
+        words.append_all(out, words.utf8("-" + group.name()));
         return out;
     };
 
+    let add_u16 = func(out: uint8[list], value: int) {
+        out.append((value >> 8) as uint8);
+        out.append((value & 255) as uint8);
+    };
+
     let add_frame = func(out: uint8[list], bytes: uint8[list]) {
-        out.append((bytes.length >> 8) as uint8);
-        out.append((bytes.length & 255) as uint8);
+        add_u16(out, bytes.length);
         words.append_all(out, bytes);
     };
 
-    let valid_lengths = func(mode: Mode, input: uint8[list], info: uint8[list]) -> bool =>
-        input.length <= 65535 && info.length <= 65535 && (mode == Mode.Partial || info.length == 0);
+    // RFC 9497 section 5.1 uses a strict upper bound for application inputs.
 
-    let nonzero_scalar = func(group: ristretto.Group, bytes: uint8[list]) -> uint32[list] {
+    let valid_input = func(input: uint8[list]) -> bool => input.length < 65535;
+
+    let valid_info = func(mode: Mode, info: uint8[list]) -> bool => mode == Mode.Partial ? valid_input(info) : info.length == 0;
+
+    let valid_batch = func(count: int) -> bool => count > 0 && count <= 65536;
+
+    let copy_elements = func(values: uint8[list][list]) -> uint8[list][list] {
+        let copies: uint8[list][list] = new;
+        for (let value in values) {
+            copies.append(words.copy(value));
+        }
+        return copies;
+    };
+
+    let nonzero_scalar = func(group: groups.Group, bytes: uint8[list]) -> uint32[list] {
         match (group.scalar_canonical(bytes)) {
             Optional.Some(scalar) => {
                 if (mp.is_zero(scalar) == 0) {
@@ -56,29 +81,29 @@ export let Oprf = module (
         trap_with_message("invalid argument: OPRF requires a canonical nonzero scalar");
     };
 
-    let read_element = func(group: ristretto.Group, bytes: uint8[list]) -> Result<edwards.Point> {
+    let read_element = func(group: groups.Group, bytes: uint8[list]) -> Result<class> {
         match (group.decode(bytes)) {
             Optional.Some(point) => {
                 if (!group.is_identity(point)) {
-                    return Result<edwards.Point>.Ok(point);
+                    return Result<class>.Ok(point);
                 }
             },
             Optional.None => {},
         }
-        return fail<edwards.Point>("expected a canonical non-identity ristretto255 element");
+        return fail<class>("expected a canonical non-identity element for the selected ciphersuite");
     };
 
-    let read_scalar = func(group: ristretto.Group, bytes: uint8[list]) -> Result<uint32[list]> {
+    let read_scalar = func(group: groups.Group, bytes: uint8[list]) -> Result<uint32[list]> {
         return match (group.scalar_canonical(bytes)) {
             Optional.Some(scalar) => Result<uint32[list]>.Ok(scalar),
             Optional.None => fail<uint32[list]>("proof scalar is not canonical"),
         };
     };
 
-    let random_scalar = func(group: ristretto.Group, source: func() -> Result<uint8[list]>) -> Result<uint8[list]> {
+    let random_scalar = func(group: groups.Group, source: func(int) -> Result<uint8[list]>) -> Result<uint8[list]> {
         for (let attempt = 0; attempt < 128; attempt++) {
-            let bytes = source()?;
-            bytes[31] = bytes[31] & 31;
+            let bytes = source(group.scalar_length())?;
+            group.mask_candidate(bytes);
             match (group.scalar_canonical(bytes)) {
                 Optional.Some(scalar) => {
                     if (mp.is_zero(scalar) == 0) {
@@ -92,17 +117,16 @@ export let Oprf = module (
         return fail<uint8[list]>("failed to sample a nonzero scalar");
     };
 
-    let hash_scalar = func(group: ristretto.Group, mode: Mode, input: uint8[list]) -> uint32[list] =>
-        group.scalar_reduce(xmd.expand_sha512(input, context("HashToScalar-", mode), 64));
+    let hash_scalar = func(group: groups.Group, mode: Mode, input: uint8[list]) -> uint32[list] => group.hash_to_scalar(input, context(group, "HashToScalar-", mode));
 
-    let info_scalar = func(group: ristretto.Group, mode: Mode, info: uint8[list]) -> uint32[list] {
+    let info_scalar = func(group: groups.Group, mode: Mode, info: uint8[list]) -> uint32[list] {
         let framed = words.utf8("Info");
         add_frame(framed, info);
         return hash_scalar(group, mode, framed);
     };
 
-    let finish = func(group: ristretto.Group, mode: Mode, input: uint8[list], info: uint8[list],
-        element: edwards.Point) -> uint8[list] {
+    let finish = func(group: groups.Group, mode: Mode, input: uint8[list], info: uint8[list],
+        element: class) -> uint8[list] {
         let framed: uint8[list] = new;
         add_frame(framed, input);
         if (mode == Mode.Partial) {
@@ -110,28 +134,29 @@ export let Oprf = module (
         }
         add_frame(framed, group.encode(element));
         words.append_all(framed, words.utf8("Finalize"));
-        last output = sha2.sha512(framed);
+        last output = group.hash(framed);
         words.wipe(framed);
         return output;
     };
 
-    let composite_weight = func(group: ristretto.Group, mode: Mode, public_key, input, output: edwards.Point)
-        -> uint32[list] {
-        let seed_input: uint8[list] = new;
-        add_frame(seed_input, group.encode(public_key));
-        add_frame(seed_input, context("Seed-", mode));
+    let composite_seed = func(group: groups.Group, mode: Mode, public_key: class) -> uint8[list] {
+        let framed: uint8[list] = new;
+        add_frame(framed, group.encode(public_key));
+        add_frame(framed, context(group, "Seed-", mode));
+        return group.hash(framed);
+    };
+
+    let composite_weight = func(group: groups.Group, mode: Mode, seed: uint8[list], index: int, input, output: class) -> uint32[list] {
         let transcript: uint8[list] = new;
-        add_frame(transcript, sha2.sha512(seed_input));
-        transcript.append(0);
-        transcript.append(0);
+        add_frame(transcript, seed);
+        add_u16(transcript, index);
         add_frame(transcript, group.encode(input));
         add_frame(transcript, group.encode(output));
         words.append_all(transcript, words.utf8("Composite"));
         return hash_scalar(group, mode, transcript);
     };
 
-    let challenge = func(group: ristretto.Group, mode: Mode, public_key, m, z, t2, t3: edwards.Point)
-        -> uint32[list] {
+    let challenge = func(group: groups.Group, mode: Mode, public_key, m, z, t2, t3: class) -> uint32[list] {
         let transcript: uint8[list] = new;
         for (let point in [public_key, m, z, t2, t3]) {
             add_frame(transcript, group.encode(point));
@@ -140,58 +165,87 @@ export let Oprf = module (
         return hash_scalar(group, mode, transcript);
     };
 
-    let prove = func(group: ristretto.Group, mode: Mode, k, random: uint32[list], public_key, input, output: edwards.Point)
-        -> uint8[list] {
-        last weight = composite_weight(group, mode, public_key, input, output);
-        last m = group.multiply(weight, input);
+    let prove = func(group: groups.Group, mode: Mode, k, nonce: uint32[list], public_key: class,
+        inputs, outputs: class [list]) -> Result<uint8[list]> {
+        last seed = composite_seed(group, mode, public_key);
+        let m = group.identity();
+        for (let i = 0; i < inputs.length; i++) {
+            last weight = composite_weight(group, mode, seed, i, inputs[i], outputs[i]);
+            m = group.add(m, group.multiply(weight, inputs[i]));
+        }
+        if (group.is_identity(m)) {
+            return fail<uint8[list]>("the batch proof composite is the identity");
+        }
         last z = group.multiply(k, m);
-        last c = challenge(group, mode, public_key, m, z, group.multiply_base(random), group.multiply(random, m));
-        last s = group.scalar_subtract(random, group.scalar_multiply(c, k));
+        last c = challenge(group, mode, public_key, m, z, group.multiply_base(nonce), group.multiply(nonce, m));
+        last s = group.scalar_subtract(nonce, group.scalar_multiply(c, k));
         let encoded = group.scalar_bytes(c);
         words.append_all(encoded, group.scalar_bytes(s));
-        return encoded;
+        return Result<uint8[list]>.Ok(encoded);
     };
 
-    let proof_valid = func(group: ristretto.Group, mode: Mode, public_key, input, output: edwards.Point,
+    let proof_valid = func(group: groups.Group, mode: Mode, public_key: class, inputs, outputs: class [list],
         proof: uint8[list]) -> Result<bool> {
-        if (proof.length != 64) {
-            return fail<bool>("the two DLEQ proof scalars must be 64 bytes");
+        last width = group.scalar_length();
+        if (proof.length != 2 * width) {
+            return fail<bool>("incorrect DLEQ proof length for the selected ciphersuite");
         }
-        last c = read_scalar(group, words.slice(proof, 0, 32))?;
-        last s = read_scalar(group, words.slice(proof, 32, 64))?;
-        last weight = composite_weight(group, mode, public_key, input, output);
-        last m = group.multiply(weight, input);
-        last z = group.multiply(weight, output);
+        last c = read_scalar(group, words.slice(proof, 0, width))?;
+        last s = read_scalar(group, words.slice(proof, width, 2 * width))?;
+        last seed = composite_seed(group, mode, public_key);
+        let m = group.identity();
+        let z = group.identity();
+        for (let i = 0; i < inputs.length; i++) {
+            last weight = composite_weight(group, mode, seed, i, inputs[i], outputs[i]);
+            m = group.add(m, group.multiply(weight, inputs[i]));
+            z = group.add(z, group.multiply(weight, outputs[i]));
+        }
+        if (group.is_identity(m) || group.is_identity(z)) {
+            return Result<bool>.Ok(false);
+        }
         last t2 = group.multiply_two(s, group.base(), c, public_key);
         last t3 = group.multiply_two(s, m, c, z);
+        if (group.is_identity(t2) || group.is_identity(t3)) {
+            return Result<bool>.Ok(false);
+        }
         last expected = challenge(group, mode, public_key, m, z, t2, t3);
         return Result<bool>.Ok(constant_time.ct_eq(group.scalar_bytes(expected), group.scalar_bytes(c)));
     };
 
-    /// @brief The evaluated element and the encoded DLEQ proof. The proof is empty in base mode.
+    /// @brief The ordered evaluated elements and their encoded DLEQ proof. The proof is empty in base mode.
     /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, Since("0.3.0")]
     export let Evaluation = class (
-        last element: uint8[list];
+        last elements: uint8[list][list];
         last proof: uint8[list];
 
         #Internal
-        export let init = func(evaluated: uint8[list], encoded_proof: uint8[list]) {
-            element = words.copy(evaluated);
+        export let init = func(evaluated: uint8[list][list], encoded_proof: uint8[list]) {
+            elements = copy_elements(evaluated);
             proof = words.copy(encoded_proof);
         };
 
-        /// @brief Canonical 32-byte evaluated element.
+        /// @brief The canonical evaluated element of a single-element response. A batch with multiple elements traps.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let evaluated_element = func -> uint8[list] => words.copy(element);
+        export let evaluated_element = func -> uint8[list] {
+            if (elements.length != 1) {
+                trap_with_message("invalid state: expected one OPRF evaluated element");
+            }
+            return words.copy(elements[0]);
+        };
 
-        /// @brief Canonical 64-byte proof, or an empty list in base mode.
+        /// @brief The canonical evaluated elements in request order.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let evaluated_elements = func -> uint8[list][list] => copy_elements(elements);
+
+        /// @brief Two canonical scalars in the selected ciphersuite, or an empty list in base mode.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let encoded_proof = func -> uint8[list] => words.copy(proof);
 
-        /// @brief Compares the evaluated element and proof by value.
+        /// @brief Compares the ordered evaluated elements and proof by value.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override equals = func(other: class) -> bool {
@@ -199,16 +253,26 @@ export let Oprf = module (
                 return false;
             }
             last that = other as Evaluation;
-            return constant_time.ct_eq(element, that.element) && constant_time.ct_eq(proof, that.proof);
+            if (elements.length != that.elements.length || !constant_time.ct_eq(proof, that.proof)) {
+                return false;
+            }
+            for (let i = 0; i < elements.length; i++) {
+                if (!constant_time.ct_eq(elements[i], that.elements[i])) {
+                    return false;
+                }
+            }
+            return true;
         };
 
-        /// @brief Hashes the evaluated element and proof.
+        /// @brief Hashes the ordered evaluated elements and proof.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let.override hash_code = func -> uint32 {
             let hash: uint32 = 49;
-            for (let byte in element) {
-                hash = words.add32((((hash as uint64) * 31) & 4294967295) as uint32, byte as uint32);
+            for (let element in elements) {
+                for (let byte in element) {
+                    hash = words.add32((((hash as uint64) * 31) & 4294967295) as uint32, byte as uint32);
+                }
             }
             for (let byte in proof) {
                 hash = words.add32((((hash as uint64) * 31) & 4294967295) as uint32, byte as uint32);
@@ -222,73 +286,113 @@ export let Oprf = module (
         export let.override to_string = func -> string => "Oprf.Evaluation";
     );
 
-    /// @brief One client exchange. The state owns the input and blind until finalization or discard.
+    /// @brief One client exchange. The state owns each input and blind until finalization or discard.
     /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, NotThreadSafe, Since("0.3.0")]
     export let BlindState = class (
-        last group: ristretto.Group;
+        last group: groups.Group;
         last mode: Mode;
-        last input: secret.SecretBytes;
-        last blind: secret.SecretBytes;
+        last inputs: secret.SecretBytes[list];
+        last blinds: secret.SecretBytes[list];
         last info: uint8[list];
-        last element: edwards.Point;
-        last proof_key: edwards.Point;
+        last elements: class [list];
+        last proof_key: class;
 
         #Internal
-        export let init = func(curve: ristretto.Group, selected: Mode, private_input, nonce, metadata: uint8[list],
-            blinded: edwards.Point, verifier_key: edwards.Point) {
+        export let init = func(curve: groups.Group, selected: Mode, private_inputs, nonces: uint8[list][list],
+            metadata: uint8[list], blinded: class [list], verifier_key: class) {
             group = curve;
             mode = selected;
-            input = new secret.SecretBytes(private_input);
-            blind = new secret.SecretBytes(nonce);
+            inputs = new;
+            blinds = new;
+            for (let i = 0; i < private_inputs.length; i++) {
+                inputs.append(new secret.SecretBytes(private_inputs[i]));
+                blinds.append(new secret.SecretBytes(nonces[i]));
+            }
             info = words.copy(metadata);
-            element = blinded;
+            elements = blinded;
             proof_key = verifier_key;
         };
 
-        /// @brief The 32-byte request sent to the server.
+        /// @brief The canonical single-element request. A batch with multiple elements traps.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let blinded_element = func -> uint8[list] => group.encode(element);
+        export let blinded_element = func -> uint8[list] {
+            if (elements.length != 1) {
+                trap_with_message("invalid state: expected one OPRF blinded element");
+            }
+            return group.encode(elements[0]);
+        };
 
-        /// @brief Overwrites the retained input and blind. A discarded exchange cannot be finalized.
+        /// @brief The canonical blinded elements in input order.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let blinded_elements = func -> uint8[list][list] {
+            let encoded: uint8[list][list] = new;
+            for (let element in elements) {
+                encoded.append(group.encode(element));
+            }
+            return encoded;
+        };
+
+        /// @brief Overwrites the retained inputs and blinds. A discarded exchange cannot be finalized.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let discard = func {
-            input.wipe();
-            blind.wipe();
+            for (let i = 0; i < inputs.length; i++) {
+                inputs[i].wipe();
+                blinds[i].wipe();
+            }
         };
 
         /// @brief Whether finalization consumed the exchange or the caller discarded it.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let is_spent = func -> bool => blind.is_wiped();
+        export let is_spent = func -> bool => blinds[0].is_wiped();
 
-        /// @brief Checks the server response and returns the 64-byte PRF result. Each attempt consumes
-        /// this state, including malformed or unauthenticated responses. A spent state traps.
+        /// @brief Checks the single response and returns the PRF output. Each attempt consumes this state.
+        /// A spent state traps. Output size is the ciphersuite hash size.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let finalize = func(evaluated_element, proof: uint8[list]) -> Result<uint8[list]> {
+            last outputs = finalize_batch(new([evaluated_element]), proof)?;
+            return Result<uint8[list]>.Ok(outputs[0]);
+        };
+
+        /// @brief Checks the entire response before returning the outputs in original input order.
+        /// Each attempt consumes every blind, including attempts with malformed or unauthenticated responses.
+        /// A spent state traps.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let finalize_batch = func(evaluated_elements: uint8[list][list], proof: uint8[list]) -> Result<uint8[list][list]> {
             if (is_spent()) {
                 trap_with_message("invalid state: OPRF exchange was consumed");
             }
             defer discard();
-            last evaluated = read_element(group, evaluated_element)?;
+            if (evaluated_elements.length != elements.length) {
+                return fail<uint8[list][list]>("the OPRF response count does not match the request");
+            }
+            let evaluated: class [list] = new;
+            for (let encoded in evaluated_elements) {
+                evaluated.append(read_element(group, encoded)?);
+            }
             if (mode == Mode.Base) {
                 if (proof.length != 0) {
-                    return fail<uint8[list]>("base OPRF responses have no proof");
+                    return fail<uint8[list][list]>("base OPRF responses have no proof");
                 }
             } else {
-                last valid = mode == Mode.Verifiable
-                    ? (proof_valid(group, mode, proof_key, element, evaluated, proof)?)
-                    : (proof_valid(group, mode, proof_key, evaluated, element, proof)?);
+                last valid = mode == Mode.Verifiable ? (proof_valid(group, mode, proof_key, elements, evaluated, proof)?) : (proof_valid(group, mode, proof_key, evaluated, elements, proof)?);
                 if (!valid) {
-                    return fail<uint8[list]>("the OPRF proof is invalid");
+                    return fail<uint8[list][list]>("the OPRF proof is invalid");
                 }
             }
-            last scalar = nonzero_scalar(group, blind.expose());
-            last issued = group.multiply(group.scalar_invert(scalar), evaluated);
-            return Result<uint8[list]>.Ok(finish(group, mode, input.expose(), info, issued));
+            let outputs: uint8[list][list] = new;
+            for (let i = 0; i < inputs.length; i++) {
+                last scalar = nonzero_scalar(group, blinds[i].expose());
+                last issued = group.multiply(group.scalar_invert(scalar), evaluated[i]);
+                outputs.append(finish(group, mode, inputs[i].expose(), info, issued));
+            }
+            return Result<uint8[list][list]>.Ok(outputs);
         };
 
         /// @brief A fixed placeholder for the private exchange.
@@ -297,44 +401,58 @@ export let Oprf = module (
         export let.override to_string = func -> string => "Oprf.BlindState(<redacted>)";
     );
 
+    let configured_key = func(group: groups.Group, mode: Mode, server_key: uint8[list]) -> class {
+        if (mode == Mode.Base) {
+            if (server_key.length != 0) {
+                trap_with_message("invalid argument: base OPRF takes no public key");
+            }
+            return group.identity();
+        }
+        return trusted_key(group, server_key);
+    };
+
     /// @brief Configures the mode and an authenticated server public key for verifiable modes.
     /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, Since("0.3.0")]
     export let Client = class (
-        last group: ristretto.Group = new;
+        last suite: Suite;
         last mode: Mode;
-        last key: edwards.Point;
+        last key: class;
 
         /// @brief In base mode, pass an empty public key. In other modes, pass the server's canonical
         /// non-identity key. An invalid configured key traps.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let init = func(selected: Mode, server_key: uint8[list]) {
-            crypto_policy.require(Algorithm.Oprf);
+            suite = Suite.Ristretto255Sha512;
             mode = selected;
-            if (mode == Mode.Base) {
-                if (server_key.length != 0) {
-                    trap_with_message("invalid argument: base OPRF takes no public key");
-                }
-                key = group.identity();
-            } else {
-                key = trusted_key(group, server_key);
-            }
+            key = configured_key(make_group(suite), mode, server_key);
+        } or func(selected: Mode, server_key: uint8[list], selected_suite: Suite) {
+            suite = selected_suite;
+            mode = selected;
+            key = configured_key(make_group(suite), mode, server_key);
         };
 
         /// @brief Blinds a private input using a supplied canonical nonzero scalar for a deterministic run.
         /// Use empty info outside partially oblivious mode.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let blind_with = func(input, info, nonce: uint8[list]) -> Result<BlindState> {
-            if (!valid_lengths(mode, input, info)) {
-                return fail<BlindState>("the input or info does not fit the selected mode");
+        export let blind_with = func(input, info, nonce: uint8[list]) -> Result<BlindState> => blind_batch_with(new([input]), info, new([nonce]));
+
+        let valid_inputs = func(inputs: uint8[list][list], info: uint8[list]) -> bool {
+            if (!valid_batch(inputs.length) || !valid_info(mode, info)) {
+                return false;
             }
-            last scalar = nonzero_scalar(group, nonce);
-            last point = group.hash_to_group(input, context("HashToGroup-", mode));
-            if (group.is_identity(point)) {
-                return fail<BlindState>("the input mapped to the identity");
+            for (let input in inputs) {
+                if (!valid_input(input)) {
+                    return false;
+                }
             }
+            return true;
+        };
+
+        let blind_items = func(group: groups.Group, inputs: uint8[list][list], info: uint8[list],
+            nonces: uint8[list][list]) -> Result<BlindState> {
             let verification_key = key;
             if (mode == Mode.Partial) {
                 verification_key = group.add(key, group.multiply_base(info_scalar(group, mode, info)));
@@ -342,26 +460,53 @@ export let Oprf = module (
                     return fail<BlindState>("the tweaked verification key is the identity");
                 }
             }
-            return Result<BlindState>.Ok(new BlindState(group, mode, input, nonce, info,
-                group.multiply(scalar, point), verification_key));
+            let blinded: class [list] = new;
+            last dst = context(group, "HashToGroup-", mode);
+            for (let i = 0; i < inputs.length; i++) {
+                last scalar = nonzero_scalar(group, nonces[i]);
+                last point = group.hash_to_group(inputs[i], dst);
+                if (group.is_identity(point)) {
+                    return fail<BlindState>("an input mapped to the identity");
+                }
+                blinded.append(group.multiply(scalar, point));
+            }
+            return Result<BlindState>.Ok(new BlindState(group, mode, inputs, nonces, info, blinded, verification_key));
         };
 
-        let randomized_blind = func(input, info: uint8[list], source: func() -> Result<uint8[list]>) -> Result<BlindState> {
-            if (!valid_lengths(mode, input, info)) {
-                return fail<BlindState>("the input or info does not fit the selected mode");
+        /// @brief Blinds 1 to 65536 inputs in order, using one caller-supplied canonical nonzero blind per item.
+        /// Use independently generated fresh blinds. Provide empty info outside partially oblivious mode.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let blind_batch_with = func(inputs: uint8[list][list], info: uint8[list], nonces: uint8[list][list]) -> Result<BlindState> {
+            if (!valid_inputs(inputs, info) || inputs.length != nonces.length) {
+                return fail<BlindState>("the inputs, info, or blind count does not fit the selected mode");
             }
-            let nonce = random_scalar(group, source)?;
-            defer words.wipe(nonce);
-            return blind_with(input, info, nonce);
+            return blind_items(make_group(suite), inputs, info, nonces);
+        };
+
+        let randomized_blind = func(inputs: uint8[list][list], info: uint8[list], source: func(int) -> Result<uint8[list]>) -> Result<BlindState> {
+            if (!valid_inputs(inputs, info)) {
+                return fail<BlindState>("the inputs or info do not fit the selected mode");
+            }
+            last group = make_group(suite);
+            let nonces: uint8[list][list] = new;
+            defer wipe_bytes(nonces);
+            for (let i = 0; i < inputs.length; i++) {
+                nonces.append(random_scalar(group, source)?);
+            }
+            return blind_items(group, inputs, info, nonces);
         };
 
         /// @brief Blinds a private input using OS entropy or a caller's DRBG.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let blind = func(input, info: uint8[list]) -> Result<BlindState> =>
-            randomized_blind(input, info, func -> Result<uint8[list]> => entropy.os_bytes(32))
-            or func(input, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<BlindState> =>
-                randomized_blind(input, info, new func -> Result<uint8[list]> => Result<uint8[list]>.Ok(random.fill(32)));
+        export let blind = func(input, info: uint8[list]) -> Result<BlindState> => blind_batch(new([input]), info) or func(input, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<BlindState> => blind_batch(new([input]), info, random);
+
+        /// @brief Blinds the inputs with independent scalars from OS entropy or a caller's DRBG.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let blind_batch = func(inputs: uint8[list][list], info: uint8[list]) -> Result<BlindState> => randomized_blind(inputs, info, func(length: int) -> Result<uint8[list]> => entropy.os_bytes(length)) or func(inputs: uint8[list][list], info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<BlindState> => randomized_blind(inputs, info, new func(length: int) -> Result<uint8[list]> =>
+            Result<uint8[list]>.Ok(random.fill(length)));
 
         /// @brief The client type without a printed key or transcript.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
@@ -369,7 +514,13 @@ export let Oprf = module (
         export let.override to_string = func -> string => "Oprf.Client";
     );
 
-    let trusted_key = func(group: ristretto.Group, server_key: uint8[list]) -> edwards.Point {
+    let wipe_bytes = func(items: uint8[list][list]) {
+        for (let item in items) {
+            words.wipe(item);
+        }
+    };
+
+    let trusted_key = func(group: groups.Group, server_key: uint8[list]) -> class {
         match (read_element(group, server_key)) {
             Result.Ok(point) => {
                 return point;
@@ -385,16 +536,23 @@ export let Oprf = module (
     /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[Final, Since("0.3.0")]
     export let Server = class implements PrivateKey<Server> (
-        last group: ristretto.Group = new;
+        last suite: Suite;
         last mode: Mode;
         last material: secret.SecretBytes;
-        last public_point: edwards.Point;
+        last public_point: class;
 
-        /// @brief Imports a canonical nonzero server scalar for the selected mode.
+        /// @brief Imports a canonical nonzero server scalar for the selected mode and ciphersuite.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
         export let init = func(selected: Mode, scalar: uint8[list]) {
-            crypto_policy.require(Algorithm.Oprf);
+            suite = Suite.Ristretto255Sha512;
+            last group = make_group(suite);
+            mode = selected;
+            public_point = group.multiply_base(nonzero_scalar(group, scalar));
+            material = new secret.SecretBytes(scalar);
+        } or func(selected: Mode, scalar: uint8[list], selected_suite: Suite) {
+            suite = selected_suite;
+            last group = make_group(suite);
             mode = selected;
             public_point = group.multiply_base(nonzero_scalar(group, scalar));
             material = new secret.SecretBytes(scalar);
@@ -423,9 +581,9 @@ export let Oprf = module (
         /// @brief The canonical public key for configuring a verifiable client.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #Since("0.3.0")
-        export let public_key_bytes = func -> uint8[list] => group.encode(public_point);
+        export let public_key_bytes = func -> uint8[list] => make_group(suite).encode(public_point);
 
-        let review_info = func(info: uint8[list]) -> Result<uint32[list]> {
+        let review_info = func(group: groups.Group, info: uint8[list]) -> Result<uint32[list]> {
             last scalar = nonzero_scalar(group, material.expose());
             if (mode == Mode.Partial) {
                 last tweaked = group.scalar_add(scalar, info_scalar(group, mode, info));
@@ -437,70 +595,91 @@ export let Oprf = module (
             return Result<uint32[list]>.Ok(scalar);
         };
 
-        let evaluate_point = func(blinded: edwards.Point, info, proof_nonce: uint8[list]) -> Result<Evaluation> {
-            last scalar = review_info(info)?;
+        let read_batch = func(group: groups.Group, encoded: uint8[list][list], info: uint8[list]) -> Result<class [list]> {
+            if (!valid_batch(encoded.length) || !valid_info(mode, info)) {
+                return fail<class [list]>("the request or info does not fit the selected mode");
+            }
+            let points: class [list] = new;
+            for (let element in encoded) {
+                points.append(read_element(group, element)?);
+            }
+            return Result<class [list]>.Ok(points);
+        };
+
+        let evaluate_points = func(group: groups.Group, blinded: class [list], info, proof_nonce: uint8[list]) -> Result<Evaluation> {
+            last scalar = review_info(group, info)?;
+            last multiplier = mode == Mode.Partial ? group.scalar_invert(scalar) : scalar;
+            let evaluated: class [list] = new;
+            let encoded: uint8[list][list] = new;
+            for (let point in blinded) {
+                last element = group.multiply(multiplier, point);
+                evaluated.append(element);
+                encoded.append(group.encode(element));
+            }
             if (mode == Mode.Base) {
                 if (proof_nonce.length != 0) {
                     trap_with_message("invalid argument: base OPRF does not use a proof nonce");
                 }
-                return Result<Evaluation>.Ok(new Evaluation(group.encode(group.multiply(scalar, blinded)), new));
+                return Result<Evaluation>.Ok(new Evaluation(encoded, new));
             }
             last nonce = nonzero_scalar(group, proof_nonce);
-            if (mode == Mode.Verifiable) {
-                last evaluated = group.multiply(scalar, blinded);
-                last proof = prove(group, mode, scalar, nonce, public_point, blinded, evaluated);
-                return Result<Evaluation>.Ok(new Evaluation(group.encode(evaluated), proof));
-            }
-            last evaluated = group.multiply(group.scalar_invert(scalar), blinded);
-            last proof = prove(group, mode, scalar, nonce, group.multiply_base(scalar), evaluated, blinded);
-            return Result<Evaluation>.Ok(new Evaluation(group.encode(evaluated), proof));
+            last proof = mode == Mode.Verifiable ? (prove(group, mode, scalar, nonce, public_point, blinded, evaluated)?) : (prove(group, mode, scalar, nonce, group.multiply_base(scalar), evaluated, blinded)?);
+            return Result<Evaluation>.Ok(new Evaluation(encoded, proof));
         };
 
         /// @brief Evaluates one blinded element with an explicit fresh proof nonce. In base mode pass
         /// an empty nonce and info. Reusing a proof nonce can disclose the server key.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let evaluate_with = func(encoded, info, proof_nonce: uint8[list]) -> Result<Evaluation> {
-            if (!valid_lengths(mode, encoded, info)) {
-                return fail<Evaluation>("the request or info does not fit the selected mode");
-            }
-            return evaluate_point(read_element(group, encoded)?, info, proof_nonce);
+        export let evaluate_with = func(encoded, info, proof_nonce: uint8[list]) -> Result<Evaluation> => evaluate_batch_with(new([encoded]), info, proof_nonce);
+
+        /// @brief Evaluates 1 to 65536 ordered blinded elements with a single fresh proof nonce.
+        /// In base mode pass an empty proof nonce and info. Reusing a proof nonce can disclose the server key.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let evaluate_batch_with = func(encoded: uint8[list][list], info, proof_nonce: uint8[list]) -> Result<Evaluation> {
+            last group = make_group(suite);
+            return evaluate_points(group, read_batch(group, encoded, info)?, info, proof_nonce);
         };
 
-        let randomized_evaluate = func(encoded, info: uint8[list], source: func() -> Result<uint8[list]>)
-            -> Result<Evaluation> {
-            if (!valid_lengths(mode, encoded, info)) {
-                return fail<Evaluation>("the request or info does not fit the selected mode");
-            }
-            last blinded = read_element(group, encoded)?;
+        let randomized_evaluate = func(encoded: uint8[list][list], info: uint8[list],
+            source: func(int) -> Result<uint8[list]>) -> Result<Evaluation> {
+            last group = make_group(suite);
+            last blinded = read_batch(group, encoded, info)?;
             if (mode == Mode.Base) {
-                return evaluate_point(blinded, info, new);
+                return evaluate_points(group, blinded, info, new);
             }
             let nonce = random_scalar(group, source)?;
             defer words.wipe(nonce);
-            return evaluate_point(blinded, info, nonce);
+            return evaluate_points(group, blinded, info, nonce);
         };
 
         /// @brief Evaluates under the server key, using OS entropy or a caller's DRBG when a proof is needed.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
-        export let evaluate = func(encoded, info: uint8[list]) -> Result<Evaluation> =>
-            randomized_evaluate(encoded, info, func -> Result<uint8[list]> => entropy.os_bytes(32))
-            or func(encoded, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<Evaluation> =>
-                randomized_evaluate(encoded, info, new func -> Result<uint8[list]> => Result<uint8[list]>.Ok(random.fill(32)));
+        export let evaluate = func(encoded, info: uint8[list]) -> Result<Evaluation> => evaluate_batch(new([encoded]), info) or func(encoded, info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<Evaluation> => evaluate_batch(new([encoded]), info, random);
 
-        /// @brief Computes the 64-byte PRF result for a known input without running the blinded protocol.
+        /// @brief Evaluates the ordered batch and produces one proof outside base mode.
+        /// The proof nonce comes from OS entropy or a caller's DRBG.
+        /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
+        #[NoDiscard, Since("0.3.0")]
+        export let evaluate_batch = func(encoded: uint8[list][list], info: uint8[list]) -> Result<Evaluation> => randomized_evaluate(encoded, info, func(length: int) -> Result<uint8[list]> => entropy.os_bytes(length)) or func(encoded: uint8[list][list], info: uint8[list], random: drbg.ChaCha20Drbg) -> Result<Evaluation> => randomized_evaluate(encoded, info, new func(length: int) -> Result<uint8[list]> =>
+            Result<uint8[list]>.Ok(random.fill(length)));
+
+        /// @brief Computes the PRF result for a known input without running the blinded protocol.
+        /// Output size is the ciphersuite hash size.
         /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
         #[NoDiscard, Since("0.3.0")]
         export let full_evaluate = func(input, info: uint8[list]) -> Result<uint8[list]> {
-            if (!valid_lengths(mode, input, info)) {
+            if (!valid_input(input) || !valid_info(mode, info)) {
                 return fail<uint8[list]>("the input or info does not fit the selected mode");
             }
-            last point = group.hash_to_group(input, context("HashToGroup-", mode));
+            last group = make_group(suite);
+            last point = group.hash_to_group(input, context(group, "HashToGroup-", mode));
             if (group.is_identity(point)) {
                 return fail<uint8[list]>("the input mapped to the identity");
             }
-            last scalar = review_info(info)?;
+            last scalar = review_info(group, info)?;
             last multiplier = mode == Mode.Partial ? group.scalar_invert(scalar) : scalar;
             return Result<uint8[list]>.Ok(finish(group, mode, input, info, group.multiply(multiplier, point)));
         };
@@ -515,44 +694,42 @@ export let Oprf = module (
     /// The info is bound to the derived key and is independent of POPRF evaluation info.
     /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[NoDiscard, Since("0.3.0")]
-    export let derive_key_pair = func(mode: Mode, seed, info: uint8[list]) -> Result<Server> {
-        crypto_policy.require(Algorithm.Oprf);
+    export let derive_key_pair = func(mode: Mode, seed, info: uint8[list]) -> Result<Server> => derive_key_pair(mode, seed, info, Suite.Ristretto255Sha512) or func(mode: Mode, seed, info: uint8[list], suite: Suite) -> Result<Server> {
+        last group = make_group(suite);
         if (seed.length != 32 || info.length > 65535) {
             trap_with_message("invalid argument: OPRF derivation requires a 32-byte seed and at most 65535 info bytes");
         }
-        last group = new ristretto.Group();
         let input = words.copy(seed);
         defer words.wipe(input);
         add_frame(input, info);
         input.append(0);
-        last dst = context("DeriveKeyPair", mode);
+        last dst = context(group, "DeriveKeyPair", mode);
         for (let counter = 0; counter < 256; counter++) {
             input[input.length - 1] = counter as uint8;
-            let uniform = xmd.expand_sha512(input, dst, 64);
-            last scalar = group.scalar_reduce(uniform);
-            words.wipe(uniform);
+            last scalar = group.hash_to_scalar(input, dst);
             if (mp.is_zero(scalar) == 0) {
                 let bytes = group.scalar_bytes(scalar);
                 defer words.wipe(bytes);
-                return Result<Server>.Ok(new Server(mode, bytes));
+                return Result<Server>.Ok(new Server(mode, bytes, suite));
             }
         }
         return fail<Server>("key derivation exhausted the counter");
     };
 
-    let random_key_pair = func(mode: Mode, seed: uint8[list]) -> Result<Server> {
+    let random_key_pair = func(mode: Mode, seed: uint8[list], suite: Suite) -> Result<Server> {
         defer words.wipe(seed);
-        return derive_key_pair(mode, seed, new);
+        return derive_key_pair(mode, seed, new, suite);
     };
 
-    /// @brief Generates a server key from OS entropy or a caller's DRBG. Entropy failures propagate.
+    /// @brief Derives a server key from a 32-byte seed from OS entropy or a caller's DRBG.
+    /// Entropy failures propagate.
     /// @see [Std.Crypto.Advanced.Oprf](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-Oprf)
     #[NoDiscard, Since("0.3.0")]
-    export let generate_key_pair = func(mode: Mode) -> Result<Server> {
+    export let generate_key_pair = func(mode: Mode) -> Result<Server> => generate_key_pair(mode, Suite.Ristretto255Sha512) or func(mode: Mode, random: drbg.ChaCha20Drbg) -> Result<Server> => generate_key_pair(mode, random, Suite.Ristretto255Sha512) or func(mode: Mode, suite: Suite) -> Result<Server> {
         crypto_policy.require(Algorithm.Oprf);
-        return random_key_pair(mode, entropy.os_bytes(32)?);
-    } or func(mode: Mode, random: drbg.ChaCha20Drbg) -> Result<Server> {
+        return random_key_pair(mode, entropy.os_bytes(32)?, suite);
+    } or func(mode: Mode, random: drbg.ChaCha20Drbg, suite: Suite) -> Result<Server> {
         crypto_policy.require(Algorithm.Oprf);
-        return random_key_pair(mode, random.fill(32));
+        return random_key_pair(mode, random.fill(32), suite);
     };
 );
