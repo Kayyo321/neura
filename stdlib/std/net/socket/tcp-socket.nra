@@ -100,9 +100,7 @@ export let TcpSocket = module (
         /// @brief The local port, from the host. Works today.
         #NoDiscard
         export let local_port = func -> Result<int> {
-            if (!open_now) {
-                return Result<int>.Err(bytes.closed("socket", label));
-            }
+            return Result<int>.Err(bytes.closed("socket", label)) unless open_now;
             return match (host.local_port(id)) {
                 host.CountOutcome.Ok(port) => Result<int>.Ok(port),
                 host.CountOutcome.Error(code) => Result<int>.Err(host_error.io(code, "local port failed", label)),
@@ -113,9 +111,7 @@ export let TcpSocket = module (
         /// specific address; otherwise it asks the host, which traps in Neura 0.3.0 (no local-address service).
         #NoDiscard
         export let local_address = func -> Result<SocketAddr> {
-            if (!open_now) {
-                return Result<SocketAddr>.Err(bytes.closed("socket", label));
-            }
+            return Result<SocketAddr>.Err(bytes.closed("socket", label)) unless open_now;
             return match (known_local) {
                 Optional.Some(address) => Result<SocketAddr>.Ok(address),
                 Optional.None => match (host.local_address(id)) {
@@ -130,9 +126,7 @@ export let TcpSocket = module (
         /// open. Traps in Neura 0.3.0: the runtime has no shutdown service.
         #NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("socket", label));
-            }
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
             last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
             return match (host.shutdown(id, code)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -149,9 +143,7 @@ export let TcpSocket = module (
             if (options.multipath) {
                 trap_with_message("invalid argument: multipath is chosen when the socket connects");
             }
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("socket", label));
-            }
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
             return support.apply(id, options, label);
         };
 
@@ -164,9 +156,7 @@ export let TcpSocket = module (
             if (offset < 0 || count < 0) {
                 trap_with_message("invalid argument: negative offset or count");
             }
-            if (!open_now) {
-                return Result<int64>.Err(bytes.closed("socket", label));
-            }
+            return Result<int64>.Err(bytes.closed("socket", label)) unless open_now;
             let file: int64 = 0;
             match (open_file(path, 0)) {
                 FileOutcome.Ok(opened) => {
@@ -191,9 +181,7 @@ export let TcpSocket = module (
             if (count < 0) {
                 trap_with_message("invalid argument: negative count");
             }
-            if (!open_now) {
-                return Result<int64>.Err(bytes.closed("socket", label));
-            }
+            return Result<int64>.Err(bytes.closed("socket", label)) unless open_now;
             return match (host.splice(id, target.id, count)) {
                 host.LongOutcome.Ok(total) => Result<int64>.Ok(total),
                 host.LongOutcome.Error(code) => Result<int64>.Err(host_error.io(code, "splice failed", label)),
@@ -205,9 +193,7 @@ export let TcpSocket = module (
         /// boundary): traps in Neura 0.3.0.
         #NoDiscard
         export let send_zerocopy = func(data: uint8[list]) -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("socket", label));
-            }
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
             return match (host.send_zerocopy(id, data)) {
                 host.CountOutcome.Ok(count) => count == data.length ? bytes.ok()
                     : Result<Unit>.Err(bytes.no_progress("zero-copy send was short", label)),
@@ -223,8 +209,8 @@ export let TcpSocket = module (
 
         /// @brief Text such as "TcpSocket(to 127.0.0.1:8080)" or "TcpSocket(accepted on 127.0.0.1:9000)".
         export let.override to_string = func -> string => match (peer) {
-            Optional.Some(address) => "TcpSocket(to " + address.to_string() + ")",
-            Optional.None => "TcpSocket(accepted on " + label + ")",
+            Optional.Some(address) => "TcpSocket(to " .. address.to_string() .. ")",
+            Optional.None => "TcpSocket(accepted on " .. label .. ")",
         };
     );
 

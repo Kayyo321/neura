@@ -52,10 +52,9 @@ export let EventLoop = module (
 
         /// @brief Equal when the system and version are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Platform)) {
+            if (other is not that: Platform) {
                 return false;
             }
-            last that = other as Platform;
             return system == that.system && major == that.major && minor == that.minor;
         };
 
@@ -64,7 +63,7 @@ export let EventLoop = module (
             hashing.combine(hashing.combine(system.hash_code(), major as uint32), minor as uint32);
 
         /// @brief Text such as "linux 6.1".
-        export let.override to_string = func -> string => system + " " + major.to_string() + "." + minor.to_string();
+        export let.override to_string = func -> string => system .. " " .. major.to_string() .. "." .. minor.to_string();
     );
 
     /// @brief The default preference: `IoUring`, `Epoll`, `Kqueue`, `Poll`.
@@ -103,7 +102,7 @@ export let EventLoop = module (
             }
         }
         return Result<EventLoopBackend>.Err(errors.custom("socket.event_loop",
-            "no event-loop backend is available on " + platform.to_string()));
+            "no event-loop backend is available on " .. platform.to_string()));
     };
 
     /// @brief Asks the runtime's driver to wait with `backend`. Traps in Neura 0.3.0: the driver waits with

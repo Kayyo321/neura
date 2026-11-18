@@ -39,9 +39,7 @@ export let UnixListener = module (
         /// @brief Waits for the next connection; its local address is this listener's and its peer is unknown.
         #NoDiscard
         export let accept = func -> Result<UnixStream> {
-            if (!open_now) {
-                return Result<UnixStream>.Err(bytes.closed("listener", bound.to_string()));
-            }
+            return Result<UnixStream>.Err(bytes.closed("listener", bound.to_string())) unless open_now;
             return match (host.accept(id)) {
                 host.IdOutcome.Ok(accepted) => Result<UnixStream>.Ok(new UnixStream(
                     new socket.Handle(accepted, bound.to_string()), Optional<UnixAddr>.None,
@@ -53,9 +51,7 @@ export let UnixListener = module (
 
         /// @brief Releases the listener. Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (host.close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -65,7 +61,7 @@ export let UnixListener = module (
         };
 
         /// @brief Text such as "UnixListener(/run/app.sock)".
-        export let.override to_string = func -> string => "UnixListener(" + bound.to_string() + ")";
+        export let.override to_string = func -> string => "UnixListener(" .. bound.to_string() .. ")";
     );
 
     /// @brief Listens on `address`.

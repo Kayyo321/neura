@@ -78,7 +78,7 @@ export let SocketOptions = module (
 
         /// @brief True when no option is set and multipath is off, so applying needs no host call.
         #Pure
-        export let is_empty = func -> bool => pairs.length == 0 && !multipath;
+        export let is_empty = func -> bool => pairs.length == 0 && not multipath;
 
         /// @brief The value set for option number `option`, or -1 when it is not set.
         #Pure
@@ -94,10 +94,9 @@ export let SocketOptions = module (
 
         /// @brief Equal when the kind, the settings and the multipath flag are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SocketOptions)) {
+            if (other is not that: SocketOptions) {
                 return false;
             }
-            last that = other as SocketOptions;
             if (kind != that.kind || multipath != that.multipath || pairs.length != that.pairs.length) {
                 return false;
             }
@@ -126,17 +125,17 @@ export let SocketOptions = module (
 
         /// @brief Text such as "SocketOptions(TcpStream: no_delay=1, keep_alive=1)".
         export let.override to_string = func -> string {
-            let text = "SocketOptions(" + kind.to_string() + ":";
+            let text = "SocketOptions(" .. kind.to_string() .. ":";
             let first = true;
             for (let pair in pairs) {
                 let [number, value] = pair;
-                text = text + (first ? " " : ", ") + name_of(number) + "=" + value.to_string();
+                text ..= (first ? " " : ", ") .. name_of(number) .. "=" .. value.to_string();
                 first = false;
             }
             if (multipath) {
-                text = text + (first ? " " : ", ") + "multipath";
+                text ..= (first ? " " : ", ") .. "multipath";
             }
-            return text + ")";
+            return text .. ")";
         };
     );
 
@@ -231,8 +230,8 @@ export let SocketOptions = module (
         export let build = func(kind: SocketKind) -> Result<SocketOptions> {
             let option = 1;
             while (option <= MultipathSlot) {
-                if (present[option] && !applies(option, kind)) {
-                    return invalid(name_of(option) + " does not apply to a " + kind.to_string() + " socket");
+                if (present[option] && not applies(option, kind)) {
+                    return invalid(name_of(option) .. " does not apply to a " .. kind.to_string() .. " socket");
                 }
                 option++;
             }
@@ -257,20 +256,16 @@ export let SocketOptions = module (
             last keep_alive_on = present[6] && values[6] == 1;
             for (let number in [7, 8]) {
                 if (present[number]) {
-                    if (!keep_alive_on) {
-                        return invalid(name_of(number) + " needs keep_alive enabled");
-                    }
+                    return invalid(name_of(number) .. " needs keep_alive enabled") unless keep_alive_on;
                     last nanos = values[number];
                     if (nanos % 1000000000 != 0 || nanos < 1000000000 || nanos / 1000000000 > MaxKeepSeconds) {
-                        return invalid(name_of(number) + " must be whole seconds from 1 through 32767");
+                        return invalid(name_of(number) .. " must be whole seconds from 1 through 32767");
                     }
                     pairs.append([number, nanos / 1000000000]);
                 }
             }
             if (present[9]) {
-                if (!keep_alive_on) {
-                    return invalid("keep_alive_count needs keep_alive enabled");
-                }
+                return invalid("keep_alive_count needs keep_alive enabled") unless keep_alive_on;
                 if (values[9] < 1 || values[9] > MaxKeepCount) {
                     return invalid("keep_alive_count must be from 1 through 127");
                 }
@@ -279,7 +274,7 @@ export let SocketOptions = module (
             for (let number in [10, 11]) {
                 if (present[number]) {
                     if (values[number] < 1) {
-                        return invalid(name_of(number) + " must be at least 1 byte");
+                        return invalid(name_of(number) .. " must be at least 1 byte");
                     }
                     pairs.append([number, values[number]]);
                 }

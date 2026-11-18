@@ -42,9 +42,7 @@ export let UnixDatagram = module (
         /// @brief The bound address. An unbound socket has none: Err with InvalidInput.
         #NoDiscard
         export let local_address = func -> Result<UnixAddr> {
-            if (!open_now) {
-                return Result<UnixAddr>.Err(bytes.closed("socket", label()));
-            }
+            return Result<UnixAddr>.Err(bytes.closed("socket", label())) unless open_now;
             return match (bound) {
                 Optional.Some(address) => Result<UnixAddr>.Ok(address),
                 Optional.None => Result<UnixAddr>.Err(
@@ -55,9 +53,7 @@ export let UnixDatagram = module (
         /// @brief Sends `data` as one datagram to `target`; the count the host sent.
         #NoDiscard
         export let send_to = func(data: uint8[list], target: UnixAddr) -> Result<int> {
-            if (!open_now) {
-                return Result<int>.Err(bytes.closed("socket", label()));
-            }
+            return Result<int>.Err(bytes.closed("socket", label())) unless open_now;
             return match (host.unix_send_to(id, target.to_string(), data)) {
                 host.CountOutcome.Ok(count) => Result<int>.Ok(count),
                 host.CountOutcome.Error(code) => Result<int>.Err(
@@ -69,9 +65,7 @@ export let UnixDatagram = module (
         #NoDiscard
         export let receive_from = func(max: int) -> Result<Datagram<UnixAddr>> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return Result<Datagram<UnixAddr>>.Err(bytes.closed("socket", label()));
-            }
+            return Result<Datagram<UnixAddr>>.Err(bytes.closed("socket", label())) unless open_now;
             return match (host.unix_receive_from(id, max, timeout_nanos)) {
                 host.DatagramOutcome.Ok(received) => datagram_of(received),
                 host.DatagramOutcome.Error(code) => Result<Datagram<UnixAddr>>.Err(
@@ -89,9 +83,7 @@ export let UnixDatagram = module (
 
         /// @brief Releases the socket. Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (host.close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -100,7 +92,7 @@ export let UnixDatagram = module (
         };
 
         /// @brief Text such as "UnixDatagram(/run/app.sock)" or "UnixDatagram(unbound)".
-        export let.override to_string = func -> string => "UnixDatagram(" + label() + ")";
+        export let.override to_string = func -> string => "UnixDatagram(" .. label() .. ")";
 
         /// @brief The bound address text, or "unbound".
         let label = func -> string => match (bound) {

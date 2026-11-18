@@ -44,9 +44,7 @@ export let RawSocket = module (
         /// @brief The local address, from the host; traps in Neura 0.3.0 (no local-address service).
         #NoDiscard
         export let local_address = func -> Result<ips.IpAddr> {
-            if (!open_now) {
-                return Result<ips.IpAddr>.Err(bytes.closed("socket", to_string()));
-            }
+            return Result<ips.IpAddr>.Err(bytes.closed("socket", to_string())) unless open_now;
             return match (host.local_address(id)) {
                 host.AddressOutcome.Ok(reported) => ip_of(reported),
                 host.AddressOutcome.Error(code) => Result<ips.IpAddr>.Err(
@@ -61,9 +59,7 @@ export let RawSocket = module (
             if (ips.family(target) != family) {
                 trap_with_message("invalid argument: address family");
             }
-            if (!open_now) {
-                return Result<int>.Err(bytes.closed("socket", to_string()));
-            }
+            return Result<int>.Err(bytes.closed("socket", to_string())) unless open_now;
             last text = ips.to_string(target);
             return match (host.raw_send_to(id, text, data)) {
                 host.CountOutcome.Ok(count) => Result<int>.Ok(count),
@@ -75,9 +71,7 @@ export let RawSocket = module (
         #NoDiscard
         export let receive_from = func(max: int) -> Result<Datagram<ips.IpAddr>> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return Result<Datagram<ips.IpAddr>>.Err(bytes.closed("socket", to_string()));
-            }
+            return Result<Datagram<ips.IpAddr>>.Err(bytes.closed("socket", to_string())) unless open_now;
             return match (host.raw_receive_from(id, max, timeout_nanos)) {
                 host.DatagramOutcome.Ok(received) => datagram_of(received),
                 host.DatagramOutcome.Error(code) => Result<Datagram<ips.IpAddr>>.Err(
@@ -95,9 +89,7 @@ export let RawSocket = module (
 
         /// @brief Releases the socket. Closing again returns Ok.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (host.close(id)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -107,7 +99,7 @@ export let RawSocket = module (
 
         /// @brief Text such as "RawSocket(Ipv4, protocol 1)".
         export let.override to_string = func -> string =>
-            "RawSocket(" + family.to_string() + ", protocol " + protocol.to_string() + ")";
+            "RawSocket(" .. family.to_string() .. ", protocol " .. protocol.to_string() .. ")";
     );
 
     /// @brief A raw socket for `family` (Ipv4 or Ipv6; Unix traps with "invalid argument: address family") and
@@ -125,7 +117,7 @@ export let RawSocket = module (
         return match (host.raw_open(code, protocol)) {
             host.IdOutcome.Ok(id) => Result<RawSocket>.Ok(new RawSocket(id, family, protocol)),
             host.IdOutcome.Error(failure) => Result<RawSocket>.Err(
-                host_error.io(failure, "raw socket failed", "protocol " + protocol.to_string())),
+                host_error.io(failure, "raw socket failed", "protocol " .. protocol.to_string())),
         };
     };
 
@@ -135,7 +127,7 @@ export let RawSocket = module (
         return match (ips.parse(text)) {
             Result.Ok(ip) => Result<ips.IpAddr>.Ok(ip),
             Result.Err(_) => Result<ips.IpAddr>.Err(bytes.io(errors.IoErrorKind.InvalidData,
-                "the host reported an address that is not numeric: " + text, text)),
+                "the host reported an address that is not numeric: " .. text, text)),
         };
     };
 
