@@ -505,7 +505,7 @@ The compiler rejects, at the span of the offending expression, a `spawn` outside
 
 Arithmetic operands must have the same type. Remainder applies to integers. Boolean operators short-circuit and evaluate left to right. Parentheses group expressions. The operator levels from tightest to loosest are
 
-1. member access, optional access `?.`, indexing, calls, and the postfix `?`
+1. member access, optional access `?.`, indexing, calls, the postfix `?`, and the primaries `nameof(...)` and `typeof(...)`
 2. postfix `++` and `--`
 3. prefix `++`, `--`, `!`, `not`, `-`, and `~`
 4. `as`, `is`, and `is not`

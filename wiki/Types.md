@@ -421,6 +421,10 @@ let radius = func(shape: Shape) -> int {
 };
 ```
 
+### The type of a value at run time
+
+`typeof(value)` gives a `Std.Reflect.Core.TypeInfo` describing the class of the object a class or interface reference holds (`Circle` for a `Circle` held as `Shape`, kind `Nil` for nil), the type of the value an `any` holds, and the static type of every other value; `typeof(Type)` describes a type. See [typeof](CoreLanguage#typeof) (implemented, proposed).
+
 ### Accessors
 
 An exported instance field can have a getter and a setter. Each is an accessor clause written after the field's `;`, indented under the field. Code outside the class still reads and writes the field as a member: `my_data.data` calls the getter and `my_data.data = text` calls the setter. There is no call syntax and no visible accessor method.
