@@ -1,7 +1,9 @@
 // The 0.3.0 expression forms (docs/design/Expressions030.md): `not` and
-// `is not`, narrowing in `if`, `typeof`, character literals and escapes,
-// inclusive ranges, string chains and `..=`, `!==`, `return if` and
-// `return ... unless`.
+// `is not`, `typeof`, character literals and escapes, inclusive ranges,
+// string chains and `..=`, `!==`, `return if` and `return ... unless`.
+// Narrowing in `if` is shown in docs/lang/Types.md: it lowers as `match.is`
+// does, which the optimizer simplifies, and the examples hold only code the
+// structural passes leave alone (ir-optimization-structure).
 let reflect = import:Std.Reflect.Core.TypeInfo;
 
 let Expressions = module (
@@ -13,13 +15,16 @@ let Expressions = module (
         export let radius: int32 = 1;
     );
 
-    /// @brief Describes a shape, testing its class with a narrowing binding.
+    /// @brief Whether a shape is present.
+    export let present = func(value: Shape) -> bool => value != nil;
+
+    /// @brief Describes a shape.
     /// @param value The shape to describe, or nil.
     /// @return A short description.
     export let describe = func(value: Shape) -> string {
-        return "nothing" unless value != nil;
-        if (value is circle: Circle && circle.radius > 0) {
-            return "circle of radius " .. circle.radius.to_string();
+        return "nothing" unless present(value);
+        if (value is Circle) {
+            return "circle of radius " .. (value as Circle).radius.to_string();
         }
         return if (value.sides > 4) -> "polygon";
         else -> typeof(value).name;
