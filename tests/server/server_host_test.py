@@ -610,6 +610,11 @@ def test_zygote_restart(args, image):
     try:
         zygotes = host.children(zygote=True)
         check(len(zygotes) == 1, f"one zygote: {zygotes}")
+        # The zygote forks with one thread: no lock or thread state of the
+        # image load can reach a worker.
+        for pid in zygotes:
+            threads = len(list(Path(f"/proc/{pid}/task").glob("*")))
+            check(threads == 1, f"the zygote has one thread: {threads}")
         for pid in zygotes:
             os.kill(pid, signal.SIGKILL)
         time.sleep(0.2)
@@ -906,6 +911,31 @@ def test_http2_streams(args, image):
         check(result["streams"][0]["status"] == 431, f"oversized header list: {result}")
         result = h2(port, "headers", "--path", "/hello", "--header-bytes", 8000)
         check(result["streams"][0]["status"] == 200, f"header list within S-5: {result}")
+    finally:
+        host.stop()
+
+    # Request bodies of many windows: the host reopens a stream's window as
+    # the worker reads, so uploads larger than 64 KiB never stall.
+    host = Host(args, image, "--h2c", "--config", "streamed_body=yes", "--max-body-bytes", "4000000")
+    try:
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/upload", body=b"u" * 2_000_000)
+        stream = result["streams"][0]
+        check(stream["status"] == 200 and stream["body"].startswith("received 2000000 in "),
+              f"2 MB streamed upload over h2: {stream['status']} {stream['body'][:80]!r}")
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/early", body=b"e" * 300_000)
+        stream = result["streams"][0]
+        check(stream["status"] == 200 and stream["body"] == "early\n", f"answer before the body over h2: {stream}")
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/upload", body=b"o" * 4_100_000)
+        check(result["streams"][0]["status"] == 413, f"streamed upload past S-6 over h2: {result['streams'][0]}")
+    finally:
+        host.stop()
+    host = Host(args, image, "--h2c")
+    try:
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/echo", body=b"y" * 500_000)
+        stream = result["streams"][0]
+        check(stream["status"] == 201 and stream["bytes"] == 500_000, f"500 KB echo over h2: {stream['status']}")
+        result = h2(host.port, "fetch", "--method", "POST", "--path", "/echo", body=b"y" * 1_100_000)
+        check(result["streams"][0]["status"] == 413, f"body past S-6 over h2: {result['streams'][0]['status']}")
     finally:
         host.stop()
 

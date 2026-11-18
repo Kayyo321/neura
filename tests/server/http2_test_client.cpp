@@ -22,6 +22,9 @@
 //               SETTINGS are read, ignoring its stream limit
 //   drain       --count requests to --path; SIGTERM to --pid after
 //               --after-ms; one more request once GOAWAY has arrived
+//   load        keeps --count streams to --path in flight on one connection
+//               for --seconds (closed loop); prints the rate and latency
+//               percentiles instead of the streams
 
 #include <nghttp2/nghttp2.h>
 
@@ -65,6 +68,7 @@ struct Options {
     int header_bytes = 0;
     int pid = 0;
     int timeout_ms = 30000;
+    int seconds = 10;
 };
 
 struct StreamResult {
@@ -200,6 +204,30 @@ public:
         held_.clear();
         (void)flush();
     }
+
+    // Forgets the closed streams; the latency of each 200, in milliseconds,
+    // and the count of other outcomes.
+    void collect(std::vector<double>& latencies, std::uint64_t& other) {
+        for (auto entry = streams_.begin(); entry != streams_.end();) {
+            if (!entry->second.closed) {
+                ++entry;
+                continue;
+            }
+            if (entry->second.status == 200 && entry->second.error == 0) {
+                latencies.push_back(entry->second.closed_ms - entry->second.opened_ms);
+            } else {
+                ++other;
+            }
+            if (const auto request = requests_.find(entry->first); request != requests_.end()) {
+                delete request->second;
+                requests_.erase(request);
+            }
+            entry = streams_.erase(entry);
+        }
+        order_.clear();
+    }
+
+    std::size_t open_streams() const { return streams_.size(); }
 
     bool all_closed() const {
         for (const auto& [id, result] : streams_) {
@@ -406,6 +434,7 @@ bool read_options(int argc, char** argv, Options& options) {
         else if (arg == "--header-bytes") options.header_bytes = std::atoi(value.c_str());
         else if (arg == "--pid") options.pid = std::atoi(value.c_str());
         else if (arg == "--timeout-ms") options.timeout_ms = std::atoi(value.c_str());
+        else if (arg == "--seconds") options.seconds = std::atoi(value.c_str());
         else return false;
     }
     return options.port > 0 && !options.scenario.empty();
@@ -514,6 +543,32 @@ int main(int argc, char** argv) {
             }
         }, [&] { return signalled && client.all_closed() && (client.goaway() || client.ended()); });
         extra += ",\"after_goaway\":" + late_result;
+    } else if (scenario == "load") {
+        std::vector<double> latencies;
+        std::uint64_t other = 0;
+        const double stop = options.seconds * 1000.0;
+        while (client.elapsed_ms() < stop && !client.ended()) {
+            client.collect(latencies, other);
+            while (client.open_streams() < static_cast<std::size_t>(options.count)) {
+                if (client.submit("GET", options.path, {}, nullptr) < 0) break;
+            }
+            if (!client.pump(5)) break;
+        }
+        const double took = client.elapsed_ms();
+        client.collect(latencies, other);
+        std::sort(latencies.begin(), latencies.end());
+        const auto at = [&](double fraction) {
+            if (latencies.empty()) return 0.0;
+            const auto index = static_cast<std::size_t>(fraction * static_cast<double>(latencies.size() - 1) + 0.5);
+            return latencies[std::min(index, latencies.size() - 1)];
+        };
+        std::printf("{\"completed\":%zu,\"other\":%llu,\"seconds\":%.3f,\"per_second\":%.1f,\"median_ms\":%.3f,"
+                    "\"p95_ms\":%.3f,\"p99_ms\":%.3f,\"connection\":%s}\n",
+                    latencies.size(), static_cast<unsigned long long>(other), took / 1000,
+                    static_cast<double>(latencies.size()) * 1000 / took, at(0.5), at(0.95), at(0.99),
+                    Client::quote(client.ended() ? "ended" : "").c_str());
+        ::close(socket);
+        return 0;
     } else {
         std::fprintf(stderr, "unknown scenario: %s\n", scenario.c_str());
         return 2;
