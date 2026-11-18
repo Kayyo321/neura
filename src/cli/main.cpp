@@ -1273,11 +1273,13 @@ private:
 };
 
 // The lifted blocks shared by every run of one image (docs/runtime/NVM.md,
-// "Execution tiers"), unless the runs use a graph device or tier 0.
-std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image, neura::nvm::RunLimits& limits,
-                                                  const neura::nvm::GraphDevice* device) {
+// "Execution tiers"), unless the runs use tier 0. A fleet's members share it
+// too: they step by reference while the fleet offers their graphs to a device,
+// and run at their tiers once the device declines every job
+// (docs/lang/GpuExecution.md, section 10.5).
+std::unique_ptr<neura::nvm::TierCache> tier_cache(const neura::nvr::Image& image, neura::nvm::RunLimits& limits) {
     std::unique_ptr<neura::nvm::TierCache> cache;
-    if (!device && std::min(limits.tier, neura::nvm::tier_ceiling()) >= 1) {
+    if (std::min(limits.tier, neura::nvm::tier_ceiling()) >= 1) {
         cache = std::make_unique<neura::nvm::TierCache>(image);
         limits.tier_cache = cache.get();
     }
@@ -1336,7 +1338,7 @@ int run_each(const Options& options, const neura::nvr::Image& image, Host& host,
     neura::runner::TaskDumps dumps(options.task_dump);
     auto limits = options.limits;
     limits.task_dump = dumps.request();
-    const auto tiers = tier_cache(image, limits, device);
+    const auto tiers = tier_cache(image, limits);
     // Without a device the members run one after another on one timeline.
     auto times = tier_times(limits, started, device != nullptr);
     if (times) limits.tier_times = &*times;
@@ -1644,7 +1646,7 @@ int run_tests(const Options& options) {
                                       options.save_schedule
                                   ? false
                                   : gpu.device() != nullptr;
-    const auto tiers = tier_cache(image, limits, fleet_device ? gpu.device() : nullptr);
+    const auto tiers = tier_cache(image, limits);
     // Without a device the tests run one after another on one timeline.
     if (fleet_device || !neura::runner::times_runs(limits)) times.reset();
     if (times) limits.tier_times = &*times;
