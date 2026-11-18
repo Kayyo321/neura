@@ -161,13 +161,27 @@ jobs:
       # A trial started by hand may reuse the components an earlier trial
       # built on the same runner image from the same lock and script. A tag
       # always builds them from the verified sources.
+      # The runner image (ImageOS, ImageVersion: variables of the runner's
+      # environment, not of the workflow's env context) and the compiler are
+      # part of the key.
+      - name: Name the built server components (trials only)
+        id: server-key
+        if: ${{ github.ref_type != 'tag' }}
+        env:
+          RECIPE: ${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+        run: |
+          compiler=$("${CC:-cc}" --version 2> /dev/null | head -n 1 | tr -c 'A-Za-z0-9.\n' '-')
+          key="server-built-$TRIPLE-${ImageOS:-unknown}-${ImageVersion:-unknown}-$compiler-$RECIPE"
+          echo "$key"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+
       - name: Restore the built server components (trials only)
         id: server-built
         if: ${{ github.ref_type != 'tag' }}
         uses: actions/cache/restore@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/server-components
-          key: server-built-${{ matrix.triple }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ env.CC || 'cc' }}-${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+          key: ${{ steps.server-key.outputs.key }}
 
       - name: Build the server components
         if: ${{ steps.server-built.outputs.cache-hit != 'true' }}
@@ -182,7 +196,7 @@ jobs:
         uses: actions/cache/save@55cc8345863c7cc4c66a329aec7e433d2d1c52a9 # v6.1.0
         with:
           path: ${{ runner.temp }}/server-components
-          key: server-built-${{ matrix.triple }}-${{ env.ImageOS }}-${{ env.ImageVersion }}-${{ env.CC || 'cc' }}-${{ hashFiles('packaging/server-components.lock.toml', 'packaging/build-server-components.sh') }}
+          key: ${{ steps.server-key.outputs.key }}
 
       - name: Locate the server components
         run: echo "SERVER_COMPONENTS=$RUNNER_TEMP/server-components" >> "$GITHUB_ENV"
@@ -242,25 +256,9 @@ jobs:
             exit 1
           fi
 
-      - name: Allow unprivileged user namespaces
-        if: ${{ runner.os == 'Linux' }}
-        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
-
-      - name: Test
-        env:
-          EXCLUDE: ${{ matrix.exclude }}
-        run: >
-          ctest --test-dir build --parallel "$JOBS" --no-tests=error
-          --output-on-failure --output-junit ctest-junit.xml -E "$EXCLUDE"
-
-      - name: Require every test to have run
-        if: ${{ !cancelled() }}
-        env:
-          MINIMUM: ${{ matrix.minimum }}
-        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
-
-      # The install and the checks of what it holds run whenever the build
-      # succeeded, so a failing test does not hide them; packing does not.
+      # The install and the checks of what it holds run before the tests and
+      # whenever the build succeeded, so a failing or slow test does not hide
+      # them; packing still needs every step.
       # stage holds the core and the SDK, for the dependency checks below;
       # `cmake --install` without a component leaves the service out
       # (docs/design/Service030.md). Each stage-<component> holds one install
@@ -355,6 +353,23 @@ jobs:
             fi
           done
           exit "$status"
+
+      - name: Allow unprivileged user namespaces
+        if: ${{ runner.os == 'Linux' }}
+        run: sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+
+      - name: Test
+        env:
+          EXCLUDE: ${{ matrix.exclude }}
+        run: >
+          ctest --test-dir build --parallel "$JOBS" --no-tests=error
+          --output-on-failure --output-junit ctest-junit.xml -E "$EXCLUDE"
+
+      - name: Require every test to have run
+        if: ${{ !cancelled() }}
+        env:
+          MINIMUM: ${{ matrix.minimum }}
+        run: python3 scripts/check-test-report.py build/ctest-junit.xml --minimum "$MINIMUM"
 
       - name: Require the built version to be the planned one
         run: |
