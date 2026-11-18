@@ -325,6 +325,92 @@ let UiStateTests = module (
         test.assert_equal_string("reset root 1", host.log[host.log.length - 3]);
     };
 
+    // A refused commit rolls back the turn's mounts and unmounts: the child the refused render
+    // embedded is unmounted again, the child it dropped stays mounted with its subscription, and
+    // an event queued for that child is still delivered. A committed render then swaps them.
+    export let test_refused_commit_rolls_back = func() -> void {
+        let trace: string[list] = new;
+        let host = new model.Host();
+        let first_state = new ui.State<int32>(1);
+        let first = ui.component<int32>(first_state, new func(value: int32) -> ui.View {
+            trace.append("first " + value.to_string());
+            return counter_view(value, func(event: ui.ClickEvent) {});
+        });
+        let second_state = new ui.State<int32>(2);
+        let second = ui.component<int32>(second_state, new func(value: int32) -> ui.View {
+            trace.append("second " + value.to_string());
+            return counter_view(value, func(event: ui.ClickEvent) {});
+        });
+        let which = new ui.State<bool>(true);
+        let parent = ui.component<bool>(which, new func(show_first: bool) -> ui.View {
+            trace.append("parent " + show_first.to_string());
+            if (show_first) {
+                return panel_view("first", ui.slot(first));
+            }
+            return panel_view("second", ui.slot(second));
+        });
+        let root = mounted(host, "#app", parent);
+        let failures: string[list] = new;
+        root.on_render_failure(new func(failure: ui.RenderFailure) {
+            match (failure) {
+                ui.RenderFailure.Invalid(diagnostic) => {
+                    failures.append("invalid");
+                },
+                ui.RenderFailure.Fault(problem) => {
+                    failures.append("fault");
+                },
+            }
+        });
+        last view_before = parent.current_view();
+        last stats_before = root.stats();
+        host.refuse_next_commit(ui.DiagnosticKind.DuplicateKey);
+        host.click(1, parent, new func(event: ui.ClickEvent) {
+            which.set(false);
+        });
+        host.click(2, first, new func(event: ui.ClickEvent) {
+            trace.append("first clicked");
+        });
+        host.end_batch();
+        root.turn();
+        test.assert_equal_string("invalid", join(failures));
+        test.assert(first.is_mounted());
+        test.assert(first.generation() == 0);
+        test.assert(!second.is_mounted());
+        test.assert(second.generation() == 1);
+        test.assert_equal_int32(0, second_state.subscriber_count());
+        test.assert_equal_int32(1, first_state.subscriber_count());
+        test.assert(parent.current_view() == view_before);
+        test.assert(root.stats().components == stats_before.components);
+        test.assert(root.stats().subscriptions == stats_before.subscriptions);
+        root.turn();
+        test.assert_equal_string("parent true; first 1; parent false; second 2; first clicked", join(trace));
+        // The parent stays clean: the next change renders it again, and that commit swaps the children.
+        which.set(true);
+        which.set(false);
+        host.click(3, parent, new func(event: ui.ClickEvent) {});
+        host.end_batch();
+        root.run();
+        test.assert(!first.is_mounted());
+        test.assert(first.generation() == 1);
+        test.assert(second.is_mounted());
+        test.assert_equal_int32(0, first_state.subscriber_count());
+        // A host failure rolls back the same way and faults the root; reset renders every component
+        // again from the current state, so the parent then embeds the first child.
+        host.fail_next_commit();
+        host.click(4, parent, new func(event: ui.ClickEvent) {
+            which.set(true);
+        });
+        host.end_batch();
+        root.run();
+        test.assert_equal_string("invalid; fault", join(failures));
+        test.assert(second.is_mounted());
+        test.assert(!first.is_mounted());
+        root.reset();
+        test.assert(first.is_mounted());
+        test.assert(!second.is_mounted());
+        test.assert_equal_int32(0, second_state.subscriber_count());
+    };
+
     // A second root on one target and more than U-9 roots are Err; a mounted component cannot
     // be mounted again.
     export let test_mount_errors = func() -> void {

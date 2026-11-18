@@ -1,4 +1,5 @@
 let build = import:Std.Ui.Internal.Build;
+let channels = import:Std.Concurrent.Channel;
 let console = import:Std.Io.Console;
 let error = import:Std.Core.Error;
 let result = import:Std.Core.Result;
@@ -371,6 +372,12 @@ export let Ui = module (
         export let view: View = nil;
         let generation_count: uint64 = 0;
         let render_total: int64 = 0;
+        /// Called with the root each time the component is mounted, after it subscribes.
+        #Internal
+        export let mount_actions: (func(Root) -> void)[list] = new;
+        /// Called each time the component is unmounted, after its children and before its generation rises.
+        #Internal
+        export let unmount_actions: (func() -> void)[list] = new;
 
         #Internal
         export let init = func(render_view: func() -> View, attach: func(Component) -> Subscription) => set;
@@ -411,6 +418,10 @@ export let Ui = module (
             last subscribe = attach;
             subscription = subscribe(instance);
             dirty = true;
+            for (let i = 0; i < mount_actions.length; i++) {
+                last action = mount_actions[i];
+                action(root);
+            }
         };
 
         #Internal
@@ -422,6 +433,10 @@ export let Ui = module (
             if (subscription != nil) {
                 subscription.close();
                 subscription = nil;
+            }
+            for (let i = 0; i < unmount_actions.length; i++) {
+                last action = unmount_actions[i];
+                action();
             }
             owner = nil;
             dirty = false;
@@ -560,6 +575,91 @@ export let Ui = module (
         };
     );
 
+    /// The listener number of a navigation in a root's queue.
+    let navigation_listener: uint64 = 18446744073709551615;
+
+    /// Starts one command run; its only use is to give a run's start function a type of its own.
+    #[Final, Immutable]
+    let Launch = class (
+        export last ticket: uint64;
+
+        export let init = func(ticket: uint64) => set;
+
+        /// @brief `Launch(` the ticket `)`.
+        export let.override to_string = func -> string => "Launch(" + ticket.to_string() + ")";
+    );
+
+    /// One command run registered with a root.
+    #[Final, NotThreadSafe]
+    let Ticket = class (
+        export last id: uint64;
+        export last launch: func(Launch, channels.Sender<uint64>) -> void;
+        export last finish: func(uint64) -> bool;
+        export last cancel: func() -> void;
+        export let stopped: bool = false;
+
+        export let init = func(id: uint64, launch: func(Launch, channels.Sender<uint64>) -> void,
+                               finish: func(uint64) -> bool, cancel: func() -> void) => set;
+
+        /// Asks the run to cancel, once.
+        export let stop = func {
+            if (!stopped) {
+                stopped = true;
+                last request = cancel;
+                request();
+            }
+        };
+
+        /// @brief `Ticket(` the id `)`.
+        export let.override to_string = func -> string => "Ticket(" + id.to_string() + ")";
+    );
+
+    /// What one turn's renders changed in the component tree, so that a refused commit can undo it.
+    #[Final, NotThreadSafe]
+    let Journal = class (
+        export last nodes: Component[list] = new;
+        export last old_children: (Component[list])[list] = new;
+        export last old_views: View[list] = new;
+        export last attached: Component[list] = new;
+        export last removed: Component[list] = new;
+
+        /// Records `node`'s children and view before it renders.
+        export let rendering = func(node: Component) {
+            nodes.append(node);
+            old_children.append(node.children);
+            old_views.append(node.view);
+        };
+
+        /// Reports whether `child` was dropped earlier in this turn, and takes it off that list.
+        export let moved = func(child: Component) -> bool {
+            for (let i = 0; i < removed.length; i++) {
+                if (removed[i] == child) {
+                    removed.remove_at(i);
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        /// Unmounts the children this turn mounted and restores every rendered component's children and view.
+        export let roll_back = func {
+            for (let i = attached.length - 1; i >= 0; i--) {
+                if (attached[i].owner != nil) {
+                    attached[i].detach();
+                }
+            }
+            for (let i = nodes.length - 1; i >= 0; i--) {
+                nodes[i].children = old_children[i];
+                nodes[i].view = old_views[i];
+            }
+        };
+
+        /// @brief `Journal(` the numbers of renders, mounts and unmounts `)`.
+        export let.override to_string = func -> string =>
+            "Journal(" + nodes.length.to_string() + " renders, " + attached.length.to_string() + " mounted, "
+            + removed.length.to_string() + " unmounted)";
+    );
+
     /// @brief Counts that show what a root holds and has done.
     #[Final, Immutable]
     export let RootStats = class (
@@ -618,6 +718,16 @@ export let Ui = module (
         let commit_total: uint64 = 0;
         let dropped_total: uint64 = 0;
         let discarded_total: uint64 = 0;
+        // Commands: every ticket in flight, the launches not yet started, and the U-10 limit.
+        let tickets: Ticket[list] = new;
+        let launches: Ticket[list] = new;
+        let ticket_count: uint64 = 0;
+        let command_limit: int = 32;
+        let running_commands: bool = false;
+        let stale_total: uint64 = 0;
+        // Navigations the host reports, and the element to focus after the turn's commit.
+        let navigation: Subscriber<string>[list] = new;
+        let pending_focus: string = "";
 
         #Internal
         export let init = func(host: Host, handle: uint64, top: Component) {
@@ -744,9 +854,234 @@ export let Ui = module (
             return !closed && !faulted;
         };
 
-        /// @brief Runs turns until the root is closed or faulted, or the host has no more events.
+        /// @brief Runs turns until the root is closed or faulted, or the host has no more events. A root
+        /// whose components run commands uses `run_with_commands` instead: a command started under `run`
+        /// traps with `a command needs root.run_with_commands()`.
         export let run = func {
-            while (turn()) {
+            while (true) {
+                if (launches.length > 0) {
+                    trap_with_message("a command needs root.run_with_commands()");
+                }
+                if (!turn()) {
+                    return;
+                }
+            }
+        };
+
+        /// @brief Runs turns, as `run` does, inside a scope that owns every command task the root starts.
+        /// Each turn is either the next event or the completion of a command. With commands in flight and
+        /// no event queued, the root waits for both together when the host is a `TaskHost`, and otherwise
+        /// for the next completion. It returns when the root is closed or faulted, or when the host has no
+        /// more events and no command is in flight; it cancels the commands still running and returns
+        /// after their tasks have finished.
+        export let run_with_commands = func {
+            if (running_commands) {
+                trap_with_message("root.run_with_commands() is already running");
+            }
+            running_commands = true;
+            scope (tasks) {
+                const [done, completions, _] = channels.open<uint64>(1024);
+                while (true) {
+                    while (launches.length > 0) {
+                        last next = launches[0];
+                        launches.remove_at(0);
+                        last start = next.launch;
+                        spawn start(new Launch(next.id), done);
+                    }
+                    if (closed || faulted) {
+                        break;
+                    }
+                    match (completions.try_receive()) {
+                        channels.TryReceived.Value(ticket) => {
+                            complete(ticket);
+                            continue;
+                        },
+                        _ => {},
+                    }
+                    if (queue.length > 0) {
+                        turn();
+                        continue;
+                    }
+                    if (tickets.length == 0) {
+                        if (!host.wait(instance)) {
+                            break;
+                        }
+                        continue;
+                    }
+                    if (host is TaskHost) {
+                        match ((host as TaskHost).wait_with(instance, completions)) {
+                            Wake.Events => {},
+                            Wake.Completed(ticket) => {
+                                complete(ticket);
+                            },
+                            Wake.Ended => {
+                                await_completion(completions);
+                            },
+                        }
+                    } else {
+                        await_completion(completions);
+                    }
+                }
+                for (let i = 0; i < tickets.length; i++) {
+                    tickets[i].stop();
+                }
+                launches = new;
+                tasks.cancel();
+            }
+            // Every task has finished: apply what the stopped runs reported, outside any turn.
+            last remaining = tickets;
+            tickets = new;
+            for (let i = 0; i < remaining.length; i++) {
+                last finish = remaining[i].finish;
+                if (!finish(remaining[i].id)) {
+                    stale_total += 1;
+                }
+            }
+            running_commands = false;
+        };
+
+        /// @brief Sets the number of commands in flight at which `Command.run` is rejected (U-10, default 32; at most 1,024).
+        export let set_command_limit = func(limit: int) {
+            if (limit < 1 || limit > 1024) {
+                trap_with_message("invalid argument: a command limit is 1 to 1,024 commands");
+            }
+            command_limit = limit;
+        };
+
+        /// @brief The number of command runs started and not yet finished, the stopped ones included.
+        export let commands_in_flight = func -> int32 => tickets.length as int32;
+
+        /// @brief How many command completions were discarded because their generation was old.
+        export let stale_completions = func -> uint64 => stale_total;
+
+        /// @brief The host as a `HistoryHost`, or nil when it keeps no history.
+        export let history = func -> HistoryHost {
+            if (host is HistoryHost) {
+                return host as HistoryHost;
+            }
+            return nil;
+        };
+
+        /// @brief Adds a listener for navigations the program did not make (back, forward, an edited
+        /// address), which the host reports with `post_navigation`.
+        export let on_navigation = func(listener: func(string) -> void) -> Subscription {
+            last handle = new Subscription();
+            navigation.append(new Subscriber<string>(handle, listener));
+            return handle;
+        };
+
+        /// @brief Queues a navigation to `path`, called by a host. A queued navigation is replaced by a
+        /// later one, and navigations are never dropped by the queue limit.
+        export let post_navigation = func(path: string) {
+            if (closed) {
+                return;
+            }
+            last self = instance;
+            last deliver = new func() {
+                self.navigated(path);
+            };
+            for (let i = 0; i < queue.length; i++) {
+                if (queue[i].listener == navigation_listener && queue[i].target == nil) {
+                    queue[i].deliver = deliver;
+                    return;
+                }
+            }
+            queue.append(new QueuedEvent(navigation_listener, nil, 0, true, deliver, 0));
+        };
+
+        /// @brief Asks the host to focus the element whose `id` is `element_id` once the current turn has
+        /// committed. A later request in the same turn replaces it; a host that is not a `FocusHost` ignores it.
+        export let request_focus = func(element_id: string) {
+            pending_focus = element_id;
+        };
+
+        #Internal
+        export let navigated = func(path: string) {
+            last count = navigation.length;
+            for (let i = 0; i < count; i++) {
+                last entry = navigation[i];
+                if (entry.handle.is_open()) {
+                    last listener = entry.listener;
+                    listener(path);
+                }
+            }
+            let j = 0;
+            while (j < navigation.length) {
+                if (navigation[j].handle.is_open()) {
+                    j += 1;
+                } else {
+                    navigation.remove_at(j);
+                }
+            }
+        };
+
+        /// @brief Reports whether another command may start: fewer than the limit are in flight.
+        #Internal
+        export let can_launch = func -> bool => tickets.length < command_limit;
+
+        /// @brief Registers a command run; `launch` starts its task under `run_with_commands`, `finish`
+        /// applies its completion in a turn, and `stop` asks it to cancel.
+        #Internal
+        export let launch = func(start: func(Launch, channels.Sender<uint64>) -> void, finish: func(uint64) -> bool,
+                                 stop: func() -> void) -> uint64 {
+            ticket_count += 1;
+            last ticket = new Ticket(ticket_count, start, finish, stop);
+            tickets.append(ticket);
+            launches.append(ticket);
+            return ticket_count;
+        };
+
+        /// @brief Asks the run `id` to cancel. A run not started yet is dropped, never completes, and
+        /// true is returned.
+        #Internal
+        export let stop_ticket = func(id: uint64) -> bool {
+            for (let i = 0; i < launches.length; i++) {
+                if (launches[i].id == id) {
+                    launches.remove_at(i);
+                    remove_ticket(id);
+                    return true;
+                }
+            }
+            for (let i = 0; i < tickets.length; i++) {
+                if (tickets[i].id == id) {
+                    tickets[i].stop();
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        let remove_ticket = func(id: uint64) -> Ticket {
+            for (let i = 0; i < tickets.length; i++) {
+                if (tickets[i].id == id) {
+                    last found = tickets[i];
+                    tickets.remove_at(i);
+                    return found;
+                }
+            }
+            return nil;
+        };
+
+        // One turn: the completion of the run `id`.
+        let complete = func(id: uint64) {
+            last ticket = remove_ticket(id);
+            if (ticket == nil || closed || faulted) {
+                return;
+            }
+            turn_total += 1;
+            last finish = ticket.finish;
+            if (!finish(id)) {
+                stale_total += 1;
+            }
+            flush();
+        };
+
+        let await_completion = func(completions: channels.Receiver<uint64>) {
+            match (completions.receive()) {
+                channels.Received.Value(ticket) => {
+                    complete(ticket);
+                },
+                _ => {},
             }
         };
 
@@ -810,8 +1145,23 @@ export let Ui = module (
             if (closed || faulted) {
                 return;
             }
+            commit_renders();
+            if (pending_focus != "" && !closed && !faulted) {
+                last element = pending_focus;
+                pending_focus = "";
+                if (host is FocusHost) {
+                    (host as FocusHost).focus(handle, element);
+                }
+            }
+        };
+
+        // Renders the dirty components and commits them. The children a render embeds are mounted
+        // at once, and the ones it drops are unmounted only when the host commits; a refused or failed
+        // commit unmounts the new children and restores each rendered component's children and view.
+        let commit_renders = func {
+            last journal = new Journal();
             last rendered: Rendered[list] = new;
-            render_tree(top, rendered);
+            render_tree(top, rendered, journal);
             if (rendered.length == 0) {
                 return;
             }
@@ -821,14 +1171,21 @@ export let Ui = module (
                     match (outcome) {
                         RenderOutcome.Committed => {
                             commit_total += 1;
+                            for (let i = 0; i < journal.removed.length; i++) {
+                                if (journal.removed[i].owner != nil) {
+                                    journal.removed[i].detach();
+                                }
+                            }
                         },
                         RenderOutcome.Invalid(diagnostic) => {
+                            journal.roll_back();
                             last handler = failure_handler;
                             handler(RenderFailure.Invalid(diagnostic));
                         },
                     }
                 },
                 result.Result.Err(problem) => {
+                    journal.roll_back();
                     faulted = true;
                     last handler = failure_handler;
                     handler(RenderFailure.Fault(problem));
@@ -836,8 +1193,9 @@ export let Ui = module (
             }
         };
 
-        let render_tree = func(node: Component, out: Rendered[list]) {
+        let render_tree = func(node: Component, out: Rendered[list], journal: Journal) {
             if (node.dirty) {
+                journal.rendering(node);
                 last view = node.render_now();
                 render_total += 1;
                 out.append(new Rendered(node, view));
@@ -846,22 +1204,26 @@ export let Ui = module (
                 for (let i = 0; i < node.children.length; i++) {
                     last old = node.children[i];
                     if (!contains_component(found, old)) {
-                        old.detach();
+                        journal.removed.append(old);
                     }
                 }
                 for (let i = 0; i < found.length; i++) {
                     last child = found[i];
                     if (!contains_component(node.children, child)) {
-                        if (child.owner != nil) {
+                        if (child.owner == nil) {
+                            child.attach_to(instance);
+                            journal.attached.append(child);
+                        } else if (child.owner == instance && journal.moved(child)) {
+                            // Dropped by a parent rendered earlier in this turn: the child moves.
+                        } else {
                             trap_with_message("a component is mounted twice");
                         }
-                        child.attach_to(instance);
                     }
                 }
                 node.children = found;
             }
             for (let i = 0; i < node.children.length; i++) {
-                render_tree(node.children[i], out);
+                render_tree(node.children[i], out, journal);
             }
         };
 
@@ -913,6 +1275,230 @@ export let Ui = module (
         RenderFailure.Invalid(diagnostic) => "invalid commit: " + diagnostic.to_string(),
         RenderFailure.Fault(problem) => "host fault: " + error.message(problem),
     };
+
+    // Commands and the optional host services (docs/apps/Components.md#commands).
+
+    /// @brief What a root's `TaskHost.wait_with` saw first.
+    export let Wake = enum (
+        /// The host posted events to the root.
+        Events,
+        /// A command run finished; its ticket, read from the completions channel.
+        Completed(uint64),
+        /// The host has no more events; the root waits for the commands in flight.
+        Ended
+    );
+
+    /// @brief A host that can wait for its own events and for command completions together. A root
+    /// whose commands are in flight, with no event queued, calls `wait_with` instead of `wait`. The
+    /// host returns `Events` after posting events, or `Completed` with a value it received from
+    /// `completions`, whichever comes first, and `Ended` when no event will ever come. A host may open
+    /// a scope of its own for the wait, for example to race a host request against the channel, as long
+    /// as every task it starts has finished when `wait_with` returns.
+    export let TaskHost = interface (
+        let wait_with = func(root: Root, completions: channels.Receiver<uint64>) -> Wake;
+    );
+
+    /// @brief A host that keeps the history of a document: the router reads and changes the location
+    /// through it. Paths are absolute (`/parts/7`). The host reports a navigation the program did not
+    /// make with `root.post_navigation(path)`.
+    export let HistoryHost = interface (
+        /// @brief The current path.
+        let location = func() -> string;
+        /// @brief Adds `path` to the history without loading a page; returns the current path.
+        let push_location = func(path: string) -> string;
+        /// @brief Replaces the current entry with `path`; returns the current path.
+        let replace_location = func(path: string) -> string;
+        /// @brief The `href` text of a link to `path` in this host's routing mode (`#/parts/7` for hash routing).
+        let link = func(path: string) -> string;
+    );
+
+    /// @brief A host that can move the keyboard focus to an element of a root, named by its `id`.
+    export let FocusHost = interface (
+        /// @brief Focuses the element; false when the root has no element with that `id`.
+        let focus = func(root: uint64, element_id: string) -> bool;
+    );
+
+    /// @brief What `Command.run` did: started the work, or started nothing.
+    export let RunOutcome = enum (Started, Rejected);
+
+    /// @brief The state of a command: never run, running, or how its latest run ended.
+    export let CommandState = enum<O> (Idle, Running, Succeeded(O), Failed(error.PortableError), Cancelled);
+
+    /// One finished run and the generation it was started in.
+    #[Final, Immutable]
+    let Finished = class<O> (
+        export last generation: uint64;
+        export last state: CommandState<O>;
+
+        export let init = func(generation: uint64, state: CommandState<O>) => set;
+
+        /// @brief `Finished(` the generation `)`.
+        export let.override to_string = func -> string => "Finished(generation " + generation.to_string() + ")";
+    );
+
+    // The task of one command run: it runs `work` in a scope of its own, so that stopping the run
+    // cancels only that work, then reports the outcome and the ticket.
+    let perform = func<I, O>(work: func(I) -> result.Result<O>, input: I, generation: uint64,
+                             results: channels.Sender<Finished<O>>, stop: channels.Receiver<int>,
+                             done: channels.Sender<uint64>, ticket: uint64) {
+        scope (own) {
+            let job = spawn work(input);
+            select {
+                let outcome = job.join() => {
+                    match (outcome) {
+                        result.Result.Ok(value) => {
+                            results.try_send(new Finished<O>(generation, CommandState<O>.Succeeded(value)));
+                        },
+                        result.Result.Err(problem) => {
+                            results.try_send(new Finished<O>(generation,
+                                CommandState<O>.Failed(error.to_portable(problem))));
+                        },
+                    }
+                },
+                let _ = stop.receive() => {
+                    own.cancel();
+                    let _ = job.join();
+                    results.try_send(new Finished<O>(generation, CommandState<O>.Cancelled));
+                },
+            }
+        }
+        done.send(ticket);
+    };
+
+    /// @brief Work that waits, started from a handler and finished in a later turn. `work` runs as a
+    /// task in the scope of `root.run_with_commands`, so it must be task-safe and its captures, `I` and
+    /// `O` transferable (E0601, E0602); its failure reaches the component as a `PortableError`. The
+    /// command's `state` is a `State` that components render. Each `run`, each `cancel` of a running
+    /// command and each unmount of the component the command is bound to raise its generation, and a
+    /// completion of an older generation changes nothing. `work` learns of a cancellation through
+    /// `Std.Concurrent.Cancellation.requested()` or a parked operation that returns `Cancelled`.
+    #[Final, NotThreadSafe]
+    export let Command = class<I, O> (
+        last work: func(I) -> result.Result<O>;
+        /// @brief `Idle` until the first run, `Running` while the latest run works, then how it ended.
+        export last state: State<CommandState<O>>;
+        let owner: Component = nil;
+        let generation_count: uint64 = 0;
+        let in_flight: uint64[list] = new;
+        let running_root: Root = nil;
+
+        /// @brief A command that runs `work`. Bind it to a component with `bind` before running it.
+        export let init = func(work: func(I) -> result.Result<O>) {
+            instance.work = work;
+            state = new State<CommandState<O>>(CommandState<O>.Idle);
+        };
+
+        /// @brief Makes `component` the command's owner: the command runs on the owner's root, and
+        /// unmounting the owner cancels the command and raises its generation. A command is bound once.
+        export let bind = func(component: Component) {
+            if (owner != nil) {
+                trap_with_message("a command is bound to one component");
+            }
+            owner = component;
+            last self = instance;
+            component.unmount_actions.append(new func() {
+                self.abandon();
+            });
+        };
+
+        /// @brief Starts `work(input)` on the owner's root and sets the state to `Running`. `Rejected`,
+        /// with nothing started, when the command is not bound to a mounted component or the root already
+        /// has its limit of commands in flight (U-10, 32 by default).
+        export let run = func(input: I) -> RunOutcome {
+            if (owner == nil || owner.owner == nil || !owner.owner.can_launch()) {
+                return RunOutcome.Rejected;
+            }
+            last root = owner.owner;
+            generation_count += 1;
+            last generation = generation_count;
+            const [results, outcomes, _] = channels.open<Finished<O>>(1);
+            const [_, stop, stopping] = channels.open<int>(0);
+            last job = work;
+            last self = instance;
+            last ticket = root.launch(
+                new func(launch: Launch, done: channels.Sender<uint64>) {
+                    perform<I, O>(job, input, generation, results, stop, done, launch.ticket);
+                },
+                new func(id: uint64) -> bool => self.finish(id, outcomes),
+                new func() {
+                    stopping.close();
+                });
+            in_flight.append(ticket);
+            running_root = root;
+            state.set(CommandState<O>.Running);
+            return RunOutcome.Started;
+        };
+
+        /// @brief Cancels the runs in flight, raises the generation and sets the state to `Cancelled`.
+        /// A command with no run in flight is left as it is.
+        export let cancel = func {
+            if (in_flight.length == 0) {
+                return;
+            }
+            stop_all();
+            generation_count += 1;
+            state.set(CommandState<O>.Cancelled);
+        };
+
+        /// @brief Raised by each run, each cancel of a running command and each unmount of the owner.
+        export let generation = func -> uint64 => generation_count;
+
+        /// @brief The number of this command's runs that have not finished.
+        export let runs_in_flight = func -> int32 => in_flight.length as int32;
+
+        /// Unmounting the owner: cancel the runs in flight and raise the generation.
+        #Internal
+        export let abandon = func {
+            last running = in_flight.length > 0;
+            stop_all();
+            generation_count += 1;
+            if (running) {
+                state.set(CommandState<O>.Cancelled);
+            }
+        };
+
+        /// Applies a finished run in the root's turn; false when its generation is old.
+        #Internal
+        export let finish = func(ticket: uint64, outcomes: channels.Receiver<Finished<O>>) -> bool {
+            forget(ticket);
+            match (outcomes.try_receive()) {
+                channels.TryReceived.Value(finished) => {
+                    if (finished.generation != generation_count) {
+                        return false;
+                    }
+                    state.set(finished.state);
+                    return true;
+                },
+                _ => {
+                    return false;
+                },
+            }
+        };
+
+        let stop_all = func {
+            let i = 0;
+            while (i < in_flight.length) {
+                if (running_root == nil || running_root.stop_ticket(in_flight[i])) {
+                    in_flight.remove_at(i);
+                } else {
+                    i += 1;
+                }
+            }
+        };
+
+        let forget = func(ticket: uint64) {
+            for (let i = 0; i < in_flight.length; i++) {
+                if (in_flight[i] == ticket) {
+                    in_flight.remove_at(i);
+                    return;
+                }
+            }
+        };
+
+        /// @brief `Command(generation N, M in flight)`.
+        export let.override to_string = func -> string =>
+            "Command(generation " + generation_count.to_string() + ", " + in_flight.length.to_string() + " in flight)";
+    );
 
     /// @brief Opens a root on `target` of `host`, renders `top` and commits it. `Err` when the host
     /// refuses the target (a second root on one element, more than U-9 roots) or `top` is mounted.
