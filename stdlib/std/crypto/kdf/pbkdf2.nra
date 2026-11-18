@@ -13,7 +13,7 @@ export let Pbkdf2 = module (
     /// one iteration or a negative length traps.
     #[NoDiscard, Since("0.3.0")]
     export let derive = func<H: StreamingDigest<H>>(password: uint8[list], salt: uint8[list], iterations: int,
-            length: int) -> uint8[list] {
+        length: int) -> uint8[list] {
         crypto_policy.require(Algorithm.Pbkdf2);
         if (iterations < 1) {
             trap_with_message("invalid argument: PBKDF2 needs at least one iteration");

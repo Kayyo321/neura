@@ -1,0 +1,49 @@
+// sizes: 1000 2000
+// scaling: 2.1
+// Interface-property reads in a hot loop (docs/design/Records030.md, Gate
+// and acceptance): a read-only requirement satisfied by a field, through a
+// field adapter, and by a getter, read through the interface.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let Sized = interface (
+    let size: int;
+        | get;
+);
+
+let Box = class implements Sized (
+    export let size: int = 0;
+    export let init = func(value: int) -> void {
+        size = value;
+    };
+);
+
+let Doubled = class implements Sized (
+    let half: int = 0;
+    export let size: int = 0;
+        | get: half * 2;
+
+    export let init = func(value: int) -> void {
+        half = value;
+    };
+);
+
+let PropertyReads = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int>(int32s.parse(args[0]), 0);
+        let items: Sized[list] = new;
+        items.append(new Box(1));
+        items.append(new Doubled(1));
+        let total = 0;
+        for (let i = 0; i < n; i++) {
+            total = total + items[i % 2].size;
+        }
+        if (total != n / 2 + (n - n / 2) * 2 - (n % 2) + (n % 2)) {
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

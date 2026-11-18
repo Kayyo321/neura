@@ -13,6 +13,8 @@ compile_commands.json
 .ninja_log
 *.o
 *.out
+# Expected standard output of test programs and trap programs is a source fixture.
+!tests/**/*.out
 *.obj
 *.a
 *.lib

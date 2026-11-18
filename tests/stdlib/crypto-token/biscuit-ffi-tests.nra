@@ -1,0 +1,128 @@
+// test-options: --gpu=off --max-steps 4000000000
+let biscuit = import:Std.Crypto.Token.Biscuit;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let errors = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let utf8 = import:Std.Encoding.Utf8;
+let vectors = import:BiscuitV3Vectors;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+let BiscuitFfiTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let code_of = func(error: Error) -> string {
+        match (error) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    let test_callback = func(receiver: biscuit.ExternalValue, argument: Optional<biscuit.ExternalValue>)
+        -> Result<biscuit.ExternalValue> {
+        match (argument) {
+            Optional.None => {
+                return Result<biscuit.ExternalValue>.Ok(receiver);
+            },
+            Optional.Some(other) => {
+                match ([receiver, other]) {
+                    [biscuit.ExternalValue.Text(left), biscuit.ExternalValue.Text(right)] => {
+                        return Result<biscuit.ExternalValue>.Ok(
+                            biscuit.ExternalValue.Text(left == right ? "equal strings" : "different strings"));
+                    },
+                    _ => {},
+                }
+            },
+        }
+        return Result<biscuit.ExternalValue>.Err(errors.custom("fixture.operand", "unsupported operands"));
+    };
+
+    let registrations = func -> biscuit.ExternalFunction[list] =>
+        new([new biscuit.ExternalFunction("test", test_callback)]);
+
+    let key = func -> ed25519.Ed25519PublicKey =>
+        test.assert_ok(ed25519.parse_public_key(decode(vectors.root[0])));
+
+    export let test_official_application_functions_are_opt_in = func {
+        last root = key();
+        last encoded = decode(vectors.external[1]);
+        last policy = test.assert_ok(utf8.decode(decode(vectors.external[2])));
+        let _ = test.assert_ok(biscuit.verify(encoded, root));
+        test.assert_equal_string("biscuit.external", code_of(test.assert_err(biscuit.authorize(encoded, root, policy))));
+        let _ = test.assert_ok(biscuit.authorize(encoded, root, policy, registrations()));
+        let _ = test.assert_ok(biscuit.authorize(encoded, root,
+            "allow if \"a\".extern::test(\"b\") == \"different strings\";", registrations()));
+        test.assert_equal_string("biscuit.external", code_of(test.assert_err(
+            biscuit.authorize(encoded, root, "allow if true || 1.extern::missing();", registrations()))));
+    };
+
+    export let test_typed_collection_values_have_exact_callback_representation = func {
+        last root = key();
+        last encoded = decode(vectors.external[1]);
+        last value = "{\"subject\": [-9223372036854775808, {1, 2}, null, hex:aabb, 2024-01-01T00:00:00Z], 7: true}";
+        let _ = test.assert_ok(biscuit.authorize(encoded, root,
+            "allow if " + value + ".extern::test() === " + value + ";", registrations()));
+        test.assert_equal_string("biscuit.expression", code_of(test.assert_err(biscuit.authorize(encoded, root,
+            "allow if true.extern::test(1);", registrations()))));
+        let _ = test.assert_ok(biscuit.authorize(encoded, root,
+            "allow if true.extern::test(1).try_or(true);", registrations()));
+    };
+
+    export let test_application_registry_rejects_duplicate_and_unbound_names = func {
+        last root = key();
+        last encoded = decode(vectors.external[1]);
+        let functions = registrations();
+        functions.append(new biscuit.ExternalFunction("test", test_callback));
+        test.assert_equal_string("biscuit.external", code_of(test.assert_err(
+            biscuit.authorize(encoded, root, "allow if true;", functions))));
+        test.assert_equal_string("biscuit.external", code_of(test.assert_err(
+            biscuit.authorize(encoded, root, "allow if true;",
+                new([new biscuit.ExternalFunction("unrelated", test_callback)])))));
+    };
+
+    let replace_callback = func(receiver: biscuit.ExternalValue, argument: Optional<biscuit.ExternalValue>)
+        -> Result<biscuit.ExternalValue> {
+        match (receiver) {
+            biscuit.ExternalValue.Array(items) => {
+                items[0] = biscuit.ExternalValue.Integer(9);
+                return Result<biscuit.ExternalValue>.Ok(receiver);
+            },
+            _ => {},
+        }
+        return Result<biscuit.ExternalValue>.Err(errors.custom("fixture.operand", "expected array"));
+    };
+
+    export let test_callback_arrays_cannot_change_datalog_facts = func {
+        let functions = registrations();
+        functions.append(new biscuit.ExternalFunction("replace", replace_callback));
+        let _ = test.assert_ok(biscuit.authorize(decode(vectors.external[1]), key(),
+            "item([1]); allow if item($x), $x.extern::replace() === [9], $x === [1];", functions));
+    };
+
+    let key_bytes = func(byte: uint8) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            out.append(byte);
+        }
+        return out;
+    };
+
+    export let test_issued_external_calls_match_the_rust_wire = func {
+        let private_key = test.assert_ok(ecdsa.parse_private_key(ecdsa.Curve.P256, key_bytes(1)));
+        last root = private_key.public_key();
+        last token = test.assert_ok(biscuit.mint_with(
+            "check if true.extern::test(), \"a\".extern::test(\"a\") == \"equal strings\";",
+            private_key, key_bytes(2), biscuit.KeyAlgorithm.Ed25519));
+        private_key.wipe();
+        test.assert_equal_string(vectors.issued_external[0], hex.encode(token));
+        let _ = test.assert_ok(biscuit.authorize(token, root, "allow if true;", registrations()));
+    };
+);

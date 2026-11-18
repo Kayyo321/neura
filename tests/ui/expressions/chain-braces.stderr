@@ -1,0 +1,9 @@
+error[E0263]: braces group a range, not a string chain
+ --> $DIR/chain-braces.nra:3:54
+  |
+3 | let braced = func(a: string, b: string) -> string => {a .. b};
+  |                                                      ^^^^^^^^ the first operand is a string
+  |
+  = help: write the chain without braces, or parenthesize it: '(a .. b)'
+
+For more information about this error, try `neura explain E0263`.

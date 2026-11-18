@@ -103,7 +103,7 @@ export let Gf128 = module (
     /// @brief The 16 bytes at the offset in reverse order.
     let reverse = func(bytes: uint8[list], offset: int) -> uint8[list] {
         let out: uint8[list] = new;
-        for (let i = 15; i >= 0; i--) {
+        for (let i in 15 ..= 0 : -1) {
             out.append(bytes[offset + i]);
         }
         return out;

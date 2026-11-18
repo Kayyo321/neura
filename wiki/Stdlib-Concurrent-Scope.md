@@ -31,6 +31,8 @@ The following public declarations are taken from the module source; each links t
   Cancels the scope at the instant. Needs the clock capability. Tagged `#NoDiscard(reason: "without the clock capability no deadline is set")`.
 - **Scope.Scope** · [`export let deadline = func -> optional.Optional<duration.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L54)
   The reading of the monotonic clock at which the scope's tasks are cancelled: the earlier of this scope's deadline and the one it inherited, or None.
+- **Scope.Scope** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/scope.nra#L68)
+  Names the scope and its identifier.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

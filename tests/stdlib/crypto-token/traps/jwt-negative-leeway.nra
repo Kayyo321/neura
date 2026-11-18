@@ -1,0 +1,16 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: negative JWT leeway
+// run-options: --gpu=off
+let fixed_clock = import:Std.Time.FixedClock;
+let instant = import:Std.Time.Instant;
+let jwt = import:Std.Crypto.Token.Jwt;
+let program = import:Std.Program;
+let utf8 = import:Std.Encoding.Utf8;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last clock = fixed_clock.of(instant.Epoch);
+        let _ = jwt.validate_claims(utf8.encode("{}"), clock, -1);
+        return program.ExitCode.Ok;
+    };
+);

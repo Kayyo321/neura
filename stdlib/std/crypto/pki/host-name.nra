@@ -1,0 +1,338 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+let.promote _ = import:Std.Crypto.Pki.GeneralName;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief Matching a server's identity against a certificate, as RFC 9525 says (Stdlib.md section 21.10).
+///
+/// Only subjectAltName is consulted; the subject's commonName is never used (RFC 9525, section 6.3). A DNS
+/// reference matches a dNSName case-insensitively (ASCII). A wildcard is accepted only as the whole left-most
+/// label (`*.example.com`) and matches exactly one non-empty label, so it never matches `example.com` or
+/// `a.b.example.com`; partial wildcards (`w*.example.com`) and wildcards elsewhere match nothing. Names must
+/// have the preferred name syntax (letters, digits and hyphens, labels of 1 to 63 characters); a dNSName or
+/// reference outside it matches nothing. An IP reference matches an iPAddress entry with the same bytes. No
+/// public-suffix list is consulted.
+/// @see [Std.Crypto.Pki.HostName](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-HostName)
+#Since("0.3.0")
+export let HostName = module (
+    /// @brief Whether the certificate's subjectAltName has a dNSName matching the host name. A trailing dot on
+    /// the reference is removed first.
+    #[NoDiscard, Since("0.3.0")]
+    export let matches_dns = func(certificate: Certificate, host: string) -> bool {
+        if (not ascii(host)) {
+            return false;
+        }
+        let reference = lower(host);
+        if (reference.byte_length > 0 && reference.byte_at(reference.byte_length - 1) == 46) {
+            reference = reference.slice(0, reference.byte_length - 1);
+        }
+        if (not is_dns_name(reference, false)) {
+            return false;
+        }
+        match (certificate.subject_alt_names) {
+            Optional.Some(names) => {
+                for (let n in names) {
+                    if (n.kind == GeneralNameKind.DnsName && dns_matches(lower(n.text), reference)) {
+                        return true;
+                    }
+                }
+            },
+            Optional.None => {},
+        }
+        return false;
+    };
+
+    /// @brief Whether the certificate's subjectAltName has an iPAddress equal to the address (4 or 16 bytes).
+    #[NoDiscard, Since("0.3.0")]
+    export let matches_ip = func(certificate: Certificate, address: uint8[list]) -> bool {
+        match (certificate.subject_alt_names) {
+            Optional.Some(names) => {
+                for (let n in names) {
+                    if (n.kind == GeneralNameKind.IpAddress && same(n.bytes, address)) {
+                        return true;
+                    }
+                }
+            },
+            Optional.None => {},
+        }
+        return false;
+    };
+
+    /// @brief Whether the certificate's subjectAltName has an rfc822Name equal to the address (the local part
+    /// compared exactly, the domain ignoring ASCII case).
+    #[NoDiscard, Since("0.3.0")]
+    export let matches_email = func(certificate: Certificate, address: string) -> bool {
+        last at = last_at(address);
+        if (at <= 0 || not ascii(address)) {
+            return false;
+        }
+        match (certificate.subject_alt_names) {
+            Optional.Some(names) => {
+                for (let n in names) {
+                    if (n.kind == GeneralNameKind.Rfc822Name) {
+                        last other_at = last_at(n.text);
+                        if (other_at > 0 && n.text.slice(0, other_at) == address.slice(0, at)
+                            && lower(n.text.slice(other_at, n.text.byte_length)) == lower(address.slice(at, address.byte_length))) {
+                            return true;
+                        }
+                    }
+                }
+            },
+            Optional.None => {},
+        }
+        return false;
+    };
+
+    let ascii = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) >= 128) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    let last_at = func(text: string) -> int {
+        for (let i = text.byte_length - 1; i >= 0; i--) {
+            if (text.byte_at(i) == 64) {
+                return i;
+            }
+        }
+        return -1;
+    };
+
+    /// @brief Whether a presented dNSName (lowercase) matches the reference (lowercase).
+    let dns_matches = func(presented: string, reference: string) -> bool {
+        if (presented.byte_length > 2 && presented.byte_at(0) == 42 && presented.byte_at(1) == 46) {
+            last suffix = presented.slice(1, presented.byte_length);
+            if (not is_dns_name(presented.slice(2, presented.byte_length), false) || labels(suffix) < 2) {
+                return false;
+            }
+            // One whole label before the suffix.
+            if (reference.byte_length <= suffix.byte_length) {
+                return false;
+            }
+            last head = reference.slice(0, reference.byte_length - suffix.byte_length);
+            return reference.slice(reference.byte_length - suffix.byte_length, reference.byte_length) == suffix
+                && head.byte_length > 0 && not contains_dot(head);
+        }
+        return is_dns_name(presented, false) && presented == reference;
+    };
+
+    let labels = func(text: string) -> int {
+        let n = 0;
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 46) {
+                n++;
+            }
+        }
+        return n;
+    };
+
+    let contains_dot = func(text: string) -> bool => labels(text) > 0;
+
+    /// @brief The preferred name syntax: labels of letters, digits and hyphens, not starting or ending with a
+    /// hyphen, 1 to 63 bytes, the whole at most 253 bytes. With `allow_wildcard`, the first label may be "*".
+    #[NoDiscard, Since("0.3.0")]
+    export let is_dns_name = func(name: string, allow_wildcard: bool) -> bool {
+        last n = name.byte_length;
+        if (n == 0 || n > 253) {
+            return false;
+        }
+        let start = 0;
+        for (let i = 0; i <= n; i++) {
+            if (i == n || name.byte_at(i) == 46) {
+                last length = i - start;
+                if (length < 1 || length > 63) {
+                    return false;
+                }
+                if (allow_wildcard && start == 0 && length == 1 && name.byte_at(0) == 42) {
+                    start = i + 1;
+                    continue;
+                }
+                for (let j = start; j < i; j++) {
+                    last c = name.byte_at(j);
+                    last letter = (c >= 97 && c <= 122) || (c >= 65 && c <= 90);
+                    last digit = c >= 48 && c <= 57;
+                    if (not (letter || digit || (c == 45 && j != start && j != i - 1))) {
+                        return false;
+                    }
+                }
+                start = i + 1;
+            }
+        }
+        return true;
+    };
+
+    /// @brief The 4 or 16 bytes of an IPv4 address in dotted-decimal (four decimal parts of at most 255,
+    /// no leading zeros) or an IPv6 address in RFC 4291 text (with "::" and an optional dotted IPv4 tail),
+    /// or None.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_ip = func(text: string) -> Optional<uint8[list]> {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) == 58) {
+                return parse_ipv6(text);
+            }
+        }
+        return parse_ipv4(text);
+    };
+
+    let parse_ipv4 = func(text: string) -> Optional<uint8[list]> {
+        let out: uint8[list] = new;
+        let value = 0;
+        let digits = 0;
+        let leading_zero = false;
+        for (let i = 0; i <= text.byte_length; i++) {
+            if (i == text.byte_length || text.byte_at(i) == 46) {
+                if (digits == 0 || (leading_zero && digits > 1) || value > 255) {
+                    return Optional<uint8[list]>.None;
+                }
+                out.append(value as uint8);
+                value = 0;
+                digits = 0;
+                leading_zero = false;
+                continue;
+            }
+            last c = text.byte_at(i);
+            if (c < 48 || c > 57 || digits >= 3) {
+                return Optional<uint8[list]>.None;
+            }
+            if (digits == 0 && c == 48) {
+                leading_zero = true;
+            }
+            value = value * 10 + (c - 48) as int;
+            digits++;
+        }
+        if (out.length != 4) {
+            return Optional<uint8[list]>.None;
+        }
+        return Optional<uint8[list]>.Some(out);
+    };
+
+    let parse_ipv6 = func(text: string) -> Optional<uint8[list]> {
+        // Split at "::" into a head and a tail of 16-bit groups.
+        let head: int[list] = new;
+        let tail: int[list] = new;
+        let seen_gap = false;
+        let i = 0;
+        last n = text.byte_length;
+        if (n >= 2 && text.byte_at(0) == 58) {
+            if (text.byte_at(1) != 58) {
+                return Optional<uint8[list]>.None;
+            }
+            seen_gap = true;
+            i = 2;
+        }
+        let v4: uint8[list] = new;
+        while (i < n) {
+            let j = i;
+            while (j < n && text.byte_at(j) != 58) {
+                j++;
+            }
+            last part = text.slice(i, j);
+            let is_v4 = false;
+            for (let k = 0; k < part.byte_length; k++) {
+                if (part.byte_at(k) == 46) {
+                    is_v4 = true;
+                }
+            }
+            if (is_v4) {
+                if (j != n) {
+                    return Optional<uint8[list]>.None;
+                }
+                match (parse_ipv4(part)) {
+                    Optional.Some(bytes) => {
+                        v4 = bytes;
+                    },
+                    Optional.None => {
+                        return Optional<uint8[list]>.None;
+                    },
+                }
+            } else {
+                if (part.byte_length < 1 || part.byte_length > 4) {
+                    return Optional<uint8[list]>.None;
+                }
+                let value = 0;
+                for (let k = 0; k < part.byte_length; k++) {
+                    last c = part.byte_at(k);
+                    let d = -1;
+                    if (c >= 48 && c <= 57) {
+                        d = (c - 48) as int;
+                    } else if (c >= 97 && c <= 102) {
+                        d = (c - 87) as int;
+                    } else if (c >= 65 && c <= 70) {
+                        d = (c - 55) as int;
+                    }
+                    if (d < 0) {
+                        return Optional<uint8[list]>.None;
+                    }
+                    value = value * 16 + d;
+                }
+                if (seen_gap) {
+                    tail.append(value);
+                } else {
+                    head.append(value);
+                }
+            }
+            if (j == n) {
+                break;
+            }
+            // At a ':'; "::" opens the gap once.
+            if (j + 1 < n && text.byte_at(j + 1) == 58) {
+                if (seen_gap) {
+                    return Optional<uint8[list]>.None;
+                }
+                seen_gap = true;
+                i = j + 2;
+            } else {
+                if (j + 1 == n) {
+                    return Optional<uint8[list]>.None;
+                }
+                i = j + 1;
+            }
+        }
+        last groups = head.length + tail.length + v4.length / 2;
+        if ((seen_gap && groups > 7) || (not seen_gap && groups != 8)) {
+            return Optional<uint8[list]>.None;
+        }
+        let out: uint8[list] = new;
+        for (let g in head) {
+            out.append((g >> 8) as uint8);
+            out.append((g & 255) as uint8);
+        }
+        for (let z = 0; z < 8 - groups; z++) {
+            out.append(0);
+            out.append(0);
+        }
+        for (let g in tail) {
+            out.append((g >> 8) as uint8);
+            out.append((g & 255) as uint8);
+        }
+        for (let b in v4) {
+            out.append(b);
+        }
+        return Optional<uint8[list]>.Some(out);
+    };
+
+    /// @brief ASCII lowercase, byte by byte (other bytes unchanged).
+    let lower = func(text: string) -> string {
+        let out: uint8[list] = new;
+        for (let i = 0; i < text.byte_length; i++) {
+            last c = text.byte_at(i);
+            out.append(c >= 65 && c <= 90 ? c + 32 : c);
+        }
+        return utf8.decode_lossy(out);
+    };
+
+    let same = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+);

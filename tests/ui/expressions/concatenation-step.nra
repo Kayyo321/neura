@@ -1,0 +1,7 @@
+// docs/design/Expressions030.md, `..=` as a statement: a stepped right side
+// is E0262.
+let append = func(text: string) -> string {
+    let result = text;
+    result ..= "!" : 2;
+    return result;
+};

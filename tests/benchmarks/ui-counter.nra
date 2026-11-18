@@ -1,0 +1,40 @@
+// sizes: 100 200
+// scaling: 2.1
+// Budget B-W8 on the model host: n clicks on a mounted counter component, each a turn that updates
+// its state, renders it once and commits. The figures cover the Neura side of a turn only: the
+// model host does not reconcile views against a document.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let model = import:Std.Ui.ModelHost;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+let ui = import:Std.Ui;
+
+let counter_view = html(count: int32, on_add: func(ui.ClickEvent) -> void) {
+    <button type="button" on:click={on_add}>{count}</button>
+};
+
+export let UiCounterBenchmark = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int32>(int32s.parse(args[0]), 0);
+        let state = new ui.State<int32>(0);
+        let add = new func(event: ui.ClickEvent) {
+            state.set(state.get() + 1);
+        };
+        let counter = ui.component<int32>(state, new func(count: int32) -> ui.View => counter_view(count, add));
+        let host = new model.Host();
+        let root = result.expect<ui.Root>(ui.mount(host, "#app", counter), "mount");
+        for (let i = 0; i < n; i = i + 1) {
+            host.click(1, counter, add);
+            host.end_batch();
+            root.turn();
+            host.clear_log();
+        }
+        if (state.get() != n || counter.render_count() != (n as int64) + 1) {
+            console.print_line("wrong count");
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

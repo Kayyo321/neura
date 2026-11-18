@@ -59,7 +59,7 @@ export let Native = module (
         if (code == 14) {
             trap_with_message("invalid state: native access denied: the native capability is not granted");
         }
-        trap_with_message("invalid state: native " + operation + " failed with code " + code.to_string());
+        trap_with_message("invalid state: native " .. operation .. " failed with code " .. code.to_string());
     };
 
     /// @brief Reads and caches the provider's ABI description.
@@ -243,10 +243,7 @@ export let Native = module (
         }
         last width = size * 8;
         last limit: uint64 = (1 as uint64) << width;
-        if (bits < (limit >> 1)) {
-            return bits as int64;
-        }
-        return (bits as int64) - (limit as int64);
+        return if (bits < (limit >> 1)) -> bits as int64 else -> (bits as int64) - (limit as int64);
     };
 
     /// @brief Traps through fail and satisfies an int64 result.

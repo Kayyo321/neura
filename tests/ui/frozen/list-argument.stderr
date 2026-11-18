@@ -1,0 +1,11 @@
+error[E0580]: type int32[list] is not deeply immutable
+ --> $DIR/list-argument.nra:4:25
+  |
+4 | let rows = frozen.empty<int32[list]>();
+  |                         ^^^^^^^^^^^ given for 'T', which must be deeply immutable
+  |
+  = note: int32[list] is a list, which can change after it is created
+  = note: deeply immutable types are bool, numbers, string, tuples and enums of such types, #Immutable classes whose fields are too, and FrozenList of them
+  = help: make the class #Immutable, or replace a list with a FrozenList
+
+For more information about this error, try `neura explain E0580`.

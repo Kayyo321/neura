@@ -300,7 +300,7 @@ export let Json = module (
 
         /// @brief Records only the first parse failure and returns the failure sentinel.
         let fail = func(kind: ParseErrorKind, offset: int, message: string) -> int {
-            if (!failed) {
+            if (not failed) {
                 failed = true;
                 failure_kind = kind;
                 failure_offset = offset;
@@ -652,6 +652,9 @@ export let Json = module (
             }
             return unit;
         };
+
+        /// @brief Names the parser and whether it has failed.
+        export let.override to_string = func -> string => "Parser(" .. (failed ? "failed" : "ok") .. ")";
     );
 
     /// @brief The first offset at or after `start` that is not JSON whitespace (space, tab, LF, CR), or
@@ -738,7 +741,7 @@ export let Json = module (
         }
         if (i < count && text.byte_at(i) == 46) {
             i++;
-            if (i == count || !is_digit(text.byte_at(i))) {
+            if (i == count || not is_digit(text.byte_at(i))) {
                 return -1 - i;
             }
             i = digits_end(text, i + 1);
@@ -748,7 +751,7 @@ export let Json = module (
             if (i < count && (text.byte_at(i) == 43 || text.byte_at(i) == 45)) {
                 i++;
             }
-            if (i == count || !is_digit(text.byte_at(i))) {
+            if (i == count || not is_digit(text.byte_at(i))) {
                 return -1 - i;
             }
             i = digits_end(text, i + 1);
@@ -950,7 +953,7 @@ export let Json = module (
     /// @brief Text from bytes this module built from whole characters.
     let text_of = func(bytes: uint8[list]) -> string {
         let [valid, text] = string.from_utf8(bytes);
-        if (!valid) {
+        if (not valid) {
             trap_with_message("invalid state: built text is not UTF-8");
         }
         return text;
@@ -974,9 +977,7 @@ export let Json = module (
             return false;
         }
         for (let i = 0; i < count; i++) {
-            if (!equals(a[i], b[i])) {
-                return false;
-            }
+            return false unless equals(a[i], b[i]);
         }
         return true;
     };
@@ -992,10 +993,7 @@ export let Json = module (
         while (i < count && a[i][0] == b[i][0] && equals(a[i][1], b[i][1])) {
             i++;
         }
-        if (i == count) {
-            return true;
-        }
-        return each_matched(a, b) && each_matched(b, a);
+        return if (i == count) -> true else -> each_matched(a, b) && each_matched(b, a);
     };
 
     /// @brief Whether each member of `a` has a member of `b` with the same name and an equal value.
@@ -1008,9 +1006,7 @@ export let Json = module (
                     break;
                 }
             }
-            if (!found) {
-                return false;
-            }
+            return false unless found;
         }
         return true;
     };
@@ -1046,10 +1042,7 @@ export let Json = module (
         if (a < b) {
             return Ordering.Less;
         }
-        if (a > b) {
-            return Ordering.Greater;
-        }
-        return Ordering.Equal;
+        return if (a > b) -> Ordering.Greater else -> Ordering.Equal;
     };
 
     /// @brief The canonical text of a JSON number: "0" for zero; otherwise an optional "-", the digits without
@@ -1090,9 +1083,7 @@ export let Json = module (
                 digits.append(b);
             }
         }
-        if (!started) {
-            return "0";
-        }
+        return "0" unless started;
         // value = digits * 10^(exponent - fraction digits); strip the
         // trailing zeros into the adjustment.
         let adjustment = (fraction_start - fraction_end) as int64;
@@ -1120,7 +1111,7 @@ export let Json = module (
             prefix = "-";
         }
         let [_, significand] = string.from_utf8(digits);
-        return prefix + significand + "e" + exponent_sum(exponent, exponent_negative, adjustment);
+        return prefix .. significand .. "e" .. exponent_sum(exponent, exponent_negative, adjustment);
     };
 
     /// @brief The decimal text of (-1 if negative) * digits + adjustment, where `digits` has no leading zeros
@@ -1199,8 +1190,12 @@ export let Json = module (
         }
         // Use the original parser to report the exact kind, byte offset, and message.
         match (parse(text)) {
-            Result.Err(failure) => { return Result<JsonValue>.Err(failure); },
-            Result.Ok(_) => { trap_with_message("invalid state: ordered JSON scanner rejected valid JSON"); },
+            Result.Err(failure) => {
+                return Result<JsonValue>.Err(failure);
+            },
+            Result.Ok(_) => {
+                trap_with_message("invalid state: ordered JSON scanner rejected valid JSON");
+            },
         }
     };
 
@@ -1377,10 +1372,17 @@ export let Json = module (
                 return -1;
             }
             match (escaped_string.value) {
-                JsonValue.Text(decoded) => { string_value = decoded; },
-                _ => { return -1; },
+                JsonValue.Text(decoded) => {
+                    string_value = decoded;
+                },
+                _ => {
+                    return -1;
+                },
             }
             return p + 1;
         };
+
+        /// @brief Names the parser.
+        export let.override to_string = func -> string => "OrderedParser";
     );
 );

@@ -39,9 +39,9 @@ export let Date = module (
         last date = local_date.of_epoch_day(epoch_day);
         last weekday = weekday_of(epoch_day);
         return Result<string>.Ok(
-            name_of(DayNames, weekday) + ", " + two_digits(date.day) + " " + name_of(MonthNames, date.month - 1)
-            + " " + four_digits(date.year) + " " + two_digits(second_of_day / 3600) + ":"
-            + two_digits(second_of_day / 60 % 60) + ":" + two_digits(second_of_day % 60) + " GMT");
+            name_of(DayNames, weekday) .. ", " .. two_digits(date.day) .. " " .. name_of(MonthNames, date.month - 1)
+            .. " " .. four_digits(date.year) .. " " .. two_digits(second_of_day / 3600) .. ":"
+            .. two_digits(second_of_day / 60 % 60) .. ":" .. two_digits(second_of_day % 60) .. " GMT");
     };
 
     /// @brief Parses an HTTP-date in any of the three formats, matching names exactly. `reference` (normally
@@ -66,9 +66,7 @@ export let Date = module (
         if (text.byte_length == 0) {
             return Result<instant.Instant>.Err(failure(ParseErrorKind.Empty, 0, "empty date"));
         }
-        if (!is_fixdate_shape(text)) {
-            return Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, 0, "not an IMF-fixdate"));
-        }
+        return Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, 0, "not an IMF-fixdate")) unless is_fixdate_shape(text);
         return parse_fixdate(new Reader(text, false));
     };
 
@@ -104,10 +102,8 @@ export let Date = module (
         if (index == 3) {
             return "Thursday";
         }
-        if (index == 5) {
-            return "Saturday";
-        }
-        return short + "day";
+        return if (index == 5) -> "Saturday"
+            else -> short .. "day";
     };
 
     /// @brief A cursor over the bytes of a date text that records the first failure.
@@ -131,7 +127,7 @@ export let Date = module (
         };
 
         /// @brief Whether no failure was recorded.
-        export let ok = func -> bool => !failed;
+        export let ok = func -> bool => not failed;
 
         /// @brief The offset of the next byte.
         export let position = func -> int => pos;
@@ -144,7 +140,7 @@ export let Date = module (
 
         /// @brief Records a failure unless one is recorded already.
         export let fail = func(kind: ParseErrorKind, offset: int, message: string) {
-            if (!failed) {
+            if (not failed) {
                 failed = true;
                 problem = failure(kind, offset, message);
             }
@@ -156,11 +152,11 @@ export let Date = module (
                 return;
             }
             if (pos >= text.byte_length) {
-                fail(ParseErrorKind.UnexpectedEnd, pos, "expected " + what);
+                fail(ParseErrorKind.UnexpectedEnd, pos, "expected " .. what);
                 return;
             }
             if (text.byte_at(pos) != b) {
-                fail(ParseErrorKind.InvalidCharacter, pos, "expected " + what);
+                fail(ParseErrorKind.InvalidCharacter, pos, "expected " .. what);
                 return;
             }
             pos++;
@@ -201,7 +197,7 @@ export let Date = module (
                     return i;
                 }
             }
-            fail(ParseErrorKind.InvalidCharacter, pos, "expected " + what);
+            fail(ParseErrorKind.InvalidCharacter, pos, "expected " .. what);
             return -1;
         };
 
@@ -210,8 +206,8 @@ export let Date = module (
             if (failed) {
                 return;
             }
-            if (!matches_at(literal)) {
-                fail(ParseErrorKind.InvalidCharacter, pos, "expected " + literal);
+            if (not matches_at(literal)) {
+                fail(ParseErrorKind.InvalidCharacter, pos, "expected " .. literal);
                 return;
             }
             pos += literal.byte_length;
@@ -219,7 +215,7 @@ export let Date = module (
 
         /// @brief Records a failure unless the whole text was read.
         export let finish = func {
-            if (!failed && pos != text.byte_length) {
+            if (not failed && pos != text.byte_length) {
                 fail(ParseErrorKind.InvalidCharacter, pos, "text after the date");
             }
         };
@@ -261,10 +257,8 @@ export let Date = module (
         if (comma > 3) {
             return parse_rfc850(reader, reference);
         }
-        if (comma < 0) {
-            return parse_asctime(reader);
-        }
-        return Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, comma, "not an HTTP-date"));
+        return if (comma < 0) -> parse_asctime(reader)
+            else -> Result<instant.Instant>.Err(failure(ParseErrorKind.Syntax, comma, "not an HTTP-date"));
     };
 
     /// @brief IMF-fixdate: day-name "," SP 2DIGIT SP month SP 4DIGIT SP time-of-day SP "GMT".
@@ -304,9 +298,7 @@ export let Date = module (
         reader.expect(32, "a space");
         reader.word("GMT");
         reader.finish();
-        if (!reader.ok()) {
-            return Result<instant.Instant>.Err(reader.error());
-        }
+        return Result<instant.Instant>.Err(reader.error()) unless reader.ok();
         last reference_seconds = reference.epoch_seconds;
         // The reference must leave room for 50 years and stay in years 0000 through 9999.
         if (reference_seconds < MinEpochSeconds || reference_seconds > MaxEpochSeconds - 1600000000) {
@@ -347,9 +339,7 @@ export let Date = module (
         last minute = reader.digits(2);
         reader.expect(58, "':'");
         let second = reader.digits(2);
-        if (!reader.ok()) {
-            return -1;
-        }
+        return -1 unless reader.ok();
         if (hour > 23 || minute > 59 || second > 60) {
             reader.fail(ParseErrorKind.OutOfRange, reader.position() - 8, "time of day out of range");
             return -1;
@@ -362,10 +352,8 @@ export let Date = module (
 
     /// @brief Checks the date and the weekday and builds the instant, or returns the recorded failure.
     let assemble = func(reader: Reader, weekday: int, year: int, month: int, day: int, day_at: int, seconds: int,
-            time_at: int) -> Result<instant.Instant> {
-        if (!reader.ok()) {
-            return Result<instant.Instant>.Err(reader.error());
-        }
+        time_at: int) -> Result<instant.Instant> {
+        return Result<instant.Instant>.Err(reader.error()) unless reader.ok();
         last date = local_date.try_of(year, month, day);
         if (date == nil) {
             return Result<instant.Instant>.Err(failure(ParseErrorKind.OutOfRange, day_at, "no such date"));
@@ -417,20 +405,18 @@ export let Date = module (
 
     /// @brief The ASCII lowercase of `b`.
     let lower = func(b: uint8) -> uint8 {
-        if (b >= 65 && b <= 90) {
-            return b + 32;
-        }
-        return b;
+        return if (b >= 65 && b <= 90) -> b + 32
+            else -> b;
     };
 
     /// @brief `value` (0 through 99) as two digits.
-    let two_digits = func(value: int) -> string => value < 10 ? "0" + value.to_string() : value.to_string();
+    let two_digits = func(value: int) -> string => value < 10 ? "0" .. value.to_string() : value.to_string();
 
     /// @brief `value` (0 through 9999) as four digits.
     let four_digits = func(value: int) -> string {
         let text = value.to_string();
         while (text.byte_length < 4) {
-            text = "0" + text;
+            text = "0" .. text;
         }
         return text;
     };

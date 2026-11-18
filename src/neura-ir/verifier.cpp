@@ -478,6 +478,13 @@ private:
                     report(entry.span, "a host-effects contract belongs to a host binding without a body, not " +
                                            name(id));
                 break;
+            case AttributeId::UiFactory: {
+                const auto descriptor = attribute.value.symbol;
+                if (valid(descriptor) && (symbol(descriptor).kind != SymbolKind::Global ||
+                    !symbol(descriptor).constant || symbol(descriptor).type.kind != TypeKind::String))
+                    report(entry.span, "the descriptor of " + name(id) + " must be a string constant");
+                break;
+            }
             case AttributeId::KernelBinding:
                 if (attribute.value.items[0].text.empty())
                     report(entry.span, "a kernel binding of " + name(id) + " needs a kernel name");
@@ -1305,6 +1312,22 @@ private:
         case IrOp::TextFromUtf8:
         case IrOp::TextEqual:
             check_text_operation(node);
+            break;
+        case IrOp::TypeOf: {
+            const IrType parts{TypeKind::Tuple, {}, no_symbol,
+                               {IrType{TypeKind::Integer, "int32", no_symbol, {}},
+                                IrType{TypeKind::String, "string", no_symbol, {}},
+                                IrType{TypeKind::String, "string", no_symbol, {}}}};
+            if (node.type != parts) report(node.span, "typeof yields [int32, string, string]");
+            if (node.operands.size() > 1 || (node.operands.empty() && node.type_arguments.size() != 1))
+                report(node.span, "typeof takes one operand or one type argument");
+            break;
+        }
+        case IrOp::ConcatText:
+            if (node.operands.size() < 2) report(node.span, "a text concatenation needs at least two operands");
+            for (const auto& operand : node.operands)
+                require_assignable(operand.type, IrType{TypeKind::String, "string", no_symbol, {}}, operand.span, "text concatenation operand");
+            if (node.type.kind != TypeKind::String) report(node.span, "a text concatenation yields a string");
             break;
         case IrOp::ReinterpretFloat:
             if (expect_operands(node, 1, "float bit reinterpretation")) {

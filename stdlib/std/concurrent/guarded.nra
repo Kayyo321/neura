@@ -21,6 +21,9 @@ export let Guarded = module (
             exit_guard<T>(instance);
             return result;
         };
+
+        /// @brief Names the guard; the state is not shown, since reading it needs the guard.
+        export let.override to_string = func -> string => "Guarded";
     );
 
     /// @brief A guard around the state that `initializer` builds. The initializer's captures are

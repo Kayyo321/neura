@@ -67,44 +67,44 @@ The following public declarations are taken from the module source; each links t
   Writes an unsigned byte.
 - **MemorySegment.MemorySegment** · [`export let set_int16 = func(offset: int64, value: int16)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L107)
   Writes a 16-bit signed integer.
-- **MemorySegment.MemorySegment** · [`export let set_uint16 = func(offset: int64, value: uint16)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L110)
+- **MemorySegment.MemorySegment** · [`export let set_uint16 = func(offset: int64, value: uint16)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L111)
   Writes a 16-bit unsigned integer.
-- **MemorySegment.MemorySegment** · [`export let set_int32 = func(offset: int64, value: int32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L112)
+- **MemorySegment.MemorySegment** · [`export let set_int32 = func(offset: int64, value: int32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L113)
   Writes a 32-bit signed integer.
-- **MemorySegment.MemorySegment** · [`export let set_uint32 = func(offset: int64, value: uint32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L115)
+- **MemorySegment.MemorySegment** · [`export let set_uint32 = func(offset: int64, value: uint32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L117)
   Writes a 32-bit unsigned integer.
-- **MemorySegment.MemorySegment** · [`export let set_int64 = func(offset: int64, value: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L117)
+- **MemorySegment.MemorySegment** · [`export let set_int64 = func(offset: int64, value: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L119)
   Writes a 64-bit signed integer.
-- **MemorySegment.MemorySegment** · [`export let set_uint64 = func(offset: int64, value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L119)
+- **MemorySegment.MemorySegment** · [`export let set_uint64 = func(offset: int64, value: uint64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L121)
   Writes a 64-bit unsigned integer.
-- **MemorySegment.MemorySegment** · [`export let set_float32 = func(offset: int64, value: float32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L121)
+- **MemorySegment.MemorySegment** · [`export let set_float32 = func(offset: int64, value: float32)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L123)
   Writes an IEEE binary32 float.
-- **MemorySegment.MemorySegment** · [`export let set_float64 = func(offset: int64, value: float64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L124)
+- **MemorySegment.MemorySegment** · [`export let set_float64 = func(offset: int64, value: float64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L127)
   Writes an IEEE binary64 float.
-- **MemorySegment.MemorySegment** · [`export let set_address = func(offset: int64, value: MemorySegment)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L126)
+- **MemorySegment.MemorySegment** · [`export let set_address = func(offset: int64, value: MemorySegment)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L129)
   Writes the address of `value`.
-- **MemorySegment.MemorySegment** · [`export let get_utf8 = func(offset: int64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L131)
+- **MemorySegment.MemorySegment** · [`export let get_utf8 = func(offset: int64) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L134)
   The UTF-8 text from `offset` up to the first NUL byte, which must lie inside the segment. Traps with "invalid argument: unterminated string" or "invalid argument: text is not valid UTF-8".
-- **MemorySegment.MemorySegment** · [`export let set_utf8 = func(offset: int64, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L146)
+- **MemorySegment.MemorySegment** · [`export let set_utf8 = func(offset: int64, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L149)
   Writes the UTF-8 bytes of `text` and a NUL at `offset`. Traps if `text` contains a NUL.
-- **MemorySegment.MemorySegment** · [`export let to_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L160)
+- **MemorySegment.MemorySegment** · [`export let to_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L163)
   A copy of all the bytes.
-- **MemorySegment.MemorySegment** · [`export let copy_from_bytes = func(offset: int64, bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L166)
+- **MemorySegment.MemorySegment** · [`export let copy_from_bytes = func(offset: int64, bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L169)
   Copies `bytes` into the segment at `offset`.
-- **MemorySegment.MemorySegment** · [`export let copy_from = func(source: MemorySegment)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L172)
+- **MemorySegment.MemorySegment** · [`export let copy_from = func(source: MemorySegment)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L175)
   Copies all of `source` to the start of this segment.
-- **MemorySegment.MemorySegment** · [`export let fill = func(value: uint8)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L177)
+- **MemorySegment.MemorySegment** · [`export let fill = func(value: uint8)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L180)
   Sets every byte to `value`.
-- **MemorySegment.MemorySegment** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L187)
+- **MemorySegment.MemorySegment** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L190)
   Segments are equal when their addresses and sizes are. Reading the argument can run its class hook.
-- **MemorySegment.MemorySegment** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L197)
+- **MemorySegment.MemorySegment** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L199)
   Hashes the address and size. Tagged `#Pure`.
-- **MemorySegment.MemorySegment** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L201)
+- **MemorySegment.MemorySegment** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L203)
   `MemorySegment(address, size)` with the address in hexadecimal. Tagged `#Pure`.
-- **MemorySegment.MemorySegment** · [`export let check = func(offset: int64, size: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L206)
+- **MemorySegment.MemorySegment** · [`export let check = func(offset: int64, size: int64)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L208)
   Traps unless the scope is open and `size` bytes at `offset` lie inside the segment. Tagged `#Pure`.
-- **MemorySegment** · [`export let null_segment = func -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L235)
+- **MemorySegment** · [`export let null_segment = func -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L237)
   The null address, with size 0.
-- **MemorySegment** · [`export let of_address = func(address: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L239)
+- **MemorySegment** · [`export let of_address = func(address: int64) -> MemorySegment`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/dynamic-foreign/memory-segment.nra#L241)
   A segment of size 0 at a raw address in the global scope (Java's MemorySegment.ofAddress). Use reinterpret to give it a size.
 <!-- END SOURCE API -->

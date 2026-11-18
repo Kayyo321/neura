@@ -1,0 +1,5 @@
+// Each arm of a `return if` is `-> value` (docs/design/Expressions030.md,
+// Return forms, edge case 49): E0264 at the value without `->`.
+let pick = func(c: bool) -> int {
+    return if (c) 1 else -> 2;
+};

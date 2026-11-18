@@ -16,6 +16,7 @@
 #include "neura-ir/float.hpp"
 #include "neura-ir/host_binding.hpp"
 #include "neura-ir/containment.hpp"
+#include "neura-ir/initialization_order.hpp"
 #include "neura-ir/inline_limit.hpp"
 #include "neura-ir/integer.hpp"
 #include "neura-ir/kernel_signature.hpp"
@@ -437,6 +438,11 @@ public:
     std::pair<IrType, Span> value_type(SymbolId id) const { return value_types_.at(id); }
 
     SymbolId member(SymbolId owner, const std::string& name) const;
+    // The member of `scope` named as `declared` is that stands for it. A
+    // generic function's specializations are named by the simple names of
+    // their type arguments, so one scope can hold several of one name, such
+    // as copy<Row> for two classes named Row in different modules.
+    SymbolId member_for(SymbolId scope, SymbolId declared) const;
     SymbolId resolve_member(SymbolId concrete, SymbolId declared) const;
     SymbolId implementation(SymbolId cls, SymbolId method) const;
     bool derives(SymbolId cls, SymbolId base) const;
@@ -523,7 +529,8 @@ private:
     // Lifted forms by (function, block) for the LIFT section.
     std::map<std::pair<std::uint32_t, std::uint32_t>, lift::LiftedForm> hints_;
 
-    std::map<std::pair<SymbolId, std::string>, SymbolId> members_;
+    // Members by owner and name, in symbol order; a name can repeat (member_for).
+    std::multimap<std::pair<SymbolId, std::string>, SymbolId> members_;
     std::map<SymbolId, std::vector<SymbolId>> constructors_;
     std::map<SymbolId, const std::vector<IrNode>*> bodies_;
     std::map<SymbolId, std::vector<const IrNode*>> field_initializers_;
@@ -1053,6 +1060,28 @@ SymbolId Converter::member(SymbolId owner, const std::string& name) const {
     return it == members_.end() ? no_symbol : it->second;
 }
 
+SymbolId Converter::member_for(SymbolId scope, SymbolId declared) const {
+    const auto [first, last] = members_.equal_range({scope, symbol(declared).name});
+    if (first == last) return no_symbol;
+    if (std::next(first) == last) return first->second;
+    // Several members share the name: the declared one itself, then the one
+    // that overrides it, then the one with its signature.
+    for (auto it = first; it != last; ++it)
+        if (it->second == declared) return declared;
+    for (auto it = first; it != last; ++it)
+        for (auto base = symbol(it->second).overrides; base != no_symbol; base = symbol(base).overrides)
+            if (base == declared) return it->second;
+    const auto signature = [&](SymbolId id) {
+        std::vector<IrType> types{symbol(id).type};
+        for (const auto parameter : symbol(id).parameters) types.push_back(symbol(parameter).type);
+        return types;
+    };
+    const auto wanted = signature(declared);
+    for (auto it = first; it != last; ++it)
+        if (signature(it->second) == wanted) return it->second;
+    return first->second;
+}
+
 FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
     if (selected == no_symbol) {
         if (const auto group = constructors_.find(cls); group != constructors_.end()) {
@@ -1067,9 +1096,8 @@ FunctionOrigin Converter::constructor(SymbolId cls, SymbolId selected) const {
 }
 
 SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
-    const auto& name = symbol(declared).name;
     for (auto scope = concrete; scope != no_symbol; scope = symbol(scope).base) {
-        if (const auto found = member(scope, name); found != no_symbol) {
+        if (const auto found = member_for(scope, declared); found != no_symbol) {
             return found;
         }
     }
@@ -1079,7 +1107,7 @@ SymbolId Converter::resolve_member(SymbolId concrete, SymbolId declared) const {
 SymbolId Converter::implementation(SymbolId cls, SymbolId method) const {
     const auto& name = symbol(method).name;
     for (auto scope = cls; scope != no_symbol; scope = symbol(scope).base) {
-        const auto found = member(scope, name);
+        const auto found = member_for(scope, method);
         if (found != no_symbol && symbol(found).kind == SymbolKind::Function && symbol(found).has_body) {
             return found;
         }
@@ -1207,66 +1235,7 @@ void Converter::order_initialization() {
     // other module or file initializer and every top-level statement runs
     // before the entry function: files that a file imports run first, ties in
     // the order the files were given, and each file runs in source order.
-    std::vector<SymbolId> files;
-    std::map<SymbolId, std::set<SymbolId>> imports;
-    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
-        const auto& item = program_.symbols[id];
-        if (item.kind == SymbolKind::File) {
-            files.push_back(id);
-        } else if (item.kind == SymbolKind::Import && item.type.symbol != no_symbol) {
-            const auto from = file_of(id);
-            const auto to = file_of(item.type.symbol);
-            if (from != no_symbol && to != no_symbol && from != to) {
-                imports[from].insert(to);
-            }
-        }
-    }
-    // Files that import each other, directly or through other files, form a
-    // cycle. A cycle runs once every file it imports from outside the cycle
-    // has run, and its files run in the given order. Without cycles this is
-    // the plain dependency order with ties in the given order.
-    std::map<SymbolId, std::set<SymbolId>> reachable;
-    for (const auto file : files) {
-        auto& seen = reachable[file];
-        std::vector<SymbolId> pending(imports[file].begin(), imports[file].end());
-        while (!pending.empty()) {
-            const auto next = pending.back();
-            pending.pop_back();
-            if (seen.insert(next).second) {
-                pending.insert(pending.end(), imports[next].begin(), imports[next].end());
-            }
-        }
-    }
-    const auto same_cycle = [&](SymbolId a, SymbolId b) {
-        return a == b || (reachable[a].contains(b) && reachable[b].contains(a));
-    };
-    std::vector<SymbolId> order;
-    std::set<SymbolId> placed;
-    while (order.size() < files.size()) {
-        bool progressed = false;
-        for (const auto file : files) {
-            if (placed.contains(file)) continue;
-            std::vector<SymbolId> cycle;
-            for (const auto member : files) {
-                if (!placed.contains(member) && same_cycle(file, member)) cycle.push_back(member);
-            }
-            const bool ready = std::ranges::all_of(cycle, [&](SymbolId member) {
-                return std::ranges::all_of(imports[member], [&](SymbolId dependency) {
-                    return placed.contains(dependency) || same_cycle(file, dependency);
-                });
-            });
-            if (!ready) continue;
-            for (const auto member : cycle) {
-                placed.insert(member);
-                order.push_back(member);
-            }
-            progressed = true;
-            break;
-        }
-        if (!progressed) {
-            throw std::logic_error("file initialization order has no ready file");
-        }
-    }
+    const auto order = file_initialization_order(program_);
     std::vector<Startup> reference_boxes;
     std::vector<Startup> reference_values;
     for (const auto file : order) {
@@ -1351,7 +1320,35 @@ FunctionOrigin Converter::entry_point() const {
         throw Diagnostic(symbol(candidates[1]).span, "the program has more than one entry point").with_code("E0804");
     }
     const auto main = candidates.front();
-    return {Role::Function, main, symbol(main).owner};
+    // The entry module inherits Std.Program.Entry and overrides main, or
+    // inherits that override from a module of its own, such as a library's
+    // application module that calls a requirement the program implements
+    // (Modules.md, Interfaces and inheritance). The image runs main for the
+    // one module of that line that no other module inherits.
+    const auto owner = symbol(main).owner;
+    const auto inherits = [&](SymbolId module) {
+        for (auto scope = module; scope != no_symbol; scope = symbol(scope).base)
+            if (scope == owner) return true;
+        return false;
+    };
+    std::vector<SymbolId> line;
+    for (SymbolId id = 0; id < program_.symbols.size(); ++id) {
+        const auto& item = program_.symbols[id];
+        if (item.kind == SymbolKind::Module && !is_static_scope(item) && inherits(id)) line.push_back(id);
+    }
+    std::vector<SymbolId> leaves;
+    for (const auto module : line) {
+        if (std::ranges::none_of(line, [&](SymbolId other) { return symbol(other).base == module; }))
+            leaves.push_back(module);
+    }
+    if (leaves.size() > 1) {
+        throw Diagnostic(symbol(leaves[1]).span, "the program has more than one entry point")
+            .with_code("E0804")
+            .label("'" + symbol(leaves[1]).name + "' and '" + symbol(leaves[0]).name + "' both inherit main from '" +
+                   symbol(owner).name + "'")
+            .help("let only one module inherit '" + symbol(owner).name + "'");
+    }
+    return {Role::Function, main, leaves.empty() ? owner : leaves.front()};
 }
 
 FunctionOrigin Converter::target(const Dispatch& dispatch, SymbolId cls) const {
@@ -3320,6 +3317,18 @@ Operand FunctionCompiler::expression(const IrNode& node) {
         const auto result = c_.type_of(node.type, node.span);
         return state(nvr::StateOp::TextFromUtf8, c_.type_at(result).reference, {input}, result, node.span);
     }
+    case IrOp::TypeOf:
+        // specialize() expands every typeof of a concrete type.
+        throw Diagnostic(node.span, "typeof was not expanded before conversion").with_code("E0899");
+    case IrOp::Reflect:
+        // specialize() expands every reflection intrinsic (reflect.cpp).
+        throw Diagnostic(node.span, "a reflection intrinsic was not expanded before conversion").with_code("E0899");
+    case IrOp::ConcatText: {
+        // A string chain (docs/design/Expressions030.md): the operands in
+        // written order, then one NVR 1.9 concat-text.
+        auto arguments = sequence(node.operands);
+        return state(nvr::StateOp::ConcatText, 0, std::move(arguments), c_.type_of(node.type, node.span), node.span);
+    }
     case IrOp::TextEqual: {
         auto arguments = sequence(node.operands);
         const auto boolean = c_.scalar(nvr::TypeKind::Bool);
@@ -3659,8 +3668,9 @@ Operand FunctionCompiler::scalar_member(IrOp op, const IrType& type, std::vector
         if (type.kind != TypeKind::Float) return word;
         const auto format = float_of(type);
         const auto first_exponent = word.begin() + format.fraction_bits;
-        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}),
-                                             circuit.any({word.begin(), first_exponent}));
+        // Fraction first, then exponent: the order of src/lift/proof.cpp.
+        const auto fraction = circuit.any({word.begin(), first_exponent});
+        const auto nan = circuit.logical_and(circuit.all({first_exponent, word.end() - 1}), fraction);
         const auto canonical = constant_word(format.canonical_nan(), format.width());
         for (std::size_t bit = 0; bit < word.size(); ++bit) {
             word[bit] = circuit.choose(nan, canonical[bit], word[bit]);
@@ -3883,8 +3893,14 @@ Values FunctionCompiler::virtual_call(const IrNode& node) {
         const auto module = module_of(receiver);
         const auto implementation = c_.resolve_member(module, node.symbol);
         if (!c_.symbol(implementation).has_body) {
-            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" +
-                                            c_.symbol(node.symbol).name + "'").with_code("E0899");
+            // A call through a module of a requirement that it, and every
+            // module it inherits, leaves without a body.
+            const auto& name = c_.symbol(node.symbol).name;
+            throw Diagnostic(node.span, "module '" + c_.symbol(module).name + "' does not implement '" + name + "'")
+                .with_code("E0434")
+                .label("this call runs in module '" + c_.symbol(module).name + "', where '" + name + "' has no body")
+                .help("implement '" + name + "' with `let.override` in '" + c_.symbol(module).name +
+                      "', or in a module that inherits it and that the call goes through");
         }
         auto arguments = sequence(node.operands, 1);
         return invoke_values({Role::Function, implementation, module}, std::move(arguments), results, node.span,
@@ -4421,7 +4437,10 @@ void FunctionCompiler::append_text_bytes(const Operand& buffer, const Operand& s
     const auto head = new_block();
     jump(head);
     begin(head, span);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto next = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, next);
@@ -4555,7 +4574,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto length = state(nvr::StateOp::ReadLength, 0, {slot_operand(left)}, count, span);
         if (equality) {
             const auto other = state(nvr::StateOp::ReadLength, 0, {slot_operand(right)}, count, span);
-            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), lanes(other))});
+            const auto other_lanes = lanes(other);
+            auto same = bits(boolean, {equal(current().synth.circuit(), lanes(length), other_lanes)});
             require_equal(described(std::move(same), binary_form("==", boolean, length, other)));
         }
         const auto position = new_slot(count);
@@ -4565,7 +4585,8 @@ void FunctionCompiler::compile_value_member(IrOp op) {
         const auto done = new_block();
         jump(head);
         begin(head, span);
-        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+        const auto limit = lanes(length);
+        auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
         branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), next, done);
         begin(next, span);
         if (!equality && !hashing) {
@@ -4718,7 +4739,8 @@ void FunctionCompiler::compile_unbox_collection() {
     const auto done = new_block();
     jump(head);
     begin(head, span);
-    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false)});
+    const auto limit = lanes(length);
+    auto more = bits(boolean, {less(current().synth.circuit(), lanes(slot_operand(position)), limit, false)});
     branch(described(std::move(more), binary_form("<", boolean, slot_operand(position), length)), body, done);
     begin(body, span);
     const auto handle = state(nvr::StateOp::ReadElement, 0, {slot_operand(input), slot_operand(position)}, boxed, span);
@@ -4759,7 +4781,10 @@ void FunctionCompiler::compile_hash_text() {
     const auto head = new_block();
     jump(head);
     begin(head, none);
-    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), lanes(length), false);
+    // The length lanes first: lanes() may add input lanes, and arguments of
+    // one call are unsequenced, so each is taken in a fixed order.
+    const auto limit = lanes(length);
+    const auto more = less(current().synth.circuit(), lanes(slot_operand(position)), limit, false);
     const auto body = new_block();
     const auto done = new_block();
     branch(described(bits(boolean, {more}), binary_form("<", boolean, slot_operand(position), length)), body, done);
@@ -4901,6 +4926,10 @@ Conversion build(IrProgram program, const BuildOptions& options) {
     // by the optimizer, or directly when optimization is off.
     require_valid_ir(program, "before specialization");
     specialize(program);
+    // A generic `using` whose Result carries an array once specialized
+    // (docs/design/Lifetime030.md): E0473 at the `using`, before the storage
+    // check would report the array inside the library.
+    check_using_results(program);
     check_storage(program, StorageStage::Specialized);
     materialize_reference_storage(program);
     // Tuples and payload enums are stored inline: a value type may not

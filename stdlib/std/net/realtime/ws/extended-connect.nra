@@ -31,10 +31,8 @@ export let ExtendedConnect = module (
     /// does not, and any other value is a connection error (RFC 8441 section 3).
     #NoDiscard
     export let enables_extended_connect = func(value: int64) -> Result<bool> {
-        if (value == 0 || value == 1) {
-            return Result<bool>.Ok(value == 1);
-        }
-        return fail<bool>("SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1, not " + value.to_string());
+        return if (value == 0 || value == 1) -> Result<bool>.Ok(value == 1)
+            else -> fail<bool>("SETTINGS_ENABLE_CONNECT_PROTOCOL must be 0 or 1, not " .. value.to_string());
     };
 
     /// @brief The request fields of an extended CONNECT for a WebSocket (RFC 8441 section 5 and its example in
@@ -71,10 +69,10 @@ export let ExtendedConnect = module (
     export let validate_request = func(headers: handshake.Header[list]) -> Result<handshake.ClientOffer> {
         for (let header in headers) {
             if (strings.to_ascii_lower(header.name) != header.name) {
-                return fail<handshake.ClientOffer>("field names must be lowercase: " + header.name);
+                return fail<handshake.ClientOffer>("field names must be lowercase: " .. header.name);
             }
             if (header.name == "connection" || header.name == "upgrade") {
-                return fail<handshake.ClientOffer>("the " + header.name + " field is not used with extended CONNECT");
+                return fail<handshake.ClientOffer>("the " .. header.name .. " field is not used with extended CONNECT");
             }
         }
         if (field(headers, ":method") != "CONNECT") {
@@ -82,7 +80,7 @@ export let ExtendedConnect = module (
         }
         last protocol = field(headers, ":protocol");
         if (protocol != ProtocolToken) {
-            return fail<handshake.ClientOffer>("unsupported :protocol \"" + protocol + "\"");
+            return fail<handshake.ClientOffer>("unsupported :protocol \"" .. protocol .. "\"");
         }
         last scheme = field(headers, ":scheme");
         if (scheme != "https" && scheme != "http") {
@@ -125,7 +123,7 @@ export let ExtendedConnect = module (
         headers: handshake.Header[list]) -> Result<handshake.ServerAcceptance> {
         last status = field(headers, ":status");
         if (status.byte_length != 3 || status.byte_at(0) != 50) {
-            return fail<handshake.ServerAcceptance>("the :status must be 2xx, not \"" + status + "\"");
+            return fail<handshake.ServerAcceptance>("the :status must be 2xx, not \"" .. status .. "\"");
         }
         let protocol = Optional<string>.None;
         last chosen = field(headers, "sec-websocket-protocol");
@@ -136,9 +134,9 @@ export let ExtendedConnect = module (
                     known = true;
                 }
             }
-            if (!known) {
+            if (not known) {
                 return fail<handshake.ServerAcceptance>("the server chose a subprotocol the client did not offer: "
-                    + chosen);
+                    .. chosen);
             }
             protocol = Optional<string>.Some(chosen);
         }
@@ -151,9 +149,9 @@ export let ExtendedConnect = module (
                     known = true;
                 }
             }
-            if (!known) {
+            if (not known) {
                 return fail<handshake.ServerAcceptance>("the server accepted an extension the client did not offer: "
-                    + name);
+                    .. name);
             }
         }
         return Result<handshake.ServerAcceptance>.Ok(new handshake.ServerAcceptance(protocol, extensions));

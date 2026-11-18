@@ -1,0 +1,4 @@
+// Edge case 46 of docs/design/Expressions030.md: the operands of `!==` have
+// the rules of `===`.
+let Box = class ( export let size: int = 0; );
+let differ = func(a: Box, b: int) -> bool => a !== b;

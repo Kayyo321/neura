@@ -1,0 +1,417 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Algorithm;
+let certificate = import:Std.Crypto.Pki.Certificate;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let der = import:Std.Crypto.Pki.Der;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let error = import:Std.Core.Error;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let hashing = import:Std.Core.Hash;
+let instant = import:Std.Time.Instant;
+let path = import:Std.Crypto.Pki.PathValidation;
+let pem = import:Std.Crypto.Pki.Pem;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let utf8 = import:Std.Encoding.Utf8;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Intel DCAP SGX v3 and TDX v4 ECDSA quote parsing and verification.
+///
+/// The offline signature check validates the PCK certificate path to an explicitly trusted Intel root,
+/// the QE report signature and attestation-key binding, and the quote signature. The policy entry point
+/// additionally requires signed collateral validation by a caller-supplied verifier for Intel TCB status,
+/// QE identity, and CRLs, and binds the report to the caller's expected measurement and REPORTDATA.
+/// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+#Since("0.3.0")
+export let Dcap = module (
+    const MaxQuoteBytes = 65536;
+    const MaxAuthenticationBytes = 4096;
+    const MaxCertificateBytes = 16384;
+    const HeaderLength = 48;
+    const SgxReportLength = 384;
+    const TdxReportLength = 584;
+    const SignatureLength = 64;
+    const PckChainType = 5;
+    const QeReportCertificationType = 6;
+    const PckExtension = "1.2.840.113741.1.13.1";
+
+    /// @brief The two supported DCAP quote formats.
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #Since("0.3.0")
+    export let Platform = enum (Sgx, Tdx);
+
+    let body_size = func(tee: Platform) -> int => tee == Platform.Sgx ? SgxReportLength : TdxReportLength;
+    let measurement_size = func(tee: Platform) -> int => tee == Platform.Sgx ? 32 : 48;
+
+    let fail = func<T>(code: string, text: string) -> Result<T> => Result<T>.Err(error.custom(code, text));
+    let malformed = func<T>(text: string) -> Result<T> => fail<T>("crypto.malformed_dcap", text);
+    let u16 = func(bytes: uint8[list], offset: int) -> int => (bytes[offset] as int) | ((bytes[offset + 1] as int) << 8);
+    let zero = func(bytes: uint8[list]) -> bool => constant_time.ct_eq(bytes, words.zeros(bytes.length));
+
+    /// @brief The decoded quote and its embedded evidence. Use the verification entry points to establish trust.
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #[Final, Since("0.3.0")]
+    export let Quote = class (
+        /// @brief The trusted execution environment named by the header.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #Since("0.3.0")
+        export last platform: Platform;
+        /// @brief The Intel PCK certification data type.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #Since("0.3.0")
+        export last certification_type: int;
+        last encoded: uint8[list];
+        last body: uint8[list];
+        last qe: uint8[list];
+        last certification: uint8[list];
+
+        /// @brief Stores the parsed quote fields. Wrong report body or QE report width traps.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #Since("0.3.0")
+        export let init = func(tee: Platform, kind: int, original, report, qe_bytes, cert_bytes: uint8[list]) {
+            if (report.length != body_size(tee) || qe_bytes.length != SgxReportLength) {
+                trap_with_message("invalid argument: wrong DCAP report body or QE report length");
+            }
+            platform = tee;
+            certification_type = kind;
+            encoded = words.copy(original);
+            body = words.copy(report);
+            qe = words.copy(qe_bytes);
+            certification = words.copy(cert_bytes);
+        };
+
+        /// @brief A copy of the original quote.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        /// @brief A copy of the raw application-enclave or trust-domain report body.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let report_body = func -> uint8[list] => words.copy(body);
+
+        /// @brief A copy of the raw SGX quoting-enclave report used for collateral validation.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let qe_report = func -> uint8[list] => words.copy(qe);
+
+        /// @brief A copy of the PCK certification data.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let certification_data = func -> uint8[list] => words.copy(certification);
+
+        /// @brief A copy of the 64-byte application REPORTDATA field.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let report_data = func -> uint8[list] => words.slice(body, body.length - 64, body.length);
+
+        /// @brief The initial measurement, MRENCLAVE for SGX or MRTD for TDX.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let measurement = func -> uint8[list] {
+            last offset = platform == Platform.Sgx ? 64 : 136;
+            return words.slice(body, offset, offset + measurement_size(platform));
+        };
+
+        /// @brief Whether the application's report indicates debug mode.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #[NoDiscard, Since("0.3.0")]
+        export let debug = func -> bool => platform == Platform.Sgx ? (body[48] & 2) != 0 : (body[120] & 1) != 0;
+
+        /// @brief Whether the original encodings are equal.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            return other is Quote && constant_time.ct_eq(encoded, (other as Quote).to_bytes());
+        };
+
+        /// @brief A hash of the quote bytes.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 484;
+            for (let b in encoded) {
+                hash = hashing.combine(hash, b as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief The platform name.
+        /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Dcap.Quote(" .. platform.to_string() .. ")";
+    );
+
+    let Evidence = class (
+        export last quote: Quote;
+        export last signed_bytes: uint8[list];
+        export last signature: uint8[list];
+        export last attestation_key: uint8[list];
+        export last qe_signature: uint8[list];
+        export last qe_authentication: uint8[list];
+
+        export let init = func(value: Quote, body, sig, key, qe_sig, qe_auth: uint8[list]) {
+            quote = value;
+            signed_bytes = body;
+            signature = sig;
+            attestation_key = key;
+            qe_signature = qe_sig;
+            qe_authentication = qe_auth;
+        };
+
+        export let.override to_string = func -> string => "Dcap.Evidence";
+    );
+
+    let platform_of = func(version: int, tee_type: uint32) -> Result<Platform> {
+        if (version == 3 && tee_type == 0) {
+            return Result<Platform>.Ok(Platform.Sgx);
+        }
+        if (version == 4 && tee_type == 129) {
+            return Result<Platform>.Ok(Platform.Tdx);
+        }
+        return fail<Platform>("crypto.unsupported_dcap", "expected an SGX v3 or TDX v4 quote");
+    };
+
+    let read_quote = func(bytes: uint8[list]) -> Result<Evidence> {
+        if (bytes.length < HeaderLength || bytes.length > MaxQuoteBytes) {
+            return malformed<Evidence>("DCAP quote is outside its size bounds");
+        }
+        last platform = platform_of(u16(bytes, 0), words.load32_le(bytes, 4))?;
+        if (u16(bytes, 2) != 2) {
+            return fail<Evidence>("crypto.unsupported_dcap", "DCAP requires an ECDSA P-256 attestation key");
+        }
+        let vendor_id: uint8[list] = new([147, 154, 114, 51, 247, 156, 76, 169, 148, 10, 13, 179, 149, 127, 6, 7]);
+        if (not constant_time.ct_eq(words.slice(bytes, 12, 28), vendor_id)) {
+            return malformed<Evidence>("DCAP quote has a non-Intel QE vendor identifier");
+        }
+        last signed_end = HeaderLength + body_size(platform);
+        if (bytes.length < signed_end + 4) {
+            return malformed<Evidence>("truncated DCAP report body");
+        }
+        last signature_start = signed_end + 4;
+        if (words.load32_le(bytes, signed_end) != ((bytes.length - signature_start) as uint32)) {
+            return malformed<Evidence>("DCAP signature-data length differs from the quote bytes");
+        }
+        // Fixed fields after the quote: 64-byte signature and key, optional TDX type-6 framing,
+        // the QE report and signature, and a uint16 QE authentication-data length.
+        let qe_start = signature_start + 2 * SignatureLength;
+        last minimum_qe = SgxReportLength + SignatureLength + 2;
+        if (platform == Platform.Tdx) {
+            if (bytes.length < qe_start + 6 || u16(bytes, qe_start) != QeReportCertificationType) {
+                return malformed<Evidence>("TDX v4 quote does not have QE report certification data");
+            }
+            if (words.load32_le(bytes, qe_start + 2) != ((bytes.length - qe_start - 6) as uint32)) {
+                return malformed<Evidence>("TDX QE report certification data length differs from the quote bytes");
+            }
+            qe_start += 6;
+        }
+        if (bytes.length < qe_start + minimum_qe) {
+            return malformed<Evidence>("truncated DCAP quoting-enclave report");
+        }
+        last qe_end = qe_start + SgxReportLength;
+        last auth_begin = qe_end + SignatureLength + 2;
+        last auth_len = u16(bytes, auth_begin - 2);
+        if (auth_len > MaxAuthenticationBytes || bytes.length < auth_begin + auth_len + 6) {
+            return malformed<Evidence>("invalid DCAP QE authentication-data length");
+        }
+        last cert_header = auth_begin + auth_len;
+        last cert_type = u16(bytes, cert_header);
+        last cert_len = words.load32_le(bytes, cert_header + 2);
+        if (cert_type < 1 || cert_type > 7 || cert_type == QeReportCertificationType
+            || cert_len == 0 || cert_len > (MaxCertificateBytes as uint32)
+            || cert_len != ((bytes.length - cert_header - 6) as uint32)) {
+            return malformed<Evidence>("invalid DCAP PCK certification data");
+        }
+
+        last quote = new Quote(platform, cert_type, bytes, words.slice(bytes, HeaderLength, signed_end),
+            words.slice(bytes, qe_start, qe_end), words.slice(bytes, cert_header + 6, bytes.length));
+        return Result<Evidence>.Ok(new Evidence(quote, words.slice(bytes, 0, signed_end),
+            words.slice(bytes, signature_start, signature_start + SignatureLength),
+            words.slice(bytes, signature_start + SignatureLength, signature_start + 2 * SignatureLength),
+            words.slice(bytes, qe_end, qe_end + SignatureLength), words.slice(bytes, auth_begin, cert_header)));
+    };
+
+    /// @brief Parses an SGX v3 or TDX v4 quote, checking declared lengths and refusing trailing bytes.
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(quote: uint8[list]) -> Result<Quote> => Result<Quote>.Ok((read_quote(quote)?).quote);
+
+    let read_pem_chain = func(data: uint8[list]) -> Result<uint8[list][list]> {
+        last end = data[data.length - 1] == 0 ? data.length - 1 : data.length;
+        for (let i = 0; i < end; i++) {
+            if (data[i] == 0 || data[i] > 127) {
+                return malformed<uint8[list][list]>("invalid character in DCAP certificate chain");
+            }
+        }
+        last blocks = pem.decode_all(utf8.decode(words.slice(data, 0, end))?)?;
+        if (blocks.length != 3) {
+            return malformed<uint8[list][list]>("DCAP certificate chain needs the PCK, issuer and root");
+        }
+        let chain: uint8[list][list] = new;
+        for (let block in blocks) {
+            if (block.label != "CERTIFICATE") {
+                return malformed<uint8[list][list]>("unexpected PEM block in DCAP certificate chain");
+            }
+            chain.append(block.der);
+        }
+        return Result<uint8[list][list]>.Ok(chain);
+    };
+
+    let read_chain = func(quote: Quote) -> Result<uint8[list][list]> {
+        if (quote.certification_type != PckChainType) {
+            return fail<uint8[list][list]>("crypto.unsupported_dcap", "DCAP signature verification needs a type-5 PCK chain");
+        }
+        last bytes = quote.certification_data();
+        if (bytes[0] != 48) {
+            return read_pem_chain(bytes);
+        }
+        let reader = new der.Reader(bytes, 0, bytes.length, 0, 8, false);
+        let chain: uint8[list][list] = new;
+        for (let i in 0 .. 3) {
+            chain.append((reader.next_universal(der.TagSequence, "DCAP certificate")?).encoded());
+        }
+        reader.finish()?;
+        return Result<uint8[list][list]>.Ok(chain);
+    };
+
+    let has_usage = func(cert: certificate.Certificate, bit: int) -> bool {
+        match (cert.key_usage) {
+            Optional.Some(usage) => {
+                return usage.has(bit);
+            },
+            Optional.None => {
+                return false;
+            },
+        }
+    };
+
+    let is_pck = func(pck: certificate.Certificate) -> bool {
+        if (pck.version != 3 || pck.is_ca() || not has_usage(pck, extensions.DigitalSignature)
+            || pck.public_key.key_algorithm != public_keys.KeyAlgorithm.Ec
+            || pck.public_key.parameter_set != "P-256") {
+            return false;
+        }
+        return match (pck.extension(PckExtension)) {
+            Optional.Some(_) => true,
+            Optional.None => false,
+        };
+    };
+
+    // Intel issues mathematically 160-bit serials whose positive DER INTEGER needs a 21st sign octet.
+    let valid_serial = func(cert: certificate.Certificate) -> bool {
+        last serial = cert.serial;
+        if (serial.length == 0 || serial[0] >= 128 || (serial.length == 1 && serial[0] == 0)) {
+            return false;
+        }
+        return serial.length <= 20 || (serial.length == 21 && serial[0] == 0);
+    };
+
+    let authenticate = func(evidence: Evidence, trusted_root_der: uint8[list], at: instant.Instant) -> Result<uint8[list]> {
+        if (at.nanos < 0 || at.nanos >= 1000000000) {
+            trap_with_message("invalid argument: DCAP verification needs a normalized instant");
+        }
+        if (not crypto_policy.allows(Algorithm.P256) || not crypto_policy.allows(Algorithm.Sha256)) {
+            return fail<uint8[list]>("crypto.attestation_policy", "DCAP P-256 and SHA-256 are denied by the crypto policy");
+        }
+        last chain = read_chain(evidence.quote)?;
+        if (not constant_time.ct_eq(chain[2], trusted_root_der)) {
+            return fail<uint8[list]>("crypto.attestation_certificate", "DCAP embedded root differs from the configured root");
+        }
+        last pck = certificate.parse(chain[0])?;
+        last issuer = certificate.parse(chain[1])?;
+        last root = certificate.parse(trusted_root_der)?;
+        if (not is_pck(pck)) {
+            return fail<uint8[list]>("crypto.attestation_certificate", "invalid Intel PCK signing certificate");
+        }
+        if (not valid_serial(pck) || not valid_serial(issuer) || not valid_serial(root)
+            || not has_usage(issuer, extensions.KeyCertSign) || not has_usage(root, extensions.KeyCertSign)) {
+            return fail<uint8[list]>("crypto.attestation_certificate", "invalid Intel DCAP certificate serial or CA key usage");
+        }
+        let options = new path.ValidationOptions(at);
+        options.strict_profile = false;
+        let _ = path.validate(pck, new([issuer]), new([root]), options)?;
+
+        last pck_key = ecdsa.parse_public_key(ecdsa.Curve.P256, pck.public_key.key)?;
+        last pck_verifier = new ecdsa.EcdsaVerifier(pck_key, Algorithm.Sha256);
+        last qe_report = evidence.quote.qe_report();
+        if (not pck_verifier.verify_raw(qe_report, evidence.qe_signature)) {
+            return fail<uint8[list]>("crypto.attestation_signature", "invalid DCAP QE report signature");
+        }
+
+        let qe_binding = sha2.sha256(words.concat(evidence.attestation_key, evidence.qe_authentication));
+        words.append_all(qe_binding, words.zeros(32));
+        if (not constant_time.ct_eq(qe_binding, words.slice(qe_report, 320, 384))) {
+            return fail<uint8[list]>("crypto.attestation_signature", "DCAP QE report does not bind the quote attestation key");
+        }
+
+        let sec1: uint8[list] = new([4]);
+        words.append_all(sec1, evidence.attestation_key);
+        last quote_key = ecdsa.parse_public_key(ecdsa.Curve.P256, sec1)?;
+        last quote_verifier = new ecdsa.EcdsaVerifier(quote_key, Algorithm.Sha256);
+        if (not quote_verifier.verify_raw(evidence.signed_bytes, evidence.signature)) {
+            return fail<uint8[list]>("crypto.attestation_signature", "invalid DCAP quote signature");
+        }
+        return Result<uint8[list]>.Ok(chain[0]);
+    };
+
+    /// @brief Authenticates the quote and its QE report with a type-5 PCK chain against the supplied root.
+    /// PCK certificate validity is checked at the caller's instant. This entry point is for signed evidence
+    /// inspection. The separate verify operation also requires caller-authenticated collateral and a challenge.
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify_signed = func(quote: uint8[list], trusted_root_der: uint8[list], at: instant.Instant)
+        -> Result<Quote> {
+        last evidence = read_quote(quote)?;
+        let _ = authenticate(evidence, trusted_root_der, at)?;
+        return Result<Quote>.Ok(evidence.quote);
+    };
+
+    /// @brief The caller's verifier for authenticated Intel collateral. Check Intel-signed TCB information,
+    /// QE identity and root and PCK CRLs, their validity at the supplied instant, and their correspondence to
+    /// the quote and authenticated PCK certificate. For TDX, include the TDX module identity and security SVN.
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #Since("0.3.0")
+    export let CollateralVerifier = interface (
+        /// @brief Validates the platform's collateral. A failed or incomplete validation returns an error.
+        let verify = func(quote: Quote, pck_der: uint8[list], trusted_root_der: uint8[list],
+            at: instant.Instant) -> Result<Unit>;
+    );
+
+    /// @brief Authenticates the quote, checks the expected platform, initial measurement and challenge-bearing
+    /// REPORTDATA, rules out debug mode, and requires successful validation by the supplied collateral verifier.
+    /// The caller supplies a fresh expected REPORTDATA value and the trusted Intel root.
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(quote: uint8[list], trusted_root_der: uint8[list], at: instant.Instant,
+        expected_platform: Platform, expected_measurement, expected_report_data: uint8[list],
+        collateral: CollateralVerifier) -> Result<Quote> {
+        if (expected_measurement.length != measurement_size(expected_platform) || expected_report_data.length != 64
+            || zero(expected_measurement) || zero(expected_report_data)) {
+            trap_with_message("invalid argument: DCAP requires a platform measurement and a fresh 64-byte REPORTDATA value");
+        }
+        last evidence = read_quote(quote)?;
+        last pck = authenticate(evidence, trusted_root_der, at)?;
+        last claims = evidence.quote;
+        if (claims.platform != expected_platform || claims.debug()
+            || not constant_time.ct_eq(claims.measurement(), expected_measurement)) {
+            return fail<Quote>("crypto.attestation_measurement", "DCAP platform, debug mode or measurement fails policy");
+        }
+        if (not constant_time.ct_eq(claims.report_data(), expected_report_data)) {
+            return fail<Quote>("crypto.attestation_nonce", "DCAP REPORTDATA differs from the expected challenge");
+        }
+        collateral.verify(claims, pck, words.copy(trusted_root_der), at)?;
+        return Result<Quote>.Ok(claims);
+    };
+
+    /// @brief Retrieves a quote from an Intel quoting device.
+    /// @stub the runtime has no SGX or TDX quote-generation host operation
+    /// @see [Std.Crypto.Enclave.Dcap](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Enclave-Dcap)
+    #[NoDiscard, Since("0.3.0")]
+    export let request_quote = func(platform: Platform, report_data: uint8[list]) -> Result<uint8[list]> {
+        trap_with_message("unsupported: Std.Crypto.Enclave.Dcap.request_quote is not implemented in Neura 0.3.0 "
+            .. "(the runtime has no SGX or TDX quote-generation host operation)");
+    };
+);

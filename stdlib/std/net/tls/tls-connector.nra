@@ -48,12 +48,12 @@ export let TlsConnector = module (
         export let connect = func -> Result<TlsStream> {
             last text = target.to_string();
             last nanos = support.timeout_nanos(config.handshake_timeout);
-            last outcome = config.is_mutual() || !config.allows_both_versions()
+            last outcome = config.is_mutual() || not config.allows_both_versions()
                 ? host.tls_connect_extended(target.host_text(), target.port, nanos, config.server_name, config.alpn(),
-                    config.ca_file, version_code(config.min_version), version_code(config.max_version),
-                    config.certificate_file, config.key_file)
+                config.ca_file, version_code(config.min_version), version_code(config.max_version),
+                config.certificate_file, config.key_file)
                 : host.tls_connect(target.host_text(), target.port, nanos, config.server_name, config.alpn(),
-                    config.ca_file);
+                config.ca_file);
             return match (outcome) {
                 host.TlsOutcome.Ok(opened) => Result<TlsStream>.Ok(stream_of(opened, target)),
                 host.TlsOutcome.Error(code) => Result<TlsStream>.Err(host_error.io(code, "TLS connect failed", text)),
@@ -61,7 +61,7 @@ export let TlsConnector = module (
         };
 
         /// @brief Text such as "TlsConnector(192.0.2.1:443)".
-        export let.override to_string = func -> string => "TlsConnector(" + target.to_string() + ")";
+        export let.override to_string = func -> string => "TlsConnector(" .. target.to_string() .. ")";
     );
 
     /// @brief The host's version number: 12 or 13.

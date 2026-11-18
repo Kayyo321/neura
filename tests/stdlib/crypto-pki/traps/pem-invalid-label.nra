@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: PEM label
+let pem = import:Std.Crypto.Pki.Pem;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = pem.encode("-BAD", new([1]));
+        return program.ExitCode.Ok;
+    };
+);

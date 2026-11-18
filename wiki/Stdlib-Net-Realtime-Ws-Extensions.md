@@ -28,33 +28,33 @@ The following public declarations are taken from the module source; each links t
   Stores the name and value.
 - **Extensions.ExtensionParam** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L33)
   Equal when the name and value are.
-- **Extensions.ExtensionParam** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L42)
+- **Extensions.ExtensionParam** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L41)
   Combines the name and value.
-- **Extensions.ExtensionParam** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L46)
+- **Extensions.ExtensionParam** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L45)
   `name` or `name=value`.
-- **Extensions** · [`export let Extension = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L54)
+- **Extensions** · [`export let Extension = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L53)
   One element of the list: an extension name and its parameters. Tagged `#Final`.
-- **Extensions.Extension** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L56)
+- **Extensions.Extension** · [`export last name: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L55)
   The extension token, such as `permessage-deflate`.
-- **Extensions.Extension** · [`export last params: ExtensionParam[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L58)
+- **Extensions.Extension** · [`export last params: ExtensionParam[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L57)
   The parameters in order.
-- **Extensions.Extension** · [`export let init = func(token: string, parameters: ExtensionParam[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L61)
+- **Extensions.Extension** · [`export let init = func(token: string, parameters: ExtensionParam[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L60)
   Stores the name and parameters.
-- **Extensions.Extension** · [`export let count = func(param_name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L68)
+- **Extensions.Extension** · [`export let count = func(param_name: string) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L67)
   How many parameters are named `param_name`. Tagged `#NoDiscard`.
-- **Extensions.Extension** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L79)
+- **Extensions.Extension** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L78)
   Equal when the names and parameter lists are.
-- **Extensions.Extension** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L96)
+- **Extensions.Extension** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L92)
   Combines the name and parameters.
-- **Extensions.Extension** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L105)
+- **Extensions.Extension** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L101)
   The element as it is written in the header.
-- **Extensions** · [`export let is_token_byte = func(c: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L116)
+- **Extensions** · [`export let is_token_byte = func(c: uint8) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L112)
   Whether `c` is a tchar of RFC 9110 section 5.6.2. Tagged `#NoDiscard`, `#Pure`.
-- **Extensions** · [`export let is_token = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L126)
+- **Extensions** · [`export let is_token = func(text: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L119)
   Whether the text is a non-empty token. Tagged `#NoDiscard`, `#Pure`.
-- **Extensions** · [`export let parse = func(value: string) -> Result<Extension[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L141)
+- **Extensions** · [`export let parse = func(value: string) -> Result<Extension[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L132)
   Parses a header value into its extensions, in order. Empty list elements (`a, , b`) are skipped, as RFC 9110 section 5.6.1 allows; a value with no element fails. Tagged `#NoDiscard`.
-- **Extensions** · [`export let format = func(list: Extension[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L218)
+- **Extensions** · [`export let format = func(list: Extension[list]) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/ws/extensions.nra#L203)
   The header value of the extensions, `, `-separated. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

@@ -1,0 +1,11 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: ML-DSA-65 public key must be 1952 bytes
+let ml_dsa = import:Std.Crypto.Pqc.MlDsa;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = new ml_dsa.MlDsaPublicKey(ml_dsa.ParameterSet.MlDsa65, new([1]));
+        return program.ExitCode.Ok;
+    };
+);

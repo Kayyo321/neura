@@ -21,13 +21,13 @@ export let Words = module (
     #[Pure, ThreadSafe]
     export let load32_be = func(bytes: uint8[list], at: int) -> uint32 =>
         ((bytes[at] as uint32) << 24) | ((bytes[at + 1] as uint32) << 16) | ((bytes[at + 2] as uint32) << 8)
-            | (bytes[at + 3] as uint32);
+        | (bytes[at + 3] as uint32);
 
     /// @brief The 32-bit little-endian word at the offset.
     #[Pure, ThreadSafe]
     export let load32_le = func(bytes: uint8[list], at: int) -> uint32 =>
         ((bytes[at + 3] as uint32) << 24) | ((bytes[at + 2] as uint32) << 16) | ((bytes[at + 1] as uint32) << 8)
-            | (bytes[at] as uint32);
+        | (bytes[at] as uint32);
 
     /// @brief The 64-bit big-endian word at the offset.
     #[Pure, ThreadSafe]

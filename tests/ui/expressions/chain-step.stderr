@@ -1,0 +1,9 @@
+error[E0263]: a string chain takes no step
+ --> $DIR/chain-step.nra:3:46
+  |
+3 | let stepped = func() -> string => "a" .. "b" : 2;
+  |                                              ^ a step is written here
+  |
+  = note: a step belongs to an integer range; this chain joins text
+
+For more information about this error, try `neura explain E0263`.

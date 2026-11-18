@@ -1,0 +1,186 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let base64 = import:Std.Encoding.Base64;
+let error = import:Std.Core.Error;
+let json = import:Std.Encoding.Json;
+let utf8 = import:Std.Encoding.Utf8;
+
+/// @brief Strict JSON objects and base64url for Std.Crypto.Token (JOSE, PASETO and macaroons). Internal.
+///
+/// RFC 7515, section 5.2 and RFC 7516, section 5.2 let a recipient reject a header with a repeated member name,
+/// and this library does, because `Std.Encoding.Json.parse` keeps only the last value of a repeated name. The
+/// check counts the colons at the top level of the object outside strings: a valid object has one per member.
+#Since("0.3.0")
+export let JoseJson = module (
+    /// @brief A `Custom` error of the code with the message.
+    export let fail = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+
+    /// @brief The members of a JSON object text, or `Custom` code `code`: not JSON, not an object, or a repeated
+    /// member name.
+    export let parse_object = func(text: string, code: string) -> Result<[string, json.JsonValue][list]> {
+        match (json.parse(text)) {
+            Result.Err(_) => {
+                return fail<[string, json.JsonValue][list]>(code, "not valid JSON");
+            },
+            Result.Ok(value) => {
+                match (value) {
+                    json.JsonValue.Object(members) => {
+                        if (top_level_names(text) != members.length) {
+                            return fail<[string, json.JsonValue][list]>(code, "repeated member name");
+                        }
+                        return Result<[string, json.JsonValue][list]>.Ok(members);
+                    },
+                    _ => {
+                        return fail<[string, json.JsonValue][list]>(code, "not a JSON object");
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief `parse_object` of UTF-8 bytes; bytes that are not UTF-8 fail with the code.
+    export let parse_object_bytes = func(bytes: uint8[list], code: string) -> Result<[string, json.JsonValue][list]> {
+        match (utf8.decode(bytes)) {
+            Result.Err(_) => {
+                return fail<[string, json.JsonValue][list]>(code, "not UTF-8");
+            },
+            Result.Ok(text) => {
+                return parse_object(text, code);
+            },
+        }
+    };
+
+    /// @brief The number of member names of the top-level object of a valid JSON text: the colons at depth 1
+    /// outside strings.
+    let top_level_names = func(text: string) -> int {
+        let depth = 0;
+        let count = 0;
+        let in_string = false;
+        let escaped = false;
+        last n = text.byte_length;
+        for (let i = 0; i < n; i++) {
+            last c = text.byte_at(i);
+            if (in_string) {
+                if (escaped) {
+                    escaped = false;
+                } else if (c == 92) {
+                    escaped = true;
+                } else if (c == 34) {
+                    in_string = false;
+                }
+            } else if (c == 34) {
+                in_string = true;
+            } else if (c == 123 || c == 91) {
+                depth++;
+            } else if (c == 125 || c == 93) {
+                depth--;
+            } else if (c == 58 && depth == 1) {
+                count++;
+            }
+        }
+        return count;
+    };
+
+    /// @brief Whether the object has a member of the name.
+    export let has = func(members: [string, json.JsonValue][list], name: string) -> bool {
+        for (let entry in members) {
+            if (entry[0] == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief The string member: Ok(None) when absent, Ok(Some(text)) when a string, and `Custom` code `code`
+    /// when present with another type.
+    export let string_member = func(members: [string, json.JsonValue][list], name: string, code: string)
+        -> Result<Optional<string>> {
+        match (json.member(members, name)) {
+            Optional.None => {
+                return Result<Optional<string>>.Ok(Optional<string>.None);
+            },
+            Optional.Some(value) => {
+                match (value) {
+                    json.JsonValue.Text(text) => {
+                        return Result<Optional<string>>.Ok(Optional<string>.Some(text));
+                    },
+                    _ => {
+                        return fail<Optional<string>>(code, "member \"" .. name .. "\" must be a string");
+                    },
+                }
+            },
+        }
+    };
+
+    /// @brief The string member, or "" when absent; another type fails with the code.
+    export let text_member = func(members: [string, json.JsonValue][list], name: string, code: string) -> Result<string> {
+        match (string_member(members, name, code)) {
+            Result.Err(e) => {
+                return Result<string>.Err(e);
+            },
+            Result.Ok(found) => {
+                return match (found) {
+                    Optional.None => Result<string>.Ok(""),
+                    Optional.Some(text) => Result<string>.Ok(text),
+                };
+            },
+        }
+    };
+
+    /// @brief The required string member; absent or another type fails with the code.
+    export let required_text = func(members: [string, json.JsonValue][list], name: string, code: string)
+        -> Result<string> {
+        if (not has(members, name)) {
+            return fail<string>(code, "member \"" .. name .. "\" is missing");
+        }
+        return text_member(members, name, code);
+    };
+
+    /// @brief The bytes of a required base64url member (unpadded, strict); absent, another type or bad
+    /// base64url fails with the code.
+    export let required_bytes = func(members: [string, json.JsonValue][list], name: string, code: string)
+        -> Result<uint8[list]> {
+        match (required_text(members, name, code)) {
+            Result.Err(e) => {
+                return Result<uint8[list]>.Err(e);
+            },
+            Result.Ok(text) => {
+                return decode(text, code, "member \"" .. name .. "\" is not base64url");
+            },
+        }
+    };
+
+    /// @brief Unpadded base64url (RFC 7515, section 2) of the bytes.
+    export let encode = func(bytes: uint8[list]) -> string => base64.encode_url_unpadded(bytes);
+
+    /// @brief The bytes of strict unpadded base64url text, or `Custom` code `code` with the message.
+    export let decode = func(text: string, code: string, message: string) -> Result<uint8[list]> {
+        match (base64.decode_url_unpadded(text)) {
+            Result.Err(_) => {
+                return fail<uint8[list]>(code, message);
+            },
+            Result.Ok(bytes) => {
+                return Result<uint8[list]>.Ok(bytes);
+            },
+        }
+    };
+
+    /// @brief The text split at every `.` byte.
+    export let split_dots = func(text: string) -> string[list] {
+        let parts: string[list] = new;
+        let start = 0;
+        last n = text.byte_length;
+        for (let i = 0; i < n; i++) {
+            if (text.byte_at(i) == 46) {
+                parts.append(text.slice(start, i));
+                start = i + 1;
+            }
+        }
+        parts.append(text.slice(start, n));
+        return parts;
+    };
+
+    /// @brief A JSON string literal of the text (quotes and escapes by Std.Encoding.Json).
+    export let quote = func(text: string) -> string => json.write(json.JsonValue.Text(text));
+);

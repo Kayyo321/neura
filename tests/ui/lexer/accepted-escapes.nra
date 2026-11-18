@@ -1,0 +1,12 @@
+// Escapes of string and character literals (docs/design/Expressions030.md,
+// Escapes, edge case 56): every character-literal escape is also a string
+// escape, \u{...} writes a scalar value as UTF-8, and \x bytes that form
+// valid UTF-8 are accepted.
+let smile = "\u{1F600}";
+let accent = "caf\u{e9}";
+let bytes = "caf\xC3\xA9";
+let mixed = "\u{41}\x42\0\'\"\\\n\r\t";
+let edges = "\u{0}\u{7F}\u{80}\u{7FF}\u{800}\u{D7FF}\u{E000}\u{FFFF}\u{10000}\u{10FFFF}";
+let four = "\xF0\x9F\x98\x80";
+let quote = $"it\'s {smile} \u{2014} \xC3\xA9";
+let apostrophe: byte = '\'';

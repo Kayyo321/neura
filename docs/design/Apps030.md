@@ -92,7 +92,7 @@ Closing an application ends its whole tree. No child becomes a resident service.
 | The browser NVM runs tier 0, tier 1 and tier 2, and tier 2 runs **function programs on the portable interpreter**: `TierOptions::Programs::On`, `TierOptions::Tier3::Off`, native code off. That is today's `NEURA_TIER_PROGRAMS=1 NEURA_TIER3=off --jit=off`. | proposed |
 | Tier 0 stays in the build as the oracle and the fallback, exactly as on every host: a block that is not proven, and every step a program declines, runs by reference. | proposed |
 | The web image keeps its `LIFT` section. It is optional: a bundle built with `--no-lift-hints` runs correctly, more slowly, and is not what the budgets measure. | proposed |
-| A proof is one uninterruptible piece of work: most take well under a millisecond, and a block with a `float64` multiplication or division takes tens ([Benchmarks](../Benchmarks.md)). In the browser a block that is due for proving is queued (a new `TierOptions` switch) and proven only at a yield where no event is waiting; until then it runs at tier 0. Which blocks are proven, and when, still changes nothing a run does. Budget B-W7 measures the result, and a proof found to exceed 50 ms is made resumable in the step that finds it. | proposed |
+| A proof is one uninterruptible piece of work: most take well under a millisecond, and a block with a `float64` multiplication or division takes tens ([Benchmarks](../Benchmarks.md)). In the browser a block that is due for proving is queued (a new `TierOptions` switch) and proven only at a yield where no event is waiting; until then it runs at tier 0. Which blocks are proven, and when, still changes nothing a run does. Budget B-W7 measures the result. A proof found to exceed 50 ms was to be made resumable in the step that found it; step 3 found one and bounded each attempt instead (below). | changed 2026-11-17, awaiting owner confirmation |
 | The browser's results, traps, steps and peak cells equal a native `--tier=0` run of the same image under the same recorded host responses. | proposed |
 
 The reason is measured. On this machine (8 cores, x86-64 Linux, the integration build of 2026-11-17, `scripts/bench-wall.py --quick`, 17 programs, medians of 3 runs, 1 run for tier 0), with native code off:
@@ -119,6 +119,44 @@ A2's order of work:
 | 4 | The `neura.ui.*`, history and timer services ([HTML](Html030.md#host-services)); the same commits as the model host | no |
 | 5 | `neura.http.fetch` ([Components](Components030.md#http-clients)); exact 64-bit transport vectors | no |
 | 6 | Web bundles, the content-security policy, deep links, the static-host checks | no |
+
+The `wasm-runtime` CMake preset takes `NEURA_EMSDK` as the path to the installed SDK checkout and verifies it against the component lock at configuration. It builds the image format, circuit, lift, kernels and portable NVM archives. `TierOptions::browser()` selects function programs and disables tier 3. The wasm build ignores native tier environment settings and executes parallel items in order on one thread.
+
+```sh
+NEURA_EMSDK=/path/to/emsdk cmake --preset wasm-runtime
+cmake --build --preset wasm-runtime
+```
+
+For the standalone Node smoke test, configure the preset with `-DNEURA_WASM_SMOKE=ON`. Run `node tests/wasm/smoke.cjs build/wasm-runtime/neura_wasm_smoke.js /path/to/image.nvr 2` with a smoke image that uses only `neura.console.write_line`. The modes `0`, `1` and `2` exercise tier 0, normal tier 2 and eager portable function programs respectively.
+
+Configure with `-DNEURA_WASM_HOST=ON` to link `nvm.wasm` and its ES module loader. The [browser adapter](../../hosts/web/README.md#nvm-execution) verifies and binds an image before starting it, then resumes the same execution across step slices. A due proof remains queued while the embedder processes events. The embedder can attempt one proof on an idle callback.
+
+Step 2's production interface and step 4's services are implemented (2026-11-17, autonomous agents, awaiting owner confirmation): version 1 of the [browser adapter interface](../runtime/Providers.md#browser-adapter-interface) carries any host request, `run()` drives overlapping and cancellable requests, sleeps and scope deadlines without polling, and the [UI and history services](../runtime/Providers.md#ui-services) serve commits and events through the DOM adapter. Their checks are `tests/wasm/check-host.py` and `tests/apps/web/check.py`, under Node, headless Chromium 156 and headless Firefox 153 ESR. Step 6's bundles are assembled by `scripts/build-web-bundle.py` until `neura build` of a web target exists ([Web bundles](../runtime/Providers.md#web-bundles)); the script refuses an image that imports a service outside the web groups, and the page checks every module by its digest. Step 5's `neura.http.fetch` is implemented over the browser's `fetch` with the binding `Std.Net.Http.Fetch` ([HTTP fetch](../runtime/Providers.md#http-fetch)); its check is `tests/apps/web/fetch-check.py`, which runs a bundle against the page's origin and a second, CORS-enabled origin in headless Chromium and Firefox. The exact 64-bit transport vectors of step 5 apply to contract messages (A3), which carry integers as JSON text written by Neura code; the fetch service itself carries bytes. Recording and replay in the browser, gesture actions, and the B-W7 qualification remain open.
+
+### Browser traces (design, not implemented)
+
+*Proposed 2026-11-17 by autonomous agents, awaiting owner confirmation.* A browser run records the trace file of [NVM](../runtime/NVM.md#traces-of-images-with-tasks), byte for byte the format a native `neura run --record` writes, so that `neura run --replay` reproduces a browser run on a developer's machine and a browser can replay a native trace.
+
+| Rule | Status |
+| --- | --- |
+| The trace is written by `nvm.wasm`, not by the adapter: the runtime answers `neura.process.exit` and every denied service itself, and only it knows each request's task and tick, which version 3 records. `neura_wasm_open` takes a record flag (`0x200` with the tier) and a new export, `neura_wasm_trace(run)`, returns the text with `nvm::write_trace`; both are additions to interface version 1 that a version 1 adapter never uses. | proposed |
+| Requests, completions, deliveries with their ticks, clock readings that expire a timer or deadline, the settings and the outcome are recorded exactly as natively. A request the adapter answers carries the completion bytes it delivered; a cancelled request carries error 15 or the answer that arrived first. | proposed |
+| Replay in the browser: `new NvmExecution(module, image, { replay: text })` answers every request from the trace in the runtime, as `nvm::replay` does, and reports the first difference; no service of the page is called. | proposed |
+| The UI and history services are ordinary requests: a commit's bytes and an event batch's bytes are in the trace, so a replay reproduces what the program saw and did without a document. A trace contains what the user typed; recording is off unless the embedder asks for it. | proposed |
+| A fetch is recorded with its request and response bytes, which can hold credentials and personal data. The adapter records only when the embedder asks, and never sends a trace anywhere. | proposed |
+
+Step 3 was measured on 2026-11-17 with `tests/wasm/bench.py --runs 1 --browser chromium` on the loaded machine (other builds running), every output matching the native runner. The first measurement found `nvm.wasm` about 40 times slower than native function programs, slower than native tier 0: the structural proof rejected hints that the native runtime accepted. The cause was the C++ compiler, not WebAssembly. Gadgets whose neurons were built by two unsequenced calls came out in another order under Clang, which Emscripten uses, than under GCC, which built the images, so a Clang-built runtime regenerated different graphs (a native Clang build rejected the same hints). Fixing the order made GCC and Clang images identical, and the test `lift-portable` pins it. Then `nvm.wasm` was still refusing every float operation, because the lowering allowed floats only on x86-64 and AArch64. WebAssembly's float instructions are IEEE operations with one environment, so they are now lowered too. Geometric means of the 17 programs at their quick sizes, in milliseconds:
+
+| Build | Native, function programs | Native, regions | Node, function programs | Node, regions | Chromium, function programs | Chromium, regions |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| Before (round 1) | 70.6 | 82.4 | 2,920 | 2,986 | 2,795 | 2,838 |
+| Same graphs from every compiler | 71.1 | 84.4 | 650 | 635 | 642 | 624 |
+| Late idle proofs picked up | 72.7 | 81.0 | 626 | 625 | 644 | 640 |
+| Floats lowered in WebAssembly | 76.0 | 86.7 | 550 | 544 | 555 | 544 |
+
+The last row is 7.3 times native function programs in Chromium. The ratio of regions to function programs is 0.98 to 1.0 in WebAssembly, below the 5% that would change the default, so function programs stay the default. What remains slow is `nbody` (5.5 s against 87 ms): 10 of its 11 attempted hints lift and none is rejected, but the program of its main function keeps 74 of 116 blocks as stubs. The other float programs fell from about 6 s to about 1.5 s. The longest idle proof over the set was 26.2 ms in Chromium and 27.4 ms (27.6 ms of CPU) under Node. B-W5 and B-W7 need the 1,000-row reference list of A3 and `scripts/bench-web.mjs`, which do not exist yet, so neither was measured. `tests/wasm/check-host.py` under Chromium reported explicit idle proofs of up to 71.7 ms on the clock fixture at tier 1 on the loaded machine, and 43 ms in another run, so the 50 ms bound of B-W7 is not yet shown to hold.
+
+The first measurement also found the over-50 ms proofs of step 2: with proofs deferred to idle callbacks a block accumulates runs, and each attempt's work allowance grew with them, up to an 88.3 ms attempt (80.2 ms of main-thread CPU) under Node. Browser attempts are now bounded instead of made resumable ([Idle proofs](../runtime/Providers.md#idle-proofs)); the longest attempt over the same set was then 25.7 ms (26.3 ms CPU) under Node and 27.6 ms in Chromium. This changes the proof row above, which asked for resumable proofs: the overflow analysis restarts on every attempt, and making it resumable is a change to `src/lift` that this step did not make. The bound of 2^19 work units is half the minimum `TierOptions` gives a binary64 multiply or divide graph, so such blocks may stay on tier 0 in a browser; what that costs is not measured, because lifting does not yet work in `nvm.wasm`. The decision was taken without the owner.
 
 ## Version axes
 
@@ -260,6 +298,8 @@ Every limit has a default, a manifest key under `[limits]` of the target ([Proje
 | D-3 | Bytes of one bridge frame | C-2 | C-2 | The frame is refused and the call fails with `TooLarge` |
 | D-4 | Seconds for one bridge call | 30 | 3,600 | `Err(TimedOut)`; a late reply is discarded |
 
+Decision taken without the owner (apps integration round 2, 2026-11-18): the boot module of a web bundle runs its image with the largest step limit, because an application's event loop lasts as long as the page and the runtime's default of 100,000,000 steps for a whole run stopped the 1,000-row page of B-W5 before its 200 clicks. A handler that never ends is therefore not stopped by a step trap in a page; W-2 still yields to the browser, so the page stays responsive. A page that constructs `NvmExecution` itself keeps the default unless it passes `maxSteps`. The desktop host's child is not covered by this change.
+
 ## Budgets
 
 A budget is a number the release must meet, with the workload, the statistic, the command that measures it and where it can be measured. The reference application is the stock-list sample of [Projects](Projects030.md#the-reference-application). Numbers marked *provisional* are estimates derived from the baselines named; the step named measures them, and a miss is resolved there by a recorded change to the budget or to the design, never silently.
@@ -276,7 +316,7 @@ A budget is a number the release must meet, with the workload, the statistic, th
 | B-W8 | View and state allocation | The recorded count, then no growth without an explanation | Heap cells and steps of one update of the counter component and of one row change of the 1,000-row list, on the model host | `tests/benchmarks/baseline.txt` rows `ui-counter`, `ui-list` (new) | Here; recorded at A3, exact and deterministic |
 | B-W9 | Retained growth | Zero | After 10,000 mount and unmount cycles and 100,000 updates: listeners, subscriptions, handles and live heap cells equal their values after cycle 100 | A CTest program on the model host; the same journey in headless Chromium, reading `neura.ui.stats` | Here; A3 |
 | B-D1 | Desktop cold launch | 1.5 s median, 2.5 s 95th percentile | Process start to first commit of the reference application, 10 launches, warm file cache. *Provisional.* | `scripts/bench-desktop.py` (new), reading the host's `--timing` output | Linux here under Xvfb; Windows and macOS on hosted runners only |
-| B-D2 | Desktop memory | 350 MiB for the whole tree; 40 MiB for the native child | Resident size 5 s after first commit, summed over the process tree. Basis for the child: `neura run` peaks near 19 MiB on the benchmark programs. *Provisional.* | The same script | As B-D1 |
+| B-D2 | Desktop memory | 350 MiB for the whole tree; 40 MiB for the native child | Proportional set size (PSS) 5 s after first commit, summed over the process tree, so that a page the processes share counts once (owner decision 2026-11-18; the child is measured as RSS). Basis for the child: `neura run` peaks near 19 MiB on the benchmark programs. *Provisional.* | The same script | As B-D1 |
 | B-D3 | Desktop package | 130 MiB per package | Each package of the matrix, as built. Dominated by the engine; reported beside the SDK archive, never inside it. *Provisional.* | `neura package --report` | Linux here; Windows and macOS on hosted runners only |
 | B-S1 | Request latency, fresh worker | 5 ms median, 15 ms 95th, 40 ms 99th percentile | `GET` of a JSON operation that touches no database, HTTP/1.1 keep-alive on loopback, 32 connections, 8 workers, 60 s after 10 s of warm-up. Basis: a whole `neura run` of a hello-world image takes 0.68 ms. *Provisional.* | `scripts/bench-server.py` (new; a fixed-rate loader in Python with no dependency) | Here; A4 |
 | B-S2 | Throughput | 1,500 requests per second | The B-S1 workload at saturation with no 503. *Provisional.* | The same script | Here; A4 |
@@ -284,6 +324,18 @@ A budget is a number the release must meet, with the workload, the statistic, th
 | B-S4 | Saturation | 503 within 5 ms at the 95th percentile; processes never above S-1 plus S-2 plus 1 | Twice the B-S2 rate for 30 s | The same script, sampling the process tree | Here; A4 |
 | B-S5 | Drain | Exit within S-12 plus 1 s; every request in flight completes or is reported | A termination signal under the B-S1 load | The same script | Here; A4 |
 | B-S6 | Sustained load | Resident size slope under 1% per minute after minute 2; no descriptor or process left | 10 minutes at half the B-S2 rate, with one request in 1,000 trapping | The same script | Here; A6 |
+
+Measured in the apps integration, round 2 (2026-11-18, `tests/apps/web/bench-web.py`; Linux x86-64, 8 CPUs, a shared machine at load average 2.1 to 5.3; headless Chromium 156 and Firefox 153 ESR; `nvm.wasm` of the A2 round-2 build; 1,000 rows of `tests/apps/web/bench/rows.nra`, each row a component, and `bench/list.nra`, one `Std.Ui.Controls.list`). B-W5 and B-W6 are misses, recorded rather than resolved:
+
+| Budget | Chromium | Firefox |
+| --- | --- | --- |
+| B-W5, a row component changes (only that row renders) | median 131.5 ms, 95th 265.7 ms | median 137.0 ms, 95th 256.0 ms |
+| B-W5, a row of the list control changes (the list renders) | median 231.2 ms, 95th 258.6 ms | median 289.0 ms, 95th 365.0 ms |
+| B-W6, reversing the row components | 95th 288.6 ms | 95th 309.0 ms |
+| B-W7, tasks over 50 ms after the first commit | none; the observer reported an 80 ms control task of the page first (the run yields between slices) | not measured: Firefox reports no long-task entries |
+| B-W9, browser half, after cycle 100 and cycle 1,000 (10,000 clicks; the budget names 10,000 cycles) | `neura.ui.stats` 4 nodes, 2 listeners, 1 template, 0 queued; 1 open root; 1 subscriber: equal; `nvm.wasm` linear memory did not grow (17,891,328 bytes) | the same |
+
+The B-W5 time is the reconciler and the turn in `nvm.wasm`: about 2.8 million steps for a row component's change and 4.7 million for the list control's (model host, `Components030`), which at the measured times is roughly 20 million steps a second in the browser (an inference from the model-host counts). The B-W9 figures are host counts; linear memory grows in pages and only shows that the runtime asked for no more, not that its live cells stayed equal, and the counter that the cycles mount is a root's top component, which the reconciler's reuse does not memoize. The model-host run of B-W9 takes 54.2 million steps for 10,000 cycles (5,417 a cycle), under its limit of 100 million. Chromium's JavaScript heap read 6.2 and 8.4 MB at the two points without a forced collection, which is not evidence either way.
 
 Published results name the hardware, system, browser, engine, driver and workload. A language benchmark is not evidence for B-W4 to B-W7, and the size of the core is not evidence for B-D3.
 

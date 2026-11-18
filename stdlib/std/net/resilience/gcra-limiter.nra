@@ -47,7 +47,7 @@ export let GcraLimiter = module (
         /// "invalid argument: <name>" unless `rate`, `burst`, and `max_attempts` are positive and `period / rate` is
         /// at least one nanosecond.
         export let init = func(rate: int, period: durations.Duration, burst_size: int, state: stores.RateStore,
-                source: Clock, max_attempts: int) {
+            source: Clock, max_attempts: int) {
             if (rate < 1) {
                 trap_with_message("invalid argument: rate");
             }
@@ -103,12 +103,12 @@ export let GcraLimiter = module (
                 }
             }
             return Result<limiters.RateDecision>.Err(errors.custom(ContentionCode,
-                "rate store compare-and-set lost " + attempts.to_string() + " times"));
+                "rate store compare-and-set lost " .. attempts.to_string() .. " times"));
         };
 
         /// @brief Text such as "GcraLimiter(interval PT0.1S, burst 3)".
         export let.override to_string = func -> string =>
-            "GcraLimiter(interval " + durations.of_nanos(interval).to_string() + ", burst " + burst.to_string() + ")";
+            "GcraLimiter(interval " .. durations.of_nanos(interval).to_string() .. ", burst " .. burst.to_string() .. ")";
     );
 
     /// @brief A limiter of `rate` per `period` with bursts of `burst`, keeping its state in a new in-memory store.

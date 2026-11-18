@@ -68,14 +68,17 @@ export let TcpStream = module (
             handle = opened;
         };
 
+        /// @brief `TcpStream(<address>, open)` or `TcpStream(<address>, closed)`; the address is the text the
+        /// socket was opened with, empty for an accepted connection.
+        export let.override to_string = func -> string =>
+            "TcpStream(" .. handle.address .. (open_now ? ", open)" : ", closed)");
+
         /// @brief Up to `max` bytes; an empty list once the peer has closed its side. Waits at most the read
         /// timeout, then fails with TimedOut. A maximum below 1 traps.
         #NoDiscard
         export let read = func(max: int) -> Result<uint8[list]> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return Result<uint8[list]>.Err(bytes.closed("stream", handle.address));
-            }
+            return Result<uint8[list]>.Err(bytes.closed("stream", handle.address)) unless open_now;
             return match (read_socket(handle.id, max, read_timeout_nanos)) {
                 BytesOutcome.Ok(chunk) => Result<uint8[list]>.Ok(chunk),
                 BytesOutcome.Error(code) => Result<uint8[list]>.Err(host_error.io(code, "stream read failed", handle.address)),
@@ -87,9 +90,7 @@ export let TcpStream = module (
         /// is the number of bytes already sent.
         #NoDiscard
         export let write = func(data: uint8[list]) -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("stream", handle.address));
-            }
+            return Result<Unit>.Err(bytes.closed("stream", handle.address)) unless open_now;
             let remaining = data;
             let written = 0;
             while (remaining.length > 0) {
@@ -107,7 +108,7 @@ export let TcpStream = module (
                     CountOutcome.Error(code) => {
                         if (code == 15) {
                             return Result<Unit>.Err(host_error.io(code,
-                                "stream write cancelled after " + written.to_string() + " bytes", handle.address));
+                                "stream write cancelled after " .. written.to_string() .. " bytes", handle.address));
                         }
                         return Result<Unit>.Err(host_error.io(code, "stream write failed", handle.address));
                     },
@@ -119,9 +120,7 @@ export let TcpStream = module (
         /// @brief Releases the connection. Closing again does nothing and returns Ok; the stream is closed even
         /// when the host reports an error.
         export let close = func -> Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (close_socket(handle.id)) {
                 DoneOutcome.Ok => bytes.ok(),
@@ -179,7 +178,7 @@ export let TcpStream = module (
             Result.Err(close_problem) => match (outcome) {
                 Result.Ok(_) => Result<T>.Err(close_problem),
                 Result.Err(cause) => Result<T>.Err(
-                    errors.context(cause, "close failed after the body failed: " + errors.message(close_problem))),
+                    errors.context(cause, "close failed after the body failed: " .. errors.message(close_problem))),
             },
         };
     };

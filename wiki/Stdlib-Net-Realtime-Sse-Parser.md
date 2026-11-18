@@ -38,15 +38,17 @@ The following public declarations are taken from the module source; each links t
   The reconnection time in milliseconds that the latest valid `retry` field set, if any.
 - **Parser.EventStreamParser** · [`export let init = func(initial_id: string, line_limit: int, event_limit: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L76)
   A parser with the limits whose ID buffer starts as `initial_id` (empty for a new source). A limit below 1 traps with "invalid argument: limit below 1".
-- **Parser.EventStreamParser** · [`export let feed = func(chunk: uint8[list]) -> Result<SseEvent[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L88)
+- **Parser.EventStreamParser** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L87)
+  `EventStreamParser(max line N bytes, max event M bytes)`; the buffered text is not shown.
+- **Parser.EventStreamParser** · [`export let feed = func(chunk: uint8[list]) -> Result<SseEvent[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L93)
   Parses the chunk and returns the events it completes, in order, or a `sse.limit` error. Tagged `#NoDiscard`.
-- **Parser.EventStreamParser** · [`export let finish = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L110)
+- **Parser.EventStreamParser** · [`export let finish = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L115)
   Ends the stream: the unfinished line and the undispatched block are discarded, and the parser is ready for a new stream with the same last event ID.
-- **Parser** · [`export let create = func -> EventStreamParser`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L248)
+- **Parser** · [`export let create = func -> EventStreamParser`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L253)
   A parser for a new stream with the default limits and no last event ID. Tagged `#NoDiscard`.
-- **Parser** · [`export let resuming = func(last_event_id: string) -> EventStreamParser`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L253)
+- **Parser** · [`export let resuming = func(last_event_id: string) -> EventStreamParser`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L258)
   A parser for a resumed stream: its ID buffer starts as `last_event_id`, so an event without an `id` field keeps the cursor. Tagged `#NoDiscard`.
-- **Parser** · [`export let parse_retry = func(value: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L259)
+- **Parser** · [`export let parse_retry = func(value: string) -> Optional<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/parser.nra#L264)
   The value of a `retry` field: one or more ASCII digits read in base ten, saturating at `MaxRetryMillis`; `None` for anything else, including the empty value. Tagged `#NoDiscard`, `#Pure`.
 <!-- END SOURCE API -->
 

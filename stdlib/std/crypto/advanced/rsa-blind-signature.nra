@@ -1,0 +1,503 @@
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.Verifier;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let mp = import:Std.Crypto.Internal.Mp;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
+let rsa_pss = import:Std.Crypto.Asymmetric.RsaPss;
+let secret = import:Std.Crypto.Core.SecretBytes;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief The four SHA-384/MGF1-SHA-384 variants of RFC 9474 RSA Blind Signatures (Stdlib.md section 21.13).
+///
+/// Prepare, blind, sign the blinded message, then finalize. The resulting signature verifies as RSA-PSS
+/// over the prepared message. Use a dedicated RSA key pair for each RSABSSA variant. RFC 9474 recommends
+/// randomized preparation and requires high-entropy inputs for the identity preparation variants.
+/// BlindSign uses independent integer blinding in addition to the CRT fault check. The fixed-step inversion
+/// loop and private exponentiation are branch-free in source; the runtime does not guarantee constant time.
+/// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+#Since("0.3.0")
+export let RsaBlindSignature = module (
+    /// @brief Randomized or identity preparation, each with a 48-byte or zero-byte salt.
+    /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+    #Since("0.3.0")
+    export let Variant = enum (PssRandomized, PssZeroRandomized, PssDeterministic, PssZeroDeterministic);
+
+    let modifies_message = func(variant: Variant) -> bool =>
+        variant == Variant.PssRandomized || variant == Variant.PssZeroRandomized;
+
+    let salt_size = func(variant: Variant) -> int =>
+        variant == Variant.PssRandomized || variant == Variant.PssDeterministic ? 48 : 0;
+
+    /// @brief A blinded request and its private, one-use unblinding state.
+    /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let BlindRequest = class (
+        last blinded: uint8[list];
+        last inverse: secret.SecretBytes;
+        last key: rsa.RsaPublicKey;
+        last suite: Variant;
+
+        #Internal
+        export let init = func(message: uint8[list], factor_inverse: uint8[list], issuer: rsa.RsaPublicKey,
+            variant: Variant) {
+            blinded = message;
+            inverse = new(factor_inverse);
+            key = issuer;
+            suite = variant;
+        };
+
+        /// @brief A copy of the modulus-width message to send to the signer.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let message = func -> uint8[list] => words.copy(blinded);
+
+        /// @brief Whether the private inverse has been wiped or consumed.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let is_wiped = func -> bool => inverse.is_wiped();
+
+        /// @brief Wipes the storage holding the inverse.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let wipe = func => inverse.wipe();
+
+        #Internal
+        export let matches = func(issuer: rsa.RsaPublicKey, variant: Variant) -> bool =>
+            key.equals(issuer) && suite == variant;
+
+        #Internal
+        export let consume = func(limbs: int) -> uint32[list] {
+            last value = mp.from_bytes_be(inverse.expose(), limbs);
+            inverse.wipe();
+            return value;
+        };
+
+        /// @brief A fixed placeholder for the request and inverse.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "BlindRequest(<redacted>)";
+    );
+
+    /// @brief The client and public verifier for one key and variant.
+    /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let Client = class implements Verifier<rsa.RsaPublicKey, uint8[list]> (
+        last key: rsa.RsaPublicKey;
+        last verifier: rsa_pss.RsaPssVerifier;
+        last suite: Variant;
+
+        /// @brief Uses the server's public key and the application's configured variant.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let init = func(server_key: rsa.RsaPublicKey, variant: Variant) {
+            crypto_policy.require(Algorithm.RsaBlindSignature);
+            key = server_key;
+            suite = variant;
+            verifier = new(server_key, Algorithm.Sha384, salt_size(variant));
+        };
+
+        /// @brief `Algorithm.RsaBlindSignature`.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let algorithm = func -> Algorithm => Algorithm.RsaBlindSignature;
+
+        /// @brief The configured server public key.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let public_key = func -> rsa.RsaPublicKey => key;
+
+        /// @brief Prepares with an OS-generated 32-byte prefix for randomized variants. Identity variants copy
+        /// the input and require no entropy.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let prepare = func(message: uint8[list]) -> Result<uint8[list]> {
+            if (modifies_message(suite)) {
+                last prefix = entropy.os_bytes(32)?;
+                return Result<uint8[list]>.Ok(prepare_with_prefix(message, prefix));
+            }
+            return Result<uint8[list]>.Ok(words.copy(message));
+        };
+
+        /// @brief Prepares using a caller-supplied generator if this variant needs a prefix.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let prepare_with_drbg = func(message: uint8[list], generator: drbg.ChaCha20Drbg) -> uint8[list] {
+            if (modifies_message(suite)) {
+                return prepare_with_prefix(message, generator.fill(32));
+            }
+            return words.copy(message);
+        };
+
+        /// @brief Prepares using exactly 32 supplied prefix bytes for randomized variants or an empty prefix
+        /// for identity variants. Another prefix length traps.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let prepare_with_prefix = func(message: uint8[list], prefix: uint8[list]) -> uint8[list] {
+            if (prefix.length != (modifies_message(suite) ? 32 : 0)) {
+                trap_with_message("invalid argument: wrong RSA blind message prefix length");
+            }
+            return words.concat(prefix, message);
+        };
+
+        /// @brief Uses OS entropy for the PSS salt (if any) and uniform RSA blinding factor.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let blind = func(prepared: uint8[list]) -> Result<BlindRequest> =>
+            blind_using(prepared, func(count: int) -> Result<uint8[list]> => entropy.os_bytes(count));
+
+        /// @brief Uses a caller-supplied generator for the PSS salt and blinding factor.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let blind_with_drbg = func(prepared: uint8[list], generator: drbg.ChaCha20Drbg)
+            -> Result<BlindRequest> =>
+                blind_using(prepared, new func(count: int) -> Result<uint8[list]> =>
+                    Result<uint8[list]>.Ok(generator.fill(count)));
+
+        /// @brief Deterministic input for known answers. The salt must match this variant and the factor must
+        /// have the modulus's byte width. Invalid scalar values return crypto.blinding.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let blind_with_factor = func(prepared: uint8[list], salt: uint8[list], factor: uint8[list])
+            -> Result<BlindRequest> {
+            last core = key.core;
+            if (salt.length != salt_size(suite) || factor.length != core.k) {
+                trap_with_message("invalid argument: wrong RSA blind salt or factor length");
+            }
+            return blind_core(prepared, salt, rsa_core.os2ip_below(core, factor));
+        };
+
+        let blind_using = func(prepared: uint8[list], random: func(int) -> Result<uint8[list]>)
+            -> Result<BlindRequest> {
+            crypto_policy.require(Algorithm.RsaBlindSignature);
+            if (not prepared_ok(prepared)) {
+                return failure<BlindRequest>("crypto.invalid_input", "prepared message is too short");
+            }
+            let salt: uint8[list] = new;
+            if (salt_size(suite) != 0) {
+                salt = random(salt_size(suite))?;
+            }
+            match (sample_factor(key.core, random)) {
+                Result.Ok(factor) => {
+                    last blinded = blind_core(prepared, salt, factor);
+                    words.wipe(salt);
+                    return blinded;
+                },
+                Result.Err(cause) => {
+                    words.wipe(salt);
+                    return Result<BlindRequest>.Err(cause);
+                },
+            }
+            return failure<BlindRequest>("crypto.blinding", "could not draw a blinding factor");
+        };
+
+        let blind_core = func(prepared: uint8[list], salt: uint8[list], factor: uint32[list]) -> Result<BlindRequest> {
+            crypto_policy.require(Algorithm.RsaBlindSignature);
+            if (not prepared_ok(prepared)) {
+                wipe_limbs(factor);
+                return failure<BlindRequest>("crypto.invalid_input", "prepared message is too short");
+            }
+            if (factor.length == 0 || mp.is_zero(factor) == 1) {
+                wipe_limbs(factor);
+                return failure<BlindRequest>("crypto.blinding", "invalid blinding factor");
+            }
+            last core = key.core;
+            // RFC 8017 and RFC 9474 Appendix A use modBits - 1 (RFC 9474 erratum 9089).
+            last encoded = rsa_core.pss_encode(Algorithm.Sha384, sha2.sha384(prepared), salt, core.bits - 1);
+            last representative = rsa_core.os2ip_below(core, encoded);
+            words.wipe(encoded);
+            if (representative.length == 0 || not coprime(representative, core)) {
+                wipe_limbs(factor);
+                wipe_limbs(representative);
+                return failure<BlindRequest>("crypto.invalid_input", "RSA PSS representative is not coprime to the modulus");
+            }
+            last inverse = invert(factor, core);
+            if (inverse.length == 0) {
+                wipe_limbs(factor);
+                wipe_limbs(representative);
+                return failure<BlindRequest>("crypto.blinding", "blinding factor has no inverse");
+            }
+            last power = core.apply(factor);
+            last blinded = multiply(core.modulus, representative, power);
+            last inverse_bytes = rsa_core.i2osp(core, inverse);
+            last request = new BlindRequest(rsa_core.i2osp(core, blinded), inverse_bytes, key, suite);
+            words.wipe(inverse_bytes);
+            wipe_limbs(inverse);
+            wipe_limbs(factor);
+            wipe_limbs(representative);
+            wipe_limbs(power);
+            return Result<BlindRequest>.Ok(request);
+        };
+
+        /// @brief Consumes the inverse and verifies the unblinded signature with RSA-PSS. An invalid response,
+        /// mismatched request or signature failure returns `crypto.invalid_signature`. Using a wiped request
+        /// traps with invalid state.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let finalize = func(prepared: uint8[list], response: uint8[list], request: BlindRequest)
+            -> Result<uint8[list]> {
+            crypto_policy.require(Algorithm.RsaBlindSignature);
+            if (request.is_wiped()) {
+                trap_with_message("invalid state: secret wiped");
+            }
+            if (not request.matches(key, suite) || response.length != key.core.k) {
+                request.wipe();
+                return signature_failure();
+            }
+            last core = key.core;
+            last signed = rsa_core.os2ip_below(core, response);
+            if (signed.length == 0) {
+                request.wipe();
+                return signature_failure();
+            }
+            last inverse = request.consume(core.n.length);
+            last signature = rsa_core.i2osp(core, multiply(core.modulus, signed, inverse));
+            wipe_limbs(inverse);
+            if (not verify(prepared, signature)) {
+                words.wipe(signature);
+                return signature_failure();
+            }
+            return Result<uint8[list]>.Ok(signature);
+        };
+
+        /// @brief Verifies a finalized signature over the prepared message with this variant's exact salt length.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify = func(message: uint8[list], signature: uint8[list]) -> bool =>
+            prepared_ok(message) && verifier.verify(message, signature);
+
+        let prepared_ok = func(message: uint8[list]) -> bool => not modifies_message(suite) || message.length >= 32;
+
+        /// @brief The verifier's type.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "RsaBlindSignature.Client";
+    );
+
+    /// @brief The server's signer under a dedicated RSA private key.
+    /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+    #[Final, NotThreadSafe, Since("0.3.0")]
+    export let BlindSigner = class implements Signer<rsa.RsaPrivateKey, Result<uint8[list]>> (
+        last key: rsa.RsaPrivateKey;
+
+        /// @brief The only variant for which the application may use this key.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export last variant: Variant;
+
+        /// @brief Retains a private key dedicated to this variant and protocol.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let init = func(private_key: rsa.RsaPrivateKey, suite: Variant) {
+            crypto_policy.require(Algorithm.RsaBlindSignature);
+            key = private_key;
+            variant = suite;
+        };
+
+        /// @brief `Algorithm.RsaBlindSignature`.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let algorithm = func -> Algorithm => Algorithm.RsaBlindSignature;
+
+        /// @brief Signs a modulus-width blinded request. The server's independent blinding uses OS entropy.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign = func(message: uint8[list]) -> Result<uint8[list]> =>
+            sign_using(message, func(count: int) -> Result<uint8[list]> => entropy.os_bytes(count));
+
+        /// @brief Signs with a caller-supplied generator for the server's independent blinding.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign_with_drbg = func(message: uint8[list], generator: drbg.ChaCha20Drbg) -> Result<uint8[list]> =>
+            sign_using(message, new func(count: int) -> Result<uint8[list]> =>
+                Result<uint8[list]>.Ok(generator.fill(count)));
+
+        /// @brief Signs with explicit server-side blinding input for tests. The factor's byte width must
+        /// equal the modulus's or the call traps.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign_with_factor = func(message: uint8[list], factor: uint8[list]) -> Result<uint8[list]> {
+            check_key();
+            last core = key.core.public_core;
+            if (factor.length != core.k) {
+                trap_with_message("invalid argument: wrong RSA blind signer factor length");
+            }
+            last input = input_of(core, message)?;
+            return sign_core(input, rsa_core.os2ip_below(core, factor));
+        };
+
+        let check_key = func {
+            crypto_policy.require(Algorithm.RsaBlindSignature);
+            if (key.is_wiped()) {
+                trap_with_message("invalid state: secret wiped");
+            }
+        };
+
+        let sign_using = func(message: uint8[list], random: func(int) -> Result<uint8[list]>) -> Result<uint8[list]> {
+            check_key();
+            last core = key.core.public_core;
+            last input = input_of(core, message)?;
+            return sign_core(input, sample_factor(core, random)?);
+        };
+
+        let sign_core = func(input: uint32[list], factor: uint32[list]) -> Result<uint8[list]> {
+            if (factor.length == 0 || mp.is_zero(factor) == 1) {
+                wipe_limbs(factor);
+                return failure<uint8[list]>("crypto.blinding", "invalid server blinding factor");
+            }
+            last private = key.core;
+            last public = private.public_core;
+            last inverse = invert(factor, public);
+            if (inverse.length == 0) {
+                wipe_limbs(factor);
+                return failure<uint8[list]>("crypto.blinding", "server blinding factor has no inverse");
+            }
+            last power = public.apply(factor);
+            last blinded = multiply(public.modulus, input, power);
+            last signed = private.apply(blinded);
+            wipe_limbs(factor);
+            wipe_limbs(power);
+            wipe_limbs(blinded);
+            if (signed.length == 0) {
+                wipe_limbs(inverse);
+                return signing_failure();
+            }
+            last output = multiply(public.modulus, signed, inverse);
+            wipe_limbs(signed);
+            wipe_limbs(inverse);
+            if (mp.equal(input, public.apply(output)) != 1) {
+                wipe_limbs(output);
+                return signing_failure();
+            }
+            return Result<uint8[list]>.Ok(rsa_core.i2osp(public, output));
+        };
+
+        /// @brief A fixed placeholder for the signing key.
+        /// @see [Std.Crypto.Advanced.RsaBlindSignature](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Advanced-RsaBlindSignature)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "RsaBlindSignature.BlindSigner(<redacted>)";
+    );
+
+    let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+
+    let signature_failure = func -> Result<uint8[list]> =>
+        failure<uint8[list]>("crypto.invalid_signature", "invalid blind signature");
+
+    let signing_failure = func -> Result<uint8[list]> =>
+        failure<uint8[list]>("crypto.fault", "RSA private operation failed its check");
+
+    let input_of = func(key: rsa_core.PublicCore, message: uint8[list]) -> Result<uint32[list]> {
+        if (message.length != key.k) {
+            return failure<uint32[list]>("crypto.invalid_input", "wrong blinded message length");
+        }
+        last input = rsa_core.os2ip_below(key, message);
+        if (input.length == 0) {
+            return failure<uint32[list]>("crypto.invalid_input", "blinded representative out of range");
+        }
+        return Result<uint32[list]>.Ok(input);
+    };
+
+    let sample_factor = func(key: rsa_core.PublicCore, random: func(int) -> Result<uint8[list]>)
+        -> Result<uint32[list]> {
+        last mask = (255 >> (key.k * 8 - key.bits)) as uint8;
+        for (let attempts in 0 .. 128) {
+            last candidate = random(key.k)?;
+            candidate[0] &= mask;
+            last value = rsa_core.os2ip_below(key, candidate);
+            words.wipe(candidate);
+            if (value.length != 0 && mp.is_zero(value) == 0) {
+                return Result<uint32[list]>.Ok(value);
+            }
+            wipe_limbs(value);
+        }
+        return failure<uint32[list]>("crypto.blinding", "could not draw a blinding factor");
+    };
+
+    let multiply = func(modulus: mp.Modulus, left: uint32[list], right: uint32[list]) -> uint32[list] =>
+        modulus.mul(modulus.to_mont(left), right);
+
+    let wipe_limbs = func(number: uint32[list]) {
+        for (let i = 0; i < number.length; i++) {
+            number[i] = 0;
+        }
+    };
+
+    // The odd operand b stays odd. Reduce the even a or subtract the smaller odd operand before halving.
+    // Each step decreases the sum of the two bit lengths until a is zero, then subsequent steps do nothing.
+    let reduce_once = func(a: uint32[list], b: uint32[list], difference: uint32[list]) -> [uint32, uint32] {
+        last odd = a[0] & 1;
+        last swap = odd & mp.less(a, b);
+        mp.cswap(swap, a, b);
+        let _ = mp.sub_into(difference, a, b);
+        mp.assign_if(odd, a, difference);
+        shift_down(a, 0);
+        return [odd, swap];
+    };
+
+    let shift_down = func(number: uint32[list], top: uint32) {
+        let carry = top;
+        for (let i = number.length - 1; i >= 0; i--) {
+            last previous = number[i];
+            number[i] = (previous >> 1) | (carry << 31);
+            carry = previous & 1;
+        }
+    };
+
+    let coprime = func(input: uint32[list], key: rsa_core.PublicCore) -> bool {
+        last a = mp.copy(input);
+        last b = mp.copy(key.n);
+        last difference = mp.zeros(a.length);
+        for (let i = 0; i < 2 * key.bits; i++) {
+            let _ = reduce_once(a, b, difference);
+        }
+        last valid = mp.equal(b, mp.small(1, b.length)) == 1;
+        wipe_limbs(a);
+        wipe_limbs(b);
+        wipe_limbs(difference);
+        return valid;
+    };
+
+    // Keep a = x * input (mod n) and b = y * input (mod n) across the same GCD steps.
+    let invert = func(input: uint32[list], key: rsa_core.PublicCore) -> uint32[list] {
+        last a = mp.copy(input);
+        last b = mp.copy(key.n);
+        last difference = mp.zeros(a.length);
+        last x = mp.small(1, a.length);
+        last y = mp.zeros(a.length);
+        for (let i = 0; i < 2 * key.bits; i++) {
+            const [odd, swap] = reduce_once(a, b, difference);
+            mp.cswap(swap, x, y);
+            last subtracted = key.modulus.sub(x, y);
+            mp.assign_if(odd, x, subtracted);
+            wipe_limbs(subtracted);
+            halve_residue(x, key.n);
+        }
+        last valid = mp.equal(b, mp.small(1, b.length)) == 1;
+        wipe_limbs(a);
+        wipe_limbs(b);
+        wipe_limbs(difference);
+        wipe_limbs(x);
+        if (not valid) {
+            wipe_limbs(y);
+            return new;
+        }
+        return y;
+    };
+
+    let halve_residue = func(number: uint32[list], modulus: uint32[list]) {
+        last mask = ((number[0] & 1) as uint64) * 4294967295;
+        let carry: uint64 = 0;
+        for (let i = 0; i < number.length; i++) {
+            last sum = (number[i] as uint64) + ((modulus[i] as uint64) & mask) + carry;
+            number[i] = (sum & 4294967295) as uint32;
+            carry = sum >> 32;
+        }
+        shift_down(number, carry as uint32);
+    };
+);

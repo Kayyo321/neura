@@ -42,7 +42,30 @@ let descending = 5 .. 0 : -2;          // [5, 3, 1]
 
 An expected array or list type determines the result and the integer type of the bounds and step; a list is constructed with `new(start .. stop)`. Without that context the result is an array and the start determines its element type. Bounds and step are evaluated once, from left to right. Construction checks the result length against the `int32` limit and the applicable stack or heap limit and does not advance past the last element. A constructed list starts with version zero.
 
-Binary operators bind more tightly than `..` and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
+`start ..= stop` is the inclusive range ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Expressions030.md#ranges-with-), implemented, proposed): it also contains `stop` when the step reaches it, and otherwise has the typing, step, braces, evaluation order and failures of `..`. `3 ..= 3` has one element and `3 ..= 2` none. A range that ends at its type's largest or smallest value, such as `250 ..= 255` as `uint8`, is constructed without computing a value past it, and a range over a whole 32-bit or 64-bit domain fails with the length failure of an over-long `..` range. A range takes exactly two bounds, and `..=` does not combine with `..` (`E0263`). A statement that is exactly `place ..= value;` is not a range: it appends text to a string (`E0262` for any other destination).
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let digits = 0 ..= 9;                 // [0, 1, ..., 9]
+        let countdown = 6 ..= 0 : -3;         // [6, 3, 0]
+        let top: uint8[] = 250 ..= 255;       // ends at the uint8 maximum
+        console.print_line(digits.length.to_string() + " " + countdown[2].to_string() + " " +
+                           top[5].to_string());
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+10 0 255
+```
+
+When the first operand of `..` is a `string`, the expression is a [string chain](CoreLanguage#string-chains), `"a" .. name .. "!"`, which joins text and takes no step, instead of a range. Binary operators bind more tightly than `..` and `..=`, and the conditional operator binds more loosely. Group a stepped range with parentheses or braces in a conditional's middle arm so its step colon stays separate from the conditional's colon. Ranges can be passed, returned, indexed after grouping, or used directly as a for-each source.
 
 A list can grow or shrink through its built-in operations. Both collections expose their current element count as `length`, of type `int` (`int32`). `append(value)` adds an element to a list, and `remove_at(index)` removes the element at an index and shifts subsequent elements left. These operations are not available on arrays.
 
@@ -81,5 +104,47 @@ A negative index fails with trap reason 2 (bounds failure); an index at or past 
 `for (let element in collection) { ... }` visits an array's or a list's elements in index order ([Core language](CoreLanguage#loops)). Assigning to elements by index during the loop is allowed. Appending to or removing from a list while a for-each loop visits it, through any alias, makes the loop trap with reason 5 before its next advance; each list carries a structural version that every successful `append` and `remove_at` changes.
 
 The same loop visits any value that implements `Std.Collections.Iterable<T>`, calling `iterator()` once and then `has_next()` and `next()` ([Core language](CoreLanguage#loops)). Every standard-library collection, `Sequence`, and `Std.Core.IntRange` implement it, and a program's own classes can too. A source that is not an array, list, or `Iterable<T>` is rejected, as is an element annotation that differs from `T`.
+
+## FrozenList
+
+`Std.Collections.Frozen.FrozenList<T>` is a list that nobody can change, with storage nobody else holds. Its element type must be deeply immutable: `bool`, a number, `string`, a tuple or enum of such parts, an `#Immutable` class whose fields are too, or a `FrozenList` of them (`E0580` at the type argument otherwise, also when a generic function passes its type parameter on). The class is `#Immutable`, so a [UI state](StateAndComponents) may hold one. It cannot yet cross to another task: the image format admits no collection in a transferable layout, so sending a `FrozenList` on a channel or to `spawn` is `E0602` in 0.3.0.
+
+<!-- example: run -->
+```neura
+let console = import:Std.Io.Console;
+let frozen = import:Std.Collections.Frozen;
+let program = import:Std.Program;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let source: string[] = ["bolt", "nut"];
+        let parts = frozen.copy_of<string>(source);
+        source[0] = "gear";
+        let more = parts.appended("washer");
+        console.print_line(parts.to_string() + " " + more.to_string());
+        for (let part: string in more) {
+            console.print_line(part);
+        }
+        return program.ExitCode.Ok;
+    };
+);
+```
+
+```text
+[bolt, nut] [bolt, nut, washer]
+bolt
+nut
+washer
+```
+
+| Member | Meaning |
+| --- | --- |
+| `frozen.copy_of<T>(array)`, `frozen.copy_of_list<T>(list)`, `frozen.of<T>(items...)`, `frozen.empty<T>()` | Copy the elements into new private storage. Nothing freezes a list in place, so a later change to the source is not seen. |
+| `length()`, `is_empty()`, `get(index)`, `first_or_none()`, `last_or_none()`, `contains(value)`, `index_of(value)`, `for_each(action)`, for-each | Reads. `get` with an index out of range traps as a list index does. `contains` and `index_of` compare with `===`. |
+| `slice(start, end)`, `appended(value)`, `replaced(index, value)`, `removed(index)`, `concat(other)` | Return a new list and leave this one unchanged. They copy; no storage is shared between lists. |
+| `to_list()` | A fresh built-in list; changing it changes nothing in the `FrozenList`. |
+| `equals`, `hash_code`, `to_string` | Compare elements by value (`===`) at each index, fold the element hashes as a list does, and print `[a, b]`. `==` stays reference identity. |
+
+The storage is a `last` list field tagged [`#Frozen`](Tags#frozen), which only the standard library may write. The compiler checks that the constructor assigns it once, from a list the constructor created and only filled, and that the class reads it only by index and length (`E0581`); with that, the `#Immutable` check accepts the field. `ImmutableList`, `ImmutableSet` and `ImmutableMap` keep their meaning, read-only views of a shallow copy: they are not deeply immutable and are rejected where a deeply immutable type is required.
 
 See [collections.nra](https://github.com/Kayyo321/neura/blob/main/examples/types/collections.nra) for examples of indexing, mutation, and nested types; the test driver in `tests/backend/examples/collections-driver.nra` builds and runs it.

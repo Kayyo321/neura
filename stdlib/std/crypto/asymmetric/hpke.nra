@@ -1,0 +1,933 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let.promote _ = import:Std.Crypto.PrivateKey;
+let aes_gcm = import:Std.Crypto.Symmetric.AesGcm;
+let chacha = import:Std.Crypto.Symmetric.ChaCha20Poly1305;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let hashing = import:Std.Core.Hash;
+let hkdf = import:Std.Crypto.Kdf.Hkdf;
+let montgomery = import:Std.Crypto.Internal.Montgomery;
+let mp = import:Std.Crypto.Internal.Mp;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Hybrid Public Key Encryption of RFC 9180 (Stdlib.md section 21.8): the four modes (base, psk, auth,
+/// auth_psk), DHKEM over X25519, X448, P-256, P-384 and P-521 with their HKDFs, the KDFs HKDF-SHA256, -SHA384
+/// and -SHA512, and the AEADs AES-128-GCM, AES-256-GCM, ChaCha20-Poly1305 and export-only.
+///
+/// `DhKem` implements `KeyEncapsulation`; `Suite` sets up a `SenderContext` (whose `enc` goes to the
+/// recipient) or a `ReceiverContext`, and offers the single-shot `seal` and `open` of the base mode. Every
+/// randomized step has a deterministic form that takes the ephemeral key, and `derive_key_pair` is RFC 9180's
+/// DeriveKeyPair. Public keys are validated: a P-curve key must be an uncompressed point of the curve, and an
+/// X25519 or X448 Diffie-Hellman result that is all zero is an error (RFC 9180, section 7.1.4). An X25519 or
+/// X448 private key keeps the bytes it was made from; the function clamps them when it uses them. A context
+/// seals or opens messages in order: each success advances the sequence number, a failed `open` does not. The
+/// sequence number is a 64-bit count, far below the RFC's limit of 2^96 - 1, so the limit is never reached.
+/// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
+#Since("0.3.0")
+export let Hpke = module (
+    /// @brief The KEMs of RFC 9180, section 7.1.
+    #Since("0.3.0")
+    export let Kem = enum (
+        DhKemP256HkdfSha256, DhKemP384HkdfSha384, DhKemP521HkdfSha512, DhKemX25519HkdfSha256,
+        DhKemX448HkdfSha512
+    );
+
+    /// @brief The KDFs of RFC 9180, section 7.2.
+    #Since("0.3.0")
+    export let Kdf = enum (HkdfSha256, HkdfSha384, HkdfSha512);
+    /// @brief The AEADs of RFC 9180, section 7.3.
+    #Since("0.3.0")
+    export let Aead = enum (Aes128Gcm, Aes256Gcm, ChaCha20Poly1305, ExportOnly);
+    /// @brief The modes of RFC 9180, section 5.
+    #Since("0.3.0")
+    export let Mode = enum (Base, Psk, Auth, AuthPsk);
+
+    /// @brief The KEM's identifier: 0x0010, 0x0011, 0x0012, 0x0020 or 0x0021.
+    #[NoDiscard, Since("0.3.0")]
+    export let kem_id = func(kem: Kem) -> int => match (kem) {
+        Kem.DhKemP256HkdfSha256 => 16,
+        Kem.DhKemP384HkdfSha384 => 17,
+        Kem.DhKemP521HkdfSha512 => 18,
+        Kem.DhKemX25519HkdfSha256 => 32,
+        Kem.DhKemX448HkdfSha512 => 33,
+    };
+
+    /// @brief The KDF's identifier: 1, 2 or 3.
+    #[NoDiscard, Since("0.3.0")]
+    export let kdf_id = func(kdf: Kdf) -> int => match (kdf) {
+        Kdf.HkdfSha256 => 1,
+        Kdf.HkdfSha384 => 2,
+        Kdf.HkdfSha512 => 3,
+    };
+
+    /// @brief The AEAD's identifier: 1, 2, 3 or 0xFFFF.
+    #[NoDiscard, Since("0.3.0")]
+    export let aead_id = func(aead: Aead) -> int => match (aead) {
+        Aead.Aes128Gcm => 1,
+        Aead.Aes256Gcm => 2,
+        Aead.ChaCha20Poly1305 => 3,
+        Aead.ExportOnly => 65535,
+    };
+
+    /// @brief The KEM's own KDF.
+    let kem_kdf = func(kem: Kem) -> Kdf => match (kem) {
+        Kem.DhKemP256HkdfSha256 => Kdf.HkdfSha256,
+        Kem.DhKemP384HkdfSha384 => Kdf.HkdfSha384,
+        Kem.DhKemP521HkdfSha512 => Kdf.HkdfSha512,
+        Kem.DhKemX25519HkdfSha256 => Kdf.HkdfSha256,
+        Kem.DhKemX448HkdfSha512 => Kdf.HkdfSha512,
+    };
+
+    /// @brief The curve's policy identifier.
+    let kem_algorithm = func(kem: Kem) -> Algorithm => match (kem) {
+        Kem.DhKemP256HkdfSha256 => Algorithm.P256,
+        Kem.DhKemP384HkdfSha384 => Algorithm.P384,
+        Kem.DhKemP521HkdfSha512 => Algorithm.P521,
+        Kem.DhKemX25519HkdfSha256 => Algorithm.X25519,
+        Kem.DhKemX448HkdfSha512 => Algorithm.X448,
+    };
+
+    /// @brief Nsecret.
+    let n_secret = func(kem: Kem) -> int => match (kem) {
+        Kem.DhKemP384HkdfSha384 => 48,
+        Kem.DhKemP521HkdfSha512 => 64,
+        Kem.DhKemX448HkdfSha512 => 64,
+        _ => 32,
+    };
+
+    /// @brief Npk (and Nenc).
+    #[NoDiscard, Since("0.3.0")]
+    export let public_key_length = func(kem: Kem) -> int => match (kem) {
+        Kem.DhKemP256HkdfSha256 => 65,
+        Kem.DhKemP384HkdfSha384 => 97,
+        Kem.DhKemP521HkdfSha512 => 133,
+        Kem.DhKemX25519HkdfSha256 => 32,
+        Kem.DhKemX448HkdfSha512 => 56,
+    };
+
+    /// @brief Nsk.
+    #[NoDiscard, Since("0.3.0")]
+    export let private_key_length = func(kem: Kem) -> int => match (kem) {
+        Kem.DhKemP256HkdfSha256 => 32,
+        Kem.DhKemP384HkdfSha384 => 48,
+        Kem.DhKemP521HkdfSha512 => 66,
+        Kem.DhKemX25519HkdfSha256 => 32,
+        Kem.DhKemX448HkdfSha512 => 56,
+    };
+
+    /// @brief Nh of the KDF.
+    let n_h = func(kdf: Kdf) -> int => match (kdf) {
+        Kdf.HkdfSha256 => 32,
+        Kdf.HkdfSha384 => 48,
+        Kdf.HkdfSha512 => 64,
+    };
+
+    /// @brief Nk of the AEAD (0 for export-only).
+    let n_k = func(aead: Aead) -> int => match (aead) {
+        Aead.Aes128Gcm => 16,
+        Aead.ExportOnly => 0,
+        _ => 32,
+    };
+
+    let curve_of = func(kem: Kem) -> weierstrass.CurveId => match (kem) {
+        Kem.DhKemP384HkdfSha384 => weierstrass.CurveId.P384,
+        Kem.DhKemP521HkdfSha512 => weierstrass.CurveId.P521,
+        _ => weierstrass.CurveId.P256,
+    };
+
+    let is_montgomery = func(kem: Kem) -> bool => kem == Kem.DhKemX25519HkdfSha256 || kem == Kem.DhKemX448HkdfSha512;
+
+    let name = func(kem: Kem) -> string => match (kem) {
+        Kem.DhKemP256HkdfSha256 => "DHKEM(P-256, HKDF-SHA256)",
+        Kem.DhKemP384HkdfSha384 => "DHKEM(P-384, HKDF-SHA384)",
+        Kem.DhKemP521HkdfSha512 => "DHKEM(P-521, HKDF-SHA512)",
+        Kem.DhKemX25519HkdfSha256 => "DHKEM(X25519, HKDF-SHA256)",
+        Kem.DhKemX448HkdfSha512 => "DHKEM(X448, HKDF-SHA512)",
+    };
+
+    let i2osp2 = func(value: int) -> uint8[list] => new([((value >> 8) & 255) as uint8, (value & 255) as uint8]);
+
+    let concat = func(parts: uint8[list][list]) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let part in parts) {
+            words.append_all(out, part);
+        }
+        return out;
+    };
+
+    let extract = func(kdf: Kdf, salt: uint8[list], ikm: uint8[list]) -> uint8[list] => match (kdf) {
+        Kdf.HkdfSha256 => hkdf.extract<sha2.Sha256>(salt, ikm),
+        Kdf.HkdfSha384 => hkdf.extract<sha2.Sha384>(salt, ikm),
+        Kdf.HkdfSha512 => hkdf.extract<sha2.Sha512>(salt, ikm),
+    };
+
+    let expand = func(kdf: Kdf, prk: uint8[list], info: uint8[list], length: int) -> uint8[list] => match (kdf) {
+        Kdf.HkdfSha256 => hkdf.expand<sha2.Sha256>(prk, info, length),
+        Kdf.HkdfSha384 => hkdf.expand<sha2.Sha384>(prk, info, length),
+        Kdf.HkdfSha512 => hkdf.expand<sha2.Sha512>(prk, info, length),
+    };
+
+    /// @brief LabeledExtract of RFC 9180, section 4.
+    let labeled_extract = func(kdf: Kdf, suite_id: uint8[list], salt: uint8[list], label: string, ikm: uint8[list])
+        -> uint8[list] => extract(kdf, salt, concat(new([words.utf8("HPKE-v1"), suite_id, words.utf8(label), ikm])));
+
+    /// @brief LabeledExpand of RFC 9180, section 4.
+    let labeled_expand = func(kdf: Kdf, suite_id: uint8[list], prk: uint8[list], label: string, info: uint8[list],
+        length: int) -> uint8[list] =>
+            expand(kdf, prk, concat(new([i2osp2(length), words.utf8("HPKE-v1"), suite_id, words.utf8(label), info])), length);
+
+    let kem_suite = func(kem: Kem) -> uint8[list] => concat(new([words.utf8("KEM"), i2osp2(kem_id(kem))]));
+
+    let invalid = func<T>(code: string, text: string) -> Result<T> => Result<T>.Err(error.custom(code, text));
+
+    /// @brief An HPKE public key: SerializePublicKey of RFC 9180, section 7.1.1 (an uncompressed SEC1 point,
+    /// or the X25519 or X448 bytes). Equal keys have equal KEMs and bytes.
+    #[Final, Since("0.3.0")]
+    export let HpkePublicKey = class (
+        /// @brief The KEM.
+        export last kem: Kem;
+        last encoded: uint8[list];
+
+        /// @brief Checks and copies the encoding; a wrong length or a P-curve encoding that is not an
+        /// uncompressed point of the curve traps (use `parse_public_key` for outside input).
+        export let init = func(key_kem: Kem, bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.Hpke);
+            crypto_policy.require(kem_algorithm(key_kem));
+            if (not public_key_ok(key_kem, bytes)) {
+                trap_with_message("invalid argument: not a " .. name(key_kem) .. " public key");
+            }
+            kem = key_kem;
+            encoded = words.copy(bytes);
+        };
+
+        /// @brief A copy of the encoding.
+        #NoDiscard
+        export let to_bytes = func -> uint8[list] => words.copy(encoded);
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not key: HpkePublicKey) {
+                return false;
+            }
+            return key.kem == kem && constant_time.ct_eq(encoded, key.to_bytes());
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint32 = hashing.combine(9180, kem_id(kem) as uint32);
+            for (let b in encoded) {
+                h = hashing.combine(h, b as uint32);
+            }
+            return h;
+        };
+
+        export let.override to_string = func -> string => "HpkePublicKey(" .. name(kem) .. ")";
+    );
+
+    let public_key_ok = func(kem: Kem, bytes: uint8[list]) -> bool {
+        if (bytes.length != public_key_length(kem)) {
+            return false;
+        }
+        if (is_montgomery(kem)) {
+            return true;
+        }
+        if (bytes[0] != 4) {
+            return false;
+        }
+        return match (new weierstrass.Curve(curve_of(kem)).decode(bytes)) {
+            Optional.None => false,
+            Optional.Some(_) => true,
+        };
+    };
+
+    /// @brief An HPKE private key (Nsk bytes in secret memory) with its public key. `to_string` never prints
+    /// it.
+    #[Final, Since("0.3.0")]
+    export let HpkePrivateKey = class implements PrivateKey<DhKem> (
+        /// @brief The KEM.
+        export last kem: Kem;
+        last material: SecretBytes;
+        last public_encoded: uint8[list];
+
+        /// @brief The key of its Nsk bytes (for a P-curve, a scalar from 1 to n - 1). Another length or scalar
+        /// traps (use `parse_private_key` for outside input).
+        export let init = func(key_kem: Kem, bytes: uint8[list]) {
+            crypto_policy.require(Algorithm.Hpke);
+            crypto_policy.require(kem_algorithm(key_kem));
+            last public_bytes = public_of(key_kem, bytes);
+            if (public_bytes.length == 0) {
+                trap_with_message("invalid argument: not a " .. name(key_kem) .. " private key");
+            }
+            kem = key_kem;
+            material = new(bytes);
+            public_encoded = public_bytes;
+        };
+
+        export let expose = func -> uint8[list] => material.expose();
+        export let wipe = func => material.wipe();
+        export let is_wiped = func -> bool => material.is_wiped();
+        export let lock = func => material.lock();
+        export let public_key_bytes = func -> uint8[list] => words.copy(public_encoded);
+
+        /// @brief The matching public key.
+        #NoDiscard
+        export let public_key = func -> HpkePublicKey => new(kem, public_encoded);
+
+        /// @brief A fixed placeholder, never the key.
+        export let.override to_string = func -> string => "HpkePrivateKey(<redacted>)";
+    );
+
+    /// @brief The public key of private key bytes, or an empty list when they are not a private key.
+    let public_of = func(kem: Kem, bytes: uint8[list]) -> uint8[list] {
+        if (bytes.length != private_key_length(kem)) {
+            return new;
+        }
+        if (kem == Kem.DhKemX25519HkdfSha256) {
+            let base = words.zeros(32);
+            base[0] = 9;
+            return montgomery.x25519(bytes, base);
+        }
+        if (kem == Kem.DhKemX448HkdfSha512) {
+            let base = words.zeros(56);
+            base[0] = 5;
+            return montgomery.x448(bytes, base);
+        }
+        last curve = new weierstrass.Curve(curve_of(kem));
+        return match (curve.scalar_in_range(bytes)) {
+            Optional.None => new,
+            Optional.Some(d) => curve.encode(curve.multiply_generator(d), false),
+        };
+    };
+
+    /// @brief DH(skX, pkY) of RFC 9180, section 4.1: the X25519 or X448 result, or the x-coordinate of the
+    /// product. An all-zero X25519 or X448 result, or a public key that is not a point, is an empty list.
+    let diffie_hellman = func(kem: Kem, private_bytes: uint8[list], public_bytes: uint8[list]) -> uint8[list] {
+        if (is_montgomery(kem)) {
+            last shared = kem == Kem.DhKemX25519HkdfSha256 ? montgomery.x25519(private_bytes, public_bytes)
+                : montgomery.x448(private_bytes, public_bytes);
+            return if (constant_time.ct_eq(shared, words.zeros(shared.length))) -> new else -> shared;
+        }
+        last curve = new weierstrass.Curve(curve_of(kem));
+        match (curve.decode(public_bytes)) {
+            Optional.None => {
+                return new;
+            },
+            Optional.Some(point) => {
+                let d = mp.from_bytes_be(private_bytes, curve.limbs());
+                last product = curve.multiply(d, point);
+                for (let i = 0; i < d.length; i++) {
+                    d[i] = 0;
+                }
+                if (curve.is_identity(product)) {
+                    return new;
+                }
+                return mp.to_bytes_be(curve.affine_x(product), curve.size);
+            },
+        }
+    };
+
+    /// @brief DeriveKeyPair of RFC 9180, section 7.1.3, from input keying material (at least Nsk bytes are
+    /// recommended). A P-curve derivation that finds no scalar in 256 candidates, which has negligible
+    /// probability, traps.
+    #[NoDiscard, Since("0.3.0")]
+    export let derive_key_pair = func(kem: Kem, ikm: uint8[list]) -> HpkePrivateKey {
+        last kdf = kem_kdf(kem);
+        last suite_id = kem_suite(kem);
+        last dkp_prk = labeled_extract(kdf, suite_id, new, "dkp_prk", ikm);
+        if (is_montgomery(kem)) {
+            return new(kem, labeled_expand(kdf, suite_id, dkp_prk, "sk", new, private_key_length(kem)));
+        }
+        last curve = new weierstrass.Curve(curve_of(kem));
+        last bitmask: uint8 = kem == Kem.DhKemP521HkdfSha512 ? 1 : 255;
+        for (let counter in 0 .. 256) {
+            let bytes = labeled_expand(kdf, suite_id, dkp_prk, "candidate", new([counter as uint8]),
+                private_key_length(kem));
+            bytes[0] = bytes[0] & bitmask;
+            match (curve.scalar_in_range(bytes)) {
+                Optional.None => {
+                },
+                Optional.Some(_) => {
+                    return new(kem, bytes);
+                },
+            }
+        }
+        trap_with_message("invalid state: HPKE DeriveKeyPair found no scalar");
+        return new(kem, new);
+    };
+
+    /// @brief A new key pair from Nsk bytes of `Entropy.os_bytes`, or of the given generator, through
+    /// DeriveKeyPair. Fails when the entropy source fails.
+    #[NoDiscard, Since("0.3.0")]
+    export let generate_key_pair = func(kem: Kem) -> Result<HpkePrivateKey> {
+        match (entropy.os_bytes(private_key_length(kem))) {
+            Result.Ok(ikm) => {
+                last key = derive_key_pair(kem, ikm);
+                words.wipe(ikm);
+                return Result<HpkePrivateKey>.Ok(key);
+            },
+            Result.Err(e) => {
+                return Result<HpkePrivateKey>.Err(e);
+            },
+        }
+    } or func(kem: Kem, random: drbg.ChaCha20Drbg) -> Result<HpkePrivateKey> {
+        let ikm = random.fill(private_key_length(kem));
+        last key = derive_key_pair(kem, ikm);
+        words.wipe(ikm);
+        return Result<HpkePrivateKey>.Ok(key);
+    };
+
+    /// @brief A public key from outside the program. A wrong length or a P-curve encoding that is not an
+    /// uncompressed point of the curve is `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_public_key = func(kem: Kem, bytes: uint8[list]) -> Result<HpkePublicKey> {
+        if (not public_key_ok(kem, bytes)) {
+            return invalid<HpkePublicKey>("crypto.invalid_key", "not a " .. name(kem) .. " public key");
+        }
+        return Result<HpkePublicKey>.Ok(new HpkePublicKey(kem, bytes));
+    };
+
+    /// @brief A private key from outside the program. A wrong length or a P-curve scalar outside 1 to n - 1 is
+    /// `Custom` code `crypto.invalid_key`.
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_private_key = func(kem: Kem, bytes: uint8[list]) -> Result<HpkePrivateKey> {
+        if (public_of(kem, bytes).length == 0) {
+            return invalid<HpkePrivateKey>("crypto.invalid_key", "not a " .. name(kem) .. " private key");
+        }
+        return Result<HpkePrivateKey>.Ok(new HpkePrivateKey(kem, bytes));
+    };
+
+    /// @brief A DHKEM of RFC 9180, section 4.1, as a `KeyEncapsulation`: the ciphertext is `enc`, the
+    /// serialized ephemeral public key, and the shared secret has Nsecret bytes.
+    #[Final, Since("0.3.0")]
+    export let DhKem = class implements KeyEncapsulation<HpkePublicKey, HpkePrivateKey, SecretBytes, uint8[list]> (
+        /// @brief The KEM.
+        export last kem: Kem;
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        /// @brief The KEM with ephemeral keys from `Entropy.os_bytes`, or from the given generator.
+        export let init = func(key_kem: Kem) {
+            kem = key_kem;
+            check();
+        } or func(key_kem: Kem, random: drbg.ChaCha20Drbg) {
+            kem = key_kem;
+            generator = random;
+            has_generator = true;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(Algorithm.Hpke);
+            crypto_policy.require(kem_algorithm(kem));
+        };
+
+        /// @brief `Algorithm.Hpke`.
+        export let algorithm = func -> Algorithm => Algorithm.Hpke;
+
+        /// @brief A fresh ephemeral key pair.
+        #NoDiscard
+        export let ephemeral_key = func -> Result<HpkePrivateKey> {
+            if (has_generator) {
+                return generate_key_pair(kem, generator);
+            }
+            return generate_key_pair(kem);
+        };
+
+        /// @brief Encap(pkR) with the given ephemeral key. An X25519 or X448 key that gives an all-zero secret
+        /// is `Custom` code `crypto.key_agreement`. Keys of another KEM trap.
+        #NoDiscard
+        export let encapsulate_with = func(public_key: HpkePublicKey, ephemeral: HpkePrivateKey)
+            -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            check_kem(public_key.kem, ephemeral.kem);
+            last dh = diffie_hellman(kem, ephemeral.expose(), public_key.to_bytes());
+            if (dh.length == 0) {
+                return invalid<Encapsulation<SecretBytes, uint8[list]>>("crypto.key_agreement", "HPKE Diffie-Hellman failed");
+            }
+            last enc = ephemeral.public_key_bytes();
+            last secret = extract_and_expand(dh, concat(new([enc, public_key.to_bytes()])));
+            return Result<Encapsulation<SecretBytes, uint8[list]>>.Ok(new Encapsulation<SecretBytes, uint8[list]>(secret, enc));
+        };
+
+        /// @brief AuthEncap(pkR, skS) with the given ephemeral key.
+        #NoDiscard
+        export let auth_encapsulate_with = func(public_key: HpkePublicKey, sender: HpkePrivateKey,
+            ephemeral: HpkePrivateKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            check_kem(public_key.kem, ephemeral.kem);
+            check_kem(sender.kem, kem);
+            last first = diffie_hellman(kem, ephemeral.expose(), public_key.to_bytes());
+            last second = diffie_hellman(kem, sender.expose(), public_key.to_bytes());
+            if (first.length == 0 || second.length == 0) {
+                return invalid<Encapsulation<SecretBytes, uint8[list]>>("crypto.key_agreement", "HPKE Diffie-Hellman failed");
+            }
+            last enc = ephemeral.public_key_bytes();
+            last secret = extract_and_expand(concat(new([first, second])),
+                concat(new([enc, public_key.to_bytes(), sender.public_key_bytes()])));
+            return Result<Encapsulation<SecretBytes, uint8[list]>>.Ok(new Encapsulation<SecretBytes, uint8[list]>(secret, enc));
+        };
+
+        /// @brief Encap(pkR) with a fresh ephemeral key. Fails on an entropy failure or a bad X25519/X448 key.
+        #NoDiscard
+        export let try_encapsulate = func(public_key: HpkePublicKey) -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            match (ephemeral_key()) {
+                Result.Ok(ephemeral) => {
+                    return encapsulate_with(public_key, ephemeral);
+                },
+                Result.Err(e) => {
+                    return Result<Encapsulation<SecretBytes, uint8[list]>>.Err(e);
+                },
+            }
+        };
+
+        /// @brief AuthEncap(pkR, skS) with a fresh ephemeral key.
+        #NoDiscard
+        export let try_auth_encapsulate = func(public_key: HpkePublicKey, sender: HpkePrivateKey)
+            -> Result<Encapsulation<SecretBytes, uint8[list]>> {
+            match (ephemeral_key()) {
+                Result.Ok(ephemeral) => {
+                    return auth_encapsulate_with(public_key, sender, ephemeral);
+                },
+                Result.Err(e) => {
+                    return Result<Encapsulation<SecretBytes, uint8[list]>>.Err(e);
+                },
+            }
+        };
+
+        /// @brief Encap(pkR) with a fresh ephemeral key. Traps with `unavailable: ...` when `try_encapsulate`
+        /// fails (an entropy failure, or an X25519/X448 key that gives an all-zero secret).
+        export let encapsulate = func(public_key: HpkePublicKey) -> Encapsulation<SecretBytes, uint8[list]> {
+            match (try_encapsulate(public_key)) {
+                Result.Ok(result) => {
+                    return result;
+                },
+                Result.Err(e) => {
+                    trap_with_message("unavailable: HPKE encapsulation failed: " .. e.to_string());
+                },
+            }
+        };
+
+        /// @brief Decap(enc, skR). A malformed `enc` or a failed Diffie-Hellman is `Custom` code
+        /// `crypto.invalid_ciphertext`.
+        export let decapsulate = func(private_key: HpkePrivateKey, ciphertext: uint8[list]) -> Result<SecretBytes> {
+            check_kem(private_key.kem, kem);
+            if (not public_key_ok(kem, ciphertext)) {
+                return invalid<SecretBytes>("crypto.invalid_ciphertext", "malformed HPKE enc");
+            }
+            last dh = diffie_hellman(kem, private_key.expose(), ciphertext);
+            if (dh.length == 0) {
+                return invalid<SecretBytes>("crypto.invalid_ciphertext", "HPKE Diffie-Hellman failed");
+            }
+            return Result<SecretBytes>.Ok(extract_and_expand(dh, concat(new([ciphertext, private_key.public_key_bytes()]))));
+        };
+
+        /// @brief AuthDecap(enc, skR, pkS).
+        #NoDiscard
+        export let auth_decapsulate = func(private_key: HpkePrivateKey, ciphertext: uint8[list], sender: HpkePublicKey)
+            -> Result<SecretBytes> {
+            check_kem(private_key.kem, kem);
+            check_kem(sender.kem, kem);
+            if (not public_key_ok(kem, ciphertext)) {
+                return invalid<SecretBytes>("crypto.invalid_ciphertext", "malformed HPKE enc");
+            }
+            last first = diffie_hellman(kem, private_key.expose(), ciphertext);
+            last second = diffie_hellman(kem, private_key.expose(), sender.to_bytes());
+            if (first.length == 0 || second.length == 0) {
+                return invalid<SecretBytes>("crypto.invalid_ciphertext", "HPKE Diffie-Hellman failed");
+            }
+            return Result<SecretBytes>.Ok(extract_and_expand(concat(new([first, second])),
+                concat(new([ciphertext, private_key.public_key_bytes(), sender.to_bytes()]))));
+        };
+
+        let check_kem = func(first: Kem, second: Kem) {
+            if (first != kem || second != kem) {
+                trap_with_message("invalid argument: HPKE key of another KEM");
+            }
+        };
+
+        /// @brief ExtractAndExpand of RFC 9180, section 4.1.
+        let extract_and_expand = func(dh: uint8[list], kem_context: uint8[list]) -> SecretBytes {
+            last kdf = kem_kdf(kem);
+            last suite_id = kem_suite(kem);
+            last eae_prk = labeled_extract(kdf, suite_id, new, "eae_prk", dh);
+            return new(labeled_expand(kdf, suite_id, eae_prk, "shared_secret", kem_context, n_secret(kem)));
+        };
+
+        export let.override to_string = func -> string => "DhKem(<redacted>)";
+    );
+
+    /// @brief The keys of a context: the AEAD key, the base nonce and the exporter secret (RFC 9180, section
+    /// 5.1).
+    #Final
+    let Schedule = class (
+        export last suite_id: uint8[list];
+        export last kdf: Kdf;
+        export last aead: Aead;
+        export last key: uint8[list];
+        export last base_nonce: uint8[list];
+        export last exporter_secret: uint8[list];
+
+        export let init = func(suite: uint8[list], schedule_kdf: Kdf, schedule_aead: Aead, aead_key: uint8[list],
+            nonce: uint8[list], exporter: uint8[list]) {
+            suite_id = suite;
+            kdf = schedule_kdf;
+            aead = schedule_aead;
+            key = aead_key;
+            base_nonce = nonce;
+            exporter_secret = exporter;
+        };
+
+        /// @brief Seal or open with sequence number `sequence`.
+        export let nonce = func(sequence: int64) -> uint8[list] {
+            let out = words.copy(base_nonce);
+            for (let i in 0 .. 8) {
+                out[11 - i] = out[11 - i] ^ (((sequence >> (8 * i)) & 255) as uint8);
+            }
+            return out;
+        };
+
+        export let seal = func(sequence: int64, aad: uint8[list], plaintext: uint8[list]) -> uint8[list] {
+            if (aead == Aead.ExportOnly) {
+                trap_with_message("invalid state: an export-only HPKE context cannot seal");
+            }
+            if (aead == Aead.ChaCha20Poly1305) {
+                return new chacha.ChaCha20Poly1305(key).seal(nonce(sequence), plaintext, aad);
+            }
+            return new aes_gcm.AesGcm(key).seal(nonce(sequence), plaintext, aad);
+        };
+
+        export let open = func(sequence: int64, aad: uint8[list], ciphertext: uint8[list]) -> Result<uint8[list]> {
+            if (aead == Aead.ExportOnly) {
+                trap_with_message("invalid state: an export-only HPKE context cannot open");
+            }
+            if (aead == Aead.ChaCha20Poly1305) {
+                return new chacha.ChaCha20Poly1305(key).open(nonce(sequence), ciphertext, aad);
+            }
+            return new aes_gcm.AesGcm(key).open(nonce(sequence), ciphertext, aad);
+        };
+
+        /// @brief Export of RFC 9180, section 5.3; a length above 255 Nh traps.
+        export let export_secret = func(exporter_context: uint8[list], length: int) -> uint8[list] =>
+            labeled_expand(kdf, suite_id, exporter_secret, "sec", exporter_context, length);
+
+        export let.override to_string = func -> string => "Hpke.Schedule(<redacted>)";
+    );
+
+    /// @brief The sender's context: `enc` for the recipient, `seal` in order, and `export_secret`.
+    #[Final, Since("0.3.0")]
+    export let SenderContext = class (
+        /// @brief The encapsulated key to send with the messages.
+        export last enc: uint8[list];
+        last schedule: Schedule;
+        /// @brief The number of messages sealed so far.
+        export let sequence: int64 = 0;
+            | get: sequence;
+
+        export let init = func(encapsulated: uint8[list], keys: Schedule) {
+            enc = encapsulated;
+            schedule = keys;
+        };
+
+        /// @brief The ciphertext of the next message. An export-only context traps.
+        #NoDiscard
+        export let seal = func(aad: uint8[list], plaintext: uint8[list]) -> uint8[list] {
+            last out = schedule.seal(sequence, aad, plaintext);
+            sequence = sequence + 1;
+            return out;
+        };
+
+        /// @brief `length` bytes of exported secret for the context string (at most 255 Nh bytes).
+        #NoDiscard
+        export let export_secret = func(exporter_context: uint8[list], length: int) -> uint8[list] =>
+            schedule.export_secret(exporter_context, length);
+
+        export let.override to_string = func -> string => "Hpke.SenderContext(<redacted>)";
+    );
+
+    /// @brief The recipient's context: `open` in order, and `export_secret`.
+    #[Final, Since("0.3.0")]
+    export let ReceiverContext = class (
+        last schedule: Schedule;
+        /// @brief The number of messages opened so far.
+        export let sequence: int64 = 0;
+            | get: sequence;
+
+        export let init = func(keys: Schedule) {
+            schedule = keys;
+        };
+
+        /// @brief The plaintext of the next message, or `Custom` code `crypto.authentication`; a failure does not
+        /// advance the sequence number. An export-only context traps.
+        #NoDiscard
+        export let open = func(aad: uint8[list], ciphertext: uint8[list]) -> Result<uint8[list]> {
+            last outcome = schedule.open(sequence, aad, ciphertext);
+            match (outcome) {
+                Result.Ok(_) => {
+                    sequence = sequence + 1;
+                },
+                Result.Err(_) => {
+                },
+            }
+            return outcome;
+        };
+
+        /// @brief `length` bytes of exported secret for the context string (at most 255 Nh bytes).
+        #NoDiscard
+        export let export_secret = func(exporter_context: uint8[list], length: int) -> uint8[list] =>
+            schedule.export_secret(exporter_context, length);
+
+        export let.override to_string = func -> string => "Hpke.ReceiverContext(<redacted>)";
+    );
+
+    /// @brief The output of the single-shot `seal`: `enc` and the ciphertext.
+    #[Final, Since("0.3.0")]
+    export let SealedMessage = class (
+        export last enc: uint8[list];
+        export last ciphertext: uint8[list];
+
+        export let init = func(encapsulated: uint8[list], sealed: uint8[list]) {
+            enc = encapsulated;
+            ciphertext = sealed;
+        };
+
+        /// @brief Whether both the encapsulation and ciphertext bytes match.
+        /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
+        #[NoDiscard, Since("0.3.0")]
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: SealedMessage) {
+                return false;
+            }
+            return constant_time.ct_eq(enc, that.enc) && constant_time.ct_eq(ciphertext, that.ciphertext);
+        };
+
+        /// @brief A hash of both byte sequences, including their lengths.
+        /// @see [Std.Crypto.Asymmetric.Hpke](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-Hpke)
+        #[NoDiscard, Since("0.3.0")]
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(enc.length as uint32, ciphertext.length as uint32);
+            for (let byte in enc) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            for (let byte in ciphertext) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            return hash;
+        };
+
+        export let.override to_string = func -> string =>
+            "Hpke.SealedMessage(" .. enc.length.to_string() .. " + " .. ciphertext.length.to_string() .. " bytes)";
+    );
+
+    /// @brief An HPKE ciphersuite (KEM, KDF, AEAD).
+    #[Final, Since("0.3.0")]
+    export let Suite = class (
+        export last kem: Kem;
+        export last kdf: Kdf;
+        export last aead: Aead;
+        last dhkem: DhKem;
+
+        /// @brief The suite, with ephemeral keys from `Entropy.os_bytes` or from the given generator.
+        export let init = func(suite_kem: Kem, suite_kdf: Kdf, suite_aead: Aead) {
+            kem = suite_kem;
+            kdf = suite_kdf;
+            aead = suite_aead;
+            dhkem = new(suite_kem);
+            check();
+        } or func(suite_kem: Kem, suite_kdf: Kdf, suite_aead: Aead, random: drbg.ChaCha20Drbg) {
+            kem = suite_kem;
+            kdf = suite_kdf;
+            aead = suite_aead;
+            dhkem = new(suite_kem, random);
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(Algorithm.Hpke);
+            crypto_policy.require(match (kdf) {
+                Kdf.HkdfSha256 => Algorithm.Sha256,
+                Kdf.HkdfSha384 => Algorithm.Sha384,
+                Kdf.HkdfSha512 => Algorithm.Sha512,
+            });
+            if (aead != Aead.ExportOnly) {
+                crypto_policy.require(match (aead) {
+                    Aead.Aes128Gcm => Algorithm.Aes128Gcm,
+                    Aead.Aes256Gcm => Algorithm.Aes256Gcm,
+                    _ => Algorithm.ChaCha20Poly1305,
+                });
+            }
+        };
+
+        /// @brief The DHKEM of the suite.
+        #NoDiscard
+        export let key_encapsulation = func -> DhKem => dhkem;
+
+        /// @brief "HPKE" || kem_id || kdf_id || aead_id.
+        let suite_id = func -> uint8[list] =>
+            concat(new([words.utf8("HPKE"), i2osp2(kem_id(kem)), i2osp2(kdf_id(kdf)), i2osp2(aead_id(aead))]));
+
+        /// @brief KeySchedule of RFC 9180, section 5.1. PSK inputs that do not fit the mode trap
+        /// (VerifyPSKInputs).
+        let schedule = func(mode: Mode, shared_secret: uint8[list], info: uint8[list], psk: uint8[list],
+            psk_id: uint8[list]) -> Schedule {
+            last with_psk = mode == Mode.Psk || mode == Mode.AuthPsk;
+            if ((psk.length == 0) != (psk_id.length == 0)) {
+                trap_with_message("invalid argument: HPKE psk and psk_id must both be given or both be empty");
+            }
+            if (with_psk != (psk.length > 0)) {
+                trap_with_message("invalid argument: HPKE psk does not fit the mode");
+            }
+            last id = suite_id();
+            last mode_byte: uint8 = match (mode) {
+                Mode.Base => 0,
+                Mode.Psk => 1,
+                Mode.Auth => 2,
+                Mode.AuthPsk => 3,
+            };
+            last psk_id_hash = labeled_extract(kdf, id, new, "psk_id_hash", psk_id);
+            last info_hash = labeled_extract(kdf, id, new, "info_hash", info);
+            last context = concat(new([new([mode_byte]), psk_id_hash, info_hash]));
+            last secret = labeled_extract(kdf, id, shared_secret, "secret", psk);
+            last key = n_k(aead) > 0 ? labeled_expand(kdf, id, secret, "key", context, n_k(aead)) : new;
+            last base_nonce = n_k(aead) > 0 ? labeled_expand(kdf, id, secret, "base_nonce", context, 12) : new;
+            last exporter = labeled_expand(kdf, id, secret, "exp", context, n_h(kdf));
+            words.wipe(secret);
+            return new(id, kdf, aead, key, base_nonce, exporter);
+        };
+
+        /// @brief SetupS of any mode with the given ephemeral key: `psk` and `psk_id` are empty in the base and
+        /// auth modes, and `sender` holds the sender's key in the auth modes (and is empty otherwise).
+        #NoDiscard
+        export let setup_sender_with = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
+            psk_id: uint8[list], sender: HpkePrivateKey[list], ephemeral: HpkePrivateKey) -> Result<SenderContext> {
+            last auth = mode == Mode.Auth || mode == Mode.AuthPsk;
+            if (auth != (sender.length == 1)) {
+                trap_with_message("invalid argument: an HPKE sender key is needed exactly in the auth modes");
+            }
+            last outcome = auth ? dhkem.auth_encapsulate_with(public_key, sender[0], ephemeral)
+                : dhkem.encapsulate_with(public_key, ephemeral);
+            match (outcome) {
+                Result.Ok(encapsulation) => {
+                    last keys = schedule(mode, encapsulation.shared_secret.expose(), info, psk, psk_id);
+                    return Result<SenderContext>.Ok(new SenderContext(encapsulation.ciphertext, keys));
+                },
+                Result.Err(e) => {
+                    return Result<SenderContext>.Err(e);
+                },
+            }
+        };
+
+        /// @brief SetupS of any mode with a fresh ephemeral key (see `setup_sender_with`).
+        #NoDiscard
+        export let setup_sender = func(mode: Mode, public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
+            psk_id: uint8[list], sender: HpkePrivateKey[list]) -> Result<SenderContext> {
+            match (dhkem.ephemeral_key()) {
+                Result.Ok(ephemeral) => {
+                    return setup_sender_with(mode, public_key, info, psk, psk_id, sender, ephemeral);
+                },
+                Result.Err(e) => {
+                    return Result<SenderContext>.Err(e);
+                },
+            }
+        };
+
+        /// @brief SetupBaseS.
+        #NoDiscard
+        export let setup_base_sender = func(public_key: HpkePublicKey, info: uint8[list]) -> Result<SenderContext> =>
+            setup_sender(Mode.Base, public_key, info, new, new, new);
+
+        /// @brief SetupPSKS.
+        #NoDiscard
+        export let setup_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
+            psk_id: uint8[list]) -> Result<SenderContext> => setup_sender(Mode.Psk, public_key, info, psk, psk_id, new);
+
+        /// @brief SetupAuthS.
+        #NoDiscard
+        export let setup_auth_sender = func(public_key: HpkePublicKey, info: uint8[list], sender: HpkePrivateKey)
+            -> Result<SenderContext> => setup_sender(Mode.Auth, public_key, info, new, new, new([sender]));
+
+        /// @brief SetupAuthPSKS.
+        #NoDiscard
+        export let setup_auth_psk_sender = func(public_key: HpkePublicKey, info: uint8[list], psk: uint8[list],
+            psk_id: uint8[list], sender: HpkePrivateKey) -> Result<SenderContext> =>
+                setup_sender(Mode.AuthPsk, public_key, info, psk, psk_id, new([sender]));
+
+        /// @brief SetupR of any mode: `sender` holds the sender's public key in the auth modes (and is empty
+        /// otherwise). A malformed `enc` or a failed Diffie-Hellman is `Custom` code `crypto.invalid_ciphertext`.
+        #NoDiscard
+        export let setup_receiver = func(mode: Mode, enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
+            psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey[list]) -> Result<ReceiverContext> {
+            last auth = mode == Mode.Auth || mode == Mode.AuthPsk;
+            if (auth != (sender.length == 1)) {
+                trap_with_message("invalid argument: an HPKE sender key is needed exactly in the auth modes");
+            }
+            last outcome = auth ? dhkem.auth_decapsulate(private_key, enc, sender[0]) : dhkem.decapsulate(private_key, enc);
+            match (outcome) {
+                Result.Ok(shared) => {
+                    return Result<ReceiverContext>.Ok(new ReceiverContext(schedule(mode, shared.expose(), info, psk, psk_id)));
+                },
+                Result.Err(e) => {
+                    return Result<ReceiverContext>.Err(e);
+                },
+            }
+        };
+
+        /// @brief SetupBaseR.
+        #NoDiscard
+        export let setup_base_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list])
+            -> Result<ReceiverContext> => setup_receiver(Mode.Base, enc, private_key, info, new, new, new);
+
+        /// @brief SetupPSKR.
+        #NoDiscard
+        export let setup_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
+            psk: uint8[list], psk_id: uint8[list]) -> Result<ReceiverContext> =>
+                setup_receiver(Mode.Psk, enc, private_key, info, psk, psk_id, new);
+
+        /// @brief SetupAuthR.
+        #NoDiscard
+        export let setup_auth_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
+            sender: HpkePublicKey) -> Result<ReceiverContext> =>
+                setup_receiver(Mode.Auth, enc, private_key, info, new, new, new([sender]));
+
+        /// @brief SetupAuthPSKR.
+        #NoDiscard
+        export let setup_auth_psk_receiver = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list],
+            psk: uint8[list], psk_id: uint8[list], sender: HpkePublicKey) -> Result<ReceiverContext> =>
+                setup_receiver(Mode.AuthPsk, enc, private_key, info, psk, psk_id, new([sender]));
+
+        /// @brief Single-shot base-mode encryption (RFC 9180, section 6.1).
+        #NoDiscard
+        export let seal = func(public_key: HpkePublicKey, info: uint8[list], aad: uint8[list], plaintext: uint8[list])
+            -> Result<SealedMessage> {
+            match (setup_base_sender(public_key, info)) {
+                Result.Ok(context) => {
+                    return Result<SealedMessage>.Ok(new SealedMessage(context.enc, context.seal(aad, plaintext)));
+                },
+                Result.Err(e) => {
+                    return Result<SealedMessage>.Err(e);
+                },
+            }
+        };
+
+        /// @brief Single-shot base-mode decryption (RFC 9180, section 6.1).
+        #NoDiscard
+        export let open = func(enc: uint8[list], private_key: HpkePrivateKey, info: uint8[list], aad: uint8[list],
+            ciphertext: uint8[list]) -> Result<uint8[list]> {
+            match (setup_base_receiver(enc, private_key, info)) {
+                Result.Ok(context) => {
+                    return context.open(aad, ciphertext);
+                },
+                Result.Err(e) => {
+                    return Result<uint8[list]>.Err(e);
+                },
+            }
+        };
+
+        export let.override to_string = func -> string => "Hpke.Suite(<redacted>)";
+    );
+);

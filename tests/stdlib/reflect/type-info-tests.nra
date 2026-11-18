@@ -1,0 +1,47 @@
+let kinds = import:Std.Reflect.Type.TypeKind;
+let reflect = import:Std.Reflect.Core.TypeInfo;
+let test = import:Std.Test;
+
+let Shape = class ( );
+let Circle = class : Shape ( );
+
+let TypeInfoTests = module (
+    export let test_kind_ordinals_are_the_contract = func() -> void {
+        test.assert(kinds.of_ordinal(0) == kinds.TypeKind.Nil);
+        test.assert(kinds.of_ordinal(2) == kinds.TypeKind.Integer);
+        test.assert(kinds.of_ordinal(5) == kinds.TypeKind.Class);
+        test.assert(kinds.of_ordinal(7) == kinds.TypeKind.Record);
+        test.assert(kinds.of_ordinal(14) == kinds.TypeKind.TypeParameter);
+        test.assert(kinds.of_ordinal(15) == kinds.TypeKind.Other);
+        test.assert(kinds.of_ordinal(16) == kinds.TypeKind.Other);
+        test.assert(kinds.of_ordinal(-1) == kinds.TypeKind.Other);
+    };
+
+    export let test_from_parts_builds_the_record = func() -> void {
+        let info = reflect.from_parts([5, "Circle", "App.Circle"]);
+        test.assert(info.kind == kinds.TypeKind.Class);
+        test.assert_equal_string("Circle", info.name);
+        test.assert_equal_string("App.Circle", info.qualified_name);
+    };
+
+    export let test_value_equality_and_identity = func() -> void {
+        let first = typeof(new Circle());
+        let second = typeof(new Circle());
+        test.assert(first === second);
+        test.assert(!(first == second));
+        test.assert(first.hash_code() == second.hash_code());
+        test.assert(typeof(new Circle()) !== typeof(new Shape()));
+        test.assert_equal_string(first.to_string(), second.to_string());
+    };
+
+    export let test_typeof_kinds = func() -> void {
+        let none: Shape = nil;
+        let held: any = 2.5;
+        test.assert(typeof(none).kind == kinds.TypeKind.Nil);
+        test.assert(typeof(held).kind == kinds.TypeKind.Float);
+        test.assert_equal_string("float64", typeof(held).name);
+        test.assert(typeof(Shape).kind == kinds.TypeKind.Class);
+        test.assert(typeof("x").kind == kinds.TypeKind.String);
+        test.assert(typeof(true).kind == kinds.TypeKind.Bool);
+    };
+);

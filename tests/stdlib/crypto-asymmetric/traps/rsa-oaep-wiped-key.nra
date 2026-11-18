@@ -1,0 +1,21 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy --max-steps 15000000000
+// stderr: explicit program failure \(trap reason 3\): invalid state: secret wiped
+let hex = import:Std.Encoding.Hex;
+let oaep = import:Std.Crypto.Asymmetric.RsaOaep;
+let program = import:Std.Program;
+let fixture = import:RsaWipeKey;
+let test = import:Std.Test;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last key = fixture.key();
+        last cipher = new oaep.RsaOaep();
+        last seed = test.assert_ok(hex.decode("0000000000000000000000000000000000000000000000000000000000000000"));
+        last ciphertext = cipher.encrypt_with_seed(key.public_key, new([1]), new, seed);
+        key.wipe();
+        let _ = cipher.decrypt(key, ciphertext, new);
+        return program.ExitCode.Ok;
+    };
+);

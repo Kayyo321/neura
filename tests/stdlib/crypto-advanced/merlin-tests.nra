@@ -1,0 +1,34 @@
+// test-options: --gpu=off --max-steps 4000000000
+let hex = import:Std.Encoding.Hex;
+let merlin = import:Std.Crypto.Advanced.Merlin;
+let test = import:Std.Test;
+let uint64s = import:Std.Core.UInt64;
+let vectors = import:MerlinVectors;
+
+let MerlinTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_transcript_operations_against_rust_merlin = func {
+        let current: merlin.Transcript = nil;
+        last rows = vectors.operations;
+        for (let i = 0; i < rows.length; i += 5) {
+            last operation = rows[i + 1];
+            last label = decode(rows[i + 2]);
+            if (operation == "new") {
+                current = new merlin.Transcript(label);
+            } else if (operation == "append") {
+                current.append_message(label, decode(rows[i + 3]));
+            } else if (operation == "u64") {
+                current.append_u64(label, test.assert_ok(uint64s.parse(rows[i + 3])));
+            } else {
+                last length = test.assert_ok(uint64s.parse(rows[i + 3])) as int;
+                if (operation == "fork") {
+                    last branch = current.fork();
+                    test.assert_equal_string(rows[i + 4], hex.encode(branch.challenge_bytes(label, length)));
+                    branch.append_u64(label, 31);
+                }
+                test.assert_equal_string(rows[i + 4], hex.encode(current.challenge_bytes(label, length)));
+            }
+        }
+    };
+);

@@ -25,7 +25,7 @@ let MultiInt = class (
 let App = module:program.Entry (
     export let.override main = func(args: string[]) -> program.ExitCode {
         last initial: int16 = 12;
-        last value: MultiInt = new(initial);   // target-typed new selects init(int16)
+        last value: MultiInt = new(initial); // target-typed new selects init(int16)
         write("Neura", 3);
         write(value);
         write((value as int64).to_string());

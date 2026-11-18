@@ -25,12 +25,12 @@ export let Multipart = module (
     export let MultipartEvent = enum (
         /// @brief A part begins; its header fields.
         PartStart(http_headers.Headers),
-        /// @brief The next bytes of the current part's body.
-        Data(uint8[list]),
-        /// @brief The current part ended.
-        PartEnd,
-        /// @brief The close delimiter was read; the rest is the epilogue.
-        Done
+            /// @brief The next bytes of the current part's body.
+            Data(uint8[list]),
+            /// @brief The current part ended.
+            PartEnd,
+            /// @brief The close delimiter was read; the rest is the epilogue.
+            Done
     );
 
     /// @brief The limits of a multipart parser. The defaults are 1,000 parts, 16,384 bytes of each part's header
@@ -68,10 +68,9 @@ export let Multipart = module (
 
         /// @brief Equal when every limit is equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MultipartLimits)) {
+            if (other is not limits: MultipartLimits) {
                 return false;
             }
-            last limits = other as MultipartLimits;
             return max_parts == limits.max_parts && max_header_bytes == limits.max_header_bytes
                 && max_header_fields == limits.max_header_fields;
         };
@@ -136,11 +135,10 @@ export let Multipart = module (
 
         /// @brief Equal header maps and equal body bytes.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Part)) {
+            if (other is not part: Part) {
                 return false;
             }
-            last part = other as Part;
-            if (!headers.equals(part.headers) || body.length != part.body.length) {
+            if (not headers.equals(part.headers) || body.length != part.body.length) {
                 return false;
             }
             for (let i = 0; i < body.length; i++) {
@@ -162,7 +160,7 @@ export let Multipart = module (
 
         /// @brief The header map and the body length.
         export let.override to_string = func -> string =>
-            "Part{" + headers.to_string() + ", " + body.length.to_string() + " bytes}";
+            "Part{" .. headers.to_string() .. ", " .. body.length.to_string() .. " bytes}";
     );
 
     /// @brief A streaming parser of one multipart body.
@@ -228,7 +226,7 @@ export let Multipart = module (
                     if (state == InBody && end > pos) {
                         events.append(MultipartEvent.Data(copy_range(buffer, pos, end)));
                     }
-                    if (!found) {
+                    if (not found) {
                         pos = end;
                         break;
                     }
@@ -283,16 +281,14 @@ export let Multipart = module (
                     }
                     // The section without its final empty line.
                     let [valid, text] = string.from_utf8(copy_range(buffer, pos, end - 2));
-                    if (!valid) {
-                        return fail(400, "part header section is not UTF-8");
-                    }
+                    return fail(400, "part header section is not UTF-8") unless valid;
                     match (wire.parse_field_section(text, field_limits, false)) {
                         Result.Ok(fields) => {
                             events.append(MultipartEvent.PartStart(fields));
                         },
                         Result.Err(e) => {
                             last status = wire.rejection_status(e);
-                            return fail(status == 431 ? 413 : 400, "part header: " + errors.message(e));
+                            return fail(status == 431 ? 413 : 400, "part header: " .. errors.message(e));
                         },
                     }
                     pos = end;
@@ -319,10 +315,8 @@ export let Multipart = module (
             if (failed_status != 0) {
                 return failure();
             }
-            if (state != Finished) {
-                return fail(400, "multipart body ends before the close delimiter");
-            }
-            return Result<MultipartEvent[list]>.Ok(new MultipartEvent[list]());
+            return if (state != Finished) -> fail(400, "multipart body ends before the close delimiter")
+                else -> Result<MultipartEvent[list]>.Ok(new MultipartEvent[list]());
         };
 
         /// @brief Whether the close delimiter has been read.
@@ -334,7 +328,7 @@ export let Multipart = module (
 
         /// @brief Sets up the delimiter and the virtual CRLF before the body.
         let start = func(boundary: string) {
-            if (!is_boundary(boundary)) {
+            if (not is_boundary(boundary)) {
                 trap_with_message("invalid argument: boundary");
             }
             delimiter.append(13);
@@ -413,15 +407,13 @@ export let Multipart = module (
         last semicolon = strings.index_of(content_type, ";");
         last media = http_headers.trim_value(semicolon < 0 ? content_type : content_type.slice(0, semicolon));
         last slash = strings.index_of(media, "/");
-        if (slash < 0 || !strings.equals_ignore_ascii_case(media.slice(0, slash), "multipart")
-                || !http_headers.is_token(media.slice(slash + 1, media.byte_length))) {
+        if (slash < 0 || not strings.equals_ignore_ascii_case(media.slice(0, slash), "multipart")
+            || not http_headers.is_token(media.slice(slash + 1, media.byte_length))) {
             return Result<string>.Err(wire.rejection(415, "not a multipart media type"));
         }
         last names: string[list] = new;
         last values: string[list] = new;
-        if (!parse_parameters(content_type, names, values)) {
-            return Result<string>.Err(wire.rejection(400, "malformed Content-Type parameters"));
-        }
+        return Result<string>.Err(wire.rejection(400, "malformed Content-Type parameters")) unless parse_parameters(content_type, names, values);
         let boundary = "";
         let count = 0;
         for (let i = 0; i < names.length; i++) {
@@ -434,9 +426,7 @@ export let Multipart = module (
             last problem = count == 0 ? "no boundary parameter" : "more than one boundary parameter";
             return Result<string>.Err(wire.rejection(400, problem));
         }
-        if (!is_boundary(boundary)) {
-            return Result<string>.Err(wire.rejection(400, "invalid boundary"));
-        }
+        return Result<string>.Err(wire.rejection(400, "invalid boundary")) unless is_boundary(boundary);
         return Result<string>.Ok(boundary);
     };
 
@@ -452,7 +442,7 @@ export let Multipart = module (
             last b = text.byte_at(i);
             last alnum = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
             // ' ( ) + _ , - . / : = ? and space
-            if (!alnum && !(b == 39 or 40 or 41 or 43 or 95 or 44 or 45 or 46 or 47 or 58 or 61 or 63 or 32)) {
+            if (not alnum && not (b == 39 or 40 or 41 or 43 or 95 or 44 or 45 or 46 or 47 or 58 or 61 or 63 or 32)) {
                 return false;
             }
         }
@@ -466,9 +456,7 @@ export let Multipart = module (
     export let parameter = func(value: string, name: string) -> Result<Optional<string>> {
         last names: string[list] = new;
         last values: string[list] = new;
-        if (!parse_parameters(value, names, values)) {
-            return Result<Optional<string>>.Err(wire.rejection(400, "malformed parameters"));
-        }
+        return Result<Optional<string>>.Err(wire.rejection(400, "malformed parameters")) unless parse_parameters(value, names, values);
         last key = strings.to_ascii_lower(name);
         for (let i = 0; i < names.length; i++) {
             if (names[i] == key) {
@@ -483,9 +471,7 @@ export let Multipart = module (
     /// for large parts.
     #NoDiscard
     export let parse_all = func(body: uint8[list], boundary: string, limits: MultipartLimits) -> Result<Part[list]> {
-        if (!is_boundary(boundary)) {
-            return Result<Part[list]>.Err(wire.rejection(400, "invalid boundary"));
-        }
+        return Result<Part[list]>.Err(wire.rejection(400, "invalid boundary")) unless is_boundary(boundary);
         last parser = new MultipartParser(boundary, limits);
         last events = parser.feed(body)?;
         parser.finish()?;
@@ -551,11 +537,9 @@ export let Multipart = module (
         last kind = http_headers.trim_value(value.slice(0, k));
         last slash = strings.index_of(kind, "/");
         if (slash < 0) {
-            if (!http_headers.is_token(kind)) {
-                return false;
-            }
-        } else if (!http_headers.is_token(kind.slice(0, slash))
-                || !http_headers.is_token(kind.slice(slash + 1, kind.byte_length))) {
+            return false unless http_headers.is_token(kind);
+        } else if (not http_headers.is_token(kind.slice(0, slash))
+            || not http_headers.is_token(kind.slice(slash + 1, kind.byte_length))) {
             return false;
         }
         while (true) {
@@ -597,18 +581,16 @@ export let Multipart = module (
                         if (j + 1 >= length || value.byte_at(j + 1) >= 128) {
                             return false;
                         }
-                        text = text + value.slice(segment, j) + value.slice(j + 1, j + 2);
+                        text ..= value.slice(segment, j) .. value.slice(j + 1, j + 2);
                         j += 2;
                         segment = j;
                         continue;
                     }
                     j++;
                 }
-                if (!closed) {
-                    return false;
-                }
+                return false unless closed;
                 names.append(name);
-                values.append(text + value.slice(segment, j));
+                values.append(text .. value.slice(segment, j));
                 k = j + 1;
             } else {
                 last value_start = k;

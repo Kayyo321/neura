@@ -39,7 +39,7 @@ export let Baggage = module (
 
         /// @brief A property. A key that is not a token traps with "invalid argument: key".
         export let init = func(name: string, decoded: Optional<string>) {
-            if (!headers.is_token(name)) {
+            if (not headers.is_token(name)) {
                 trap_with_message("invalid argument: key");
             }
             key = name;
@@ -49,13 +49,17 @@ export let Baggage = module (
         /// @brief The encoded form, `key` or `key=value`.
         #NoDiscard
         export let to_header = func -> string => match (value) {
-            Optional.Some(text) => key + "=" + encode(text),
+            Optional.Some(text) => key .. "=" .. encode(text),
             Optional.None => key,
         };
 
         /// @brief Equal when the key and value are.
-        export let.override equals = func(other: class) -> bool =>
-            other is Property && to_header() == (other as Property).to_header();
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Property) {
+                return false;
+            }
+            return to_header() == that.to_header();
+        };
 
         /// @brief The hash of the encoded form.
         export let.override hash_code = func -> uint32 => strings.hash(to_header());
@@ -77,7 +81,7 @@ export let Baggage = module (
         /// @brief An entry (the property list is copied). A key that is not a token traps with "invalid argument:
         /// key".
         export let init = func(name: string, decoded: string, properties: Property[list]) {
-            if (!headers.is_token(name)) {
+            if (not headers.is_token(name)) {
                 trap_with_message("invalid argument: key");
             }
             key = name;
@@ -99,16 +103,20 @@ export let Baggage = module (
         /// @brief The encoded member, `key=value;prop;prop=value`, without spaces.
         #NoDiscard
         export let to_header = func -> string {
-            let text = key + "=" + encode(value);
+            let text = key .. "=" .. encode(value);
             for (let p in props) {
-                text += ";" + p.to_header();
+                text ..= ";" .. p.to_header();
             }
             return text;
         };
 
         /// @brief Equal when the encoded members are.
-        export let.override equals = func(other: class) -> bool =>
-            other is Entry && to_header() == (other as Entry).to_header();
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: Entry) {
+                return false;
+            }
+            return to_header() == that.to_header();
+        };
 
         /// @brief The hash of the encoded member.
         export let.override hash_code = func -> uint32 => strings.hash(to_header());
@@ -165,12 +173,12 @@ export let Baggage = module (
             for (let e in members) {
                 if (e.key != key) {
                     out.append(e);
-                } else if (!placed) {
+                } else if (not placed) {
                     out.append(entry);
                     placed = true;
                 }
             }
-            if (!placed) {
+            if (not placed) {
                 out.append(entry);
             }
             return new Baggage(out);
@@ -200,7 +208,7 @@ export let Baggage = module (
                 if (count == MaxMembers || text.byte_length + added > MaxBytes) {
                     break;
                 }
-                text += (count > 0 ? "," : "") + member;
+                text ..= (count > 0 ? "," : "") .. member;
                 count++;
             }
             return text;
@@ -208,17 +216,14 @@ export let Baggage = module (
 
         /// @brief Equal when every member and the order are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Baggage)) {
+            if (other is not that: Baggage) {
                 return false;
             }
-            last that = other as Baggage;
             if (members.length != that.members.length) {
                 return false;
             }
             for (let i = 0; i < members.length; i++) {
-                if (!members[i].equals(that.members[i])) {
-                    return false;
-                }
+                return false unless members[i].equals(that.members[i]);
             }
             return true;
         };
@@ -233,7 +238,7 @@ export let Baggage = module (
         };
 
         /// @brief Text such as "Baggage(3 members)".
-        export let.override to_string = func -> string => "Baggage(" + members.length.to_string() + " members)";
+        export let.override to_string = func -> string => "Baggage(" .. members.length.to_string() .. " members)";
     );
 
     /// @brief A baggage with no members.
@@ -262,16 +267,14 @@ export let Baggage = module (
                     return fail(start, "a list-member has no '='");
                 }
                 last key = trim_ows(first.slice(0, eq));
-                if (!headers.is_token(key)) {
-                    return fail(start, "the key '" + key + "' is not a token");
-                }
+                return fail(start, "the key '" .. key .. "' is not a token") unless headers.is_token(key);
                 let value = "";
                 match (decode(trim_ows(first.slice(eq + 1, first.byte_length)))) {
                     Optional.Some(text) => {
                         value = text;
                     },
                     Optional.None => {
-                        return fail(start, "the value of '" + key + "' is not baggage-octets or percent-encoding");
+                        return fail(start, "the value of '" .. key .. "' is not baggage-octets or percent-encoding");
                     },
                 }
                 last props: Property[list] = new;
@@ -279,9 +282,7 @@ export let Baggage = module (
                     last prop = parts[i];
                     last peq = strings.index_of(prop, "=");
                     last pkey = trim_ows(peq < 0 ? prop : prop.slice(0, peq));
-                    if (!headers.is_token(pkey)) {
-                        return fail(start, "a property key of '" + key + "' is not a token");
-                    }
+                    return fail(start, "a property key of '" .. key .. "' is not a token") unless headers.is_token(pkey);
                     if (peq < 0) {
                         props.append(new Property(pkey, Optional<string>.None));
                     } else {
@@ -291,7 +292,7 @@ export let Baggage = module (
                                 props.append(new Property(pkey, pvalue));
                             },
                             Optional.None => {
-                                return fail(start, "a property value of '" + key + "' is invalid");
+                                return fail(start, "a property value of '" .. key .. "' is invalid");
                             },
                         }
                     }
@@ -329,9 +330,7 @@ export let Baggage = module (
     #NoDiscard
     export let decode = func(text: string) -> Optional<string> {
         for (let i = 0; i < text.byte_length; i++) {
-            if (!is_baggage_octet(text.byte_at(i))) {
-                return Optional<string>.None;
-            }
+            return Optional<string>.None unless is_baggage_octet(text.byte_at(i));
         }
         return match (percent.decode_bytes(text)) {
             Result.Ok(bytes) => Optional<string>.Some(utf8.decode_lossy(bytes)),
@@ -358,5 +357,5 @@ export let Baggage = module (
     /// @brief A parse error at `offset`.
     let fail = func(offset: int, text: string) -> Result<Baggage> =>
         Result<Baggage>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
-            message: "baggage: " + text });
+            message: "baggage: " .. text });
 );

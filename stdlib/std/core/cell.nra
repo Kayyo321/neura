@@ -13,6 +13,9 @@ export let Cell = module (
         export let init = func(initial: T) {
             value = initial;
         };
+
+        /// @brief Names the cell and shows its current value.
+        export let.override to_string = func -> string => "Cell(" .. value.to_string() .. ")";
     );
 
     /// @brief Creates a new, independent cell containing the value.

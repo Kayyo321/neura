@@ -1,0 +1,7 @@
+error[E1013]: stylesheet import or asset cannot be resolved
+ --> $DIR/b.css:1:9
+  |
+1 | @import url(a.css);
+  |         ^^^^^^^^^^ these stylesheets import each other: a.css -> b.css -> a.css
+
+For more information about this error, try `neura explain E1013`.

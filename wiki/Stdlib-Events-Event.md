@@ -25,22 +25,28 @@ The following public declarations are taken from the module source; each links t
   Removes the registration. It takes effect from the next emission: a handler removed during an emission is still called by it. A second call does nothing.
 - **Event.Subscription** · [`export let active = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L30)
   Whether the registration is still in place.
-- **Event** · [`export let Event = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L52)
+- **Event.Subscription** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L33)
+  Names the subscription and whether it is attached.
+- **Event** · [`export let Event = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L60)
   The owner's side of an event with payloads of type T. The registrations are an immutable list that subscribe and unsubscribe replace, so an emission delivers to the registrations that existed when it started and copies nothing. Tagged `#Final`, `#NotThreadSafe`.
-- **Event.Event** · [`export let subscribe = func(handler: func(T) -> void) -> Subscription`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L58)
+- **Event.Event** · [`export let subscribe = func(handler: func(T) -> void) -> Subscription`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L66)
   Registers `handler` until its subscription is removed, and returns the subscription. The event keeps the handler alive; collection is not unsubscription. The same handler subscribed twice is two registrations.
-- **Event.Event** · [`export let emit = func(payload: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L74)
+- **Event.Event** · [`export let emit = func(payload: T)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L82)
   Delivers `payload` to every registration that exists when the emission starts, in registration order. A registration added or removed by a handler takes effect from the next emission; a nested emit uses the registrations at its own start. A trap in a handler ends the run.
-- **Event.Event** · [`export let view = func -> EventView<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L82)
+- **Event.Event** · [`export let view = func -> EventView<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L90)
   A view that can subscribe and nothing else, for the owner to export.
-- **Event.Event** · [`export let subscriber_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L85)
+- **Event.Event** · [`export let subscriber_count = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L93)
   The number of registrations in place.
-- **Event** · [`export let EventView = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L100)
+- **Event.Event** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L106)
+  Names the event and its registration count.
+- **Event** · [`export let EventView = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L112)
   What an owner exports: subscribe only. It cannot emit and gives no access to the Event. Tagged `#Final`, `#NotThreadSafe`.
-- **Event.EventView** · [`export let init = func(event: Event<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L104)
+- **Event.EventView** · [`export let init = func(event: Event<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L116)
   Use Event.view.
-- **Event.EventView** · [`export let subscribe = func(handler: func(T) -> void) -> Subscription`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L109)
+- **Event.EventView** · [`export let subscribe = func(handler: func(T) -> void) -> Subscription`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L121)
   Registers `handler` on the event; see Event.subscribe.
+- **Event.EventView** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/events/event.nra#L124)
+  Names the view.
 <!-- END SOURCE API -->
 
 ## Detailed contracts

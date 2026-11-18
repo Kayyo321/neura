@@ -30,7 +30,7 @@ export let GrpcWeb = module (
     export let trailer_block = func(trailers: metadata.Metadata) -> uint8[list] {
         last out: uint8[list] = new;
         for (let pair in trailers.entries()) {
-            last line = strings.to_ascii_lower(pair[0]) + ": " + pair[1] + "\r\n";
+            last line = strings.to_ascii_lower(pair[0]) .. ": " .. pair[1] .. "\r\n";
             for (let i = 0; i < line.byte_length; i++) {
                 out.append(line.byte_at(i));
             }
@@ -52,7 +52,7 @@ export let GrpcWeb = module (
     #NoDiscard
     export let parse_trailer_block = func(block: uint8[list]) -> Result<metadata.Metadata> {
         last decoded = string.from_utf8(block);
-        if (!decoded[0]) {
+        if (not decoded[0]) {
             return Result<metadata.Metadata>.Err(errors.Error.Encoding { offset: 0,
                 message: "trailer block is not UTF-8" });
         }
@@ -91,7 +91,7 @@ export let GrpcWeb = module (
 
         /// @brief The message count and trailers.
         export let.override to_string = func -> string =>
-            "WebBody(" + messages.length.to_string() + " messages, " + trailers.to_string() + ")";
+            "WebBody(" .. messages.length.to_string() .. " messages, " .. trailers.to_string() .. ")";
     );
 
     /// @brief Splits a complete gRPC-Web response body into messages and trailers. Fails with INTERNAL when a
@@ -172,7 +172,7 @@ export let GrpcWeb = module (
 
         /// @brief The pending character count.
         export let.override to_string = func -> string =>
-            "TextDecoder(" + pending.byte_length.to_string() + " characters pending)";
+            "TextDecoder(" .. pending.byte_length.to_string() .. " characters pending)";
     );
 
     /// @brief Decodes a complete text-variant body; fails on bad base64 or a body that ends inside a group.
@@ -180,7 +180,7 @@ export let GrpcWeb = module (
     export let decode_text = func(text: string) -> Result<uint8[list]> {
         last decoder = new TextDecoder();
         last bytes = decoder.push(text)?;
-        if (!decoder.is_complete()) {
+        if (not decoder.is_complete()) {
             return Result<uint8[list]>.Err(errors.Error.Encoding { offset: text.byte_length,
                 message: "text body ends inside a base64 group" });
         }

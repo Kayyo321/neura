@@ -134,19 +134,16 @@ export let ResolvConf = module (
         /// @brief Equal when the servers, search list and options are equal (unknown options and problems are
         /// not compared).
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ResolvConf)) {
+            if (other is not that: ResolvConf) {
                 return false;
             }
-            last that = other as ResolvConf;
             if (ndots != that.ndots || timeout_seconds != that.timeout_seconds || attempts != that.attempts
                 || rotate != that.rotate || edns0 != that.edns0 || servers.length != that.servers.length
                 || search_list.length != that.search_list.length) {
                 return false;
             }
             for (let i = 0; i < servers.length; i++) {
-                if (!ips.equals(servers[i], that.servers[i])) {
-                    return false;
-                }
+                return false unless ips.equals(servers[i], that.servers[i]);
             }
             for (let i = 0; i < search_list.length; i++) {
                 if (search_list[i] != that.search_list[i]) {
@@ -177,16 +174,16 @@ export let ResolvConf = module (
             for (let ip in servers) {
                 names.append(ips.to_string(ip));
             }
-            let text = "ResolvConf(nameservers [" + strings.join(names, ", ") + "], search ["
-                + strings.join(search_list, ", ") + "], ndots " + ndots.to_string() + ", timeout "
-                + timeout_seconds.to_string() + ", attempts " + attempts.to_string();
+            let text = "ResolvConf(nameservers [" .. strings.join(names, ", ") .. "], search ["
+                .. strings.join(search_list, ", ") .. "], ndots " .. ndots.to_string() .. ", timeout "
+                .. timeout_seconds.to_string() .. ", attempts " .. attempts.to_string();
             if (rotate) {
-                text += ", rotate";
+                text ..= ", rotate";
             }
             if (edns0) {
-                text += ", edns0";
+                text ..= ", edns0";
             }
-            return text + ")";
+            return text .. ")";
         };
     );
 
@@ -210,7 +207,7 @@ export let ResolvConf = module (
         last lines = strings.lines(text);
         for (let i = 0; i < lines.length; i++) {
             last line = lines[i];
-            last where = "line " + (i + 1).to_string() + ": ";
+            last where = "line " .. (i + 1).to_string() .. ": ";
             if (line.byte_length > 0 && (line.byte_at(0) == 59 || line.byte_at(0) == 35)) {
                 continue;
             }
@@ -219,21 +216,21 @@ export let ResolvConf = module (
                 continue;
             }
             if (line.byte_at(0) == 32 || line.byte_at(0) == 9) {
-                problems.append(where + "the keyword must start the line");
+                problems.append(where .. "the keyword must start the line");
                 continue;
             }
             last keyword = fields[0];
             if (keyword == "nameserver") {
                 if (fields.length < 2) {
-                    problems.append(where + "nameserver without an address");
+                    problems.append(where .. "nameserver without an address");
                 } else {
                     match (ips.parse(fields[1])) {
                         Result.Err(_) => {
-                            problems.append(where + "invalid nameserver address " + fields[1]);
+                            problems.append(where .. "invalid nameserver address " .. fields[1]);
                         },
                         Result.Ok(ip) => {
                             if (servers.length >= MaxNameservers) {
-                                problems.append(where + "more than 3 nameservers; " + fields[1] + " ignored");
+                                problems.append(where .. "more than 3 nameservers; " .. fields[1] .. " ignored");
                             } else {
                                 servers.append(ip);
                             }
@@ -247,7 +244,7 @@ export let ResolvConf = module (
                     list.append(fields[k]);
                 }
                 if (list.length == 0) {
-                    problems.append(where + keyword + " without a domain");
+                    problems.append(where .. keyword .. " without a domain");
                 } else {
                     search = list;
                 }
@@ -261,21 +258,21 @@ export let ResolvConf = module (
                     } else if (strings.starts_with(option, "ndots:")) {
                         last value = number_of(option.slice(6, option.byte_length), MaxNdots);
                         if (value < 0) {
-                            problems.append(where + "invalid option " + option);
+                            problems.append(where .. "invalid option " .. option);
                         } else {
                             ndots = value;
                         }
                     } else if (strings.starts_with(option, "timeout:")) {
                         last value = number_of(option.slice(8, option.byte_length), MaxTimeoutSeconds);
                         if (value < 0) {
-                            problems.append(where + "invalid option " + option);
+                            problems.append(where .. "invalid option " .. option);
                         } else {
                             timeout = value;
                         }
                     } else if (strings.starts_with(option, "attempts:")) {
                         last value = number_of(option.slice(9, option.byte_length), MaxAttempts);
                         if (value < 0) {
-                            problems.append(where + "invalid option " + option);
+                            problems.append(where .. "invalid option " .. option);
                         } else {
                             attempts = value;
                         }

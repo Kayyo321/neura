@@ -1,0 +1,117 @@
+let errors = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief The opt-in application function registry for Biscuit Datalog. Internal.
+export let BiscuitExternals = module (
+    const MaxFunctions: int = 16;
+    const MaxNameBytes: int = 64;
+    const MaxCalls: int = 1024;
+
+    export let fail = func<T>(message: string) -> Result<T> =>
+        Result<T>.Err(errors.custom("biscuit.external", message));
+
+    /// @brief A Datalog map key passed to an application function.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #Since("0.3.0")
+    export let ExternalMapKey = enum (Integer(int64), Text(string));
+
+    /// @brief An exact Biscuit Datalog value passed to an application function.
+    /// Date values are whole seconds since the UTC Unix epoch.
+    /// Values are copied across the callback boundary. Set members share a scalar type.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #Since("0.3.0")
+    export let ExternalValue = enum (
+        Integer(int64), Date(uint64), Boolean(bool), Text(string), Bytes(uint8[list]), Null,
+        Set(ExternalValue[list]), Array(ExternalValue[list]), Map([ExternalMapKey, ExternalValue][list])
+    );
+
+    /// @brief An application function available by name during an authorization call.
+    /// Supply pure application logic. A token selects the function's operands and can call it repeatedly.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[Final, Since("0.3.0")]
+    export let ExternalFunction = class (
+        /// @brief The unqualified name referred to by `extern::name` in Datalog.
+        #Since("0.3.0")
+        export last name: string;
+        last callback: func(ExternalValue, Optional<ExternalValue>) -> Result<ExternalValue>;
+
+        /// @brief Binds an explicit name and a pure callback. A unary call passes no second value.
+        #Since("0.3.0")
+        export let init = func(identifier: string, operation: func(ExternalValue, Optional<ExternalValue>)
+            -> Result<ExternalValue>) {
+            name = identifier;
+            callback = operation;
+        };
+
+        /// @brief Calls the registered application function.
+        #Since("0.3.0")
+        export let call = func(left: ExternalValue, right: Optional<ExternalValue>) -> Result<ExternalValue> =>
+            callback(left, right);
+
+        export let.override to_string = func -> string => "Biscuit ExternalFunction";
+    );
+
+    let letter = func(byte: uint8) -> bool => (byte >= 65 && byte <= 90) || (byte >= 97 && byte <= 122);
+
+    export let valid_name = func(name: string) -> bool {
+        if (name.byte_length == 0 || name.byte_length > MaxNameBytes || not letter(name.byte_at(0))) {
+            return false;
+        }
+        for (let i = 1; i < name.byte_length; i++) {
+            last byte = name.byte_at(i);
+            if (not letter(byte) && (byte < 48 || byte > 57) && byte != 95) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    export let Registry = class (
+        last functions: ExternalFunction[list] = new;
+        let calls = 0;
+
+        export let init = func {};
+
+        export let add = func(value: ExternalFunction) -> Result<Unit> {
+            if (value == nil || not valid_name(value.name) || functions.length == MaxFunctions || has(value.name)) {
+                return fail<Unit>("invalid, repeated, or excessive Biscuit external function registration");
+            }
+            functions.append(value);
+            return Result<Unit>.Ok(Unit.Value);
+        };
+
+        export let has = func(name: string) -> bool {
+            for (let function in functions) {
+                if (function.name == name) {
+                    return true;
+                }
+            }
+            return false;
+        };
+
+        export let call = func(name: string, left: ExternalValue, right: Optional<ExternalValue>) -> Result<ExternalValue> {
+            if (calls == MaxCalls) {
+                return Result<ExternalValue>.Err(errors.custom("biscuit.limit", "too many Biscuit external calls"));
+            }
+            for (let function in functions) {
+                if (function.name == name) {
+                    calls++;
+                    return function.call(left, right);
+                }
+            }
+            return fail<ExternalValue>("unregistered Biscuit external function");
+        };
+
+        export let.override to_string = func -> string => "Biscuit External Registry";
+    );
+
+    export let bind = func(functions: ExternalFunction[list]) -> Result<Registry> {
+        let registry: Registry = new;
+        for (let function in functions) {
+            registry.add(function)?;
+        }
+        return Result<Registry>.Ok(registry);
+    };
+);

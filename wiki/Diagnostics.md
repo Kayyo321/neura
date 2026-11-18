@@ -53,6 +53,23 @@ Errors about the grammar.
 | [E0226](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0226.md) | default value on a parameter that takes none |
 | [E0227](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0227.md) | malformed interpolated string |
 | [E0228](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0228.md) | malformed extension declaration or extension import |
+| [E0240](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0240.md) | malformed html factory |
+| [E0241](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0241.md) | unterminated template or stylesheet |
+| [E0242](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0242.md) | mismatched or unclosed element |
+| [E0243](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0243.md) | nesting a browser would repair |
+| [E0244](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0244.md) | malformed tag |
+| [E0245](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0245.md) | malformed or repeated attribute |
+| [E0246](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0246.md) | unknown or malformed character reference |
+| [E0247](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0247.md) | malformed hole |
+| [E0248](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0248.md) | stray brace or control word in text |
+| [E0249](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0249.md) | malformed control block |
+| [E0250](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0250.md) | malformed binding directive |
+| [E0251](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0251.md) | not allowed in a template |
+| [E0252](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0252.md) | malformed css declaration |
+| [E0253](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0253.md) | malformed stylesheet |
+| [E0254](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0254.md) | malformed from clause |
+| [E0255](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0255.md) | html or css form not allowed here |
+| [E0256](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0256.md) | malformed CSS module construct |
 
 ## E03xx: Names
 
@@ -64,6 +81,17 @@ Errors about declarations, scopes, and name resolution.
 | [E0231](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0231.md) | pattern form that is not supported |
 | [E0232](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0232.md) | postfix ? that needs parentheses |
 | [E0233](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0233.md) | malformed optional access |
+| [E0260](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0260.md) | character literal that is not one byte |
+| [E0261](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0261.md) | malformed character literal |
+| [E0262](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0262.md) | ..= statement whose destination is not a string |
+| [E0263](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0263.md) | range or chain of the wrong shape |
+| [E0264](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0264.md) | malformed return if |
+| [E0265](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0265.md) | narrowing binding outside the condition of an if |
+| [E0266](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0266.md) | is not narrowing inside an && chain |
+| [E0267](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0267.md) | typeof without a value or a type |
+| [E0268](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0268.md) | invalid Unicode escape |
+| [E0269](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0269.md) | Unicode escape that is not a scalar value |
+| [E0270](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0270.md) | string literal escapes that are not valid UTF-8 |
 | [E0301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0301.md) | duplicate local binding |
 | [E0302](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0302.md) | duplicate declaration |
 | [E0303](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0303.md) | duplicate parameter or field name |
@@ -226,6 +254,8 @@ Errors about inheritance, interfaces, construction, destruction, field accessors
 | [E0578](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0578.md) | conformance declared by a module |
 | [E0579](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0579.md) | unknown or misplaced derivation |
 | [E0590](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0590.md) | unsupported JSON codec shape |
+| [E0580](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0580.md) | type is not deeply immutable |
+| [E0581](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0581.md) | frozen storage is exposed or changed |
 
 ## E06xx: Concurrency
 
@@ -311,6 +341,60 @@ Errors about `#` tags before declarations ([Tags](Tags)).
 | [E0921](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0921.md) | #Synchronized on a method without a body to guard |
 | [E0922](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0922.md) | override of a synchronized method that is not synchronized |
 | [E0923](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E0923.md) | #HostEffects on a function that is not a host binding without a body |
+| [E1100](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1100.md) | string chain operand that is not a string |
+
+## E10xx: Applications
+
+Errors about application forms and their build limits.
+
+| Code | Error |
+| --- | --- |
+| [E1001](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1001.md) | unknown element |
+| [E1002](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1002.md) | unknown attribute, property or event |
+| [E1003](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1003.md) | modifier not valid for this event |
+| [E1004](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1004.md) | value cannot be rendered |
+| [E1005](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1005.md) | attribute or property value of the wrong type |
+| [E1006](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1006.md) | handler does not match the event |
+| [E1007](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1007.md) | URL not allowed |
+| [E1008](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1008.md) | value cannot be iterated by a template |
+| [E1009](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1009.md) | key of the wrong type |
+| [E1010](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1010.md) | effect not allowed while rendering |
+| [E1011](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1011.md) | template or stylesheet file cannot be used |
+| [E1012](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1012.md) | not a class of the CSS module |
+| [E1013](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1013.md) | stylesheet import or asset cannot be resolved |
+| [E1014](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1014.md) | invalid static document structure |
+| [E1015](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1015.md) | template or stylesheet exceeds a limit |
+
+## E10xx: Application projects
+
+Errors about projects and their artifacts.
+
+| Code | Error |
+| --- | --- |
+| [E1020](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1020.md) | malformed project manifest |
+| [E1021](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1021.md) | unsupported manifest schema or language version |
+| [E1022](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1022.md) | lock file missing or out of date |
+| [E1023](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1023.md) | invalid target |
+| [E1024](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1024.md) | entry module without the required entry |
+| [E1025](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1025.md) | path outside the project |
+| [E1026](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1026.md) | content does not match its digest |
+| [E1027](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1027.md) | capability used but not declared |
+| [E1028](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1028.md) | limit out of range |
+| [E1029](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1029.md) | bundle cannot be written |
+| [E1030](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1030.md) | module not available to this package or target |
+| [E1031](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1031.md) | unknown or incompatible provider |
+| [E1032](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1032.md) | dependency not pinned or not found |
+| [E1033](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1033.md) | package cannot be built here |
+
+## E13xx: Reflection
+
+Codes reported for `Std.Reflect` ([design](https://github.com/Kayyo321/neura/blob/main/docs/design/Reflect030.md)).
+
+| Code | Error |
+| --- | --- |
+| [E1300](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1300.md) | a type that Std.Reflect.Proxy cannot proxy |
+| [E1301](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1301.md) | a value a Std.Reflect dynamic value cannot hold |
+| [E1302](https://github.com/Kayyo321/neura/blob/main/docs/diagnostics/E1302.md) | a class with two reflection policies |
 
 ## Warnings
 

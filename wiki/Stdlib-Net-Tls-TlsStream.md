@@ -26,27 +26,27 @@ The following public declarations are taken from the module source; each links t
   Use `TlsConnector` or `TlsAcceptor`; the handle comes from the library.
 - **TlsStream.TlsStream** · [`export let read = func(max: int) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L51)
   Up to `max` decrypted bytes; an empty list once the peer has closed the stream. A maximum below 1 traps. Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L64)
+- **TlsStream.TlsStream** · [`export let write = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L62)
   Encrypts and writes every byte, repeating partial host writes. Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L88)
+- **TlsStream.TlsStream** · [`export let receive = func -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L84)
   The next decrypted bytes (at most `ReceiveChunk`), or `None` at the end of the peer's data. Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L98)
+- **TlsStream.TlsStream** · [`export let send = func(data: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L92)
   Sends every byte; the `Std.Net.Transport` form of `write`. Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L101)
+- **TlsStream.TlsStream** · [`export let read_timeout = func -> Duration`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L95)
   The longest a read waits; zero waits without limit.
-- **TlsStream.TlsStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L104)
+- **TlsStream.TlsStream** · [`export let set_read_timeout = func(timeout: Duration)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L98)
   Sets the read timeout. A negative timeout traps with "invalid argument: negative timeout".
-- **TlsStream.TlsStream** · [`export let peer_address = func -> Optional<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L109)
+- **TlsStream.TlsStream** · [`export let peer_address = func -> Optional<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L103)
   The dialed peer, or `None` for an accepted stream (not reported by the host).
-- **TlsStream.TlsStream** · [`export let local_address = func -> Result<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L113)
+- **TlsStream.TlsStream** · [`export let local_address = func -> Result<SocketAddr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L107)
   The local address, from the host; traps in Neura 0.3.0 (no local-address service). Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L127)
+- **TlsStream.TlsStream** · [`export let shutdown = func(how: Shutdown) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L119)
   Ends reading, writing or both of the underlying TCP connection. Traps in Neura 0.3.0: the runtime has no shutdown service. `close` sends `close_notify`. Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let enable_kernel_offload = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L141)
+- **TlsStream.TlsStream** · [`export let enable_kernel_offload = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L131)
   Moves symmetric record encryption into the kernel (kTLS, and the NIC where it supports it). Traps in Neura 0.3.0: no runtime offers kTLS. Tagged `#NoDiscard`.
-- **TlsStream.TlsStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L153)
+- **TlsStream.TlsStream** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L141)
   Sends `close_notify` and releases the stream. Closing again returns Ok; the stream is closed even when the host reports an error.
-- **TlsStream.TlsStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L165)
+- **TlsStream.TlsStream** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/tls/tls-stream.nra#L151)
   Text such as "TlsStream(to 192.0.2.1:443, alpn h2)".
 <!-- END SOURCE API -->
 

@@ -213,9 +213,10 @@ NEURA_TAG(Expect, 72, Diagnostics, Declarations & ~Variant, reserved, true, "war
 NEURA_TAG(RequiresCapability, 73, Security, Callables | Module, reserved, true, "capability:n+", "0.2.0",
           "callers need the named runtime capability",
           "capabilities are granted per run (`neura run --deny-*`); document the requirement")
-NEURA_TAG(Sensitive, 74, Security, Values | Local | Parameter | Class, reserved, false, "", "0.2.0",
-          "a secret kept out of traces, dumps, and to_string",
-          "avoid printing the value; --record and --task-dump may contain it")
+NEURA_TAG(Sensitive, 74, Security, Values | Local | Parameter | Class, informational, false, "", "0.2.0",
+          "a secret: on a field or class, Std.Reflect.Codec writes a placeholder instead of the value; on other "
+          "declarations it is only recorded, and to_string, traces and dumps do not read it",
+          "")
 NEURA_TAG(Untrusted, 75, Security, Values | Parameter | Callables, reserved, false, "", "0.2.0",
           "data from outside the program that must be validated before use",
           "validate the value where it enters the program")
@@ -227,10 +228,11 @@ NEURA_TAG(ConstantTime, 76, Security, Callables, reserved, false, "", "0.2.0",
 NEURA_TAG(Serializable, 77, Serialization, Class | Enum, reserved, false, "", "0.2.0",
           "can be written and read by Std serializers",
           "write to_json and from_json with Std.Encoding.Json explicitly")
-NEURA_TAG(SerialName, 78, Serialization, Field | Class | Variant, reserved, false, "name:t", "0.2.0",
-          "the name used when serialized", "choose the key in the explicit to_json")
-NEURA_TAG(Skip, 79, Serialization, Field, reserved, false, "", "0.2.0", "left out when serialized",
-          "leave the field out of the explicit to_json")
+NEURA_TAG(SerialName, 78, Serialization, Field | Class | Variant, informational, false, "name:t", "0.2.0",
+          "the name Std.Reflect.Codec uses for a field or variant, and for a class in schemas; derive json.Codec "
+          "does not read it", "")
+NEURA_TAG(Skip, 79, Serialization, Field, informational, false, "", "0.2.0",
+          "left out when Std.Reflect.Codec serializes; derive json.Codec does not read it", "")
 NEURA_TAG(SerialDefault, 80, Serialization, Field, reserved, false, "value:a", "0.2.0",
           "the value used when the input has no entry", "supply the default in the explicit from_json")
 
@@ -254,5 +256,11 @@ NEURA_TAG(Range, 85, Numerics, Values | Local | Parameter | Callables, reserved,
 NEURA_TAG(HostEffects, 86, Resources, Function, implemented, false,
           "allocates:b=true,traps:b=true,scheduler:b=true,retains:b=true", "0.3.0",
           "what a call of this host binding may do; an omitted argument says it may (E0923)", "")
+
+// Immutable application data (docs/design/Components030.md, "FrozenList")
+NEURA_TAG(Frozen, 87, Correctness, Class | Field, implemented, false, "", "0.3.0",
+          "standard library only: on a class, its type arguments are deeply immutable (E0580); on a last list "
+          "field, storage assigned once from a list the constructor created and never exposed (E0581)",
+          "")
 
 #undef NEURA_TAG

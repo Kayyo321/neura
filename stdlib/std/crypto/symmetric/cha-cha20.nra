@@ -42,7 +42,7 @@ export let ChaCha20 = module (
     #[Internal, Since("0.3.0")]
     export let short_nonce = func(nonce: uint8[list]) -> uint8[list] {
         let out = words.zeros(4);
-        for (let i = 16; i < 24; i++) {
+        for (let i in 16 .. 24) {
             out.append(nonce[i]);
         }
         return out;
@@ -53,7 +53,7 @@ export let ChaCha20 = module (
             trap_with_message("invalid argument: ChaCha20 key must be 32 bytes");
         }
         if (nonce.length != nonce_length) {
-            trap_with_message("invalid argument: ChaCha20 nonce must be " + nonce_length.to_string() + " bytes");
+            trap_with_message("invalid argument: ChaCha20 nonce must be " .. nonce_length.to_string() .. " bytes");
         }
     };
 );

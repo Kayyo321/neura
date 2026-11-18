@@ -1,0 +1,29 @@
+let intrinsics = import:Std.Reflect.Internal.Intrinsics;
+let model = import:Std.Reflect.Internal.Model;
+
+/// @brief Interface proxies (docs/design/Reflect030.md, Proxies). `create<I>(handler)` returns an object that
+/// implements the interface `I`: each call of one of its methods packs the arguments into Variants and calls
+/// `handler.invoke` with a `MethodCallContext`, and the result is unpacked to the method's result type. The
+/// compiler synthesizes one proxy class per interface the program proxies; a proxy's dynamic type is `class`.
+/// An interface with a property, a static requirement, or a generic or variadic method cannot be proxied (E1300).
+/// @see [Std.Reflect.Proxy.DynamicProxy](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Proxy-DynamicProxy)
+#Since("0.3.0")
+export let DynamicProxy = module (
+    /// @brief The handler a proxy forwards to.
+    #Since("0.3.0")
+    export let InvocationHandler = model.InvocationHandler;
+
+    /// @brief One method call through a proxy.
+    #Since("0.3.0")
+    export let MethodCallContext = model.MethodCallContext;
+
+    /// @brief A new `I` whose methods call `handler`.
+    #Since("0.3.0")
+    export let create = func<I>(handler: InvocationHandler) -> I => intrinsics.proxy<I>(handler);
+
+    /// @brief Forwards a call to `target` through its descriptor: the usual body of a handler that wraps an
+    /// object, for logging or mocking around the real implementation.
+    #Since("0.3.0")
+    export let forward = func(target: model.Variant, context: MethodCallContext) -> model.Variant =>
+        target.invoke_named(context.method.name, context.arguments);
+);

@@ -1,0 +1,9 @@
+error[E1300]: the type Sized cannot be proxied
+  --> $DIR/proxy-property.nra:14:29
+   |
+14 | let make = func -> Sized => proxies.create<Sized>(new Handler());
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ it requires a property, which a proxy cannot implement
+   |
+   = help: proxy an interface whose requirements are non-generic instance methods
+
+For more information about this error, try `neura explain E1300`.

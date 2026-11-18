@@ -1,0 +1,11 @@
+interface value: Class Ring Shapes.Ring
+enum: Enum Color Shapes.Color
+optional: Enum Optional<int32> Optional.Optional<int32>
+list: List int32[list] int32[list]
+function: Function func(int32) -> int32 func(int32) -> int32
+T: Float float64 float64
+T class: Interface Named Shapes.Named
+string type: String string string
+Ring type: Class Ring Shapes.Ring
+1 int32
+bool: Bool bool bool

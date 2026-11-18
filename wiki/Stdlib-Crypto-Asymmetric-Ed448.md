@@ -1,0 +1,75 @@
+# `Std.Crypto.Asymmetric.Ed448`
+
+[Standard library index](Stdlib) · [Standard library specification](Stdlib-Design) · [Language status](Status)
+
+Import `Std.Crypto.Asymmetric.Ed448` to use this module. The [package specification](Stdlib-Design#218-stdcryptoasymmetric) describes the supported profile. The [source](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra) defines the implementation.
+
+## Exported declarations
+
+<!-- BEGIN SOURCE API -->
+The following public declarations are taken from the module source; each links to its definition. Notes reproduce adjacent source comments where present. Inherited members are documented on their declaring types. Consult the contracts and source for behavior, preconditions, and failures that are not stated here.
+
+- **Ed448** · [`export let Ed448PublicKey = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L34)
+  An Ed448 public key: the 57-byte encoding of A. Equal keys have equal bytes. The point is checked when a signature is verified. Tagged `#Final`. Since 0.3.0.
+- **Ed448.Ed448PublicKey** · [`export let init = func(bytes: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L38)
+  Copies the 57 bytes; another length traps (use `parse_public_key` for outside input).
+- **Ed448.Ed448PublicKey** · [`export let to_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L48)
+  A copy of the 57 bytes. Tagged `#NoDiscard`.
+- **Ed448.Ed448PublicKey** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L50)
+- **Ed448.Ed448PublicKey** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L57)
+- **Ed448.Ed448PublicKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L65)
+- **Ed448** · [`export let Ed448PrivateKey = class implements PrivateKey<Ed448Signer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L71)
+  An Ed448 private key: the 57-byte seed of RFC 8032 in secret memory, with its public key. `to_string` never prints it. Tagged `#Final`. Since 0.3.0.
+- **Ed448.Ed448PrivateKey** · [`export let init = func(seed: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L76)
+  Copies the 57-byte seed and computes the public key; another length traps.
+- **Ed448.Ed448PrivateKey** · [`export let expose = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L88)
+- **Ed448.Ed448PrivateKey** · [`export let wipe = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L89)
+- **Ed448.Ed448PrivateKey** · [`export let is_wiped = func -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L90)
+- **Ed448.Ed448PrivateKey** · [`export let lock = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L91)
+- **Ed448.Ed448PrivateKey** · [`export let public_key_bytes = func -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L92)
+- **Ed448.Ed448PrivateKey** · [`export let public_key = func -> Ed448PublicKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L96)
+  The matching public key. Tagged `#NoDiscard`.
+- **Ed448.Ed448PrivateKey** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L99)
+  A fixed placeholder, never the key.
+- **Ed448** · [`export let Ed448Signer = class implements Signer<Ed448PrivateKey, uint8[list]>, Verifier<Ed448PublicKey, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L104)
+  Signs with an Ed448 private key; it also verifies against the matching public key. Tagged `#Final`. Since 0.3.0.
+- **Ed448.Ed448Signer** · [`export let init = func(private_key: Ed448PrivateKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L109)
+  A signer over the key.
+- **Ed448.Ed448Signer** · [`export let algorithm = func -> Algorithm`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L115)
+  `Algorithm.Ed448`.
+- **Ed448.Ed448Signer** · [`export let public_key = func -> Ed448PublicKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L118)
+  The public key.
+- **Ed448.Ed448Signer** · [`export let sign = func(message: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L122)
+  The 114-byte Ed448 signature R || S of the message with an empty context (RFC 8032, section 5.2.6).
+- **Ed448.Ed448Signer** · [`export let sign_with_context = func(message: uint8[list], context: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L126)
+  The Ed448 signature under a context of at most 255 bytes; a longer one traps. Tagged `#NoDiscard`.
+- **Ed448.Ed448Signer** · [`export let sign_prehashed = func(message: uint8[list], context: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L134)
+  The Ed448ph signature: the message is hashed with SHAKE256 to 64 bytes first. The context has at most 255 bytes. Tagged `#NoDiscard`.
+- **Ed448.Ed448Signer** · [`export let verify = func(message: uint8[list], signature: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L140)
+  Strict Ed448 verification against the matching public key (see the module).
+- **Ed448.Ed448Signer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L145)
+- **Ed448** · [`export let Ed448Verifier = class implements Verifier<Ed448PublicKey, uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L151)
+  Verifies Ed448 and Ed448ph signatures under a public key, strictly (see the module). Tagged `#Final`. Since 0.3.0.
+- **Ed448.Ed448Verifier** · [`export let init = func(public_key: Ed448PublicKey)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L155)
+  A verifier for the key.
+- **Ed448.Ed448Verifier** · [`export let algorithm = func -> Algorithm`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L161)
+  `Algorithm.Ed448`.
+- **Ed448.Ed448Verifier** · [`export let public_key = func -> Ed448PublicKey`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L164)
+  The public key.
+- **Ed448.Ed448Verifier** · [`export let verify = func(message: uint8[list], signature: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L168)
+  Whether the 114-byte signature is a valid Ed448 signature of the message with an empty context. Any other length is false.
+- **Ed448.Ed448Verifier** · [`export let verify_with_context = func(message: uint8[list], signature: uint8[list], context: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L173)
+  Whether the signature is a valid Ed448 signature under the context (at most 255 bytes). Tagged `#NoDiscard`.
+- **Ed448.Ed448Verifier** · [`export let verify_prehashed = func(message: uint8[list], signature: uint8[list], context: uint8[list]) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L181)
+  Whether the signature is a valid Ed448ph signature under the context. Tagged `#NoDiscard`.
+- **Ed448.Ed448Verifier** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L187)
+- **Ed448** · [`export let generate_key_pair = func -> Result<Ed448PrivateKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L292)
+  A new private key from a 57-byte seed of `Entropy.os_bytes`, or from the given generator. Fails when the entropy source fails. Tagged `#NoDiscard`. Since 0.3.0.
+- **Ed448** · [`export let parse_public_key = func(bytes: uint8[list]) -> Result<Ed448PublicKey>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/asymmetric/ed448.nra#L313)
+  A public key from outside the program. A wrong length, or bytes that are not the canonical encoding of a point, is `Custom` code `crypto.invalid_key`. Tagged `#NoDiscard`. Since 0.3.0.
+<!-- END SOURCE API -->
+
+## Shared contracts
+
+- [`Std.Crypto` contracts and runtime guarantees](Stdlib-Design#21-stdcrypto)
+- [Failure and resource handling](Stdlib-Design#5-core-contracts)

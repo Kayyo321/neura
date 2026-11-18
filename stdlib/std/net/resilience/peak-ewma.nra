@@ -46,7 +46,7 @@ export let PeakEwma = module (
         /// reading at construction (zero if the clock fails then). Traps with "invalid argument: <name>" unless
         /// `decay` is positive and `default_rtt` is not negative.
         export let init = func(targets: Endpoint[list], decay: durations.Duration, default_rtt: durations.Duration,
-                source: randoms.Random, time: Clock) {
+            source: randoms.Random, time: Clock) {
             if (decay.to_nanos() <= 0) {
                 trap_with_message("invalid argument: decay");
             }
@@ -93,7 +93,7 @@ export let PeakEwma = module (
 
         /// @brief Ends the pending request and observes its latency.
         export let report = func(selection: balancers.Selection<Endpoint>, latency: durations.Duration, success: bool)
-                -> Result<Unit> {
+            -> Result<Unit> {
             last now = now_nanos()?;
             if (waiting[selection.index] > 0) {
                 waiting[selection.index] = waiting[selection.index] - 1;
@@ -119,7 +119,7 @@ export let PeakEwma = module (
         export let pending = func(index: int) -> int => waiting[index];
 
         /// @brief Text such as "PeakEwma(3 endpoints)".
-        export let.override to_string = func -> string => "PeakEwma(" + endpoints.length.to_string() + " endpoints)";
+        export let.override to_string = func -> string => "PeakEwma(" .. endpoints.length.to_string() .. " endpoints)";
 
         /// @brief Decays the estimate to `now` and returns the cost.
         let cost_at = func(index: int, now: int64) -> float64 {
@@ -153,5 +153,5 @@ export let PeakEwma = module (
     #NoDiscard
     export let of = func<Endpoint>(endpoints: Endpoint[list], tau: durations.Duration, default_rtt: durations.Duration,
         random: randoms.Random, clock: Clock) -> PeakEwma<Endpoint> =>
-        new PeakEwma<Endpoint>(endpoints, tau, default_rtt, random, clock);
+            new PeakEwma<Endpoint>(endpoints, tau, default_rtt, random, clock);
 );

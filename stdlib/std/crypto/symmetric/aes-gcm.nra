@@ -59,14 +59,14 @@ export let AesGcm = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 12, "AES-GCM");
             if (sealed.length < 16) {
                 return aead.failure();
             }
             last body = words.slice(sealed, 0, sealed.length - 16);
             last j0 = first_counter(nonce);
-            if (!constant_time.ct_eq(tag(j0, associated_data, body), words.slice(sealed, sealed.length - 16, sealed.length))) {
+            if (not constant_time.ct_eq(tag(j0, associated_data, body), words.slice(sealed, sealed.length - 16, sealed.length))) {
                 return aead.failure();
             }
             return Result<uint8[list]>.Ok(ctr(j0, body));

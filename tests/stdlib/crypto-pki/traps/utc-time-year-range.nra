@@ -1,0 +1,13 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: UTCTime year out of range
+let instant = import:Std.Time.Instant;
+let program = import:Std.Program;
+let writer = import:Std.Crypto.Pki.DerWriter;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        // 2050-01-01T00:00:00Z needs GeneralizedTime.
+        let _ = writer.utc_time(instant.of_epoch_seconds(2524608000, 0));
+        return program.ExitCode.Ok;
+    };
+);

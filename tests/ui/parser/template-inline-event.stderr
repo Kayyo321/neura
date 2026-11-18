@@ -1,0 +1,7 @@
+error[E0251]: not allowed in a template
+ --> $DIR/template-inline-event.nra:1:29
+  |
+1 | let view = html() { <button onclick="save()">Save</button> };
+  |                             ^^^^^^^ use 'on:event={handler}' for event handlers
+
+For more information about this error, try `neura explain E0251`.

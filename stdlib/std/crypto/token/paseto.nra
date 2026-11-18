@@ -1,0 +1,313 @@
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Signer;
+let.promote _ = import:Std.Crypto.SymmetricKey;
+let.promote _ = import:Std.Crypto.Verifier;
+let blake2b = import:Std.Crypto.Internal.Blake2b;
+let chacha20 = import:Std.Crypto.Symmetric.ChaCha20;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let entropy = import:Std.Crypto.Random.Entropy;
+let hashing = import:Std.Core.Hash;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief PASETO version 4 (Stdlib.md section 21.11).
+///
+/// Local tokens encrypt and authenticate with XChaCha20 and keyed BLAKE2b; public tokens sign with
+/// Ed25519. Both authenticate the exact footer and implicit assertion. The implicit assertion is
+/// supplied separately and does not appear in the token. These operations accept payload bytes;
+/// applications supply their own claim parsing and validation. The tag comparison is branch-free
+/// in source; the runtime does not guarantee constant time.
+/// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+#Since("0.3.0")
+export let Paseto = module (
+    const LocalHeader = "v4.local.";
+    const PublicHeader = "v4.public.";
+
+    /// @brief The authenticated payload and footer of an opened token. Accessors return copies.
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+    #[Final, Since("0.3.0")]
+    export let OpenedToken = class (
+        last payload_bytes: uint8[list];
+        last footer_bytes: uint8[list];
+
+        /// @brief Copies the payload and footer bytes.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let init = func(payload: uint8[list], footer: uint8[list]) {
+            payload_bytes = words.copy(payload);
+            footer_bytes = words.copy(footer);
+        };
+
+        /// @brief A copy of the payload.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let payload = func -> uint8[list] => words.copy(payload_bytes);
+
+        /// @brief A copy of the authenticated footer, or an empty list when absent.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let footer = func -> uint8[list] => words.copy(footer_bytes);
+
+        /// @brief Whether both payloads and both footers are equal byte for byte.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: OpenedToken) {
+                return false;
+            }
+            return constant_time.ct_eq(payload_bytes, that.payload_bytes)
+                && constant_time.ct_eq(footer_bytes, that.footer_bytes);
+        };
+
+        /// @brief A hash of the payload and footer.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 {
+            let hash = hashing.combine(17, payload_bytes.length as uint32);
+            for (let byte in payload_bytes) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            for (let byte in footer_bytes) {
+                hash = hashing.combine(hash, byte as uint32);
+            }
+            return hash;
+        };
+
+        /// @brief A fixed placeholder for the token contents.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Paseto.OpenedToken(<redacted>)";
+    );
+
+    /// @brief PASETO v4.local under a purpose-bound 32-byte key.
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+    #[Final, Since("0.3.0")]
+    export let Local = class (
+        last key: SymmetricKey<Local>;
+
+        /// @brief Retains the key. A key of another length traps with invalid argument.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let init = func(local_key: SymmetricKey<Local>) {
+            crypto_policy.require(Algorithm.Blake2b);
+            crypto_policy.require(Algorithm.ChaCha20);
+            if (local_key.key_length() != 32) {
+                trap_with_message("invalid argument: PASETO v4.local key must be 32 bytes");
+            }
+            key = local_key;
+        };
+
+        /// @brief Encrypts with a fresh 32-byte OS nonce. Entropy failures are returned.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let encrypt = func(plaintext: uint8[list], footer: uint8[list], implicit_assertion: uint8[list])
+            -> Result<string> {
+            last nonce = entropy.os_bytes(32)?;
+            return Result<string>.Ok(encrypt_with_nonce(plaintext, nonce, footer, implicit_assertion));
+        };
+
+        /// @brief Encrypts with the given 32-byte nonce; another length traps. Use a fresh random nonce
+        /// for every encryption with the same key.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let encrypt_with_nonce = func(plaintext: uint8[list], nonce: uint8[list], footer: uint8[list],
+            implicit_assertion: uint8[list]) -> string {
+            if (nonce.length != 32) {
+                trap_with_message("invalid argument: PASETO v4.local nonce must be 32 bytes");
+            }
+            last key_bytes = material();
+            last ciphertext = crypt(key_bytes, nonce, plaintext);
+            last tag = authenticate(key_bytes, nonce, ciphertext, footer, implicit_assertion);
+            let body = words.concat(nonce, ciphertext);
+            words.append_all(body, tag);
+            return encode(LocalHeader, body, footer);
+        };
+
+        /// @brief Authenticates before decrypting. Returns crypto.token for malformed framing or encoding
+        /// and crypto.authentication for a failed tag check.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let decrypt = func(token: string, implicit_assertion: uint8[list]) -> Result<OpenedToken> {
+            const [body, footer] = decode(token, "local")?;
+            if (body.length < 64) {
+                return jose.fail<OpenedToken>("crypto.token", "PASETO v4.local body is too short");
+            }
+            last nonce = words.slice(body, 0, 32);
+            last ciphertext = words.slice(body, 32, body.length - 32);
+            last tag = words.slice(body, body.length - 32, body.length);
+            last key_bytes = material();
+            last expected = authenticate(key_bytes, nonce, ciphertext, footer, implicit_assertion);
+            if (not constant_time.ct_eq(tag, expected)) {
+                return jose.fail<OpenedToken>("crypto.authentication", "authentication failed");
+            }
+            return Result<OpenedToken>.Ok(new OpenedToken(crypt(key_bytes, nonce, ciphertext), footer));
+        };
+
+        let material = func -> uint8[list] {
+            crypto_policy.require(Algorithm.Blake2b);
+            crypto_policy.require(Algorithm.ChaCha20);
+            last bytes = key.expose();
+            if (bytes.length != 32) {
+                trap_with_message("invalid argument: PASETO v4.local key must be 32 bytes");
+            }
+            return bytes;
+        };
+
+        /// @brief A fixed placeholder for the local key.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Paseto.Local(<redacted>)";
+    );
+
+    /// @brief A signer producing PASETO v4.public tokens. Use a key dedicated to this purpose.
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+    #[Final, Since("0.3.0")]
+    export let PublicSigner = class implements Signer<ed25519.Ed25519PrivateKey, string> (
+        last signer: ed25519.Ed25519Signer;
+
+        /// @brief Retains the Ed25519 private key for issuing v4.public tokens.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let init = func(key: ed25519.Ed25519PrivateKey) {
+            signer = new(key);
+        };
+
+        /// @brief The underlying algorithm, Ed25519.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let algorithm = func -> Algorithm => Algorithm.Ed25519;
+
+        /// @brief Signs the payload with no footer or implicit assertion.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign = func(message: uint8[list]) -> string => sign_with(message, new, new);
+
+        /// @brief Signs the payload and binds the footer and implicit assertion.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let sign_with = func(message: uint8[list], footer: uint8[list], implicit_assertion: uint8[list])
+            -> string {
+            crypto_policy.require(Algorithm.Ed25519);
+            last input = pae(new([words.utf8(PublicHeader), message, footer, implicit_assertion]));
+            return encode(PublicHeader, words.concat(message, signer.sign(input)), footer);
+        };
+
+        /// @brief A fixed placeholder for the signing key.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Paseto.PublicSigner(<redacted>)";
+    );
+
+    /// @brief A verifier accepting only PASETO v4.public tokens.
+    /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+    #[Final, Since("0.3.0")]
+    export let PublicVerifier = class implements Verifier<ed25519.Ed25519PublicKey, string> (
+        last verifier: ed25519.Ed25519Verifier;
+
+        /// @brief Retains the Ed25519 verification key.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let init = func(key: ed25519.Ed25519PublicKey) {
+            verifier = new(key);
+        };
+
+        /// @brief The underlying algorithm, Ed25519.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let algorithm = func -> Algorithm => Algorithm.Ed25519;
+
+        /// @brief The public verification key.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let public_key = func -> ed25519.Ed25519PublicKey => verifier.public_key();
+
+        /// @brief Whether the token authenticates the expected payload with an empty implicit assertion.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify = func(message: uint8[list], signature: string) -> bool => match (open(signature, new)) {
+            Result.Ok(token) => constant_time.ct_eq(message, token.payload()),
+            Result.Err(_) => false,
+        };
+
+        /// @brief Verifies the signature and returns the authenticated payload and footer.
+        /// Returns crypto.token for malformed framing or encoding and crypto.authentication for a bad signature.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #[NoDiscard, Since("0.3.0")]
+        export let open = func(token: string, implicit_assertion: uint8[list]) -> Result<OpenedToken> {
+            const [body, footer] = decode(token, "public")?;
+            if (body.length < 64) {
+                return jose.fail<OpenedToken>("crypto.token", "PASETO v4.public body is too short");
+            }
+            crypto_policy.require(Algorithm.Ed25519);
+            last message = words.slice(body, 0, body.length - 64);
+            last signature = words.slice(body, body.length - 64, body.length);
+            last input = pae(new([words.utf8(PublicHeader), message, footer, implicit_assertion]));
+            if (not verifier.verify(input, signature)) {
+                return jose.fail<OpenedToken>("crypto.authentication", "authentication failed");
+            }
+            return Result<OpenedToken>.Ok(new OpenedToken(message, footer));
+        };
+
+        /// @brief The public verifier's type.
+        /// @see [Std.Crypto.Token.Paseto](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Paseto)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Paseto.PublicVerifier";
+    );
+
+    let keyed_hash = func(key: uint8[list], input: uint8[list], length: int) -> uint8[list] {
+        last hash = new blake2b.Hasher(length, key);
+        hash.update(input);
+        return hash.finish();
+    };
+
+    let crypt = func(key: uint8[list], nonce: uint8[list], input: uint8[list]) -> uint8[list] {
+        last split = keyed_hash(key, words.concat(words.utf8("paseto-encryption-key"), nonce), 56);
+        last encryption_key = words.slice(split, 0, 32);
+        last stream_nonce = words.slice(split, 32, 56);
+        last output = chacha20.xchacha20_xor(encryption_key, stream_nonce, 0, input);
+        words.wipe(split);
+        words.wipe(encryption_key);
+        return output;
+    };
+
+    let authenticate = func(key: uint8[list], nonce: uint8[list], ciphertext: uint8[list], footer: uint8[list],
+        implicit_assertion: uint8[list]) -> uint8[list] {
+        last authentication_key = keyed_hash(key, words.concat(words.utf8("paseto-auth-key-for-aead"), nonce), 32);
+        last input = pae(new([words.utf8(LocalHeader), nonce, ciphertext, footer, implicit_assertion]));
+        last tag = keyed_hash(authentication_key, input, 32);
+        words.wipe(authentication_key);
+        return tag;
+    };
+
+    let pae = func(pieces: uint8[list][list]) -> uint8[list] {
+        let output: uint8[list] = new;
+        words.append64_le(output, pieces.length as uint64);
+        for (let part in pieces) {
+            words.append64_le(output, part.length as uint64);
+            words.append_all(output, part);
+        }
+        return output;
+    };
+
+    let encode = func(header: string, body: uint8[list], footer: uint8[list]) -> string {
+        last token = header .. jose.encode(body);
+        return footer.length == 0 ? token : (token .. "." .. jose.encode(footer));
+    };
+
+    let decode = func(token: string, purpose: string) -> Result<[uint8[list], uint8[list]]> {
+        last parts = jose.split_dots(token);
+        if ((parts.length != 3 && parts.length != 4) || parts[0] != "v4" || parts[1] != purpose
+            || parts[2] == "" || (parts.length == 4 && parts[3] == "")) {
+            return jose.fail<[uint8[list], uint8[list]]>("crypto.token", "invalid PASETO version, purpose, or framing");
+        }
+        last body = jose.decode(parts[2], "crypto.token", "invalid PASETO body encoding")?;
+        let footer: uint8[list] = new;
+        if (parts.length == 4) {
+            footer = jose.decode(parts[3], "crypto.token", "invalid PASETO footer encoding")?;
+        }
+        return Result<[uint8[list], uint8[list]]>.Ok([body, footer]);
+    };
+);

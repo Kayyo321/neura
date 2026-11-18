@@ -1,0 +1,13 @@
+error[E1010]: effect not allowed while rendering: it reaches 'doubled', which starts or scopes tasks
+  --> $DIR/render-effect-spawn.nra:11:56
+   |
+ 6 |         spawn work(value);
+   |         ----------------- starts or scopes tasks here
+...
+11 | let badge = html(value: int32) { <data value={value}>{ doubled(value) }</data> };
+   |                                                        ^^^^^^^^^^^^^^ calls 'doubled' while the view is built
+   |
+   = note: a template may allocate and read, but it may not write what it did not create, assign a binding, make a host request, start or wait for tasks, or call a function value
+   = help: do it in a handler or a command, and pass the result to the factory
+
+For more information about this error, try `neura explain E1010`.

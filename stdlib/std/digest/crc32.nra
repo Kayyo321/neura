@@ -36,6 +36,9 @@ export let Crc32 = module (
         export let reset = func {
             register = AllOnes;
         };
+
+        /// @brief Names the hasher.
+        export let.override to_string = func -> string => "Crc32";
     );
 
     /// @brief A new checksum with no bytes added.

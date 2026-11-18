@@ -1,0 +1,7 @@
+error[E1014]: invalid static document structure
+ --> $DIR/template-media-missing-alt.nra:1:21
+  |
+1 | let logo = html() { <img src="./a.png"> };
+  |                     ^^^^^^^^^^^^^^^^^^^ an image needs an 'alt' attribute
+
+For more information about this error, try `neura explain E1014`.

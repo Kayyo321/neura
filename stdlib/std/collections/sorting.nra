@@ -15,7 +15,7 @@ export let Sorting = module (
     /// goes after the last element of the sorted prefix that is not Greater
     /// than it, which keeps equal elements in their original order.
     let insertion_sort = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering,
-                                 version: uint64) {
+        version: uint64) {
         let i = start + 1;
         while (i < end) {
             last value = items[i];
@@ -47,8 +47,8 @@ export let Sorting = module (
     /// source[source_start, source_start + count) into the same positions of
     /// destination, which starts at destination_start.
     let merge_pass = func<T>(source: T[list], source_start: int, destination: T[list], destination_start: int,
-                             count: int, width: int, c: func(T, T) -> ordering.Ordering, items: T[list],
-                             version: uint64) {
+        count: int, width: int, c: func(T, T) -> ordering.Ordering, items: T[list],
+        version: uint64) {
         let left = 0;
         while (left < count) {
             let middle = left + width;
@@ -60,7 +60,7 @@ export let Sorting = module (
                 right_end = count;
             }
             let copy_only = middle == right_end;
-            if (!copy_only) {
+            if (not copy_only) {
                 // A pair that is already in order is copied without merging.
                 last order = c(source[source_start + middle - 1], source[source_start + middle]);
                 if (items.version != version) {
@@ -114,7 +114,7 @@ export let Sorting = module (
     /// lives only in this helper's frame, so it is unreachable once the
     /// helper returns (section 5.5).
     let merge_blocks = func<T>(items: T[list], start: int, end: int, c: func(T, T) -> ordering.Ordering,
-                               version: uint64) {
+        version: uint64) {
         let count = end - start;
         // The buffer holds references the list already holds, so it keeps
         // nothing extra alive and needs no "empty" element.
@@ -132,7 +132,7 @@ export let Sorting = module (
             } else {
                 merge_pass<T>(items, start, buffer, 0, count, width, c, items, version);
             }
-            in_buffer = !in_buffer;
+            in_buffer = not in_buffer;
             if (width > count / 2) {
                 width = count;
             } else {

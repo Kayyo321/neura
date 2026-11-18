@@ -28,9 +28,9 @@ export let DatagramSocket = module (
         /// @brief Text such as "Datagram(5 bytes from 127.0.0.1:9000)" or "Datagram(5 bytes from an unnamed
         /// sender)".
         export let.override to_string = func -> string => match (sender) {
-            Optional.Some(address) => "Datagram(" + data.length.to_string() + " bytes from " + address.to_string()
-                + ")",
-            Optional.None => "Datagram(" + data.length.to_string() + " bytes from an unnamed sender)",
+            Optional.Some(address) => "Datagram(" .. data.length.to_string() .. " bytes from " .. address.to_string()
+                .. ")",
+            Optional.None => "Datagram(" .. data.length.to_string() .. " bytes from an unnamed sender)",
         };
     );
 

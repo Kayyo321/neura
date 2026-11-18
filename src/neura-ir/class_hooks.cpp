@@ -400,6 +400,7 @@ private:
         // docs/design/Lifetime030.md: a Cleanup's lists keep their events,
         // which happen when they run; reading Pending and a Yield are none.
         case IrOp::Cleanup: case IrOp::Pending: case IrOp::Yield:
+        case IrOp::ConcatText: case IrOp::TypeOf: case IrOp::Reflect:
             break;
         }
         for (auto& operand : node.operands) value(operand);

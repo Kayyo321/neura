@@ -1,0 +1,75 @@
+error[E0270]: string literal escapes do not form valid UTF-8
+ --> $DIR/escape-invalid-utf8.nra:4:12
+  |
+4 | let lone = "caf\xE9";
+  |            ^^^^^^^^^
+  |                ---- this byte does not form a valid UTF-8 sequence here
+  |
+  = note: a string holds UTF-8 text: \xHH escapes must together form UTF-8 sequences, as \xC3\xA9 does for U+00E9
+help: to write the code point U+00E9, use a Unicode escape
+  |
+4 | let lone = "caf\u{E9}";
+  |                ~~~~~~
+
+error[E0270]: string literal escapes do not form valid UTF-8
+ --> $DIR/escape-invalid-utf8.nra:5:17
+  |
+5 | let truncated = "\xC3";
+  |                 ^^^^^^
+  |                  ---- this byte does not form a valid UTF-8 sequence here
+  |
+  = note: a string holds UTF-8 text: \xHH escapes must together form UTF-8 sequences, as \xC3\xA9 does for U+00E9
+help: to write the code point U+00C3, use a Unicode escape
+  |
+5 | let truncated = "\u{C3}";
+  |                  ~~~~~~
+
+error[E0270]: string literal escapes do not form valid UTF-8
+ --> $DIR/escape-invalid-utf8.nra:6:20
+  |
+6 | let continuation = "a\x80b";
+  |                    ^^^^^^^^
+  |                      ---- this byte does not form a valid UTF-8 sequence here
+  |
+  = note: a string holds UTF-8 text: \xHH escapes must together form UTF-8 sequences, as \xC3\xA9 does for U+00E9
+help: to write the code point U+0080, use a Unicode escape
+  |
+6 | let continuation = "a\u{80}b";
+  |                      ~~~~~~
+
+error[E0270]: string literal escapes do not form valid UTF-8
+ --> $DIR/escape-invalid-utf8.nra:7:18
+  |
+7 | let after_text = "é\xA9";
+  |                  ^^^^^^^
+  |                    ---- this byte does not form a valid UTF-8 sequence here
+  |
+  = note: a string holds UTF-8 text: \xHH escapes must together form UTF-8 sequences, as \xC3\xA9 does for U+00E9
+help: to write the code point U+00A9, use a Unicode escape
+  |
+7 | let after_text = "é\u{A9}";
+  |                    ~~~~~~
+
+error[E0270]: string literal escapes do not form valid UTF-8
+ --> $DIR/escape-invalid-utf8.nra:8:22
+  |
+8 | let interpolated = $"x\xFF{1}";
+  |                      ^^^^^
+  |                       ---- this byte does not form a valid UTF-8 sequence here
+  |
+  = note: a string holds UTF-8 text: \xHH escapes must together form UTF-8 sequences, as \xC3\xA9 does for U+00E9
+help: to write the code point U+00FF, use a Unicode escape
+  |
+8 | let interpolated = $"x\u{FF}{1}";
+  |                       ~~~~~~
+
+error[E0104]: invalid string escape
+ --> $DIR/escape-invalid-utf8.nra:9:14
+  |
+9 | let short = "\x4G";
+  |              ^^^ \x takes exactly two hexadecimal digits
+  |
+  = note: the escapes are \n, \r, \t, \0, \\, \', \", \xHH with two hexadecimal digits, and \u{H} with one to six hexadecimal digits
+
+Some errors have detailed explanations: E0104, E0270.
+For more information about an error, try `neura explain E0104`.

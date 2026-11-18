@@ -44,21 +44,21 @@ The following public declarations are taken from the module source; each links t
   Always `AddressFamily.Ipv4`. Tagged `#Pure`.
 - **Ipv4Addr.Ipv4Addr** · [`export let compare_to = func(other: Ipv4Addr) -> Ordering`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L85)
   Compares the unsigned values. Tagged `#Pure`.
-- **Ipv4Addr.Ipv4Addr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L93)
+- **Ipv4Addr.Ipv4Addr** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L91)
   Tests whether another address is an `Ipv4Addr` with the same value.
-- **Ipv4Addr.Ipv4Addr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L102)
+- **Ipv4Addr.Ipv4Addr** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L100)
   Combines 17 with the value. Tagged `#Pure`.
-- **Ipv4Addr.Ipv4Addr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L106)
+- **Ipv4Addr.Ipv4Addr** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L104)
   The dotted-decimal form, for example `192.0.2.1`. Tagged `#Pure`.
-- **Ipv4Addr** · [`export let of = func(a: int, b: int, c: int, d: int) -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L116)
+- **Ipv4Addr** · [`export let of = func(a: int, b: int, c: int, d: int) -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L114)
   The address `a.b.c.d`; traps when a part is outside 0 to 255. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv4Addr** · [`export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L126)
+- **Ipv4Addr** · [`export let from_bytes = func(bytes: uint8[list], offset: int) -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L124)
   The address held in `bytes[offset]` to `bytes[offset + 3]`, network order; traps when fewer than four bytes follow `offset`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv4Addr** · [`export let localhost = func -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L139)
+- **Ipv4Addr** · [`export let localhost = func -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L137)
   `127.0.0.1`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv4Addr** · [`export let unspecified = func -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L143)
+- **Ipv4Addr** · [`export let unspecified = func -> Ipv4Addr`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L141)
   `0.0.0.0`. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Ipv4Addr** · [`export let parse = func(text: string) -> Result<Ipv4Addr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L152)
+- **Ipv4Addr** · [`export let parse = func(text: string) -> Result<Ipv4Addr>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/ipv4-addr.nra#L150)
   Parses strict dotted-decimal text: exactly four parts of 1 to 3 decimal digits, each 0 to 255, with no leading zero except a lone `0`. Errors: Empty for ""; InvalidCharacter at the first byte that is not a digit or a dot (also a leading zero, at the zero); Syntax at an empty part or a fifth part; OutOfRange at the start of a part above 255; UnexpectedEnd at the length when fewer than four parts are given. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
 <!-- END SOURCE API -->
 

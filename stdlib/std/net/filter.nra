@@ -94,7 +94,7 @@ export let Filter = module (
         };
 
         /// @brief The text "FilterChain(N filters)".
-        export let.override to_string = func -> string => "FilterChain(" + filters.length.to_string() + " filters)";
+        export let.override to_string = func -> string => "FilterChain(" .. filters.length.to_string() .. " filters)";
     );
 
     /// @brief `filter` bound to `service`.

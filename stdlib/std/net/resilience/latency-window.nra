@@ -78,7 +78,7 @@ export let LatencyWindow = module (
 
         /// @brief Text such as "LatencyWindow(12 of 100 samples)".
         export let.override to_string = func -> string =>
-            "LatencyWindow(" + samples.length.to_string() + " of " + capacity.to_string() + " samples)";
+            "LatencyWindow(" .. samples.length.to_string() .. " of " .. capacity.to_string() .. " samples)";
     );
 
     /// @brief An empty window of `capacity` samples.

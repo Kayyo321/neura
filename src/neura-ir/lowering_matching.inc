@@ -666,3 +666,169 @@ IrNode Lowering::general_match(const Statement& stmt, Context& context, bool pro
     result.body.push_back(std::move(remaining));
     return result;
 }
+
+// A narrowing `if` (docs/design/Expressions030.md, Narrowing). The steps are
+// those general_match builds for a statement `match.is`, so that
+// `if (x is y: T && rest) A else B` lowers as
+// `match.is (x) { y: T if rest => A, _ => B }` and builds the same image:
+// the subject in a constant `$match`, the arm index `$arm`, the deferred
+// binding, the tests and the binding as nested branches, the guard storing
+// arm 0, the `_` arm storing arm 1, and a branch on `$arm` between the two
+// bodies. Conjuncts before a narrowing are tests that enclose its steps, a
+// later narrowing saves its subject inside them, and the conjuncts after the
+// last narrowing form the guard. `x is not y: T` swaps the bodies, so `y`
+// is bound in the `else` branch. A scalar or string subject has no class
+// test, as in `match.is`, and the `_` arm is kept without the coverage
+// check that would reject it there. When `after` is given, the bindings'
+// scope is moved to it instead of being dropped, for the binding of a
+// negated narrowing after the `if`.
+IrNode Lowering::narrowing_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted, Names* after) {
+    std::vector<const Expr*> conjuncts;
+    const Expr* chain = &stmt.expressions.front();
+    while (chain->kind == ExprKind::Binary && chain->text == "&&") {
+        conjuncts.insert(conjuncts.begin(), &chain->operands[1]);
+        chain = &chain->operands[0];
+    }
+    conjuncts.insert(conjuncts.begin(), chain);
+    const auto narrowing = [](const Expr* conjunct) -> const Expr* {
+        if (conjunct->kind == ExprKind::TypeTest && conjunct->narrowing) return conjunct;
+        if (conjunct->kind == ExprKind::Unary && conjunct->is_not && conjunct->operands.front().narrowing)
+            return &conjunct->operands.front();
+        return nullptr;
+    };
+    std::size_t last = 0;
+    for (std::size_t i = 0; i < conjuncts.size(); ++i)
+        if (narrowing(conjuncts[i])) last = i;
+
+    auto owner = context.owner;
+    if (symbol(owner).kind == SymbolKind::Global || symbol(owner).kind == SymbolKind::Field)
+        owner = symbol(owner).owner;
+    constexpr std::size_t arms = 2;
+    auto result = node(IrOp::Block, stmt.span);
+    SymbolId selected = no_symbol;
+    const auto select = [&] {
+        if (selected != no_symbol) return;
+        selected = add(SymbolKind::Local, "$arm", stmt.span, owner);
+        symbol(selected).type = arm_index_type;
+    };
+    std::vector<IrNode> head;
+    std::vector<IrNode> declarations;
+    std::vector<PatternStep> steps;
+    context.scopes.emplace_back();
+    for (std::size_t i = 0; i <= last; ++i) {
+        const auto* test = narrowing(conjuncts[i]);
+        if (!test) {
+            select();
+            steps.push_back({value(*conjuncts[i], context, &bool_type), std::nullopt});
+            continue;
+        }
+        auto subject = value(test->operands.front(), context);
+        is_subject(subject);
+        const auto subject_type = subject.type;
+        const auto temporary = add(SymbolKind::Local, "$match", subject.span, owner);
+        symbol(temporary).type = subject_type;
+        symbol(temporary).constant = true;
+        auto save = node(IrOp::Initialize, subject.span);
+        save.symbol = temporary;
+        save.operands.push_back(std::move(subject));
+        if (i == 0) head.push_back(std::move(save));
+        else steps.push_back({std::nullopt, std::move(save)});
+        select();
+        if (const auto& names = context.scopes.back(); names.contains(test->binding))
+            throw duplicate_local(*test->narrowing, "duplicate local binding '" + test->binding + "'",
+                                  names.find(test->binding)->second);
+        PatternSyntax pattern{};
+        pattern.kind = PatternSyntax::Kind::Binding;
+        pattern.span = Span{test->narrowing->file, test->narrowing->line, test->narrowing->column,
+                            test->narrowing->offset, test->span.offset + test->span.length - test->narrowing->offset};
+        pattern.name = test->binding;
+        pattern.name_span = *test->narrowing;
+        pattern.type = test->type;
+        is_pattern(pattern, load_local(temporary, subject_type, pattern.span), steps, declarations, context, owner);
+    }
+    // The guard: the conjuncts after the last narrowing, as `&&` joins them.
+    std::optional<IrNode> guard;
+    for (std::size_t i = last + 1; i < conjuncts.size(); ++i) {
+        auto operand = value(*conjuncts[i], context, &bool_type);
+        if (!guard) {
+            guard = std::move(operand);
+            continue;
+        }
+        auto span = guard->span;
+        span.length = operand.span.offset + operand.span.length - span.offset;
+        auto joined = node(IrOp::ShortCircuit, span, bool_type);
+        joined.text = "&&";
+        joined.operands.push_back(std::move(*guard));
+        joined.body.push_back(std::move(operand));
+        guard = std::move(joined);
+    }
+    const auto& condition = stmt.expressions.front();
+    IrNode finish = store_local(selected, arm_index_type, arm_index(0, condition.span), condition.span);
+    if (guard) {
+        auto branch = node(IrOp::Branch, guard->span);
+        branch.operands.push_back(std::move(*guard));
+        branch.body.push_back(std::move(finish));
+        finish = std::move(branch);
+    }
+    std::vector<IrNode> region{std::move(finish)};
+    for (auto step = steps.rbegin(); step != steps.rend(); ++step) {
+        if (step->statement) {
+            region.insert(region.begin(), std::move(*step->statement));
+            continue;
+        }
+        auto branch = node(IrOp::Branch, step->test->span);
+        branch.operands.push_back(std::move(*step->test));
+        branch.body = std::move(region);
+        region.clear();
+        region.push_back(std::move(branch));
+    }
+    for (auto& item : head) result.body.push_back(std::move(item));
+    auto unset = node(IrOp::Initialize, stmt.span);
+    unset.symbol = selected;
+    unset.operands.push_back(arm_index(arms, stmt.span));
+    result.body.push_back(std::move(unset));
+    const auto declared_at = result.body.size();
+    for (auto& item : region) result.body.push_back(std::move(item));
+    // The `_` arm.
+    auto pending = node(IrOp::Branch, stmt.span);
+    pending.operands.push_back(equals(load_local(selected, arm_index_type, stmt.span), arm_index(arms, stmt.span),
+                                      stmt.span));
+    pending.body.push_back(store_local(selected, arm_index_type, arm_index(1, stmt.span), stmt.span));
+    result.body.push_back(std::move(pending));
+
+    // The bodies: the bound branch in the bindings' scope, the other without.
+    auto bindings = std::move(context.scopes.back());
+    context.scopes.pop_back();
+    const auto& bound = stmt.negated_narrowing ? stmt.alternative : stmt.body;
+    const auto& unbound = stmt.negated_narrowing ? stmt.body : stmt.alternative;
+    auto matched = node(IrOp::Block, stmt.span);
+    context.scopes.push_back(std::move(bindings));
+    context.scopes.emplace_back();
+    for (const auto& child : bound) append_statement(matched.body, child, context);
+    context.scopes.pop_back();
+    bindings = std::move(context.scopes.back());
+    context.scopes.pop_back();
+    auto other = node(IrOp::Block, stmt.span);
+    context.scopes.emplace_back();
+    for (const auto& child : unbound) append_statement(other.body, child, context);
+    context.scopes.pop_back();
+    auto branch = node(IrOp::Branch, stmt.span);
+    branch.operands.push_back(equals(load_local(selected, arm_index_type, stmt.span), arm_index(0, stmt.span),
+                                     stmt.span));
+    branch.body.push_back(std::move(matched));
+    branch.alternative.push_back(std::move(other));
+    result.body.push_back(std::move(branch));
+    // The binding of a negated narrowing whose true branch cannot complete
+    // is declared before the `if` and stays in scope after it; otherwise
+    // the declarations open the block, as in general_match.
+    const bool escapes = after && stmt.negated_narrowing &&
+                         std::ranges::any_of(result.body.back().alternative.front().body, never_completes);
+    if (escapes) {
+        for (auto& item : declarations) hoisted->push_back(std::move(item));
+        *after = std::move(bindings);
+    } else {
+        result.body.insert(result.body.begin() + static_cast<std::ptrdiff_t>(declared_at),
+                           std::make_move_iterator(declarations.begin()), std::make_move_iterator(declarations.end()));
+    }
+    return result;
+}

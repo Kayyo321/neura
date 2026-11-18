@@ -23,7 +23,7 @@ let Shapes = module (
 );
 ```
 
-`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 86 tags: 17 implemented, 17 informational, and 52 reserved. The [catalogue](#catalogue) below lists them all.
+`neura tags` prints every tag with its arguments, the declarations it applies to, and its status; `neura tags <Name>` prints one. The registry holds 87 tags: 18 implemented, 20 informational, and 49 reserved. The [catalogue](#catalogue) below lists them all.
 
 ## Syntax
 
@@ -179,6 +179,10 @@ The optimizer uses the property the compiler infers, so an untagged pure functio
 
 `#Immutable` on a class says that no field of an instance changes after construction. The compiler checks that every instance field is declared `last` or `const` (`E0918`) and has an immutable type (`E0919`): `bool`, a number, `string`, a tuple or enum whose parts are immutable, or a class marked `#Immutable`. An `#Immutable` class extends only `#Immutable` classes, and every class that extends it is `#Immutable` (`E0920`). A field whose type is a type parameter counts as immutable here; a specialization whose type arguments are mutable, such as `Pair<int32[list]>` of an `#Immutable` class `Pair<T>`, is not immutable, so tasks cannot share it. Tasks may share the instances of an `#Immutable` class ([Concurrency](Concurrency#51-transferable-types)).
 
+### Frozen
+
+`#Frozen` belongs to the standard library: only `Std.Collections.Frozen` and `Std.Ui` may write it, and anywhere else it is `E0581`. On a class it says that every type argument given to the class is deeply immutable ([Collections](Collections#frozenlist)): a written argument that is not is `E0580`, and a type parameter written as such an argument carries the requirement to the arguments of its own declaration. On a `last` field of list type it marks frozen storage: the constructor assigns it once, from a list the constructor created and only filled, and the class's code reads it only by index and length; any other use is `E0581`. The `#Immutable` check accepts a frozen field whose element type is immutable. `FrozenList<T>` and `ui.State<T>` carry it.
+
 ### ThreadSafe and NotThreadSafe
 
 `#ThreadSafe` on a function or method says that it is [task-safe](Concurrency#52-task-safe-calls). The compiler checks it with the same analysis as a `spawn`, and a function that is not task-safe is error `E0608` at the tag, with the call chain that a spawn of it would report. `#ThreadSafe` on a class says that tasks may share its instances and call every exported method: the class is `#Immutable` or a [monitor](Concurrency#81-monitors) (otherwise `E0609`, with a label at the member that breaks the rule), and each exported method is task-safe (`E0608`).
@@ -276,6 +280,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | `#Requires(condition: string)` | functions, methods | reserved, repeatable | A precondition checked on entry. Instead: check the condition at the start of the body and call trap_with_message. |
 | `#Ensures(condition: string)` | functions, methods | reserved, repeatable | A postcondition checked on return. Instead: check the condition before each return. |
 | `#Invariant(condition: string)` | classes | reserved, repeatable | A condition that holds between method calls. Instead: write a validate() method and call it in tests. |
+| `#Frozen` | classes, fields | implemented | Standard library only: on a class, its type arguments are deeply immutable (E0580); on a `last` list field, storage assigned once from a list the constructor created and never exposed (E0581). |
 
 ### Optimization
 
@@ -362,7 +367,7 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#RequiresCapability(capability: name...)` | modules, functions, methods | reserved, repeatable | Callers need the named runtime capability. Instead: capabilities are granted per run (`neura run --deny-*`); document the requirement. |
-| `#Sensitive` | classes, fields, file and module bindings, locals, parameters | reserved | A secret kept out of traces, dumps, and to_string. Instead: avoid printing the value; --record and --task-dump may contain it. |
+| `#Sensitive` | classes, fields, file and module bindings, locals, parameters | informational | A secret: on a field or class, [`Std.Reflect.Codec`](Stdlib-Design#22-stdreflect) writes a placeholder instead of the value. On other declarations it is only recorded; `to_string`, traces, `--record` and `--task-dump` do not read the tag. |
 | `#Untrusted` | functions, methods, fields, file and module bindings, parameters | reserved | Data from outside the program that must be validated before use. Instead: validate the value where it enters the program. |
 | `#ConstantTime` | functions, methods | reserved | Runs in time independent of secret inputs. Instead: write the comparison without early exits; no analysis proves it yet. |
 
@@ -371,8 +376,8 @@ Each table gives a tag's signature, the declarations it applies to, its status, 
 | Tag | Applies to | Status | Meaning |
 | --- | --- | --- | --- |
 | `#Serializable` | classes, enums | reserved | Can be written and read by Std serializers. Instead: write to_json and from_json with Std.Encoding.Json explicitly. |
-| `#SerialName(name: string)` | classes, variants, fields | reserved | The name used when serialized. Instead: choose the key in the explicit to_json. |
-| `#Skip` | fields | reserved | Left out when serialized. Instead: leave the field out of the explicit to_json. |
+| `#SerialName(name: string)` | classes, variants, fields | informational | The name [`Std.Reflect.Codec`](Stdlib-Design#22-stdreflect) uses for a field or variant, and for a class in schemas. `derive json.Codec` does not read it. |
+| `#Skip` | fields | informational | Left out when [`Std.Reflect.Codec`](Stdlib-Design#22-stdreflect) serializes. `derive json.Codec` does not read it. |
 | `#SerialDefault(value: literal)` | fields | reserved | The value used when the input has no entry. Instead: supply the default in the explicit from_json. |
 
 ### Resource management

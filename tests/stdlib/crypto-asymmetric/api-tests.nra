@@ -1,0 +1,111 @@
+// test-options: --gpu=off --max-steps 20000000000
+let.promote _ = import:Std.Crypto.Algorithm;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let ed448 = import:Std.Crypto.Asymmetric.Ed448;
+let hex = import:Std.Encoding.Hex;
+let hpke = import:Std.Crypto.Asymmetric.Hpke;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_oaep = import:Std.Crypto.Asymmetric.RsaOaep;
+let rsa_pkcs1v15 = import:Std.Crypto.Asymmetric.RsaPkcs1v15;
+let rsa_pss = import:Std.Crypto.Asymmetric.RsaPss;
+let test = import:Std.Test;
+let vectors = import:RsaVectors;
+
+// The conversion, parsing and digest entry points that the PKI and token packages use (round trips and
+// rejections; the known answers are in the other files).
+let ApiTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let seed = func(first: int, count: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(((first + 5 * i) % 256) as uint8);
+        }
+        return out;
+    };
+
+    let zeros = func(count: int) -> uint8[list] {
+        let out: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            out.append(0);
+        }
+        return out;
+    };
+
+    export let test_ec_encodings_and_digests = func {
+        last curves: ecdsa.Curve[list] = new([ecdsa.Curve.P256, ecdsa.Curve.Secp256k1]);
+        for (let curve in curves) {
+            last key = test.assert_ok(ecdsa.parse_private_key(curve, seed(7, 32)));
+            last public_key = key.public_key();
+            last compressed = public_key.to_sec1(true);
+            test.assert_equal_int32(33, compressed.length);
+            last again = test.assert_ok(ecdsa.parse_public_key(curve, compressed));
+            test.assert(again.equals(public_key));
+            test.assert(again.hash_code() == public_key.hash_code());
+            test.assert_equal_string(hex.encode(public_key.to_sec1(false)), hex.encode(again.to_sec1(false)));
+            last signer = new ecdsa.EcdsaSigner(key);
+            last digest = sha2.sha256(new([1, 2, 3]));
+            last der = signer.sign_digest(digest);
+            last verifier = new ecdsa.EcdsaVerifier(public_key);
+            test.assert(verifier.verify_digest(digest, der));
+            test.assert(verifier.verify(new([1, 2, 3]), der));
+            last raw = test.assert_ok(ecdsa.der_to_raw(curve, der));
+            test.assert_equal_string(hex.encode(der), hex.encode(test.assert_ok(ecdsa.raw_to_der(curve, raw))));
+            test.assert_err(ecdsa.raw_to_der(curve, new([1, 2])));
+            // r = 0 is out of range.
+            test.assert_err(ecdsa.raw_to_der(curve, zeros(64)));
+            test.assert_err(ecdsa.der_to_raw(curve, new([48, 0])));
+        }
+        test.assert_err(ecdsa.parse_private_key(ecdsa.Curve.P256, seed(7, 31)));
+        test.assert_err(ecdsa.parse_private_key(ecdsa.Curve.P256, decode("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")));
+        test.assert_err(ecdsa.parse_public_key(ecdsa.Curve.P256, new([0])));
+    };
+
+    export let test_eddsa_parsing = func {
+        last key = new ed25519.Ed25519PrivateKey(seed(1, 32));
+        test.assert(test.assert_ok(ed25519.parse_public_key(key.public_key_bytes())).equals(key.public_key()));
+        test.assert_err(ed25519.parse_public_key(seed(1, 31)));
+        // y = p (2^255 - 19) is not canonical.
+        test.assert_err(ed25519.parse_public_key(decode("edffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff7f")));
+        last key448 = new ed448.Ed448PrivateKey(seed(2, 57));
+        test.assert(test.assert_ok(ed448.parse_public_key(key448.public_key_bytes())).equals(key448.public_key()));
+        test.assert_err(ed448.parse_public_key(seed(2, 56)));
+        test.assert_err(ed448.parse_public_key(seed(2, 57)));
+    };
+
+    export let test_rsa_digests_and_limits = func {
+        last rows = vectors.keys;
+        last key = new rsa.RsaPrivateKey(decode(rows[1]), decode(rows[2]), decode(rows[3]), decode(rows[4]), decode(rows[5]));
+        last digest = sha2.sha256(new([4, 5]));
+        last pss = test.assert_ok(new rsa_pss.RsaPssSigner(key, Algorithm.Sha256, 0).sign_with_salt(new([4, 5]), new));
+        test.assert(new rsa_pss.RsaPssVerifier(key.public_key, Algorithm.Sha256, 0).verify_digest(digest, pss));
+        test.assert(!new rsa_pss.RsaPssVerifier(key.public_key, Algorithm.Sha256, 32).verify_digest(digest, pss));
+        last oaep = new rsa_oaep.RsaOaep(Algorithm.Sha256);
+        last most = oaep.max_message_length(key.public_key);
+        test.assert_equal_int32(256 - 2 * 32 - 2, most);
+        last ciphertext = oaep.encrypt_with_seed(key.public_key, seed(3, most), new, seed(4, 32));
+        test.assert_equal_string(hex.encode(seed(3, most)), hex.encode(test.assert_ok(oaep.decrypt(key, ciphertext, new))));
+        last pkcs = vectors.pkcs1v15;
+        last verifier = new rsa_pkcs1v15.RsaPkcs1v15Verifier(key.public_key, Algorithm.Sha256);
+        for (let i = 0; i < pkcs.length; i += 4) {
+            if (pkcs[i + 1] == "Sha256") {
+                test.assert(verifier.verify_digest(sha2.sha256(decode(pkcs[i + 2])), decode(pkcs[i + 3])));
+                test.assert(!verifier.verify_digest(digest, decode(pkcs[i + 3])));
+            }
+        }
+    };
+
+    export let test_hpke_parsing = func {
+        last kem = hpke.Kem.DhKemP256HkdfSha256;
+        last key = hpke.derive_key_pair(kem, seed(9, 32));
+        last parsed = test.assert_ok(hpke.parse_private_key(kem, key.expose()));
+        test.assert(parsed.public_key().equals(key.public_key()));
+        test.assert_err(hpke.parse_private_key(kem, seed(9, 31)));
+        test.assert_err(hpke.parse_private_key(kem, decode("ffffffff00000000ffffffffffffffffbce6faada7179e84f3b9cac2fc632551")));
+        test.assert(test.assert_ok(hpke.parse_public_key(kem, key.public_key_bytes())).equals(key.public_key()));
+        last x = hpke.derive_key_pair(hpke.Kem.DhKemX448HkdfSha512, seed(1, 56));
+        test.assert_ok(hpke.parse_private_key(hpke.Kem.DhKemX448HkdfSha512, x.expose()));
+    };
+);

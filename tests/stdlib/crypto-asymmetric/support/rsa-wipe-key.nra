@@ -1,0 +1,14 @@
+let hex = import:Std.Encoding.Hex;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let test = import:Std.Test;
+let vectors = import:RsaVectors;
+
+export let RsaWipeKey = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let key = func -> rsa.RsaPrivateKey {
+        last row = vectors.keys;
+        return new rsa.RsaPrivateKey(bytes(row[1]), bytes(row[2]), bytes(row[3]), bytes(row[4]), bytes(row[5]),
+            bytes(row[6]), bytes(row[7]), bytes(row[8]));
+    };
+);

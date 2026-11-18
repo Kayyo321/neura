@@ -31,7 +31,9 @@ The following public declarations are taken from the module source; each links t
   Takes a permit if one is free; never waits. Tagged `#NoDiscard(reason: "the result says whether a permit was taken")`.
 - **Semaphore.Semaphore** · [`export let release = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L40)
   Returns a permit and wakes the task that has waited longest. Releasing more permits than the semaphore was created with traps.
-- **Semaphore** · [`export let create = func(permits: int) -> Semaphore`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L51)
+- **Semaphore.Semaphore** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L50)
+  Names the semaphore.
+- **Semaphore** · [`export let create = func(permits: int) -> Semaphore`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/semaphore.nra#L54)
   A semaphore with `permits` permits, all free. A negative count traps.
 <!-- END SOURCE API -->
 

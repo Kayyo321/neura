@@ -41,9 +41,11 @@ The following public declarations are taken from the module source; each links t
   Fisher-Yates: for i from the last index down to 1, swaps i with next_int_below(i + 1).
 - **Random.Random** · [`export let choose = func<T>(items: T[list]) -> T`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L142)
   An element chosen with next_int_below. An empty list traps with "no such element".
-- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L168)
+- **Random.Random** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L166)
+  Names the generator; the state is never shown.
+- **Random** · [`export let seeded = func(seed: uint64) -> Random`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L171)
   The four words are successive outputs of SplitMix64 started at the seed. Tagged `#Pure`, `#ThreadSafe`.
-- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L189)
+- **Random** · [`export let from_entropy = func -> Result<Random>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/random/random.nra#L192)
   Seeds with 8 bytes from neura.entropy.fill, read as a little-endian uint64. Needs the entropy capability; a denied or failed request is an Io error (CapabilityDenied when denied). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

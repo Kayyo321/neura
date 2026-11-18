@@ -1,0 +1,33 @@
+// sizes: 1000 2000
+// scaling: 2.1
+// A sequence pipeline fed by a generator (docs/design/Lifetime030.md, Gate
+// and acceptance): the generator yields n values, `filter` keeps the odd
+// ones, `map` squares them, and `fold` sums them.
+let console = import:Std.Io.Console;
+let int32s = import:Std.Core.Int32;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let GeneratorPipeline = module:program.Entry (
+    let naturals = iterator(count: int) -> int {
+        for (let value = 1; value <= count; value++) {
+            yield value;
+        }
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let n = result.value_or<int>(int32s.parse(args[0]), 0);
+        let total = naturals(n)
+            .filter(func(value: int) -> bool => value % 2 == 1)
+            .map<int64>(func(value: int) -> int64 => (value as int64) * (value as int64))
+            .fold<int64>(0, func(sum: int64, value: int64) -> int64 => sum + value);
+        // The sum of the odd squares up to n, for an even n: m(2m-1)(2m+1)/3
+        // with m = n / 2.
+        let m = (n / 2) as int64;
+        if (total != m * (2 * m - 1) * (2 * m + 1) / 3) {
+            return program.ExitCode.Failure;
+        }
+        console.print_line("ok");
+        return program.ExitCode.Ok;
+    };
+);

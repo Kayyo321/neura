@@ -34,9 +34,9 @@ The following public declarations are taken from the module source; each links t
   The first WT_APPLICATION_ERROR codepoint (0x52e4a40fa8db).
 - **Wire** · [`export const LastApplicationError: uint64 = 91146396643682`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L36)
   The last WT_APPLICATION_ERROR codepoint (0x52e5ac983162).
-- **Wire** · [`export let StreamType = enum (ClientBidirectional, ServerBidirectional, ClientUnidirectional, ServerUnidirectional)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L39)
+- **Wire** · [`export let StreamType = enum ( ClientBidirectional, ServerBidirectional, ClientUnidirectional, ServerUnidirectional )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L39)
   The four stream types of RFC 9000 section 2.1, by the two low bits of the ID.
-- **Wire** · [`export let stream_type = func(id: int64) -> StreamType`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L45)
+- **Wire** · [`export let stream_type = func(id: int64) -> StreamType`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L47)
   The type of a stream ID. A negative ID or one above 2^62 - 1 traps with "invalid argument: stream id". Tagged `#NoDiscard`.
 - **Wire** · [`export let is_bidirectional = func(id: int64) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L59)
   Whether the stream ID names a bidirectional stream. Tagged `#NoDiscard`.
@@ -74,41 +74,41 @@ The following public declarations are taken from the module source; each links t
   The header of a bidirectional WebTransport stream for the session: 0x41 and the session ID. Tagged `#NoDiscard`.
 - **Wire** · [`export let read_stream_header = func(reader: WireReader, bidirectional: bool) -> Result<int64>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L228)
   Reads the header of a unidirectional stream (`bidirectional` false) or a bidirectional one and returns the session ID; the reader is left at the stream data. Fails for another type or signal and for a session ID that is not a client-initiated bidirectional stream ID. Tagged `#NoDiscard`.
-- **Wire** · [`export let encode_datagram = func(session: int64, payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L244)
+- **Wire** · [`export let encode_datagram = func(session: int64, payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L242)
   An HTTP/3 datagram for the session: the quarter stream ID (session / 4) and the payload. Tagged `#NoDiscard`.
-- **Wire** · [`export let Datagram = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L255)
+- **Wire** · [`export let Datagram = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L253)
   A received HTTP/3 datagram: its session and payload. Tagged `#Final`.
-- **Wire.Datagram** · [`export last session: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L257)
+- **Wire.Datagram** · [`export last session: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L255)
   The session ID (4 times the quarter stream ID).
-- **Wire.Datagram** · [`export last payload: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L259)
+- **Wire.Datagram** · [`export last payload: uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L257)
   The payload.
-- **Wire.Datagram** · [`export let init = func(session_id: int64, data: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L262)
+- **Wire.Datagram** · [`export let init = func(session_id: int64, data: uint8[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L260)
   Stores the fields.
-- **Wire.Datagram** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L268)
+- **Wire.Datagram** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L266)
   The session and payload length.
-- **Wire** · [`export let decode_datagram = func(bytes: uint8[list]) -> Result<Datagram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L274)
+- **Wire** · [`export let decode_datagram = func(bytes: uint8[list]) -> Result<Datagram>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L272)
   Reads an HTTP/3 datagram. A quarter stream ID above 2^60 - 1 fails (RFC 9297 section 2.1). Tagged `#NoDiscard`.
-- **Wire** · [`export let SessionClose = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L285)
+- **Wire** · [`export let SessionClose = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L281)
   The reason a session ended, as a WT_CLOSE_SESSION capsule carries it. Tagged `#Final`, `#Immutable`.
-- **Wire.SessionClose** · [`export last code: uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L287)
+- **Wire.SessionClose** · [`export last code: uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L283)
   The 32-bit application error code.
-- **Wire.SessionClose** · [`export last message: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L289)
+- **Wire.SessionClose** · [`export last message: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L285)
   The UTF-8 message, at most 1024 bytes.
-- **Wire.SessionClose** · [`export let init = func(error_code: uint32, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L292)
+- **Wire.SessionClose** · [`export let init = func(error_code: uint32, text: string)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L288)
   Stores the code and message.
-- **Wire.SessionClose** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L298)
+- **Wire.SessionClose** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L294)
   Equal when the code and message are.
-- **Wire.SessionClose** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L307)
+- **Wire.SessionClose** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L302)
   Combines the code and message.
-- **Wire.SessionClose** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L310)
+- **Wire.SessionClose** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L305)
   `code: message`.
-- **Wire** · [`export let encode_close_capsule = func(close: SessionClose) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L316)
+- **Wire** · [`export let encode_close_capsule = func(close: SessionClose) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L311)
   The WT_CLOSE_SESSION capsule (type 0x2843, length, code, message). A message over 1024 bytes traps with "invalid argument: close message". Tagged `#NoDiscard`.
-- **Wire** · [`export let decode_close_capsule = func(bytes: uint8[list]) -> Result<SessionClose>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L335)
+- **Wire** · [`export let decode_close_capsule = func(bytes: uint8[list]) -> Result<SessionClose>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L330)
   Reads a WT_CLOSE_SESSION capsule. Fails for another capsule type, a length below 4 or past the bytes, a message over 1024 bytes, or a message that is not UTF-8. Tagged `#NoDiscard`.
-- **Wire** · [`export let to_http3_error = func(code: uint32) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L356)
+- **Wire** · [`export let to_http3_error = func(code: uint32) -> uint64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L349)
   The HTTP/3 error code of a WebTransport application error code (draft section 4.4): `first + n + floor(n / 0x1e)`, skipping the reserved codepoints `0x1f * N + 0x21`. Tagged `#NoDiscard`.
-- **Wire** · [`export let from_http3_error = func(code: uint64) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L364)
+- **Wire** · [`export let from_http3_error = func(code: uint64) -> Result<uint32>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/web-transport/wire.nra#L357)
   The WebTransport application error code of an HTTP/3 error code, or a failure when the code is outside the WT_APPLICATION_ERROR range or a reserved codepoint. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

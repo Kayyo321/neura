@@ -1,0 +1,9 @@
+error[E0206]: expected an interface after 'implements'
+ --> $DIR/record-implements-at-end.nra:4:26
+  |
+4 | let P = record implements
+  |                          ^ the file ends before the interfaces of the record
+  |
+  = help: name an interface, as in 'record implements Named (name: string)'
+
+For more information about this error, try `neura explain E0206`.

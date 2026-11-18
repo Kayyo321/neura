@@ -1,0 +1,228 @@
+// test-options: --gpu=off --max-steps 200000000000
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let hex = import:Std.Encoding.Hex;
+let hpke = import:Std.Crypto.Asymmetric.Hpke;
+let test = import:Std.Test;
+let vectors = import:HpkeVectors;
+
+// HPKE (RFC 9180) for DHKEM(X25519) and DHKEM(X448) against the official test vectors and, for P-384 and HKDF-SHA384, an
+// independent reference checked against them (support/hpke-vectors.nra, scripts/crypto-vectors/gen-asymmetric-hpke.py).
+let HpkeXTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_sealed_messages_compare_by_both_byte_sequences = func {
+        last original = new hpke.SealedMessage(new([1]), new([2, 3]));
+        last copy = new hpke.SealedMessage(new([1]), new([2, 3]));
+        test.assert(original.equals(copy) && copy.equals(original));
+        test.assert(original.hash_code() == copy.hash_code());
+        test.assert(!original.equals(new hpke.SealedMessage(new([4]), new([2, 3]))));
+        test.assert(!original.equals(new hpke.SealedMessage(new([1]), new([2, 4]))));
+        test.assert(!original.equals(new hpke.SealedMessage(new([1, 2]), new([3]))));
+    };
+
+    let kem_of = func(id: string) -> hpke.Kem {
+        if (id == "16") {
+            return hpke.Kem.DhKemP256HkdfSha256;
+        }
+        if (id == "17") {
+            return hpke.Kem.DhKemP384HkdfSha384;
+        }
+        if (id == "18") {
+            return hpke.Kem.DhKemP521HkdfSha512;
+        }
+        if (id == "32") {
+            return hpke.Kem.DhKemX25519HkdfSha256;
+        }
+        return hpke.Kem.DhKemX448HkdfSha512;
+    };
+
+    let kdf_of = func(id: string) -> hpke.Kdf {
+        if (id == "1") {
+            return hpke.Kdf.HkdfSha256;
+        }
+        if (id == "2") {
+            return hpke.Kdf.HkdfSha384;
+        }
+        return hpke.Kdf.HkdfSha512;
+    };
+
+    let aead_of = func(id: string) -> hpke.Aead {
+        if (id == "1") {
+            return hpke.Aead.Aes128Gcm;
+        }
+        if (id == "2") {
+            return hpke.Aead.Aes256Gcm;
+        }
+        if (id == "3") {
+            return hpke.Aead.ChaCha20Poly1305;
+        }
+        return hpke.Aead.ExportOnly;
+    };
+
+    let mode_of = func(id: string) -> hpke.Mode {
+        if (id == "0") {
+            return hpke.Mode.Base;
+        }
+        if (id == "1") {
+            return hpke.Mode.Psk;
+        }
+        if (id == "2") {
+            return hpke.Mode.Auth;
+        }
+        return hpke.Mode.AuthPsk;
+    };
+
+    /// @brief Runs every row whose KEM id is in `kems`; checks sequence 256 on the first row of each AEAD.
+    let run = func(kems: string[list]) -> int {
+        last rows = vectors.vectors;
+        last width = 32;
+        let count = 0;
+        let long_runs: string[list] = new;
+        for (let i = 0; i < rows.length; i += width) {
+            let wanted = false;
+            for (let k in kems) {
+                if (rows[i + 2] == k) {
+                    wanted = true;
+                }
+            }
+            if (!wanted) {
+                continue;
+            }
+            last label = rows[i] + " mode " + rows[i + 1] + " kem " + rows[i + 2] + " kdf " + rows[i + 3] + " aead " + rows[i + 4];
+            last kem = kem_of(rows[i + 2]);
+            last mode = mode_of(rows[i + 1]);
+            last aead = aead_of(rows[i + 4]);
+            last info = decode(rows[i + 5]);
+            last psk = decode(rows[i + 15]);
+            last psk_id = decode(rows[i + 16]);
+            last recipient = hpke.derive_key_pair(kem, decode(rows[i + 7]));
+            last ephemeral = hpke.derive_key_pair(kem, decode(rows[i + 6]));
+            test.assert_equal_string(rows[i + 9], hex.encode(recipient.expose()));
+            test.assert_equal_string(rows[i + 12], hex.encode(recipient.public_key_bytes()));
+            test.assert_equal_string(rows[i + 11], hex.encode(ephemeral.expose()));
+            let senders: hpke.HpkePrivateKey[list] = new;
+            let sender_publics: hpke.HpkePublicKey[list] = new;
+            if (rows[i + 8] != "") {
+                last sender = hpke.derive_key_pair(kem, decode(rows[i + 8]));
+                test.assert_equal_string(rows[i + 10], hex.encode(sender.expose()));
+                test.assert_equal_string(rows[i + 13], hex.encode(sender.public_key_bytes()));
+                senders.append(sender);
+                sender_publics.append(sender.public_key());
+            }
+            last suite = new hpke.Suite(kem, kdf_of(rows[i + 3]), aead);
+            // The KEM alone: Encap / AuthEncap and the shared secret.
+            last dhkem = suite.key_encapsulation();
+            last encapsulation = senders.length == 1
+                ? test.assert_ok(dhkem.auth_encapsulate_with(recipient.public_key(), senders[0], ephemeral))
+                : test.assert_ok(dhkem.encapsulate_with(recipient.public_key(), ephemeral));
+            test.assert_equal_string(rows[i + 18], hex.encode(encapsulation.shared_secret.expose()));
+            test.assert_equal_string(rows[i + 17], hex.encode(encapsulation.ciphertext));
+            last decapsulated = senders.length == 1
+                ? test.assert_ok(dhkem.auth_decapsulate(recipient, encapsulation.ciphertext, sender_publics[0]))
+                : test.assert_ok(dhkem.decapsulate(recipient, encapsulation.ciphertext));
+            test.assert(decapsulated.ct_equals(encapsulation.shared_secret));
+            // The contexts.
+            last sender_context = test.assert_ok(suite.setup_sender_with(mode, recipient.public_key(), info, psk, psk_id,
+                senders, ephemeral));
+            test.assert_equal_string(rows[i + 17], hex.encode(sender_context.enc));
+            last receiver = test.assert_ok(suite.setup_receiver(mode, sender_context.enc, recipient, info, psk, psk_id,
+                sender_publics));
+            if (aead != hpke.Aead.ExportOnly) {
+                last pt = decode(rows[i + 19]);
+                last ct0 = sender_context.seal(decode(rows[i + 20]), pt);
+                test.assert_equal_string(rows[i + 21], hex.encode(ct0));
+                last ct1 = sender_context.seal(decode(rows[i + 22]), pt);
+                test.assert_equal_string(rows[i + 23], hex.encode(ct1));
+                test.assert_equal_string(rows[i + 19], hex.encode(test.assert_ok(receiver.open(decode(rows[i + 20]), ct0))));
+                // A failed open leaves the sequence number where it was.
+                test.assert_err(receiver.open(decode(rows[i + 20]), ct1));
+                test.assert_equal_string(rows[i + 19], hex.encode(test.assert_ok(receiver.open(decode(rows[i + 22]), ct1))));
+                let first_of_aead = true;
+                for (let seen in long_runs) {
+                    if (seen == rows[i + 4]) {
+                        first_of_aead = false;
+                    }
+                }
+                if (first_of_aead) {
+                    long_runs.append(rows[i + 4]);
+                    for (let seq = 2; seq < 256; seq++) {
+                        let _ = sender_context.seal(new, pt);
+                    }
+                    test.assert_equal_string(rows[i + 25], hex.encode(sender_context.seal(decode(rows[i + 24]), pt)));
+                }
+            }
+            for (let e = 0; e < 3; e++) {
+                last context = decode(rows[i + 26 + 2 * e]);
+                test.assert_equal_string(rows[i + 27 + 2 * e], hex.encode(sender_context.export_secret(context, 32)));
+                test.assert_equal_string(rows[i + 27 + 2 * e], hex.encode(receiver.export_secret(context, 32)));
+            }
+            count++;
+        }
+        return count;
+    };
+
+    export let test_x25519_vectors = func {
+        test.assert_equal_int32(32 + 4, run(new(["32"])));
+    };
+
+    export let test_x448_vectors = func {
+        test.assert_equal_int32(32 + 4, run(new(["33"])));
+    };
+
+    // Wycheproof's X25519 decryption cases: modified tags, ciphertexts, enc values and small-order enc values
+    // fail; the expected outcome of each case comes from the reference (gen-asymmetric-hpke.py).
+    export let test_wycheproof_x25519 = func {
+        last rows = vectors.wycheproof_x25519;
+        for (let i = 0; i < rows.length; i += 11) {
+            last suite = new hpke.Suite(hpke.Kem.DhKemX25519HkdfSha256, kdf_of(rows[i + 1]), aead_of(rows[i + 2]));
+            last key = new hpke.HpkePrivateKey(hpke.Kem.DhKemX25519HkdfSha256, decode(rows[i + 3]));
+            last outcome = suite.open(decode(rows[i + 4]), key, decode(rows[i + 5]), decode(rows[i + 6]), decode(rows[i + 7]));
+            if (rows[i + 8] == "1") {
+                test.assert_equal_string(rows[i + 9], hex.encode(test.assert_ok(outcome)));
+            } else {
+                test.assert_err(outcome);
+            }
+        }
+    };
+
+    // Single-shot seal and open, every mode through the named setups, and fresh keys.
+    export let test_round_trips = func {
+        let seed: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            seed.append(i as uint8);
+        }
+        last random = new drbg.ChaCha20Drbg(seed);
+        last kem = hpke.Kem.DhKemX25519HkdfSha256;
+        last suite = new hpke.Suite(kem, hpke.Kdf.HkdfSha256, hpke.Aead.ChaCha20Poly1305, random);
+        last recipient = test.assert_ok(hpke.generate_key_pair(kem, random));
+        last sender = test.assert_ok(hpke.generate_key_pair(kem));
+        last message: uint8[list] = new([104, 105]);
+        last sealed = test.assert_ok(suite.seal(recipient.public_key(), new([1]), new([2]), message));
+        test.assert_equal_string("6869", hex.encode(test.assert_ok(suite.open(sealed.enc, recipient, new([1]), new([2]), sealed.ciphertext))));
+        test.assert_err(suite.open(sealed.enc, recipient, new([9]), new([2]), sealed.ciphertext));
+        last psk: uint8[list] = new([7, 7, 7, 7]);
+        last psk_id: uint8[list] = new([1]);
+        last a = test.assert_ok(suite.setup_psk_sender(recipient.public_key(), new, psk, psk_id));
+        last b = test.assert_ok(suite.setup_psk_receiver(a.enc, recipient, new, psk, psk_id));
+        test.assert_equal_string("6869", hex.encode(test.assert_ok(b.open(new, a.seal(new, message)))));
+        last c = test.assert_ok(suite.setup_auth_sender(recipient.public_key(), new, sender));
+        last d = test.assert_ok(suite.setup_auth_receiver(c.enc, recipient, new, sender.public_key()));
+        test.assert_equal_string("6869", hex.encode(test.assert_ok(d.open(new, c.seal(new, message)))));
+        // The wrong sender key gives another key schedule.
+        last e = test.assert_ok(suite.setup_auth_receiver(c.enc, recipient, new, recipient.public_key()));
+        test.assert_err(e.open(new, c.seal(new, message)));
+        last f = test.assert_ok(suite.setup_auth_psk_sender(recipient.public_key(), new, psk, psk_id, sender));
+        last g = test.assert_ok(suite.setup_auth_psk_receiver(f.enc, recipient, new, psk, psk_id, sender.public_key()));
+        test.assert_equal_string(hex.encode(f.export_secret(new([3]), 40)), hex.encode(g.export_secret(new([3]), 40)));
+        last kem_object = new hpke.DhKem(kem);
+        last sent = kem_object.encapsulate(recipient.public_key());
+        test.assert(test.assert_ok(kem_object.decapsulate(recipient, sent.ciphertext)).ct_equals(sent.shared_secret));
+        test.assert_err(kem_object.decapsulate(recipient, new([1, 2, 3])));
+        // A small-order public key (u = 0) makes the X25519 result all zero.
+        last zero_key = new hpke.HpkePublicKey(kem, test.assert_ok(hex.decode("0000000000000000000000000000000000000000000000000000000000000000")));
+        test.assert_err(kem_object.try_encapsulate(zero_key));
+        test.assert_err(hpke.parse_public_key(hpke.Kem.DhKemP256HkdfSha256, new([4, 1, 2])));
+        test.assert_equal_string("HpkePrivateKey(<redacted>)", recipient.to_string());
+        test.assert(recipient.public_key().equals(new hpke.HpkePublicKey(kem, recipient.public_key_bytes())));
+    };
+);

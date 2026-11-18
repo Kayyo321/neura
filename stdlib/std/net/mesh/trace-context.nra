@@ -64,10 +64,9 @@ export let TraceContext = module (
 
         /// @brief Equal when the parent, state and baggage are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is TraceContext)) {
+            if (other is not that: TraceContext) {
                 return false;
             }
-            last that = other as TraceContext;
             return to_string() == that.to_string() && baggage.equals(that.baggage);
         };
 
@@ -75,10 +74,11 @@ export let TraceContext = module (
         export let.override hash_code = func -> uint32 => to_string().hash_code() ^ baggage.hash_code();
 
         /// @brief Text such as "TraceContext(00-...-01, rojo=1, Baggage(2 members))".
-        export let.override to_string = func -> string => "TraceContext(" + match (parent) {
+        export let.override to_string = func -> string => "TraceContext(" .. match (parent) {
             Optional.Some(p) => p.to_header(),
             Optional.None => "no parent",
-        } + ", " + state.to_header() + ", " + baggage.to_string() + ")";
+        }
+        .. ", " .. state.to_header() .. ", " .. baggage.to_string() .. ")";
     );
 
     /// @brief An empty context: no parent, state or baggage.

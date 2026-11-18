@@ -48,10 +48,8 @@ export let Framing = module (
         if (token == "gzip") {
             return Optional<Compression>.Some(Compression.Gzip);
         }
-        if (token == "deflate") {
-            return Optional<Compression>.Some(Compression.Deflate);
-        }
-        return Optional<Compression>.None;
+        return if (token == "deflate") -> Optional<Compression>.Some(Compression.Deflate)
+            else -> Optional<Compression>.None;
     };
 
     /// @brief Compresses one message; identity returns the bytes unchanged.
@@ -99,10 +97,9 @@ export let Framing = module (
 
         /// @brief Equal when the flags and bytes are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Frame)) {
+            if (other is not that: Frame) {
                 return false;
             }
-            last that = other as Frame;
             if (flags != that.flags || payload.length != that.payload.length) {
                 return false;
             }
@@ -125,7 +122,7 @@ export let Framing = module (
 
         /// @brief The flags and size.
         export let.override to_string = func -> string =>
-            "Frame(flags " + flags.to_string() + ", " + payload.length.to_string() + " bytes)";
+            "Frame(flags " .. flags.to_string() .. ", " .. payload.length.to_string() .. " bytes)";
     );
 
     /// @brief Appends a length-prefixed frame with `flags` to `out`. A payload of 2^32 bytes or more traps with
@@ -160,16 +157,14 @@ export let Framing = module (
             Compression.Identity => true,
             _ => false,
         };
-        return Result<uint8[list]>.Ok(encode_message(compress(compression, payload)?, !identity));
+        return Result<uint8[list]>.Ok(encode_message(compress(compression, payload)?, not identity));
     };
 
     /// @brief The message bytes of a frame received on a call whose `grpc-encoding` is `compression`: fails with
     /// INTERNAL when the compressed flag is set on an identity call (PROTOCOL-HTTP2.md "Compressed-Flag").
     #NoDiscard
     export let message_of = func(frame: Frame, compression: Compression) -> Result<uint8[list]> {
-        if (!frame.is_compressed()) {
-            return Result<uint8[list]>.Ok(frame.payload);
-        }
+        return Result<uint8[list]>.Ok(frame.payload) unless frame.is_compressed();
         return match (compression) {
             Compression.Identity => Result<uint8[list]>.Err(status.error(status.Code.Internal,
                 "compressed flag set without grpc-encoding")),
@@ -225,16 +220,14 @@ export let Framing = module (
             }
             last flags = buffer[offset] as int;
             last valid = flags == 0 or 1 || (web && flags == 128 or 129);
-            if (!valid) {
-                return fail(status.Code.Internal, "invalid message flags " + flags.to_string());
-            }
+            return fail(status.Code.Internal, "invalid message flags " .. flags.to_string()) unless valid;
             let length: uint64 = 0;
             for (let i = 1; i < PrefixSize; i++) {
                 length = (length << 8) | (buffer[offset + i] as uint64);
             }
             if (length > (max_size as uint64)) {
-                return fail(status.Code.ResourceExhausted, "message of " + length.to_string()
-                    + " bytes exceeds the limit of " + max_size.to_string());
+                return fail(status.Code.ResourceExhausted, "message of " .. length.to_string()
+                    .. " bytes exceeds the limit of " .. max_size.to_string());
             }
             last size = length as int;
             last start = offset + PrefixSize;
@@ -262,7 +255,7 @@ export let Framing = module (
 
         /// @brief The buffered byte count.
         export let.override to_string = func -> string =>
-            "MessageDecoder(" + buffered().to_string() + " bytes buffered)";
+            "MessageDecoder(" .. buffered().to_string() .. " bytes buffered)";
 
         /// @brief Drops the consumed prefix once it is at least half the buffer.
         let compact = func {
@@ -354,7 +347,7 @@ export let Framing = module (
             let length: uint64 = 0;
             let i = 0;
             let done = false;
-            while (!done) {
+            while (not done) {
                 if (i == proto.MaxVarintBytes) {
                     return fail(status.Code.Internal, "length varint longer than 10 bytes");
                 }
@@ -370,8 +363,8 @@ export let Framing = module (
                 done = b < 128;
             }
             if (length > (max_size as uint64)) {
-                return fail(status.Code.ResourceExhausted, "message of " + length.to_string()
-                    + " bytes exceeds the limit of " + max_size.to_string());
+                return fail(status.Code.ResourceExhausted, "message of " .. length.to_string()
+                    .. " bytes exceeds the limit of " .. max_size.to_string());
             }
             last size = length as int;
             last start = offset + i;
@@ -396,7 +389,7 @@ export let Framing = module (
 
         /// @brief The buffered byte count.
         export let.override to_string = func -> string =>
-            "DelimitedDecoder(" + (buffer.length - offset).to_string() + " bytes buffered)";
+            "DelimitedDecoder(" .. (buffer.length - offset).to_string() .. " bytes buffered)";
 
         /// @brief Marks the decoder failed.
         let fail = func(code: status.Code, message: string) -> Result<Optional<uint8[list]>> {

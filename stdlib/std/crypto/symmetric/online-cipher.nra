@@ -34,8 +34,7 @@ export let OnlineCipher = module (
             trap_with_message("invalid argument: STREAM needs an AEAD with a nonce of at least 12 bytes");
         }
         if (prefix.length != nonce_length - 5) {
-            trap_with_message("invalid argument: STREAM nonce prefix must be " + (nonce_length - 5).to_string()
-                + " bytes");
+            trap_with_message("invalid argument: STREAM nonce prefix must be " .. (nonce_length - 5).to_string() .. " bytes");
         }
     };
 
@@ -51,7 +50,7 @@ export let OnlineCipher = module (
         /// @brief A stream under the AEAD with the nonce prefix (the AEAD's nonce length less 5 bytes) and the
         /// associated data that every segment authenticates.
         export let init = func(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
-                associated_data: uint8[list]) {
+            associated_data: uint8[list]) {
             crypto_policy.require(Algorithm.Stream);
             check_prefix(aead.nonce_length(), nonce_prefix);
             cipher = aead;
@@ -78,7 +77,7 @@ export let OnlineCipher = module (
         /// @brief Whether the final segment was sealed.
         export let is_ended = func -> bool => ended;
 
-        export let.override to_string = func -> string => "StreamEncryptor(" + index.to_string() + " segments)";
+        export let.override to_string = func -> string => "StreamEncryptor(<redacted>)";
     );
 
     /// @brief Opens a stream segment by segment, in order.
@@ -93,7 +92,7 @@ export let OnlineCipher = module (
 
         /// @brief The decryptor matching a StreamEncryptor with the same AEAD key, prefix and data.
         export let init = func(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
-                associated_data: uint8[list]) {
+            associated_data: uint8[list]) {
             crypto_policy.require(Algorithm.Stream);
             check_prefix(aead.nonce_length(), nonce_prefix);
             cipher = aead;
@@ -127,20 +126,20 @@ export let OnlineCipher = module (
         /// cut short or failed.
         #NoDiscard
         export let finish = func -> Result<Unit> {
-            if (ended && !failed) {
+            if (ended && not failed) {
                 return Result<Unit>.Ok(Unit.Value);
             }
             return Result<Unit>.Err(error.custom("crypto.authentication", "stream truncated or not authentic"));
         };
 
-        export let.override to_string = func -> string => "StreamDecryptor(" + index.to_string() + " segments)";
+        export let.override to_string = func -> string => "StreamDecryptor(<redacted>)";
     );
 
     /// @brief The plaintext cut into segments of `segment_length` bytes (the last may be shorter; an empty
     /// plaintext is one empty segment), each sealed.
     #[NoDiscard, Since("0.3.0")]
     export let seal_segments = func<K>(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
-            associated_data: uint8[list], plaintext: uint8[list], segment_length: int) -> uint8[list][list] {
+        associated_data: uint8[list], plaintext: uint8[list], segment_length: int) -> uint8[list][list] {
         if (segment_length < 1) {
             trap_with_message("invalid argument: segment length must be positive");
         }
@@ -162,7 +161,7 @@ export let OnlineCipher = module (
     /// @brief The plaintext of a whole stream, or the "crypto.authentication" error.
     #[NoDiscard, Since("0.3.0")]
     export let open_segments = func<K>(aead: AeadCipher<K, uint8[list], uint8[list]>, nonce_prefix: uint8[list],
-            associated_data: uint8[list], segments: uint8[list][list]) -> Result<uint8[list]> {
+        associated_data: uint8[list], segments: uint8[list][list]) -> Result<uint8[list]> {
         let decryptor = new StreamDecryptor<K>(aead, nonce_prefix, associated_data);
         let out: uint8[list] = new;
         for (let i = 0; i < segments.length; i++) {

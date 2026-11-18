@@ -1,0 +1,25 @@
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid state: an export-only HPKE context cannot seal
+let.promote _ = import:Std.Core.Result;
+let hpke = import:Std.Crypto.Asymmetric.Hpke;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let ikm: uint8[list] = new;
+        for (let i = 0; i < 32; i++) {
+            ikm.append(i as uint8);
+        }
+        last kem = hpke.Kem.DhKemX25519HkdfSha256;
+        last recipient = hpke.derive_key_pair(kem, ikm);
+        last suite = new hpke.Suite(kem, hpke.Kdf.HkdfSha256, hpke.Aead.ExportOnly);
+        match (suite.setup_sender_with(hpke.Mode.Base, recipient.public_key(), new, new, new, new, hpke.derive_key_pair(kem, ikm))) {
+            Result.Ok(context) => {
+                let _ = context.seal(new, new([1]));
+            },
+            Result.Err(e) => {
+            },
+        }
+        return program.ExitCode.Ok;
+    };
+);

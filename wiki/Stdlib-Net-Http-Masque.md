@@ -48,39 +48,39 @@ The following public declarations are taken from the module source; each links t
   The pseudo-header values, parallel to `pseudo_names`. Tagged `#NoDiscard`.
 - **Masque.ConnectRequest** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L91)
   Equal pseudo-header values and fields.
-- **Masque.ConnectRequest** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L100)
+- **Masque.ConnectRequest** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L99)
   Combines the pseudo-header values and the fields.
-- **Masque.ConnectRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L104)
+- **Masque.ConnectRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L103)
   The HEADERS lines as in the RFC figures, "name = value" joined by "; ".
-- **Masque** · [`export let Tunnel = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L120)
+- **Masque** · [`export let Tunnel = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L119)
   A proxied UDP or IP flow carried by a request stream. Tagged `#Final`, `#NotThreadSafe`.
-- **Masque.Tunnel** · [`export last request: ConnectRequest`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L122)
+- **Masque.Tunnel** · [`export last request: ConnectRequest`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L121)
   The request that opened the tunnel.
-- **Masque.Tunnel** · [`export let init = func(opening: ConnectRequest)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L125)
+- **Masque.Tunnel** · [`export let init = func(opening: ConnectRequest)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L124)
   Records the request; only `open` creates tunnels.
-- **Masque.Tunnel** · [`export let send_datagram = func(datagram: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L131)
+- **Masque.Tunnel** · [`export let send_datagram = func(datagram: uint8[list]) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L130)
   Sends one HTTP Datagram with the payload (for CONNECT-UDP, use `encode_udp_datagram`).
-- **Masque.Tunnel** · [`export let receive_datagram = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L136)
+- **Masque.Tunnel** · [`export let receive_datagram = func -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L135)
   Receives the next HTTP Datagram payload. Tagged `#NoDiscard`.
-- **Masque.Tunnel** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L140)
+- **Masque.Tunnel** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L139)
   Closes the request stream and with it the tunnel.
-- **Masque.Tunnel** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L143)
+- **Masque.Tunnel** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L142)
   The protocol and path.
-- **Masque** · [`export let udp_path = func(target_host: string, target_port: int) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L149)
+- **Masque** · [`export let udp_path = func(target_host: string, target_port: int) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L148)
   The default CONNECT-UDP path for a target (RFC 9298 section 2), for example `/.well-known/masque/udp/192.0.2.6/443/`. Tagged `#NoDiscard`.
-- **Masque** · [`export let ip_path = func(target: string, ipproto: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L163)
+- **Masque** · [`export let ip_path = func(target: string, ipproto: string) -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L160)
   The default CONNECT-IP path (RFC 9484 section 3), for example `/.well-known/masque/ip/*/*/`. `target` is `*`, a host, or an address with an optional `/length`; `ipproto` is `*` or 0 through 255. Tagged `#NoDiscard`.
-- **Masque** · [`export let udp_request = func(proxy_authority: string, target_host: string, target_port: int) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L176)
+- **Masque** · [`export let udp_request = func(proxy_authority: string, target_host: string, target_port: int) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L169)
   The extended CONNECT request for UDP proxying to `target_host`:`target_port` through the proxy at `proxy_authority`, with the default template (RFC 9298 section 3.4). Errors are those of `udp_path`. Tagged `#NoDiscard`.
-- **Masque** · [`export let ip_request = func(proxy_authority: string, target: string, ipproto: string) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L185)
+- **Masque** · [`export let ip_request = func(proxy_authority: string, target: string, ipproto: string) -> Result<ConnectRequest>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L178)
   The extended CONNECT request for IP proxying through the proxy at `proxy_authority`, with the default template (RFC 9484 section 4.4). Errors are those of `ip_path`. Tagged `#NoDiscard`.
-- **Masque** · [`export let expand = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L192)
+- **Masque** · [`export let expand = func(value: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L185)
   RFC 6570 simple string expansion of one variable value, with `*` alone kept as the wildcard. Tagged `#Pure`, `#ThreadSafe`.
-- **Masque** · [`export let encode_udp_datagram = func(payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L220)
+- **Masque** · [`export let encode_udp_datagram = func(payload: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L213)
   An HTTP Datagram payload carrying a UDP payload: Context ID 0, then the bytes (RFC 9298 section 5). Tagged `#NoDiscard`.
-- **Masque** · [`export let decode_udp_datagram = func(datagram: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L232)
+- **Masque** · [`export let decode_udp_datagram = func(datagram: uint8[list]) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L225)
   The UDP payload of an HTTP Datagram payload with Context ID 0 (RFC 9298 section 5). Err (UnexpectedEnd) without a complete Context ID; Err (Syntax) for another Context ID, which the receiver drops or buffers. Tagged `#NoDiscard`.
-- **Masque** · [`export let open = func(request: ConnectRequest) -> Result<Tunnel>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L248)
+- **Masque** · [`export let open = func(request: ConnectRequest) -> Result<Tunnel>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/masque.nra#L241)
   Sends `request` on an HTTP/3 connection to the proxy and, on a 2xx response, returns the tunnel (RFC 9298 section 3.5, RFC 9484 section 4.5). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

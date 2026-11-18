@@ -2,6 +2,7 @@ let base64 = import:Std.Encoding.Base64;
 let errors = import:Std.Core.Error;
 let hashing = import:Std.Core.Hash;
 let.promote _ = import:Std.Core.Optional;
+let optionals = import:Std.Core.Optional;
 let.promote _ = import:Std.Random.Random;
 let.promote _ = import:Std.Core.Result;
 let sha1_digest = import:Std.Net.Realtime.Ws.Internal.Sha1;
@@ -42,10 +43,9 @@ export let Handshake = module (
 
         /// @brief Equal when the names match without ASCII case and the values match exactly.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Header)) {
+            if (other is not header: Header) {
                 return false;
             }
-            last header = other as Header;
             return strings.equals_ignore_ascii_case(name, header.name) && value == header.value;
         };
 
@@ -174,6 +174,18 @@ export let Handshake = module (
             extensions = extension_response;
         };
 
+        /// @brief Equal when the chosen protocol and the extension response are.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ServerAcceptance) {
+                return false;
+            }
+            return optionals.equals<string>(protocol, that.protocol) && extensions == that.extensions;
+        };
+
+        /// @brief Combines the protocol and the extension response, consistent with equals.
+        export let.override hash_code = func -> uint32 =>
+            hashing.combine(optionals.hash<string>(protocol), strings.hash(extensions));
+
         /// @brief The chosen protocol and extensions.
         export let.override to_string = func -> string {
             last name = match (protocol) {
@@ -269,7 +281,7 @@ export let Handshake = module (
         let joined = "";
         for (let header in headers) {
             if (strings.equals_ignore_ascii_case(header.name, name)) {
-                joined = found ? joined + ", " + header.value : header.value;
+                joined = found ? joined .. ", " .. header.value : header.value;
                 found = true;
             }
         }
@@ -309,28 +321,20 @@ export let Handshake = module (
     #NoDiscard
     export let validate_client_request = func(head: RequestHead) -> Result<ClientOffer> {
         if (head.method != "GET") {
-            return fail<ClientOffer>("the method must be GET, not " + head.method);
+            return fail<ClientOffer>("the method must be GET, not " .. head.method);
         }
-        if (!is_http11_or_later(head.version)) {
-            return fail<ClientOffer>("the HTTP version must be 1.1 or later, not " + head.version);
-        }
+        return fail<ClientOffer>("the HTTP version must be 1.1 or later, not " .. head.version) unless is_http11_or_later(head.version);
         last host = header_value(head.headers, "Host");
-        if (!is_some<string>(host)) {
+        if (not is_some<string>(host)) {
             return fail<ClientOffer>("the Host header is missing");
         }
-        if (!list_contains(text_or_empty(header_value(head.headers, "Upgrade")), "websocket")) {
-            return fail<ClientOffer>("the Upgrade header must contain websocket");
-        }
-        if (!list_contains(text_or_empty(header_value(head.headers, "Connection")), "Upgrade")) {
-            return fail<ClientOffer>("the Connection header must contain Upgrade");
-        }
+        return fail<ClientOffer>("the Upgrade header must contain websocket") unless list_contains(text_or_empty(header_value(head.headers, "Upgrade")), "websocket");
+        return fail<ClientOffer>("the Connection header must contain Upgrade") unless list_contains(text_or_empty(header_value(head.headers, "Connection")), "Upgrade");
         last key = text_or_empty(header_value(head.headers, "Sec-WebSocket-Key"));
-        if (!is_valid_key(key)) {
-            return fail<ClientOffer>("the Sec-WebSocket-Key header must be base64 of 16 bytes");
-        }
+        return fail<ClientOffer>("the Sec-WebSocket-Key header must be base64 of 16 bytes") unless is_valid_key(key);
         last version = text_or_empty(header_value(head.headers, "Sec-WebSocket-Version"));
         if (version != Version) {
-            return fail<ClientOffer>("unsupported Sec-WebSocket-Version \"" + version + "\" (expected 13)");
+            return fail<ClientOffer>("unsupported Sec-WebSocket-Version \"" .. version .. "\" (expected 13)");
         }
         last protocols = split_list(text_or_empty(header_value(head.headers, "Sec-WebSocket-Protocol")));
         last extensions = text_or_empty(header_value(head.headers, "Sec-WebSocket-Extensions"));
@@ -368,14 +372,10 @@ export let Handshake = module (
     #NoDiscard
     export let validate_server_response = func(request: ClientRequest, head: ResponseHead) -> Result<ServerAcceptance> {
         if (head.status != 101) {
-            return fail<ServerAcceptance>("the status must be 101, not " + head.status.to_string());
+            return fail<ServerAcceptance>("the status must be 101, not " .. head.status.to_string());
         }
-        if (!list_contains(text_or_empty(header_value(head.headers, "Upgrade")), "websocket")) {
-            return fail<ServerAcceptance>("the Upgrade header must contain websocket");
-        }
-        if (!list_contains(text_or_empty(header_value(head.headers, "Connection")), "Upgrade")) {
-            return fail<ServerAcceptance>("the Connection header must contain Upgrade");
-        }
+        return fail<ServerAcceptance>("the Upgrade header must contain websocket") unless list_contains(text_or_empty(header_value(head.headers, "Upgrade")), "websocket");
+        return fail<ServerAcceptance>("the Connection header must contain Upgrade") unless list_contains(text_or_empty(header_value(head.headers, "Connection")), "Upgrade");
         last accept = text_or_empty(header_value(head.headers, "Sec-WebSocket-Accept"));
         if (accept != accept_key(request.key)) {
             return fail<ServerAcceptance>("the Sec-WebSocket-Accept header does not match the key");
@@ -391,9 +391,7 @@ export let Handshake = module (
                         offered = true;
                     }
                 }
-                if (!offered) {
-                    return fail<ServerAcceptance>("the server chose a subprotocol the client did not offer: " + chosen);
-                }
+                return fail<ServerAcceptance>("the server chose a subprotocol the client did not offer: " .. chosen) unless offered;
                 protocol = Optional<string>.Some(chosen);
             },
             Optional.None => {},
@@ -408,9 +406,7 @@ export let Handshake = module (
                         known = true;
                     }
                 }
-                if (!known) {
-                    return fail<ServerAcceptance>("the server accepted an extension the client did not offer: " + name);
-                }
+                return fail<ServerAcceptance>("the server accepted an extension the client did not offer: " .. name) unless known;
             }
         }
         return Result<ServerAcceptance>.Ok(new ServerAcceptance(protocol, extensions));
@@ -431,21 +427,21 @@ export let Handshake = module (
     /// @brief An HTTP/1.1 request head: request line, header lines and the empty line, each ending in CRLF.
     #[NoDiscard, Pure]
     export let request_text = func(method: string, target: string, headers: Header[list]) -> string {
-        let text = method + " " + target + " HTTP/1.1\r\n";
+        let text = method .. " " .. target .. " HTTP/1.1\r\n";
         for (let header in headers) {
-            text = text + header.name + ": " + header.value + "\r\n";
+            text ..= header.name .. ": " .. header.value .. "\r\n";
         }
-        return text + "\r\n";
+        return text .. "\r\n";
     };
 
     /// @brief An HTTP/1.1 response head with the status and reason, ending with the empty line.
     #[NoDiscard, Pure]
     export let response_text = func(status: int, reason: string, headers: Header[list]) -> string {
-        let text = "HTTP/1.1 " + status.to_string() + " " + reason + "\r\n";
+        let text = "HTTP/1.1 " .. status.to_string() .. " " .. reason .. "\r\n";
         for (let header in headers) {
-            text = text + header.name + ": " + header.value + "\r\n";
+            text ..= header.name .. ": " .. header.value .. "\r\n";
         }
-        return text + "\r\n";
+        return text .. "\r\n";
     };
 
     /// @brief The byte offset just past the first CRLF CRLF in `bytes` (the end of an HTTP head), or -1.
@@ -469,7 +465,7 @@ export let Handshake = module (
         }
         last parts = strings.split(lines[0], " ");
         if (parts.length != 3 || parts[0].byte_length == 0 || parts[1].byte_length == 0) {
-            return fail<RequestHead>("malformed request line: " + lines[0]);
+            return fail<RequestHead>("malformed request line: " .. lines[0]);
         }
         last headers: Header[list] = new;
         for (let i = 1; i < lines.length; i++) {
@@ -493,14 +489,14 @@ export let Handshake = module (
             return fail<ResponseHead>("empty response head");
         }
         last parts = strings.split_limit(lines[0], " ", 3);
-        if (parts.length < 2 || !strings.starts_with(parts[0], "HTTP/") || parts[1].byte_length != 3) {
-            return fail<ResponseHead>("malformed status line: " + lines[0]);
+        if (parts.length < 2 || not strings.starts_with(parts[0], "HTTP/") || parts[1].byte_length != 3) {
+            return fail<ResponseHead>("malformed status line: " .. lines[0]);
         }
         let status = 0;
         for (let i = 0; i < 3; i++) {
             last digit = parts[1].byte_at(i);
             if (digit < 48 || digit > 57) {
-                return fail<ResponseHead>("malformed status code: " + parts[1]);
+                return fail<ResponseHead>("malformed status code: " .. parts[1]);
             }
             status = status * 10 + ((digit - 48) as int);
         }
@@ -534,13 +530,11 @@ export let Handshake = module (
     let parse_header_line = func(line: string) -> Result<Header> {
         last colon = strings.index_of(line, ":");
         if (colon <= 0) {
-            return fail<Header>("malformed header line: " + line);
+            return fail<Header>("malformed header line: " .. line);
         }
         last name = line.slice(0, colon);
-        if (strings.contains(name, " ") || strings.contains(name, "\t")) {
-            return fail<Header>("malformed header name: " + name);
-        }
-        return Result<Header>.Ok(new Header(name, strings.trim(line.slice(colon + 1, line.byte_length))));
+        return if (strings.contains(name, " ") || strings.contains(name, "\t")) -> fail<Header>("malformed header name: " .. name)
+            else -> Result<Header>.Ok(new Header(name, strings.trim(line.slice(colon + 1, line.byte_length))));
     };
 
     /// @brief Whether the version text is HTTP/1.1 or a later HTTP version.
@@ -548,7 +542,7 @@ export let Handshake = module (
         if (version == "HTTP/1.1") {
             return true;
         }
-        if (!strings.starts_with(version, "HTTP/") || version.byte_length < 6) {
+        if (not strings.starts_with(version, "HTTP/") || version.byte_length < 6) {
             return false;
         }
         last major = version.byte_at(5);

@@ -1,0 +1,48 @@
+// test-options: --gpu=off --deny-entropy --max-steps 200000000
+let.promote _ = import:Std.Crypto.Algorithm;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let test = import:Std.Test;
+let tls = import:Std.Crypto.Pqc.X25519MlKem768;
+let x_wing = import:Std.Crypto.Pqc.XWing;
+
+let HybridKemApiTests = module (
+    let seed = func(count: int) -> uint8[list] {
+        let bytes: uint8[list] = new;
+        for (let i = 0; i < count; i++) {
+            bytes.append(i as uint8);
+        }
+        return bytes;
+    };
+
+    export let test_tls_drbg_and_os_entropy_paths = func {
+        let kem = new tls.X25519MlKem768(new drbg.ChaCha20Drbg(seed(32)));
+        last key = test.assert_ok(kem.generate_key_pair());
+        last public_key = key.public_key();
+        last sealed = test.assert_ok(kem.try_encapsulate(public_key));
+        test.assert_equal_int32(64, sealed.shared_secret.length());
+        test.assert(sealed.shared_secret.ct_equals(test.assert_ok(kem.decapsulate(key, sealed.ciphertext))));
+        test.assert_equal_string("X25519MlKem768PrivateKey(<redacted>)", key.to_string());
+        test.assert(kem.algorithm() == Algorithm.X25519MlKem768);
+        key.wipe();
+        test.assert(key.is_wiped());
+        let os_kem = new tls.X25519MlKem768();
+        let _ = test.assert_err(os_kem.generate_key_pair());
+        let _ = test.assert_err(os_kem.try_encapsulate(public_key));
+    };
+
+    export let test_x_wing_drbg_and_os_entropy_paths = func {
+        let kem = new x_wing.XWing(new drbg.ChaCha20Drbg(seed(32)));
+        last key = test.assert_ok(kem.generate_key_pair());
+        last public_key = key.public_key();
+        last sealed = test.assert_ok(kem.try_encapsulate(public_key));
+        test.assert_equal_int32(32, sealed.shared_secret.length());
+        test.assert(sealed.shared_secret.ct_equals(test.assert_ok(kem.decapsulate(key, sealed.ciphertext))));
+        test.assert_equal_string("XWingPrivateKey(<redacted>)", key.to_string());
+        test.assert(kem.algorithm() == Algorithm.XWing);
+        key.wipe();
+        test.assert(key.is_wiped());
+        let os_kem = new x_wing.XWing();
+        let _ = test.assert_err(os_kem.generate_key_pair());
+        let _ = test.assert_err(os_kem.try_encapsulate(public_key));
+    };
+);

@@ -1,0 +1,8 @@
+error[E0243]: template nesting a browser would repair
+ --> $DIR/template-table-repair.nra:1:28
+  |
+1 | let view = html() { <table><tr></tr></table> };
+  |                            ^^^^ use 'tbody', 'thead', or 'tfoot' as the parent
+  |                     ------- enclosing element starts here
+
+For more information about this error, try `neura explain E0243`.

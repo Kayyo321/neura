@@ -194,7 +194,7 @@ export let Chunked = module (
             let j = 0;
             while (j < length && hex_value(line[j]) >= 0) {
                 last digit = hex_value(line[j]) as int64;
-                if (!over) {
+                if (not over) {
                     if (allowed < digit || size > (allowed - digit) / 16) {
                         over = true;
                     } else {
@@ -206,9 +206,7 @@ export let Chunked = module (
             if (j == 0) {
                 return note(400, "chunk-size is not a hexadecimal number");
             }
-            if (!extensions_valid(line, j)) {
-                return note(400, "malformed chunk extension");
-            }
+            return note(400, "malformed chunk extension") unless extensions_valid(line, j);
             if (over) {
                 return note(413, $"chunked body is over the limit of {limits.max_body_bytes} bytes");
             }
@@ -230,15 +228,13 @@ export let Chunked = module (
                 section.append(trailer[k]);
             }
             let [valid, text] = string.from_utf8(section);
-            if (!valid) {
-                return note(400, "trailer section is not UTF-8");
-            }
+            return note(400, "trailer section is not UTF-8") unless valid;
             match (wire.parse_field_section(text, limits, false)) {
                 Result.Ok(parsed) => {
                     fields = parsed;
                 },
                 Result.Err(e) => {
-                    return note(wire.rejection_status(e), "trailer: " + errors.message(e));
+                    return note(wire.rejection_status(e), "trailer: " .. errors.message(e));
                 },
             }
             state = Done;
@@ -271,7 +267,7 @@ export let Chunked = module (
         last out: uint8[list] = new;
         append_text(out, "0\r\n");
         for (let i = 0; i < trailer_fields.size(); i++) {
-            append_text(out, trailer_fields.name_at(i) + ": " + trailer_fields.value_at(i) + "\r\n");
+            append_text(out, trailer_fields.name_at(i) .. ": " .. trailer_fields.value_at(i) .. "\r\n");
         }
         append_text(out, "\r\n");
         return out;
@@ -309,13 +305,9 @@ export let Chunked = module (
     export let decode = func(body: uint8[list], limits: wire.Limits) -> Result<uint8[list]> {
         last decoder = new ChunkedDecoder(limits);
         last data = decoder.feed(body)?;
-        if (!decoder.is_done()) {
-            return Result<uint8[list]>.Err(wire.rejection(400, "chunked body ends before the last chunk"));
-        }
-        if (decoder.remainder().length > 0) {
-            return Result<uint8[list]>.Err(wire.rejection(400, "bytes after the chunked body"));
-        }
-        return Result<uint8[list]>.Ok(data);
+        return Result<uint8[list]>.Err(wire.rejection(400, "chunked body ends before the last chunk")) unless decoder.is_done();
+        return if (decoder.remainder().length > 0) -> Result<uint8[list]>.Err(wire.rejection(400, "bytes after the chunked body"))
+            else -> Result<uint8[list]>.Ok(data);
     };
 
     /// @brief Decoder state: reading a chunk-size line.
@@ -339,10 +331,8 @@ export let Chunked = module (
         if (b >= 97 && b <= 102) {
             return (b - 87) as int;
         }
-        if (b >= 65 && b <= 70) {
-            return (b - 55) as int;
-        }
-        return -1;
+        return if (b >= 65 && b <= 70) -> (b - 55) as int
+            else -> -1;
     };
 
     /// @brief `n` (positive) in lowercase hexadecimal.
@@ -352,7 +342,7 @@ export let Chunked = module (
         let value = n;
         while (value > 0) {
             last d = (value % 16) as int;
-            text = digits.slice(d, d + 1) + text;
+            text = digits.slice(d, d + 1) .. text;
             value = value / 16;
         }
         return text;
@@ -423,15 +413,13 @@ export let Chunked = module (
                 return k + 1;
             }
             if (c == 92) {
-                if (k + 1 >= line.length || !is_quoted_text(line[k + 1]) && line[k + 1] != 34 && line[k + 1] != 92) {
+                if (k + 1 >= line.length || not is_quoted_text(line[k + 1]) && line[k + 1] != 34 && line[k + 1] != 92) {
                     return -1;
                 }
                 k += 2;
                 continue;
             }
-            if (!is_quoted_text(c)) {
-                return -1;
-            }
+            return -1 unless is_quoted_text(c);
             k++;
         }
         return -1;

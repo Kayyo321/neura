@@ -67,8 +67,8 @@ export let App = module (
 
         /// @brief Builds a request; the server host's values arrive through `Context.serve`.
         export let init = func(method_value: string, target_value: string, header_list: [string, string][list],
-                               body_bytes: uint8[list], client_value: string, scheme_value: string,
-                               id: string) {
+            body_bytes: uint8[list], client_value: string, scheme_value: string,
+            id: string) {
             method = method_value;
             target = target_value;
             last mark = strings.index_of(target_value, "?");
@@ -103,7 +103,7 @@ export let App = module (
         export let body_text = func -> Result<string> => strings.from_bytes(body);
 
         /// @brief The method and target, such as "GET /parts?page=2".
-        export let.override to_string = func -> string => method + " " + target;
+        export let.override to_string = func -> string => method .. " " .. target;
     );
 
     /// @brief Reads the body of a request handled by `Context.serve_streamed` as the client sends it.
@@ -249,7 +249,7 @@ export let App = module (
 
         /// @brief The status and the body size, such as "200 (5 bytes)".
         export let.override to_string = func -> string =>
-            status.to_string() + " (" + body.length.to_string() + " bytes)";
+            status.to_string() .. " (" .. body.length.to_string() .. " bytes)";
     );
 
     /// @brief The producer of a response that is not streamed.
@@ -429,7 +429,7 @@ export let App = module (
                     }
                     last none: uint8[list] = new;
                     last request = new Request(assigned[2], assigned[3], pairs_of(assigned[4]), none, assigned[6],
-                                               assigned[7], assigned[1]);
+                        assigned[7], assigned[1]);
                     return answer(handler.handle(request, new BodyReader()));
                 },
             }
@@ -457,8 +457,8 @@ export let App = module (
 
         /// @brief Answers a startup check or reads the body, calls the handler and responds.
         let dispatch = func(handler: Handler,
-                            assigned: [uint32, string, string, string, string[list], int64, string, string, int64])
-                            -> Result<Unit> {
+            assigned: [uint32, string, string, string, string[list], int64, string, string, int64])
+            -> Result<Unit> {
             if (assigned[0] == 2 as uint32) {
                 return send(empty(204));
             }
@@ -469,7 +469,7 @@ export let App = module (
                 },
                 Result.Ok(content) => {
                     last request = new Request(assigned[2], assigned[3], pairs_of(assigned[4]), content, assigned[6],
-                                               assigned[7], assigned[1]);
+                        assigned[7], assigned[1]);
                     return answer(handler.handle(request));
                 },
             }
@@ -483,7 +483,7 @@ export let App = module (
                     return send(response);
                 },
                 Result.Err(problem) => {
-                    log(LogLevel.Error, "handler failed: " + errors.message(problem));
+                    log(LogLevel.Error, "handler failed: " .. errors.message(problem));
                     return send(json(500, "{\"error\":\"internal\"}"));
                 },
             }
@@ -532,7 +532,7 @@ export let App = module (
                 match (response.write_stream(new BodyWriter())) {
                     Result.Ok(_) => {},
                     Result.Err(problem) => {
-                        log(LogLevel.Error, "streamed response failed: " + errors.message(problem));
+                        log(LogLevel.Error, "streamed response failed: " .. errors.message(problem));
                         return Result<Unit>.Err(problem);
                     },
                 }
@@ -599,10 +599,10 @@ export let App = module (
     /// @brief Logs a failure of serve through the host, or writes it to standard error without one.
     let report = func(message: string) {
         last fields: string[list] = new;
-        match (server.log(4 as uint32, "serve failed: " + message, fields)) {
+        match (server.log(4 as uint32, "serve failed: " .. message, fields)) {
             server.DoneOutcome.Ok => {},
             server.DoneOutcome.Error(_) => {
-                console.error_line("serve failed: " + message);
+                console.error_line("serve failed: " .. message);
             },
         }
     };

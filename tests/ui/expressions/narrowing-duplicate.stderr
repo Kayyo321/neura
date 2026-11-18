@@ -1,0 +1,8 @@
+error[E0301]: duplicate local binding 'circle'
+  --> $DIR/narrowing-duplicate.nra:12:37
+   |
+12 |     if (a is circle: Circle && b is circle: Circle) {
+   |                                     ^^^^^^ bound again here
+   |              ------ first bound here
+
+For more information about this error, try `neura explain E0301`.

@@ -69,10 +69,8 @@ export let QuicConfig = module (
             if (congestion == CongestionAlgorithm.Cubic) {
                 return new cubic.Cubic(max_datagram_size, true);
             }
-            if (congestion == CongestionAlgorithm.Ledbat) {
-                return new ledbat.Ledbat(max_datagram_size, of_millis(100));
-            }
-            return bbr.bbr3(max_datagram_size);
+            return if (congestion == CongestionAlgorithm.Ledbat) -> new ledbat.Ledbat(max_datagram_size, of_millis(100))
+                else -> bbr.bbr3(max_datagram_size);
         };
 
         /// @brief Text such as "QuicConfig(Cubic, alpn h3, 100/100 streams, datagrams 65535)".
@@ -80,11 +78,11 @@ export let QuicConfig = module (
             last protocols = tls_config.alpn();
             let alpn = "";
             for (let name in protocols) {
-                alpn = alpn + (alpn.byte_length > 0 ? "," : "") + name;
+                alpn ..= (alpn.byte_length > 0 ? "," : "") .. name;
             }
-            return "QuicConfig(" + congestion.to_string() + ", alpn " + alpn + ", "
-                + max_bidirectional_streams.to_string() + "/" + max_unidirectional_streams.to_string() + " streams, "
-                + "datagrams " + max_datagram_frame_size.to_string() + ")";
+            return "QuicConfig(" .. congestion.to_string() .. ", alpn " .. alpn .. ", "
+                .. max_bidirectional_streams.to_string() .. "/" .. max_unidirectional_streams.to_string() .. " streams, "
+                .. "datagrams " .. max_datagram_frame_size.to_string() .. ")";
         };
     );
 

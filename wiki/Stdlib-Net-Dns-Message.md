@@ -72,155 +72,155 @@ The following public declarations are taken from the module source; each links t
   An option; a code outside 0-65535 traps with "invalid argument: option code".
 - **Message.EdnsOption** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L90)
   Equal when code and bytes are.
-- **Message.EdnsOption** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L99)
+- **Message.EdnsOption** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L98)
   Combines the code and the bytes.
-- **Message.EdnsOption** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L102)
+- **Message.EdnsOption** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L101)
   Text such as "EdnsOption(10, 8 bytes)".
-- **Message** · [`export let Edns = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L108)
+- **Message** · [`export let Edns = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L107)
   The EDNS(0) parameters an OPT record carries (RFC 6891 section 6.1.3). Tagged `#Final`.
-- **Message.Edns** · [`export last udp_payload_size: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L110)
+- **Message.Edns** · [`export last udp_payload_size: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L109)
   The requester's UDP payload size (the OPT CLASS field).
-- **Message.Edns** · [`export last extended_rcode: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L112)
+- **Message.Edns** · [`export last extended_rcode: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L111)
   The upper 8 bits of the 12-bit RCODE.
-- **Message.Edns** · [`export last version: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L114)
+- **Message.Edns** · [`export last version: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L113)
   The EDNS version (0).
-- **Message.Edns** · [`export last dnssec_ok: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L116)
+- **Message.Edns** · [`export last dnssec_ok: bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L115)
   The DO bit (RFC 3225).
-- **Message.Edns** · [`export last options: EdnsOption[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L118)
+- **Message.Edns** · [`export last options: EdnsOption[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L117)
   The options.
-- **Message.Edns** · [`export let init = func(payload_size: int, rcode_high: int, edns_version: int, dnssec: bool, edns_options: EdnsOption[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L121)
+- **Message.Edns** · [`export let init = func(payload_size: int, rcode_high: int, edns_version: int, dnssec: bool, edns_options: EdnsOption[list])`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L120)
   EDNS parameters. Fields out of range trap with "invalid argument: edns".
-- **Message.Edns** · [`export let ttl_field = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L136)
+- **Message.Edns** · [`export let ttl_field = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L135)
   The TTL field of the OPT record. Tagged `#NoDiscard`.
-- **Message.Edns** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L140)
+- **Message.Edns** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L139)
   Equal when every field and option is.
-- **Message.Edns** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L158)
+- **Message.Edns** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L154)
   Combines the fields.
-- **Message.Edns** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L168)
+- **Message.Edns** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L164)
   Text such as "Edns(udp 1232, version 0, do false, 0 options)".
-- **Message** · [`export let edns_of = func(payload_size: int) -> Edns`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L174)
+- **Message** · [`export let edns_of = func(payload_size: int) -> Edns`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L170)
   EDNS(0) with a UDP payload size, version 0, no DO bit and no options. Tagged `#NoDiscard`.
-- **Message** · [`export let RecordData = enum ( A(Ipv4Addr), Aaaa(Ipv6Addr), Ns(names.DnsName), Cname(names.DnsName), Ptr(names.DnsName), Mx { preference: int, exchange: names.DnsName }, Txt(uint8[list][list]), Soa { mname: names.DnsName, rname: names.DnsName, serial: int64, refresh: int64, retry: int64, expire: int64, minimum: int64 }, Srv { priority: int, weight: int, port: int, target: names.DnsName }, Naptr { order: int, preference: int, flags: string, services: string, regexp: string, replacement: names.DnsName }, Opt(EdnsOption[list]), Unknown(uint8[list]) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L177)
+- **Message** · [`export let RecordData = enum ( A(Ipv4Addr), Aaaa(Ipv6Addr), Ns(names.DnsName), Cname(names.DnsName), Ptr(names.DnsName), Mx { preference: int, exchange: names.DnsName }, Txt(uint8[list][list]), Soa { mname: names.DnsName, rname: names.DnsName, serial: int64, refresh: int64, retry: int64, expire: int64, minimum: int64 },  Srv { priority: int, weight: int, port: int, target: names.DnsName }, Naptr { order: int, preference: int, flags: string, services: string, regexp: string, replacement: names.DnsName },  Opt(EdnsOption[list]), Unknown(uint8[list]) )`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L173)
   The data of one resource record.
-- **Message** · [`export let Question = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L196)
+- **Message** · [`export let Question = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L194)
   One question: a name, a QTYPE and a raw QCLASS (16 bits; mDNS uses the top bit). Tagged `#Final`.
-- **Message.Question** · [`export last name: names.DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L198)
+- **Message.Question** · [`export last name: names.DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L196)
   The name asked about.
-- **Message.Question** · [`export last qtype: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L200)
+- **Message.Question** · [`export last qtype: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L198)
   The QTYPE.
-- **Message.Question** · [`export last qclass: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L202)
+- **Message.Question** · [`export last qclass: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L200)
   The raw QCLASS.
-- **Message.Question** · [`export let init = func(asked: names.DnsName, question_type: int, question_class: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L205)
+- **Message.Question** · [`export let init = func(asked: names.DnsName, question_type: int, question_class: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L203)
   A question; a type or class outside 0-65535 traps with "invalid argument: question".
-- **Message.Question** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L215)
+- **Message.Question** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L213)
   Equal when the name (ignoring case), type and class are.
-- **Message.Question** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L224)
+- **Message.Question** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L221)
   Combines the name, type and class.
-- **Message.Question** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L228)
+- **Message.Question** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L225)
   Text such as "www.example.com. IN A".
-- **Message** · [`export let ResourceRecord = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L234)
+- **Message** · [`export let ResourceRecord = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L231)
   One resource record: owner name, type, raw class, TTL (unsigned 32-bit) and data. Tagged `#Final`.
-- **Message.ResourceRecord** · [`export last name: names.DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L236)
+- **Message.ResourceRecord** · [`export last name: names.DnsName`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L233)
   The owner name.
-- **Message.ResourceRecord** · [`export last rtype: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L238)
+- **Message.ResourceRecord** · [`export last rtype: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L235)
   The TYPE.
-- **Message.ResourceRecord** · [`export last rclass: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L240)
+- **Message.ResourceRecord** · [`export last rclass: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L237)
   The raw CLASS (16 bits).
-- **Message.ResourceRecord** · [`export last ttl: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L242)
+- **Message.ResourceRecord** · [`export last ttl: int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L239)
   The TTL in seconds, 0 to 2^32-1.
-- **Message.ResourceRecord** · [`export last data: RecordData`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L244)
+- **Message.ResourceRecord** · [`export last data: RecordData`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L241)
   The data.
-- **Message.ResourceRecord** · [`export let init = func(owner: names.DnsName, record_type: int, record_class: int, time_to_live: int64, record_data: RecordData)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L248)
+- **Message.ResourceRecord** · [`export let init = func(owner: names.DnsName, record_type: int, record_class: int, time_to_live: int64, record_data: RecordData)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L245)
   A record. A type or class outside 0-65535, or a TTL outside 0 to 2^32-1, traps with "invalid argument: record".
-- **Message.ResourceRecord** · [`export let with_ttl = func(time_to_live: int64) -> ResourceRecord`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L263)
+- **Message.ResourceRecord** · [`export let with_ttl = func(time_to_live: int64) -> ResourceRecord`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L260)
   The same record with another TTL. Tagged `#NoDiscard`.
-- **Message.ResourceRecord** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L267)
+- **Message.ResourceRecord** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L264)
   Equal when owner (ignoring case), type, class, TTL and data are.
-- **Message.ResourceRecord** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L277)
+- **Message.ResourceRecord** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L273)
   Combines the owner, type, class, TTL and the data's text.
-- **Message.ResourceRecord** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L285)
+- **Message.ResourceRecord** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L281)
   Master-file-like text: "www.example.com. 300 IN A 192.0.2.1".
-- **Message** · [`export let Header = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L292)
+- **Message** · [`export let Header = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L288)
   The header fields (RFC 1035 section 4.1.1). The section counts are filled by `decode` and recomputed by `encode`. Tagged `#Final`, `#NotThreadSafe`.
-- **Message.Header** · [`export let id: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L294)
+- **Message.Header** · [`export let id: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L290)
   The 16-bit ID.
-- **Message.Header** · [`export let is_response: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L296)
+- **Message.Header** · [`export let is_response: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L292)
   QR: a response.
-- **Message.Header** · [`export let opcode: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L298)
+- **Message.Header** · [`export let opcode: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L294)
   The 4-bit opcode.
-- **Message.Header** · [`export let authoritative: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L300)
+- **Message.Header** · [`export let authoritative: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L296)
   AA: an authoritative answer.
-- **Message.Header** · [`export let truncated: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L302)
+- **Message.Header** · [`export let truncated: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L298)
   TC: truncated.
-- **Message.Header** · [`export let recursion_desired: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L304)
+- **Message.Header** · [`export let recursion_desired: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L300)
   RD: recursion desired.
-- **Message.Header** · [`export let recursion_available: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L306)
+- **Message.Header** · [`export let recursion_available: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L302)
   RA: recursion available.
-- **Message.Header** · [`export let z: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L308)
+- **Message.Header** · [`export let z: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L304)
   The Z bit (bit 9; must be zero).
-- **Message.Header** · [`export let authentic_data: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L310)
+- **Message.Header** · [`export let authentic_data: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L306)
   AD: authentic data (RFC 4035).
-- **Message.Header** · [`export let checking_disabled: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L312)
+- **Message.Header** · [`export let checking_disabled: bool = false`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L308)
   CD: checking disabled (RFC 4035).
-- **Message.Header** · [`export let rcode: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L314)
+- **Message.Header** · [`export let rcode: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L310)
   The 4-bit RCODE (the low bits of the extended RCODE with EDNS).
-- **Message.Header** · [`export let question_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L316)
+- **Message.Header** · [`export let question_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L312)
   QDCOUNT as decoded.
-- **Message.Header** · [`export let answer_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L318)
+- **Message.Header** · [`export let answer_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L314)
   ANCOUNT as decoded.
-- **Message.Header** · [`export let authority_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L320)
+- **Message.Header** · [`export let authority_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L316)
   NSCOUNT as decoded.
-- **Message.Header** · [`export let additional_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L322)
+- **Message.Header** · [`export let additional_count: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L318)
   ARCOUNT as decoded (the OPT record included).
-- **Message.Header** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L325)
+- **Message.Header** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L321)
   A header with ID 0 and every flag clear.
-- **Message.Header** · [`export let flags = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L330)
+- **Message.Header** · [`export let flags = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L326)
   The 16-bit flags word. Tagged `#NoDiscard`.
-- **Message.Header** · [`export let set_flags = func(word: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L341)
+- **Message.Header** · [`export let set_flags = func(word: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L337)
   Sets every flag from a 16-bit flags word.
-- **Message.Header** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L355)
+- **Message.Header** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L351)
   Text such as "Header(id 4660, flags 0x0100)".
-- **Message** · [`export let Message = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L361)
+- **Message** · [`export let Message = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L357)
   A whole DNS message. Tagged `#Final`, `#NotThreadSafe`.
-- **Message.Message** · [`export last header: Header = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L363)
+- **Message.Message** · [`export last header: Header = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L359)
   The header.
-- **Message.Message** · [`export last questions: Question[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L365)
+- **Message.Message** · [`export last questions: Question[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L361)
   The question section.
-- **Message.Message** · [`export last answers: ResourceRecord[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L367)
+- **Message.Message** · [`export last answers: ResourceRecord[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L363)
   The answer section.
-- **Message.Message** · [`export last authorities: ResourceRecord[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L369)
+- **Message.Message** · [`export last authorities: ResourceRecord[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L365)
   The authority section.
-- **Message.Message** · [`export last additionals: ResourceRecord[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L371)
+- **Message.Message** · [`export last additionals: ResourceRecord[list] = new`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L367)
   The additional section without the OPT record.
-- **Message.Message** · [`export let edns: Optional<Edns> = Optional<Edns>.None`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L373)
+- **Message.Message** · [`export let edns: Optional<Edns> = Optional<Edns>.None`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L369)
   The EDNS(0) parameters, from or for the OPT record.
-- **Message.Message** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L376)
+- **Message.Message** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L372)
   An empty message (ID 0, a query).
-- **Message.Message** · [`export let rcode = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L381)
+- **Message.Message** · [`export let rcode = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L377)
   The full RCODE: the header's 4 bits plus EDNS's upper 8 bits. Tagged `#NoDiscard`.
-- **Message.Message** · [`export let question = func -> Question`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L388)
+- **Message.Message** · [`export let question = func -> Question`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L384)
   The first question; traps with "invalid argument: no question" when there is none. Tagged `#NoDiscard`.
-- **Message.Message** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L396)
+- **Message.Message** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L392)
   Text listing the header and section sizes.
-- **Message** · [`export let query = func(id: int, name: names.DnsName, qtype: int) -> Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L403)
+- **Message** · [`export let query = func(id: int, name: names.DnsName, qtype: int) -> Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L399)
   A recursive query for `name` and `qtype` in class IN with `id`. Tagged `#NoDiscard`.
-- **Message** · [`export let response_to = func(request: Message, rcode: int) -> Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L413)
+- **Message** · [`export let response_to = func(request: Message, rcode: int) -> Message`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L409)
   A response to `request`: same ID, opcode, RD and questions, QR set, the given RCODE. Tagged `#NoDiscard`.
-- **Message** · [`export let encode = func(message: Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L429)
+- **Message** · [`export let encode = func(message: Message) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L425)
   Encodes a message. Err (Custom `dns.too_large`) when it would exceed 65,535 bytes or a section exceeds 65,535 entries. Tagged `#NoDiscard`.
-- **Message** · [`export let decode = func(bytes: uint8[list]) -> Result<Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L478)
+- **Message** · [`export let decode = func(bytes: uint8[list]) -> Result<Message>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L472)
   Decodes a message. Err (Parse) for a truncated or malformed message, a bad name, rdata that does not use exactly RDLENGTH, more than one OPT record or trailing bytes. Tagged `#NoDiscard`.
-- **Message** · [`export let rdata_bytes = func(data: RecordData) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L525)
+- **Message** · [`export let rdata_bytes = func(data: RecordData) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L517)
   The record data as raw bytes, as RFC 3597 section 5 writes it for an unknown type (uncompressed). Tagged `#NoDiscard`.
-- **Message** · [`export let txt_strings = func(data: RecordData) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L533)
+- **Message** · [`export let txt_strings = func(data: RecordData) -> string[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L525)
   The character-strings of TXT data as text (invalid UTF-8 replaced); empty for other data. Tagged `#NoDiscard`.
-- **Message** · [`export let txt_of = func(texts: string[list]) -> RecordData`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L549)
+- **Message** · [`export let txt_of = func(texts: string[list]) -> RecordData`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L541)
   TXT data of text strings; a string above 255 bytes traps with "invalid argument: character-string". Tagged `#NoDiscard`.
-- **Message** · [`export let type_name = func(rtype: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L563)
+- **Message** · [`export let type_name = func(rtype: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L555)
   The mnemonic of a type ("A", "AAAA", ...), or "TYPEn" (RFC 3597 section 5). Tagged `#NoDiscard`.
-- **Message** · [`export let class_name = func(rclass: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L594)
+- **Message** · [`export let class_name = func(rclass: int) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L586)
   "IN" for class 1, otherwise "CLASSn" (RFC 3597 section 5). Tagged `#NoDiscard`.
-- **Message** · [`export let data_text = func(data: RecordData) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L598)
+- **Message** · [`export let data_text = func(data: RecordData) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/message.nra#L590)
   The master-file-like text of record data; unknown data as `\# length hex` (RFC 3597 section 5). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

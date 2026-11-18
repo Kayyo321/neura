@@ -1,0 +1,40 @@
+// The stock desktop child: one window over the web bundle and the native operation parts.export, which
+// answers the starting parts as CSV (Std.Encoding.Csv).
+let csv = import:Std.Encoding.Csv;
+let desktop = import:Std.Desktop;
+let parts = import:Contracts.Parts;
+let program = import:Std.Program;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Main = module:program.Entry (
+    /// @brief The starting parts as CSV with a header row.
+    let export_parts = func(call: desktop.Call) -> Result<uint8[list]> {
+        last rows: string[list][list] = new;
+        last header: string[list] = new;
+        header.append("name");
+        rows.append(header);
+        for (let name: string in parts.starter_names()) {
+            last row: string[list] = new;
+            row.append(name);
+            rows.append(row);
+        }
+        return Result<uint8[list]>.Ok(strings.to_bytes(csv.write(rows)));
+    };
+
+    let start = func(context: desktop.Context) -> Result<Unit> {
+        match (context.open_window("Stock", 960, 640)) {
+            Result.Ok(_) => {},
+            Result.Err(problem) => {
+                return Result<Unit>.Err(problem);
+            },
+        }
+        last dispatcher = new desktop.Dispatcher(new desktop.Registry(new(["parts.export"])));
+        dispatcher.add("parts.export", export_parts);
+        return context.run(dispatcher);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode =>
+        desktop.run_application(new desktop.Registry(new(["parts.export"])), start);
+);

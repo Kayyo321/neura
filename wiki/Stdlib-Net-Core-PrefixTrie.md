@@ -28,13 +28,13 @@ The following public declarations are taken from the module source; each links t
   Removes the value of `block`; returns whether there was one.
 - **PrefixTrie.PrefixTrie** · [`export let longest_match = func(ip: ips.IpAddr) -> Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L83)
   The value of the longest stored block that contains `ip`, or None. Tagged `#NoDiscard`.
-- **PrefixTrie.PrefixTrie** · [`export let longest_match_block = func(ip: ips.IpAddr) -> Optional<cidr.CidrBlock>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L93)
+- **PrefixTrie.PrefixTrie** · [`export let longest_match_block = func(ip: ips.IpAddr) -> Optional<cidr.CidrBlock>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L91)
   The longest stored block that contains `ip`, or None. Tagged `#NoDiscard`.
-- **PrefixTrie.PrefixTrie** · [`export let exact = func(block: cidr.CidrBlock) -> Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L103)
+- **PrefixTrie.PrefixTrie** · [`export let exact = func(block: cidr.CidrBlock) -> Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L99)
   The value stored for exactly `block`, or None. Tagged `#NoDiscard`.
-- **PrefixTrie.PrefixTrie** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L112)
+- **PrefixTrie.PrefixTrie** · [`export let size = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L106)
   The number of stored blocks.
-- **PrefixTrie.PrefixTrie** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L115)
+- **PrefixTrie.PrefixTrie** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/core/prefix-trie.nra#L109)
   `PrefixTrie(size N)`; the entries are not listed.
 <!-- END SOURCE API -->
 

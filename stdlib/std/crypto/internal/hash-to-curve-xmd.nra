@@ -1,0 +1,60 @@
+let.promote _ = import:Std.Crypto.StreamingDigest;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief RFC 9380 expand_message_xmd over a fixed-length streaming digest. Internal.
+export let HashToCurveXmd = module (
+    export let expand = func<H: StreamingDigest<H>>(message: uint8[list], dst: uint8[list], length: int)
+        -> uint8[list] {
+        last width = H.output_length();
+        if (length < 0 || length > 65535 || length > 255 * width) {
+            trap_with_message("invalid argument: hash-to-curve XMD output length");
+        }
+        if (dst.length == 0) {
+            trap_with_message("invalid argument: empty hash-to-curve domain separation tag");
+        }
+        let domain: uint8[list] = new;
+        if (dst.length > 255) {
+            last shortened = H.create();
+            shortened.update(words.utf8("H2C-OVERSIZE-DST-"));
+            shortened.update(dst);
+            domain = shortened.finish();
+        } else {
+            domain = words.copy(dst);
+        }
+        domain.append(domain.length as uint8);
+
+        last initial = H.create();
+        initial.update(words.zeros(H.block_length()));
+        initial.update(message);
+        initial.update(new([(length >> 8) as uint8, (length & 255) as uint8, 0]));
+        initial.update(domain);
+        last b0 = initial.finish();
+
+        let previous = b0;
+        let out: uint8[list] = new;
+        last count = (length + width - 1) / width;
+        for (let i in 1 ..= count) {
+            let prefix = words.copy(b0);
+            if (i > 1) {
+                for (let j = 0; j < width; j++) {
+                    prefix[j] = prefix[j] ^ previous[j];
+                }
+            }
+            last block = H.create();
+            block.update(prefix);
+            block.update(new([i as uint8]));
+            block.update(domain);
+            previous = block.finish();
+            last needed = length - out.length;
+            last take = needed < width ? needed : width;
+            for (let j = 0; j < take; j++) {
+                out.append(previous[j]);
+            }
+        }
+        return out;
+    };
+
+    export let expand_sha512 = func(message: uint8[list], dst: uint8[list], length: int) -> uint8[list] =>
+        expand<sha2.Sha512>(message, dst, length);
+);

@@ -56,9 +56,7 @@ export let File = module (
         #NoDiscard
         export let read = func(max: int) -> result.Result<uint8[list]> {
             bytes.check_maximum(max);
-            if (!open_now) {
-                return result.Result<uint8[list]>.Err(bytes.closed("file", handle.path));
-            }
+            return result.Result<uint8[list]>.Err(bytes.closed("file", handle.path)) unless open_now;
             return match (read_file(handle.id, max)) {
                 BytesOutcome.Ok(chunk) => result.Result<uint8[list]>.Ok(chunk),
                 BytesOutcome.Error(code) => result.Result<uint8[list]>.Err(host_error.io(code, "file read failed", handle.path)),
@@ -68,9 +66,7 @@ export let File = module (
         /// @brief Writes every byte, repeating partial host writes.
         #NoDiscard
         export let write = func(data: uint8[list]) -> result.Result<Unit> {
-            if (!open_now) {
-                return result.Result<Unit>.Err(bytes.closed("file", handle.path));
-            }
+            return result.Result<Unit>.Err(bytes.closed("file", handle.path)) unless open_now;
             let remaining = data;
             while (remaining.length > 0) {
                 match (write_file(handle.id, remaining)) {
@@ -94,9 +90,7 @@ export let File = module (
         /// @brief Moves the position and returns it, counted from the start.
         #NoDiscard
         export let seek = func(offset: int64, origin: SeekOrigin) -> result.Result<int64> {
-            if (!open_now) {
-                return result.Result<int64>.Err(bytes.closed("file", handle.path));
-            }
+            return result.Result<int64>.Err(bytes.closed("file", handle.path)) unless open_now;
             return match (seek_file(handle.id, offset, origin as int)) {
                 IdOutcome.Ok(position) => result.Result<int64>.Ok(position),
                 IdOutcome.Error(code) => result.Result<int64>.Err(host_error.io(code, "file seek failed", handle.path)),
@@ -133,15 +127,16 @@ export let File = module (
         /// @brief Releases the file. Closing again does nothing and returns Ok; the file is closed even when
         /// the host reports an error.
         export let close = func -> result.Result<Unit> {
-            if (!open_now) {
-                return bytes.ok();
-            }
+            return bytes.ok() unless open_now;
             open_now = false;
             return match (close_file(handle.id)) {
                 DoneOutcome.Ok => bytes.ok(),
                 DoneOutcome.Error(code) => result.Result<Unit>.Err(host_error.io(code, "file close failed", handle.path)),
             };
         };
+
+        /// @brief Names the file with its path and whether it is open.
+        export let.override to_string = func -> string => "File(" .. handle.path .. (open_now ? ")" : ", closed)");
     );
 
     /// @brief Opens the normalized path using the selected mode and returns an owned file.
@@ -163,7 +158,7 @@ export let File = module (
     /// closes the files the run left open. Needs the fs capability.
     #NoDiscard
     export let with_open = func<T>(path: Path, mode: OpenMode,
-            body: func(File) -> result.Result<T>) -> result.Result<T> {
+        body: func(File) -> result.Result<T>) -> result.Result<T> {
         return match (open(path, mode)) {
             result.Result.Ok(file) => release<T>(file, run_body<T>(file, body)),
             result.Result.Err(failure) => result.Result<T>.Err(failure),

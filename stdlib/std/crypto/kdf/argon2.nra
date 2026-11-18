@@ -44,10 +44,9 @@ export let Argon2 = module (
         };
 
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Argon2Params)) {
+            if (other is not params: Argon2Params) {
                 return false;
             }
-            last params = other as Argon2Params;
             return memory_kib == params.memory_kib && iterations == params.iterations
                 && parallelism == params.parallelism && tag_length == params.tag_length;
         };
@@ -68,7 +67,7 @@ export let Argon2 = module (
     /// @brief Argon2id with the optional secret value K and associated data X of RFC 9106, section 3.1.
     #[NoDiscard, Since("0.3.0")]
     export let argon2id_with = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
-            associated_data: uint8[list], params: Argon2Params) -> uint8[list] {
+        associated_data: uint8[list], params: Argon2Params) -> uint8[list] {
         crypto_policy.require(Algorithm.Argon2id);
         if (salt.length < 8) {
             trap_with_message("invalid argument: Argon2 salt must be at least 8 bytes");
@@ -106,20 +105,20 @@ export let Argon2 = module (
             blocks = 4 * lanes * (params.memory_kib / (4 * lanes));
             lane_length = blocks / lanes;
             segment = lane_length / 4;
-            for (let i = 0; i < 128; i++) {
+            for (let i in 0 .. 128) {
                 r.append(0);
                 z.append(0);
                 input.append(0);
                 address.append(0);
                 zero.append(0);
             }
-            for (let row = 0; row < 8; row++) {
-                for (let k = 0; k < 16; k++) {
+            for (let row in 0 .. 8) {
+                for (let k in 0 .. 16) {
                     order.append(16 * row + k);
                 }
             }
-            for (let column = 0; column < 8; column++) {
-                for (let k = 0; k < 8; k++) {
+            for (let column in 0 .. 8) {
+                for (let k in 0 .. 8) {
                     order.append(2 * column + 16 * k);
                     order.append(2 * column + 16 * k + 1);
                 }
@@ -127,7 +126,7 @@ export let Argon2 = module (
         };
 
         export let run = func(password: uint8[list], salt: uint8[list], secret: uint8[list],
-                associated_data: uint8[list]) -> uint8[list] {
+            associated_data: uint8[list]) -> uint8[list] {
             let h0_input: uint8[list] = new;
             words.append32_le(h0_input, lanes as uint32);
             words.append32_le(h0_input, tag_length as uint32);
@@ -145,26 +144,26 @@ export let Argon2 = module (
                 memory.append(0);
             }
             for (let lane = 0; lane < lanes; lane++) {
-                for (let j = 0; j < 2; j++) {
+                for (let j in 0 .. 2) {
                     let seed = words.copy(h0);
                     words.append32_le(seed, j as uint32);
                     words.append32_le(seed, lane as uint32);
                     last block = blake2b.long_hash(seed, 1024);
                     last base = (lane * lane_length + j) * 128;
-                    for (let k = 0; k < 128; k++) {
+                    for (let k in 0 .. 128) {
                         memory[base + k] = words.load64_le(block, 8 * k);
                     }
                 }
             }
             for (let pass = 0; pass < passes; pass++) {
-                for (let slice = 0; slice < 4; slice++) {
+                for (let slice in 0 .. 4) {
                     for (let lane = 0; lane < lanes; lane++) {
                         fill_segment(pass, slice, lane);
                     }
                 }
             }
             let final_bytes: uint8[list] = new;
-            for (let k = 0; k < 128; k++) {
+            for (let k in 0 .. 128) {
                 let word: uint64 = 0;
                 for (let lane = 0; lane < lanes; lane++) {
                     word = word ^ memory[(lane * lane_length + lane_length - 1) * 128 + k];
@@ -181,7 +180,7 @@ export let Argon2 = module (
         let fill_segment = func(pass: int, slice: int, lane: int) {
             last independent = pass == 0 && slice < 2;
             if (independent) {
-                for (let k = 0; k < 128; k++) {
+                for (let k in 0 .. 128) {
                     input[k] = 0;
                 }
                 input[0] = pass as uint64;
@@ -207,11 +206,11 @@ export let Argon2 = module (
                 compress(memory, previous * 128, memory, (ref_lane * lane_length + ref_index) * 128);
                 last base = current * 128;
                 if (pass == 0) {
-                    for (let k = 0; k < 128; k++) {
+                    for (let k in 0 .. 128) {
                         memory[base + k] = z[k];
                     }
                 } else {
-                    for (let k = 0; k < 128; k++) {
+                    for (let k in 0 .. 128) {
                         memory[base + k] = memory[base + k] ^ z[k];
                     }
                 }
@@ -229,11 +228,11 @@ export let Argon2 = module (
         let next_addresses = func {
             input[6] = input[6] + 1;
             compress(zero, 0, input, 0);
-            for (let k = 0; k < 128; k++) {
+            for (let k in 0 .. 128) {
                 address[k] = z[k];
             }
             compress(zero, 0, address, 0);
-            for (let k = 0; k < 128; k++) {
+            for (let k in 0 .. 128) {
                 address[k] = z[k];
             }
         };

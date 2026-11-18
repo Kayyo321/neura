@@ -1,0 +1,215 @@
+let certificate = import:Std.Crypto.Pki.Certificate;
+let der = import:Std.Crypto.Pki.Der;
+let hex = import:Std.Encoding.Hex;
+let host_name = import:Std.Crypto.Pki.HostName;
+let instant = import:Std.Time.Instant;
+let oids = import:Std.Crypto.Pki.Oids;
+let paths = import:Std.Crypto.Pki.PathValidation;
+let test = import:Std.Test;
+let vectors = import:PathVectors;
+let verifiers = import:TestVerifiers;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+
+// RFC 5280 path validation over the recorded openssl chains, with the signature truth table that Python
+// `cryptography` computed, and policy cases whose expected result is `openssl verify -policy_check`
+// (support/path-vectors.nra, scripts/crypto-vectors/gen-pki-paths.py). Validation time 1780000000.
+let PathTests = module (
+    const Now: int64 = 1780000000;
+    const ServerAuth: string = "1.3.6.1.5.5.7.3.1";
+
+    let cert = func(name: string) -> Certificate {
+        last rows = vectors.certificates;
+        for (let i = 0; i < rows.length; i += 2) {
+            if (rows[i] == name) {
+                return test.assert_ok(certificate.parse(test.assert_ok(hex.decode(rows[i + 1]))));
+            }
+        }
+        test.fail("no certificate " + name);
+        return cert("root");
+    };
+
+    let table = func -> verifiers.Table {
+        let keys: string[list] = new;
+        let values: string[list] = new;
+        last rows = vectors.signatures;
+        for (let i = 0; i < rows.length; i += 2) {
+            keys.append(rows[i]);
+            values.append(rows[i + 1]);
+        }
+        return new verifiers.Table(keys, values);
+    };
+
+    let options = func -> paths.ValidationOptions => new paths.ValidationOptions(instant.of_epoch_seconds(Now, 0), table());
+
+    let code_of = func(e: Error) -> string {
+        match (e) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    let main_chain = func(leaf: string, settings: paths.ValidationOptions) -> Result<paths.ValidatedPath> =>
+        paths.validate(cert(leaf), new([cert("inter")]), new([cert("root")]), settings);
+
+    export let test_main_chain_validates = func {
+        let settings = options();
+        settings.purpose = ServerAuth;
+        settings.dns_name = "www.example.com";
+        last path = test.assert_ok(main_chain("leaf", settings));
+        test.assert_equal_int32(3, path.chain.length);
+        test.assert(path.anchor().equals(cert("root")));
+        test.assert_equal_string("ValidatedPath(3 certificates)", path.to_string());
+        test.assert_equal_int32(1, path.policies.length);
+        test.assert_equal_string("1.3.6.1.4.1.55555.1.1", path.policies[0]);
+        // The other identities of the leaf.
+        for (let name in ["WWW.Example.COM", "x.api.example.com", "www.example.com."]) {
+            let s = options();
+            s.dns_name = name;
+            let _ = test.assert_ok(main_chain("leaf", s));
+        }
+        let ip = options();
+        ip.ip_address = test.assert_some(host_name.parse_ip("2001:db8::1"));
+        let _ = test.assert_ok(main_chain("leaf", ip));
+        let mail = options();
+        mail.email_address = "admin@EXAMPLE.com";
+        let _ = test.assert_ok(main_chain("leaf", mail));
+        // AcceptAll gives the same path: the table is consulted for each edge.
+        let t = table();
+        let counted = new paths.ValidationOptions(instant.of_epoch_seconds(Now, 0), t);
+        let _ = test.assert_ok(main_chain("leaf", counted));
+        test.assert_equal_int32(2, t.lookups);
+    };
+
+    export let test_each_check_has_its_error = func {
+        last expected: string[] = [
+            "neg-excluded-dns", "pki.name_constraints",
+            "neg-outside-dns", "pki.name_constraints",
+            "neg-excluded-ip", "pki.name_constraints",
+            "neg-outside-ipv6", "pki.name_constraints",
+            "neg-outside-email", "pki.name_constraints",
+            "neg-outside-uri", "pki.name_constraints",
+            "neg-outside-dirname", "pki.name_constraints",
+            "neg-expired", "pki.validity",
+            "neg-codesign", "pki.extended_key_usage",
+            "neg-critical", "pki.unknown_critical_extension"
+        ];
+        for (let i = 0; i < expected.length; i += 2) {
+            let settings = options();
+            settings.purpose = ServerAuth;
+            test.assert_equal_string(expected[i + 1], code_of(test.assert_err(main_chain(expected[i], settings))));
+        }
+        // A CA below the pathLenConstraint 0 intermediate, and a CA without keyCertSign.
+        last sub = paths.validate(cert("sub-leaf"), new([cert("sub-ca"), cert("inter")]), new([cert("root")]), options());
+        test.assert_equal_string("pki.path_length", code_of(test.assert_err(sub)));
+        last no_kcs = paths.validate(cert("no-kcs-leaf"), new([cert("no-kcs-ca")]), new([cert("root")]), options());
+        test.assert_equal_string("pki.key_usage", code_of(test.assert_err(no_kcs)));
+        // Host-name mismatches.
+        for (let name in ["example.com", "a.b.api.example.com", "api.example.com", "www.example.org", "w_w.example.com"]) {
+            let s = options();
+            s.dns_name = name;
+            test.assert_equal_string("pki.host_name", code_of(test.assert_err(main_chain("leaf", s))));
+        }
+        // Without the intermediate, or without anchors, there is no path.
+        test.assert_equal_string("pki.no_path", code_of(test.assert_err(paths.validate(cert("leaf"), new, new([cert("root")]), options()))));
+        test.assert_equal_string("pki.no_path", code_of(test.assert_err(paths.validate(cert("leaf"), new([cert("inter")]), new, options()))));
+        // At a time before the leaf's notBefore.
+        let early = new paths.ValidationOptions(instant.of_epoch_seconds(1700000000, 0), table());
+        test.assert_equal_string("pki.validity", code_of(test.assert_err(main_chain("leaf", early))));
+    };
+
+    export let test_bad_signature_is_refused = func {
+        // A leaf whose signature's last byte changed: the truth table has no entry for it, so the double answers
+        // UnsupportedAlgorithm, which validation must refuse like an invalid signature.
+        let bytes = der.copy_range(cert("leaf").der_bytes, 0, cert("leaf").der_bytes.length);
+        bytes[bytes.length - 1] = bytes[bytes.length - 1] ^ 1;
+        last tampered = test.assert_ok(certificate.parse(bytes));
+        last e = test.assert_err(paths.validate(tampered, new([cert("inter")]), new([cert("root")]), options()));
+        test.assert_equal_string("pki.signature", code_of(e));
+    };
+
+    export let test_wildcards_follow_rfc_9525 = func {
+        last wild = cert("neg-wildcard");
+        test.assert(host_name.matches_dns(wild, "a.wild.example.com"));
+        test.assert(host_name.matches_dns(wild, "A.WILD.example.com"));
+        test.assert(!host_name.matches_dns(wild, "wild.example.com"));
+        test.assert(!host_name.matches_dns(wild, "a.b.wild.example.com"));
+        // w*.example.com is a partial wildcard: it matches nothing.
+        test.assert(!host_name.matches_dns(wild, "www.example.com"));
+        test.assert(!host_name.matches_dns(wild, "w.example.com"));
+    };
+
+    export let test_ip_text = func {
+        last cases: string[] = [
+            "10.1.2.3", "0a010203",
+            "2001:db8::1", "20010db8000000000000000000000001",
+            "::", "00000000000000000000000000000000",
+            "::ffff:192.0.2.1", "00000000000000000000ffffc0000201",
+            "1:2:3:4:5:6:7:8", "00010002000300040005000600070008",
+            "fe80::", "fe800000000000000000000000000000"
+        ];
+        for (let i = 0; i < cases.length; i += 2) {
+            test.assert_equal_string(cases[i + 1], hex.encode(test.assert_some(host_name.parse_ip(cases[i]))));
+        }
+        for (let bad in ["1.2.3", "1.2.3.4.5", "01.2.3.4", "256.1.1.1", "1:2:3:4:5:6:7", "1::2::3", ":1:2", "12345::",
+                "1.2.3.4:", "g::1", ""]) {
+            test.assert_none(host_name.parse_ip(bad));
+        }
+    };
+
+    export let test_policy_processing_matches_openssl = func {
+        last rows = vectors.policy_cases;
+        for (let i = 0; i < rows.length; i += 8) {
+            let settings = options();
+            if (rows[i + 3].byte_length > 0) {
+                settings.initial_policies = new([rows[i + 3]]);
+            }
+            settings.initial_explicit_policy = rows[i + 4] == "true";
+            settings.initial_policy_mapping_inhibit = rows[i + 5] == "true";
+            settings.initial_any_policy_inhibit = rows[i + 6] == "true";
+            let pool: Certificate[list] = new;
+            last names = rows[i + 2];
+            let start = 0;
+            for (let k = 0; k <= names.byte_length; k++) {
+                if (k == names.byte_length || names.byte_at(k) == 44) {
+                    pool.append(cert(names.slice(start, k)));
+                    start = k + 1;
+                }
+            }
+            last result = paths.validate(cert(rows[i + 1]), pool, new([cert("policy-root")]), settings);
+            match (result) {
+                Result.Ok(path) => {
+                    test.assert_with(rows[i + 7] == "valid", rows[i]);
+                    test.assert_equal_int32(pool.length + 2, path.chain.length);
+                },
+                Result.Err(e) => {
+                    test.assert_with(rows[i + 7] == "invalid", rows[i] + ": " + e.to_string());
+                    test.assert_equal_string("pki.policy", code_of(e));
+                },
+            }
+        }
+        test.assert_equal_int32(21 * 8, rows.length);
+        // The mapped chain's valid policy at the leaf is the subject-domain policy.
+        last path = test.assert_ok(paths.validate(cert("policy-leaf"), new([cert("policy-inter")]), new([cert("policy-root")]),
+            options()));
+        test.assert_equal_string("1.3.6.1.4.1.55555.3.1", path.policies[0]);
+    };
+
+    export let test_rsa_pss_chain = func {
+        // The leaf is signed with RSASSA-PSS (SHA-256, MGF1-SHA-256, salt 32) by a 2048-bit RSA root.
+        let settings = options();
+        settings.dns_name = "rsa.example.com";
+        let _ = test.assert_ok(paths.validate(cert("rsa-pss-leaf"), new, new([cert("rsa-root")]), settings));
+        let strict = options();
+        strict.min_rsa_bits = 3072;
+        test.assert_equal_string("pki.weak_key", code_of(test.assert_err(paths.validate(cert("rsa-pss-leaf"), new,
+            new([cert("rsa-root")]), strict))));
+    };
+);

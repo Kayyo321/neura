@@ -1,0 +1,176 @@
+// A counter written directly against the UI host services, without Std.Ui's components: it mounts a button,
+// counts clicks from encoded event batches, and commits a new label for each. The check copies this file into a
+// trusted library tree as Std.Probe.Counter, because only library code may declare or call host services.
+let console = import:Std.Io.Console;
+let host = import:Std.Ui.Internal.Host;
+
+export let Counter = module (
+    let put8 = func(bytes: uint8[list], value: int) {
+        bytes.append(value as uint8);
+    };
+
+    let put32 = func(bytes: uint8[list], value: int) {
+        bytes.append((value & 255) as uint8);
+        bytes.append(((value >> 8) & 255) as uint8);
+        bytes.append(((value >> 16) & 255) as uint8);
+        bytes.append(((value >> 24) & 255) as uint8);
+    };
+
+    let put_text = func(bytes: uint8[list], text: string) {
+        put32(bytes, text.byte_length);
+        for (let i: int = 0; i < text.byte_length; i++) {
+            bytes.append(text.byte_at(i));
+        }
+    };
+
+    let read32 = func(bytes: uint8[list], at: int) -> int {
+        return (bytes[at] as int) | ((bytes[at + 1] as int) << 8) | ((bytes[at + 2] as int) << 16)
+            | ((bytes[at + 3] as int) << 24);
+    };
+
+    // Commit encoding 1: element 2, text 3, attribute 6, handler 8; parent 0 is the container.
+    let mount_operations = func -> uint8[list] {
+        last bytes: uint8[list] = new;
+        put8(bytes, 1);
+        put32(bytes, 5);
+        put8(bytes, 2);
+        put32(bytes, 1);
+        put32(bytes, 0);
+        put32(bytes, 0);
+        put8(bytes, 0);
+        put_text(bytes, "div");
+        put8(bytes, 2);
+        put32(bytes, 2);
+        put32(bytes, 1);
+        put32(bytes, 0);
+        put8(bytes, 0);
+        put_text(bytes, "button");
+        put8(bytes, 3);
+        put32(bytes, 3);
+        put32(bytes, 2);
+        put32(bytes, 0);
+        put_text(bytes, "Clicked 0");
+        put8(bytes, 6);
+        put32(bytes, 2);
+        put_text(bytes, "id");
+        put8(bytes, 1);
+        put_text(bytes, "counter");
+        put8(bytes, 8);
+        put32(bytes, 2);
+        put_text(bytes, "click");
+        put32(bytes, 7);
+        put32(bytes, 0);
+        put8(bytes, 0);
+        return bytes;
+    };
+
+    let label_operations = func(count: int) -> uint8[list] {
+        last bytes: uint8[list] = new;
+        put8(bytes, 1);
+        put32(bytes, 1);
+        put8(bytes, 5);
+        put32(bytes, 3);
+        put_text(bytes, "Clicked " + count.to_string());
+        return bytes;
+    };
+
+    let show = func(label: string, outcome: host.DoneOutcome) {
+        match (outcome) {
+            host.DoneOutcome.Ok => {
+                console.print_line(label + ": ok");
+            },
+            host.DoneOutcome.Error(code) => {
+                console.print_line(label + ": error " + code.to_string());
+            },
+        }
+    };
+
+    let show_path = func(label: string, outcome: host.PathOutcome) {
+        match (outcome) {
+            host.PathOutcome.Ok(path) => {
+                console.print_line(label + ": " + path);
+            },
+            host.PathOutcome.Error(code) => {
+                console.print_line(label + ": error " + code.to_string());
+            },
+        }
+    };
+
+    // Waits for one batch and returns the clicks in it, or -1 when the root closed.
+    let clicks_in_next_batch = func(root: int64) -> int {
+        match (host.next_events(root, 16)) {
+            host.BytesOutcome.Ok(bytes) => {
+                last count = read32(bytes, 1);
+                let at = 5;
+                for (let i: int = 0; i < count; i++) {
+                    if (bytes[at] != 1 || read32(bytes, at + 5) != 7) {
+                        trap_with_message("expected a click on handler 7");
+                    }
+                    at += 35;
+                }
+                return count == 0 ? -1 : count;
+            },
+            host.BytesOutcome.Error(code) => {
+                console.print_line("events: error " + code.to_string());
+            },
+        }
+        return -1;
+    };
+
+    export let run = func(wanted: int) -> int {
+        let root: int64 = 0;
+        match (host.open_root("#app")) {
+            host.HandleOutcome.Ok(handle) => {
+                root = handle;
+            },
+            host.HandleOutcome.Error(code) => {
+                console.print_line("open: error " + code.to_string());
+                return 1;
+            },
+        }
+        match (host.register_template(root, "{\"encoding\":1,\"fragments\":[{\"nodes\":[],\"slots\":[]}]}")) {
+            host.HandleOutcome.Ok(_) => {
+                console.print_line("template: ok");
+            },
+            host.HandleOutcome.Error(code) => {
+                console.print_line("template: error " + code.to_string());
+            },
+        }
+        match (host.register_template(root, "{\"encoding\":2,\"fragments\":[]}")) {
+            host.HandleOutcome.Ok(_) => {
+                console.print_line("unknown encoding: accepted");
+            },
+            host.HandleOutcome.Error(code) => {
+                console.print_line("unknown encoding: error " + code.to_string());
+            },
+        }
+        show("mount", host.commit(root, mount_operations()));
+        last broken: uint8[list] = new;
+        put8(broken, 9);
+        show("unknown commit encoding", host.commit(root, broken));
+        let count = 0;
+        while (count < wanted) {
+            last clicks = clicks_in_next_batch(root);
+            if (clicks < 0) {
+                return 1;
+            }
+            count += clicks;
+            show("label " + count.to_string(), host.commit(root, label_operations(count)));
+        }
+        match (host.stats(root)) {
+            host.StatsOutcome.Ok(counts) => {
+                console.print_line("nodes " + counts[0].to_string() + ", listeners " + counts[1].to_string()
+                    + ", templates " + counts[2].to_string() + ", queued " + counts[3].to_string());
+            },
+            host.StatsOutcome.Error(code) => {
+                console.print_line("stats: error " + code.to_string());
+            },
+        }
+        show_path("pushed", host.push_path("/parts/7"));
+        show_path("current", host.current_path());
+        show_path("invalid path", host.push_path("parts"));
+        show("close", host.close_root(root));
+        show("closed root", host.close_root(root));
+        return 0;
+    };
+);

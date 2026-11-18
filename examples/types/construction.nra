@@ -17,7 +17,10 @@ let Account = class (
 
 // A parameter can repeat the fields of an anonymous class: every
 // fields-only body with the same fields is the same class.
-let summary = func(totals: class (export let count: int; export let sum: int;)) -> string {
+let summary = func(totals: class (
+    export let count: int;
+    export let sum: int;
+)) -> string {
     return totals.count.to_string() + " accounts, " + totals.sum.to_string() + " in total";
 };
 

@@ -1,0 +1,11 @@
+// A hole that writes an object the template did not create (E1010).
+let Counter = class (
+    export let value: int = 0;
+);
+
+let bump = func(counter: Counter) -> int {
+    counter.value += 1;
+    return counter.value;
+};
+
+let badge = html(counter: Counter) { <span>{ bump(counter) }</span> };

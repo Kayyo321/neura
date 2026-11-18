@@ -1,0 +1,108 @@
+// test-options: --gpu=off --max-steps 300000000
+let.promote _ = import:Std.Crypto.Core.SecretBytes;
+let.promote _ = import:Std.Crypto.KeyEncapsulation;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let test = import:Std.Test;
+let tls = import:Std.Crypto.Pqc.X25519MlKem768;
+let vectors = import:HybridKemVectors;
+let x_wing = import:Std.Crypto.Pqc.XWing;
+
+let HybridKemTests = module (
+    const Columns = 10;
+
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    export let test_x_wing_appendix_c = func {
+        let kem = new x_wing.XWing();
+        let rows = vectors.cases;
+        for (let i = 0; i < rows.length; i += Columns) {
+            last key = kem.key_pair_from_seed(decode(rows[i]));
+            last public_key = test.assert_ok(kem.parse_public_key(decode(rows[i + 1])));
+            test.assert_equal_string(rows[i], hex.encode(key.expose()));
+            test.assert(public_key.equals(key.public_key()));
+            test.assert_equal_uint64(public_key.hash_code() as uint64, key.public_key().hash_code() as uint64);
+            last sealed = kem.encapsulate_with(public_key, decode(rows[i + 2]));
+            test.assert_equal_string(rows[i + 3], hex.encode(sealed.ciphertext));
+            test.assert_equal_string(rows[i + 4], hex.encode(sealed.shared_secret.expose()));
+            last opened = test.assert_ok(kem.decapsulate(key, decode(rows[i + 3])));
+            test.assert_equal_string(rows[i + 4], hex.encode(opened.expose()));
+        }
+    };
+
+    export let test_tls_known_answers = func {
+        let kem = new tls.X25519MlKem768();
+        let rows = vectors.cases;
+        for (let i = 0; i < rows.length; i += Columns) {
+            last key = kem.key_pair_from_seed(decode(rows[i + 5]));
+            last public_key = test.assert_ok(kem.parse_public_key(decode(rows[i + 1])));
+            test.assert_equal_string(rows[i + 1], hex.encode(key.public_key_bytes()));
+            test.assert(public_key.equals(key.public_key()));
+            test.assert_equal_uint64(public_key.hash_code() as uint64, key.public_key().hash_code() as uint64);
+            last sealed = kem.encapsulate_with(public_key, decode(rows[i + 2]));
+            test.assert_equal_string(rows[i + 3], hex.encode(sealed.ciphertext));
+            test.assert_equal_string(rows[i + 6], hex.encode(sealed.shared_secret.expose()));
+            let contract: KeyEncapsulation<tls.X25519MlKem768PublicKey, tls.X25519MlKem768PrivateKey,
+                SecretBytes, uint8[list]> = kem;
+            last opened = test.assert_ok(contract.decapsulate(key, decode(rows[i + 3])));
+            test.assert_equal_string(rows[i + 6], hex.encode(opened.expose()));
+        }
+    };
+
+    export let test_implicit_rejection = func {
+        last rows = vectors.cases;
+        let ciphertext = decode(rows[3]);
+        ciphertext[0] = ciphertext[0] ^ 1;
+        let tls_kem = new tls.X25519MlKem768();
+        let x_kem = new x_wing.XWing();
+        last tls_key = tls_kem.key_pair_from_seed(decode(rows[5]));
+        last x_key = x_kem.key_pair_from_seed(decode(rows[0]));
+        last tls_opened = test.assert_ok(tls_kem.decapsulate(tls_key, ciphertext));
+        last x_opened = test.assert_ok(x_kem.decapsulate(x_key, ciphertext));
+        test.assert_equal_string(rows[7], hex.encode(tls_opened.expose()));
+        test.assert_equal_string(rows[8], hex.encode(x_opened.expose()));
+    };
+
+    export let test_malformed_key_or_ciphertext = func {
+        last rows = vectors.cases;
+        let tls_kem = new tls.X25519MlKem768();
+        let x_kem = new x_wing.XWing();
+        last tls_key = tls_kem.key_pair_from_seed(decode(rows[5]));
+        last x_key = x_kem.key_pair_from_seed(decode(rows[0]));
+
+        test.assert_equal_string("crypto.invalid_key", code(test.assert_err(tls_kem.parse_public_key(new))));
+        test.assert_equal_string("crypto.invalid_key", code(test.assert_err(x_kem.parse_public_key(new))));
+        test.assert_equal_string("crypto.invalid_ciphertext", code(test.assert_err(tls_kem.decapsulate(tls_key, new))));
+        test.assert_equal_string("crypto.invalid_ciphertext", code(test.assert_err(x_kem.decapsulate(x_key, new))));
+
+        let public_bytes = decode(rows[1]);
+        for (let i = 1184; i < public_bytes.length; i++) {
+            public_bytes[i] = 0;
+        }
+        test.assert_equal_string("crypto.invalid_key", code(test.assert_err(tls_kem.parse_public_key(public_bytes))));
+        let _ = test.assert_ok(x_kem.parse_public_key(public_bytes));
+
+        // The first packed coefficient is 4095, above the ML-KEM modulus of 3329.
+        public_bytes[0] = 255;
+        public_bytes[1] = public_bytes[1] | 15;
+        test.assert_equal_string("crypto.invalid_key", code(test.assert_err(x_kem.parse_public_key(public_bytes))));
+        let tls_public_bytes = decode(rows[1]);
+        tls_public_bytes[0] = 255;
+        tls_public_bytes[1] = tls_public_bytes[1] | 15;
+        test.assert_equal_string("crypto.invalid_key", code(test.assert_err(tls_kem.parse_public_key(tls_public_bytes))));
+
+        let ciphertext = decode(rows[3]);
+        for (let i = 1088; i < ciphertext.length; i++) {
+            ciphertext[i] = 0;
+        }
+        test.assert_equal_string("crypto.invalid_ciphertext",
+            code(test.assert_err(tls_kem.decapsulate(tls_key, ciphertext))));
+        last x_opened = test.assert_ok(x_kem.decapsulate(x_key, ciphertext));
+        test.assert_equal_string(rows[9], hex.encode(x_opened.expose()));
+    };
+);

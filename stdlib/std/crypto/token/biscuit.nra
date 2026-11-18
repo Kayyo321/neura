@@ -1,0 +1,281 @@
+let authorizer = import:Std.Crypto.Internal.BiscuitAuthorizer;
+let datalog = import:Std.Crypto.Internal.BiscuitDatalog;
+let ecdsa = import:Std.Crypto.Asymmetric.Ecdsa;
+let ed25519 = import:Std.Crypto.Asymmetric.Ed25519;
+let externals = import:Std.Crypto.Internal.BiscuitExternals;
+let keys = import:Std.Crypto.Internal.BiscuitKeys;
+let wire = import:Std.Crypto.Internal.BiscuitWire;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+/// @brief Signed Biscuit tokens and bounded Datalog authorization.
+/// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+#Since("0.3.0")
+export let Biscuit = module (
+    /// @brief Algorithm to use for a new Biscuit next key.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #Since("0.3.0")
+    export let KeyAlgorithm = enum (Ed25519, P256);
+
+    /// @brief An exact Datalog value delivered to an explicitly registered application function.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #Since("0.3.0")
+    export let ExternalValue = externals.ExternalValue;
+
+    /// @brief A Datalog map key delivered to an explicitly registered application function.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #Since("0.3.0")
+    export let ExternalMapKey = externals.ExternalMapKey;
+
+    /// @brief Binds a pure application callback to an unqualified Datalog external function name.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #Since("0.3.0")
+    export let ExternalFunction = externals.ExternalFunction;
+
+    let kind = func(algorithm: KeyAlgorithm) -> keys.SignatureAlgorithm =>
+        algorithm == KeyAlgorithm.Ed25519 ? keys.SignatureAlgorithm.Ed25519 : keys.SignatureAlgorithm.P256;
+
+    let require_algorithm = func(algorithm: keys.SignatureAlgorithm) -> Result<Unit> {
+        if (not keys.allowed(algorithm)) {
+            return datalog.fail<Unit>("biscuit.unsupported", "the crypto policy denies the Biscuit key algorithm");
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let verify_chain = func(token: uint8[list], root: keys.PublicKey, stable_ids: bool = false)
+        -> Result<datalog.Block[list]> {
+        require_algorithm(root.algorithm)?;
+        return wire.verify(token, root, stable_ids);
+    };
+
+    /// @brief Checks the signed chain and its open or sealed proof using an explicitly trusted root.
+    /// The caller uses authorize for access decisions.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let verify = func(token: uint8[list], root: ed25519.Ed25519PublicKey) -> Result<Unit> {
+        let _ = verify_chain(token, new keys.PublicKey(root))?;
+        return Result<Unit>.Ok(Unit.Value);
+    } or func(token: uint8[list], root: ecdsa.EcPublicKey) -> Result<Unit> {
+        let _ = verify_chain(token, new keys.PublicKey(root))?;
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let authorize_with = func(token: uint8[list], root: keys.PublicKey, code: string,
+        functions: ExternalFunction[list]) -> Result<Unit> {
+        last registry = externals.bind(functions)?;
+        last trusted = authorizer.parse(code)?;
+        last blocks = verify_chain(token, root, true)?;
+        return datalog.authorize(blocks, trusted, registry);
+    };
+
+    /// @brief Grants access only when the verified token's checks and the first matching policy allow it.
+    /// Default Datalog scopes isolate holder-signed facts from the authority and authorizer.
+    /// Explicitly supply any application functions for this call. Only register pure callbacks that can
+    /// handle arbitrary token-selected operands. Unregistered names cause an authorization error.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let authorize = func(token: uint8[list], root: ed25519.Ed25519PublicKey, code: string) -> Result<Unit> =>
+        authorize_with(token, new keys.PublicKey(root), code, new)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey, code: string) -> Result<Unit> =>
+            authorize_with(token, new keys.PublicKey(root), code, new)
+        or func(token: uint8[list], root: ed25519.Ed25519PublicKey, code: string,
+            functions: ExternalFunction[list]) -> Result<Unit> =>
+                authorize_with(token, new keys.PublicKey(root), code, functions)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey, code: string,
+            functions: ExternalFunction[list]) -> Result<Unit> =>
+                authorize_with(token, new keys.PublicKey(root), code, functions);
+
+    let prepare_block = func(code: string, attenuation: bool) -> Result<datalog.Block> {
+        last parsed = authorizer.parse(code)?;
+        last block = parsed.logic;
+        if (parsed.policies.length > 0) {
+            return datalog.fail<datalog.Block>("biscuit.authorizer", "token blocks cannot contain authorizer policies");
+        }
+        if (attenuation && (block.facts.length > 0 || block.rules.length > 0 || block.checks.length == 0)) {
+            return datalog.fail<datalog.Block>("biscuit.authorizer", "attenuation requires one or more checks");
+        }
+        return Result<datalog.Block>.Ok(block);
+    };
+
+    let require_seed_length = func(seed: uint8[list]) {
+        if (seed.length != 32) {
+            trap_with_message("invalid argument: Biscuit next seed must be 32 bytes");
+        }
+    };
+
+    let mint_using = func(code: string, root: keys.PrivateKey, algorithm: KeyAlgorithm, seed: uint8[list],
+        generated: bool) -> Result<uint8[list]> {
+        require_algorithm(root.algorithm)?;
+        last block = prepare_block(code, false)?;
+        last selected = kind(algorithm);
+        last next: keys.PrivateKey;
+        if (generated) {
+            next = keys.generate(selected)?;
+        } else {
+            require_seed_length(seed);
+            next = keys.parse_private(selected, seed)?;
+        }
+        last token = wire.mint(block, root, next);
+        next.wipe();
+        return token;
+    };
+
+    /// @brief Mints an open token using fresh, caller-supplied 32-byte next-key material.
+    /// Ed25519 uses a seed, and P-256 uses a canonical big-endian scalar. A wrong size traps.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let mint_with = func(code: string, root: ed25519.Ed25519PrivateKey, next_seed: uint8[list],
+        algorithm: KeyAlgorithm = KeyAlgorithm.Ed25519) -> Result<uint8[list]> =>
+            mint_using(code, new keys.PrivateKey(root), algorithm, next_seed, false)
+        or func(code: string, root: ecdsa.EcPrivateKey, next_seed: uint8[list],
+            algorithm: KeyAlgorithm = KeyAlgorithm.P256) -> Result<uint8[list]> =>
+                mint_using(code, new keys.PrivateKey(root), algorithm, next_seed, false);
+
+    /// @brief Mints an open token with a fresh next key from OS entropy.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let mint = func(code: string, root: ed25519.Ed25519PrivateKey, algorithm: KeyAlgorithm = KeyAlgorithm.Ed25519)
+        -> Result<uint8[list]> => mint_using(code, new keys.PrivateKey(root), algorithm, new, true)
+        or func(code: string, root: ecdsa.EcPrivateKey, algorithm: KeyAlgorithm = KeyAlgorithm.P256)
+        -> Result<uint8[list]> => mint_using(code, new keys.PrivateKey(root), algorithm, new, true);
+
+    let append_using = func(token: uint8[list], root: keys.PublicKey, code: string, algorithm: KeyAlgorithm,
+        seed: uint8[list], generated: bool) -> Result<uint8[list]> {
+        require_algorithm(root.algorithm)?;
+        last block = prepare_block(code, true)?;
+        last selected = kind(algorithm);
+        last next: keys.PrivateKey;
+        if (generated) {
+            next = keys.generate(selected)?;
+        } else {
+            require_seed_length(seed);
+            next = keys.parse_private(selected, seed)?;
+        }
+        last result = wire.append(token, root, block, next);
+        next.wipe();
+        return result;
+    };
+
+    /// @brief Appends one or more checks to a verified open token using a fresh caller-supplied next key.
+    /// A wrong next-key size traps.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let append_with = func(token: uint8[list], root: ed25519.Ed25519PublicKey, code: string, next_seed: uint8[list],
+        algorithm: KeyAlgorithm = KeyAlgorithm.Ed25519) -> Result<uint8[list]> =>
+            append_using(token, new keys.PublicKey(root), code, algorithm, next_seed, false)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey, code: string, next_seed: uint8[list],
+            algorithm: KeyAlgorithm = KeyAlgorithm.P256) -> Result<uint8[list]> =>
+                append_using(token, new keys.PublicKey(root), code, algorithm, next_seed, false);
+
+    /// @brief Appends checks to a verified open token with a fresh next key from OS entropy.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let append = func(token: uint8[list], root: ed25519.Ed25519PublicKey, code: string,
+        algorithm: KeyAlgorithm = KeyAlgorithm.Ed25519) -> Result<uint8[list]> =>
+            append_using(token, new keys.PublicKey(root), code, algorithm, new, true)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey, code: string, algorithm: KeyAlgorithm = KeyAlgorithm.P256)
+        -> Result<uint8[list]> => append_using(token, new keys.PublicKey(root), code, algorithm, new, true);
+
+    let seal_using = func(token: uint8[list], root: keys.PublicKey) -> Result<uint8[list]> {
+        require_algorithm(root.algorithm)?;
+        return wire.seal(token, root);
+    };
+
+    /// @brief Seals a verified open token by replacing its next-key secret with a final signature.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let seal = func(token: uint8[list], root: ed25519.Ed25519PublicKey) -> Result<uint8[list]> =>
+        seal_using(token, new keys.PublicKey(root))
+        or func(token: uint8[list], root: ecdsa.EcPublicKey) -> Result<uint8[list]> =>
+            seal_using(token, new keys.PublicKey(root));
+
+    let identifiers = func(token: uint8[list], root: keys.PublicKey, stable: bool) -> Result<uint8[list][list]> {
+        require_algorithm(root.algorithm)?;
+        return wire.revocation_identifiers(token, root, stable);
+    };
+
+    /// @brief Returns each verified block's wire signature in chain order, starting with the authority.
+    /// Use stable_revocation_identifiers when comparing P-256 credentials against a revocation list.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let revocation_identifiers = func(token: uint8[list], root: ed25519.Ed25519PublicKey)
+        -> Result<uint8[list][list]> => identifiers(token, new keys.PublicKey(root), false)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey) -> Result<uint8[list][list]> =>
+            identifiers(token, new keys.PublicKey(root), false);
+
+    /// @brief Returns each verified block's signature for an application revocation list.
+    /// P-256 signatures use the low-S DER representative. Normalize stored identifiers with the same API.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let stable_revocation_identifiers = func(token: uint8[list], root: ed25519.Ed25519PublicKey)
+        -> Result<uint8[list][list]> => identifiers(token, new keys.PublicKey(root), true)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey) -> Result<uint8[list][list]> =>
+            identifiers(token, new keys.PublicKey(root), true);
+
+    let request_using = func(token: uint8[list], root: keys.PublicKey) -> Result<uint8[list]> {
+        require_algorithm(root.algorithm)?;
+        return wire.third_party_request(token, root);
+    };
+
+    /// @brief Encodes a request bound to the last signature of a verified open Biscuit.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let third_party_request = func(token: uint8[list], root: ed25519.Ed25519PublicKey) -> Result<uint8[list]> =>
+        request_using(token, new keys.PublicKey(root))
+        or func(token: uint8[list], root: ecdsa.EcPublicKey) -> Result<uint8[list]> =>
+            request_using(token, new keys.PublicKey(root));
+
+    let create_using = func(request: uint8[list], code: string, signer: keys.PrivateKey) -> Result<uint8[list]> {
+        require_algorithm(signer.algorithm)?;
+        return wire.create_third_party(request, prepare_block(code, false)?, signer);
+    };
+
+    /// @brief Signs a third-party block response. The third party supplies the facts and checks in code.
+    /// Treat the request as opaque input and authenticate the requester independently if needed.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let create_third_party = func(request: uint8[list], code: string, signer: ed25519.Ed25519PrivateKey)
+        -> Result<uint8[list]> => create_using(request, code, new keys.PrivateKey(signer))
+        or func(request: uint8[list], code: string, signer: ecdsa.EcPrivateKey) -> Result<uint8[list]> =>
+            create_using(request, code, new keys.PrivateKey(signer));
+
+    let append_third_using = func(token: uint8[list], root: keys.PublicKey, expected_signer: string,
+        response: uint8[list], algorithm: KeyAlgorithm, seed: uint8[list], generated: bool) -> Result<uint8[list]> {
+        require_algorithm(root.algorithm)?;
+        last expected = keys.parse_id(expected_signer)?;
+        last next: keys.PrivateKey;
+        if (generated) {
+            next = keys.generate(kind(algorithm))?;
+        } else {
+            require_seed_length(seed);
+            next = keys.parse_private(kind(algorithm), seed)?;
+        }
+        last result = wire.append_third_party(token, root, expected, response, next);
+        next.wipe();
+        return result;
+    };
+
+    /// @brief Appends a verified third-party response using fresh caller-supplied next-key material.
+    /// The expected signer is the Datalog public-key literal. A wrong next-key size traps.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let append_third_party_with = func(token: uint8[list], root: ed25519.Ed25519PublicKey,
+        expected_signer: string, response: uint8[list], next_seed: uint8[list],
+        algorithm: KeyAlgorithm = KeyAlgorithm.Ed25519) -> Result<uint8[list]> =>
+            append_third_using(token, new keys.PublicKey(root), expected_signer, response, algorithm, next_seed, false)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey, expected_signer: string, response: uint8[list],
+            next_seed: uint8[list], algorithm: KeyAlgorithm = KeyAlgorithm.P256) -> Result<uint8[list]> =>
+                append_third_using(token, new keys.PublicKey(root), expected_signer, response, algorithm, next_seed, false);
+
+    /// @brief Appends a verified third-party response with a fresh next key from OS entropy.
+    /// The expected signer is the Datalog public-key literal.
+    /// @see [Std.Crypto.Token.Biscuit](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Biscuit)
+    #[NoDiscard, Since("0.3.0")]
+    export let append_third_party = func(token: uint8[list], root: ed25519.Ed25519PublicKey,
+        expected_signer: string, response: uint8[list], algorithm: KeyAlgorithm = KeyAlgorithm.Ed25519)
+        -> Result<uint8[list]> =>
+            append_third_using(token, new keys.PublicKey(root), expected_signer, response, algorithm, new, true)
+        or func(token: uint8[list], root: ecdsa.EcPublicKey, expected_signer: string, response: uint8[list],
+            algorithm: KeyAlgorithm = KeyAlgorithm.P256) -> Result<uint8[list]> =>
+                append_third_using(token, new keys.PublicKey(root), expected_signer, response, algorithm, new, true);
+);

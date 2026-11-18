@@ -1,0 +1,73 @@
+// test-options: --gpu=off --deny-all --max-steps 2000000000
+let certs = import:Std.Crypto.Pki.Certificate;
+let hex = import:Std.Encoding.Hex;
+let int64s = import:Std.Core.Int64;
+let sev = import:Std.Crypto.Enclave.SevSnp;
+let test = import:Std.Test;
+let time = import:Std.Time.Instant;
+let uint64s = import:Std.Core.UInt64;
+let vectors = import:SevSnpVectors;
+
+let SevSnpTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    export let test_milan_report_and_vendor_chain = func {
+        last row = vectors.milan;
+        let _ = test.assert_err(certs.parse(decode(row[2])));
+        last vcek = decode(row[1]);
+        last ask = decode(row[2]);
+        last ark = decode(row[3]);
+        last at = time.of_epoch_seconds(test.assert_ok(int64s.parse(row[4])), 0);
+        last bytes = decode(row[0]);
+        last data = decode(row[5]);
+        last measurement = decode(row[6]);
+        last tcb = test.assert_ok(uint64s.parse(row[7]));
+        last report = test.assert_ok(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb, true));
+        test.assert(report.vmpl() == 0);
+        test.assert(report.debug_allowed());
+        test.assert(report.reported_tcb() == tcb);
+        test.assert_equal_string(row[5], hex.encode(report.report_data()));
+        test.assert_equal_string(row[6], hex.encode(report.measurement()));
+        test.assert(report.equals(test.assert_ok(sev.parse(bytes))));
+        test.assert(report.hash_code() == test.assert_ok(sev.parse(bytes)).hash_code());
+    };
+
+    export let test_evidence_rejections = func {
+        last row = vectors.milan;
+        last vcek = decode(row[1]);
+        last ask = decode(row[2]);
+        last ark = decode(row[3]);
+        last at = time.of_epoch_seconds(test.assert_ok(int64s.parse(row[4])), 0);
+        let bytes = decode(row[0]);
+        let data = decode(row[5]);
+        let measurement = decode(row[6]);
+        last tcb = test.assert_ok(uint64s.parse(row[7]));
+        // The public sample allows debugging. It must fail with the default policy.
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb));
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb + 1, true));
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ask, at, data, measurement, tcb, true));
+        data[0] = data[0] ^ 1;
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb, true));
+        data[0] = data[0] ^ 1;
+        measurement[0] = measurement[0] ^ 1;
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb, true));
+        measurement[0] = measurement[0] ^ 1;
+        bytes[192] = bytes[192] ^ 1;
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb, true));
+        bytes[192] = bytes[192] ^ 1;
+        bytes[416] = bytes[416] ^ 1;
+        let _ = test.assert_err(sev.verify(bytes, vcek, ask, ark, at, data, measurement, tcb, true));
+    };
+
+    export let test_structural_rejections = func {
+        let bytes = decode(vectors.milan[0]);
+        for (let offset in [0, 52, 72, 76, 392, 491, 504, 720, 792, 816]) {
+            bytes[offset] = bytes[offset] ^ 2;
+            let _ = test.assert_err(sev.parse(bytes));
+            bytes[offset] = bytes[offset] ^ 2;
+        }
+        bytes.append(0);
+        let _ = test.assert_err(sev.parse(bytes));
+        let _ = test.assert_err(sev.parse(new));
+    };
+);

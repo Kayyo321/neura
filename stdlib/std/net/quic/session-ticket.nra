@@ -90,10 +90,9 @@ export let SessionTicket = module (
 
         /// @brief Equal when every field is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SessionTicket)) {
+            if (other is not that: SessionTicket) {
                 return false;
             }
-            last that = other as SessionTicket;
             return same_bytes(ticket, that.ticket) && server_name == that.server_name && alpn == that.alpn
                 && received.equals(that.received) && lifetime_seconds == that.lifetime_seconds
                 && age_add == that.age_add && early_data == that.early_data;
@@ -104,8 +103,8 @@ export let SessionTicket = module (
             hashing.combine(hashing.combine(ticket.length as uint32, server_name.hash_code()), received.hash_code());
 
         /// @brief Text such as "SessionTicket(example.com, h3, 7200 s, 0-RTT, ticket redacted)".
-        export let.override to_string = func -> string => "SessionTicket(" + server_name + ", " + alpn + ", "
-            + lifetime_seconds.to_string() + " s" + (early_data ? ", 0-RTT" : "") + ", ticket redacted)";
+        export let.override to_string = func -> string => "SessionTicket(" .. server_name .. ", " .. alpn .. ", "
+            .. lifetime_seconds.to_string() .. " s" .. (early_data ? ", 0-RTT" : "") .. ", ticket redacted)";
     );
 
     /// @brief A ticket from a NewSessionTicket: the opaque ticket (1 through 65,535 bytes), the server name and

@@ -1,0 +1,29 @@
+let desktop = import:Std.Desktop;
+let test = import:Std.Test;
+
+let ValueTests = module (
+    let agree = func(a: class, b: class) -> void {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+    };
+
+    export let test_file_filters_agree = func() -> void {
+        agree(new desktop.FileFilter("Images", new(["png", "jpg"])), new desktop.FileFilter("Images", new(["png", "jpg"])));
+        test.assert(not new desktop.FileFilter("Images", new(["png"])).equals(new desktop.FileFilter("Images", new(["jpg"]))));
+        test.assert(not new desktop.FileFilter("A", new(["png"])).equals(new desktop.FileFilter("B", new(["png"]))));
+        test.assert(not new desktop.FileFilter("A", new(["png"])).equals(desktop.separator()));
+        test.assert_equal_string("FileFilter(Images)", new desktop.FileFilter("Images", new(["png"])).to_string());
+    };
+
+    export let test_menu_items_agree = func() -> void {
+        last save = desktop.action("file.save", "Save", desktop.MenuTarget.Window);
+        agree(save, desktop.action("file.save", "Save", desktop.MenuTarget.Window));
+        test.assert(not save.equals(desktop.action("file.save", "Save", desktop.MenuTarget.Native)));
+        test.assert(not save.equals(save.with_accelerator("CmdOrCtrl+S")));
+        agree(save.with_accelerator("CmdOrCtrl+S"), save.with_accelerator("CmdOrCtrl+S"));
+        agree(desktop.submenu("File", new([save])), desktop.submenu("File", new([save])));
+        test.assert(not desktop.submenu("File", new([save])).equals(desktop.submenu("File", new desktop.MenuItem[list]())));
+        test.assert_equal_string("MenuItem(item, file.save, Save)", save.to_string());
+    };
+);

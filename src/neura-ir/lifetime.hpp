@@ -20,4 +20,12 @@ bool uses_lifetime_operations(const std::vector<IrNode>& nodes);
 // The number of Yield statements in `nodes`, nested ones included.
 std::size_t count_yields(const std::vector<IrNode>& nodes);
 
+// docs/design/Lifetime030.md, `using`: a return inside `using` passes its
+// value to close_outcome, so the function's `Result` may not carry storage
+// that belongs to the frame. Lowering checks the written result type; this
+// check runs after specialization, where a generic function's `Result<T>`
+// has become, say, `Result<int32[]>`, and throws E0473 at the `using`
+// instead of the storage check's E0451 inside the library.
+void check_using_results(const IrProgram& program);
+
 } // namespace neura

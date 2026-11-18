@@ -1,0 +1,15 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy
+// stderr: explicit program failure \(trap reason 3\): denied: Frost is not allowed under the Fips140_3 policy
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let frost = import:Std.Crypto.Advanced.Frost;
+let program = import:Std.Program;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        crypto_policy.set_policy(crypto_policy.Policy.Fips140_3);
+        let _ = frost.deal(2, 3);
+        return program.ExitCode.Ok;
+    };
+);

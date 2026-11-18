@@ -72,7 +72,7 @@ export let CircuitBreaker = module (
         /// `half_open_calls`, and the window size or bucket count must be positive; `open_duration` and a bucket span
         /// must be positive. A violation traps with "invalid argument: <name>".
         export let init = func(shape: SlidingWindow, failure_rate_threshold: int, minimum_calls: int,
-                open_duration: durations.Duration, half_open_calls: int, source: Clock) {
+            open_duration: durations.Duration, half_open_calls: int, source: Clock) {
             if (failure_rate_threshold < 1 || failure_rate_threshold > 100) {
                 trap_with_message("invalid argument: failure_rate_threshold");
             }
@@ -170,7 +170,7 @@ export let CircuitBreaker = module (
         };
 
         /// @brief Text such as "CircuitBreaker(Closed)".
-        export let.override to_string = func -> string => "CircuitBreaker(" + current.to_string() + ")";
+        export let.override to_string = func -> string => "CircuitBreaker(" .. current.to_string() .. ")";
 
         /// @brief Records one outcome in the current state.
         let record = func(failed: bool) -> Result<Unit> {
@@ -315,15 +315,15 @@ export let CircuitBreaker = module (
     /// @brief A breaker over the last `size` calls.
     #NoDiscard
     export let count_based = func(size: int, failure_rate_threshold: int, minimum_calls: int,
-            open_duration: durations.Duration, half_open_calls: int, clock: Clock) -> CircuitBreaker =>
-        new CircuitBreaker(SlidingWindow.Count(size), failure_rate_threshold, minimum_calls, open_duration,
-            half_open_calls, clock);
+        open_duration: durations.Duration, half_open_calls: int, clock: Clock) -> CircuitBreaker =>
+            new CircuitBreaker(SlidingWindow.Count(size), failure_rate_threshold, minimum_calls, open_duration,
+                half_open_calls, clock);
 
     /// @brief A breaker over the calls of the last `buckets` buckets of length `span`.
     #NoDiscard
     export let time_based = func(buckets: int, span: durations.Duration, failure_rate_threshold: int,
-            minimum_calls: int, open_duration: durations.Duration, half_open_calls: int, clock: Clock)
-            -> CircuitBreaker =>
-        new CircuitBreaker(SlidingWindow.Time { buckets: buckets, span: span }, failure_rate_threshold, minimum_calls,
-            open_duration, half_open_calls, clock);
+        minimum_calls: int, open_duration: durations.Duration, half_open_calls: int, clock: Clock)
+        -> CircuitBreaker =>
+            new CircuitBreaker(SlidingWindow.Time { buckets: buckets, span: span }, failure_rate_threshold, minimum_calls,
+                open_duration, half_open_calls, clock);
 );

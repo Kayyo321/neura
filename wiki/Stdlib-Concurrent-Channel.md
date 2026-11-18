@@ -31,14 +31,18 @@ The following public declarations are taken from the module source; each links t
   The identity the scheduler keeps a channel's buffer and waiters under. The three ends of one channel share one State; the scheduler releases the channel when the State is collected. Tagged `#Final`.
 - **Channel.State** · [`export let init = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L23)
   Creates an identity that open has yet to register. Use open.
-- **Channel** · [`export let Sender = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L28)
+- **Channel.State** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L26)
+  Names the channel identity.
+- **Channel** · [`export let Sender = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L31)
   The sending end of a channel of T. Tagged `#Final`, `#ThreadSafe`.
-- **Channel.Sender** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L32)
+- **Channel.Sender** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L35)
   Wraps a channel's identity. Use open, which returns the three ends of one channel.
-- **Channel.Sender** · [`export let send = func(value: T) -> SendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L37)
+- **Channel.Sender** · [`export let send = func(value: T) -> SendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L40)
   Sends the value. Waits while the buffer is full, or with capacity 0 until a receiver takes it.
-- **Channel.Sender** · [`export let try_send = func(value: T) -> TrySendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L40)
+- **Channel.Sender** · [`export let try_send = func(value: T) -> TrySendOutcome`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L43)
   Sends the value if that needs no waiting.
+- **Channel.Sender** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L65)
+  Names the sending end.
 - **Channel** · [`export let Receiver = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L70)
   The receiving end of a channel of T. Tagged `#Final`, `#ThreadSafe`.
 - **Channel.Receiver** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L74)
@@ -47,12 +51,16 @@ The following public declarations are taken from the module source; each links t
   Receives the next value in the order the sends committed. Waits while the channel is empty and open. Values already buffered are still received after the channel closes.
 - **Channel.Receiver** · [`export let try_receive = func -> TryReceived<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L83)
   Receives a value if one is there.
-- **Channel** · [`export let Closer = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L113)
+- **Channel.Receiver** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L105)
+  Names the receiving end.
+- **Channel** · [`export let Closer = class<T>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L110)
   Closes a channel. A coordinator keeps the closer, so a task that only sends or receives cannot. Tagged `#Final`, `#ThreadSafe`.
-- **Channel.Closer** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L117)
+- **Channel.Closer** · [`export let init = func(shared: State)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L114)
   Wraps a channel's identity. Use open, which returns the three ends of one channel.
-- **Channel.Closer** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L124)
+- **Channel.Closer** · [`export let close = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L121)
   Closes the channel. Closing again does nothing. Afterwards a send reports Closed; parked senders wake with Closed and their values are not delivered; receivers see Closed once the buffer is empty.
+- **Channel.Closer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L126)
+  Names the closing end.
 - **Channel** · [`export let open = func<T>(capacity: int) -> [Sender<T>, Receiver<T>, Closer<T>]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/concurrent/channel.nra#L132)
   Opens a channel that buffers `capacity` values of the transferable type T. Capacity 0 is a rendezvous: each send waits for its receive. A negative capacity traps. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->

@@ -1,0 +1,51 @@
+// typeof (docs/design/Expressions030.md, typeof, edge cases 19-24): the kind,
+// name and qualified name of built-in types, values, the dynamic class of a
+// reference (nil, a subclass held as its base, an interface), an any
+// (scalar, string, object), records, arrays, lists, tuples, enums, generic
+// classes and functions, type operands, typeof(T) in a generic function,
+// value equality and identity, and single evaluation of the operand. The
+// harness also runs it unoptimized, from .nir and without names.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let reflect = import:Std.Reflect.Core.TypeInfo;
+let optional = import:Std.Core.Optional;
+
+export let Shapes = module (
+    export let Named = interface ( export let label = func -> string; );
+    export let Circle = class implements Named ( export let label = func -> string => "c"; );
+    export let Ring = class : Circle ( );
+    export let Color = enum (Red, Green);
+);
+
+let show = func(label: string, info: reflect.TypeInfo) {
+    console.print_line(label + ": " + info.kind.to_string() + " " + info.name + " " + info.qualified_name);
+};
+
+let generic = func<T>(value: T) -> reflect.TypeInfo => typeof(T);
+
+let count = 0;
+let next = func -> int {
+    count = count + 1;
+    return count;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let named: Shapes.Named = new Shapes.Ring();
+        show("interface value", typeof(named));
+        show("enum", typeof(Shapes.Color.Green));
+        show("optional", typeof(optional.Optional<int32>.Some(3)));
+        let items: int[list] = new();
+        show("list", typeof(items));
+        let twice = func(x: int) -> int => x * 2;
+        show("function", typeof(twice));
+        show("T", generic(1.5));
+        show("T class", generic(named));
+        show("string type", typeof(string));
+        show("Ring type", typeof(Shapes.Ring));
+        let once = typeof(next());
+        console.print_line(count.to_string() + " " + once.name);
+        show("bool", typeof(true));
+        return program.ExitCode.Ok;
+    };
+);

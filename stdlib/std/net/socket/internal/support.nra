@@ -26,8 +26,8 @@ export let Support = module (
     /// @brief Traps with "invalid argument: options for <kind>" unless the set was built for `kind`.
     export let check_kind = func(options: SocketOptions, kind: SocketKind) {
         if (options.kind != kind) {
-            trap_with_message("invalid argument: options for " + options.kind.to_string() + " given to a "
-                + kind.to_string() + " socket");
+            trap_with_message("invalid argument: options for " .. options.kind.to_string() .. " given to a "
+                .. kind.to_string() .. " socket");
         }
     };
 
@@ -40,8 +40,8 @@ export let Support = module (
             match (host.set_option(id, number, value)) {
                 host.DoneOutcome.Ok => {},
                 host.DoneOutcome.Error(code) => {
-                    return Result<Unit>.Err(host_error.io(code, "setting socket option " + number.to_string()
-                        + " failed", address));
+                    return Result<Unit>.Err(host_error.io(code, "setting socket option " .. number.to_string()
+                        .. " failed", address));
                 },
             }
         }
@@ -90,7 +90,7 @@ export let Support = module (
         return match (ips.parse(text)) {
             Result.Ok(ip) => Result<SocketAddr>.Ok(new SocketAddr(ip, port)),
             Result.Err(_) => Result<SocketAddr>.Err(bytes.io(errors.IoErrorKind.InvalidData,
-                "the host reported an address that is not numeric: " + text, text)),
+                "the host reported an address that is not numeric: " .. text, text)),
         };
     };
 );

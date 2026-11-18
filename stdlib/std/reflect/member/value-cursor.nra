@@ -1,0 +1,110 @@
+let model = import:Std.Reflect.Internal.Model;
+
+/// @brief Cursors over a value's structure (docs/design/Reflect030.md, The packages): a root value and a path of
+/// member indexes (a field of a class, an element of a collection or tuple, a payload of an enum). Neura has no
+/// raw pointers, so a cursor reads and writes through the checked operations of `Std.Reflect.Dynamic`.
+/// @see [Std.Reflect.Member.ValueCursor](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-Member-ValueCursor)
+#Since("0.3.0")
+export let ValueCursor = module (
+    /// @brief A read-only position in a value.
+    #Since("0.3.0")
+    export let ValueCursor = class (
+        export last root: model.Variant;
+        export last path: int[list];
+
+        export let init = func(value: model.Variant, steps: int[list]) {
+            root = value;
+            path = steps;
+        };
+
+        /// @brief The value at the cursor.
+        export let value = func -> model.Variant {
+            let current = root;
+            for (let step in path) {
+                current = step_into(current, step);
+            }
+            return current;
+        };
+
+        /// @brief The type of the value at the cursor.
+        export let descriptor = func -> model.TypeDescriptor => value().descriptor();
+
+        /// @brief A cursor one step deeper.
+        export let child = func(index: int) -> ValueCursor => new ValueCursor(root, extended(path, index));
+
+        export let.override to_string = func -> string => "cursor " .. path_text(path) .. " at " .. descriptor().name;
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: ValueCursor) {
+                return root.equals(that.root) && path_text(path) == path_text(that.path);
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 => path_text(path).hash_code();
+    );
+
+    /// @brief A position whose field can be written: the last step names a field of the object the rest of the
+    /// path reaches.
+    #Since("0.3.0")
+    export let ValueCursorMut = class (
+        export last root: model.Variant;
+        export last path: int[list];
+
+        export let init = func(value: model.Variant, steps: int[list]) {
+            root = value;
+            path = steps;
+        };
+
+        /// @brief The value at the cursor.
+        export let value = func -> model.Variant => new ValueCursor(root, path).value();
+
+        /// @brief Writes the field at the cursor; an empty path or a value of another type traps.
+        export let write = func(replacement: model.Variant) {
+            if (path.length == 0) {
+                trap_with_message("reflection: a cursor at the root cannot be written");
+            }
+            let owner = root;
+            for (let i in 0 .. path.length - 1) {
+                owner = step_into(owner, path[i]);
+            }
+            owner.set_field(path[path.length - 1], replacement);
+        };
+
+        export let.override to_string = func -> string => "mutable cursor " .. path_text(path);
+        export let.override equals = func(other: class) -> bool {
+            if (other is that: ValueCursorMut) {
+                return root.equals(that.root) && path_text(path) == path_text(that.path);
+            }
+            return false;
+        };
+
+        export let.override hash_code = func -> uint32 => path_text(path).hash_code();
+    );
+
+    /// @brief A cursor at the root of `value`.
+    #Since("0.3.0")
+    export let at = func(value: model.Variant) -> ValueCursor => new ValueCursor(value, new);
+
+    let step_into = func(current: model.Variant, step: int) -> model.Variant {
+        last kind = current.descriptor().fields.length;
+        return if (kind > 0) -> current.field(step);
+        else -> current.element(step);
+    };
+
+    let extended = func(steps: int[list], step: int) -> int[list] {
+        last result: int[list] = new;
+        for (let item in steps) {
+            result.append(item);
+        }
+        result.append(step);
+        return result;
+    };
+
+    let path_text = func(steps: int[list]) -> string {
+        let text = "$";
+        for (let step in steps) {
+            text ..= "/" .. step.to_string();
+        }
+        return text;
+    };
+);

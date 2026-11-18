@@ -83,18 +83,16 @@ export let Ipv4Addr = module (
         /// @brief Compares the unsigned values.
         #Pure
         export let compare_to = func(other: Ipv4Addr) -> Ordering {
-            if (bits == other.bits) {
-                return Ordering.Equal;
-            }
-            return bits < other.bits ? Ordering.Less : Ordering.Greater;
+            return if (bits == other.bits) -> Ordering.Equal
+                else -> bits < other.bits ? Ordering.Less : Ordering.Greater;
         };
 
         /// @brief Tests whether another address is an `Ipv4Addr` with the same value.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Ipv4Addr)) {
+            if (other is not that: Ipv4Addr) {
                 return false;
             }
-            return bits == (other as Ipv4Addr).bits;
+            return bits == that.bits;
         };
 
         /// @brief Combines 17 with the value.
@@ -104,8 +102,8 @@ export let Ipv4Addr = module (
         /// @brief The dotted-decimal form, for example `192.0.2.1`.
         #Pure
         export let.override to_string = func -> string =>
-            octet(0).to_string() + "." + octet(1).to_string() + "." + octet(2).to_string() + "."
-            + octet(3).to_string();
+            octet(0).to_string() .. "." .. octet(1).to_string() .. "." .. octet(2).to_string() .. "."
+            .. octet(3).to_string();
 
         /// @brief Octet `index` (0 is the most significant) as an int.
         let octet = func(index: int) -> int => ((bits >> ((3 - index) * 8) as uint32) & 255) as int;
@@ -174,10 +172,8 @@ export let Ipv4Addr = module (
                 if (i < length && text.byte_at(i) != 46) {
                     return failed(ParseErrorKind.InvalidCharacter, i, "expected a decimal digit");
                 }
-                if (i >= length) {
-                    return failed(ParseErrorKind.UnexpectedEnd, i, "expected a decimal digit");
-                }
-                return failed(ParseErrorKind.Syntax, i, "empty IPv4 part");
+                return if (i >= length) -> failed(ParseErrorKind.UnexpectedEnd, i, "expected a decimal digit")
+                    else -> failed(ParseErrorKind.Syntax, i, "empty IPv4 part");
             }
             if (part > 255) {
                 return failed(ParseErrorKind.OutOfRange, start, "IPv4 part above 255");
@@ -186,10 +182,8 @@ export let Ipv4Addr = module (
             parts++;
             if (parts == 4) {
                 if (i < length) {
-                    if (text.byte_at(i) == 46) {
-                        return failed(ParseErrorKind.Syntax, i, "more than four IPv4 parts");
-                    }
-                    return failed(ParseErrorKind.InvalidCharacter, i, "unexpected character after the address");
+                    return if (text.byte_at(i) == 46) -> failed(ParseErrorKind.Syntax, i, "more than four IPv4 parts")
+                        else -> failed(ParseErrorKind.InvalidCharacter, i, "unexpected character after the address");
                 }
                 return Result<Ipv4Addr>.Ok(new Ipv4Addr(value));
             }

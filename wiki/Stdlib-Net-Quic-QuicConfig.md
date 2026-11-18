@@ -42,9 +42,9 @@ The following public declarations are taken from the module source; each links t
   Use `create`.
 - **QuicConfig.QuicConfig** · [`export let new_controller = func -> CongestionController`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-config.nra#L65)
   A new congestion controller of the configured algorithm (Cubic with fast convergence, LEDBAT with a 100 ms target). Bbr3 traps (see `Bbr.bbr3`). Tagged `#NoDiscard`.
-- **QuicConfig.QuicConfig** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-config.nra#L79)
+- **QuicConfig.QuicConfig** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-config.nra#L77)
   Text such as "QuicConfig(Cubic, alpn h3, 100/100 streams, datagrams 65535)".
-- **QuicConfig** · [`export let create = func(tls_config: tls.TlsConfig, max_bidirectional_streams: int64, max_unidirectional_streams: int64, max_datagram_frame_size: uint64, idle_timeout: Duration, max_datagram_size: int64, congestion: CongestionAlgorithm, early_data: bool) -> Result<QuicConfig>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-config.nra#L93)
+- **QuicConfig** · [`export let create = func(tls_config: tls.TlsConfig, max_bidirectional_streams: int64, max_unidirectional_streams: int64, max_datagram_frame_size: uint64, idle_timeout: Duration, max_datagram_size: int64, congestion: CongestionAlgorithm, early_data: bool) -> Result<QuicConfig>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/quic/quic-config.nra#L91)
   A checked configuration (see the module documentation). Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

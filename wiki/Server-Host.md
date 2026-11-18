@@ -204,7 +204,7 @@ cmake -S . -B build -DCMAKE_BUILD_TYPE=Release \
 
 The host and its workers write JSON lines on standard error: `time_ms`, `level`, `request_id` when there is one, `message`, and named fields. A record longer than 16 KiB keeps its first 2 KiB of message and gains `"truncated":"true"`.
 
-`SIGTERM` and `SIGINT` stop accepting, answer 503 to new requests, wait up to S-12 for the requests in flight, kill the remaining workers and exit (status 0, or 1 when a request was still running). `SIGHUP` rereads the certificate and key; a failed reload keeps the previous pair. When the host itself is killed, its workers see their channel close and exit.
+`SIGTERM` and `SIGINT` stop accepting, answer 503 to new requests, wait up to S-12 for the requests in flight and for the worker of each answered request to exit (with `--record-dir`, after its trace is written; a worker past its grace period is still killed), kill the remaining workers and exit (status 0, or 1 when a request was still running). `SIGHUP` rereads the certificate and key; a failed reload keeps the previous pair. When the host itself is killed, its workers see their channel close and exit.
 
 ## The admin listener
 

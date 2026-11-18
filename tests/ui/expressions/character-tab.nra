@@ -1,0 +1,3 @@
+// A raw tab between quotes is E0261 (docs/design/Expressions030.md, edge
+// case 26), with the escape as a fix.
+let tab = '	';

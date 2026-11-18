@@ -1,0 +1,12 @@
+// Edge case 42 of docs/design/Expressions030.md: the accepted positions of
+// string chains.
+let join = func(text: string) -> string => text;
+let pick = func(c: bool, a: string, b: string, d: string) -> string => c ? a .. b : d;
+let call = func(a: string, b: string) -> string => join(a .. b);
+let compare = func(a: string, b: string, c: string) -> bool => (a .. b) == c;
+let grouped = func(a: string, b: string, c: string) -> string => prefix(a) .. (b .. c) .. "";
+let prefix = func(a: string) -> string => a;
+let typed = func(a: string) -> string {
+    let text: string = a .. a;
+    return text;
+};

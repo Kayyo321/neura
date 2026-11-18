@@ -9,6 +9,7 @@
 #include "float.hpp"
 #include "hook_arguments.hpp"
 #include "host_binding.hpp"
+#include "initialization_order.hpp"
 #include "kernel_signature.hpp"
 #include "scheduler_ops.hpp"
 #include "integer.hpp"
@@ -16,6 +17,7 @@
 #include "lifetime.hpp"
 #include "linker.hpp"
 #include "monitors.hpp"
+#include "frozen.hpp"
 #include "nominal.hpp"
 #include "purity.hpp"
 #include "reference_initialization.hpp"
@@ -24,7 +26,10 @@
 #include "event_guard.hpp"
 #include "static_initialization.hpp"
 #include "tags.hpp"
+#include "parser/html_template.hpp"
 #include "parser/syntax.hpp"
+#include "tooling/json.hpp"
+#include "util/sha256.hpp"
 #include "util/source_map.hpp"
 #include "util/suggest.hpp"
 
@@ -35,6 +40,7 @@
 #include <functional>
 #include <cstdint>
 #include <deque>
+#include <iterator>
 #include <limits>
 #include <map>
 #include <optional>
@@ -254,6 +260,8 @@ private:
     };
 
     IrProgram program_;
+    // Every type argument written in this compilation, for E0580 (frozen.hpp).
+    std::vector<WrittenTypeArgument> written_type_arguments_;
     std::vector<Entry> entries_;
     std::vector<SymbolId> file_ids_;
     Names linked_files_;
@@ -266,6 +274,23 @@ private:
     std::map<std::pair<std::string, std::string>, SymbolId> linked_modules_;
     std::map<const Statement*, GlobalDestructure> destructures_;
     std::set<std::pair<SymbolId, SymbolId>> wrapper_imports_;
+    std::map<SymbolId, std::vector<IrNode>> template_constants_;
+    // Stylesheet forms (Html030.md, Stylesheets): the scoped names of each
+    // css.module constant, and every stylesheet constant with the bundle
+    // path of its file, to order the links once lowering is done.
+    struct StyleModuleNames {
+        std::map<std::string, std::string, std::less<>> classes;
+        std::map<std::string, std::string, std::less<>> keyframes;
+    };
+    std::map<SymbolId, StyleModuleNames> style_modules_;
+    std::map<const Expr*, SymbolId> stylesheet_constants_;
+    struct StylesheetLink {
+        SymbolId constant;
+        std::size_t offset;
+        std::string path;
+    };
+    std::vector<StylesheetLink> stylesheet_links_;
+    std::deque<Declaration> named_html_;
     const std::vector<ParsedFile>* files_ = nullptr;
     SymbolId root_class_ = no_symbol;
     // Trusted library functions bound to a scheduler operation, by name.
@@ -375,6 +400,13 @@ private:
                             const std::vector<std::string>& names);
     IrNode closure_value(const IrType& type, ClosureEnvironment& environment, const Span& span);
     IrNode lambda(const Declaration& declaration, Context& context, const IrType* expected = nullptr);
+    class UiLowering;
+    IrNode html_factory(const Expr& expr, Context& context);
+    IrNode stylesheet(const Expr& expr, Context& context);
+    std::optional<IrNode> style_module_name(const Expr& expr, Context& context);
+    void order_stylesheets();
+    std::vector<IrNode> html_body(SymbolId id, const Expr& expression, Context& context);
+    IrType html_view_type(const Span& span, const Context& context);
     IrNode bind_function(IrNode callee, Context& context, bool owned = false);
     std::optional<IrNode> static_qualifier(IrNode& callee);
     IrNode closure_field(SymbolId field, const Span& span);
@@ -407,6 +439,12 @@ private:
     Substitution enum_arguments(const IrType& type) const;
     IrNode tuple(const Expr& expr, Context& context, const IrType* expected);
     IrNode range(const Expr& expr, Context& context, const IrType* expected);
+    IrNode string_chain(const Expr& expr, Context& context, IrNode first);
+    void chain_operators(const Expr& chain);
+    IrNode text_operand(const Expr& syntax, Context& context);
+    Diagnostic not_text(const Expr& syntax, const IrType& type) const;
+    bool lowers_to_text(const Expr& syntax, Context& context);
+    IrNode concatenate_text(std::vector<IrNode> operands, const Span& span);
     IrType parameter_type(const Parameter& parameter, const Context& context);
     IrNode pack_argument(const Expr& expr, const IrType& argument, Context& context);
     IrNode allocate(const Expr& expr, Context& context, const IrType* target = nullptr);
@@ -530,7 +568,10 @@ private:
     IrNode any_guard(const Expr& expr, Context& context, const std::function<IrNode()>& lower);
     IrNode general_match(const Statement& stmt, Context& context, bool produces_value, const IrType* expected,
                          bool call_argument, std::optional<IrNode> lowered_subject = std::nullopt);
+    IrNode narrowing_if(const Statement& stmt, Context& context, std::vector<IrNode>* hoisted = nullptr,
+                        Names* after = nullptr);
     IrNode do_loop(const Statement& stmt, Context& context);
+    IrNode concatenation_assignment(const Statement& stmt, Context& context);
     IrNode for_loop(const Statement& stmt, Context& context);
     IrNode for_each(const Statement& stmt, Context& context);
     IrNode for_each_iterable(const Statement& stmt, Context& context, IrNode items);
@@ -629,6 +670,8 @@ private:
     IrNode interpolation(const Expr& expr, Context& context);
     // nameof.
     IrNode name_of(const Expr& expr, Context& context);
+    IrNode type_of(const Expr& expr, Context& context);
+    bool names_type(const Expr& operand, Context& context);
     SymbolId name_of_target(const Expr& path, Context& context);
     // Extension sets.
     std::map<std::string, std::vector<SymbolId>, std::less<>> extension_index_;
@@ -937,6 +980,28 @@ SymbolId Lowering::function_branch(const Declaration& decl, SymbolId owner, std:
     return id;
 }
 
+Declaration named_factory(const Declaration& binding, const Expr& expression, bool primary) {
+    Declaration factory{};
+    factory.kind = DeclKind::Function;
+    factory.name = binding.name;
+    factory.name_span = primary ? binding.name_span : std::optional<Span>{expression.span};
+    factory.span = primary ? binding.span : expression.span;
+    factory.type = TypeSyntax{expression.span, "[html View]", {}, {}};
+    factory.parameters = expression.html_factory->parameters;
+    factory.initializer = expression;
+    factory.constant = binding.constant;
+    factory.exported = binding.exported;
+    factory.override_member = binding.override_member;
+    factory.static_member = binding.static_member;
+    factory.has_body = true;
+    if (primary) {
+        factory.tags = binding.tags;
+        for (const auto& alternative : expression.html_factory->overloads)
+            factory.overloads.push_back(named_factory(binding, alternative, false));
+    }
+    return factory;
+}
+
 SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind kind) {
     if (accessor_override_syntax(decl) && symbol(owner).kind == SymbolKind::Class)
         return declare_accessor_override(decl, owner);
@@ -952,6 +1017,11 @@ SymbolId Lowering::declare(const Declaration& decl, SymbolId owner, SymbolKind k
             throw Diagnostic(decl.span, "'_' requires a value initializer and does not declare a member")
                 .with_code("E0310");
         return no_symbol;
+    }
+    if (decl.kind == DeclKind::Binding && !decl.last && !decl.type && decl.accessors.empty() &&
+        decl.initializer && decl.initializer->html_factory && !decl.initializer->html_factory->retained) {
+        named_html_.push_back(named_factory(decl, *decl.initializer, true));
+        return declare(named_html_.back(), owner, kind);
     }
     switch (decl.kind) {
     case DeclKind::Module: kind = SymbolKind::Module; break;
@@ -1346,6 +1416,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
         if (scope_bound(actual))
             throw Diagnostic(args[i].span, "a value of type " + describe(actual) +
                                            " cannot leave its scope: it cannot be a type argument").with_code("E0605");
+        written_type_arguments_.push_back({params[i], actual, args[i].span});
         result.emplace(params[i], std::move(actual));
     }
     for (std::size_t i = 0; i < args.size(); ++i) {
@@ -1366,6 +1437,7 @@ Substitution Lowering::type_arguments(const std::vector<SymbolId>& params,
 }
 
 IrType Lowering::type(const TypeSyntax& syntax, const Context& context) {
+    if (syntax.name == "[html View]") return html_view_type(syntax.span, context);
     IrType result;
     if (syntax.name == "[tuple]") {
         result = {TypeKind::Tuple, {}, no_symbol, {}};
@@ -1852,6 +1924,8 @@ void Lowering::resolve_generics(SymbolId id, const Declaration& decl, Context& c
 void Lowering::resolve_binding(SymbolId id, const Declaration& decl) {
     auto ctx = context(symbol(id).owner);
     ctx.initializer = id;
+    if (decl.initializer && decl.initializer->kind == ExprKind::Stylesheet)
+        stylesheet_constants_[&*decl.initializer] = id;
     if (decl.initializer && decl.initializer->kind == ExprKind::Import) {
         if (decl.type) throw Diagnostic(decl.span, "import aliases cannot have a type annotation").with_code("E0704");
         auto target = resolve_import(*decl.initializer);
@@ -2812,6 +2886,7 @@ IrNode Lowering::call(const Expr& expr, Context& context, const IrType* expected
     const auto& callee_expr = expr.operands.front();
     if (callee_expr.kind == ExprKind::OptionalMember) return optional_access(callee_expr, &expr, context);
     if (auto result = primitive_call(expr, context)) return std::move(*result);
+    if (auto result = style_module_name(expr, context)) return std::move(*result);
     if (auto result = conformance_call(expr, context)) return std::move(*result);
     // `spawn (f)(x)` parses as a call of a function named spawn. Without one,
     // say what the form requires (Concurrency.md section 4.4).
@@ -3000,9 +3075,12 @@ IrNode Lowering::allocate(const Expr& expr, Context& context, const IrType* targ
 IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative) {
     const bool floating = expr.kind == ExprKind::Float;
     auto kind = floating ? TypeKind::Float : TypeKind::Integer;
+    // A character literal defaults to `byte` (docs/design/Expressions030.md).
     auto result = node(floating ? IrOp::Float : IrOp::Integer, expr.span,
                        expected && expected->kind == kind ? *expected
-                                                         : (floating ? float64_type : int32_type));
+                       : floating                         ? float64_type
+                       : expr.character                   ? uint8_type
+                                                          : int32_type);
     result.text = negative ? "-" + expr.text : expr.text;
     if (floating) {
         // Literals convert directly from decimal to the target format, so a
@@ -3034,8 +3112,11 @@ IrNode Lowering::number(const Expr& expr, const IrType* expected, bool negative)
     std::uint64_t magnitude = 0;
     auto [end, error] = std::from_chars(expr.text.data(), expr.text.data() + expr.text.size(), magnitude);
     if (error != std::errc{} || end != expr.text.data() + expr.text.size() ||
-        magnitude > limit || (negative && !signed_integer))
-        throw Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
+        magnitude > limit || (negative && !signed_integer)) {
+        auto error = Diagnostic(expr.span, "integer literal is outside the range of " + name).with_code("E0424");
+        if (expr.character) error.note("a character literal is the integer " + expr.text);
+        throw error;
+    }
     return result;
 }
 
@@ -3435,9 +3516,23 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     const auto& span = expr.span;
     const auto* expected_element = expected && collection(*expected) ? &expected->arguments.front() : nullptr;
     auto start = value(expr.operands[0], context, expected_element);
+    // docs/design/Expressions030.md, String chains: a string first operand
+    // makes the node a chain.
+    if (start.type.kind == TypeKind::String) return string_chain(expr, context, std::move(start));
     const auto element = start.type;
     const auto format = specified_integer_format(element);
     if (!format) throw Diagnostic(start.span, "a range requires integer bounds and step").with_code("E0429");
+    // docs/design/Expressions030.md, Ranges with `..=`: exactly two bounds.
+    if (expr.range_operators.size() > 1) {
+        if (lowers_to_text(expr.operands[1], context)) throw not_text(expr.operands[0], element);
+        const bool mixed = expr.range_inclusive[0] || expr.range_inclusive[1];
+        throw Diagnostic(expr.range_operators[1], mixed ? "'..=' and '..' do not combine in one range"
+                                                        : "a range has exactly two bounds")
+            .with_code("E0263").label(mixed ? "a second range operator" : "a third bound starts here")
+            .note("only text is joined by a chain 'a .. b .. c'; an integer range has a start, a stop and an optional step")
+            .help("write 'start .. stop', 'start ..= stop', or either with ': step'");
+    }
+    const bool inclusive = !expr.range_inclusive.empty() && expr.range_inclusive.front();
     auto result = node(IrOp::ScopedValue, span,
                        expected_element ? *expected : collection_type(TypeKind::Array, element));
     const auto integer = [&](const IrType& type, std::string digits) {
@@ -3474,9 +3569,17 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     };
 
     const auto current = save(std::move(start), "$range_current", false);
-    const auto stop = save(value(expr.operands[1], context, &element), "$range_stop");
-    const auto step = save(expr.operands.size() == 3 ? value(expr.operands[2], context, &element)
-                                                   : integer(element, "1"), "$range_step");
+    const auto stop = save([&] {
+        try {
+            return value(expr.operands[1], context, &element);
+        } catch (const Diagnostic&) {
+            // `3 .. "turn"` is a chain whose integer operand is the error.
+            if (lowers_to_text(expr.operands[1], context)) throw not_text(expr.operands[0], element);
+            throw;
+        }
+    }(), "$range_stop");
+    const auto step = save(expr.step_colon ? value(expr.operands[2], context, &element)
+                                           : integer(element, "1"), "$range_step");
     const auto& distance_type = format->bits <= 32 ? uint32_type : uint64_type;
     const auto zero = integer(distance_type, "0");
     const auto one = integer(distance_type, "1");
@@ -3511,13 +3614,27 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
         if (format->bits == 64) magnitude = binary("+", distance_type, std::move(magnitude), one);
         stride = select(descending, std::move(magnitude), std::move(stride));
     }
-    const auto has_items = save(binary("<", bool_type, low, high), "$range_nonempty");
-    auto last_offset = select(has_items, binary("-", distance_type,
-                             binary("-", distance_type, high, low), one), zero);
-    // The division also checks a zero step for an empty range.
-    auto count = binary("+", distance_type,
-                        binary("/", distance_type, std::move(last_offset), std::move(stride)),
-                        select(has_items, one, zero));
+    const auto has_items = save(binary(inclusive ? "<=" : "<", bool_type, low, high), "$range_nonempty");
+    IrNode count = node(IrOp::Binary, span);
+    if (!inclusive) {
+        auto last_offset = select(has_items, binary("-", distance_type,
+                                 binary("-", distance_type, high, low), one), zero);
+        // The division also checks a zero step for an empty range.
+        count = binary("+", distance_type,
+                       binary("/", distance_type, std::move(last_offset), std::move(stride)),
+                       select(has_items, one, zero));
+    } else {
+        // The last offset of `..=` is `high - low`. Limiting the quotient
+        // to the int32 maximum before adding one keeps a whole-domain range
+        // from overflowing the distance type: its length then fails the
+        // conversion below, as an over-long `..` range does.
+        auto last_offset = select(has_items, binary("-", distance_type, high, low), zero);
+        const auto quotient = save(binary("/", distance_type, std::move(last_offset), std::move(stride)),
+                                   "$range_quotient");
+        const auto limit = integer(distance_type, "2147483647");
+        count = binary("+", distance_type, select(binary(">", bool_type, quotient, limit), limit, quotient),
+                       select(has_items, one, zero));
+    }
     const auto length = save(convert(int32_type, std::move(count)), "$range_length");
     auto allocation = node(IrOp::RepeatCollection, span, result.type);
     allocation.operands = {convert(uint64_type, length), current};
@@ -3540,7 +3657,128 @@ IrNode Lowering::range(const Expr& expr, Context& context, const IrType* expecte
     return result;
 }
 
+// docs/design/Expressions030.md, String chains. `first` is the lowered
+// first operand, a string.
+IrNode Lowering::string_chain(const Expr& expr, Context& context, IrNode first) {
+    if (expr.braced)
+        throw Diagnostic(expr.span, "braces group a range, not a string chain").with_code("E0263")
+            .label("the first operand is a string")
+            .help("write the chain without braces, or parenthesize it: '(a .. b)'");
+    chain_operators(expr);
+    if (expr.step_colon)
+        throw Diagnostic(*expr.step_colon, "a string chain takes no step").with_code("E0263")
+            .label("a step is written here")
+            .note("a step belongs to an integer range; this chain joins text");
+    std::vector<IrNode> operands;
+    operands.push_back(std::move(first));
+    for (std::size_t i = 1; i < expr.operands.size(); ++i) operands.push_back(text_operand(expr.operands[i], context));
+    return concatenate_text(std::move(operands), expr.span);
+}
+
+// `..=` never joins text in an expression.
+void Lowering::chain_operators(const Expr& chain) {
+    for (std::size_t i = 0; i < chain.range_operators.size(); ++i) {
+        if (!chain.range_inclusive[i]) continue;
+        throw Diagnostic(chain.range_operators[i], "'..=' does not join text in an expression").with_code("E0263")
+            .label("'..=' with string operands")
+            .note("in an expression, '..=' makes an inclusive integer range; a chain joins text with '..'")
+            .help("to append to a string, write the statement 'place ..= text;', or join with 'a .. b'");
+    }
+}
+
+IrNode Lowering::text_operand(const Expr& syntax, Context& context) {
+    auto operand = value(syntax, context);
+    if (operand.type.kind != TypeKind::String) throw not_text(syntax, operand.type);
+    return operand;
+}
+
+// E1100: a chain operand that is not a string, which `..` never converts.
+Diagnostic Lowering::not_text(const Expr& syntax, const IrType& type) const {
+    auto error = Diagnostic(syntax.span, "a string chain joins only strings, but this operand is " + describe(type))
+        .with_code("E1100").label("this is " + describe(type))
+        .note("'..' converts nothing to text; call 'to_string()' to join a value");
+    if (syntax.kind == ExprKind::Binary && !syntax.grouped)
+        error.help("operators bind more tightly than '..'; parenthesize the chain to apply one to the joined text, "
+                   "as in '(a .. b) == c'");
+    const auto start = source_span(syntax.span.file, syntax.span.offset, 0);
+    const auto end = source_span(syntax.span.file, syntax.span.offset + syntax.span.length, 0);
+    if (start && end) {
+        if (syntax.kind == ExprKind::Name || syntax.grouped)
+            error.suggest("convert it to text", *end, ".to_string()", Applicability::MaybeIncorrect);
+        else
+            error.suggest("convert it to text", {{*start, "("}, {*end, ").to_string()"}}, Applicability::MaybeIncorrect);
+    }
+    return error;
+}
+
+// Whether `syntax` lowers to a string, tried without keeping its
+// diagnostics; used only on a path that already reports an error.
+bool Lowering::lowers_to_text(const Expr& syntax, Context& context) {
+    SpeculativeDiagnostics speculative;
+    try {
+        return value(syntax, context).type.kind == TypeKind::String;
+    } catch (const Diagnostic&) {
+        return false;
+    }
+}
+
+// The text of `operands` in order. Adjacent string constants fold at
+// compile time; two or more operands left after folding are one
+// `concat text` (NeuraIR 1.15), which allocates once.
+IrNode Lowering::concatenate_text(std::vector<IrNode> operands, const Span& span) {
+    std::vector<IrNode> folded;
+    for (auto& operand : operands) {
+        if (operand.op == IrOp::String && !folded.empty() && folded.back().op == IrOp::String) {
+            folded.back().text += operand.text;
+            continue;
+        }
+        folded.push_back(std::move(operand));
+    }
+    if (folded.size() == 1) return std::move(folded.front());
+    auto result = node(IrOp::ConcatText, span, string_type);
+    result.operands = std::move(folded);
+    return result;
+}
+
+// docs/design/Expressions030.md, `..=` as a statement.
+IrNode Lowering::concatenation_assignment(const Statement& stmt, Context& context) {
+    auto result = node(IrOp::Block, stmt.span);
+    auto destination = capture_place(stmt.expressions[0], result.body, context);
+    if (destination.type.kind != TypeKind::String) {
+        throw Diagnostic(stmt.keyword, "a '..=' statement appends to a string, but the destination is " +
+                                           describe(destination.type))
+            .with_code("E0262").label("'..=' as a statement")
+            .label(stmt.expressions[0].span, "this has type " + describe(destination.type))
+            .note("as a statement, 'place ..= text;' appends text to a string; "
+                  "in an expression, 'start ..= stop' is an inclusive range")
+            .help("to make an inclusive range, use it as a value: 'let r = start ..= stop;'");
+    }
+    // As a compound assignment: the place's receiver and index once, the old
+    // value once, then the right operands in order (an unparenthesized chain
+    // joins after the old value), then the text, then one store.
+    std::vector<IrNode> operands;
+    operands.push_back(read_place(destination, context));
+    const auto& right = stmt.expressions[1];
+    if (right.kind == ExprKind::Range && !right.grouped && !right.braced) {
+        chain_operators(right);
+        for (const auto& operand : right.operands) operands.push_back(text_operand(operand, context));
+    } else {
+        operands.push_back(text_operand(right, context));
+    }
+    auto text = concatenate_text(std::move(operands), stmt.span);
+    result.body.push_back(store_place(std::move(destination), std::move(text), stmt.span));
+    return result;
+}
+
 IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
+    if (expr.kind == ExprKind::Binary && expr.text == "!==") {
+        // docs/design/Expressions030.md, Value inequality: `a !== b` is
+        // `!(a === b)`, lowered as that form so it builds the same image.
+        Expr equal = expr;
+        equal.text = "===";
+        Expr negation{ExprKind::Unary, expr.span, "!", {std::move(equal)}, {}, {}};
+        return expression(negation, context, expected, call_argument);
+    }
     const bool guarded = expr.kind == ExprKind::Binary || expr.kind == ExprKind::Unary ||
                          expr.kind == ExprKind::PrefixUpdate || expr.kind == ExprKind::PostfixUpdate ||
                          expr.kind == ExprKind::ComparisonChain || expr.kind == ExprKind::Member ||
@@ -3552,8 +3790,14 @@ IrNode Lowering::expression(const Expr& expr, Context& context, const IrType* ex
     return result;
 }
 
+#include "lowering_ui.inc"
+
 IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrType* expected, bool call_argument) {
     switch (expr.kind) {
+    case ExprKind::HtmlFactory:
+        return html_factory(expr, context);
+    case ExprKind::Stylesheet:
+        return stylesheet(expr, context);
     case ExprKind::TypeApplication: {
         auto target = expression(expr.operands.front(), context);
         if (target.op != IrOp::Reference || target.symbol == no_symbol ||
@@ -3579,6 +3823,8 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return interpolation(expr, context);
     case ExprKind::NameOf:
         return name_of(expr, context);
+    case ExprKind::TypeOf:
+        return type_of(expr, context);
     case ExprKind::Spawn:
         return spawn(expr, context);
     case ExprKind::Name: {
@@ -3643,7 +3889,19 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
             return literal;
         }
         bool logical = expr.text == "!";
-        auto input = value(child, context, logical ? &bool_type : expected);
+        auto input = [&] {
+            if (!expr.spelled_not) return value(child, context, logical ? &bool_type : expected);
+            // A diagnostic about the operand of `not` names `not`
+            // (docs/design/Expressions030.md, Negation words).
+            try {
+                return value(child, context, &bool_type);
+            } catch (Diagnostic& error) {
+                if (error.code() == "E0403" && error.span.offset == child.span.offset &&
+                    error.span.length == child.span.length)
+                    error.note("'not' requires a bool operand, as '!' does");
+                throw;
+            }
+        }();
         if (expr.text == "~" && input.type.kind != TypeKind::Integer)
             throw Diagnostic(expr.span, "unary '~' requires an integer operand").with_code("E0413");
         if (expr.text == "-" && input.type.kind != TypeKind::Integer && input.type.kind != TypeKind::Float)
@@ -3744,6 +4002,10 @@ IrNode Lowering::expression_node(const Expr& expr, Context& context, const IrTyp
         return lower_match(*expr.match, context, true, expected, call_argument);
     case ExprKind::TypeTest:
     case ExprKind::Cast: {
+        // The parser admits a narrowing only where narrowing_if lowers it.
+        if (expr.narrowing)
+            throw Diagnostic(*expr.narrowing, "a narrowing binding is allowed only in the condition of an 'if'")
+                .with_code("E0265");
         auto target = type(*expr.type, context);
         if (is_primitive_reference(target))
             throw Diagnostic(expr.type->span, "a primitive reference must be bound to storage").with_code("E0428");
@@ -4507,6 +4769,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
             result.operands = {std::move(destination), std::move(source)};
             return result;
         }
+        if (stmt.assignment_operator == "..=") return concatenation_assignment(stmt, context);
         if (stmt.assignment_operator != "=") {
             auto result = node(IrOp::Block, stmt.span);
             auto destination = capture_place(stmt.expressions[0], result.body, context);
@@ -4534,6 +4797,7 @@ IrNode Lowering::statement(const Statement& stmt, Context& context) {
         return result;
     }
     case StmtKind::If: {
+        if (!stmt.bindings.empty()) return narrowing_if(stmt, context);
         auto result = node(IrOp::Branch, stmt.span);
         result.operands.push_back(value(stmt.expressions.front(), context, &bool_type));
         result.body = body(stmt.body, context);
@@ -4889,6 +5153,20 @@ IrNode Lowering::for_each_iterable(const Statement& stmt, Context& context, IrNo
 }
 
 void Lowering::append_statement(std::vector<IrNode>& instructions, const Statement& stmt, Context& context) {
+    if (stmt.kind == StmtKind::If && stmt.negated_narrowing) {
+        // `if (x is not y: T) A` where A cannot complete binds `y` for the
+        // rest of the block (docs/design/Expressions030.md, Narrowing).
+        Names after;
+        auto lowered = narrowing_if(stmt, context, &instructions, &after);
+        auto& names = context.scopes.back();
+        for (const auto& [name, id] : after) {
+            if (names.contains(name))
+                throw duplicate_local(name_span(id), "duplicate local binding '" + name + "'", names.find(name)->second);
+        }
+        names.insert(after.begin(), after.end());
+        instructions.push_back(std::move(lowered));
+        return;
+    }
     if (stmt.kind == StmtKind::Destructure) {
         destructure(instructions, stmt, context);
     } else if (stmt.kind == StmtKind::Defer) {
@@ -5229,7 +5507,9 @@ void Lowering::lower_declaration(SymbolId id) {
         }
         if (declaration.type && symbol(id).type.kind != TypeKind::Void) result_spans_.emplace(id, declaration.type->span);
         check_definite_assignment(declaration, id);
-        auto instructions = declaration.generator ? generator_factory(declaration, ctx, id) : body(declaration.body, ctx);
+        auto instructions = declaration.generator ? generator_factory(declaration, ctx, id)
+            : declaration.initializer && declaration.initializer->html_factory
+            ? html_body(id, *declaration.initializer, ctx) : body(declaration.body, ctx);
         if (symbol(id).type.kind != TypeKind::Void && !always_returns(instructions))
             throw missing_return(declaration.span, id, declaration);
         program_.bodies.push_back({id, std::move(instructions)});
@@ -5516,6 +5796,17 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // write.
     for (std::size_t i = 0; i < pending_anonymous_.size(); ++i) lower_declaration(pending_anonymous_[i]);
     lower_pending_twins();
+    order_stylesheets();
+    for (auto& [file, constants] : template_constants_) {
+        const auto body = std::ranges::find(program_.bodies, file, &IrBody::owner);
+        if (body == program_.bodies.end()) {
+            program_.bodies.push_back({file, std::move(constants)});
+        } else {
+            constants.insert(constants.end(), std::make_move_iterator(body->instructions.begin()),
+                             std::make_move_iterator(body->instructions.end()));
+            body->instructions = std::move(constants);
+        }
+    }
     finish_tags(program_, linked_symbols, warning_mark, [&](SymbolId id) -> std::optional<TagDeclarationSpans> {
         if (id >= entries_.size() || !entries_[id].declaration) return std::nullopt;
         const auto& decl = *entries_[id].declaration;
@@ -5534,6 +5825,10 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
     // function of a prebuilt module is pure only when it is marked #Pure,
     // because its tag is part of its interface.
     declare_checked_tags(program_, linked_symbols, [&](SymbolId id) { return name_span(id); });
+    // Deeply immutable application data (Components030.md): #Frozen storage
+    // and the type arguments of #Frozen classes.
+    check_frozen_storage(program_, linked_symbols, linked_bodies, [&](SymbolId id) { return name_span(id); });
+    check_frozen_arguments(program_, written_type_arguments_);
     std::set<SymbolId> artifact_files;
     for (SymbolId id = 0; id < linked_symbols; ++id) {
         const auto& item = symbol(id);
@@ -5541,12 +5836,14 @@ IrProgram Lowering::run(const std::vector<ParsedFile>& files, LinkedImports link
             artifact_files.insert(id);
         }
     }
-    check_pure_tags(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    const auto prebuilt = [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); };
+    check_pure_tags(program_, prebuilt);
     // A `using` resource does not escape its block (Lifetime030.md), judged
     // with the retention summaries of the linked program.
-    check_scoped_resources(program_, [&](SymbolId id) { return artifact_files.contains(source_file(program_, id)); });
+    check_scoped_resources(program_, prebuilt);
     // No event is emitted under a monitor guard (Lifetime030.md, Events).
     check_event_guards(program_);
+    check_render_factories(program_, prebuilt);
     return std::move(program_);
 }
 

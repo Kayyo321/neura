@@ -80,10 +80,7 @@ export let BitSet = module (
 
         /// @brief The word at `index`, zero beyond the last word.
         let word_at = func(index: int) -> uint32 {
-            if (index < words.length) {
-                return words[index];
-            }
-            return 0;
+            return if (index < words.length) -> words[index] else -> 0;
         };
 
         /// @brief Appends zero words until the storage has at least `length` words.
@@ -106,10 +103,7 @@ export let BitSet = module (
         export let contains = func(value: int) -> bool {
             check_element(value);
             last index = value / 32;
-            if (index >= words.length) {
-                return false;
-            }
-            return (words[index] & bit(value)) != 0;
+            return if (index >= words.length) -> false else -> (words[index] & bit(value)) != 0;
         };
 
         /// @brief Adds the value and returns false if it was already present. Appends zero
@@ -367,10 +361,9 @@ export let BitSet = module (
         /// @brief Tests for another BitSet with the same members, ignoring trailing zero words.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is BitSet)) {
+            if (other is not that: BitSet) {
                 return false;
             }
-            last that = other as BitSet;
             if (that.count != count) {
                 return false;
             }
@@ -404,13 +397,13 @@ export let BitSet = module (
             let text = "{";
             let first = true;
             for (let value in to_list()) {
-                if (!first) {
-                    text = text + ", ";
+                if (not first) {
+                    text ..= ", ";
                 }
                 text = text + value.to_string();
                 first = false;
             }
-            return text + "}";
+            return text .. "}";
         };
     );
 
@@ -458,6 +451,9 @@ export let BitSet = module (
             }
             return value;
         };
+
+        /// @brief Names the iterator and the next value it reports.
+        export let.override to_string = func -> string => "BitSetIterator(next " .. upcoming.to_string() .. ")";
     );
 
     /// @brief Creates an empty set.

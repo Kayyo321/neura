@@ -41,10 +41,9 @@ export let Regex = module (
         /// @brief Compares flags by their three Boolean values.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RegexFlags)) {
+            if (other is not flags: RegexFlags) {
                 return false;
             }
-            last flags = other as RegexFlags;
             return ignore_ascii_case == flags.ignore_ascii_case &&
                 multi_line == flags.multi_line && dot_all == flags.dot_all;
         };
@@ -57,8 +56,8 @@ export let Regex = module (
         /// @brief Formats the flags as a RegexFlags description.
         #Pure
         export let.override to_string = func -> string =>
-            "RegexFlags(ignore_ascii_case=" + ignore_ascii_case.to_string() +
-                ", multi_line=" + multi_line.to_string() + ", dot_all=" + dot_all.to_string() + ")";
+            "RegexFlags(ignore_ascii_case=" .. ignore_ascii_case.to_string() ..
+            ", multi_line=" .. multi_line.to_string() .. ", dot_all=" .. dot_all.to_string() .. ")";
     );
 
     /// @brief One match: group 0 is the whole match. Immutable.
@@ -97,10 +96,9 @@ export let Regex = module (
         /// @brief Tests equality of input, capture offsets, and group names.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RegexMatch)) {
+            if (other is not found: RegexMatch) {
                 return false;
             }
-            last found = other as RegexMatch;
             return input == found.input && slots === found.slots && names === found.names;
         };
 
@@ -251,10 +249,9 @@ export let Regex = module (
         /// @brief Tests equality of the original pattern and recorded compilation options.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Regex)) {
+            if (other is not expression: Regex) {
                 return false;
             }
-            last expression = other as Regex;
             return pattern == expression.pattern && compile_options() == expression.compile_options();
         };
 
@@ -273,10 +270,7 @@ export let Regex = module (
         /// @brief Searches from a validated byte offset and wraps any matching capture offsets.
         let match_at = func(input: string, offset: int) -> RegexMatch {
             last slots = machine.search(program, input, offset, machine.Leftmost);
-            if (slots.length == 0) {
-                return nil;
-            }
-            return new(input, slots, names);
+            return if (slots.length == 0) -> nil else -> new(input, slots, names);
         };
 
         /// @brief Builds replacement output from the replacement template and supplied matches.
@@ -438,10 +432,7 @@ export let Regex = module (
         if (lead < 224) {
             return 2;
         }
-        if (lead < 240) {
-            return 3;
-        }
-        return 4;
+        return if (lead < 240) -> 3 else -> 4;
     };
 
     /// @brief Appends a half-open string byte range to the output list.

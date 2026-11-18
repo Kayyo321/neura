@@ -1,0 +1,21 @@
+// status: 134
+// stderr: invalid route pattern '/parts/\{id\}/\{id\}': the parameter 'id' appears twice
+// A pattern that names one parameter twice traps when it is added.
+let program = import:Std.Program;
+let routing = import:Std.Ui.Routing;
+let ui = import:Std.Ui;
+
+let page_view = html(title: string) {
+    <h1>{title}</h1>
+};
+
+let page = func(params: routing.Params) -> ui.Component =>
+    ui.component<string>(new ui.State<string>("part"), new func(title: string) -> ui.View => page_view(title));
+
+export let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let router = new routing.Router();
+        router.add("/parts/{id}/{id}", page);
+        return program.ExitCode.Ok;
+    };
+);

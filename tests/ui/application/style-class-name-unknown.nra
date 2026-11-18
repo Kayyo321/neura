@@ -1,0 +1,3 @@
+const Local = css.module { .row { color: red; } };
+
+let name = Local.class_name("rwo");

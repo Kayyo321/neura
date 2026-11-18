@@ -75,12 +75,8 @@ export let TraceState = module (
         /// the list would exceed 32. Fails with a Parse error when the key or value is invalid.
         #NoDiscard
         export let put = func(key: string, value: string) -> Result<TraceState> {
-            if (!is_valid_key(key)) {
-                return fail(0, "invalid key '" + key + "'");
-            }
-            if (!is_valid_value(value)) {
-                return fail(0, "invalid value for key '" + key + "'");
-            }
+            return fail(0, "invalid key '" .. key .. "'") unless is_valid_key(key);
+            return fail(0, "invalid value for key '" .. key .. "'") unless is_valid_value(value);
             last new_keys: string[list] = new;
             last new_values: string[list] = new;
             new_keys.append(key);
@@ -138,17 +134,17 @@ export let TraceState = module (
         export let to_header = func -> string {
             let text = "";
             for (let i = 0; i < keys.length; i++) {
-                text += (i > 0 ? "," : "") + keys[i] + "=" + values[i];
+                text ..= (i > 0 ? "," : "") .. keys[i] .. "=" .. values[i];
             }
             return text;
         };
 
         /// @brief Equal when the members and their order are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is TraceState)) {
+            if (other is not that: TraceState) {
                 return false;
             }
-            return to_header() == (other as TraceState).to_header();
+            return to_header() == that.to_header();
         };
 
         /// @brief The hash of the header value.
@@ -191,15 +187,11 @@ export let TraceState = module (
                 }
                 last key = member.slice(0, eq);
                 last value = member.slice(eq + 1, member.byte_length);
-                if (!is_valid_key(key)) {
-                    return fail(start, "invalid key '" + key + "'");
-                }
-                if (!is_valid_value(value)) {
-                    return fail(start, "invalid value for key '" + key + "'");
-                }
+                return fail(start, "invalid key '" .. key .. "'") unless is_valid_key(key);
+                return fail(start, "invalid value for key '" .. key .. "'") unless is_valid_value(value);
                 for (let k in keys) {
                     if (k == key) {
-                        return fail(start, "key '" + key + "' appears twice");
+                        return fail(start, "key '" .. key .. "' appears twice");
                     }
                 }
                 if (keys.length == MaxMembers) {
@@ -220,14 +212,10 @@ export let TraceState = module (
             return false;
         }
         last first = key.byte_at(0);
-        if (!((first >= 97 && first <= 122) || (first >= 48 && first <= 57))) {
-            return false;
-        }
+        return false unless(first >= 97 && first <= 122) || (first >= 48 && first <= 57);
         for (let i = 1; i < key.byte_length; i++) {
             last b = key.byte_at(i);
-            if (!((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95 or 45 or 42 or 47 or 64)) {
-                return false;
-            }
+            return false unless(b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 95 or 45 or 42 or 47 or 64;
         }
         return true;
     };
@@ -273,5 +261,5 @@ export let TraceState = module (
     /// @brief A parse error at `offset`.
     let fail = func(offset: int, text: string) -> Result<TraceState> =>
         Result<TraceState>.Err(errors.Error.Parse { kind: errors.ParseErrorKind.Syntax, offset: offset,
-            message: "tracestate: " + text });
+            message: "tracestate: " .. text });
 );

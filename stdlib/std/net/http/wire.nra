@@ -30,12 +30,12 @@ export let Wire = module (
     export let BodyFraming = enum (
         /// @brief No body follows the head.
         None,
-        /// @brief Exactly this many bytes follow (Content-Length).
-        Length(int64),
-        /// @brief The body is in the chunked transfer coding (RFC 9112 section 7.1).
-        Chunked,
-        /// @brief A response body that ends when the server closes the connection.
-        UntilClose
+            /// @brief Exactly this many bytes follow (Content-Length).
+            Length(int64),
+            /// @brief The body is in the chunked transfer coding (RFC 9112 section 7.1).
+            Chunked,
+            /// @brief A response body that ends when the server closes the connection.
+            UntilClose
     );
 
     /// @brief The limits a recipient applies to a message. Read-only once built.
@@ -87,7 +87,7 @@ export let Wire = module (
         /// @brief Every limit given. The numbers must be positive and each method a token; otherwise traps with
         /// "invalid argument: <name>".
         or func(head_bytes: int, header_fields: int, body_bytes: int64, chunk_line_bytes: int, trailer_bytes: int,
-                bare_lf: bool, known_methods: string[]) {
+            bare_lf: bool, known_methods: string[]) {
             check_positive(head_bytes as int64, "head_bytes");
             check_positive(header_fields as int64, "header_fields");
             check_positive(body_bytes, "body_bytes");
@@ -101,24 +101,23 @@ export let Wire = module (
             allow_bare_lf = bare_lf;
             let known = "";
             for (let m in known_methods) {
-                if (!http_headers.is_token(m)) {
+                if (not http_headers.is_token(m)) {
                     trap_with_message("invalid argument: known_methods");
                 }
-                known = known + m + " ";
+                known ..= m .. " ";
             }
             methods = known;
         };
 
         /// @brief Whether `method` (exact case) is one the server implements.
         export let knows_method = func(method: string) -> bool =>
-            http_headers.is_token(method) && strings.contains(" " + methods, " " + method + " ");
+            http_headers.is_token(method) && strings.contains(" " .. methods, " " .. method .. " ");
 
         /// @brief Equal when every limit and the known methods (in order) are equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Limits)) {
+            if (other is not limits: Limits) {
                 return false;
             }
-            last limits = other as Limits;
             return max_head_bytes == limits.max_head_bytes && max_header_fields == limits.max_header_fields
                 && max_body_bytes == limits.max_body_bytes && max_chunk_line_bytes == limits.max_chunk_line_bytes
                 && max_trailer_bytes == limits.max_trailer_bytes && allow_bare_lf == limits.allow_bare_lf
@@ -160,11 +159,11 @@ export let Wire = module (
         /// @brief A head of the given parts. Traps with "invalid argument: <name>" when the method is not a token,
         /// the target is empty or holds a byte outside visible ASCII, or the version is not "HTTP/" DIGIT "." DIGIT.
         export let init = func(method_text: string, target_text: string, version_text: string,
-                fields: http_headers.Headers) {
-            if (!http_headers.is_token(method_text)) {
+            fields: http_headers.Headers) {
+            if (not http_headers.is_token(method_text)) {
                 trap_with_message("invalid argument: method");
             }
-            if (!is_target(target_text)) {
+            if (not is_target(target_text)) {
                 trap_with_message("invalid argument: target");
             }
             if (version_major(version_text) < 0) {
@@ -181,10 +180,9 @@ export let Wire = module (
 
         /// @brief Equal parts and equal header maps.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RequestHead)) {
+            if (other is not head: RequestHead) {
                 return false;
             }
-            last head = other as RequestHead;
             return method == head.method && target == head.target && version == head.version
                 && headers.equals(head.headers);
         };
@@ -200,7 +198,7 @@ export let Wire = module (
 
         /// @brief The request-line and the header map.
         export let.override to_string = func -> string =>
-            "RequestHead{" + method + " " + target + " " + version + ", " + headers.to_string() + "}";
+            "RequestHead{" .. method .. " " .. target .. " " .. version .. ", " .. headers.to_string() .. "}";
     );
 
     /// @brief A response's status-line and header fields (RFC 9112 section 4).
@@ -219,14 +217,14 @@ export let Wire = module (
         /// "HTTP/" DIGIT "." DIGIT, the status is outside 100 through 599, or the reason holds a control byte other
         /// than tab.
         export let init = func(version_text: string, status_code: int, reason_text: string,
-                fields: http_headers.Headers) {
+            fields: http_headers.Headers) {
             if (version_major(version_text) < 0) {
                 trap_with_message("invalid argument: version");
             }
-            if (!http_status.is_valid(status_code)) {
+            if (not http_status.is_valid(status_code)) {
                 trap_with_message("invalid argument: status");
             }
-            if (!http_headers.is_valid_value(reason_text)) {
+            if (not http_headers.is_valid_value(reason_text)) {
                 trap_with_message("invalid argument: reason");
             }
             version = version_text;
@@ -240,10 +238,9 @@ export let Wire = module (
 
         /// @brief Equal parts and equal header maps.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ResponseHead)) {
+            if (other is not head: ResponseHead) {
                 return false;
             }
-            last head = other as ResponseHead;
             return version == head.version && status == head.status && reason == head.reason
                 && headers.equals(head.headers);
         };
@@ -259,7 +256,7 @@ export let Wire = module (
 
         /// @brief The status-line and the header map.
         export let.override to_string = func -> string =>
-            "ResponseHead{" + version + " " + status.to_string() + " " + reason + ", " + headers.to_string() + "}";
+            "ResponseHead{" .. version .. " " .. status.to_string() .. " " .. reason .. ", " .. headers.to_string() .. "}";
     );
 
     /// @brief Collects bytes until a complete head is buffered, enforcing the head limit as they arrive.
@@ -316,7 +313,7 @@ export let Wire = module (
                         scan++;
                         break;
                     }
-                    if (!empty) {
+                    if (not empty) {
                         seen_line = true;
                     }
                     line_start = scan + 1;
@@ -378,7 +375,7 @@ export let Wire = module (
     /// @brief The error a server answers with `status`: a custom error whose code is "http.status.NNN".
     #[NoDiscard, Pure, ThreadSafe]
     export let rejection = func(status: int, message: string) -> errors.Error =>
-        errors.custom("http.status." + status.to_string(), message);
+        errors.custom("http.status." .. status.to_string(), message);
 
     /// @brief The status of an error made by `rejection`, or 0 for any other error.
     #[Pure, ThreadSafe]
@@ -416,22 +413,16 @@ export let Wire = module (
         last method = line.slice(0, first_space);
         last target = line.slice(first_space + 1, second_space);
         last version = line.slice(second_space + 1, line.byte_length);
-        if (!http_headers.is_token(method)) {
-            return fail<RequestHead>(400, "method is not a token");
-        }
-        if (!is_target(target)) {
-            return fail<RequestHead>(400, "malformed request-target");
-        }
+        return fail<RequestHead>(400, "method is not a token") unless http_headers.is_token(method);
+        return fail<RequestHead>(400, "malformed request-target") unless is_target(target);
         last major = version_major(version);
         if (major < 0) {
             return fail<RequestHead>(400, "malformed HTTP-version");
         }
         if (major != 1) {
-            return fail<RequestHead>(505, "HTTP version " + version + " is not supported");
+            return fail<RequestHead>(505, "HTTP version " .. version .. " is not supported");
         }
-        if (!limits.knows_method(method)) {
-            return fail<RequestHead>(501, "method " + method + " is not implemented");
-        }
+        return fail<RequestHead>(501, "method " .. method .. " is not implemented") unless limits.knows_method(method);
         last fields = fields_from_lines(lines, start + 1, lines.length - 1, limits, false)?;
         last hosts = fields.get_all("Host");
         if (hosts.length > 1) {
@@ -440,7 +431,7 @@ export let Wire = module (
         if (hosts.length == 0) {
             return fail<RequestHead>(400, "missing Host field");
         }
-        if (hosts.length == 1 && !is_host_value(hosts[0])) {
+        if (hosts.length == 1 && not is_host_value(hosts[0])) {
             return fail<RequestHead>(400, "invalid Host field value");
         }
         if (fields.contains("Transfer-Encoding")) {
@@ -493,7 +484,7 @@ export let Wire = module (
             return fail<ResponseHead>(400, "malformed HTTP-version");
         }
         if (major != 1) {
-            return fail<ResponseHead>(505, "HTTP version " + version + " is not supported");
+            return fail<ResponseHead>(505, "HTTP version " .. version .. " is not supported");
         }
         if (line.byte_length < space + 4 || (line.byte_length > space + 4 && line.byte_at(space + 4) != 32)) {
             return fail<ResponseHead>(400, "malformed status-code");
@@ -506,13 +497,9 @@ export let Wire = module (
             }
             status = status * 10 + ((b - 48) as int);
         }
-        if (!http_status.is_valid(status)) {
-            return fail<ResponseHead>(400, "status-code outside 100 through 599");
-        }
+        return fail<ResponseHead>(400, "status-code outside 100 through 599") unless http_status.is_valid(status);
         last reason = line.byte_length > space + 4 ? line.slice(space + 5, line.byte_length) : "";
-        if (!http_headers.is_valid_value(reason)) {
-            return fail<ResponseHead>(400, "control character in reason-phrase");
-        }
+        return fail<ResponseHead>(400, "control character in reason-phrase") unless http_headers.is_valid_value(reason);
         last fields = fields_from_lines(lines, start + 1, lines.length - 1, limits, true)?;
         if (fields.contains("Transfer-Encoding")) {
             if (version_minor(version) == 0) {
@@ -551,9 +538,7 @@ export let Wire = module (
     export let request_body_length = func(head: RequestHead) -> Result<BodyFraming> {
         if (head.headers.contains("Transfer-Encoding")) {
             last chunked = chunked_last(head.headers, true)?;
-            if (!chunked) {
-                return fail<BodyFraming>(400, "chunked is not the final transfer coding");
-            }
+            return fail<BodyFraming>(400, "chunked is not the final transfer coding") unless chunked;
             return Result<BodyFraming>.Ok(BodyFraming.Chunked);
         }
         if (head.headers.contains("Content-Length")) {
@@ -660,7 +645,7 @@ export let Wire = module (
     /// @brief Traps unless `value` is positive.
     let check_positive = func(value: int64, name: string) {
         if (value <= 0) {
-            trap_with_message("invalid argument: " + name);
+            trap_with_message("invalid argument: " .. name);
         }
     };
 
@@ -672,7 +657,7 @@ export let Wire = module (
 
     /// @brief The three-digit status in a "http.status.NNN" code, or 0.
     let status_of_code = func(code: string) -> int {
-        if (code.byte_length != 15 || !strings.starts_with(code, "http.status.")) {
+        if (code.byte_length != 15 || not strings.starts_with(code, "http.status.")) {
             return 0;
         }
         let status = 0;
@@ -693,9 +678,7 @@ export let Wire = module (
             return too_large<string[list]>(limits.max_head_bytes);
         }
         let [valid, text] = string.from_utf8(bytes);
-        if (!valid) {
-            return fail<string[list]>(400, "head is not UTF-8");
-        }
+        return fail<string[list]>(400, "head is not UTF-8") unless valid;
         last lines = split_lines(text, limits.allow_bare_lf)?;
         last start = first_line(lines);
         if (start >= lines.length) {
@@ -703,10 +686,8 @@ export let Wire = module (
         }
         for (let i = start + 1; i < lines.length; i++) {
             if (lines[i].byte_length == 0) {
-                if (i != lines.length - 1) {
-                    return fail<string[list]>(400, "bytes after the end of the head");
-                }
-                return Result<string[list]>.Ok(lines);
+                return if (i != lines.length - 1) -> fail<string[list]>(400, "bytes after the end of the head")
+                    else -> Result<string[list]>.Ok(lines);
             }
         }
         return fail<string[list]>(400, "head does not end with an empty line");
@@ -737,9 +718,7 @@ export let Wire = module (
                 i += 2;
                 start = i;
             } else if (b == 10) {
-                if (!bare_lf) {
-                    return fail<string[list]>(400, "bare LF");
-                }
+                return fail<string[list]>(400, "bare LF") unless bare_lf;
                 lines.append(text.slice(start, i));
                 i++;
                 start = i;
@@ -747,15 +726,13 @@ export let Wire = module (
                 i++;
             }
         }
-        if (start != count) {
-            return fail<string[list]>(400, "line without a line end");
-        }
-        return Result<string[list]>.Ok(lines);
+        return if (start != count) -> fail<string[list]>(400, "line without a line end")
+            else -> Result<string[list]>.Ok(lines);
     };
 
     /// @brief The fields of lines[from, to), all non-empty.
     let fields_from_lines = func(lines: string[list], from: int, to: int, limits: Limits, lenient: bool)
-            -> Result<http_headers.Headers> {
+        -> Result<http_headers.Headers> {
         last names: string[list] = new;
         last values: string[list] = new;
         for (let i = from; i < to; i++) {
@@ -765,15 +742,13 @@ export let Wire = module (
             }
             last lead = line.byte_at(0);
             if (lead == 32 || lead == 9) {
-                if (!lenient || names.length == 0) {
+                if (not lenient || names.length == 0) {
                     return fail<http_headers.Headers>(400, "field line starts with whitespace (obs-fold)");
                 }
                 last more = http_headers.trim_value(line);
-                if (!http_headers.is_valid_value(more)) {
-                    return fail<http_headers.Headers>(400, "invalid field value");
-                }
+                return fail<http_headers.Headers>(400, "invalid field value") unless http_headers.is_valid_value(more);
                 last at = values.length - 1;
-                values[at] = values[at].byte_length == 0 ? more : values[at] + " " + more;
+                values[at] = values[at].byte_length == 0 ? more : values[at] .. " " .. more;
                 continue;
             }
             last colon = index_of_byte(line, 58, 0);
@@ -782,21 +757,15 @@ export let Wire = module (
             }
             let name_end = colon;
             if (name_end > 0 && (line.byte_at(name_end - 1) == 32 || line.byte_at(name_end - 1) == 9)) {
-                if (!lenient) {
-                    return fail<http_headers.Headers>(400, "whitespace between field name and colon");
-                }
+                return fail<http_headers.Headers>(400, "whitespace between field name and colon") unless lenient;
                 while (name_end > 0 && (line.byte_at(name_end - 1) == 32 || line.byte_at(name_end - 1) == 9)) {
                     name_end--;
                 }
             }
             last name = line.slice(0, name_end);
-            if (!http_headers.is_token(name)) {
-                return fail<http_headers.Headers>(400, "field name is not a token");
-            }
+            return fail<http_headers.Headers>(400, "field name is not a token") unless http_headers.is_token(name);
             last value = http_headers.trim_value(line.slice(colon + 1, line.byte_length));
-            if (!http_headers.is_valid_value(value)) {
-                return fail<http_headers.Headers>(400, "invalid value of field " + name);
-            }
+            return fail<http_headers.Headers>(400, "invalid value of field " .. name) unless http_headers.is_valid_value(value);
             if (names.length >= limits.max_header_fields) {
                 return fail<http_headers.Headers>(431, $"more than {limits.max_header_fields} header fields");
             }
@@ -825,13 +794,11 @@ export let Wire = module (
                 }
                 chunked_count++;
             } else if (request) {
-                return fail<bool>(501, "transfer coding " + name + " is not implemented");
+                return fail<bool>(501, "transfer coding " .. name .. " is not implemented");
             }
         }
-        if (chunked_count > 1) {
-            return fail<bool>(400, "chunked applied more than once");
-        }
-        return Result<bool>.Ok(last_chunked);
+        return if (chunked_count > 1) -> fail<bool>(400, "chunked applied more than once")
+            else -> Result<bool>.Ok(last_chunked);
     };
 
     /// @brief The value of 1*DIGIT text, or -1 when it is not digits or exceeds int64.
@@ -856,15 +823,13 @@ export let Wire = module (
 
     /// @brief The major digit of "HTTP/" DIGIT "." DIGIT, or -1.
     let version_major = func(text: string) -> int {
-        if (text.byte_length != 8 || !strings.starts_with(text, "HTTP/") || text.byte_at(6) != 46) {
+        if (text.byte_length != 8 || not strings.starts_with(text, "HTTP/") || text.byte_at(6) != 46) {
             return -1;
         }
         last major = text.byte_at(5);
         last minor = text.byte_at(7);
-        if (major < 48 || major > 57 || minor < 48 || minor > 57) {
-            return -1;
-        }
-        return (major - 48) as int;
+        return if (major < 48 || major > 57 || minor < 48 || minor > 57) -> -1
+            else -> (major - 48) as int;
     };
 
     /// @brief The minor digit of a version accepted by `version_major`.
@@ -891,10 +856,10 @@ export let Wire = module (
             last b = text.byte_at(i);
             last alnum = (b >= 48 && b <= 57) || (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
             // - . _ ~ ! $ & ' ( ) * + , ; = % : [ ]
-            if (!alnum && !(b == 45 or 46 or 95 or 126 or 33 or 36 or 38 or 39 or 40 or 41 or 42 or 43 or 44 or 59
-                    or 61 or 37 or 58 or 91 or 93)) {
-                return false;
-            }
+            if (not alnum && not (b == 45 or 46 or 95 or 126 or 33 or 36 or 38 or 39 or 40 or 41 or 42 or 43 or 44 or 59
+                or 61 or 37 or 58 or 91 or 93)) {
+                    return false;
+                }
         }
         return true;
     };

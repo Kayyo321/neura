@@ -1,0 +1,17 @@
+error[E1010]: effect not allowed while rendering: it reaches 'print_line', which makes the host request neura.console.write_line
+  --> $DIR/render-effect-host.nra:9:42
+   |
+ 5 |     console.print_line(text);
+   |     ------------------------ calls 'print_line'
+...
+ 9 | let greeting = html(name: string) { <p>{ shout(name) }</p> };
+   |                                          ^^^^^^^^^^^ calls 'shout' while the view is built
+  ::: $ROOT/stdlib/std/io/console.nra:75:16
+   |
+75 |         match (write_line(s)) {
+   |                ------------- makes the host request neura.console.write_line here
+   |
+   = note: a template may allocate and read, but it may not write what it did not create, assign a binding, make a host request, start or wait for tasks, or call a function value
+   = help: do it in a handler or a command, and pass the result to the factory
+
+For more information about this error, try `neura explain E1010`.

@@ -1,3 +1,4 @@
+// test-options: --gpu=off
 let.promote _ = import:Std.Crypto.Algorithm;
 let constant_time = import:Std.Crypto.Core.ConstantTime;
 let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
@@ -52,7 +53,7 @@ let CoreTests = module (
         let secret = new SecretBytes(source);
         source[0] = 0;
         test.assert_equal_int32(9, secret.expose()[0] as int);
-        test.assert_equal_string("SecretBytes(3 bytes, <redacted>)", secret.to_string());
+        test.assert_equal_string("SecretBytes(<redacted>)", secret.to_string());
         test.assert(secret.ct_equals(new SecretBytes(new([9, 8, 7]))));
         test.assert(!secret.ct_equals(new SecretBytes(new([9, 8, 6]))));
         // Equality is identity: two objects with the same bytes are not equal.
@@ -79,7 +80,7 @@ let CoreTests = module (
     export let test_secret_key = func {
         let key: SymmetricKey<Marker> = new SecretKey<Marker>(new([1, 2, 3, 4]));
         test.assert_equal_int32(4, key.key_length());
-        test.assert_equal_string("SecretKey(4 bytes, <redacted>)", key.to_string());
+        test.assert_equal_string("SecretKey(<redacted>)", key.to_string());
         let same = new SecretKey<Marker>(new([1, 2, 3, 4]));
         test.assert(same.ct_equals(new SecretKey<Marker>(new([1, 2, 3, 4]))));
         key.wipe();
@@ -89,6 +90,7 @@ let CoreTests = module (
     export let test_policy_default_is_modern = func {
         test.assert(crypto_policy.policy() == crypto_policy.Policy.Modern);
         test.assert(crypto_policy.allows(Algorithm.ChaCha20Poly1305));
+        test.assert(crypto_policy.allows(Algorithm.HardwareEntropy));
         test.assert(!crypto_policy.allows(Algorithm.Sha1));
         test.assert(!crypto_policy.allows(Algorithm.Rsa1024));
         crypto_policy.require(Algorithm.Blake3);
@@ -101,6 +103,9 @@ let CoreTests = module (
         test.assert(!crypto_policy.allowed_by(fips, Algorithm.ChaCha20Poly1305));
         test.assert(!crypto_policy.allowed_by(fips, Algorithm.Argon2id));
         test.assert(!crypto_policy.allowed_by(fips, Algorithm.Sha1));
+        test.assert(!crypto_policy.allowed_by(fips, Algorithm.Hpke));
+        test.assert(crypto_policy.allowed_by(fips, Algorithm.OsEntropy));
+        test.assert(not crypto_policy.allowed_by(fips, Algorithm.HardwareEntropy));
         last cnsa = crypto_policy.Policy.Cnsa2_0;
         test.assert(crypto_policy.allowed_by(cnsa, Algorithm.Aes256Gcm));
         test.assert(crypto_policy.allowed_by(cnsa, Algorithm.Sha384));
@@ -108,6 +113,8 @@ let CoreTests = module (
         test.assert(!crypto_policy.allowed_by(cnsa, Algorithm.Sha256));
         test.assert(crypto_policy.allowed_by(cnsa, Algorithm.MlKem1024));
         test.assert(!crypto_policy.allowed_by(cnsa, Algorithm.MlKem768));
+        test.assert(crypto_policy.allowed_by(cnsa, Algorithm.OsEntropy));
+        test.assert(not crypto_policy.allowed_by(cnsa, Algorithm.HardwareEntropy));
     };
 
     export let test_set_policy = func {

@@ -1,0 +1,21 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy --max-steps 15000000000
+// stderr: explicit program failure \(trap reason 3\): invalid state: secret wiped
+let blind = import:Std.Crypto.Advanced.RsaBlindSignature;
+let cases = import:RsaBlindTestCases;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let vectors = import:RsaBlindVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last client = new blind.Client(cases.public_key(), blind.Variant.PssRandomized);
+        last rows = vectors.cases;
+        last prepared = cases.bytes(rows[3]);
+        last state = test.assert_ok(client.blind_with_factor(prepared, cases.bytes(rows[4]), cases.bytes(rows[5])));
+        state.wipe();
+        let _ = client.finalize(prepared, cases.bytes(rows[8]), state);
+        return program.ExitCode.Ok;
+    };
+);

@@ -1,0 +1,762 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+let.promote _ = import:Std.Crypto.Pki.Certificate;
+let.promote _ = import:Std.Crypto.Pki.Extensions;
+let.promote _ = import:Std.Crypto.Pki.GeneralName;
+let.promote _ = import:Std.Crypto.Pki.PublicKeyInfo;
+let.promote _ = import:Std.Crypto.Pki.SignatureVerifier;
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let error = import:Std.Core.Error;
+let extensions = import:Std.Crypto.Pki.Extensions;
+let general_names = import:Std.Crypto.Pki.GeneralName;
+let host_name = import:Std.Crypto.Pki.HostName;
+let instant = import:Std.Time.Instant;
+let name_constraints = import:Std.Crypto.Internal.PkiNameConstraints;
+let oids = import:Std.Crypto.Pki.Oids;
+let policy_tree = import:Std.Crypto.Internal.PkiPolicyTree;
+
+/// @brief Certification path building and RFC 5280, section 6.1 path validation (Stdlib.md section 21.10).
+///
+/// `validate` builds paths from the leaf through the given intermediates to a trust anchor, depth first,
+/// trusting anchors before intermediates, and validates each candidate with the algorithm of section 6.1: the
+/// signature of every certificate (through the options' SignatureVerifier), validity at the given instant, name
+/// chaining, basicConstraints and pathLenConstraint, keyUsage keyCertSign, name constraints for DNS, IP, e-mail,
+/// URI and directory names, the certificate policy tree (explicit policy, policy mapping, inhibit anyPolicy and
+/// the user's initial policy set), and refusal of unknown critical extensions. The first path that validates is
+/// returned. Revocation is not checked here (see Ocsp and CrLite).
+///
+/// Decisions beyond section 6.1, each an option: the trust anchor is a certificate whose own constraints apply
+/// (validity, basicConstraints with cA, keyCertSign, pathLenConstraint, name constraints and unknown critical
+/// extensions, as RFC 5937 allows), while its policy extensions are not processed; an extended key usage, when
+/// asked for, must be in the leaf's extKeyUsage (or anyExtendedKeyUsage, or no extKeyUsage at all) and in the
+/// extKeyUsage of every intermediate that has one; `strict_profile` adds the RFC 5280 rules a certificate user
+/// can check (section 4): a positive serial of at most 20 bytes, non-empty issuer and CA subject names, a critical
+/// subjectAltName when the subject is empty, authority and subject key identifiers present where required and
+/// never critical, critical basicConstraints in CA certificates, critical nameConstraints only in CA certificates,
+/// critical policyConstraints, a non-critical authorityInfoAccess, and keyCertSign only with cA.
+/// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PathValidation)
+#Since("0.3.0")
+export let PathValidation = module (
+    /// @brief The most comparisons of names against name-constraint subtrees for one certificate; a certificate
+    /// that would need more fails with pki.name_constraints (a guard against crafted certificates, like Go's).
+    #Since("0.3.0")
+    export const MaxNameComparisons: int = 100000;
+
+    /// @brief The inputs of section 6.1.1 and this library's extra checks. Set the fields after construction.
+    #[Final, Since("0.3.0")]
+    export let ValidationOptions = class (
+        /// @brief The instant at which every certificate must be valid.
+        export let time: instant.Instant;
+        /// @brief The signature step.
+        export let verifier: SignatureVerifier;
+        /// @brief user-initial-policy-set (dotted OIDs); anyPolicy by default.
+        export let initial_policies: string[list] = new([oids.AnyPolicy]);
+        export let initial_explicit_policy: bool = false;
+        export let initial_policy_mapping_inhibit: bool = false;
+        export let initial_any_policy_inhibit: bool = false;
+        /// @brief The extended key usage the leaf must allow (dotted), or empty for none.
+        export let purpose: string = "";
+        /// @brief The DNS name the leaf must match (RFC 9525), or empty.
+        export let dns_name: string = "";
+        /// @brief The IP address the leaf must match (4 or 16 bytes), or empty.
+        export let ip_address: uint8[list] = new;
+        /// @brief The e-mail address the leaf must match, or empty.
+        export let email_address: string = "";
+        /// @brief The most intermediates that are not self-issued.
+        export let max_intermediates: int = 8;
+        /// @brief The most signature checks one validation may make (a guard against crafted pools).
+        export let max_signature_checks: int = 64;
+        /// @brief Whether to apply the profile rules of RFC 5280, section 4 listed in the module's description.
+        export let strict_profile: bool = true;
+        /// @brief The smallest RSA modulus accepted, in bits.
+        export let min_rsa_bits: int = 2048;
+
+        /// @brief Options for validation at the instant using the library verifier or a supplied verifier.
+        /// @see [Std.Crypto.Pki.PathValidation](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Pki-PathValidation)
+        #Since("0.3.0")
+        export let init = func(at: instant.Instant) {
+            time = at;
+            verifier = new algorithm_verifier.AlgorithmVerifier();
+        } or func(at: instant.Instant, signature_verifier: SignatureVerifier) {
+            time = at;
+            verifier = signature_verifier;
+        };
+
+        export let.override to_string = func -> string => "ValidationOptions(" .. time.to_string() .. ")";
+    );
+
+    /// @brief A validated path: the certificates from the leaf to the trust anchor, and the outputs of section
+    /// 6.1.6.
+    #[Final, Since("0.3.0")]
+    export let ValidatedPath = class (
+        /// @brief Leaf first, trust anchor last.
+        export last chain: Certificate[list];
+        /// @brief The valid policies at the leaf after the user-initial-policy-set was applied
+        /// (2.5.29.32.0 stands for any); empty when the policy tree is NULL.
+        export last policies: string[list];
+
+        export let init = func(certificates: Certificate[list], valid_policies: string[list]) {
+            chain = certificates;
+            policies = valid_policies;
+        };
+
+        /// @brief The trust anchor.
+        export let anchor = func -> Certificate => chain[chain.length - 1];
+
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: ValidatedPath) {
+                return false;
+            }
+            if (that.chain.length != chain.length) {
+                return false;
+            }
+            for (let i = 0; i < chain.length; i++) {
+                if (not chain[i].equals(that.chain[i])) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let.override hash_code = func -> uint32 {
+            let h: uint64 = 17;
+            for (let c in chain) {
+                h = (h * 31 + c.hash_code() as uint64) & 4294967295;
+            }
+            return h as uint32;
+        };
+
+        export let.override to_string = func -> string => $"ValidatedPath({chain.length} certificates)";
+    );
+
+    /// @brief The failure of one validation: a code such as "pki.signature" (see Stdlib.md section 21.10) and a
+    /// message.
+    let failure = func<T>(code: string, message: string) -> Result<T> => Result<T>.Err(error.custom(code, message));
+
+    /// @brief The state of the search for a path.
+    #Final
+    let Search = class (
+        export last leaf: Certificate;
+        export last intermediates: Certificate[list];
+        export last anchors: Certificate[list];
+        export last options: ValidationOptions;
+        export let checks: int = 0;
+        export let first_error: Optional<Error> = Optional<Error>.None;
+        /// @brief Signature results by (child, issuer), to check each edge once.
+        export let edge_children: Certificate[list] = new;
+        export let edge_issuers: Certificate[list] = new;
+        export let edge_results: bool[list] = new;
+
+        export let init = func(end_entity: Certificate, pool: Certificate[list], trusted: Certificate[list],
+            settings: ValidationOptions) {
+            leaf = end_entity;
+            intermediates = pool;
+            anchors = trusted;
+            options = settings;
+        };
+
+        export let note = func(e: Error) {
+            match (first_error) {
+                Optional.None => {
+                    first_error = Optional<Error>.Some(e);
+                },
+                Optional.Some(x) => {},
+            }
+        };
+
+        export let.override to_string = func -> string => "Search";
+    );
+
+    /// @brief Builds and validates a path from the leaf to one of the anchors. Failures are `Custom` errors
+    /// whose code names the check: pki.no_path, pki.signature, pki.validity, pki.issuer_name, pki.not_ca,
+    /// pki.path_length, pki.key_usage, pki.name_constraints, pki.policy, pki.unknown_critical_extension,
+    /// pki.extended_key_usage, pki.host_name, pki.profile, pki.weak_key or pki.budget. When several candidate
+    /// paths fail, the error of the first is returned.
+    #[NoDiscard, Since("0.3.0")]
+    export let validate = func(leaf: Certificate, intermediates: Certificate[list], anchors: Certificate[list],
+        options: ValidationOptions) -> Result<ValidatedPath> {
+        if (anchors.length == 0) {
+            return failure<ValidatedPath>("pki.no_path", "no trust anchors");
+        }
+        let search = new Search(leaf, intermediates, anchors, options);
+        let path: Certificate[list] = new([leaf]);
+        match (extend(search, path)) {
+            Optional.Some(found) => {
+                return Result<ValidatedPath>.Ok(found);
+            },
+            Optional.None => {},
+        }
+        match (search.first_error) {
+            Optional.Some(e) => {
+                return Result<ValidatedPath>.Err(e);
+            },
+            Optional.None => {},
+        }
+        return failure<ValidatedPath>("pki.no_path", "no path to a trust anchor");
+    };
+
+    let budget_spent = func(search: Search) -> bool => search.checks > search.options.max_signature_checks;
+
+    /// @brief Depth-first search: anchors first, then unused intermediates whose subject is the current
+    /// certificate's issuer.
+    let extend = func(search: Search, path: Certificate[list]) -> Optional<ValidatedPath> {
+        last current = path[path.length - 1];
+        for (let anchor in search.anchors) {
+            if (budget_spent(search)) {
+                search.note(error.custom("pki.budget", "signature check budget exhausted"));
+                return Optional<ValidatedPath>.None;
+            }
+            if (not could_issue(current, anchor) || not signature_ok(search, current, anchor)) {
+                continue;
+            }
+            match (check_path(path, anchor, search.options)) {
+                Result.Ok(found) => {
+                    return Optional<ValidatedPath>.Some(found);
+                },
+                Result.Err(e) => {
+                    search.note(e);
+                },
+            }
+        }
+        if (path.length >= 32) {
+            return Optional<ValidatedPath>.None;
+        }
+        last used = non_self_issued(path);
+        for (let candidate in search.intermediates) {
+            if (budget_spent(search)) {
+                search.note(error.custom("pki.budget", "signature check budget exhausted"));
+                return Optional<ValidatedPath>.None;
+            }
+            if ((not candidate.is_self_issued() && used + 1 > search.options.max_intermediates) || in_path(path, candidate)
+                || not could_issue(current, candidate) || not signature_ok(search, current, candidate)) {
+                continue;
+            }
+            path.append(candidate);
+            match (extend(search, path)) {
+                Optional.Some(found) => {
+                    return Optional<ValidatedPath>.Some(found);
+                },
+                Optional.None => {},
+            }
+            path.remove_at(path.length - 1);
+        }
+        return Optional<ValidatedPath>.None;
+    };
+
+    /// @brief Intermediates in the path (excluding the leaf) that are not self-issued.
+    let non_self_issued = func(path: Certificate[list]) -> int {
+        let n = 0;
+        for (let i = 1; i < path.length; i++) {
+            if (not path[i].is_self_issued()) {
+                n++;
+            }
+        }
+        return n;
+    };
+
+    /// @brief Whether the candidate is already in the path, or shares a subject and key with one in it (a loop).
+    let in_path = func(path: Certificate[list], candidate: Certificate) -> bool {
+        for (let c in path) {
+            if (c.equals(candidate) || (c.subject.equals(candidate.subject) && c.public_key.equals(candidate.public_key))) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    /// @brief Name chaining, and key identifiers when both are present.
+    let could_issue = func(child: Certificate, issuer: Certificate) -> bool {
+        if (not child.issuer.equals(issuer.subject)) {
+            return false;
+        }
+        match (child.authority_key_identifier) {
+            Optional.Some(aki) => {
+                match (issuer.subject_key_identifier) {
+                    Optional.Some(ski) => {
+                        if (aki.has_key_identifier && not same(aki.key_identifier, ski)) {
+                            return false;
+                        }
+                    },
+                    Optional.None => {},
+                }
+            },
+            Optional.None => {},
+        }
+        return true;
+    };
+
+    let signature_ok = func(search: Search, child: Certificate, issuer: Certificate) -> bool {
+        for (let i = 0; i < search.edge_children.length; i++) {
+            if (search.edge_children[i].equals(child) && search.edge_issuers[i].equals(issuer)) {
+                return search.edge_results[i];
+            }
+        }
+        search.checks++;
+        last check = search.options.verifier.verify_signature(child.signature_algorithm, issuer.public_key,
+            child.tbs_bytes, child.signature);
+        last ok = check == SignatureCheck.Valid;
+        if (check == SignatureCheck.Invalid) {
+            search.note(error.custom("pki.signature", "invalid signature on " .. child.subject.to_string()));
+        } else if (check == SignatureCheck.UnsupportedAlgorithm) {
+            search.note(error.custom("pki.signature", "unsupported signature algorithm "
+                .. oids.name_of(child.signature_algorithm.oid.dotted) .. " on " .. child.subject.to_string()));
+        }
+        search.edge_children.append(child);
+        search.edge_issuers.append(issuer);
+        search.edge_results.append(ok);
+        return ok;
+    };
+
+    let same = func(a: uint8[list], b: uint8[list]) -> bool {
+        if (a.length != b.length) {
+            return false;
+        }
+        for (let i = 0; i < a.length; i++) {
+            if (a[i] != b[i]) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief Section 6.1 over path[0] (the leaf) to path[length - 1], under the anchor. Signatures were
+    /// checked while the path was built.
+    let check_path = func(path: Certificate[list], anchor: Certificate, options: ValidationOptions)
+        -> Result<ValidatedPath> {
+        last n = path.length;
+        check_anchor(anchor, options)?;
+        // Section 6.1.2.
+        let tree = new policy_tree.PolicyTree();
+        let explicit_policy = options.initial_explicit_policy ? 0 : n + 1;
+        let inhibit_any = options.initial_any_policy_inhibit ? 0 : n + 1;
+        let policy_mapping = options.initial_policy_mapping_inhibit ? 0 : n + 1;
+        let max_path_length = n;
+        match (anchor.basic_constraints) {
+            Optional.Some(b) => {
+                if (b.path_length >= 0 && b.path_length < max_path_length) {
+                    max_path_length = b.path_length;
+                }
+            },
+            Optional.None => {},
+        }
+        let layers: NameConstraints[list] = new;
+        match (anchor.name_constraints) {
+            Optional.Some(nc) => {
+                layers.append(nc);
+            },
+            Optional.None => {},
+        }
+        let working_issuer = anchor;
+        // Certificate i (1-based) is path[n - i]: the one just below the anchor first.
+        for (let i = 1; i <= n; i++) {
+            last cert = path[n - i];
+            last is_leaf = i == n;
+            // 6.1.3 (a).
+            if (not cert.is_valid_at(options.time)) {
+                return failure<ValidatedPath>("pki.validity", "not valid at the validation time: " .. cert.subject.to_string());
+            }
+            if (not cert.issuer.equals(working_issuer.subject)) {
+                return failure<ValidatedPath>("pki.issuer_name", "issuer does not match: " .. cert.subject.to_string());
+            }
+            check_key(cert, options)?;
+            if (options.strict_profile) {
+                check_profile(cert, is_leaf, false)?;
+            }
+            // 6.1.3 (b), (c).
+            if (is_leaf || not cert.is_self_issued()) {
+                last names = constrained_names(cert);
+                // A directoryName costs one comparison per attribute.
+                let weight = names.length as int64;
+                for (let rdn in cert.subject.rdns) {
+                    weight += rdn.length as int64;
+                }
+                let comparisons: int64 = 0;
+                for (let layer in layers) {
+                    if (comparisons <= (MaxNameComparisons as int64)) {
+                        comparisons += weight * ((layer.permitted.length + layer.excluded.length) as int64);
+                    }
+                }
+                if (comparisons > (MaxNameComparisons as int64)) {
+                    return failure<ValidatedPath>("pki.name_constraints", "too many name-constraint comparisons at "
+                        .. cert.subject.to_string());
+                }
+                for (let layer in layers) {
+                    if (not name_constraints.satisfies(names, layer)) {
+                        return failure<ValidatedPath>("pki.name_constraints", "name constraints refuse " .. cert.subject.to_string());
+                    }
+                }
+            }
+            // 6.1.3 (d), (e), (f).
+            match (cert.policies) {
+                Optional.Some(policies) => {
+                    if (not tree.is_null) {
+                        tree.process_certificate(i, policies, inhibit_any > 0 || (not is_leaf && cert.is_self_issued()));
+                    }
+                },
+                Optional.None => {
+                    tree.is_null = true;
+                },
+            }
+            if (tree.overflowed) {
+                return failure<ValidatedPath>("pki.policy", "policy tree too large");
+            }
+            if (explicit_policy <= 0 && tree.is_null) {
+                return failure<ValidatedPath>("pki.policy", "an explicit policy is required at " .. cert.subject.to_string());
+            }
+            if (is_leaf) {
+                break;
+            }
+            // 6.1.4 (a), (b).
+            match (cert.policy_mappings) {
+                Optional.Some(mappings) => {
+                    for (let m in mappings) {
+                        if (m.issuer_domain.dotted == oids.AnyPolicy || m.subject_domain.dotted == oids.AnyPolicy) {
+                            return failure<ValidatedPath>("pki.policy", "anyPolicy in policyMappings");
+                        }
+                    }
+                    if (not tree.is_null) {
+                        tree.apply_mappings(i, mappings, policy_mapping > 0);
+                    }
+                },
+                Optional.None => {},
+            }
+            // 6.1.4 (c) to (f).
+            working_issuer = cert;
+            // 6.1.4 (g).
+            match (cert.name_constraints) {
+                Optional.Some(nc) => {
+                    layers.append(nc);
+                },
+                Optional.None => {},
+            }
+            // 6.1.4 (h), (i), (j).
+            if (not cert.is_self_issued()) {
+                explicit_policy = explicit_policy > 0 ? explicit_policy - 1 : 0;
+                policy_mapping = policy_mapping > 0 ? policy_mapping - 1 : 0;
+                inhibit_any = inhibit_any > 0 ? inhibit_any - 1 : 0;
+            }
+            match (cert.policy_constraints) {
+                Optional.Some(pc) => {
+                    if (pc.require_explicit_policy >= 0 && pc.require_explicit_policy < explicit_policy) {
+                        explicit_policy = pc.require_explicit_policy;
+                    }
+                    if (pc.inhibit_policy_mapping >= 0 && pc.inhibit_policy_mapping < policy_mapping) {
+                        policy_mapping = pc.inhibit_policy_mapping;
+                    }
+                },
+                Optional.None => {},
+            }
+            match (cert.inhibit_any_policy) {
+                Optional.Some(skip) => {
+                    if (skip < inhibit_any) {
+                        inhibit_any = skip;
+                    }
+                },
+                Optional.None => {},
+            }
+            // 6.1.4 (k).
+            if (cert.version != 3 || not cert.is_ca()) {
+                return failure<ValidatedPath>("pki.not_ca", "not a CA certificate: " .. cert.subject.to_string());
+            }
+            // 6.1.4 (l), (m).
+            if (not cert.is_self_issued()) {
+                if (max_path_length <= 0) {
+                    return failure<ValidatedPath>("pki.path_length", "path length constraint exceeded at "
+                        .. cert.subject.to_string());
+                }
+                max_path_length--;
+            }
+            match (cert.basic_constraints) {
+                Optional.Some(b) => {
+                    if (b.path_length >= 0 && b.path_length < max_path_length) {
+                        max_path_length = b.path_length;
+                    }
+                },
+                Optional.None => {},
+            }
+            // 6.1.4 (n).
+            match (cert.key_usage) {
+                Optional.Some(ku) => {
+                    if (not ku.has(extensions.KeyCertSign)) {
+                        return failure<ValidatedPath>("pki.key_usage", "keyCertSign not set in " .. cert.subject.to_string());
+                    }
+                },
+                Optional.None => {},
+            }
+            // 6.1.4 (o).
+            check_critical(cert)?;
+            if (options.purpose.byte_length > 0) {
+                match (cert.extended_key_usage) {
+                    Optional.Some(eku) => {
+                        if (not eku.has(options.purpose) && not eku.has(oids.AnyExtendedKeyUsage)) {
+                            return failure<ValidatedPath>("pki.extended_key_usage", "an intermediate's extKeyUsage excludes "
+                                + options.purpose);
+                        }
+                    },
+                    Optional.None => {},
+                }
+            }
+        }
+        // 6.1.5.
+        last leaf = path[0];
+        if (explicit_policy > 0) {
+            explicit_policy--;
+        }
+        match (leaf.policy_constraints) {
+            Optional.Some(pc) => {
+                if (pc.require_explicit_policy == 0) {
+                    explicit_policy = 0;
+                }
+            },
+            Optional.None => {},
+        }
+        check_critical(leaf)?;
+        tree.intersect(n, options.initial_policies);
+        if (tree.overflowed) {
+            return failure<ValidatedPath>("pki.policy", "policy tree too large");
+        }
+        if (explicit_policy <= 0 && tree.is_null) {
+            return failure<ValidatedPath>("pki.policy", "no valid policy for the path");
+        }
+        if (options.purpose.byte_length > 0) {
+            match (leaf.extended_key_usage) {
+                Optional.Some(eku) => {
+                    if (not eku.has(options.purpose) && not eku.has(oids.AnyExtendedKeyUsage)) {
+                        return failure<ValidatedPath>("pki.extended_key_usage", "the leaf's extKeyUsage excludes " .. options.purpose);
+                    }
+                },
+                Optional.None => {},
+            }
+        }
+        if (options.dns_name.byte_length > 0 && not host_name.matches_dns(leaf, options.dns_name)) {
+            return failure<ValidatedPath>("pki.host_name", "the leaf does not match " .. options.dns_name);
+        }
+        if (options.ip_address.length > 0 && not host_name.matches_ip(leaf, options.ip_address)) {
+            return failure<ValidatedPath>("pki.host_name", "the leaf does not match the IP address");
+        }
+        if (options.email_address.byte_length > 0 && not host_name.matches_email(leaf, options.email_address)) {
+            return failure<ValidatedPath>("pki.host_name", "the leaf does not match " .. options.email_address);
+        }
+        let chain: Certificate[list] = new;
+        for (let c in path) {
+            chain.append(c);
+        }
+        chain.append(anchor);
+        return Result<ValidatedPath>.Ok(new ValidatedPath(chain, tree.policies_at(n)));
+    };
+
+    /// @brief The anchor's own constraints (the module's description).
+    let check_anchor = func(anchor: Certificate, options: ValidationOptions) -> Result<Unit> {
+        if (not anchor.is_valid_at(options.time)) {
+            return failure<Unit>("pki.validity", "trust anchor not valid at the validation time");
+        }
+        if (anchor.version != 3 || not anchor.is_ca()) {
+            return failure<Unit>("pki.not_ca", "trust anchor is not a CA certificate");
+        }
+        match (anchor.key_usage) {
+            Optional.Some(ku) => {
+                if (not ku.has(extensions.KeyCertSign)) {
+                    return failure<Unit>("pki.key_usage", "keyCertSign not set in the trust anchor");
+                }
+            },
+            Optional.None => {},
+        }
+        check_key(anchor, options)?;
+        check_critical(anchor)?;
+        if (options.strict_profile) {
+            check_profile(anchor, false, true)?;
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Refuses keys below the RSA minimum and keys whose algorithm the crypto policy denies.
+    let check_key = func(cert: Certificate, options: ValidationOptions) -> Result<Unit> {
+        last key = cert.public_key;
+        if ((key.key_algorithm == KeyAlgorithm.Rsa || key.key_algorithm == KeyAlgorithm.RsaPss)
+            && key.key_bits() < options.min_rsa_bits) {
+            return failure<Unit>("pki.weak_key", "RSA key below " .. options.min_rsa_bits.to_string() .. " bits in "
+                .. cert.subject.to_string());
+        }
+        match (key.policy_algorithm()) {
+            Optional.Some(alg) => {
+                if (not crypto_policy.allows(alg)) {
+                    return failure<Unit>("pki.weak_key", "key algorithm denied by the crypto policy in " .. cert.subject.to_string());
+                }
+            },
+            Optional.None => {},
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Section 6.1.4 (o) and 6.1.5 (f): every critical extension must be one this module processes.
+    let check_critical = func(cert: Certificate) -> Result<Unit> {
+        for (let e in cert.extensions) {
+            if (e.critical && not processed(e.oid.dotted)) {
+                return failure<Unit>("pki.unknown_critical_extension", "unknown critical extension " .. e.oid.dotted .. " in "
+                    .. cert.subject.to_string());
+            }
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    let processed = func(dotted: string) -> bool => dotted == oids.BasicConstraints || dotted == oids.KeyUsage
+        || dotted == oids.ExtKeyUsage || dotted == oids.SubjectAltName || dotted == oids.IssuerAltName
+        || dotted == oids.NameConstraints || dotted == oids.CertificatePolicies || dotted == oids.PolicyMappings
+        || dotted == oids.PolicyConstraints || dotted == oids.InhibitAnyPolicy || dotted == oids.AuthorityKeyIdentifier
+        || dotted == oids.SubjectKeyIdentifier;
+
+    /// @brief The names that name constraints apply to: the subject (as a directoryName, when not empty), its
+    /// emailAddress attributes (as rfc822Names), and the subjectAltName entries.
+    let constrained_names = func(cert: Certificate) -> GeneralName[list] {
+        let names: GeneralName[list] = new;
+        if (not cert.subject.is_empty()) {
+            names.append(general_names.directory_name(cert.subject));
+        }
+        for (let address in cert.subject.email_addresses()) {
+            if (ascii(address)) {
+                names.append(general_names.email(address));
+            }
+        }
+        match (cert.subject_alt_names) {
+            Optional.Some(sans) => {
+                for (let s in sans) {
+                    names.append(s);
+                }
+            },
+            Optional.None => {},
+        }
+        return names;
+    };
+
+    let ascii = func(text: string) -> bool {
+        for (let i = 0; i < text.byte_length; i++) {
+            if (text.byte_at(i) >= 128) {
+                return false;
+            }
+        }
+        return true;
+    };
+
+    /// @brief The RFC 5280 section 4 rules of `strict_profile`.
+    let check_profile = func(cert: Certificate, is_leaf: bool, is_anchor: bool) -> Result<Unit> {
+        if (cert.serial.length > 20 || cert.serial[0] >= 128 || (cert.serial.length == 1 && cert.serial[0] == 0)) {
+            return failure<Unit>("pki.profile", "serial number must be positive and at most 20 bytes: " .. cert.subject.to_string());
+        }
+        if (cert.issuer.is_empty()) {
+            return failure<Unit>("pki.profile", "empty issuer name");
+        }
+        if (cert.is_ca() && cert.subject.is_empty()) {
+            return failure<Unit>("pki.profile", "CA certificate with an empty subject");
+        }
+        if (cert.subject.is_empty()) {
+            match (cert.extension(oids.SubjectAltName)) {
+                Optional.Some(e) => {
+                    return failure<Unit>("pki.profile", "subjectAltName must be critical when the subject is empty") unless e.critical;
+                },
+                Optional.None => {
+                    return failure<Unit>("pki.profile", "a certificate with an empty subject needs subjectAltName");
+                },
+            }
+        }
+        last self_signed = cert.is_self_issued();
+        match (cert.extension(oids.AuthorityKeyIdentifier)) {
+            Optional.Some(e) => {
+                if (e.critical) {
+                    return failure<Unit>("pki.profile", "authorityKeyIdentifier must not be critical: " .. cert.subject.to_string());
+                }
+                last aki = must(cert.authority_key_identifier);
+                return failure<Unit>("pki.profile", "authorityKeyIdentifier needs keyIdentifier: " .. cert.subject.to_string()) unless aki.has_key_identifier;
+                if (self_signed && is_anchor) {
+                    match (cert.subject_key_identifier) {
+                        Optional.Some(ski) => {
+                            if (not same(ski, aki.key_identifier)) {
+                                return failure<Unit>("pki.profile", "self-signed certificate's key identifiers differ: " .. cert.subject.to_string());
+                            }
+                        },
+                        Optional.None => {},
+                    }
+                }
+            },
+            Optional.None => {
+                if (not self_signed && not is_anchor && cert.version == 3) {
+                    return failure<Unit>("pki.profile", "authorityKeyIdentifier missing: " .. cert.subject.to_string());
+                }
+            },
+        }
+        match (cert.extension(oids.SubjectKeyIdentifier)) {
+            Optional.Some(e) => {
+                if (e.critical) {
+                    return failure<Unit>("pki.profile", "subjectKeyIdentifier must not be critical: " .. cert.subject.to_string());
+                }
+            },
+            Optional.None => {
+                if (cert.is_ca() && (not is_leaf || is_anchor)) {
+                    return failure<Unit>("pki.profile", "CA certificate without subjectKeyIdentifier: " .. cert.subject.to_string());
+                }
+            },
+        }
+        match (cert.extension(oids.BasicConstraints)) {
+            Optional.Some(e) => {
+                if (cert.is_ca() && not e.critical) {
+                    return failure<Unit>("pki.profile", "basicConstraints must be critical in a CA certificate: " .. cert.subject.to_string());
+                }
+            },
+            Optional.None => {},
+        }
+        match (cert.extension(oids.NameConstraints)) {
+            Optional.Some(e) => {
+                return failure<Unit>("pki.profile", "nameConstraints must be critical: " .. cert.subject.to_string()) unless e.critical;
+                return failure<Unit>("pki.profile", "nameConstraints in an end-entity certificate: " .. cert.subject.to_string()) unless cert.is_ca();
+            },
+            Optional.None => {},
+        }
+        match (cert.extension(oids.PolicyConstraints)) {
+            Optional.Some(e) => {
+                return failure<Unit>("pki.profile", "policyConstraints must be critical: " .. cert.subject.to_string()) unless e.critical;
+            },
+            Optional.None => {},
+        }
+        match (cert.extension(oids.AuthorityInfoAccess)) {
+            Optional.Some(e) => {
+                if (e.critical) {
+                    return failure<Unit>("pki.profile", "authorityInfoAccess must not be critical: " .. cert.subject.to_string());
+                }
+            },
+            Optional.None => {},
+        }
+        match (cert.key_usage) {
+            Optional.Some(ku) => {
+                if (ku.has(extensions.KeyCertSign) && not cert.is_ca()) {
+                    return failure<Unit>("pki.profile", "keyCertSign without cA: " .. cert.subject.to_string());
+                }
+                if (signature_only(cert.public_key.key_algorithm) && (ku.has(extensions.KeyEncipherment)
+                    || ku.has(extensions.DataEncipherment) || ku.has(extensions.KeyAgreement)
+                    || ku.has(extensions.EncipherOnly) || ku.has(extensions.DecipherOnly))) {
+                    return failure<Unit>("pki.profile", "encipherment or agreement usage on a signature-only key: " .. cert.subject.to_string());
+                }
+            },
+            Optional.None => {},
+        }
+        return Result<Unit>.Ok(Unit.Value);
+    };
+
+    /// @brief Keys that can only sign (RFC 8410, section 5; RFC 9881; FIPS 205).
+    let signature_only = func(kind: KeyAlgorithm) -> bool => kind == KeyAlgorithm.Ed25519 || kind == KeyAlgorithm.Ed448
+        || kind == KeyAlgorithm.MlDsa44 || kind == KeyAlgorithm.MlDsa65 || kind == KeyAlgorithm.MlDsa87
+        || kind == KeyAlgorithm.SlhDsa;
+
+    let must = func<T>(value: Optional<T>) -> T {
+        match (value) {
+            Optional.Some(v) => {
+                return v;
+            },
+            Optional.None => {
+                trap_with_message("invalid state: missing value");
+            },
+        }
+        trap_with_message("invalid state: missing value");
+    };
+);

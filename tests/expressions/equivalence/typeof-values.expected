@@ -1,0 +1,16 @@
+int32: Integer int32 int32
+value 3: Integer int32 int32
+shape: Class Circle Circle
+nil: Nil nil nil
+Shape type: Class Shape Shape
+record: Record Point Point
+any int64: Integer int64 int64
+any string: String string string
+any object: Class Square Square
+array: Array int32[] int32[]
+tuple: Tuple [int32, string] [int32, string]
+Box: Class Box<int32> Box<int32>
+Box type: Class Box<string> Box<string>
+interface: Interface Named Named
+int32 string Circle
+true false

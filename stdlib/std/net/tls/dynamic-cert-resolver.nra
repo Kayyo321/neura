@@ -56,10 +56,9 @@ export let DynamicCertResolver = module (
 
         /// @brief Equal when the chain, key and trust bundle are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is CertificateBundle)) {
+            if (other is not that: CertificateBundle) {
                 return false;
             }
-            last that = other as CertificateBundle;
             return chain_pem == that.chain_pem && private_key_pem == that.private_key_pem
                 && trust_pem == that.trust_pem;
         };
@@ -68,8 +67,8 @@ export let DynamicCertResolver = module (
         export let.override hash_code = func -> uint32 => hashing.combine(chain_pem.hash_code(), trust_pem.hash_code());
 
         /// @brief Text such as "CertificateBundle(2 certificates, key redacted, 1 trust anchors)".
-        export let.override to_string = func -> string => "CertificateBundle(" + chain_length().to_string()
-            + " certificates, key redacted, " + trust_anchor_count().to_string() + " trust anchors)";
+        export let.override to_string = func -> string => "CertificateBundle(" .. chain_length().to_string()
+            .. " certificates, key redacted, " .. trust_anchor_count().to_string() .. " trust anchors)";
     );
 
     /// @brief Rotates a `CertificateBundle` when the injected change detector reports new material.
@@ -119,10 +118,8 @@ export let DynamicCertResolver = module (
                 return Result<bool>.Ok(false);
             }
             checked_at = now;
-            if (!changed()?) {
-                return Result<bool>.Ok(false);
-            }
-            return reload();
+            return if (not changed()?) -> Result<bool>.Ok(false)
+                else -> reload();
         };
 
         /// @brief Loads and checks a bundle now and swaps it in. Ok(false) when it equals the current one.
@@ -136,13 +133,13 @@ export let DynamicCertResolver = module (
             return match (fresh) {
                 Result.Ok(candidate) => swap(candidate),
                 Result.Err(problem) => Result<bool>.Err(errors.context(problem,
-                    "certificate reload failed; generation " + swaps.to_string() + " stays in use")),
+                    "certificate reload failed; generation " .. swaps.to_string() .. " stays in use")),
             };
         };
 
         /// @brief Text such as "DynamicCertResolver(generation 2, CertificateBundle(...))".
         export let.override to_string = func -> string =>
-            "DynamicCertResolver(generation " + swaps.to_string() + ", " + active.to_string() + ")";
+            "DynamicCertResolver(generation " .. swaps.to_string() .. ", " .. active.to_string() .. ")";
 
         /// @brief Replaces the bundle unless it is unchanged.
         let swap = func(candidate: CertificateBundle) -> Result<bool> {
@@ -194,10 +191,8 @@ export let DynamicCertResolver = module (
             || strings.index_of_from(key, "-----END ", begin) < 0) {
             return invalid("the key is not a PEM private key");
         }
-        if (candidate.trust_pem.byte_length > 0 && count_certificates(candidate.trust_pem) < 1) {
-            return invalid("the trust bundle holds no complete PEM certificate");
-        }
-        return Result<CertificateBundle>.Ok(candidate);
+        return if (candidate.trust_pem.byte_length > 0 && count_certificates(candidate.trust_pem) < 1) -> invalid("the trust bundle holds no complete PEM certificate")
+            else -> Result<CertificateBundle>.Ok(candidate);
     };
 
     /// @brief The number of complete BEGIN/END CERTIFICATE blocks.

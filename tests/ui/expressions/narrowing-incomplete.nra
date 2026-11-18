@@ -1,0 +1,12 @@
+// Edge case 55 of docs/design/Expressions030.md: incomplete input reports one error at the end.
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+let Other = class (
+    export let value: int = 0;
+);
+let check = func(shape: Shape) -> int {
+    if (shape is circle:

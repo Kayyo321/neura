@@ -38,65 +38,65 @@ The following public declarations are taken from the module source; each links t
   The request header lines: `Accept: text/event-stream`, `Cache-Control: no-store`, and `Last-Event-ID` when the cursor is not empty. Tagged `#NoDiscard`.
 - **Client.SseRequest** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L69)
   Equal when the URL, cursor and attempt number are equal.
-- **Client.SseRequest** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L78)
+- **Client.SseRequest** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L77)
   Combines the three fields.
-- **Client.SseRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L83)
+- **Client.SseRequest** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L82)
   `SseRequest(url, Last-Event-ID "...", attempt n)`.
-- **Client** · [`export let SseResponse = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L90)
+- **Client** · [`export let SseResponse = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L89)
   The response to an attempt: status, media type, and the body as a chunk source that returns `None` at the end of the body. Tagged `#Final`.
-- **Client.SseResponse** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L92)
+- **Client.SseResponse** · [`export last status: int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L91)
   The HTTP status code.
-- **Client.SseResponse** · [`export last content_type: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L94)
+- **Client.SseResponse** · [`export last content_type: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L93)
   The Content-Type header value.
-- **Client.SseResponse** · [`export last body: func() -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L96)
+- **Client.SseResponse** · [`export last body: func() -> Result<Optional<uint8[list]>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L95)
   Reads the next chunk of the body.
-- **Client.SseResponse** · [`export let init = func(code: int, media_type: string, reader: func() -> Result<Optional<uint8[list]>>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L99)
+- **Client.SseResponse** · [`export let init = func(code: int, media_type: string, reader: func() -> Result<Optional<uint8[list]>>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L98)
   Stores the fields.
-- **Client.SseResponse** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L106)
+- **Client.SseResponse** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L105)
   `SseResponse(status, content type)`.
-- **Client** · [`export let EventSourceClient = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L112)
+- **Client** · [`export let EventSourceClient = class implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L111)
   A reconnecting event-stream client. Not for use by several tasks at once. Tagged `#Final`, `#NotThreadSafe`.
-- **Client.EventSourceClient** · [`export last url: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L114)
+- **Client.EventSourceClient** · [`export last url: string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L113)
   The event-stream URL.
-- **Client.EventSourceClient** · [`export let state: ReadyState = ReadyState.Connecting { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L116)
+- **Client.EventSourceClient** · [`export let state: ReadyState = ReadyState.Connecting { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L115)
   The ready state.
-- **Client.EventSourceClient** · [`export let last_event_id: string { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L120)
+- **Client.EventSourceClient** · [`export let last_event_id: string { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L119)
   The last event ID string, sent as `Last-Event-ID` on reconnection.
-- **Client.EventSourceClient** · [`export let reconnection_millis: int64 = DefaultReconnectionMillis { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L124)
+- **Client.EventSourceClient** · [`export let reconnection_millis: int64 = DefaultReconnectionMillis { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L123)
   The current reconnection time in milliseconds.
-- **Client.EventSourceClient** · [`export let failures: int = 0 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L128)
+- **Client.EventSourceClient** · [`export let failures: int = 0 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L127)
   The number of consecutive failed fetches.
-- **Client.EventSourceClient** · [`export let attempts: int = 0 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L132)
+- **Client.EventSourceClient** · [`export let attempts: int = 0 { get }`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L131)
   The number of fetches made so far.
-- **Client.EventSourceClient** · [`export let max_attempts: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L136)
+- **Client.EventSourceClient** · [`export let max_attempts: int = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L135)
   The consecutive failed fetches after which `next` gives up; 0, the default, never gives up.
-- **Client.EventSourceClient** · [`export let max_backoff_millis: int64 = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L139)
+- **Client.EventSourceClient** · [`export let max_backoff_millis: int64 = 0`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L138)
   The cap of exponential backoff in milliseconds; 0, the default, waits the reconnection time after every failure.
-- **Client.EventSourceClient** · [`export let init = func(target: string, cursor: string, fetcher: func(SseRequest) -> Result<SseResponse>, timer: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L160)
+- **Client.EventSourceClient** · [`export let init = func(target: string, cursor: string, fetcher: func(SseRequest) -> Result<SseResponse>, timer: Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L159)
   A client for `target` that resumes after `cursor` (empty for a new stream), fetching with `fetcher` and waiting on `timer`.
-- **Client.EventSourceClient** · [`export let next = func -> Result<Optional<SseEvent>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L171)
+- **Client.EventSourceClient** · [`export let next = func -> Result<Optional<SseEvent>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L170)
   The next event, `None` once the stream has ended (status 204 or `close`), or an error that failed the connection. Tagged `#NoDiscard`.
-- **Client.EventSourceClient** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L201)
+- **Client.EventSourceClient** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L200)
   Closes the client: no further fetch is made and `next` returns `None`.
-- **Client.EventSourceClient** · [`export let next_delay_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L213)
+- **Client.EventSourceClient** · [`export let next_delay_millis = func -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L212)
   The wait before the next attempt: the reconnection time, doubled per consecutive failure up to `max_backoff_millis` when backoff is on. Tagged `#NoDiscard`.
-- **Client.EventSourceClient** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L324)
+- **Client.EventSourceClient** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L321)
   `EventSourceClient(url, state)`.
-- **Client** · [`export let TypedEventSource = class<T> implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L331)
+- **Client** · [`export let TypedEventSource = class<T> implements Closeable`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L328)
   Decodes each event of a client into a `T` with a decoding hook, such as a JSON decoder for streamed model tokens. Tagged `#Final`, `#NotThreadSafe`.
-- **Client.TypedEventSource** · [`export last source: EventSourceClient`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L333)
+- **Client.TypedEventSource** · [`export last source: EventSourceClient`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L330)
   The client that supplies the events.
-- **Client.TypedEventSource** · [`export let init = func(client: EventSourceClient, decoder: func(SseEvent) -> Result<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L338)
+- **Client.TypedEventSource** · [`export let init = func(client: EventSourceClient, decoder: func(SseEvent) -> Result<T>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L335)
   Reads `client`, decoding with `decoder`.
-- **Client.TypedEventSource** · [`export let next = func -> Result<Optional<T>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L346)
+- **Client.TypedEventSource** · [`export let next = func -> Result<Optional<T>>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L343)
   The next decoded value, `None` at the end, or the client's or decoder's error. After a decoder error the client stays open and the next call reads the following event. Tagged `#NoDiscard`.
-- **Client.TypedEventSource** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L360)
+- **Client.TypedEventSource** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L357)
   Closes the client.
-- **Client.TypedEventSource** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L363)
+- **Client.TypedEventSource** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L360)
   `TypedEventSource(url)`.
-- **Client** · [`export let connect = func(url: string, fetch: func(SseRequest) -> Result<SseResponse>, clock: Clock) -> EventSourceClient`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L368)
+- **Client** · [`export let connect = func(url: string, fetch: func(SseRequest) -> Result<SseResponse>, clock: Clock) -> EventSourceClient`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L365)
   A client for a new stream at `url`. Tagged `#NoDiscard`.
-- **Client** · [`export let is_event_stream = func(content_type: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L374)
+- **Client** · [`export let is_event_stream = func(content_type: string) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/realtime/sse/client.nra#L371)
   Whether a Content-Type value names `text/event-stream`, ignoring parameters, surrounding whitespace and ASCII case. Tagged `#NoDiscard`, `#Pure`.
 <!-- END SOURCE API -->
 

@@ -46,10 +46,9 @@ export let Reflection = module (
 
         /// @brief Equal when every part is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MethodDescriptor)) {
+            if (other is not that: MethodDescriptor) {
                 return false;
             }
-            last that = other as MethodDescriptor;
             return name == that.name && input_type == that.input_type && output_type == that.output_type
                 && client_streaming == that.client_streaming && server_streaming == that.server_streaming;
         };
@@ -60,8 +59,8 @@ export let Reflection = module (
             (client_streaming ? 2 : 0) + (server_streaming ? 1 : 0));
 
         /// @brief `name(input) returns (output)` with `stream` markers, as in a `.proto` file.
-        export let.override to_string = func -> string => name + "(" + (client_streaming ? "stream " : "")
-            + input_type + ") returns (" + (server_streaming ? "stream " : "") + output_type + ")";
+        export let.override to_string = func -> string => name .. "(" .. (client_streaming ? "stream " : "")
+            .. input_type .. ") returns (" .. (server_streaming ? "stream " : "") .. output_type .. ")";
     );
 
     /// @brief Registered services and their methods.
@@ -138,7 +137,7 @@ export let Reflection = module (
 
         /// @brief The number of services.
         export let.override to_string = func -> string =>
-            "ReflectionRegistry(" + services.length.to_string() + " services)";
+            "ReflectionRegistry(" .. services.length.to_string() .. " services)";
     );
 
     /// @brief The `ServerReflectionResponse` answering a `list_services` request: field 6 holding a

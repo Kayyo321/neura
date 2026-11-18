@@ -20,6 +20,7 @@ export let LockedMemory = module (
     /// @brief Copies `bytes` into the buffer at `offset`; InvalidInput (4) outside the buffer.
     export let write = func(handle: int64, offset: int, bytes: uint8[list]) -> DoneOutcome
         host("neura.memory.lock.write", 1);
+
     /// @brief A copy of `count` bytes at `offset`, as an ordinary heap value.
     export let read = func(handle: int64, offset: int, count: int) -> BytesOutcome host("neura.memory.lock.read", 1);
     /// @brief Whether `bytes` equal the whole buffer, compared in time that depends on the buffer's length only.

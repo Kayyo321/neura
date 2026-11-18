@@ -48,7 +48,7 @@ export let ChaCha20Poly1305 = module (
         };
 
         export let open = func(nonce: uint8[list], sealed: uint8[list], associated_data: uint8[list])
-                -> Result<uint8[list]> {
+            -> Result<uint8[list]> {
             aead.check_nonce(nonce, 12, "ChaCha20-Poly1305");
             return open_with(key_bytes, nonce, sealed, associated_data);
         };
@@ -84,12 +84,12 @@ export let ChaCha20Poly1305 = module (
     /// @brief Opens under a 32-byte key and 12-byte nonce. Used by XChaCha20Poly1305 with its subkey.
     #[Internal, Since("0.3.0")]
     export let open_with = func(key: uint8[list], nonce: uint8[list], sealed: uint8[list], data: uint8[list])
-            -> Result<uint8[list]> {
+        -> Result<uint8[list]> {
         if (sealed.length < 16) {
             return aead.failure();
         }
         last body = words.slice(sealed, 0, sealed.length - 16);
-        if (!constant_time.ct_eq(tag_of(key, nonce, body, data), words.slice(sealed, sealed.length - 16, sealed.length))) {
+        if (not constant_time.ct_eq(tag_of(key, nonce, body, data), words.slice(sealed, sealed.length - 16, sealed.length))) {
             return aead.failure();
         }
         return Result<uint8[list]>.Ok(chacha.xor_stream(key, 1, nonce, body));

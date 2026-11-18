@@ -1,0 +1,38 @@
+// An interface proxy and its handler (docs/design/Reflect030.md, Proxies).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Greeter = interface (
+    export let greet = func(name: string, times: int32) -> string;
+    export let count = func -> int32;
+    export let reset = func;
+);
+
+let Recorder = class implements proxies.InvocationHandler (
+    export let calls: int32 = 0;
+    export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant {
+        calls = calls + 1;
+        console.print_line("call " + context.to_string());
+        if (context.method.name == "greet") {
+            let text = "hi " + context.arguments[0].get<string>() + " x" + context.arguments[1].to_string();
+            return variants.of(text);
+        }
+        if (context.method.name == "count") {
+            return variants.of(calls);
+        }
+        return variants.of(nil as class);
+    };
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let recorder = new Recorder();
+        let greeter: Greeter = proxies.create<Greeter>(recorder);
+        console.print_line(greeter.greet("Ada", 2));
+        greeter.reset();
+        console.print_line(greeter.count().to_string());
+        return program.ExitCode.Ok;
+    };
+);

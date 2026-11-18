@@ -40,9 +40,10 @@ Ada
 | `Std.Random` | `Random` (xoshiro256**), `Uuid` |
 | `Std.Encoding` | `Utf8`, `Hex`, `Base64`, `Csv`, `Json` |
 | `Std.Digest` | `Crc32`, `Sha256` |
-| `Std.Crypto` | Contracts (`SecretMemory`, `StreamingDigest`, `AeadCipher`, ...); `Core` (`SecretBytes`, `ConstantTime`, `CryptoPolicy`); `Random` (`Entropy`, `ChaCha20Drbg`); `Hash` (`Sha2`, `Sha3`, `TupleHash`, `Blake3`, `MerkleTree`); `Mac` (`Hmac`, `Kmac`, `Poly1305`, `AesCmac`); `Kdf` (`Hkdf`, `Pbkdf2`, `Scrypt`, `Argon2`, `Balloon`, `Phc`, `PasswordHash`); `Symmetric` (`AesGcm`, `AesGcmSiv`, `AesSiv`, `ChaCha20Poly1305`, `XChaCha20Poly1305`, `OnlineCipher`, `Ff1`) ([Stdlib, section 21](Stdlib.md#21-stdcrypto)) |
+| `Std.Crypto` | Shared cryptography contracts and policy, secret hygiene, entropy and DRBGs, hashes, MACs, key derivation and symmetric encryption. The public-key packages include classical, post-quantum and hybrid schemes. Other packages provide PKI, token formats, enclave evidence verification and envelope encryption, and advanced schemes including Shamir, FROST, blind signatures, OPRF and Bulletproofs. The specification lists modules and their supported profiles. [Stdlib, section 21](Stdlib.md#21-stdcrypto) |
 | `Std.Io` | `Console`, `Closeable`, `ByteBuffer`, `BufferedReader`, `BufferedWriter`, `Utf8Reader`, `Utf8Writer` |
 | `Std.Fs` | `Path`, `File`, `Fs` |
+| `Std.Desktop` | `Desktop`: `Registry`, `Dispatcher`, `Context`, `Window`, `Call`, `Event`, `run_application` (0.3.0) |
 | `Std.Net` | `TcpStream`, `TcpListener`; in 0.3.0 the contracts (`Endpoint`, `Listener`, `Connector`, `Transport`, `Service`, `Filter`) and the packages `Core`, `Socket`, `Dns`, `Tls`, `Quic`, `Http`, `Rpc`, `Realtime`, `Resilience` and `Mesh`, some of whose host calls are stubs ([Stdlib](Stdlib.md#114-stdnet)) |
 | `Std.Program` | `Entry`, `ExitCode`, `Environment`, `Process` |
 | `Std.Log` | `Logger` |

@@ -32,25 +32,25 @@ The following public declarations are taken from the module source; each links t
   A target.
 - **SrvLookup.SrvTarget** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L44)
   Equal when every field is.
-- **SrvLookup.SrvTarget** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L54)
+- **SrvLookup.SrvTarget** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L53)
   Combines the fields.
-- **SrvLookup.SrvTarget** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L58)
+- **SrvLookup.SrvTarget** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L57)
   Text such as "10 60 5060 sip.example.com.".
-- **SrvLookup** · [`export let SrvLookup = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L64)
+- **SrvLookup** · [`export let SrvLookup = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L63)
   SRV lookups through a resolver. Tagged `#Final`, `#NotThreadSafe`.
-- **SrvLookup.SrvLookup** · [`export let init = func(stub: resolvers.StubResolver, source: Random)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L71)
+- **SrvLookup.SrvLookup** · [`export let init = func(stub: resolvers.StubResolver, source: Random)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L70)
   A lookup over `stub` choosing with `source`.
-- **SrvLookup.SrvLookup** · [`export let lookup = func(service: string, proto: string, domain: string) -> Result<SrvTarget[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L79)
+- **SrvLookup.SrvLookup** · [`export let lookup = func(service: string, proto: string, domain: string) -> Result<SrvTarget[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L78)
   The ordered targets of `_service._proto.domain`; empty when the service is not available (no records, a name error, or the single target "."). Tagged `#NoDiscard`.
-- **SrvLookup.SrvLookup** · [`export let socket_addresses = func(service: string, proto: string, domain: string) -> Result<SocketAddr[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L91)
+- **SrvLookup.SrvLookup** · [`export let socket_addresses = func(service: string, proto: string, domain: string) -> Result<SocketAddr[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L88)
   The socket addresses of every target, in target order, each target's addresses in resolver order. Targets that do not resolve are skipped; Err (Io NotFound) when none resolves. Tagged `#NoDiscard`.
-- **SrvLookup.SrvLookup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L112)
+- **SrvLookup.SrvLookup** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L109)
   Text "SrvLookup".
-- **SrvLookup** · [`export let service_name = func(service: string, proto: string, domain: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L117)
+- **SrvLookup** · [`export let service_name = func(service: string, proto: string, domain: string) -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L114)
   The owner name "_service._proto.domain." (underscores added when missing). Tagged `#NoDiscard`.
-- **SrvLookup** · [`export let targets_from = func(records: messages.ResourceRecord[list]) -> SrvTarget[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L126)
+- **SrvLookup** · [`export let targets_from = func(records: messages.ResourceRecord[list]) -> SrvTarget[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L123)
   The SRV targets among records. Tagged `#NoDiscard`.
-- **SrvLookup** · [`export let order_targets = func(targets: SrvTarget[list], source: Random) -> SrvTarget[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L142)
+- **SrvLookup** · [`export let order_targets = func(targets: SrvTarget[list], source: Random) -> SrvTarget[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/srv-lookup.nra#L139)
   Orders targets by priority, and within a priority by RFC 2782 weighted random selection. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

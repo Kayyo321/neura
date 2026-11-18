@@ -1,0 +1,609 @@
+let.promote _ = import:Std.Core.Result;
+let constant_time = import:Std.Crypto.Core.ConstantTime;
+let entropy = import:Std.Crypto.Random.Entropy;
+let hmac = import:Std.Crypto.Mac.Hmac;
+let jose = import:Std.Crypto.Internal.JoseJson;
+let secretbox = import:Std.Crypto.Internal.MacaroonSecretbox;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief Macaroons with libmacaroons binary v1 and v2 encoding (Stdlib.md section 21.11).
+///
+/// The signature chains HMAC-SHA-256 over the identifier and each caveat. Anyone holding a macaroon can
+/// append caveats. Third-party caveats use NaCl XSalsa20-Poly1305 to encrypt a derived caveat key.
+/// A discharge binds to the final root signature before use. Locations are unauthenticated routing hints.
+/// Verification authenticates the entire discharge tree before passing any predicate to the supplied
+/// checker. Signature comparison is branch-free in source; the runtime does not guarantee constant time.
+/// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+#Since("0.3.0")
+export let Macaroon = module (
+    const MaxFieldLength = 32767;
+    const MaxCaveats = 1024;
+    const MaxDischarges = 256;
+    const MaxDepth = 32;
+    const MaxVerifyCaveats = 4096;
+
+    /// @brief The supported binary wire encodings.
+    /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+    #Since("0.3.0")
+    export let WireFormat = enum (V1, V2);
+
+    /// @brief An immutable bearer token. Treat its serialization as a credential.
+    /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+    #[Final, Since("0.3.0")]
+    export let Macaroon = class (
+        last location_hint: uint8[list];
+        last id: uint8[list];
+        last caveats: CaveatRecord[list];
+        last signature: uint8[list];
+
+        #Internal
+        export let init = func(location: uint8[list], identifier: uint8[list],
+            records: CaveatRecord[list], tag: uint8[list]) {
+            location_hint = location;
+            id = identifier;
+            caveats = records;
+            signature = tag;
+        };
+
+        /// @brief A copy of the unauthenticated location hint.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let location = func -> uint8[list] => words.copy(location_hint);
+
+        /// @brief A copy of the token identifier.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let identifier = func -> uint8[list] => words.copy(id);
+
+        /// @brief The number of attached caveats.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let caveat_count = func -> int => caveats.length;
+
+        /// @brief A copy of the caveat identifier, which is the predicate for a first-party caveat.
+        /// An index outside the caveat list traps with invalid argument.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let caveat_identifier = func(index: int) -> uint8[list] => words.copy(caveat_at(index).id);
+
+        /// @brief A copy of the third-party location hint, empty when absent.
+        /// An index outside the caveat list traps with invalid argument.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let caveat_location = func(index: int) -> uint8[list] => words.copy(caveat_at(index).location);
+
+        /// @brief Whether the caveat must be discharged before use.
+        /// An index outside the caveat list traps with invalid argument.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let needs_discharge = func(index: int) -> bool => caveat_at(index).vid.length != 0;
+
+        /// @brief Attenuates the token with one first-party predicate. The source token is unchanged.
+        /// An empty predicate, an oversized field or too many caveats traps with invalid argument.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let add_first_party = func(predicate: uint8[list]) -> Macaroon {
+            check_caveat(caveats.length, predicate);
+            return append(new CaveatRecord(new, words.copy(predicate), new), mac(signature, predicate));
+        };
+
+        /// @brief Attenuates with a third-party caveat and a fresh 24-byte OS nonce. Entropy failures are returned.
+        /// Choose an unpredictable caveat key and pass it directly to the third party by a secure channel.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let add_third_party = func(location: uint8[list], identifier: uint8[list], caveat_key: uint8[list])
+            -> Result<Macaroon> {
+            check_third_party(location, identifier, caveat_key);
+            last nonce = entropy.os_bytes(24)?;
+            return Result<Macaroon>.Ok(seal_caveat(location, identifier, caveat_key, nonce));
+        };
+
+        /// @brief Attenuates with one third-party caveat using a caller-supplied 24-byte nonce. Use a fresh nonce
+        /// every time. An invalid length or too many caveats traps with invalid argument.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let add_third_party_with_nonce = func(location: uint8[list], identifier: uint8[list],
+            caveat_key: uint8[list], nonce: uint8[list]) -> Macaroon {
+            check_third_party(location, identifier, caveat_key);
+            if (nonce.length != 24) {
+                trap_with_message("invalid argument: a third-party macaroon caveat nonce must be 24 bytes");
+            }
+            return seal_caveat(location, identifier, caveat_key, nonce);
+        };
+
+        let check_third_party = func(location: uint8[list], identifier: uint8[list], caveat_key: uint8[list]) {
+            check_caveat(caveats.length, identifier);
+            check_field(location);
+            if (caveat_key.length == 0) {
+                trap_with_message("invalid argument: a third-party macaroon caveat needs a nonempty key");
+            }
+        };
+
+        let seal_caveat = func(location: uint8[list], identifier: uint8[list], caveat_key: uint8[list],
+            nonce: uint8[list]) -> Macaroon {
+            last derived = derive(caveat_key);
+            last vid = secretbox.seal(signature, nonce, derived);
+            words.wipe(derived);
+            return append(new CaveatRecord(words.copy(location), words.copy(identifier), vid),
+                hash2(signature, vid, identifier));
+        };
+
+        /// @brief Binds a discharge to this root token. Bind only after adding every caveat; bind all discharges,
+        /// including nested ones, to the same final root.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let bind = func(discharge: Macaroon) -> Macaroon =>
+            new(discharge.location_hint, discharge.id, discharge.caveats, bind_signatures(signature, discharge.signature));
+
+        /// @brief Verifies the root signature and every bound discharge, then requires the supplied checker to
+        /// accept every authenticated first-party predicate. A missing discharge, multiple discharges for one
+        /// identifier or a cyclic discharge chain fails closed.
+        /// The bounds are 256 supplied discharges, depth 32 and 4096 visited caveats.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let verify = func(root_key: uint8[list], discharges: Macaroon[list], check: func(uint8[list]) -> bool)
+            -> bool {
+            if (root_key.length == 0 || discharges.length > MaxDischarges) {
+                return false;
+            }
+            let context = new Verification(signature, discharges);
+            last derived = derive(root_key);
+            last verified = verify_inner(derived, context, false);
+            words.wipe(derived);
+            return false unless verified;
+            for (let predicate in context.predicates) {
+                if (not check(words.copy(predicate))) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        /// @brief The compact v2 binary wire format as unpadded base64url.
+        /// Pass a format explicitly to serialize as libmacaroons v1.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let serialize = func -> string => serialize(WireFormat.V2)
+            or func(format: WireFormat) -> string => jose.encode(serialize_binary(format));
+
+        /// @brief The binary v1 or v2 wire bytes before base64url encoding.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #[NoDiscard, Since("0.3.0")]
+        export let serialize_binary = func(format: WireFormat) -> uint8[list] {
+            if (format == WireFormat.V1) {
+                return encode_v1(location_hint, id, caveats, signature);
+            }
+            return encode_v2(location_hint, id, caveats, signature);
+        };
+
+        /// @brief Whether the tokens have the same wire fields and signature.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #Since("0.3.0")
+        export let.override equals = func(other: class) -> bool {
+            if (other is not Macaroon) {
+                return false;
+            }
+            return constant_time.ct_eq(serialize_binary(WireFormat.V2),
+                (other as Macaroon).serialize_binary(WireFormat.V2));
+        };
+
+        /// @brief The hash of the canonical v2 encoding.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #Since("0.3.0")
+        export let.override hash_code = func -> uint32 => serialize().hash_code();
+
+        /// @brief A fixed placeholder for the bearer credential.
+        /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+        #Since("0.3.0")
+        export let.override to_string = func -> string => "Macaroon(<redacted>)";
+
+        let caveat_at = func(index: int) -> CaveatRecord {
+            if (index < 0 || index >= caveats.length) {
+                trap_with_message("invalid argument: macaroon caveat index is out of range");
+            }
+            return caveats[index];
+        };
+
+        let append = func(caveat: CaveatRecord, tag: uint8[list]) -> Macaroon {
+            let records: CaveatRecord[list] = new;
+            for (let prior in caveats) {
+                records.append(prior);
+            }
+            records.append(caveat);
+            return new(location_hint, id, records, tag);
+        };
+
+        let verify_inner = func(key: uint8[list], context: Verification, discharge: bool) -> bool {
+            if (context.active.length > MaxDepth || caveats.length > context.remaining) {
+                return false;
+            }
+            context.remaining -= caveats.length;
+            let prefixes: uint8[list][list] = new;
+            let expected = mac(key, id);
+            for (let caveat in caveats) {
+                if (caveat.vid.length == 0) {
+                    last next = mac(expected, caveat.id);
+                    words.wipe(expected);
+                    expected = next;
+                } else {
+                    prefixes.append(expected);
+                    expected = hash2(expected, caveat.vid, caveat.id);
+                }
+            }
+            if (discharge) {
+                last bound = bind_signatures(context.root_signature, expected);
+                words.wipe(expected);
+                expected = bound;
+            }
+            last verified = constant_time.ct_eq(signature, expected) && check_caveats(context, prefixes);
+            words.wipe(expected);
+            for (let prefix in prefixes) {
+                words.wipe(prefix);
+            }
+            return verified;
+        };
+
+        let check_caveats = func(context: Verification, prefixes: uint8[list][list]) -> bool {
+            let prefix_at = 0;
+            for (let caveat in caveats) {
+                if (caveat.vid.length == 0) {
+                    context.predicates.append(caveat.id);
+                } else {
+                    if (not check_discharge(caveat, prefixes[prefix_at], context)) {
+                        return false;
+                    }
+                    prefix_at++;
+                }
+            }
+            return true;
+        };
+
+        let check_discharge = func(caveat: CaveatRecord, prefix: uint8[list], context: Verification) -> bool {
+            let found = -1;
+            for (let i = 0; i < context.discharges.length; i++) {
+                if (constant_time.ct_eq(caveat.id, context.discharges[i].id)) {
+                    if (found >= 0) {
+                        return false;
+                    }
+                    found = i;
+                }
+            }
+            if (found < 0) {
+                return false;
+            }
+            for (let i in context.active) {
+                if (found == i) {
+                    return false;
+                }
+            }
+            match (secretbox.open(prefix, caveat.vid)) {
+                Result.Err(_) => {
+                    return false;
+                },
+                Result.Ok(key) => {
+                    context.active.append(found);
+                    last verified = context.discharges[found].verify_inner(key, context, true);
+                    context.active.remove_at(context.active.length - 1);
+                    words.wipe(key);
+                    return verified;
+                },
+            }
+            return false;
+        };
+    );
+
+    /// @brief Issues a root macaroon or a discharge with the given identifier and root key. The root key and
+    /// identifier must be nonempty and each wire field must be at most 32767 bytes.
+    /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+    #[NoDiscard, Since("0.3.0")]
+    export let create = func(location: uint8[list], root_key: uint8[list], identifier: uint8[list]) -> Macaroon {
+        check_field(location);
+        check_caveat(0, identifier);
+        if (root_key.length == 0) {
+            trap_with_message("invalid argument: a macaroon needs a nonempty root key");
+        }
+        last derived = derive(root_key);
+        last signature = mac(derived, identifier);
+        words.wipe(derived);
+        return new(words.copy(location), words.copy(identifier), new, signature);
+    };
+
+    /// @brief Parses base64url binary v1 or v2. Decode does not authorize the token.
+    /// Invalid or noncanonical framing returns crypto.token.
+    /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse = func(token: string) -> Result<Macaroon> =>
+        parse_binary(jose.decode(token, "crypto.token", "invalid macaroon base64url")?);
+
+    /// @brief Parses binary v1 or v2 wire bytes. Malformed input returns crypto.token.
+    /// @see [Std.Crypto.Token.Macaroon](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Token-Macaroon)
+    #[NoDiscard, Since("0.3.0")]
+    export let parse_binary = func(bytes: uint8[list]) -> Result<Macaroon> {
+        if (bytes.length == 0) {
+            return invalid<Macaroon>("empty macaroon");
+        }
+        if (bytes[0] == 2) {
+            return parse_v2(bytes);
+        }
+        return parse_v1(bytes);
+    };
+
+    #Final
+    let CaveatRecord = class (
+        export last location: uint8[list];
+        export last id: uint8[list];
+        export last vid: uint8[list];
+
+        export let init = func(hint: uint8[list], identifier: uint8[list], verification_id: uint8[list]) {
+            location = hint;
+            id = identifier;
+            vid = verification_id;
+        };
+
+        export let.override to_string = func -> string => "Macaroon.CaveatRecord(<redacted>)";
+    );
+
+    #Final
+    let Verification = class (
+        export last root_signature: uint8[list];
+        export last discharges: Macaroon[list];
+        export last active: int[list] = new;
+        export last predicates: uint8[list][list] = new;
+        export let remaining: int = MaxVerifyCaveats;
+
+        export let init = func(root: uint8[list], supplied: Macaroon[list]) {
+            root_signature = root;
+            discharges = supplied;
+        };
+
+        export let.override to_string = func -> string => "Macaroon.Verification(<redacted>)";
+    );
+
+    let mac = func(key: uint8[list], bytes: uint8[list]) -> uint8[list] => hmac.mac<sha2.Sha256>(key, bytes);
+
+    let derive = func(key: uint8[list]) -> uint8[list] => mac(words.utf8("macaroons-key-generator"), key);
+
+    let hash2 = func(key: uint8[list], left: uint8[list], right: uint8[list]) -> uint8[list] =>
+        mac(key, words.concat(mac(key, left), mac(key, right)));
+
+    let bind_signatures = func(root: uint8[list], discharge: uint8[list]) -> uint8[list] =>
+        hash2(words.zeros(32), root, discharge);
+
+    let check_field = func(value: uint8[list]) {
+        if (value.length > MaxFieldLength) {
+            trap_with_message("invalid argument: a macaroon field may hold at most 32767 bytes");
+        }
+    };
+
+    let check_caveat = func(count: int, id: uint8[list]) {
+        check_field(id);
+        if (id.length == 0 || count >= MaxCaveats) {
+            trap_with_message("invalid argument: a macaroon identifier must be nonempty and at most 1024 caveats are allowed");
+        }
+    };
+
+    let invalid = func<T>(message: string) -> Result<T> => jose.fail<T>("crypto.token", message);
+
+    let encode_v2 = func(location: uint8[list], id: uint8[list], caveats: CaveatRecord[list],
+        signature: uint8[list]) -> uint8[list] {
+        let bytes: uint8[list] = new([2]);
+        optional_v2(bytes, 1, location);
+        write_v2(bytes, 2, id);
+        bytes.append(0);
+        for (let caveat in caveats) {
+            optional_v2(bytes, 1, caveat.location);
+            write_v2(bytes, 2, caveat.id);
+            optional_v2(bytes, 4, caveat.vid);
+            bytes.append(0);
+        }
+        bytes.append(0);
+        write_v2(bytes, 6, signature);
+        return bytes;
+    };
+
+    let write_v2 = func(out: uint8[list], tag: uint8, field: uint8[list]) {
+        out.append(tag);
+        let length = field.length;
+        while (length >= 128) {
+            out.append(((length & 127) | 128) as uint8);
+            length >>= 7;
+        }
+        out.append(length as uint8);
+        words.append_all(out, field);
+    };
+
+    let optional_v2 = func(out: uint8[list], tag: uint8, field: uint8[list]) {
+        if (field.length > 0) {
+            write_v2(out, tag, field);
+        }
+    };
+
+    let write_v1 = func(out: uint8[list], name: string, field: uint8[list]) {
+        const Digits = "0123456789abcdef";
+        last length = 6 + name.byte_length + field.length;
+        for (let shift in [12, 8, 4, 0]) {
+            out.append(Digits.byte_at((length >> shift) & 15));
+        }
+        words.append_all(out, words.utf8(name));
+        out.append(32);
+        words.append_all(out, field);
+        out.append(10);
+    };
+
+    let encode_v1 = func(location: uint8[list], id: uint8[list], caveats: CaveatRecord[list],
+        signature: uint8[list]) -> uint8[list] {
+        let bytes: uint8[list] = new;
+        write_v1(bytes, "location", location);
+        write_v1(bytes, "identifier", id);
+        for (let caveat in caveats) {
+            write_v1(bytes, "cid", caveat.id);
+            if (caveat.vid.length > 0) {
+                write_v1(bytes, "vid", caveat.vid);
+            }
+            if (caveat.location.length > 0) {
+                write_v1(bytes, "cl", caveat.location);
+            }
+        }
+        write_v1(bytes, "signature", signature);
+        return bytes;
+    };
+
+    #Final
+    let Reader = class (
+        last bytes: uint8[list];
+        let at = 0;
+
+        export let init = func(input: uint8[list], offset: int) {
+            bytes = input;
+            at = offset;
+        };
+
+        export let done = func -> bool => at == bytes.length;
+
+        export let peek = func(value: uint8) -> bool => at < bytes.length && bytes[at] == value;
+
+        export let end_section = func -> Result<bool> {
+            if (not peek(0)) {
+                return invalid<bool>("missing macaroon v2 section terminator");
+            }
+            at++;
+            return Result<bool>.Ok(true);
+        };
+
+        export let v2 = func(tag: uint8, optional: bool) -> Result<uint8[list]> {
+            if (not peek(tag)) {
+                if (optional) {
+                    return Result<uint8[list]>.Ok(new);
+                }
+                return invalid<uint8[list]>("missing macaroon v2 field");
+            }
+            at++;
+            let length = 0;
+            for (let shift in [0, 7, 14]) {
+                if (at == bytes.length) {
+                    break;
+                }
+                last digit = bytes[at] as int;
+                at++;
+                length |= (digit & 127) << shift;
+                if (digit < 128) {
+                    if ((shift > 0 && digit == 0) || length > MaxFieldLength || length > bytes.length - at
+                        || (optional && length == 0)) {
+                        break;
+                    }
+                    return take(length);
+                }
+            }
+            return invalid<uint8[list]>("invalid macaroon v2 field length");
+        };
+
+        let take = func(length: int) -> Result<uint8[list]> {
+            last value = words.slice(bytes, at, at + length);
+            at += length;
+            return Result<uint8[list]>.Ok(value);
+        };
+
+        export let has_v1 = func(name: string) -> bool {
+            if (bytes.length - at < 6 + name.byte_length) {
+                return false;
+            }
+            last start = at + 4;
+            if (bytes[start + name.byte_length] != 32) {
+                return false;
+            }
+            for (let i = 0; i < name.byte_length; i++) {
+                if (bytes[start + i] != name.byte_at(i)) {
+                    return false;
+                }
+            }
+            return true;
+        };
+
+        export let v1 = func(name: string, optional: bool) -> Result<uint8[list]> {
+            if (not has_v1(name)) {
+                if (optional) {
+                    return Result<uint8[list]>.Ok(new);
+                }
+                return invalid<uint8[list]>("missing macaroon v1 field");
+            }
+            let length = 0;
+            for (let i in 0 .. 4) {
+                last byte = bytes[at + i] as int;
+                if (byte >= 48 && byte <= 57) {
+                    length = (length << 4) | (byte - 48);
+                } else if (byte >= 97 && byte <= 102) {
+                    length = (length << 4) | (byte - 87);
+                } else {
+                    return invalid<uint8[list]>("invalid macaroon v1 packet length");
+                }
+            }
+            last header = 5 + name.byte_length;
+            last field_length = length - header - 1;
+            if (field_length < 0 || field_length > MaxFieldLength || length > bytes.length - at
+                || bytes[at + length - 1] != 10 || (optional && field_length == 0)) {
+                return invalid<uint8[list]>("invalid macaroon v1 packet length");
+            }
+            at += header;
+            last value = take(field_length)?;
+            at++;
+            return Result<uint8[list]>.Ok(value);
+        };
+
+        export let.override to_string = func -> string => "Macaroon.Reader(<redacted>)";
+    );
+
+    let checked_caveat = func(location: uint8[list], id: uint8[list], vid: uint8[list]) -> Result<CaveatRecord> {
+        if (id.length == 0 || (vid.length == 0 && location.length != 0) || (vid.length != 0 && vid.length != 72)) {
+            return invalid<CaveatRecord>("invalid macaroon caveat fields");
+        }
+        return Result<CaveatRecord>.Ok(new CaveatRecord(location, id, vid));
+    };
+
+    let checked_token = func(location: uint8[list], id: uint8[list], caveats: CaveatRecord[list],
+        signature: uint8[list], reader: Reader) -> Result<Macaroon> {
+        if (id.length == 0 || signature.length != 32 || not reader.done()) {
+            return invalid<Macaroon>("invalid macaroon identifier, signature or trailing data");
+        }
+        return Result<Macaroon>.Ok(new Macaroon(location, id, caveats, signature));
+    };
+
+    let parse_v2 = func(bytes: uint8[list]) -> Result<Macaroon> {
+        last reader = new Reader(bytes, 1);
+        last location = reader.v2(1, true)?;
+        last id = reader.v2(2, false)?;
+        let _ = reader.end_section()?;
+        let caveats: CaveatRecord[list] = new;
+        while (not reader.peek(0)) {
+            if (caveats.length >= MaxCaveats) {
+                return invalid<Macaroon>("too many macaroon caveats");
+            }
+            last hint = reader.v2(1, true)?;
+            last cid = reader.v2(2, false)?;
+            last vid = reader.v2(4, true)?;
+            let _ = reader.end_section()?;
+            caveats.append(checked_caveat(hint, cid, vid)?);
+        }
+        let _ = reader.end_section()?;
+        last signature = reader.v2(6, false)?;
+        return checked_token(location, id, caveats, signature, reader);
+    };
+
+    let parse_v1 = func(bytes: uint8[list]) -> Result<Macaroon> {
+        last reader = new Reader(bytes, 0);
+        last location = reader.v1("location", false)?;
+        last id = reader.v1("identifier", false)?;
+        let caveats: CaveatRecord[list] = new;
+        while (reader.has_v1("cid")) {
+            if (caveats.length >= MaxCaveats) {
+                return invalid<Macaroon>("too many macaroon caveats");
+            }
+            last cid = reader.v1("cid", false)?;
+            last vid = reader.v1("vid", true)?;
+            last hint = reader.v1("cl", true)?;
+            caveats.append(checked_caveat(hint, cid, vid)?);
+        }
+        last signature = reader.v1("signature", false)?;
+        return checked_token(location, id, caveats, signature, reader);
+    };
+);

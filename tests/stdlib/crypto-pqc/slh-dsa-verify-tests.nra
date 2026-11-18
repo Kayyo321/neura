@@ -1,0 +1,112 @@
+// test-options: --gpu=off --max-steps 4000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let hex = import:Std.Encoding.Hex;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let test = import:Std.Test;
+let vectors = import:SlhDsaVectors;
+
+// SLH-DSA against NIST's ACVP test sets SLH-DSA-keyGen-FIPS205, SLH-DSA-sigGen-FIPS205 and
+// SLH-DSA-sigVer-FIPS205 (support/, scripts/crypto-vectors/gen-pqc-slh-dsa.py).
+let SlhDsaVerifyTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let set_of = func(name: string) -> slh_dsa.ParameterSet {
+        if (name == "SHA2-128s") {
+            return slh_dsa.ParameterSet.Sha2_128s;
+        }
+        if (name == "SHA2-128f") {
+            return slh_dsa.ParameterSet.Sha2_128f;
+        }
+        if (name == "SHA2-192s") {
+            return slh_dsa.ParameterSet.Sha2_192s;
+        }
+        if (name == "SHA2-192f") {
+            return slh_dsa.ParameterSet.Sha2_192f;
+        }
+        if (name == "SHA2-256s") {
+            return slh_dsa.ParameterSet.Sha2_256s;
+        }
+        if (name == "SHA2-256f") {
+            return slh_dsa.ParameterSet.Sha2_256f;
+        }
+        if (name == "SHAKE-128s") {
+            return slh_dsa.ParameterSet.Shake128s;
+        }
+        if (name == "SHAKE-128f") {
+            return slh_dsa.ParameterSet.Shake128f;
+        }
+        if (name == "SHAKE-192s") {
+            return slh_dsa.ParameterSet.Shake192s;
+        }
+        if (name == "SHAKE-192f") {
+            return slh_dsa.ParameterSet.Shake192f;
+        }
+        if (name == "SHAKE-256s") {
+            return slh_dsa.ParameterSet.Shake256s;
+        }
+        return slh_dsa.ParameterSet.Shake256f;
+    };
+
+    let hash_of = func(name: string) -> Algorithm {
+        if (name == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (name == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (name == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        if (name == "Sha512") {
+            return Algorithm.Sha512;
+        }
+        if (name == "Sha512_256") {
+            return Algorithm.Sha512_256;
+        }
+        if (name == "Sha3_224") {
+            return Algorithm.Sha3_224;
+        }
+        if (name == "Sha3_256") {
+            return Algorithm.Sha3_256;
+        }
+        if (name == "Sha3_384") {
+            return Algorithm.Sha3_384;
+        }
+        if (name == "Sha3_512") {
+            return Algorithm.Sha3_512;
+        }
+        if (name == "Shake128") {
+            return Algorithm.Shake128;
+        }
+        return Algorithm.Shake256;
+    };
+
+    export let test_verification = func {
+        last rows = vectors.verify;
+        let valid = 0;
+        for (let i = 0; i < rows.length; i += 9) {
+            last set = set_of(rows[i]);
+            last verifier = new slh_dsa.SlhDsaVerifier(test.assert_ok(slh_dsa.parse_public_key(set, decode(rows[i + 5]))));
+            last kind = rows[i + 1];
+            last message = decode(rows[i + 4]);
+            last signature = decode(rows[i + 6]);
+            last context = decode(rows[i + 3]);
+            last expected = rows[i + 7] == "true";
+            last actual: bool;
+            if (kind == "pure") {
+                actual = verifier.verify_with_context(message, signature, context);
+            } else if (kind == "prehash") {
+                actual = verifier.verify_prehash(message, signature, context, hash_of(rows[i + 2]));
+            } else {
+                actual = verifier.verify_internal(message, signature);
+            }
+            test.assert_equal_bool(expected, actual);
+            if (expected) {
+                valid++;
+            }
+        }
+        test.assert_equal_int32(6, valid);
+        test.assert_equal_int32(288, rows.length);
+    };
+);

@@ -25,7 +25,7 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | Executable | Component | Unified commands | Direct form | Loads |
 | --- | --- | --- | --- | --- |
 | `neura` | core | `--version`, `version`, `--help`, `help`, `capabilities --json` (built in); every other command is forwarded | | nothing: a static executable on Linux, holding the registry, the version line and the usage text |
-| `neura-run` | core | `run`, `runtime`, `serve` | `neura-run [run] ...`, `neura-run runtime ...`, `neura-run serve ...` | `libneura-core` |
+| `neura-run` | core | `run`, `runtime`, `serve` | `neura-run [run] ...`, `neura-run runtime ...`, `neura-run serve ...` | `libneura-core`; it also holds its own static copy of the project layer (`src/project`, `src/app`) for `neura run <bundle>`, so that a runtime-only installation runs bundles without `libneura-sdk` |
 | `neura-inspect` | core | `inspect`, `inspect-image` | `neura-inspect [inspect] ...`, `neura-inspect inspect-image ...` | `libneura-core` |
 | `neura-doctor` | core | `doctor` | `neura-doctor [doctor]` | `libneura-core`; in an SDK build it also holds the C import stage's libclang probe, linked statically, and does not load `libneura-sdk` |
 | `neura-update` | core | `update` | `neura-update [update] ...` | `libneura-core` |
@@ -41,8 +41,9 @@ Each row is one executable in `bin/`. A tool is a small `main` that loads the sh
 | `neura-explain` | sdk | `explain`, `--explain` | `neura-explain [explain] ...` | `libneura-sdk`, `libneura-core` |
 | `neura-tags` | sdk | `tags` | `neura-tags [tags] ...` | `libneura-sdk`, `libneura-core` |
 | `neura-debug` | sdk | `debug --stdio` | `neura-debug [debug] --stdio` | `libneura-sdk`, `libneura-core`; every debug session runs at tier 0 with the JIT off |
-| `neura-lsp` | sdk | `lsp --stdio` | `neura-lsp [lsp] --stdio` | `libneura-sdk`, `libneura-core` |
+| `neura-lsp` | sdk | `lsp --stdio`, `rename` | `neura-lsp [lsp] --stdio`, `neura-lsp rename ...` | `libneura-sdk`, `libneura-core` |
 | `neura-fmt` | sdk | `fmt ...` | `neura-fmt [fmt] ...` | `libneura-sdk`, `libneura-core` |
+| `neura-new`, `neura-package`, `neura-dev` | sdk | `new`, `package`, `dev` ([projects](Projects030.md)) | `neura-new [new] ...`, `neura-package [package] ...`, `neura-dev [dev] ...` | `libneura-sdk` (which holds the project layer once for them and `neurac`), `libneura-core` |
 | `neurad` | service | `runtime ...` is served by `neura-run` | `neurad --foreground --root ROOT`, and the private `neurad --worker` | `libneura-core`; built by the service milestone ([Service030.md](Service030.md)) and installed only with `--component service` |
 
 The bracketed word is optional. When the first argument of a tool is one of its own command names, it selects that command; otherwise the tool runs its first command. `neurac app.nra -o app.nvr` is therefore `neura build app.nra -o app.nvr`. A file whose name is exactly a command name is passed after the command, as in `neurac build check`. As its only argument, `--help` prints the tool's commands and `--version` prints the same line as `neura --version`; after a command word both keep their 0.2 meaning, which for most commands is an unknown option.

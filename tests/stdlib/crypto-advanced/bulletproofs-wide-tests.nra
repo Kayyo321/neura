@@ -1,0 +1,28 @@
+// test-options: --gpu=off --max-steps 20000000000
+let bulletproofs = import:Std.Crypto.Advanced.Bulletproofs;
+let hex = import:Std.Encoding.Hex;
+let merlin = import:Std.Crypto.Advanced.Merlin;
+let test = import:Std.Test;
+let uint64s = import:Std.Core.UInt64;
+let vectors = import:BulletproofsVectors;
+
+let BulletproofsWideTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let check = func(index: int) {
+        last rows = vectors.range_cases;
+        last at = 10 * index;
+        last bits = test.assert_ok(uint64s.parse(rows[at])) as int;
+        last value = test.assert_ok(uint64s.parse(rows[at + 1]));
+        let transcript: merlin.Transcript = new(decode(rows[at + 3]));
+        let [commitment, proof] = test.assert_ok(bulletproofs.prove_with(transcript, bits, value,
+            decode(rows[at + 2]), decode(rows[at + 4])));
+        test.assert_equal_string(rows[at + 5], hex.encode(commitment));
+        test.assert_equal_string(rows[at + 6], hex.encode(proof));
+        test.assert(bulletproofs.verify(transcript, bits, decode(rows[at + 5]), decode(rows[at + 6])));
+    };
+
+    export let test_16_bit_range = func => check(2);
+    export let test_32_bit_range = func => check(3);
+    export let test_64_bit_range = func => check(4);
+);

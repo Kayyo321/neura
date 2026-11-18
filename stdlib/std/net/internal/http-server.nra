@@ -9,6 +9,7 @@ export let HttpServer = module (
         Ok([uint32, string, string, string, string[list], int64, string, string, int64]),
         Error(uint32)
     );
+
     /// @brief Returned bytes or an unsigned host error code.
     export let BytesOutcome = enum (Ok(uint8[list]), Error(uint32));
     /// @brief Host success without a value or an unsigned host error code.
@@ -24,6 +25,7 @@ export let HttpServer = module (
     /// @brief Sends the status, the header pairs and the first body bytes; `complete` ends the body.
     export let respond = func(status: uint32, headers: string[list], body: uint8[list], complete: bool)
         -> DoneOutcome host("neura.http.server.respond", 1);
+
     /// @brief Sends further response body bytes after a respond whose body was not complete.
     export let write_body = func(bytes: uint8[list]) -> DoneOutcome host("neura.http.server.body.write", 1);
     /// @brief Ends a response body that respond left open.
@@ -34,6 +36,7 @@ export let HttpServer = module (
     /// named fields.
     export let log = func(level: uint32, message: string, fields: string[list]) -> DoneOutcome
         host("neura.app.log", 1);
+
     /// @brief Adds `value` to the host counter `name` (kind 1) or sets the host gauge `name` (kind 2), shown
     /// on the admin listener's /metrics.
     export let metric = func(name: string, kind: uint32, value: int64) -> DoneOutcome host("neura.app.metric", 1);

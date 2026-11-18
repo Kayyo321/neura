@@ -33,7 +33,7 @@ namespace fs = std::filesystem;
 constexpr auto reserved = std::to_array<std::string_view>({
     "let", "const", "export", "override", "func", "module", "class", "import", "new", "destroy", "if", "else",
     "while", "do", "for", "in", "break", "continue", "return", "true", "false", "as", "is", "nil", "enum",
-    "match", "and", "or", "interface", "implements", "promote", "static", "singleton", "this", "int", "int8",
+    "match", "and", "or", "interface", "implements", "promote", "static", "singleton", "not", "typeof", "this", "int", "int8",
     "int16", "int32", "int64", "uint", "uint8", "uint16", "uint32", "uint64", "float16", "bfloat16",
     "float32", "float64", "float", "bool", "string", "void", "unit", "host", "callback", "init",
 });

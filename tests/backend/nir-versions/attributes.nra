@@ -29,6 +29,9 @@ let Attributes = module:program.Entry (
         };
     );
 
+    // A string constant: the descriptor an HTML factory's ui.factory attribute names.
+    const SumLabel = "sum_to(10) = ";
+
     let checksum = func(value: int32) -> int32 {
         return value * 3 + 1;
     };
@@ -51,7 +54,7 @@ let Attributes = module:program.Entry (
         let box = new Box<int32>();
         box.put(checksum(2));
         console.print_line("box = " + box.get().to_string());
-        console.print_line("sum_to(10) = " + sum_to(10).to_string());
+        console.print_line(SumLabel + sum_to(10).to_string());
         return program.ExitCode.Ok;
     };
 );

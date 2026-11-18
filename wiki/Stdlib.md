@@ -15,6 +15,7 @@ The [standard library specification](Stdlib-Design) gives the shared contracts. 
 | [`Std.Collections.BitSet`](Stdlib-Collections-BitSet) | [Contracts](Stdlib-Collections-BitSet#detailed-contracts) | [Declarations](Stdlib-Collections-BitSet#exported-declarations) |
 | [`Std.Collections.Collection`](Stdlib-Collections-Collection) | [Contracts](Stdlib-Collections-Collection#detailed-contracts) | [Declarations](Stdlib-Collections-Collection#exported-declarations) |
 | [`Std.Collections.Deque`](Stdlib-Collections-Deque) | [Contracts](Stdlib-Collections-Deque#detailed-contracts) | [Declarations](Stdlib-Collections-Deque#exported-declarations) |
+| [`Std.Collections.Frozen`](Stdlib-Collections-Frozen) | [Contracts](Stdlib-Collections-Frozen#detailed-contracts) | [Declarations](Stdlib-Collections-Frozen#exported-declarations) |
 | [`Std.Collections.HashMap`](Stdlib-Collections-HashMap) | [Contracts](Stdlib-Collections-HashMap#detailed-contracts) | [Declarations](Stdlib-Collections-HashMap#exported-declarations) |
 | [`Std.Collections.HashSet`](Stdlib-Collections-HashSet) | [Contracts](Stdlib-Collections-HashSet#detailed-contracts) | [Declarations](Stdlib-Collections-HashSet#exported-declarations) |
 | [`Std.Collections.ImmutableList`](Stdlib-Collections-ImmutableList) | [Contracts](Stdlib-Collections-ImmutableList#detailed-contracts) | [Declarations](Stdlib-Collections-ImmutableList#exported-declarations) |
@@ -227,6 +228,12 @@ Native libraries, memory, and calls; see [Foreign interop](ForeignInterop). Gran
 | [`Std.Math.BigInteger`](Stdlib-Math-BigInteger) | [Contracts](Stdlib-Math-BigInteger#detailed-contracts) | [Declarations](Stdlib-Math-BigInteger#exported-declarations) |
 | [`Std.Math.Math`](Stdlib-Math-Math) | [Contracts](Stdlib-Math-Math#detailed-contracts) | [Declarations](Stdlib-Math-Math#exported-declarations) |
 
+### `Std.Desktop`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Desktop`](Stdlib-Desktop) | [Contracts](Stdlib-Desktop#detailed-contracts) | [Declarations](Stdlib-Desktop#exported-declarations) |
+
 ### `Std.Net`
 
 The networking contracts, TCP streams and listeners, and the packages added in 0.3.0 (proposed; some host calls are stubs). The [specification](Stdlib-Design#114-stdnet) describes each package, and the design note [`docs/design/Net030.md`](https://github.com/Kayyo321/neura/blob/main/docs/design/Net030.md) in the repository lists what each provides and what each stub needs.
@@ -379,6 +386,7 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | [`Std.Net.Socket.UnixListener`](Stdlib-Net-Socket-UnixListener) | [Contracts](Stdlib-Net-Socket-UnixListener#detailed-contracts) | [Declarations](Stdlib-Net-Socket-UnixListener#exported-declarations) |
 | [`Std.Net.Socket.UnixStream`](Stdlib-Net-Socket-UnixStream) | [Contracts](Stdlib-Net-Socket-UnixStream#detailed-contracts) | [Declarations](Stdlib-Net-Socket-UnixStream#exported-declarations) |
 | [`Std.Net.TcpListener`](Stdlib-Net-TcpListener) | [Contracts](Stdlib-Net-TcpListener#detailed-contracts) | [Declarations](Stdlib-Net-TcpListener#exported-declarations) |
+| [`Std.Net.Http.Fetch`](Stdlib-Net-Http-Fetch) | [Contracts](Stdlib-Net-Http-Fetch#api-and-shared-contracts) | [Declarations](Stdlib-Net-Http-Fetch#exported-declarations) |
 | [`Std.Net.TcpStream`](Stdlib-Net-TcpStream) | [Contracts](Stdlib-Net-TcpStream#detailed-contracts) | [Declarations](Stdlib-Net-TcpStream#exported-declarations) |
 | [`Std.Net.Tls.Acme`](Stdlib-Net-Tls-Acme) | [Contracts](Stdlib-Net-Tls-Acme#detailed-contracts) | [Declarations](Stdlib-Net-Tls-Acme#exported-declarations) |
 | [`Std.Net.Tls.DynamicCertResolver`](Stdlib-Net-Tls-DynamicCertResolver) | [Contracts](Stdlib-Net-Tls-DynamicCertResolver#detailed-contracts) | [Declarations](Stdlib-Net-Tls-DynamicCertResolver#exported-declarations) |
@@ -407,6 +415,29 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | Module | Detailed contracts | Exported declarations |
 | --- | --- | --- |
 | [`Std.Program`](Stdlib-Program) | [Contracts](Stdlib-Program#detailed-contracts) | [Declarations](Stdlib-Program#exported-declarations) |
+
+### `Std.Reflect`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Reflect.Core.TypeInfo`](Stdlib-Reflect-Core-TypeInfo) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-Core-TypeInfo#exported-declarations) |
+| [`Std.Reflect.Type.TypeKind`](Stdlib-Reflect-Type-TypeKind) | [Core language](CoreLanguage#typeof) | [Declarations](Stdlib-Reflect-Type-TypeKind#exported-declarations) |
+| [`Std.Reflect.Core.TypeId`](Stdlib-Reflect-Core-TypeId) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-TypeId#exported-declarations) |
+| [`Std.Reflect.Core.MemoryLayout`](Stdlib-Reflect-Core-MemoryLayout) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-MemoryLayout#exported-declarations) |
+| [`Std.Reflect.Core.ReflectPolicy`](Stdlib-Reflect-Core-ReflectPolicy) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-ReflectPolicy#exported-declarations) |
+| [`Std.Reflect.Core.TypeRegistry`](Stdlib-Reflect-Core-TypeRegistry) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-TypeRegistry#exported-declarations) |
+| [`Std.Reflect.Core.Reflectable`](Stdlib-Reflect-Core-Reflectable) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Core-Reflectable#exported-declarations) |
+| [`Std.Reflect.Type.TypeDescriptor`](Stdlib-Reflect-Type-TypeDescriptor) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Type-TypeDescriptor#exported-declarations) |
+| [`Std.Reflect.Member.Members`](Stdlib-Reflect-Member-Members) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Member-Members#exported-declarations) |
+| [`Std.Reflect.Member.ValueCursor`](Stdlib-Reflect-Member-ValueCursor) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Member-ValueCursor#exported-declarations) |
+| [`Std.Reflect.Attribute.Attributes`](Stdlib-Reflect-Attribute-Attributes) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Attribute-Attributes#exported-declarations) |
+| [`Std.Reflect.Dynamic.Variant`](Stdlib-Reflect-Dynamic-Variant) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Dynamic-Variant#exported-declarations) |
+| [`Std.Reflect.Codec.JsonBridge`](Stdlib-Reflect-Codec-JsonBridge) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Codec-JsonBridge#exported-declarations) |
+| [`Std.Reflect.Codec.Walk`](Stdlib-Reflect-Codec-Walk) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Codec-Walk#exported-declarations) |
+| [`Std.Reflect.Codec.SchemaBuilder`](Stdlib-Reflect-Codec-SchemaBuilder) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Codec-SchemaBuilder#exported-declarations) |
+| [`Std.Reflect.Ffi.Abi`](Stdlib-Reflect-Ffi-Abi) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Ffi-Abi#exported-declarations) |
+| [`Std.Reflect.Ffi.ForeignCall`](Stdlib-Reflect-Ffi-ForeignCall) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Ffi-ForeignCall#exported-declarations) |
+| [`Std.Reflect.Proxy.DynamicProxy`](Stdlib-Reflect-Proxy-DynamicProxy) | [Std.Reflect](Stdlib-Design#22-stdreflect) | [Declarations](Stdlib-Reflect-Proxy-DynamicProxy#exported-declarations) |
 
 ### `Std.Random`
 
@@ -445,6 +476,23 @@ The networking contracts, TCP streams and listeners, and the packages added in 0
 | [`Std.Time.Stopwatch`](Stdlib-Time-Stopwatch) | [Contracts](Stdlib-Time-Stopwatch#detailed-contracts) | [Declarations](Stdlib-Time-Stopwatch#exported-declarations) |
 | [`Std.Time.SystemClock`](Stdlib-Time-SystemClock) | [Contracts](Stdlib-Time-SystemClock#detailed-contracts) | [Declarations](Stdlib-Time-SystemClock#exported-declarations) |
 | [`Std.Time.ZoneOffset`](Stdlib-Time-ZoneOffset) | [Contracts](Stdlib-Time-ZoneOffset#detailed-contracts) | [Declarations](Stdlib-Time-ZoneOffset#exported-declarations) |
+
+### `Std.Ui`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Ui`](Stdlib-Ui) | [Contracts](Stdlib-Ui#detailed-contracts) | [Declarations](Stdlib-Ui#exported-declarations) |
+| [`Std.Ui.Commands`](Stdlib-Ui-Commands) | [Contracts](Stdlib-Ui-Commands#detailed-contracts) | [Declarations](Stdlib-Ui-Commands#exported-declarations) |
+| [`Std.Ui.Controls`](Stdlib-Ui-Controls) | [Contracts](Stdlib-Ui-Controls#detailed-contracts) | [Declarations](Stdlib-Ui-Controls#exported-declarations) |
+| [`Std.Ui.Forms`](Stdlib-Ui-Forms) | [Contracts](Stdlib-Ui-Forms#detailed-contracts) | [Declarations](Stdlib-Ui-Forms#exported-declarations) |
+| [`Std.Ui.ModelHost`](Stdlib-Ui-ModelHost) | [Contracts](Stdlib-Ui-ModelHost#detailed-contracts) | [Declarations](Stdlib-Ui-ModelHost#exported-declarations) |
+| [`Std.Ui.Routing`](Stdlib-Ui-Routing) | [Contracts](Stdlib-Ui-Routing#detailed-contracts) | [Declarations](Stdlib-Ui-Routing#exported-declarations) |
+
+### `Std.Web`
+
+| Module | Detailed contracts | Exported declarations |
+| --- | --- | --- |
+| [`Std.Web`](Stdlib-Web) | [Contracts](Stdlib-Web#detailed-contracts) | [Declarations](Stdlib-Web#exported-declarations) |
 
 ## Specification sections
 

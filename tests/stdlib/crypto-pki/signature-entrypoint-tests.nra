@@ -1,0 +1,128 @@
+// test-options: --gpu=off --max-steps 30000000000
+let certificate = import:Std.Crypto.Pki.Certificate;
+let csr = import:Std.Crypto.Pki.Csr;
+let der = import:Std.Crypto.Pki.Der;
+let csr_vectors = import:CertVectors;
+let ct_vectors = import:CtVectors;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let ocsp = import:Std.Crypto.Pki.Ocsp;
+let ocsp_vectors = import:OcspVectors;
+let path_vectors = import:PathVectors;
+let paths = import:Std.Crypto.Pki.PathValidation;
+let public_keys = import:Std.Crypto.Pki.PublicKeyInfo;
+let signature = import:Std.Crypto.Pki.SignatureVerifier;
+let test = import:Std.Test;
+let transparency = import:Std.Crypto.Pki.Transparency;
+let utf8 = import:Std.Encoding.Utf8;
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+
+// Exercise the default verifier through PKI's certificate, CSR, OCSP and RFC 6962 entry points.
+let SignatureEntrypointTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let certificate_named = func(rows: string[], name: string) -> certificate.Certificate {
+        for (let i = 0; i < rows.length; i += 2) {
+            if (rows[i] == name) {
+                return test.assert_ok(certificate.parse(decode(rows[i + 1])));
+            }
+        }
+        test.fail("no certificate " + name);
+        trap_with_message("missing certificate vector");
+    };
+
+    let csr_der = func(name: string) -> uint8[list] {
+        last rows = csr_vectors.csrs;
+        for (let i = 0; i < rows.length; i += 3) {
+            if (rows[i] == name && rows[i + 1] == "der") {
+                return decode(rows[i + 2]);
+            }
+        }
+        test.fail("no CSR " + name);
+        trap_with_message("missing CSR vector");
+    };
+
+    let code_of = func(error: Error) -> string {
+        match (error) {
+            Error.Custom(detail) => {
+                return detail.code();
+            },
+            _ => {
+                return "not custom";
+            },
+        }
+        return "";
+    };
+
+    export let test_default_path_verifier = func {
+        last trust = certificate_named(path_vectors.certificates, "rsa-root");
+        last leaf = certificate_named(path_vectors.certificates, "rsa-pss-leaf");
+        let options: paths.ValidationOptions = new(instant.of_epoch_seconds(1780000000, 0));
+        options.dns_name = "rsa.example.com";
+        last verified = test.assert_ok(paths.validate(leaf, new, new([trust]), options));
+        test.assert_equal_int32(2, verified.chain.length);
+        let altered = der.copy_range(leaf.der_bytes, 0, leaf.der_bytes.length);
+        altered[altered.length - 1] = altered[altered.length - 1] ^ 1;
+        last bad = test.assert_ok(certificate.parse(altered));
+        test.assert_equal_string("pki.signature", code_of(test.assert_err(paths.validate(bad, new, new([trust]), options))));
+    };
+
+    export let test_default_csr_verifier = func {
+        last p256 = test.assert_ok(csr.parse(csr_der("csr-p256")));
+        test.assert(csr.verify_signature(p256) == signature.SignatureCheck.Valid);
+        let bytes = csr_der("csr-ed25519");
+        last ed25519 = test.assert_ok(csr.parse(bytes));
+        test.assert(ed25519.verify_signature() == signature.SignatureCheck.Valid);
+        bytes[bytes.length - 1] = bytes[bytes.length - 1] ^ 1;
+        last bad = test.assert_ok(csr.parse(bytes));
+        test.assert(bad.verify_signature() == signature.SignatureCheck.Invalid);
+    };
+
+    export let test_default_ocsp_verifier = func {
+        last leaf = certificate_named(ocsp_vectors.certificates, "leaf");
+        last issuer = certificate_named(ocsp_vectors.certificates, "inter");
+        last rows = ocsp_vectors.responses;
+        for (let i = 0; i < rows.length; i += 7) {
+            if (rows[i] == "resp-good-direct") {
+                last response = test.assert_ok(ocsp.parse_response(decode(rows[i + 1])));
+                last produced = test.assert_ok(int64s.parse(rows[i + 3]));
+                last at = instant.of_epoch_seconds(produced + 60, 0);
+                last verified = test.assert_ok(ocsp.verify(response, leaf, issuer, at, 300, new));
+                test.assert(verified.status == ocsp.CertStatus.Good);
+                // The response's parsed signature is independent of the CertificateID and responder fields.
+                last basic = test.assert_some(response.basic);
+                basic.signature[basic.signature.length - 1] = basic.signature[basic.signature.length - 1] ^ 1;
+                test.assert_equal_string("ocsp.signature", code_of(test.assert_err(
+                    ocsp.verify(response, leaf, issuer, at, 300, new))));
+                return;
+            }
+        }
+        test.fail("no OCSP response vector");
+    };
+
+    export let test_default_ct_verifier = func {
+        last generated = ct_vectors.generated;
+        last log = test.assert_ok(public_keys.parse_der(decode(generated[0])));
+        last leaf = test.assert_ok(certificate.parse(decode(generated[2])));
+        last scts = test.assert_ok(transparency.parse_list(decode(generated[1])));
+        last entry = transparency.EntryType.X509Entry;
+        last no_issuer = Optional<certificate.Certificate>.None;
+        let _ = test.assert_ok(transparency.verify_sct(scts[0], entry, leaf, no_issuer, log));
+        let bytes = decode(generated[1]);
+        bytes[bytes.length - 1] = bytes[bytes.length - 1] ^ 1;
+        last altered = test.assert_ok(transparency.parse_list(bytes));
+        test.assert_equal_string("ct.signature", code_of(test.assert_err(
+            transparency.verify_sct(altered[1], entry, leaf, no_issuer, log))));
+
+        // The source fixture keeps apostrophes for quotes and angle brackets for braces.
+        let json: uint8[list] = new;
+        for (let byte in utf8.encode(ct_vectors.sth[0])) {
+            json.append(byte == 39 ? 34 : (byte == 60 ? 123 : (byte == 62 ? 125 : byte)));
+        }
+        last sth = test.assert_ok(transparency.parse_sth_json(utf8.decode_lossy(json)));
+        let _ = test.assert_ok(transparency.verify_sth(sth, log));
+    };
+);

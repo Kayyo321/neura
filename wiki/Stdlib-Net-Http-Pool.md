@@ -58,27 +58,27 @@ The following public declarations are taken from the module source; each links t
   The computed wait after attempt `attempt` (1-based): base times 2^(attempt-1), at most the cap.
 - **Pool.RetryPolicy** · [`export let decide = func(request: http.ClientRequest, attempt: int, outcome: Result<http.Response>, now: clocks.Clock) -> RetryDecision`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L215)
   The decision after attempt `attempt` ended with `outcome`; `now` resolves an HTTP-date `Retry-After`. Tagged `#NoDiscard`.
-- **Pool.RetryPolicy** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L260)
+- **Pool.RetryPolicy** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L256)
   The text "RetryPolicy(N attempts)".
-- **Pool** · [`export let retry_after = func(response: http.Response, now: clocks.Clock) -> Optional<durations.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L266)
+- **Pool** · [`export let retry_after = func(response: http.Response, now: clocks.Clock) -> Optional<durations.Duration>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L262)
   The wait a `Retry-After` field asks for: delay-seconds, or an HTTP-date minus the clock's now (zero when past); None when absent or invalid (RFC 9110 section 10.2.3). Tagged `#NoDiscard`.
-- **Pool** · [`export let PooledClient = class implements services.Service<http.ClientRequest, http.Response>, http.Transport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L310)
+- **Pool** · [`export let PooledClient = class implements services.Service<http.ClientRequest, http.Response>, http.Transport`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L306)
   A client that limits exchanges per origin and retries by a policy, over a transport; a `Std.Net.Service<ClientRequest, Response>` and itself a `Transport`. Tagged `#Final`, `#NotThreadSafe`.
-- **Pool.PooledClient** · [`export last limits: HostLimits`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L314)
+- **Pool.PooledClient** · [`export last limits: HostLimits`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L310)
   The per-origin limits.
-- **Pool.PooledClient** · [`export last policy: RetryPolicy`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L316)
+- **Pool.PooledClient** · [`export last policy: RetryPolicy`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L312)
   The retry policy.
-- **Pool.PooledClient** · [`export let init = func(carrier: http.Transport, origin_limits: HostLimits, retries: RetryPolicy, time: clocks.Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L323)
+- **Pool.PooledClient** · [`export let init = func(carrier: http.Transport, origin_limits: HostLimits, retries: RetryPolicy, time: clocks.Clock)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L319)
   A pooled client.
-- **Pool.PooledClient** · [`export let send = func(request: http.ClientRequest) -> Result<http.Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L333)
+- **Pool.PooledClient** · [`export let send = func(request: http.ClientRequest) -> Result<http.Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L329)
   Sends `request`: fails with "http.pool.busy" when its origin is at its limit; otherwise attempts until the policy stops, sleeping between attempts, and returns the last outcome. Tagged `#NoDiscard`.
-- **Pool.PooledClient** · [`export let fetch = func(request: http.ClientRequest) -> Result<http.Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L370)
+- **Pool.PooledClient** · [`export let fetch = func(request: http.ClientRequest) -> Result<http.Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L366)
   `send`, as a transport.
-- **Pool.PooledClient** · [`export let call = func(request: http.ClientRequest) -> Result<http.Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L373)
+- **Pool.PooledClient** · [`export let call = func(request: http.ClientRequest) -> Result<http.Response>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L369)
   `send`, as a service.
-- **Pool.PooledClient** · [`export let attempts = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L376)
+- **Pool.PooledClient** · [`export let attempts = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L372)
   The number of attempts the last `send` made.
-- **Pool.PooledClient** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L379)
+- **Pool.PooledClient** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/pool.nra#L375)
   The text "PooledClient".
 <!-- END SOURCE API -->
 

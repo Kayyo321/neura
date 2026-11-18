@@ -134,10 +134,7 @@ export let UnicodeCharacter = module (
         if (code_point >= 65313 && code_point <= 65338) {
             return (code_point - 65303) as int;
         }
-        if (code_point >= 65345 && code_point <= 65370) {
-            return (code_point - 65335) as int;
-        }
-        return -1;
+        return if (code_point >= 65345 && code_point <= 65370) -> (code_point - 65335) as int else -> -1;
     };
 
     /// @brief Java's getNumericValue over the Unicode Numeric_Value property: 10 through 35 for Latin letters,
@@ -218,7 +215,7 @@ export let UnicodeCharacter = module (
     /// @brief Traps with "invalid argument: not a Unicode scalar value" unless the value is a scalar value.
     #[Pure, ThreadSafe]
     export let check_scalar = func(code_point: uint32) {
-        if (!is_scalar(code_point)) {
+        if (not is_scalar(code_point)) {
             trap_with_message("invalid argument: not a Unicode scalar value");
         }
     };

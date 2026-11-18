@@ -147,6 +147,9 @@ private:
         // docs/design/Lifetime030.md: a cleanup list's operations are its
         // children; Pending and Yield do nothing of their own.
         case IrOp::Cleanup: case IrOp::Pending: case IrOp::Yield:
+        // Packing, reading the tag of, and unpacking an `any` have no effect of
+        // their own, as EffectAnalysis and the purity analysis agree.
+        case IrOp::AnyPack: case IrOp::AnyTag: case IrOp::AnyUnpack:
             break;
         case IrOp::Load:
             if (!local(node.symbol)) flags.traps = true;
@@ -185,7 +188,7 @@ private:
         case IrOp::TextEqual: case IrOp::Project: case IrOp::EnumTag: case IrOp::EnumProject:
             flags.traps = true;
             break;
-        case IrOp::TextSlice: case IrOp::TextFromUtf8: case IrOp::Append: case IrOp::RemoveAt: case IrOp::String:
+        case IrOp::TextSlice: case IrOp::TextFromUtf8: case IrOp::ConcatText: case IrOp::Append: case IrOp::RemoveAt: case IrOp::String:
         case IrOp::Allocate: case IrOp::Collection: case IrOp::RepeatCollection: case IrOp::Tuple:
         case IrOp::EnumConstruct: case IrOp::MakeClosure:
             flags.allocates = flags.traps = true;

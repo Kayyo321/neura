@@ -60,6 +60,7 @@ std::vector<TlsContextHandle> load_contexts(std::span<const ListenEndpoint> endp
 #ifdef NEURA_SERVER_TLS_ENABLED
         contexts.push_back(load_tls_context(endpoint.tls->certificate_chain, endpoint.tls->private_key, offer_http2));
 #else
+        (void)offer_http2;
         throw std::invalid_argument("this server build has no TLS adapter");
 #endif
     }

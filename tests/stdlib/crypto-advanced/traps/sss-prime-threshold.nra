@@ -1,0 +1,12 @@
+// test-options: --gpu=off
+// status: 134
+// stderr: invalid argument: prime-field Shamir threshold
+let program = import:Std.Program;
+let sss = import:Std.Crypto.Advanced.Sss;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let _ = sss.combine_prime(new, 1, 65536);
+        return program.ExitCode.Ok;
+    };
+);

@@ -74,10 +74,8 @@ export let Ledbat = module (
         /// @brief The filtered current delay minus the base delay in microseconds; 0 before any sample.
         #Pure
         export let queuing_delay_micros = func -> int64 {
-            if (current_delays.length == 0) {
-                return 0;
-            }
-            return minimum(current_delays) - minimum(base_delays);
+            return if (current_delays.length == 0) -> 0
+                else -> minimum(current_delays) - minimum(base_delays);
         };
 
         /// @brief Adds a sent packet to the bytes in flight.
@@ -153,7 +151,7 @@ export let Ledbat = module (
 
         /// @brief Text such as "Ledbat(window 2400, in flight 0)".
         export let.override to_string = func -> string =>
-            "Ledbat(window " + cwnd.to_string() + ", in flight " + in_flight.to_string() + ")";
+            "Ledbat(window " .. cwnd.to_string() .. ", in flight " .. in_flight.to_string() .. ")";
 
         /// @brief update_base_delay of section 2.4.2.
         let update_base_delay = func(delay: int64, now_nanos: int64) {

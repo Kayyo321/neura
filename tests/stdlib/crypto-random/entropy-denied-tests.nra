@@ -1,4 +1,4 @@
-// test-options: --deny-entropy
+// test-options: --gpu=off --deny-entropy
 let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
 let entropy = import:Std.Crypto.Random.Entropy;
 let error = import:Std.Core.Error;
@@ -9,6 +9,18 @@ let test = import:Std.Test;
 let EntropyDeniedTests = module (
     export let test_os_bytes_denied = func {
         last failure = test.assert_err(entropy.os_bytes(16));
+        test.assert_equal_string("CapabilityDenied: entropy request failed", error.message(failure));
+    };
+
+    export let test_hardware_bytes_denied = func {
+        for (let count in 0 ..= 1) {
+            last failure = test.assert_err(entropy.hardware_bytes(count));
+            test.assert_equal_string("CapabilityDenied: hardware entropy request failed", error.message(failure));
+        }
+    };
+
+    export let test_fused_seed_denied = func {
+        last failure = test.assert_err(entropy.fused_seed());
         test.assert_equal_string("CapabilityDenied: entropy request failed", error.message(failure));
     };
 

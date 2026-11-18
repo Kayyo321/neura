@@ -1,0 +1,14 @@
+error[E1100]: a string chain joins only strings, but this operand is bool
+ --> $DIR/chain-comparison.nra:3:68
+  |
+3 | let same = func(a: string, b: string, c: string) -> string => a .. b == c;
+  |                                                                    ^^^^^^ this is bool
+  |
+  = note: '..' converts nothing to text; call 'to_string()' to join a value
+  = help: operators bind more tightly than '..'; parenthesize the chain to apply one to the joined text, as in '(a .. b) == c'
+help: convert it to text
+  |
+3 | let same = func(a: string, b: string, c: string) -> string => a .. (b == c).to_string();
+  |                                                                    +      +++++++++++++
+
+For more information about this error, try `neura explain E1100`.

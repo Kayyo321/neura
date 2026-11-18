@@ -73,7 +73,7 @@ export let TokenBucket = module (
         };
 
         /// @brief Text such as "TokenBucket(capacity 10)".
-        export let.override to_string = func -> string => "TokenBucket(capacity " + capacity.to_string() + ")";
+        export let.override to_string = func -> string => "TokenBucket(capacity " .. capacity.to_string() .. ")";
 
         /// @brief Adds the units earned since the last refill.
         let refill = func -> Result<bool> {

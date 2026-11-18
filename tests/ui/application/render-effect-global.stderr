@@ -1,0 +1,13 @@
+error[E1010]: effect not allowed while rendering: it reaches 'count_render', which assigns the binding 'renders'
+ --> $DIR/render-effect-global.nra:9:30
+  |
+5 |     renders = renders + 1;
+  |     ------- assigns the binding 'renders' here
+...
+9 | let badge = html() { <span>{ count_render() }</span> };
+  |                              ^^^^^^^^^^^^^^ calls 'count_render' while the view is built
+  |
+  = note: a template may allocate and read, but it may not write what it did not create, assign a binding, make a host request, start or wait for tasks, or call a function value
+  = help: do it in a handler or a command, and pass the result to the factory
+
+For more information about this error, try `neura explain E1010`.

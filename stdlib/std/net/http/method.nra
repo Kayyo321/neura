@@ -14,9 +14,7 @@ export let Method = module (
     /// @brief The method named by `text` (exact case), or None when `text` is not a token.
     #[NoDiscard, Pure, ThreadSafe]
     export let parse = func(text: string) -> Optional<HttpMethod> {
-        if (!headers.is_token(text)) {
-            return Optional<HttpMethod>.None;
-        }
+        return Optional<HttpMethod>.None unless headers.is_token(text);
         last known = standard(text);
         return match (known) {
             Optional.Some(m) => Optional<HttpMethod>.Some(m),
@@ -27,16 +25,32 @@ export let Method = module (
     /// @brief One of the nine standard methods named by `text`, or None.
     #[NoDiscard, Pure, ThreadSafe]
     export let standard = func(text: string) -> Optional<HttpMethod> {
-        if (text == "GET") { return Optional<HttpMethod>.Some(HttpMethod.Get); }
-        if (text == "HEAD") { return Optional<HttpMethod>.Some(HttpMethod.Head); }
-        if (text == "POST") { return Optional<HttpMethod>.Some(HttpMethod.Post); }
-        if (text == "PUT") { return Optional<HttpMethod>.Some(HttpMethod.Put); }
-        if (text == "DELETE") { return Optional<HttpMethod>.Some(HttpMethod.Delete); }
-        if (text == "CONNECT") { return Optional<HttpMethod>.Some(HttpMethod.Connect); }
-        if (text == "OPTIONS") { return Optional<HttpMethod>.Some(HttpMethod.Options); }
-        if (text == "TRACE") { return Optional<HttpMethod>.Some(HttpMethod.Trace); }
-        if (text == "PATCH") { return Optional<HttpMethod>.Some(HttpMethod.Patch); }
-        return Optional<HttpMethod>.None;
+        if (text == "GET") {
+            return Optional<HttpMethod>.Some(HttpMethod.Get);
+        }
+        if (text == "HEAD") {
+            return Optional<HttpMethod>.Some(HttpMethod.Head);
+        }
+        if (text == "POST") {
+            return Optional<HttpMethod>.Some(HttpMethod.Post);
+        }
+        if (text == "PUT") {
+            return Optional<HttpMethod>.Some(HttpMethod.Put);
+        }
+        if (text == "DELETE") {
+            return Optional<HttpMethod>.Some(HttpMethod.Delete);
+        }
+        if (text == "CONNECT") {
+            return Optional<HttpMethod>.Some(HttpMethod.Connect);
+        }
+        if (text == "OPTIONS") {
+            return Optional<HttpMethod>.Some(HttpMethod.Options);
+        }
+        if (text == "TRACE") {
+            return Optional<HttpMethod>.Some(HttpMethod.Trace);
+        }
+        return if (text == "PATCH") -> Optional<HttpMethod>.Some(HttpMethod.Patch)
+            else -> Optional<HttpMethod>.None;
     };
 
     /// @brief The method's token.

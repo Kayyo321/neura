@@ -1,0 +1,12 @@
+error[E0453]: escaping closure requires new func
+ --> $DIR/unowned-render.nra:9:40
+  |
+9 |     return ui.component<int32>(number, func(value: int32) -> ui.View => view(value + offset));
+  |                                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+help: construct an owned closure
+  |
+9 | ...eturn ui.component<int32>(number, new func(value: int32) -> ui.View => view(value + offset));
+  |                                      ++++
+
+For more information about this error, try `neura explain E0453`.

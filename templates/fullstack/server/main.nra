@@ -1,0 +1,36 @@
+// The stock server: neura-server-host runs it once for each request (docs/runtime/ServerHost.md). GET /parts
+// lists the starting parts; POST /parts?name=... checks a name with the shared contract.
+let app = import:Std.App;
+let parts = import:Contracts.Parts;
+let program = import:Std.Program;
+let strings = import:Std.Text.Strings;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Main = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode => app.run(serve);
+
+    /// @brief Hands the routing function to the host for this execution's one request.
+    let serve = func(context: app.Context) -> Result<Unit> =>
+        context.serve(app.handler_of(new func(request: app.Request) -> Result<app.Response> => route(request)));
+
+    /// @brief Answers GET /parts and POST /parts; everything else is 404.
+    let route = func(request: app.Request) -> Result<app.Response> {
+        if (request.path == "/parts" && request.method == "GET") {
+            let text = "";
+            for (let name: string in parts.starter_names()) {
+                text = $"{text}{name}\n";
+            }
+            return Result<app.Response>.Ok(app.text(200, text));
+        }
+        if (request.path == "/parts" && request.method == "POST") {
+            last name = strings.starts_with(request.query, "name=")
+                ? request.query.slice(5, request.query.byte_length) : "";
+            if (!parts.valid_name(name)) {
+                return Result<app.Response>.Ok(app.text(422, "rejected: a name has 1 to 40 bytes\n"));
+            }
+            return Result<app.Response>.Ok(app.text(201, $"accepted: {name}\n"));
+        }
+        return Result<app.Response>.Ok(app.text(404, "not found\n"));
+    };
+);

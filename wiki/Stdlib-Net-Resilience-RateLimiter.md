@@ -34,9 +34,9 @@ The following public declarations are taken from the module source; each links t
   A decision with each part.
 - **RateLimiter.RateDecision** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limiter.nra#L43)
   Equal when every part is equal.
-- **RateLimiter.RateDecision** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limiter.nra#L53)
+- **RateLimiter.RateDecision** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limiter.nra#L52)
   Combines the hashes of the parts in order.
-- **RateLimiter.RateDecision** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limiter.nra#L61)
+- **RateLimiter.RateDecision** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/resilience/rate-limiter.nra#L60)
   Text such as "RateDecision(allowed, remaining 2, retry after PT0S, reset after PT0.1S)".
 <!-- END SOURCE API -->
 

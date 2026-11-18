@@ -1,0 +1,5 @@
+call Greeter.greet(Ada, 2)
+hi Ada x2
+call Greeter.reset()
+call Greeter.count()
+3

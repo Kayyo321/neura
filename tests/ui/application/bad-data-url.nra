@@ -1,0 +1,1 @@
+let view = html() { <img alt="" src="data:text/html,bad"> };

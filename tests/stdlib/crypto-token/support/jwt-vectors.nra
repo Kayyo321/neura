@@ -1,0 +1,9 @@
+// Generated; do not edit. Regenerate with the script named below.
+// python3 scripts/crypto-vectors/gen-token-jwt.py
+// RFC 7519 section 3.1, https://www.rfc-editor.org/rfc/rfc7519.txt
+export let JwtVectors = module (
+    /// @brief Rows of 3 cells: JWT payload bytes, exp, iss.
+    export let example: string[] = [
+        "7b22697373223a226a6f65222c0d0a2022657870223a313330303831393338302c0d0a2022687474703a2f2f6578616d706c652e636f6d2f69735f726f6f74223a747275657d", "1300819380", "joe"
+    ];
+);

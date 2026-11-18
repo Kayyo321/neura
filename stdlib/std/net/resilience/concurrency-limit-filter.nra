@@ -49,7 +49,7 @@ export let ConcurrencyLimitFilter = module (
             if (active >= allowed) {
                 shed++;
                 return Result<Resp>.Err(errors.custom(ExceededCode,
-                    "concurrency limit of " + allowed.to_string() + " reached"));
+                    "concurrency limit of " .. allowed.to_string() .. " reached"));
             }
             last start = clock.monotonic()?;
             active++;
@@ -72,7 +72,7 @@ export let ConcurrencyLimitFilter = module (
 
         /// @brief Text such as "ConcurrencyLimitFilter(VegasLimit(limit 20), 0 in flight)".
         export let.override to_string = func -> string =>
-            "ConcurrencyLimitFilter(" + limit.to_string() + ", " + active.to_string() + " in flight)";
+            "ConcurrencyLimitFilter(" .. limit.to_string() .. ", " .. active.to_string() .. " in flight)";
     );
 
     /// @brief A filter that counts every `Err` as a drop.
@@ -87,5 +87,5 @@ export let ConcurrencyLimitFilter = module (
     #NoDiscard
     export let classified = func<Req, Resp>(limit: limits.AdaptiveLimit, is_drop: func(Result<Resp>) -> bool,
         clock: Clock) -> ConcurrencyLimitFilter<Req, Resp> =>
-        new ConcurrencyLimitFilter<Req, Resp>(limit, is_drop, clock);
+            new ConcurrencyLimitFilter<Req, Resp>(limit, is_drop, clock);
 );

@@ -47,7 +47,7 @@ export let MemoryLayout = module (
 
         /// @brief Use the module functions; this constructor stores precomputed fields.
         export let init = func(shape: Shape, carrier: Carrier, byte_size: int64, byte_alignment: int64,
-                               members: MemoryLayout[list], member_offsets: int64[list], elements: int64) {
+            members: MemoryLayout[list], member_offsets: int64[list], elements: int64) {
             kind = shape;
             value_carrier = carrier;
             size = byte_size;
@@ -171,16 +171,15 @@ export let MemoryLayout = module (
                     return i;
                 }
             }
-            trap_with_message("invalid argument: no member " + member_name);
+            trap_with_message("invalid argument: no member " .. member_name);
         };
 
         /// @brief Layouts compare by shape, carrier, size, alignment, name, and members.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is MemoryLayout)) {
+            if (other is not that: MemoryLayout) {
                 return false;
             }
-            last that = other as MemoryLayout;
             return to_string() == that.to_string() && alignment == that.alignment;
         };
 
@@ -193,12 +192,12 @@ export let MemoryLayout = module (
         export let.override to_string = func -> string {
             last text = match (kind) {
                 Shape.Value => carrier_name(value_carrier),
-                Shape.Padding => "x" + size.to_string(),
-                Shape.Sequence => count.to_string() + ":" + parts[0].to_string(),
-                Shape.Struct => "[" + joined(parts, "") + "]",
-                Shape.Union => "[" + joined(parts, "|") + "]",
+                Shape.Padding => "x" .. size.to_string(),
+                Shape.Sequence => count.to_string() .. ":" .. parts[0].to_string(),
+                Shape.Struct => "[" .. joined(parts, "") .. "]",
+                Shape.Union => "[" .. joined(parts, "|") .. "]",
             };
-            return (label == "") ? text : text + "(" + label + ")";
+            return (label == "") ? text : text .. "(" .. label .. ")";
         };
     );
 
@@ -291,7 +290,7 @@ export let MemoryLayout = module (
             list_members.append(member);
         }
         return new(Shape.Struct, Carrier.Bool, align_up(offset, alignment), alignment, list_members,
-                   offsets, 0);
+            offsets, 0);
     };
 
     /// @brief A union: every member at offset 0, the size the largest member's rounded up to the largest
@@ -313,7 +312,7 @@ export let MemoryLayout = module (
             list_members.append(member);
         }
         return new(Shape.Union, Carrier.Bool, align_up(size, alignment), alignment, list_members,
-                   offsets, 0);
+            offsets, 0);
     };
 
     /// @brief `elements` consecutive copies of `element`, a C array.
@@ -325,7 +324,7 @@ export let MemoryLayout = module (
             trap_with_message("invalid argument: element size is not a multiple of its alignment");
         }
         return new(Shape.Sequence, Carrier.Bool, elements * element.byte_size(),
-                   element.byte_alignment(), new([element]), new([0]), elements);
+            element.byte_alignment(), new([element]), new([0]), elements);
     };
 
     /// @brief `offset` rounded up to a multiple of `alignment`.
@@ -338,7 +337,7 @@ export let MemoryLayout = module (
         for (let i = 0; i < members.length; i++) {
             for (let j = i + 1; j < members.length; j++) {
                 if (members[i].name() != "" && members[i].name() == members[j].name()) {
-                    trap_with_message("invalid argument: duplicate member name " + members[i].name());
+                    trap_with_message("invalid argument: duplicate member name " .. members[i].name());
                 }
             }
         }

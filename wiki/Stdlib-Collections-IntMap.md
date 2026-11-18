@@ -33,51 +33,51 @@ The following public declarations are taken from the module source; each links t
   Returns the associated value as `Some`, or `None` when the key is absent. Tagged `#NoDiscard`.
 - **IntMap.IntMap** · [`export let get_or = func(key: int, fallback: V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L64)
   Returns the associated value, or `fallback` when the key is absent.
-- **IntMap.IntMap** · [`export let require = func(key: int) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L73)
+- **IntMap.IntMap** · [`export let require = func(key: int) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L70)
   Returns the associated value. Traps with `no such element` when the key is absent.
-- **IntMap.IntMap** · [`export let set = func(key: int, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L82)
+- **IntMap.IntMap** · [`export let set = func(key: int, value: V)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L79)
   Stores the value for `key`. Replacing an existing value preserves the key and iterator validity.
-- **IntMap.IntMap** · [`export let put = func(key: int, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L93)
+- **IntMap.IntMap** · [`export let put = func(key: int, value: V) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L90)
   Stores the value for `key` and returns its previous value as `Some`, or `None` for a new key.
-- **IntMap.IntMap** · [`export let delete = func(key: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L107)
+- **IntMap.IntMap** · [`export let delete = func(key: int) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L104)
   Removes the entry for `key`. Returns true if an entry was present.
-- **IntMap.IntMap** · [`export let remove = func(key: int) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L117)
+- **IntMap.IntMap** · [`export let remove = func(key: int) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L114)
   Removes the entry for `key` and returns its value as `Some`, or `None` when absent.
-- **IntMap.IntMap** · [`export let keys = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L128)
+- **IntMap.IntMap** · [`export let keys = func -> int[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L125)
   Copies the keys to a new built-in list in insertion order.
-- **IntMap.IntMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L143)
+- **IntMap.IntMap** · [`export let values = func -> V[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L140)
   Copies the values to a new built-in list in insertion order.
-- **IntMap.IntMap** · [`export let entries = func -> [int, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L158)
+- **IntMap.IntMap** · [`export let entries = func -> [int, V][list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L155)
   Copies the `[key, value]` tuples to a new built-in list in insertion order.
-- **IntMap.IntMap** · [`export let iterator = func -> Iterator<[int, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L174)
+- **IntMap.IntMap** · [`export let iterator = func -> Iterator<[int, V]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L171)
   Returns a fail-fast iterator over `[key, value]` tuples in insertion order.
-- **IntMap.IntMap** · [`export let put_all = func(other: IntMap<V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L178)
+- **IntMap.IntMap** · [`export let put_all = func(other: IntMap<V>)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L175)
   Sets each entry of `other` in its iteration order.
-- **IntMap.IntMap** · [`export let for_each = func(action: func(int, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L191)
+- **IntMap.IntMap** · [`export let for_each = func(action: func(int, V) -> void)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L188)
   Calls `action` with the key and value of each entry in insertion order. The action leaves the map structure unchanged.
-- **IntMap.IntMap** · [`export let remove_if = func(drop: func(int, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L208)
+- **IntMap.IntMap** · [`export let remove_if = func(drop: func(int, V) -> bool) -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L205)
   Calls `drop` once per entry in insertion order, then removes the matches and compacts at most once. The predicate leaves the map structure unchanged. The number of removed entries.
-- **IntMap.IntMap** · [`export let get_or_put = func(key: int, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L240)
+- **IntMap.IntMap** · [`export let get_or_put = func(key: int, make: func() -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L237)
   Returns the associated value, or calls `make` once, stores its result, and returns it when absent. The factory leaves the map structure unchanged.
-- **IntMap.IntMap** · [`export let merge = func(key: int, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L257)
+- **IntMap.IntMap** · [`export let merge = func(key: int, value: V, combine: func(V, V) -> V) -> V`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L254)
   Stores and returns `value` when the key is absent. Otherwise stores and returns `combine(old, value)`. The combiner leaves the map structure unchanged.
-- **IntMap.IntMap** · [`export let compute = func(key: int, f: func(int, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L277)
+- **IntMap.IntMap** · [`export let compute = func(key: int, f: func(int, optional.Optional<V>) -> optional.Optional<V>) -> optional.Optional<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L274)
   Calls `f` with the key and its optional current value. Stores a `Some` result or removes the entry for `None`. The callback leaves the map structure unchanged. The result of the callback.
-- **IntMap.IntMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L307)
+- **IntMap.IntMap** · [`export let contains_value = func(value: V) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L304)
   Tests whether `value.equals(held_value)` is true for any entry.
-- **IntMap.IntMap** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L321)
+- **IntMap.IntMap** · [`export let trim = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L318)
   Compacts to the smallest table that holds the live entries and invalidates iterators.
-- **IntMap.IntMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L327)
+- **IntMap.IntMap** · [`export let validate = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L324)
   Traps with "invalid state: ..." on a broken table invariant or when a live key's hash differs from its cached hash.
-- **IntMap.IntMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L344)
+- **IntMap.IntMap** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L341)
   Another IntMap with the same size in which, for each of its entries, this map holds an equal value for the key.
-- **IntMap.IntMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L368)
+- **IntMap.IntMap** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L364)
   The wrapping sum over entries of the key hash exclusive-or the value hash.
-- **IntMap.IntMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L385)
+- **IntMap.IntMap** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L381)
   Formats entries as `{k: v, k2: v2}` in iteration order. The map prints "(this collection)" where its own text reaches it again.
-- **IntMap** · [`export let create = func<V> -> IntMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L516)
+- **IntMap** · [`export let create = func<V> -> IntMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L515)
   Creates an empty map with the default table size.
-- **IntMap** · [`export let with_capacity = func<V>(capacity: int) -> IntMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L520)
+- **IntMap** · [`export let with_capacity = func<V>(capacity: int) -> IntMap<V>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/collections/int-map.nra#L519)
   Creates an empty map sized for `capacity` entries. Traps with `invalid argument: capacity` outside 0 through 2^29.
 <!-- END SOURCE API -->
 

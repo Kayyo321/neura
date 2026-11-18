@@ -14,5 +14,8 @@ export let FileHandle = module (
             id = host_id;
             path = path_text;
         };
+
+        /// @brief Names the handle with its path.
+        export let.override to_string = func -> string => "FileHandle(" .. path .. ")";
     );
 );

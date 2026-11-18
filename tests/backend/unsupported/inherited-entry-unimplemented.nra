@@ -1,0 +1,13 @@
+// expect: 8:9 module 'Site' does not implement 'serve'
+let program = import:Std.Program;
+
+let Server = module:program.Entry (
+    export let serve = func(path: string) -> string;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        serve("/");
+        return program.ExitCode.Ok;
+    };
+);
+
+let Site = module:Server ();

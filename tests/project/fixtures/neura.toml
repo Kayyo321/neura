@@ -1,0 +1,27 @@
+schema = 1
+
+[targets.web.origins]
+connect = ["https://stock.example"]
+
+[project]
+name = "stock"
+id = "example.stock"
+version = "1.0.0"
+language = "0.3"
+
+[packages.ui]
+root = "ui source"
+assets = [
+    "ui source/画像", # Raw UTF-8
+    "ui source/\u00e9", # Escaped UTF-8
+]
+depends = []
+
+[targets.web]
+kind = "web"
+package = "ui"
+entry = "Stock.Ui.Main"
+capabilities = ["ui", "http_client"]
+
+[targets.web.limits]
+W-1 = 16

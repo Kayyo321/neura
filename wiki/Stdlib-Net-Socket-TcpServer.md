@@ -30,13 +30,13 @@ The following public declarations are taken from the module source; each links t
   The bound port.
 - **TcpServer.TcpServer** · [`export let accept = func -> Result<TcpSocket>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L62)
   Waits for the next connection. Fails with Closed after close, and with Cancelled when the task's scope is cancelled first. Tagged `#NoDiscard`.
-- **TcpServer.TcpServer** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L76)
+- **TcpServer.TcpServer** · [`export let close = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L74)
   Releases the listener, as `TcpListener.close`. Closing again returns Ok.
-- **TcpServer.TcpServer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L82)
+- **TcpServer.TcpServer** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L80)
   Text such as "TcpServer(127.0.0.1:8080)".
-- **TcpServer** · [`export let bind = func(address: SocketAddr) -> Result<TcpServer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L87)
+- **TcpServer** · [`export let bind = func(address: SocketAddr) -> Result<TcpServer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L85)
   Listens on `address` with no options. Port 0 asks the host for a free port. Tagged `#NoDiscard`.
-- **TcpServer** · [`export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<TcpServer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L94)
+- **TcpServer** · [`export let bind_with = func(address: SocketAddr, options: SocketOptions) -> Result<TcpServer>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/socket/tcp-server.nra#L92)
   Listens on `address` with an option set built for `SocketKind.TcpListener` (another kind traps with "invalid argument"). A non-empty set or multipath traps in Neura 0.3.0 (see the module documentation); with multipath, every option is applied after the listener is created. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

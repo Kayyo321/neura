@@ -1,0 +1,40 @@
+let frozen = import:Std.Collections.Frozen;
+let controls = import:Std.Ui.Controls;
+let forms = import:Std.Ui.Forms;
+let test = import:Std.Test;
+let ui = import:Std.Ui;
+
+let EqualityHashTests = module (
+    let agree = func(a: class, b: class) -> void {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+    };
+
+    export let test_choice_and_row_agree = func() -> void {
+        agree(new controls.Choice("a", "Alpha"), new controls.Choice("a", "Alpha"));
+        test.assert(not new controls.Choice("a", "Alpha").equals(new controls.Choice("a", "Beta")));
+        test.assert_equal_string("a: Alpha", new controls.Choice("a", "Alpha").to_string());
+        test.assert_equal_string("TableRow(k)", new controls.TableRow("k", frozen.of<string>("x")).to_string());
+    };
+
+    export let test_field_state_agrees = func() -> void {
+        agree(new forms.FieldState("x", true, false, "bad"), new forms.FieldState("x", true, false, "bad"));
+        test.assert(not new forms.FieldState("x", true, false, "bad").equals(new forms.FieldState("y", true, false, "bad")));
+        test.assert(not new forms.FieldState("x", true, false, "bad").equals(new controls.Choice("x", "bad")));
+    };
+
+    export let test_event_values_agree = func() -> void {
+        last keys = new ui.Modifiers(false, true, false, false);
+        agree(keys, new ui.Modifiers(false, true, false, false));
+        test.assert(not keys.equals(new ui.Modifiers(true, true, false, false)));
+        test.assert_equal_string("Modifiers(alt=false, ctrl=true, meta=false, shift=false)", keys.to_string());
+        agree(new ui.KeyEvent("a", "KeyA", keys, false), new ui.KeyEvent("a", "KeyA", keys, false));
+        test.assert(not new ui.KeyEvent("a", "KeyA", keys, false).equals(new ui.KeyEvent("b", "KeyA", keys, false)));
+        agree(new ui.ClickEvent(0, 1.5, 2.5, keys, 1), new ui.ClickEvent(0, 1.5, 2.5, keys, 1));
+        agree(new ui.ScrollEvent(0.0, -0.0), new ui.ScrollEvent(-0.0, 0.0));
+        test.assert_equal_string("SubmitEvent(submitter=ok)", new ui.SubmitEvent("ok").to_string());
+        test.assert_equal_string("FocusEvent", new ui.FocusEvent().to_string());
+        agree(new ui.FocusEvent(), new ui.FocusEvent());
+    };
+);

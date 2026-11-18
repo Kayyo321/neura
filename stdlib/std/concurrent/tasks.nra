@@ -54,7 +54,7 @@ export let Tasks = module (
                                 group.cancel();
                                 return result.Result<T[list]>.Err(failure);
                             },
-                            _ => { },
+                            _ => {},
                         }
                     },
                     _ => {
@@ -67,7 +67,9 @@ export let Tasks = module (
             last values: T[list] = new;
             for (let task: task_handles.Task<result.Result<T>> in pending) {
                 match (task.join()) {
-                    result.Result.Ok(value) => { values.append(value); },
+                    result.Result.Ok(value) => {
+                        values.append(value);
+                    },
                     result.Result.Err(failure) => {
                         return result.Result<T[list]>.Err(failure);
                     },
@@ -120,7 +122,7 @@ export let Tasks = module (
 
     // Runs a call and then reports its index on the channel, which has room for every call.
     let run_indexed = func<T>(call: func() -> result.Result<T>, index: int, done: channels.Sender<int>)
-            -> result.Result<T> {
+        -> result.Result<T> {
         last outcome = call();
         done.send(index);
         return outcome;

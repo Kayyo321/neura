@@ -26,16 +26,16 @@ export let ZoneOffset = module (
             if (total_seconds < other.total_seconds) {
                 return Ordering.Less;
             }
-            if (total_seconds > other.total_seconds) {
-                return Ordering.Greater;
-            }
-            return Ordering.Equal;
+            return if (total_seconds > other.total_seconds) -> Ordering.Greater else -> Ordering.Equal;
         };
 
         /// @brief Tests equality of offsets in seconds.
         /// Reading the argument can run its class hook.
         export let.override equals = func(other: class) -> bool {
-            return other is ZoneOffset && total_seconds == (other as ZoneOffset).total_seconds;
+            if (other is not that: ZoneOffset) {
+                return false;
+            }
+            return total_seconds == that.total_seconds;
         };
 
         /// @brief Hashes the offset in seconds.
@@ -74,9 +74,7 @@ export let ZoneOffset = module (
         last scan = new calendar.Scanner(text);
         last total = calendar.read_offset(scan);
         scan.finish();
-        if (!scan.ok()) {
-            return result.Result<ZoneOffset>.Err(scan.failure());
-        }
+        return result.Result<ZoneOffset>.Err(scan.failure()) unless scan.ok();
         return result.Result<ZoneOffset>.Ok(new ZoneOffset(total));
     };
 );

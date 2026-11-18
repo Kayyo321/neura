@@ -37,19 +37,19 @@ export let Acme = module (
     /// base64url(SHA-256 of `{"e":..,"kty":"RSA","n":..}`).
     #NoDiscard
     export let rsa_thumbprint = func(modulus: string, exponent: string) -> string =>
-        digest_text("{\"e\":\"" + exponent + "\",\"kty\":\"RSA\",\"n\":\"" + modulus + "\"}");
+        digest_text("{\"e\":\"" .. exponent .. "\",\"kty\":\"RSA\",\"n\":\"" .. modulus .. "\"}");
 
     /// @brief The RFC 7638 thumbprint of an EC public key given as `crv` and the base64url `x` and `y` members:
     /// base64url(SHA-256 of `{"crv":..,"kty":"EC","x":..,"y":..}`).
     #NoDiscard
     export let ec_thumbprint = func(curve: string, x: string, y: string) -> string =>
-        digest_text("{\"crv\":\"" + curve + "\",\"kty\":\"EC\",\"x\":\"" + x + "\",\"y\":\"" + y + "\"}");
+        digest_text("{\"crv\":\"" .. curve .. "\",\"kty\":\"EC\",\"x\":\"" .. x .. "\",\"y\":\"" .. y .. "\"}");
 
     /// @brief The key authorization `token.thumbprint` (RFC 8555 section 8.1).
     #NoDiscard
     export let key_authorization = func(token: string, thumbprint: string) -> Result<string> {
         check_token(token)?;
-        return Result<string>.Ok(token + "." + thumbprint);
+        return Result<string>.Ok(token .. "." .. thumbprint);
     };
 
     /// @brief The HTTP-01 resource path `/.well-known/acme-challenge/<token>` (RFC 8555 section 8.3); the
@@ -57,12 +57,12 @@ export let Acme = module (
     #NoDiscard
     export let http01_path = func(token: string) -> Result<string> {
         check_token(token)?;
-        return Result<string>.Ok("/.well-known/acme-challenge/" + token);
+        return Result<string>.Ok("/.well-known/acme-challenge/" .. token);
     };
 
     /// @brief The DNS-01 record name `_acme-challenge.<domain>` (RFC 8555 section 8.4). A trailing dot is kept.
     #Pure
-    export let dns01_record_name = func(domain: string) -> string => "_acme-challenge." + domain;
+    export let dns01_record_name = func(domain: string) -> string => "_acme-challenge." .. domain;
 
     /// @brief The DNS-01 TXT value: base64url(SHA-256(key authorization)) (RFC 8555 section 8.4).
     #NoDiscard
@@ -134,7 +134,7 @@ export let Acme = module (
         };
 
         /// @brief Text such as "AcmeClient(https://ca.example/directory)".
-        export let.override to_string = func -> string => "AcmeClient(" + directory_url + ")";
+        export let.override to_string = func -> string => "AcmeClient(" .. directory_url .. ")";
     );
 
     /// @brief base64url without padding of SHA-256 of the UTF-8 text.
@@ -149,9 +149,7 @@ export let Acme = module (
         while (i < token.byte_length) {
             last c = token.byte_at(i);
             last valid = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || c == 45 || c == 95;
-            if (!valid) {
-                return Result<bool>.Err(errors.custom("acme.token", "the token is not base64url text"));
-            }
+            return Result<bool>.Err(errors.custom("acme.token", "the token is not base64url text")) unless valid;
             i++;
         }
         return Result<bool>.Ok(true);

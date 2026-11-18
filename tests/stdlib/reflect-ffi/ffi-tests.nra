@@ -1,0 +1,92 @@
+// Std.Reflect.Ffi.Abi (docs/design/Reflect030.md, edge case 15): C layouts and argument classes for declared
+// targets. Vectors from clang 19.1.7: the C file below compiled with
+//   clang --target=<triple> -O0 -S -emit-llvm layouts.c
+// for x86_64-unknown-linux-gnu, aarch64-unknown-linux-gnu, x86_64-pc-windows-msvc and wasm32-unknown-unknown,
+// reading the initializer of `v` (sizes, alignments, offsets) and the lowered signatures of the take_* functions:
+//   struct mixed { char c; int i; double d; };       struct longs { long a; char b; };
+//   struct pair { double x; double y; };             struct inner { short s; char c; };
+//   struct outer { char a; struct inner in; int arr[3]; };
+//   struct three_floats { float a; float b; float c; };  struct big { long long a, b, c; };
+//   x86_64 linux: v = 16 8 4 8 | 16 8 8 | 20 4 2 8; pair (double, double); mixed (i64, double);
+//                 three (<2 x float>, float); big byval; longs (i64, i8)
+//   aarch64 linux: same v; pair [2 x double]; mixed [2 x i64]; three [3 x float]; big ptr; longs [2 x i64]
+//   x86_64 windows: v = 16 8 4 8 | 8 4 4 | 20 4 2 8; pair, mixed, three, big ptr; longs i64
+//   wasm32: v as windows; every struct byval ptr
+let.promote optional = import:Std.Core.Optional;
+let abi = import:Std.Reflect.Ffi.Abi;
+let test = import:Std.Test;
+
+let target = func(triple: string) -> abi.Target => optional.expect(abi.target(triple), triple);
+
+let mixed = func -> abi.CStruct =>
+    new abi.CStruct("mixed").scalar("c", abi.CType.Char).scalar("i", abi.CType.Int).scalar("d", abi.CType.Double);
+let longs = func -> abi.CStruct => new abi.CStruct("longs").scalar("a", abi.CType.Long).scalar("b", abi.CType.Char);
+let pair = func -> abi.CStruct => new abi.CStruct("pair").scalar("x", abi.CType.Double).scalar("y", abi.CType.Double);
+let three = func -> abi.CStruct =>
+    new abi.CStruct("three_floats").scalar("a", abi.CType.Float).scalar("b", abi.CType.Float).scalar("c", abi.CType.Float);
+let big = func -> abi.CStruct =>
+    new abi.CStruct("big").scalar("a", abi.CType.LongLong).scalar("b", abi.CType.LongLong).scalar("c", abi.CType.LongLong);
+let outer = func -> abi.CStruct {
+    last inner = new abi.CStruct("inner").scalar("s", abi.CType.Short).scalar("c", abi.CType.Char);
+    return new abi.CStruct("outer").scalar("a", abi.CType.Char).nested("in", inner).array("arr", abi.CType.Int, 3);
+};
+
+let classes = func(shape: abi.CStruct, triple: string) -> string => abi.classify(shape, target(triple)).to_string();
+
+let FfiTests = module (
+    export let test_targets = func() -> void {
+        test.assert(target("x86_64-unknown-linux-gnu").convention == abi.CallingConvention.SystemV64);
+        test.assert(target("arm64-apple-darwin").convention == abi.CallingConvention.Aapcs64);
+        test.assert(target("x86_64-pc-windows-msvc").long_bytes == 4);
+        test.assert(target("wasm32-unknown-unknown").pointer_bytes == 4);
+        test.assert_none(abi.target("riscv64-unknown-linux-gnu"));
+    };
+
+    export let test_layouts = func() -> void {
+        for (let triple in ["x86_64-unknown-linux-gnu", "aarch64-unknown-linux-gnu", "x86_64-pc-windows-msvc",
+                            "wasm32-unknown-unknown"]) {
+            last on = target(triple);
+            last first = abi.layout(mixed(), on);
+            test.assert_equal_int32(16, first.size);
+            test.assert_equal_int32(8, first.alignment);
+            test.assert_equal_int32(4, first.offset("i"));
+            test.assert_equal_int32(8, first.offset("d"));
+            last nested = abi.layout(outer(), on);
+            test.assert_equal_int32(20, nested.size);
+            test.assert_equal_int32(4, nested.alignment);
+            test.assert_equal_int32(2, nested.offset("in"));
+            test.assert_equal_int32(8, nested.offset("arr"));
+        }
+        last lp64 = abi.layout(longs(), target("x86_64-unknown-linux-gnu"));
+        test.assert_equal_string("size 16 align 8 a@0 b@8", lp64.to_string());
+        last llp64 = abi.layout(longs(), target("x86_64-pc-windows-msvc"));
+        test.assert_equal_string("size 8 align 4 a@0 b@4", llp64.to_string());
+        test.assert_equal_string("size 8 align 4 a@0 b@4", abi.layout(longs(), target("wasm32-unknown-unknown")).to_string());
+    };
+
+    export let test_system_v_classes = func() -> void {
+        last linux = "x86_64-unknown-linux-gnu";
+        test.assert_equal_string("[Sse, Sse]", classes(pair(), linux));
+        test.assert_equal_string("[Integer, Sse]", classes(mixed(), linux));
+        test.assert_equal_string("[Sse, Sse]", classes(three(), linux));
+        test.assert_equal_string("[Memory]", classes(big(), linux));
+        test.assert_equal_string("[Integer, Integer]", classes(longs(), linux));
+    };
+
+    export let test_aapcs64_classes = func() -> void {
+        last arm = "aarch64-unknown-linux-gnu";
+        test.assert_equal_string("[FloatRegisters]", classes(pair(), arm));
+        test.assert_equal_string("[GeneralRegisters]", classes(mixed(), arm));
+        test.assert_equal_string("[FloatRegisters]", classes(three(), arm));
+        test.assert_equal_string("[Indirect]", classes(big(), arm));
+        test.assert_equal_string("[GeneralRegisters]", classes(longs(), arm));
+    };
+
+    export let test_windows_and_wasm_classes = func() -> void {
+        last windows = "x86_64-pc-windows-msvc";
+        test.assert_equal_string("[Indirect]", classes(pair(), windows));
+        test.assert_equal_string("[Indirect]", classes(three(), windows));
+        test.assert_equal_string("[Integer]", classes(longs(), windows));
+        test.assert_equal_string("[Indirect]", classes(pair(), "wasm32-unknown-unknown"));
+    };
+);

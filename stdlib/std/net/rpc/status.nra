@@ -79,10 +79,8 @@ export let Status = module (
     /// @brief The code with that number, or `None` outside 0 to 16.
     #NoDiscard
     export let of_number = func(value: int) -> Optional<Code> {
-        if (value < 0 || value > 16) {
-            return Optional<Code>.None;
-        }
-        return Optional<Code>.Some(all()[value]);
+        return if (value < 0 || value > 16) -> Optional<Code>.None
+            else -> Optional<Code>.Some(all()[value]);
     };
 
     /// @brief The canonical name, such as `DEADLINE_EXCEEDED`.
@@ -118,10 +116,8 @@ export let Status = module (
         if (http_status == 404) {
             return Code.Unimplemented;
         }
-        if (http_status == 429 or 502 or 503 or 504) {
-            return Code.Unavailable;
-        }
-        return Code.Unknown;
+        return if (http_status == 429 or 502 or 503 or 504) -> Code.Unavailable
+            else -> Code.Unknown;
     };
 
     /// @brief The HTTP status of a code per google/rpc/code.proto ("HTTP Mapping"), for gateways that answer a
@@ -211,10 +207,9 @@ export let Status = module (
 
         /// @brief Equal when the code, message and details are.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is RpcStatus)) {
+            if (other is not that: RpcStatus) {
                 return false;
             }
-            last that = other as RpcStatus;
             if (number(code) != number(that.code) || message != that.message || details.length != that.details.length) {
                 return false;
             }
@@ -237,7 +232,7 @@ export let Status = module (
 
         /// @brief `NAME: message`.
         export let.override to_string = func -> string =>
-            message.byte_length == 0 ? name(code) : name(code) + ": " + message;
+            message.byte_length == 0 ? name(code) : name(code) .. ": " .. message;
     );
 
     /// @brief A status without details.
@@ -257,7 +252,7 @@ export let Status = module (
         if (status.message.byte_length > 0) {
             out.add_raw(MessageHeader, encode_message(status.message));
         }
-        if (!status.is_ok() && status.details.length > 0) {
+        if (not status.is_ok() && status.details.length > 0) {
             last ignored = out.add_binary(DetailsHeader, status.details);
         }
         return out;
@@ -280,7 +275,7 @@ export let Status = module (
         match (code_text) {
             Optional.None => {
                 return of(from_http(http_status), message.byte_length > 0 ? message
-                    : "missing grpc-status (HTTP status " + http_status.to_string() + ")");
+                    : "missing grpc-status (HTTP status " .. http_status.to_string() .. ")");
             },
             Optional.Some(text) => {
                 last code = parse_code(text);
@@ -291,10 +286,8 @@ export let Status = module (
                     Result.Ok(parts) => parts.length == 1 ? parts[0] : new,
                     Result.Err(e) => new,
                 };
-                if (details.length > 0 && !details_agree(details, number(code))) {
-                    return of(code, message);
-                }
-                return new RpcStatus(code, message, details);
+                return if (details.length > 0 && not details_agree(details, number(code))) -> of(code, message)
+                    else -> new RpcStatus(code, message, details);
             },
         }
     };
@@ -332,14 +325,18 @@ export let Status = module (
         export let.override message = func -> string => status.to_string();
 
         /// @brief Equal when the statuses are.
-        export let.override equals = func(other: class) -> bool =>
-            other is RpcFailure && status.equals((other as RpcFailure).status);
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: RpcFailure) {
+                return false;
+            }
+            return status.equals(that.status);
+        };
 
         /// @brief The status's hash.
         export let.override hash_code = func -> uint32 => status.hash_code();
 
         /// @brief `grpc.status NAME: message`.
-        export let.override to_string = func -> string => ErrorCode + " " + status.to_string();
+        export let.override to_string = func -> string => ErrorCode .. " " .. status.to_string();
     );
 
     /// @brief A Custom error carrying `status`.
@@ -426,9 +423,7 @@ export let Status = module (
         if (b >= 65 && b <= 70) {
             return (b - 55) as int;
         }
-        if (b >= 97 && b <= 102) {
-            return (b - 87) as int;
-        }
-        return -1;
+        return if (b >= 97 && b <= 102) -> (b - 87) as int
+            else -> -1;
     };
 );

@@ -89,10 +89,9 @@ export let Masque = module (
 
         /// @brief Equal pseudo-header values and fields.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is ConnectRequest)) {
+            if (other is not that: ConnectRequest) {
                 return false;
             }
-            last that = other as ConnectRequest;
             return to_string() == that.to_string() && fields.equals(that.fields);
         };
 
@@ -106,10 +105,10 @@ export let Masque = module (
             last values = pseudo_values();
             last lines: string[list] = new;
             for (let i = 0; i < names.length; i++) {
-                lines.append(names[i] + " = " + values[i]);
+                lines.append(names[i] .. " = " .. values[i]);
             }
             for (let i = 0; i < fields.size(); i++) {
-                lines.append(fields.name_at(i) + " = " + fields.value_at(i));
+                lines.append(fields.name_at(i) .. " = " .. fields.value_at(i));
             }
             return strings.join(lines, "; ");
         };
@@ -140,41 +139,35 @@ export let Masque = module (
         export let close = func -> Result<Unit> => host_close_tunnel();
 
         /// @brief The protocol and path.
-        export let.override to_string = func -> string => "Tunnel{" + request.protocol + " " + request.path + "}";
+        export let.override to_string = func -> string => "Tunnel{" .. request.protocol .. " " .. request.path .. "}";
     );
 
     /// @brief The default CONNECT-UDP path for a target (RFC 9298 section 2), for example
     /// `/.well-known/masque/udp/192.0.2.6/443/`.
     #NoDiscard
     export let udp_path = func(target_host: string, target_port: int) -> Result<string> {
-        if (!is_valid_host(target_host)) {
-            return Result<string>.Err(failure(ParseErrorKind.InvalidCharacter, 0, "invalid target_host"));
-        }
+        return Result<string>.Err(failure(ParseErrorKind.InvalidCharacter, 0, "invalid target_host")) unless is_valid_host(target_host);
         if (target_port < 1 || target_port > 65535) {
             return Result<string>.Err(failure(ParseErrorKind.OutOfRange, 0, "target_port outside 1 through 65535"));
         }
         return Result<string>.Ok(
-            "/.well-known/masque/udp/" + expand(target_host) + "/" + target_port.to_string() + "/");
+            "/.well-known/masque/udp/" .. expand(target_host) .. "/" .. target_port.to_string() .. "/");
     };
 
     /// @brief The default CONNECT-IP path (RFC 9484 section 3), for example `/.well-known/masque/ip/*/*/`.
     /// `target` is `*`, a host, or an address with an optional `/length`; `ipproto` is `*` or 0 through 255.
     #NoDiscard
     export let ip_path = func(target: string, ipproto: string) -> Result<string> {
-        if (!is_valid_ip_target(target)) {
-            return Result<string>.Err(failure(ParseErrorKind.InvalidCharacter, 0, "invalid target"));
-        }
-        if (!is_valid_ipproto(ipproto)) {
-            return Result<string>.Err(failure(ParseErrorKind.OutOfRange, 0, "ipproto is not * or 0 through 255"));
-        }
-        return Result<string>.Ok("/.well-known/masque/ip/" + expand(target) + "/" + expand(ipproto) + "/");
+        return Result<string>.Err(failure(ParseErrorKind.InvalidCharacter, 0, "invalid target")) unless is_valid_ip_target(target);
+        return Result<string>.Err(failure(ParseErrorKind.OutOfRange, 0, "ipproto is not * or 0 through 255")) unless is_valid_ipproto(ipproto);
+        return Result<string>.Ok("/.well-known/masque/ip/" .. expand(target) .. "/" .. expand(ipproto) .. "/");
     };
 
     /// @brief The extended CONNECT request for UDP proxying to `target_host`:`target_port` through the proxy at
     /// `proxy_authority`, with the default template (RFC 9298 section 3.4). Errors are those of `udp_path`.
     #NoDiscard
     export let udp_request = func(proxy_authority: string, target_host: string,
-            target_port: int) -> Result<ConnectRequest> {
+        target_port: int) -> Result<ConnectRequest> {
         last path = udp_path(target_host, target_port)?;
         return Result<ConnectRequest>.Ok(new ConnectRequest(ConnectUdp, "https", proxy_authority, path));
     };
@@ -198,19 +191,19 @@ export let Masque = module (
         let start = 0;
         for (let i = 0; i < value.byte_length; i++) {
             last b = value.byte_at(i);
-            if (!is_unreserved(b)) {
+            if (not is_unreserved(b)) {
                 last high = (b / 16) as int;
                 last low = (b % 16) as int;
                 if (start < i) {
                     // Bytes start..i-1 are unreserved ASCII, so both ends are character boundaries.
-                    text += value.slice(start, i);
+                    text ..= value.slice(start, i);
                 }
-                text = text + "%" + digits.slice(high, high + 1) + digits.slice(low, low + 1);
+                text ..= "%" .. digits.slice(high, high + 1) .. digits.slice(low, low + 1);
                 start = i + 1;
             }
         }
         if (start < value.byte_length) {
-            text += value.slice(start, value.byte_length);
+            text ..= value.slice(start, value.byte_length);
         }
         return text;
     };
@@ -298,9 +291,7 @@ export let Masque = module (
             return is_valid_host(target);
         }
         last address = target.slice(0, slash);
-        if (!is_valid_host(address)) {
-            return false;
-        }
+        return false unless is_valid_host(address);
         last length = small_number(target.slice(slash + 1, target.byte_length), 3);
         last limit = strings.contains(address, ":") ? 128 : 32;
         return length >= 0 && length <= limit;

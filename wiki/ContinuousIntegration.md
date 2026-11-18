@@ -86,7 +86,7 @@ cmake --build build --parallel
 scripts/check-kernels.sh build
 python3 scripts/check-core-closure.py build
 NEURA_LIBCLANG_REQUIRED=1 NEURA_USERNS_REQUIRED=1 ctest --test-dir build --parallel 4 --no-tests=error --output-on-failure --output-junit ctest-junit.xml
-python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 258
+python3 scripts/check-test-report.py build/ctest-junit.xml --minimum 321
 ```
 
 The first two commands build the configuration of the Tier 1 job; `cmake -S . -B build -DCMAKE_BUILD_TYPE=Release` alone builds without TLS, HTTP/2 and the PostgreSQL provider, which leaves out their tests (`server-sql-postgres` also needs Docker). To check only the documentation examples, run `python3 scripts/check-doc-examples.py --neura build/neura`, or `python3 scripts/check-doc-examples.py --directives-only` to check the directives without a compiler.

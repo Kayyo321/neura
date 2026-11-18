@@ -1,0 +1,17 @@
+// The contract the page, the server and the desktop child share: the starting parts and the rule for a name.
+let strings = import:Std.Text.Strings;
+
+let Parts = module (
+    /// @brief The parts a new stock list starts with.
+    export let starter_names = func -> string[list] {
+        last names: string[list] = new;
+        names.append("Bolt");
+        names.append("Nut");
+        names.append("Washer");
+        return names;
+    };
+
+    /// @brief Whether a part name is accepted: 1 to 40 bytes that are not all spaces.
+    export let valid_name = func(name: string) -> bool =>
+        name.byte_length <= 40 && strings.trim(name).byte_length > 0;
+);

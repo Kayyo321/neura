@@ -144,6 +144,10 @@ let App = module:program.Entry (
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'true || missing == 0'})['result'], 'true')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && missing.field[999] == 0 || true'})['result'], 'true')
         self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'true || (false && missing.field[999] == 0)'})['result'], 'true')
+        # A character literal is the integer of its byte (docs/design/Expressions030.md).
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': "'A'"})['result'], '65')
+        self.assertEqual(self.client.request('evaluate', {'frameId': frame['id'], 'expression': "counter < '\\x02' && '\\n' == 10"})['result'], 'true')
+        self.client.request('evaluate', {'frameId': frame['id'], 'expression': "'ab'"}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'false && (counter = 9)'}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter = 9'}, success=False)
         self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'counter()'}, success=False)
@@ -170,6 +174,67 @@ let App = module:program.Entry (
         outputs = [e['body']['output'] for e in self.client.events if e.get('event') == 'output']
         self.assertIn('dap output\n', ''.join(outputs))
         self.assertFalse(self.capabilities['supportsStepBack'])
+
+    def test_records_and_getters_show_raw_fields(self):
+        # docs/design/Records030.md, Tooling: a record's fields are shown
+        # raw, and a field with a getter or a virtual accessor shows its
+        # stored value; inspecting runs no getter, override, adapter or
+        # to_string (the getter and the override would print).
+        path = self.source('records.nra', '''let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let User = record (id: int64, name: string);
+let Badge = class (
+    export let label: string = "stored";
+        | get: {
+            console.print_line("getter ran");
+            return "read " + label;
+        };
+);
+let Shape = class (
+    export let kind: string = "shape";
+        | get.virtual: kind;
+);
+let Circle = class: Shape (
+    export let.override kind: string;
+        | get.override: {
+            console.print_line("override ran");
+            return "circle of " + kind;
+        };
+);
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let user = new User(7 as int64, "ada");
+        let badge = new Badge();
+        let circle: Shape = new Circle();
+        console.print_line(user.name);
+        return program.ExitCode.Ok;
+    };
+);
+''')
+        self.launch(path)
+        self.client.request('setBreakpoints', {'source': {'path': str(path)}, 'breakpoints': [{'line': 27}]})
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        scopes = self.client.request('scopes', {'frameId': frame['id']})['scopes']
+        variables = {item['name']: item for item in self.client.request(
+            'variables', {'variablesReference': scopes[0]['variablesReference']})['variables']}
+        fields = lambda name: {item['name']: item['value'] for item in self.client.request(
+            'variables', {'variablesReference': variables[name]['variablesReference']})['variables']}
+        user = fields('user')
+        self.assertEqual(user['id'], '7')
+        self.assertIn('ada', user['name'])
+        self.assertIn('stored', fields('badge')['label'])
+        self.assertIn('shape', fields('circle')['kind'])
+        self.assertIn('shape', self.client.request('evaluate', {'frameId': frame['id'],
+                                                                'expression': 'circle.kind'})['result'])
+        self.assertIn('stored', self.client.request('evaluate', {'frameId': frame['id'],
+                                                                 'expression': 'badge.label'})['result'])
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
+        self.assertEqual(outputs, 'ada\n')
 
     def test_hooked_nil_inspection_uses_raw_storage(self):
         source = '''let program = import:Std.Program;
@@ -600,6 +665,46 @@ let App = module:program.Entry (
         self.client.event('terminated')
         outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
         self.assertEqual(outputs, '0\n1\nbody\ndeferred\n')
+
+    def test_condition_reads_a_generator_local_moved_into_its_state(self):
+        # docs/design/Lifetime030.md, Tooling: a local whose scope contains a
+        # `yield` lives in the generator's state, and a condition or an
+        # evaluation in the `$resume` frame reads it by its source name.
+        path = self.source('moved.nra', """let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let App = module:program.Entry (
+    let squares = iterator(count: int) -> int {
+        for (let index = 0; index < count; index++) {
+            let square = index * index;
+            yield square;
+        }
+    };
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        for (let value in squares(5)) {
+            console.print_line(value.to_string());
+        }
+        return program.ExitCode.Ok;
+    };
+);
+""")
+        self.launch(path)
+        result = self.client.request('setBreakpoints', {'source': {'path': str(path)},
+                                                        'breakpoints': [{'line': 7, 'condition': 'square == 9'}]})
+        self.assertTrue(result['breakpoints'][0]['verified'])
+        self.client.request('configurationDone')
+        self.assertEqual(self.client.event('stopped')['reason'], 'breakpoint')
+        frame = self.frame()
+        self.assertIn('$resume', frame['name'])
+        evaluate = lambda text: self.client.request('evaluate', {'frameId': frame['id'], 'expression': text})['result']
+        self.assertEqual(evaluate('square'), '9')
+        self.assertEqual(evaluate('index'), '3')
+        self.assertEqual(evaluate('index == 3 && square > 4'), 'true')
+        self.client.request('evaluate', {'frameId': frame['id'], 'expression': 'missing'}, success=False)
+        self.client.request('continue')
+        self.assertEqual(self.client.event('exited')['exitCode'], 0)
+        self.client.event('terminated')
+        outputs = ''.join(e['body']['output'] for e in self.client.events if e.get('event') == 'output')
+        self.assertEqual(outputs, '0\n1\n4\n9\n16\n')
 
     def test_pending_breakpoint_keeps_id_and_condition_short_circuits(self):
         path = self.source('pending.nra', """let program = import:Std.Program;

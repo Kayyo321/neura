@@ -1,0 +1,95 @@
+let close_status = import:Std.Net.Realtime.Ws.CloseStatus;
+let deflate = import:Std.Net.Realtime.Ws.PermessageDeflate;
+let exts = import:Std.Net.Realtime.Ws.Extensions;
+let frames = import:Std.Net.Realtime.Ws.Frame;
+let handshake = import:Std.Net.Realtime.Ws.Handshake;
+let.promote _ = import:Std.Core.Optional;
+let session = import:Std.Net.Realtime.WebTransport.Session;
+let test = import:Std.Test;
+let web_socket = import:Std.Net.Realtime.Ws.WebSocket;
+let wt_wire = import:Std.Net.Realtime.WebTransport.Wire;
+
+// Part 4 of the 0.3.0 stdlib pass: to_string, equals and hash_code of the Std.Net.Realtime value classes agree.
+let ToStringHashTests = module (
+    let agree = func(a: class, b: class) {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_int64(a.hash_code() as int64, b.hash_code() as int64);
+    };
+
+    let differ = func(a: class, b: class) {
+        test.assert(not a.equals(b));
+        test.assert(not b.equals(a));
+    };
+
+    export let test_frame = func {
+        last a = frames.of(1, new([104, 105]));
+        agree(a, frames.of(1, new([104, 105])));
+        differ(a, frames.of(1, new([104, 106])));
+        differ(a, frames.of(2, new([104, 105])));
+        test.assert_equal_string(a.to_string(), frames.of(1, new([104, 105])).to_string());
+        test.assert(a.to_string().byte_length > 0);
+    };
+
+    export let test_extensions = func {
+        last p = new exts.ExtensionParam("client_max_window_bits", Optional<string>.Some("12"));
+        agree(p, new exts.ExtensionParam("client_max_window_bits", Optional<string>.Some("12")));
+        differ(p, new exts.ExtensionParam("client_max_window_bits", Optional<string>.None));
+        test.assert_equal_string("client_max_window_bits=12", p.to_string());
+        last e = new exts.Extension("permessage-deflate", new([p]));
+        agree(e, new exts.Extension("permessage-deflate", new([p])));
+        differ(e, new exts.Extension("permessage-deflate", new));
+        test.assert_equal_string("permessage-deflate; client_max_window_bits=12", e.to_string());
+    };
+
+    export let test_close_reason = func {
+        last a = new close_status.CloseReason(1000, "bye");
+        agree(a, new close_status.CloseReason(1000, "bye"));
+        differ(a, new close_status.CloseReason(1001, "bye"));
+        test.assert_equal_string("1000 bye", a.to_string());
+    };
+
+    export let test_deflate_params = func {
+        last a = new deflate.DeflateParams(true, false, 12, 15);
+        agree(a, new deflate.DeflateParams(true, false, 12, 15));
+        differ(a, new deflate.DeflateParams(true, true, 12, 15));
+        test.assert(a.to_string().byte_length > 0);
+    };
+
+    export let test_handshake_header = func {
+        last a = new handshake.Header("Host", "example.com");
+        agree(a, new handshake.Header("Host", "example.com"));
+        differ(a, new handshake.Header("Host", "example.org"));
+        test.assert_equal_string("Host: example.com", a.to_string());
+    };
+
+    export let test_value_options = func {
+        last d = new deflate.ServerConfig(true, false, true, 12);
+        agree(d, new deflate.ServerConfig(true, false, true, 12));
+        differ(d, new deflate.ServerConfig(true, true, true, 12));
+        test.assert(d.to_string().byte_length > 0);
+        last o = web_socket.default_options();
+        agree(o, new web_socket.WebSocketOptions(1048576, 16777216, 65536));
+        differ(o, new web_socket.WebSocketOptions(1048576, 16777216, 1024));
+        test.assert_equal_string("WebSocketOptions(frame 1048576, message 16777216, fragment 65536)", o.to_string());
+        last a = new handshake.ServerAcceptance(Optional<string>.Some("chat"), "");
+        agree(a, new handshake.ServerAcceptance(Optional<string>.Some("chat"), ""));
+        differ(a, new handshake.ServerAcceptance(Optional<string>.None, ""));
+        test.assert_equal_string("ServerAcceptance(protocol chat, extensions \"\")", a.to_string());
+    };
+
+    export let test_web_transport = func {
+        last f = new session.Field(":protocol", "webtransport");
+        agree(f, new session.Field(":protocol", "webtransport"));
+        differ(f, new session.Field(":protocol", "other"));
+        test.assert_equal_string(":protocol: webtransport", f.to_string());
+        last r = new session.SessionRequest("example.com", "/wt", "https://example.com");
+        agree(r, new session.SessionRequest("example.com", "/wt", "https://example.com"));
+        differ(r, new session.SessionRequest("example.com", "/other", "https://example.com"));
+        test.assert_equal_string("SessionRequest(example.com/wt, origin https://example.com)", r.to_string());
+        last c = new wt_wire.SessionClose(7, "done");
+        agree(c, new wt_wire.SessionClose(7, "done"));
+        differ(c, new wt_wire.SessionClose(8, "done"));
+        test.assert_equal_string("7: done", c.to_string());
+    };
+);

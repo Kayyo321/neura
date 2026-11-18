@@ -56,11 +56,10 @@ export let HostsFile = module (
 
         /// @brief Equal when the addresses are equal and the names are equal in order (case-sensitively).
         export let.override equals = func(other: class) -> bool {
-            if (!(other is HostsEntry)) {
+            if (other is not that: HostsEntry) {
                 return false;
             }
-            last that = other as HostsEntry;
-            if (!ips.equals(address, that.address) || names.length != that.names.length) {
+            if (not ips.equals(address, that.address) || names.length != that.names.length) {
                 return false;
             }
             for (let i = 0; i < names.length; i++) {
@@ -82,7 +81,7 @@ export let HostsFile = module (
 
         /// @brief The line form, such as "127.0.0.1 localhost loopback".
         export let.override to_string = func -> string =>
-            ips.to_string(address) + " " + strings.join(names, " ");
+            ips.to_string(address) .. " " .. strings.join(names, " ");
     );
 
     /// @brief A skipped line: its 1-based number, its text, and why it was skipped.
@@ -104,10 +103,9 @@ export let HostsFile = module (
 
         /// @brief Equal when the line number, text and reason are equal.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is HostsProblem)) {
+            if (other is not that: HostsProblem) {
                 return false;
             }
-            last that = other as HostsProblem;
             return line == that.line && text == that.text && reason == that.reason;
         };
 
@@ -116,7 +114,7 @@ export let HostsFile = module (
             hashing.combine(hashing.combine(line as uint32, strings.hash(text)), strings.hash(reason));
 
         /// @brief Text such as "line 3: invalid address".
-        export let.override to_string = func -> string => "line " + line.to_string() + ": " + reason;
+        export let.override to_string = func -> string => "line " .. line.to_string() .. ": " .. reason;
     );
 
     /// @brief A parsed host table: its entries in file order and the lines it skipped.
@@ -192,9 +190,38 @@ export let HostsFile = module (
             return found;
         };
 
+        /// @brief Equal when the entries and the problems are equal, in order.
+        export let.override equals = func(other: class) -> bool {
+            if (other is not that: HostsFile) {
+                return false;
+            }
+            if (table.length != that.table.length || skipped.length != that.skipped.length) {
+                return false;
+            }
+            for (let i = 0; i < table.length; i++) {
+                return false unless table[i].equals(that.table[i]);
+            }
+            for (let i = 0; i < skipped.length; i++) {
+                return false unless skipped[i].equals(that.skipped[i]);
+            }
+            return true;
+        };
+
+        /// @brief Combines the hashes of the entries and the problems, consistent with equals.
+        export let.override hash_code = func -> uint32 {
+            let hash: uint32 = 17;
+            for (let entry in table) {
+                hash = hashing.combine(hash, entry.hash_code());
+            }
+            for (let problem in skipped) {
+                hash = hashing.combine(hash, problem.hash_code());
+            }
+            return hash;
+        };
+
         /// @brief Text such as "HostsFile(3 entries, 1 problems)".
         export let.override to_string = func -> string =>
-            "HostsFile(" + table.length.to_string() + " entries, " + skipped.length.to_string() + " problems)";
+            "HostsFile(" .. table.length.to_string() .. " entries, " .. skipped.length.to_string() .. " problems)";
     );
 
     /// @brief A table with no entries.
@@ -216,7 +243,7 @@ export let HostsFile = module (
             last parsed = ips.parse(fields[0]);
             match (parsed) {
                 Result.Err(_) => {
-                    rejected.append(new HostsProblem(i + 1, raw, "invalid address " + fields[0]));
+                    rejected.append(new HostsProblem(i + 1, raw, "invalid address " .. fields[0]));
                 },
                 Result.Ok(ip) => {
                     if (fields.length < 2) {
@@ -227,7 +254,7 @@ export let HostsFile = module (
                         for (let k = 1; k < fields.length && why == ""; k++) {
                             last problem = name_problem(fields[k]);
                             if (problem != "") {
-                                why = "invalid host name " + fields[k] + ": " + problem;
+                                why = "invalid host name " .. fields[k] .. ": " .. problem;
                             } else {
                                 names.append(drop_trailing_dot(fields[k]));
                             }
@@ -272,11 +299,11 @@ export let HostsFile = module (
                 if (length > 63) {
                     return "label longer than 63 bytes";
                 }
-                if (!is_alnum(body.byte_at(label_start)) || !is_alnum(body.byte_at(i - 1))) {
+                if (not is_alnum(body.byte_at(label_start)) || not is_alnum(body.byte_at(i - 1))) {
                     return "label must begin and end with a letter or digit";
                 }
                 label_start = i + 1;
-            } else if (!is_alnum(body.byte_at(i)) && body.byte_at(i) != 45) {
+            } else if (not is_alnum(body.byte_at(i)) && body.byte_at(i) != 45) {
                 return "invalid character";
             }
         }
@@ -288,10 +315,8 @@ export let HostsFile = module (
 
     /// @brief The name without one trailing dot.
     let drop_trailing_dot = func(name: string) -> string {
-        if (name.byte_length > 0 && name.byte_at(name.byte_length - 1) == 46) {
-            return name.slice(0, name.byte_length - 1);
-        }
-        return name;
+        return if (name.byte_length > 0 && name.byte_at(name.byte_length - 1) == 46) -> name.slice(0, name.byte_length - 1)
+            else -> name;
     };
 
     /// @brief Whether the byte is an ASCII letter or digit.

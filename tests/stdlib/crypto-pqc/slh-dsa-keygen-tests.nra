@@ -1,0 +1,96 @@
+// test-options: --gpu=off --max-steps 20000000000
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let hex = import:Std.Encoding.Hex;
+let slh_dsa = import:Std.Crypto.Pqc.SlhDsa;
+let test = import:Std.Test;
+let vectors = import:SlhDsaVectors;
+
+// SLH-DSA against NIST's ACVP test sets SLH-DSA-keyGen-FIPS205, SLH-DSA-sigGen-FIPS205 and
+// SLH-DSA-sigVer-FIPS205 (support/, scripts/crypto-vectors/gen-pqc-slh-dsa.py).
+let SlhDsaKeygenTests = module (
+    let decode = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let set_of = func(name: string) -> slh_dsa.ParameterSet {
+        if (name == "SHA2-128s") {
+            return slh_dsa.ParameterSet.Sha2_128s;
+        }
+        if (name == "SHA2-128f") {
+            return slh_dsa.ParameterSet.Sha2_128f;
+        }
+        if (name == "SHA2-192s") {
+            return slh_dsa.ParameterSet.Sha2_192s;
+        }
+        if (name == "SHA2-192f") {
+            return slh_dsa.ParameterSet.Sha2_192f;
+        }
+        if (name == "SHA2-256s") {
+            return slh_dsa.ParameterSet.Sha2_256s;
+        }
+        if (name == "SHA2-256f") {
+            return slh_dsa.ParameterSet.Sha2_256f;
+        }
+        if (name == "SHAKE-128s") {
+            return slh_dsa.ParameterSet.Shake128s;
+        }
+        if (name == "SHAKE-128f") {
+            return slh_dsa.ParameterSet.Shake128f;
+        }
+        if (name == "SHAKE-192s") {
+            return slh_dsa.ParameterSet.Shake192s;
+        }
+        if (name == "SHAKE-192f") {
+            return slh_dsa.ParameterSet.Shake192f;
+        }
+        if (name == "SHAKE-256s") {
+            return slh_dsa.ParameterSet.Shake256s;
+        }
+        return slh_dsa.ParameterSet.Shake256f;
+    };
+
+    let hash_of = func(name: string) -> Algorithm {
+        if (name == "Sha224") {
+            return Algorithm.Sha224;
+        }
+        if (name == "Sha256") {
+            return Algorithm.Sha256;
+        }
+        if (name == "Sha384") {
+            return Algorithm.Sha384;
+        }
+        if (name == "Sha512") {
+            return Algorithm.Sha512;
+        }
+        if (name == "Sha512_256") {
+            return Algorithm.Sha512_256;
+        }
+        if (name == "Sha3_224") {
+            return Algorithm.Sha3_224;
+        }
+        if (name == "Sha3_256") {
+            return Algorithm.Sha3_256;
+        }
+        if (name == "Sha3_384") {
+            return Algorithm.Sha3_384;
+        }
+        if (name == "Sha3_512") {
+            return Algorithm.Sha3_512;
+        }
+        if (name == "Shake128") {
+            return Algorithm.Shake128;
+        }
+        return Algorithm.Shake256;
+    };
+
+    export let test_key_generation = func {
+        last rows = vectors.keygen;
+        for (let i = 0; i < rows.length; i += 6) {
+            last set = set_of(rows[i]);
+            last key = slh_dsa.key_pair_from_seed(set, decode(rows[i + 1]), decode(rows[i + 2]), decode(rows[i + 3]));
+            test.assert_equal_string(rows[i + 4], hex.encode(key.expose()));
+            test.assert_equal_string(rows[i + 5], hex.encode(key.public_key_bytes()));
+            test.assert_equal_string(slh_dsa.name(set), "SLH-DSA-" + rows[i]);
+        }
+        test.assert_equal_int32(144, rows.length);
+    };
+);

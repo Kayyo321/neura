@@ -1,0 +1,8 @@
+// Edge case 44 of docs/design/Expressions030.md: `..=` as a statement
+// appends to a string, so an integer destination is E0262, which explains
+// both forms; as a value, `n ..= 5` is an inclusive range.
+let count = func(n: int) -> int {
+    let r = n ..= 5;
+    n ..= 5;
+    return r.length;
+};

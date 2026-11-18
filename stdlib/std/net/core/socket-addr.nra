@@ -42,10 +42,9 @@ export let SocketAddr = module (
 
         /// @brief Tests whether another object is a `SocketAddr` with an equal address and the same port.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is SocketAddr)) {
+            if (other is not address: SocketAddr) {
                 return false;
             }
-            last address = other as SocketAddr;
             return port == address.port && ips.equals(ip, address.ip);
         };
 
@@ -56,8 +55,8 @@ export let SocketAddr = module (
         /// @brief `a.b.c.d:port` or `[ipv6]:port`.
         #Pure
         export let.override to_string = func -> string => match (ip) {
-            ips.IpAddr.V4(a) => a.to_string() + ":" + port.to_string(),
-            ips.IpAddr.V6(a) => "[" + a.to_string() + "]:" + port.to_string(),
+            ips.IpAddr.V4(a) => a.to_string() .. ":" .. port.to_string(),
+            ips.IpAddr.V6(a) => "[" .. a.to_string() .. "]:" .. port.to_string(),
         };
     );
 
@@ -141,10 +140,8 @@ export let SocketAddr = module (
             }
             port = port * 10 + b - 48;
         }
-        if (port > 65535) {
-            return failed(ParseErrorKind.OutOfRange, start, "port above 65535");
-        }
-        return Result<SocketAddr>.Ok(new SocketAddr(ip, port));
+        return if (port > 65535) -> failed(ParseErrorKind.OutOfRange, start, "port above 65535")
+            else -> Result<SocketAddr>.Ok(new SocketAddr(ip, port));
     };
 
     /// @brief Creates a socket-address parse error at a UTF-8 byte offset.

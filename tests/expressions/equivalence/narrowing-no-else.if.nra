@@ -1,0 +1,28 @@
+// A narrowing `if` (docs/design/Expressions030.md, Narrowing): no else branch.
+// Built against narrowing-no-else.expanded.nra, the same program written with match.is.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Shape = class (
+    export let sides: int = 0;
+);
+let Circle = class : Shape (
+    export let radius: int = 1;
+);
+
+let describe = func(shape: Shape, limit: int) -> string {
+    let text = "none";
+    if (shape is circle: Circle) {
+        text = "circle " + circle.radius.to_string();
+    }
+    return text;
+};
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(describe(new Circle(), 0));
+        console.print_line(describe(new Circle(), 3));
+        console.print_line(describe(new Shape(), 0));
+        return program.ExitCode.Ok;
+    };
+);

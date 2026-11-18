@@ -210,6 +210,23 @@ class EditorRegressionTests(unittest.TestCase):
         # The binding, its guard and its result; the next arm's binding is another name.
         self.assertEqual(sorted(edit['range']['start']['line'] for edit in edits), [3, 3, 3])
 
+    def test_narrowing_bindings_hover_with_their_type(self):
+        # docs/design/Expressions030.md, Narrowing: the binding is a constant of
+        # the tested type inside the if.
+        source = ('let Shape = class ( export let sides: int = 0; );\n'
+                  'let Circle = class : Shape ( export let radius: int = 1; );\n'
+                  'let size = func(value: Shape) -> int {\n'
+                  '    if (value is circle: Circle && circle.radius > 0) {\n'
+                  '        return circle.radius;\n'
+                  '    }\n'
+                  '    return 0;\n'
+                  '};\n')
+        path = self.root / 'narrowing.nra'
+        self.client.open(path, source)
+        hover = self.client.request('textDocument/hover', params(path, 4, 17))
+        self.assertIn('Circle', hover['contents']['value'])
+        self.assertTrue({'radius', 'sides'} <= self.labels(source.replace('return circle.radius;', 'return circle.<cursor>;')))
+
     def test_interface_statics_are_only_available_on_declaring_interface(self):
         declaration = ('let I = interface (static let utility = func -> int => 1; let required = func -> int;);\n'
                        'let C = class implements I (export let.override required = func -> int => 1;);\n')

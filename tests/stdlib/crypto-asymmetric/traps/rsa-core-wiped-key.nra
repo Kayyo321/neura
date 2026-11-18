@@ -1,0 +1,20 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off --deny-entropy --max-steps 15000000000
+// stderr: explicit program failure \(trap reason 3\): invalid state: secret wiped
+let program = import:Std.Program;
+let fixture = import:RsaWipeKey;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last key = fixture.key();
+        last cached = key.core;
+        let representative: uint32[list] = new([2]);
+        for (let i = 1; i < (key.bits() + 31) / 32; i++) {
+            representative.append(0);
+        }
+        key.wipe();
+        let _ = cached.apply(representative);
+        return program.ExitCode.Ok;
+    };
+);

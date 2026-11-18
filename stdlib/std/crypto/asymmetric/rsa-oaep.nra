@@ -1,0 +1,116 @@
+let.promote _ = import:Std.Core.Error;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Crypto.Algorithm;
+let.promote _ = import:Std.Crypto.CryptographicPrimitive;
+let asym_hash = import:Std.Crypto.Internal.AsymHash;
+let crypto_policy = import:Std.Crypto.Core.CryptoPolicy;
+let drbg = import:Std.Crypto.Random.ChaCha20Drbg;
+let entropy = import:Std.Crypto.Random.Entropy;
+let error = import:Std.Core.Error;
+let rsa = import:Std.Crypto.Asymmetric.Rsa;
+let rsa_core = import:Std.Crypto.Internal.RsaCore;
+
+/// @brief RSAES-OAEP encryption of RFC 8017, section 7.1, with MGF1 over the same hash (Stdlib.md section
+/// 21.8).
+///
+/// The hash is SHA-256 unless another SHA-2 or SHA-3 hash is chosen. A message may have at most k - 2 hLen - 2
+/// bytes for a k-byte modulus. The seed comes from a `ChaCha20Drbg` given to the object, or else from
+/// `Entropy.os_bytes`; `encrypt_with_seed` takes it directly for known-answer tests. Decryption has a single
+/// failure, `Custom` code `crypto.decryption`, whatever went wrong (a value not below n, a failed private
+/// check, a bad label hash, padding or leading byte), and its padding check is branch-free in source, so the
+/// failure reason does not show in its steps (Manger's attack). The runtime does not guarantee constant time.
+/// @see [Std.Crypto.Asymmetric.RsaOaep](https://github.com/Kayyo321/neura/wiki/Stdlib-Crypto-Asymmetric-RsaOaep)
+#Since("0.3.0")
+export let RsaOaep = module (
+    /// @brief RSA-OAEP with one hash.
+    #[Final, Since("0.3.0")]
+    export let RsaOaep = class implements CryptographicPrimitive<RsaOaep> (
+        /// @brief The hash of the label and of MGF1.
+        export last hash: Algorithm;
+        let generator: drbg.ChaCha20Drbg;
+        let has_generator: bool = false;
+
+        /// @brief SHA-256, or the given SHA-2 or SHA-3 hash (another traps), with seeds from
+        /// `Entropy.os_bytes`, or from the given generator.
+        export let init = func {
+            hash = Algorithm.Sha256;
+            check();
+        } or func(digest: Algorithm) {
+            hash = digest;
+            check();
+        } or func(digest: Algorithm, random: drbg.ChaCha20Drbg) {
+            hash = digest;
+            generator = random;
+            has_generator = true;
+            check();
+        };
+
+        let check = func {
+            crypto_policy.require(Algorithm.RsaOaep);
+            asym_hash.check(hash);
+            crypto_policy.require(hash);
+        };
+
+        /// @brief `Algorithm.RsaOaep`.
+        export let algorithm = func -> Algorithm => Algorithm.RsaOaep;
+
+        /// @brief The largest message for the key, k - 2 hLen - 2 bytes.
+        #NoDiscard
+        export let max_message_length = func(key: rsa.RsaPublicKey) -> int =>
+            key.core.k - 2 * asym_hash.output_length(hash) - 2;
+
+        /// @brief The ciphertext (k bytes) with the given hLen-byte seed. A message too long or a seed of
+        /// another length traps.
+        #NoDiscard
+        export let encrypt_with_seed = func(key: rsa.RsaPublicKey, message: uint8[list], label: uint8[list],
+            seed: uint8[list]) -> uint8[list] {
+            last core = key.core;
+            last em = rsa_core.oaep_encode(hash, core.k, message, label, seed);
+            return rsa_core.i2osp(core, core.apply(rsa_core.os2ip_below(core, em)));
+        };
+
+        /// @brief The ciphertext with a fresh seed. A message too long traps; an entropy failure is returned.
+        #NoDiscard
+        export let encrypt = func(key: rsa.RsaPublicKey, message: uint8[list], label: uint8[list]) -> Result<uint8[list]> {
+            last h_len = asym_hash.output_length(hash);
+            last seed: Result<uint8[list]> = has_generator ? Result<uint8[list]>.Ok(generator.fill(h_len))
+                : entropy.os_bytes(h_len);
+            match (seed) {
+                Result.Ok(bytes) => {
+                    return Result<uint8[list]>.Ok(encrypt_with_seed(key, message, label, bytes));
+                },
+                Result.Err(e) => {
+                    return Result<uint8[list]>.Err(e);
+                },
+            }
+        };
+
+        /// @brief The message, or `Custom` code `crypto.decryption` for any decryption failure. A wiped key traps.
+        #NoDiscard
+        export let decrypt = func(key: rsa.RsaPrivateKey, ciphertext: uint8[list], label: uint8[list])
+            -> Result<uint8[list]> {
+            last core = key.core;
+            core.require_live();
+            last public_core = core.public_core;
+            last failure = Result<uint8[list]>.Err(error.custom("crypto.decryption", "decryption failed"));
+            if (ciphertext.length != public_core.k || public_core.k < 2 * asym_hash.output_length(hash) + 2) {
+                return failure;
+            }
+            last c = rsa_core.os2ip_below(public_core, ciphertext);
+            if (c.length == 0) {
+                return failure;
+            }
+            last m = core.apply(c);
+            if (m.length == 0) {
+                return failure;
+            }
+            last decoded = rsa_core.oaep_decode(hash, rsa_core.i2osp(public_core, m), label);
+            if (decoded.length == 0) {
+                return failure;
+            }
+            return Result<uint8[list]>.Ok(decoded[0]);
+        };
+
+        export let.override to_string = func -> string => "RsaOaep(<redacted>)";
+    );
+);

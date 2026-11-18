@@ -1,0 +1,70 @@
+// test-options: --gpu=off --deny-all --max-steps 1200000000
+let test = import:Std.Test;
+let collateral = import:Std.Crypto.Enclave.DcapCollateral;
+let dcap = import:Std.Crypto.Enclave.Dcap;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int64s = import:Std.Core.Int64;
+let utf8 = import:Std.Encoding.Utf8;
+let quotes = import:DcapVectors;
+let history = import:DcapCollateralVectors;
+let capture = import:DcapPcsVectors;
+
+let DcapPcsTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+
+    let document = func(row: string[], offset: int) -> collateral.SignedJson =>
+        new collateral.SignedJson(test.assert_ok(utf8.decode(bytes(row[offset]))), bytes(row[offset + 1]), bytes(row[offset + 2]));
+
+    let verification_time = func(row: string[]) -> instant.Instant =>
+        instant.of_epoch_seconds(test.assert_ok(int64s.parse(row[0])), 0);
+
+    let expect_status_refusal = func(cause: error.Error, status: string) {
+        match (cause) {
+            error.Error.Custom(detail) => {
+                test.assert_equal_string("crypto.dcap_tcb_status", detail.code());
+                test.assert_equal_string("DCAP status refused by policy: " + status, detail.message());
+            },
+            _ => {
+                test.assert(false);
+            },
+        }
+    };
+
+    export let test_direct_pcs_sgx_defaults_to_denial_and_respects_allowlist = func {
+        last row = capture.sgx;
+        last at = verification_time(row);
+        last quote = bytes(quotes.quotes[1]);
+        last root = bytes(quotes.roots[0]);
+        last measurement = bytes(quotes.quotes[4]);
+        last expected_binding = bytes(quotes.quotes[3]);
+        last tcb = document(row, 4);
+        last qe = document(row, 7);
+        last standard = new collateral.SgxCollateralVerifier(tcb, qe, bytes(row[1]), bytes(row[2]), bytes(row[3]));
+        last denied = test.assert_err(dcap.verify(quote, root, at, dcap.Platform.Sgx, measurement, expected_binding, standard));
+        expect_status_refusal(denied, "OutOfDateConfigurationNeeded");
+        last chosen = new collateral.SgxCollateralVerifier(tcb, qe, bytes(row[1]), bytes(row[2]), bytes(row[3]),
+            new([collateral.TcbStatus.UpToDate, collateral.TcbStatus.OutOfDateConfigurationNeeded]));
+        last verified = test.assert_ok(dcap.verify(quote, root, at, dcap.Platform.Sgx, measurement, expected_binding, chosen));
+        test.assert(verified.platform == dcap.Platform.Sgx);
+    };
+
+    export let test_direct_pcs_tdx_defaults_to_denial_and_respects_allowlist = func {
+        last row = capture.tdx;
+        last at = verification_time(row);
+        last quote = bytes(history.tdx[13]);
+        last root = bytes(quotes.roots[0]);
+        last measurement = bytes(history.tdx[15]);
+        last expected_binding = bytes(history.tdx[14]);
+        last tcb = document(row, 4);
+        last qe = document(row, 7);
+        last standard = new collateral.TdxCollateralVerifier(tcb, qe, bytes(row[1]), bytes(row[2]), bytes(row[3]));
+        last denied = test.assert_err(dcap.verify(quote, root, at, dcap.Platform.Tdx, measurement, expected_binding, standard));
+        expect_status_refusal(denied, "OutOfDate");
+        last chosen = new collateral.TdxCollateralVerifier(tcb, qe, bytes(row[1]), bytes(row[2]), bytes(row[3]),
+            new([collateral.TcbStatus.UpToDate, collateral.TcbStatus.OutOfDate]));
+        last verified = test.assert_ok(dcap.verify(quote, root, at, dcap.Platform.Tdx, measurement, expected_binding, chosen));
+        test.assert(verified.platform == dcap.Platform.Tdx);
+    };
+);

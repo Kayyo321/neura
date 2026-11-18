@@ -1,0 +1,145 @@
+let.promote _ = import:Std.Core.Optional;
+let edwards = import:Std.Crypto.Internal.Edwards448;
+let mp = import:Std.Crypto.Internal.Mp;
+let words = import:Std.Crypto.Internal.Words;
+
+/// @brief RFC 9496 decaf448 group arithmetic and 56-byte codec. Internal.
+/// Points use the existing Edwards448 representation. Only this group's constructors supply representatives.
+/// Secret point multiplication and the element map are branch-free in source.
+/// The runtime does not guarantee constant time.
+#Since("0.3.0")
+export let Decaf448Core = module (
+    #Final
+    export let Group = class (
+        last ed: edwards.Group = new;
+        last field: mp.Modulus;
+        export last order: mp.Modulus;
+        last d: uint32[list];
+        last one_minus_d: uint32[list];
+        last one_minus_two_d: uint32[list];
+        last sqrt_minus_d: uint32[list];
+        last invsqrt_minus_d: uint32[list];
+        last exponent: uint32[list];
+
+        export let init = func {
+            field = ed.field;
+            order = ed.order;
+            d = field.neg(field.to_mont(mp.small(39081, 14)));
+            one_minus_d = field.to_mont(mp.small(39082, 14));
+            one_minus_two_d = field.to_mont(mp.small(78163, 14));
+            sqrt_minus_d = field.to_mont(mp.from_hex(
+                "22d962fbeb24f7683bf68d722fa26aa0a1f1a7b8a5b8d54b64a2d780968c14ba839a66f4fd6eded260337bf6aa20ce529642ef0f45572736",
+                14));
+            invsqrt_minus_d = field.to_mont(mp.from_hex(
+                "6ef40652e222c057902be35a0bcac8075a90950c3a5b27a7d6ba56f128a6521abe707ee2c21fba15efbb2479f19e94f353afbb5eb878682c",
+                14));
+            exponent = mp.shift_right(mp.plain_sub(field.m, mp.small(3, 14)), 2);
+        };
+
+        let absolute = func(value: uint32[list]) -> uint32[list] {
+            last normal = field.from_mont(value);
+            return mp.select(normal[0] & 1, field.neg(value), value);
+        };
+
+        // RFC 9496 §5.2 gives an absolute square root of u/v or, when nonsquare, of -u/v.
+
+        let sqrt_ratio = func(u, v: uint32[list]) -> [uint32, uint32[list]] {
+            last root = field.mul(u, field.pow(field.mul(u, v), exponent));
+            last check = field.mul(v, field.sqr(root));
+            return [mp.equal(check, u), absolute(root)];
+        };
+
+        export let identity = func -> edwards.Point => ed.identity();
+
+        // RFC 9496 §5 chooses twice the Edwards448 basepoint.
+
+        export let base = func -> edwards.Point => ed.double(ed.base());
+
+        export let add = func(p, q: edwards.Point) -> edwards.Point => ed.add(p, q);
+
+        export let multiply = func(scalar: uint32[list], point: edwards.Point) -> edwards.Point => ed.multiply(scalar, point);
+
+        export let multiply_base = func(scalar: uint32[list]) -> edwards.Point => ed.multiply(scalar, base());
+
+        export let multiply_two = func(a: uint32[list], p: edwards.Point, b: uint32[list], q: edwards.Point) -> edwards.Point => ed.multiply_two(a, p, b, q);
+
+        // Equality with the identity specializes the quotient test x1*y2 == y1*x2 (§5.3.3).
+
+        export let is_identity = func(point: edwards.Point) -> bool => mp.is_zero(point.x) == 1;
+
+        export let decode = func(bytes: uint8[list]) -> Optional<edwards.Point> {
+            if (bytes.length != 56 || (bytes[0] & 1) != 0) {
+                return Optional<edwards.Point>.None;
+            }
+            last f = field;
+            last raw = mp.from_bytes_le(bytes, 14);
+            if (mp.less(raw, f.m) != 1) {
+                return Optional<edwards.Point>.None;
+            }
+            last s = f.to_mont(raw);
+            last ss = f.sqr(s);
+            last u1 = f.add(f.one, ss);
+            last u1_squared = f.sqr(u1);
+            last d_ss = f.mul(d, ss);
+            last twice_d_ss = f.add(d_ss, d_ss);
+            last u2 = f.sub(u1_squared, f.add(twice_d_ss, twice_d_ss));
+            let [square, inverse] = sqrt_ratio(f.one, f.mul(u2, u1_squared));
+            if (square != 1) {
+                return Optional<edwards.Point>.None;
+            }
+            last u3 = absolute(f.mul(f.mul(f.mul(f.add(s, s), inverse), u1), sqrt_minus_d));
+            last x = f.mul(f.mul(f.mul(u3, inverse), u2), invsqrt_minus_d);
+            last y = f.mul(f.mul(f.sub(f.one, ss), inverse), u1);
+            return Optional<edwards.Point>.Some(new edwards.Point(x, y, f.one));
+        };
+
+        export let encode = func(point: edwards.Point) -> uint8[list] {
+            last f = field;
+            // (XZ, YZ, Z², XY) are extended coordinates for (X:Y:Z), with XY = ZT after rescaling.
+            last x = f.mul(point.x, point.z);
+            last z = f.sqr(point.z);
+            last t = f.mul(point.x, point.y);
+            last u1 = f.mul(f.add(x, t), f.sub(x, t));
+            let [_, inverse] = sqrt_ratio(f.one, f.mul(f.mul(u1, one_minus_d), f.sqr(x)));
+            last ratio = absolute(f.mul(f.mul(inverse, u1), sqrt_minus_d));
+            last u2 = f.sub(f.mul(f.mul(invsqrt_minus_d, ratio), z), t);
+            last s = absolute(f.mul(f.mul(f.mul(one_minus_d, inverse), x), u2));
+            return mp.to_bytes_le(f.from_mont(s), 56);
+        };
+
+        let map = func(bytes: uint8[list]) -> edwards.Point {
+            last f = field;
+            last input = f.to_mont(f.reduce_bytes_le(bytes));
+            last r = f.neg(f.sqr(input));
+            last r_minus_one = f.sub(r, f.one);
+            last r_plus_one = f.add(r, f.one);
+            last u0 = f.mul(d, r_minus_one);
+            last u1 = f.mul(f.add(u0, f.one), f.sub(u0, r));
+            let [square, root] = sqrt_ratio(one_minus_two_d, f.mul(r_plus_one, u1));
+            last v = mp.select(square, root, f.mul(input, root));
+            last sign = mp.select(square, f.one, f.neg(f.one));
+            last s = f.mul(v, r_plus_one);
+            last ss = f.sqr(s);
+            last magnitude = absolute(s);
+            last w0 = f.add(magnitude, magnitude);
+            last w1 = f.add(ss, f.one);
+            last w2 = f.sub(ss, f.one);
+            last w3 = f.add(f.mul(f.mul(f.mul(v, s), r_minus_one), one_minus_two_d), sign);
+            return new edwards.Point(f.mul(w0, w3), f.mul(w2, w1), f.mul(w1, w3));
+        };
+
+        /// @brief Derives a group element from a 112-byte uniform string, RFC 9496 §5.3.4.
+        export let from_uniform = func(bytes: uint8[list]) -> edwards.Point {
+            if (bytes.length != 112) {
+                trap_with_message("invalid argument: decaf448 uniform input must be 112 bytes");
+            }
+            let left = words.slice(bytes, 0, 56);
+            defer words.wipe(left);
+            let right = words.slice(bytes, 56, 112);
+            defer words.wipe(right);
+            return ed.add(map(left), map(right));
+        };
+
+        export let.override to_string = func -> string => "Decaf448Core.Group";
+    );
+);

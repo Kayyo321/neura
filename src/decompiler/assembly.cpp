@@ -29,7 +29,7 @@ constexpr std::array<std::string_view, nvr::state_op_count> state_ops{
     "class-is",        "class-cast",       "scalar-text", "repeat-collection", "kernel",
     "read-component",  "write-component",
     "enter-region",    "release-region",   "region-object", "region-collection", "region-repeat",
-    "move-to-region",  "hook-enter",       "hook-leave",
+    "move-to-region",  "hook-enter",       "hook-leave",    "concat-text",
 };
 constexpr std::array<std::string_view, 3> value_kinds{"slot", "constant", "lanes"};
 
@@ -737,6 +737,9 @@ nvr::Image assemble(std::string_view text) {
                 }
                 if (nvr::is_hook_operation(exit.operation) && image.minor_version < nvr::hooks_minor_version) {
                     in.error("class hook operations require NVR 1." + std::to_string(nvr::hooks_minor_version));
+                }
+                if (exit.operation == nvr::StateOp::ConcatText && image.minor_version < nvr::concat_minor_version) {
+                    in.error("concat-text requires NVR 1." + std::to_string(nvr::concat_minor_version));
                 }
                 in.keyword("immediate");
                 exit.immediate = in.index("immediate");

@@ -1,0 +1,7 @@
+error[E1012]: not a class of the CSS module
+ --> $DIR/style-keyframes-unknown.nra:3:33
+  |
+3 | let name = Local.keyframes_name("row");
+  |                                 ^^^^^ the module declares no keyframes rule 'row'
+
+For more information about this error, try `neura explain E1012`.

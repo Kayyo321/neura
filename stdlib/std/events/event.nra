@@ -19,7 +19,7 @@ export let Event = module (
         /// @brief Removes the registration. It takes effect from the next emission: a handler removed
         /// during an emission is still called by it. A second call does nothing.
         export let unsubscribe = func {
-            if (!attached) {
+            if (not attached) {
                 return;
             }
             attached = false;
@@ -28,6 +28,10 @@ export let Event = module (
 
         /// @brief Whether the registration is still in place.
         export let active = func -> bool => attached;
+
+        /// @brief Names the subscription and whether it is attached.
+        export let.override to_string = func -> string =>
+            "Subscription(" .. (attached ? "attached" : "detached") .. ")";
     );
 
     /// @brief One handler and its token.
@@ -39,10 +43,14 @@ export let Event = module (
             token = subscription;
             handler = run;
         };
+
         export let token_of = func -> Subscription => token;
         export let deliver = func(payload: T) {
             handler(payload);
         };
+
+        /// @brief Names the registration.
+        export let.override to_string = func -> string => "Registration";
     );
 
     /// @brief The owner's side of an event with payloads of type T. The registrations are an immutable list
@@ -93,6 +101,10 @@ export let Event = module (
             }
             registrations = next;
         };
+
+        /// @brief Names the event and its registration count.
+        export let.override to_string = func -> string =>
+            "Event(" .. registrations.length.to_string() .. " registrations)";
     );
 
     /// @brief What an owner exports: subscribe only. It cannot emit and gives no access to the Event.
@@ -107,5 +119,8 @@ export let Event = module (
 
         /// @brief Registers `handler` on the event; see Event.subscribe.
         export let subscribe = func(handler: func(T) -> void) -> Subscription => source.subscribe(handler);
+
+        /// @brief Names the view.
+        export let.override to_string = func -> string => "EventView";
     );
 );

@@ -1,0 +1,18 @@
+// test-options: --gpu=off
+// status: 134
+// run-options: --gpu=off
+// stderr: explicit program failure \(trap reason 3\): invalid argument: PASETO v4.local nonce must be 32 bytes
+let hex = import:Std.Encoding.Hex;
+let paseto = import:Std.Crypto.Token.Paseto;
+let program = import:Std.Program;
+let secret_key = import:Std.Crypto.Core.SecretKey;
+let test = import:Std.Test;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last bytes = test.assert_ok(hex.decode("0000000000000000000000000000000000000000000000000000000000000000"));
+        last cipher = new paseto.Local(new secret_key.SecretKey<paseto.Local>(bytes));
+        let _ = cipher.encrypt_with_nonce(new, new([1]), new, new);
+        return program.ExitCode.Ok;
+    };
+);

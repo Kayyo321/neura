@@ -50,7 +50,7 @@ export let Cache = module (
 
         /// @brief Copies the header fields and the content.
         export let init = func(code: int, response_fields: header_map.Headers, content: uint8[list],
-                requested: instant.Instant, received: instant.Instant) {
+            requested: instant.Instant, received: instant.Instant) {
             status = code;
             fields = response_fields.copy();
             body = new;
@@ -63,12 +63,11 @@ export let Cache = module (
 
         /// @brief Equal status, fields, content and times.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is StoredResponse)) {
+            if (other is not that: StoredResponse) {
                 return false;
             }
-            last that = other as StoredResponse;
-            if (status != that.status || !fields.equals(that.fields) || body.length != that.body.length
-                    || !request_time.equals(that.request_time) || !response_time.equals(that.response_time)) {
+            if (status != that.status || not fields.equals(that.fields) || body.length != that.body.length
+                || not request_time.equals(that.request_time) || not response_time.equals(that.response_time)) {
                 return false;
             }
             for (let i = 0; i < body.length; i++) {
@@ -92,9 +91,9 @@ export let Cache = module (
 
         /// @brief The status, the number of fields and content bytes, and the two times.
         export let.override to_string = func -> string =>
-            "StoredResponse{status=" + status.to_string() + ", fields=" + fields.size().to_string() + ", body="
-                + body.length.to_string() + " bytes, request_time=" + request_time.to_string() + ", response_time="
-                + response_time.to_string() + "}";
+            "StoredResponse{status=" .. status.to_string() .. ", fields=" .. fields.size().to_string() .. ", body="
+            .. body.length.to_string() .. " bytes, request_time=" .. request_time.to_string() .. ", response_time="
+            .. response_time.to_string() .. "}";
     );
 
     /// @brief Every term of the age calculation of RFC 9111 section 4.2.3, in seconds.
@@ -119,7 +118,7 @@ export let Cache = module (
 
         /// @brief Stores the eight terms.
         export let init = func(age: int64, date: int64, apparent: int64, delay: int64, corrected: int64,
-                initial: int64, resident: int64, current: int64) {
+            initial: int64, resident: int64, current: int64) {
             age_value = age;
             date_value = date;
             apparent_age = apparent;
@@ -132,10 +131,10 @@ export let Cache = module (
 
         /// @brief Equal terms.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is AgeTerms)) {
+            if (other is not that: AgeTerms) {
                 return false;
             }
-            return to_string() == (other as AgeTerms).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the text form.
@@ -143,11 +142,11 @@ export let Cache = module (
 
         /// @brief The terms by name.
         export let.override to_string = func -> string =>
-            "AgeTerms{age_value=" + age_value.to_string() + ", date_value=" + date_value.to_string()
-                + ", apparent_age=" + apparent_age.to_string() + ", response_delay=" + response_delay.to_string()
-                + ", corrected_age_value=" + corrected_age_value.to_string() + ", corrected_initial_age="
-                + corrected_initial_age.to_string() + ", resident_time=" + resident_time.to_string()
-                + ", current_age=" + current_age.to_string() + "}";
+            "AgeTerms{age_value=" .. age_value.to_string() .. ", date_value=" .. date_value.to_string()
+            .. ", apparent_age=" .. apparent_age.to_string() .. ", response_delay=" .. response_delay.to_string()
+            .. ", corrected_age_value=" .. corrected_age_value.to_string() .. ", corrected_initial_age="
+            .. corrected_initial_age.to_string() .. ", resident_time=" .. resident_time.to_string()
+            .. ", current_age=" .. current_age.to_string() .. "}";
     );
 
     /// @brief Which rule of RFC 9111 section 4.2.1 gave the freshness lifetime, with the lifetime in seconds.
@@ -214,12 +213,10 @@ export let Cache = module (
             },
             Optional.None => {},
         }
-        if (!heuristic || !(statuses.is_heuristically_cacheable(stored.status) || directives.is_public())) {
+        if (not heuristic || not (statuses.is_heuristically_cacheable(stored.status) || directives.is_public())) {
             return Lifetime.Unknown;
         }
-        if (!stored.fields.contains("Last-Modified")) {
-            return Lifetime.Unknown;
-        }
+        return Lifetime.Unknown unless stored.fields.contains("Last-Modified");
         last date_value = date_field(stored, "Date", response_time);
         // An invalid Last-Modified counts as the Date value, which gives a lifetime of 0.
         last modified = date_field(stored, "Last-Modified", date_value);
@@ -249,8 +246,8 @@ export let Cache = module (
     /// @brief Whether a cache may store the response (section 3, with section 3.5 and the request no-store
     /// directive of section 5.2.1.5); see `refusal`.
     export let is_storable = func(method: string, request_fields: header_map.Headers, status: int,
-            response_fields: header_map.Headers, shared: bool) -> bool =>
-        refusal(method, request_fields, status, response_fields, shared) == "";
+        response_fields: header_map.Headers, shared: bool) -> bool =>
+            refusal(method, request_fields, status, response_fields, shared) == "";
 
     /// @brief Why a cache must not store the response, or "" when it may. The reasons, checked in this order:
     /// "method" (only GET and HEAD are understood), "status" (not final), "status not understood" (206 or 304,
@@ -261,7 +258,7 @@ export let Cache = module (
     /// or a heuristically cacheable status).
     #NoDiscard
     export let refusal = func(method: string, request_fields: header_map.Headers, status: int,
-            response_fields: header_map.Headers, shared: bool) -> string {
+        response_fields: header_map.Headers, shared: bool) -> string {
         if (method != "GET" && method != "HEAD") {
             return "method";
         }
@@ -270,20 +267,18 @@ export let Cache = module (
         }
         last response = cc.of_headers(response_fields);
         last understood = status != 206 && status != 304;
-        if (!understood) {
-            return "status not understood";
-        }
+        return "status not understood" unless understood;
         if (cc.of_headers(request_fields).no_store()) {
             return "request no-store";
         }
-        if (response.no_store() && !response.must_understand()) {
+        if (response.no_store() && not response.must_understand()) {
             return "no-store";
         }
         if (shared && response.is_private()) {
             return "private";
         }
-        if (shared && request_fields.contains("Authorization") && !response.must_revalidate() && !response.is_public()
-                && !response.has("s-maxage")) {
+        if (shared && request_fields.contains("Authorization") && not response.must_revalidate() && not response.is_public()
+            && not response.has("s-maxage")) {
             return "authorization";
         }
         for (let name in response_fields.list_elements("Vary")) {
@@ -291,12 +286,10 @@ export let Cache = module (
                 return "vary *";
             }
         }
-        last explicit = response.is_public() || (!shared && response.is_private())
+        last explicit = response.is_public() || (not shared && response.is_private())
             || response_fields.contains("Expires") || response.has("max-age") || (shared && response.has("s-maxage"))
             || statuses.is_heuristically_cacheable(status);
-        if (!explicit) {
-            return "no freshness information";
-        }
+        return "no freshness information" unless explicit;
         return "";
     };
 
@@ -320,7 +313,7 @@ export let Cache = module (
 
         /// @brief Records the response and the request fields Vary nominates.
         export let init = func(request_method: string, target: string, response: StoredResponse,
-                request_fields: header_map.Headers, tick: int64) {
+            request_fields: header_map.Headers, tick: int64) {
             method = request_method;
             uri = target;
             stored = response;
@@ -346,17 +339,15 @@ export let Cache = module (
             for (let i = 0; i < vary_names.length; i++) {
                 last matched = match (request_fields.joined(vary_names[i])) {
                     Optional.Some(value) => vary_present[i] && value == vary_values[i],
-                    Optional.None => !vary_present[i],
+                    Optional.None => not vary_present[i],
                 };
-                if (!matched) {
-                    return false;
-                }
+                return false unless matched;
             }
             return true;
         };
 
         /// @brief The method and URI.
-        export let.override to_string = func -> string => "Entry{" + method + " " + uri + "}";
+        export let.override to_string = func -> string => "Entry{" .. method .. " " .. uri .. "}";
     );
 
     /// @brief An in-memory HTTP cache keyed by request method and target URI text, holding responses to GET and
@@ -404,7 +395,7 @@ export let Cache = module (
         /// @brief Stores the response to a `method` request for `uri` when section 3 allows it (see
         /// `refusal`); returns whether it was stored.
         export let store = func(method: string, uri: string, request_fields: header_map.Headers,
-                response: StoredResponse) -> bool {
+            response: StoredResponse) -> bool {
             if (refusal(method, request_fields, response.status, response.fields, shared) != "") {
                 return false;
             }
@@ -427,15 +418,13 @@ export let Cache = module (
         /// must-revalidate, proxy-revalidate and s-maxage limits on serving stale responses (section 4.2.4).
         #NoDiscard
         export let lookup = func(method: string, uri: string, request_fields: header_map.Headers,
-                now: instant.Instant) -> Lookup {
+            now: instant.Instant) -> Lookup {
             last at = find(method, uri);
             if (at < 0) {
                 return Lookup.Miss;
             }
             last entry = entries[at];
-            if (!entry.vary_matches(request_fields)) {
-                return Lookup.Miss;
-            }
+            return Lookup.Miss unless entry.vary_matches(request_fields);
             tick++;
             entry.used = tick;
             last stored = entry.stored;
@@ -464,7 +453,7 @@ export let Cache = module (
             last forbidden = response.must_revalidate()
                 || (shared && (response.proxy_revalidate() || response.has("s-maxage")));
             last tolerated = match (request.max_stale()) {
-                Optional.Some(limit) => !forbidden && age - life <= limit,
+                Optional.Some(limit) => not forbidden && age - life <= limit,
                 Optional.None => false,
             };
             return tolerated ? Lookup.Fresh(stored) : Lookup.Stale(stored);
@@ -473,7 +462,7 @@ export let Cache = module (
         /// @brief `lookup` at the clock's current time; the clock's error, if any, is returned.
         #NoDiscard
         export let lookup_with = func(clock: Clock, method: string, uri: string,
-                request_fields: header_map.Headers) -> Result<Lookup> {
+            request_fields: header_map.Headers) -> Result<Lookup> {
             last now = clock.now()?;
             return Result<Lookup>.Ok(lookup(method, uri, request_fields, now));
         };
@@ -495,10 +484,8 @@ export let Cache = module (
         /// @brief Section 4.4: after a non-error (2xx or 3xx) response to a request whose method is not safe
         /// (unknown methods included), invalidates `uri`; returns how many responses were removed.
         export let record_response = func(method: string, uri: string, status: int) -> int {
-            if (methods.is_safe_name(method) || status < 200 || status > 399) {
-                return 0;
-            }
-            return invalidate(uri);
+            return if (methods.is_safe_name(method) || status < 200 || status > 399) -> 0
+                else -> invalidate(uri);
         };
 
         /// @brief Removes the response stored for `method` and `uri`; returns whether one was stored.
@@ -520,8 +507,8 @@ export let Cache = module (
 
         /// @brief The kind of cache, the number of entries and the capacity.
         export let.override to_string = func -> string =>
-            "ResponseCache{" + (shared ? "shared" : "private") + ", " + entries.length.to_string() + "/"
-                + capacity.to_string() + "}";
+            "ResponseCache{" .. (shared ? "shared" : "private") .. ", " .. entries.length.to_string() .. "/"
+            .. capacity.to_string() .. "}";
 
         /// @brief The index of the entry for `method` and `uri`, or -1.
         let find = func(method: string, uri: string) -> int {
@@ -585,10 +572,8 @@ export let Cache = module (
         if (value > bound) {
             return bound;
         }
-        if (value < -bound) {
-            return -bound;
-        }
-        return value;
+        return if (value < -bound) -> -bound
+            else -> value;
     };
 
     /// @brief `value` limited to plus or minus 2147483648 (section 1.2.2).

@@ -83,9 +83,7 @@ export let Uri = module (
         /// @brief The authority as written (`userinfo@host:port`), if any.
         #Pure
         export let authority = func -> optional.Optional<string> {
-            if (!has_authority()) {
-                return optional.Optional<string>.None;
-            }
+            return optional.Optional<string>.None unless has_authority();
             return optional.Optional<string>.Some(authority_text(userinfo, host, port));
         };
 
@@ -178,10 +176,10 @@ export let Uri = module (
 
         /// @brief Equal when every component is equal as written (not normalized).
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Uri)) {
+            if (other is not that: Uri) {
                 return false;
             }
-            return to_string() == (other as Uri).to_string();
+            return to_string() == that.to_string();
         };
 
         /// @brief The hash of the recomposed text, consistent with equals.
@@ -241,9 +239,7 @@ export let Uri = module (
                 if (close >= end) {
                     return failed(ParseErrorKind.Syntax, host_start, "unclosed '[' in the host");
                 }
-                if (!valid_ip_literal(text.slice(host_start + 1, close))) {
-                    return failed(ParseErrorKind.Syntax, host_start, "invalid IP literal");
-                }
+                return failed(ParseErrorKind.Syntax, host_start, "invalid IP literal") unless valid_ip_literal(text.slice(host_start + 1, close));
                 host = optional.Optional<string>.Some(text.slice(host_start, close + 1));
                 if (close + 1 < end) {
                     if (text.byte_at(close + 1) != 58) {
@@ -336,7 +332,7 @@ export let Uri = module (
                 input = "";
             } else {
                 last next = find_first(input, 1, input.byte_length, "/");
-                output += input.slice(0, next);
+                output ..= input.slice(0, next);
                 input = input.slice(next, input.byte_length);
             }
         }
@@ -350,10 +346,8 @@ export let Uri = module (
         if (lowered == "http") {
             return optional.Optional<int>.Some(80);
         }
-        if (lowered == "https") {
-            return optional.Optional<int>.Some(443);
-        }
-        return optional.Optional<int>.None;
+        return if (lowered == "https") -> optional.Optional<int>.Some(443)
+            else -> optional.Optional<int>.None;
     };
 
     /// @brief Collects URI components and builds a checked Uri. Setters without `raw` percent-encode their
@@ -402,8 +396,8 @@ export let Uri = module (
         /// (a `%` zone separator becomes `%25`); other text is encoded with the RegName set, except that its
         /// non-ASCII bytes are kept, and build converts a host with non-ASCII with Idna.to_ascii.
         export let set_host = func(name: string) {
-            if (strings.contains(name, ":") && !strings.starts_with(name, "[")) {
-                host_text = optional.Optional<string>.Some("[" + strings.replace(name, "%", "%25") + "]");
+            if (strings.contains(name, ":") && not strings.starts_with(name, "[")) {
+                host_text = optional.Optional<string>.Some("[" .. strings.replace(name, "%", "%25") .. "]");
             } else if (has_non_ascii(name)) {
                 host_text = optional.Optional<string>.Some(encode_ireg_name(name));
             } else {
@@ -443,7 +437,7 @@ export let Uri = module (
 
         /// @brief Appends `/` and the segment encoded with the PathSegment set (so `/` in it is encoded).
         export let add_path_segment = func(segment: string) {
-            path_text = path_text + "/" + percent.encode(segment, percent.EncodeSet.PathSegment);
+            path_text ..= "/" .. percent.encode(segment, percent.EncodeSet.PathSegment);
         };
 
         /// @brief Sets the query from decoded text, encoding it with the Query set.
@@ -464,10 +458,10 @@ export let Uri = module (
         /// @brief Appends `key=value` to the query (with `&` when it is not empty), both encoded with the
         /// QueryComponent set.
         export let add_query_parameter = func(key: string, value: string) {
-            last pair = percent.encode(key, percent.EncodeSet.QueryComponent) + "="
-                + percent.encode(value, percent.EncodeSet.QueryComponent);
+            last pair = percent.encode(key, percent.EncodeSet.QueryComponent) .. "="
+                .. percent.encode(value, percent.EncodeSet.QueryComponent);
             last current = optional.value_or<string>(query_text, "");
-            query_text = optional.Optional<string>.Some(current.byte_length == 0 ? pair : current + "&" + pair);
+            query_text = optional.Optional<string>.Some(current.byte_length == 0 ? pair : current .. "&" .. pair);
         };
 
         /// @brief Removes the query.
@@ -538,11 +532,11 @@ export let Uri = module (
             }
             last text = compose(scheme_text, userinfo_text, host, port_value, path_text, query_text, fragment_text);
             last uri = parse(text)?;
-            if (!same(uri.scheme, scheme_text) || !same(uri.userinfo, userinfo_text) || !same(uri.host, host)
-                || !optional.equals<int>(uri.port, port_value) || uri.path != path_text
-                || !same(uri.query, query_text) || !same(uri.fragment, fragment_text)) {
+            if (not same(uri.scheme, scheme_text) || not same(uri.userinfo, userinfo_text) || not same(uri.host, host)
+                || not optional.equals<int>(uri.port, port_value) || uri.path != path_text
+                || not same(uri.query, query_text) || not same(uri.fragment, fragment_text)) {
                 return failed(ParseErrorKind.Syntax, 0,
-                    "the components do not read back unchanged from \"" + text + "\"");
+                    "the components do not read back unchanged from \"" .. text .. "\"");
             }
             return Result<Uri>.Ok(uri);
         };
@@ -582,7 +576,7 @@ export let Uri = module (
         if (bad >= 0) {
             return Result<int>.Err(Error.Parse {
                 kind: ParseErrorKind.InvalidCharacter, offset: start + bad,
-                message: "character not allowed in the " + name
+                message: "character not allowed in the " .. name
             });
         }
         return Result<int>.Ok(0);
@@ -594,7 +588,7 @@ export let Uri = module (
         for (let i = 0; i < end; i++) {
             last b = text.byte_at(i);
             last alpha = (b >= 65 && b <= 90) || (b >= 97 && b <= 122);
-            if (!alpha && (i == 0 || !((b >= 48 && b <= 57) || b == 43 or 45 or 46))) {
+            if (not alpha && (i == 0 || not ((b >= 48 && b <= 57) || b == 43 or 45 or 46))) {
                 return i;
             }
         }
@@ -608,7 +602,7 @@ export let Uri = module (
         while (i < end) {
             last b = text.byte_at(i);
             if (b == 37) {
-                if (i + 2 >= end || !percent.is_triplet(text, i)) {
+                if (i + 2 >= end || not percent.is_triplet(text, i)) {
                     return i;
                 }
                 i += 3;
@@ -638,19 +632,15 @@ export let Uri = module (
                 return false;
             }
             for (let k = i + 1; k < length; k++) {
-                if (!percent.is_allowed(inside.byte_at(k), percent.EncodeSet.UserInfo)) {
-                    return false;
-                }
+                return false unless percent.is_allowed(inside.byte_at(k), percent.EncodeSet.UserInfo);
             }
             return true;
         }
         last zone = strings.index_of(inside, "%25");
         if (zone >= 0) {
             last zone_id = inside.slice(zone + 3, length);
-            if (zone_id.byte_length == 0 || percent.first_invalid(zone_id, percent.EncodeSet.Unreserved) >= 0) {
-                return false;
-            }
-            return valid_ipv6(inside.slice(0, zone));
+            return if (zone_id.byte_length == 0 || percent.first_invalid(zone_id, percent.EncodeSet.Unreserved) >= 0) -> false
+                else -> valid_ipv6(inside.slice(0, zone));
         }
         return valid_ipv6(inside);
     };
@@ -697,9 +687,7 @@ export let Uri = module (
         for (let i = 0; i < parts.length; i++) {
             last part = parts[i];
             if (allow_ipv4 && i == parts.length - 1 && strings.contains(part, ".")) {
-                if (!is_ipv4(part)) {
-                    return -1;
-                }
+                return -1 unless is_ipv4(part);
                 count += 2;
             } else {
                 if (part.byte_length < 1 || part.byte_length > 4) {
@@ -754,10 +742,8 @@ export let Uri = module (
 
     /// @brief The host without IP-literal brackets.
     let unbracket = func(h: string) -> string {
-        if (h.byte_length >= 2 && h.byte_at(0) == 91) {
-            return h.slice(1, h.byte_length - 1);
-        }
-        return h;
+        return if (h.byte_length >= 2 && h.byte_at(0) == 91) -> h.slice(1, h.byte_length - 1)
+            else -> h;
     };
 
     /// @brief Decodes an optional component; an absent one decodes to the empty text.
@@ -772,15 +758,15 @@ export let Uri = module (
         let text = "";
         match (userinfo) {
             optional.Optional.Some(u) => {
-                text += u + "@";
+                text ..= u .. "@";
             },
             optional.Optional.None => {
             },
         }
-        text += optional.value_or<string>(host, "");
+        text ..= optional.value_or<string>(host, "");
         match (port) {
             optional.Optional.Some(p) => {
-                text += ":" + p.to_string();
+                text ..= ":" .. p.to_string();
             },
             optional.Optional.None => {
             },
@@ -795,25 +781,25 @@ export let Uri = module (
         let text = "";
         match (scheme) {
             optional.Optional.Some(s) => {
-                text += s + ":";
+                text ..= s .. ":";
             },
             optional.Optional.None => {
             },
         }
         if (optional.is_some<string>(host)) {
-            text += "//" + authority_text(userinfo, host, port);
+            text ..= "//" .. authority_text(userinfo, host, port);
         }
-        text += path;
+        text ..= path;
         match (query) {
             optional.Optional.Some(q) => {
-                text += "?" + q;
+                text ..= "?" .. q;
             },
             optional.Optional.None => {
             },
         }
         match (fragment) {
             optional.Optional.Some(f) => {
-                text += "#" + f;
+                text ..= "#" .. f;
             },
             optional.Optional.None => {
             },
@@ -830,18 +816,16 @@ export let Uri = module (
     /// @brief Merges a relative-path reference with the base path (section 5.2.3).
     let merge = func(base: Uri, reference_path: string) -> string {
         if (base.has_authority() && base.path.byte_length == 0) {
-            return "/" + reference_path;
+            return "/" .. reference_path;
         }
         last at = strings.last_index_of(base.path, "/");
-        return at < 0 ? reference_path : base.path.slice(0, at + 1) + reference_path;
+        return at < 0 ? reference_path : base.path.slice(0, at + 1) .. reference_path;
     };
 
     /// @brief Keeps a path without authority from starting with `//`.
     let guard_path = func(host: optional.Optional<string>, path: string) -> string {
-        if (optional.is_none<string>(host) && strings.starts_with(path, "//")) {
-            return "/." + path;
-        }
-        return path;
+        return if (optional.is_none<string>(host) && strings.starts_with(path, "//")) -> "/." .. path
+            else -> path;
     };
 
     /// @brief Reference resolution (section 5.2.2, strict).
@@ -849,7 +833,7 @@ export let Uri = module (
         if (base.is_relative()) {
             return failed(ParseErrorKind.Syntax, 0, "the base URI must have a scheme");
         }
-        if (!reference.is_relative()) {
+        if (not reference.is_relative()) {
             last path = guard_path(reference.host, remove_dot_segments(reference.path));
             return Result<Uri>.Ok(new Uri(Seal.Token, reference.scheme, reference.userinfo, reference.host,
                 reference.port, path, reference.query, reference.fragment));
@@ -892,7 +876,7 @@ export let Uri = module (
             }
         }
         let [valid, result] = string.from_utf8(output);
-        if (!valid) {
+        if (not valid) {
             trap_with_message("invalid state: lowercasing broke UTF-8");
         }
         return result;
@@ -920,7 +904,7 @@ export let Uri = module (
             last zone = strings.index_of(h, "%25");
             if (zone >= 0) {
                 last address = strings.to_ascii_lower(h.slice(0, zone));
-                return Result<string>.Ok(address + percent.normalize(h.slice(zone, h.byte_length)));
+                return Result<string>.Ok(address .. percent.normalize(h.slice(zone, h.byte_length)));
             }
             return Result<string>.Ok(strings.to_ascii_lower(h));
         }
@@ -956,12 +940,12 @@ export let Uri = module (
         last length = name.byte_length;
         for (let i = 0; i < length; i++) {
             last b = name.byte_at(i);
-            if (b < 128 && !percent.is_allowed(b, percent.EncodeSet.RegName)) {
-                text += name.slice(start, i) + percent.encode(name.slice(i, i + 1), percent.EncodeSet.RegName);
+            if (b < 128 && not percent.is_allowed(b, percent.EncodeSet.RegName)) {
+                text ..= name.slice(start, i) .. percent.encode(name.slice(i, i + 1), percent.EncodeSet.RegName);
                 start = i + 1;
             }
         }
-        return text + name.slice(start, length);
+        return text .. name.slice(start, length);
     };
 
     /// @brief Syntax-based and (http, https) scheme-based normalization.
@@ -989,7 +973,7 @@ export let Uri = module (
             port = optional.Optional<int>.None;
         }
         let path = percent.normalize(uri.path);
-        if (!uri.is_relative()) {
+        if (not uri.is_relative()) {
             path = guard_path(uri.host, remove_dot_segments(path));
         }
         if (optional.is_some<int>(defaults) && uri.has_authority() && path.byte_length == 0) {

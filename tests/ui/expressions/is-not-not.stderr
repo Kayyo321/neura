@@ -1,0 +1,7 @@
+error[E0202]: expected an identifier
+ --> $DIR/is-not-not.nra:6:56
+  |
+6 | let check = func(shape: Shape) -> bool => shape is not not Shape;
+  |                                                        ^^^ 'not' is a keyword
+
+For more information about this error, try `neura explain E0202`.

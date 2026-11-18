@@ -1,0 +1,7 @@
+error[E0202]: expected an identifier
+ --> $DIR/typeof-is-reserved.nra:2:5
+  |
+2 | let typeof = 1;
+  |     ^^^^^^ 'typeof' is a keyword
+
+For more information about this error, try `neura explain E0202`.

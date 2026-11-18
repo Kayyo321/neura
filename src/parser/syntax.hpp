@@ -78,6 +78,8 @@ struct Declaration;
 struct MatchArm;
 struct SelectArm;
 struct Statement;
+struct HtmlFactorySyntax;
+struct StylesheetSyntax;
 
 struct Expr {
     enum class Kind {
@@ -89,7 +91,7 @@ struct Expr {
         Lambda, Nil, TypeTest, TypeApplication,
         // `spawn call` (Concurrency.md section 4.4): the call is operand 0.
         // The span starts at the contextual keyword, which is five bytes long.
-        Spawn,
+        Spawn, HtmlFactory, Stylesheet,
         // `$"text {hole:spec}"` (docs/design/Calls030.md): the operands are
         // the hole expressions in written order, nested width and precision
         // holes included, and `interpolation` describes them.
@@ -112,6 +114,11 @@ struct Expr {
         // `lambda` is the declaration, with `generator` set and the result
         // type `[generator]` of the element type.
         Generator,
+        // `typeof(operand)` (docs/design/Expressions030.md, typeof): operand 0
+        // is the operand read as an expression, when it parses as one, and
+        // `type` the operand read as a type, when it parses as one; lowering
+        // decides which it is. The span starts at `typeof`.
+        TypeOf,
     };
 
     Kind kind;
@@ -126,6 +133,9 @@ struct Expr {
     bool chain_conjunction{};
     std::shared_ptr<Declaration> lambda{};
     std::vector<std::string> field_names{};
+    // The span of each name in `field_names`, for a NamedVariant
+    // (`Enum.Variant { name: value }`); the editor renames them.
+    std::vector<Span> field_spans{};
     std::shared_ptr<Statement> match{};
     // Artifact imports carry a quoted path and an optional module name in text.
     std::optional<std::string> import_path{};
@@ -141,6 +151,40 @@ struct Expr {
     std::vector<Span> label_spans{};
     std::shared_ptr<const struct InterpolationSyntax> interpolation{};
     std::optional<Span> operator_span{};
+    std::shared_ptr<HtmlFactorySyntax> html_factory{};
+    std::shared_ptr<StylesheetSyntax> stylesheet{};
+    // docs/design/Expressions030.md, Negation words. A Unary "!" written
+    // `not`, either as a prefix (`not x`) or after `is` (`x is not T`, whose
+    // operand is the TypeTest); `operator_span` is the word `not`.
+    bool spelled_not{};
+    bool is_not{};
+    // A node the parser made for a source form that has no token of its
+    // own: the negation of a `return ... unless guard` (docs/design/
+    // Expressions030.md, Return forms). Its span is its operand's.
+    bool implicit{};
+    // docs/design/Expressions030.md, Narrowing. A TypeTest written
+    // `x is name: T` binds `binding`, written at `narrowing`. The parser
+    // accepts it only as the whole condition of an `if` or a top-level
+    // conjunct of the `&&` chain that is the whole condition.
+    std::string binding{};
+    std::optional<Span> narrowing{};
+    // docs/design/Expressions030.md, Character literals. An Integer written
+    // as a character literal, whose text is its value in decimal; its type
+    // without an expected integer type is `byte`.
+    bool character{};
+    // docs/design/Expressions030.md, Ranges with `..=` and String chains. A
+    // Range holds two or more bounds and then, when `step_colon` is set, the
+    // step written after that colon. `range_operators` are the `..` and `..=`
+    // tokens in written order, and `range_inclusive` says which of them is
+    // `..=`. Lowering decides from the type of the first bound whether the
+    // node is an integer range or a string chain.
+    std::vector<Span> range_operators{};
+    std::vector<bool> range_inclusive{};
+    std::optional<Span> step_colon{};
+    // An expression written in parentheses, which a chain keeps as one
+    // operand, and a range written in braces, `{a .. b}`.
+    bool grouped{};
+    bool braced{};
 };
 
 // The pattern and holes of an interpolated string. The pattern is the
@@ -198,7 +242,9 @@ struct Statement {
     bool constant_bindings{};
     std::vector<MatchArm> arms;
     std::vector<SelectArm> select_arms;
-    // The contextual keyword of a scope or select statement.
+    // The contextual keyword of a scope or select statement, or the word
+    // `unless` of the `if` that a guarded return stands for (docs/design/
+    // Expressions030.md, Return forms).
     Span keyword{};
     // Empty for other statements. Holds the operator for an assignment.
     std::string assignment_operator{};
@@ -206,6 +252,12 @@ struct Statement {
     std::shared_ptr<const DocComment> documentation{};
     // `match.is (subject) { arms }` (docs/design/Matching030.md).
     bool match_is{};
+    // An `if` whose condition narrows (docs/design/Expressions030.md,
+    // Narrowing): `bindings` holds the names it binds, in written order, and
+    // `constant_bindings` is set. They are visible in `body`; for a negated
+    // narrowing, `if (x is not y: T)`, in `alternative` instead (and after
+    // the `if` when `body` cannot complete normally).
+    bool negated_narrowing{};
     // A destructuring declaration's tuple annotation, `let [a, b]: [A, B]`.
     // Its `expressions` hold one initializer, or one per name.
     std::optional<TypeSyntax> binding_type{};

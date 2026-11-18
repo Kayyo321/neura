@@ -86,7 +86,7 @@ export let Http = module (
         export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);
 
         /// @brief The text "MemoryBody(N bytes)".
-        export let.override to_string = func -> string => "MemoryBody(" + data.length.to_string() + " bytes)";
+        export let.override to_string = func -> string => "MemoryBody(" .. data.length.to_string() .. " bytes)";
     );
 
     /// @brief The body of the request the server host assigned to this worker. Host-dependent: its reads trap
@@ -150,10 +150,8 @@ export let Http = module (
             }
             last chunk = source.read(max)?;
             total = total + (chunk.length as int64);
-            if (total > limit) {
-                return Result<uint8[list]>.Err(too_large(limit));
-            }
-            return Result<uint8[list]>.Ok(chunk);
+            return if (total > limit) -> Result<uint8[list]>.Err(too_large(limit))
+                else -> Result<uint8[list]>.Ok(chunk);
         };
 
         /// @brief Bytes read so far.
@@ -169,7 +167,7 @@ export let Http = module (
         };
 
         /// @brief The text "BodyReader(N bytes read)".
-        export let.override to_string = func -> string => "BodyReader(" + total.to_string() + " bytes read)";
+        export let.override to_string = func -> string => "BodyReader(" .. total.to_string() .. " bytes read)";
     );
 
     /// @brief Where a response body goes: memory, or the server host.
@@ -216,7 +214,7 @@ export let Http = module (
         export let is_closed = func -> bool => closed;
 
         /// @brief The text "MemorySink(N bytes)".
-        export let.override to_string = func -> string => "MemorySink(" + collected.length.to_string() + " bytes)";
+        export let.override to_string = func -> string => "MemorySink(" .. collected.length.to_string() .. " bytes)";
     );
 
     /// @brief The response body of the current host request. Host-dependent: writes trap until the runtime
@@ -285,10 +283,9 @@ export let Http = module (
 
         /// @brief Equal subject, scheme and scopes.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Principal)) {
+            if (other is not p: Principal) {
                 return false;
             }
-            last p = other as Principal;
             if (p.subject != subject || p.scheme != scheme) {
                 return false;
             }
@@ -315,7 +312,7 @@ export let Http = module (
         };
 
         /// @brief The text "Principal(scheme:subject)".
-        export let.override to_string = func -> string => "Principal(" + scheme + ":" + subject + ")";
+        export let.override to_string = func -> string => "Principal(" .. scheme .. ":" .. subject .. ")";
     );
 
     /// @brief An ordered list of names and values: the path parameters of a matched route, or query pairs.
@@ -367,7 +364,7 @@ export let Http = module (
                     return Result<string>.Ok(values[i]);
                 }
             }
-            return Result<string>.Err(io_error(errors.IoErrorKind.InvalidInput, "missing parameter " + name));
+            return Result<string>.Err(io_error(errors.IoErrorKind.InvalidInput, "missing parameter " .. name));
         };
 
         /// @brief The number of pairs.
@@ -381,10 +378,9 @@ export let Http = module (
 
         /// @brief Equal pairs in equal order.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is Params)) {
+            if (other is not p: Params) {
                 return false;
             }
-            last p = other as Params;
             if (p.size() != names.length) {
                 return false;
             }
@@ -410,9 +406,9 @@ export let Http = module (
         export let.override to_string = func -> string {
             last parts: string[list] = new;
             for (let i = 0; i < names.length; i++) {
-                parts.append(names[i] + "=" + values[i]);
+                parts.append(names[i] .. "=" .. values[i]);
             }
-            return "Params{" + strings.join(parts, ", ") + "}";
+            return "Params{" .. strings.join(parts, ", ") .. "}";
         };
     );
 
@@ -510,10 +506,8 @@ export let Http = module (
         /// @brief The authenticated principal, set by `require`.
         #NoDiscard
         export let principal = func -> Optional<Principal> {
-            if (identity.length == 0) {
-                return Optional<Principal>.None;
-            }
-            return Optional<Principal>.Some(identity[0]);
+            return if (identity.length == 0) -> Optional<Principal>.None
+                else -> Optional<Principal>.Some(identity[0]);
         };
 
         /// @brief The whole body within `body_limit`, read once and kept. Fails with "http.body_too_large" past
@@ -582,7 +576,7 @@ export let Http = module (
         };
 
         /// @brief The text "Request(METHOD target)".
-        export let.override to_string = func -> string => "Request(" + method + " " + target + ")";
+        export let.override to_string = func -> string => "Request(" .. method .. " " .. target .. ")";
     );
 
     // ---------------------------------------------------------------- responses
@@ -655,7 +649,7 @@ export let Http = module (
         #NoDiscard
         export let without_body = func -> Response {
             last fields = headers.copy();
-            if (!streamed && !fields.contains("Content-Length") && !statuses.has_no_content(status)) {
+            if (not streamed && not fields.contains("Content-Length") && not statuses.has_no_content(status)) {
                 fields.set("Content-Length", content.length.to_string());
             }
             return new Response(status, fields, new uint8[list]());
@@ -663,10 +657,8 @@ export let Http = module (
 
         /// @brief The text "Response(STATUS, N bytes)" or "Response(STATUS, streamed)".
         export let.override to_string = func -> string {
-            if (streamed) {
-                return "Response(" + status.to_string() + ", streamed)";
-            }
-            return "Response(" + status.to_string() + ", " + content.length.to_string() + " bytes)";
+            return if (streamed) -> "Response(" .. status.to_string() .. ", streamed)"
+                else -> "Response(" .. status.to_string() .. ", " .. content.length.to_string() .. " bytes)";
         };
     );
 
@@ -739,7 +731,7 @@ export let Http = module (
     #NoDiscard
     export let host_request = func(method: string, target: string, fields: Headers, limit: int64, peer: string,
         scheme: string, request_id: string) -> Request =>
-        new Request(method, target, fields, new HostBody(), limit, peer, scheme, request_id);
+            new Request(method, target, fields, new HostBody(), limit, peer, scheme, request_id);
 
     // ---------------------------------------------------------------- message conversions
 
@@ -890,7 +882,7 @@ export let Http = module (
         };
 
         /// @brief The text "FixedService(STATUS)".
-        export let.override to_string = func -> string => "FixedService(" + status.to_string() + ")";
+        export let.override to_string = func -> string => "FixedService(" .. status.to_string() .. ")";
     );
 
     /// @brief A middleware as a `Std.Net.Filter.SimpleFilter<Request, Response>`.
@@ -923,25 +915,25 @@ export let Http = module (
     #NoDiscard
     export let from_filter = func(filter: filters.SimpleFilter<Request, Response>)
         -> func(Request, Next) -> Result<Response> =>
-        new func(request: Request, next: Next) -> Result<Response> => filter.apply(request, next);
+            new func(request: Request, next: Next) -> Result<Response> => filter.apply(request, next);
 
     /// @brief A middleware that logs one line per request ("ID METHOD PATH STATUS Nms", or "error" in place of
     /// the status) at Info through `logger`, timing with `clock`'s monotonic time.
     #NoDiscard
     export let request_log_to = func(logger: logging.Logger, clock: clocks.Clock)
         -> func(Request, Next) -> Result<Response> =>
-        new func(request: Request, next: Next) -> Result<Response> {
-            last started = elapsed_or_zero(clock);
-            last outcome = next.call(request);
-            last millis = (elapsed_or_zero(clock).to_nanos() - started.to_nanos()) / 1000000;
-            last outcome_text = match (outcome) {
-                Result.Ok(response) => response.status.to_string(),
-                Result.Err(_) => "error",
+            new func(request: Request, next: Next) -> Result<Response> {
+                last started = elapsed_or_zero(clock);
+                last outcome = next.call(request);
+                last millis = (elapsed_or_zero(clock).to_nanos() - started.to_nanos()) / 1000000;
+                last outcome_text = match (outcome) {
+                    Result.Ok(response) => response.status.to_string(),
+                    Result.Err(_) => "error",
+                };
+                logger.info(request.request_id .. " " .. request.method .. " " .. request.path .. " " .. outcome_text .. " "
+                    .. millis.to_string() .. "ms");
+                return outcome;
             };
-            logger.info(request.request_id + " " + request.method + " " + request.path + " " + outcome_text + " "
-                + millis.to_string() + "ms");
-            return outcome;
-        };
 
     /// @brief `request_log_to` with a logger named "http" writing to standard error and the system clock.
     #NoDiscard
@@ -982,7 +974,7 @@ export let Http = module (
         export let middleware_count = func -> int => layers.length;
 
         /// @brief The text "Route(METHOD host/pattern)".
-        export let.override to_string = func -> string => "Route(" + method + " " + host + pattern + ")";
+        export let.override to_string = func -> string => "Route(" .. method .. " " .. host .. pattern .. ")";
     );
 
     /// @brief A group of routes for `Router.mount`, such as a generated contract adapter's.
@@ -1048,7 +1040,7 @@ export let Http = module (
         export let route_at = func(index: int) -> Route => entries[index];
 
         /// @brief The text "Routes(host, N routes)".
-        export let.override to_string = func -> string => "Routes(" + host + ", " + entries.length.to_string() + " routes)";
+        export let.override to_string = func -> string => "Routes(" .. host .. ", " .. entries.length.to_string() .. " routes)";
     );
 
     /// @brief A registered route with its group's middleware and parsed pattern.
@@ -1069,7 +1061,7 @@ export let Http = module (
         };
 
         /// @brief The text "Entry".
-        export let.override to_string = func -> string => "Entry(" + route.to_string() + ")";
+        export let.override to_string = func -> string => "Entry(" .. route.to_string() .. ")";
     );
 
     /// @brief The routes of one host pattern.
@@ -1086,7 +1078,7 @@ export let Http = module (
         };
 
         /// @brief The text "HostTree(host)".
-        export let.override to_string = func -> string => "HostTree(" + host + ")";
+        export let.override to_string = func -> string => "HostTree(" .. host .. ")";
     );
 
     /// @brief The application's routes and middleware; dispatches one request to one response (Backend030,
@@ -1178,10 +1170,8 @@ export let Http = module (
         /// lists the problems.
         #NoDiscard
         export let check = func -> Result<Unit> {
-            if (problems.length == 0) {
-                return Result<Unit>.Ok(Unit.Value);
-            }
-            return Result<Unit>.Err(errors.custom("http.router.invalid", strings.join(problems, "; ")));
+            return if (problems.length == 0) -> Result<Unit>.Ok(Unit.Value)
+                else -> Result<Unit>.Err(errors.custom("http.router.invalid", strings.join(problems, "; ")));
         };
 
         /// @brief The registration problems, as a new list.
@@ -1235,7 +1225,7 @@ export let Http = module (
                     break;
                 }
             }
-            if (!matched) {
+            if (not matched) {
                 last allowed: string[list] = new;
                 for (let t in candidates) {
                     t.root.collect_methods(segments, 0, allowed);
@@ -1266,14 +1256,14 @@ export let Http = module (
         /// sink.
         export let report_failure = func(request_id: string, problem: errors.Error) {
             last sink = error_sink;
-            sink("request " + request_id + " failed: " + errors.message(problem));
+            sink("request " .. request_id .. " failed: " .. errors.message(problem));
         };
 
         /// @brief `dispatch` as a service call: always Ok.
         export let call = func(request: Request) -> Result<Response> => Result<Response>.Ok(dispatch(request));
 
         /// @brief The text "Router(N routes)".
-        export let.override to_string = func -> string => "Router(" + size().to_string() + " routes)";
+        export let.override to_string = func -> string => "Router(" .. size().to_string() .. " routes)";
 
         /// @brief The handler of `entry` wrapped in its group's and its own middleware.
         let route_service = func(entry: Entry, values: string[list]) -> services.Service<Request, Response> {
@@ -1293,28 +1283,28 @@ export let Http = module (
 
         /// @brief Validates and stores a route, recording any problem.
         let register = func(route: Route, group_layers: Layer[list]) {
-            last label = route.method + " " + route.host + route.pattern;
-            if (!header_maps.is_token(route.method)) {
-                problems.append(label + ": invalid method");
+            last label = route.method .. " " .. route.host .. route.pattern;
+            if (not header_maps.is_token(route.method)) {
+                problems.append(label .. ": invalid method");
                 return;
             }
-            if (!is_valid_host_pattern(route.host)) {
-                problems.append(label + ": invalid host pattern");
+            if (not is_valid_host_pattern(route.host)) {
+                problems.append(label .. ": invalid host pattern");
                 return;
             }
             last shape: string[list] = new;
             last names: string[list] = new;
             last problem = parse_pattern(route.pattern, shape, names);
             if (problem.byte_length > 0) {
-                problems.append(label + ": " + problem);
+                problems.append(label .. ": " .. problem);
                 return;
             }
             last host_tree = tree_for(route.host);
             last index = entries.length;
             last existing = tree.insert(host_tree.root, shape, route.method, index);
             if (existing >= 0) {
-                problems.append(label + ": duplicate of " + entries[existing].route.method + " " + entries[existing].route.host
-                    + entries[existing].route.pattern);
+                problems.append(label .. ": duplicate of " .. entries[existing].route.method .. " " .. entries[existing].route.host
+                    .. entries[existing].route.pattern);
                 return;
             }
             entries.append(new Entry(route, group_layers, names));
@@ -1336,7 +1326,7 @@ export let Http = module (
         let trees_for = func(host: string) -> HostTree[list] {
             last chosen: HostTree[list] = new;
             for (let t in trees) {
-                if (t.host.byte_length > 0 && !strings.starts_with(t.host, "*.") && t.host == host) {
+                if (t.host.byte_length > 0 && not strings.starts_with(t.host, "*.") && t.host == host) {
                     chosen.append(t);
                 }
             }
@@ -1399,7 +1389,7 @@ export let Http = module (
             Optional.Some(v) => v,
             Optional.None => "",
         };
-        if (value.byte_length < 8 || !strings.starts_with(strings.to_ascii_lower(value), "bearer ")) {
+        if (value.byte_length < 8 || not strings.starts_with(strings.to_ascii_lower(value), "bearer ")) {
             return Optional<string>.None;
         }
         let start = 7;
@@ -1417,10 +1407,8 @@ export let Http = module (
         while (i < token.byte_length && token.byte_at(i) == 61) {
             i++;
         }
-        if (i != token.byte_length) {
-            return Optional<string>.None;
-        }
-        return Optional<string>.Some(token);
+        return if (i != token.byte_length) -> Optional<string>.None
+            else -> Optional<string>.Some(token);
     };
 
     /// @brief A middleware that requires a principal: 401 with the envelope (and `WWW-Authenticate: Bearer` for
@@ -1449,10 +1437,8 @@ export let Http = module (
     #NoDiscard
     export let same_origin = func -> func(Request, Next) -> Result<Response> =>
         new func(request: Request, next: Next) -> Result<Response> {
-            if (methods.is_safe_name(request.method) || is_same_origin(request)) {
-                return next.call(request);
-            }
-            return Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
+            return if (methods.is_safe_name(request.method) || is_same_origin(request)) -> next.call(request)
+                else -> Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
         };
 
     /// @brief Whether `request` shows a same-origin `Sec-Fetch-Site` or `Origin`.
@@ -1465,7 +1451,7 @@ export let Http = module (
         }
         return match (request.header("Origin")) {
             Optional.Some(origin) => match (request.header("Host")) {
-                Optional.Some(host) => same_origin_text(origin, request.scheme + "://" + host),
+                Optional.Some(host) => same_origin_text(origin, request.scheme .. "://" .. host),
                 Optional.None => false,
             },
             Optional.None => false,
@@ -1495,7 +1481,7 @@ export let Http = module (
         /// and no extra headers. "*", "null" or an empty origin traps with "invalid argument: origin".
         export let init = func(allowed_origins: string[list]) {
             for (let origin in allowed_origins) {
-                if (origin == "*" || origin == "null" || !strings.contains(origin, "://")) {
+                if (origin == "*" || origin == "null" || not strings.contains(origin, "://")) {
                     trap_with_message("invalid argument: origin");
                 }
                 origins.append(normalize_origin(origin));
@@ -1575,9 +1561,7 @@ export let Http = module (
                         found = true;
                     }
                 }
-                if (!found) {
-                    return false;
-                }
+                return false unless found;
             }
             return true;
         };
@@ -1610,7 +1594,7 @@ export let Http = module (
         };
 
         /// @brief The text "CorsPolicy(origins)".
-        export let.override to_string = func -> string => "CorsPolicy(" + strings.join(origins, ", ") + ")";
+        export let.override to_string = func -> string => "CorsPolicy(" .. strings.join(origins, ", ") .. ")";
     );
 
     /// @brief A middleware applying `policy` (Fetch standard CORS protocol). A request without `Origin` passes
@@ -1633,10 +1617,8 @@ export let Http = module (
             if (request.method == "OPTIONS" && optional_is_some(requested_method)) {
                 last wanted = optional_text(requested_method);
                 last wanted_headers = optional_text(request.header("Access-Control-Request-Headers"));
-                if (policy.admits_origin(origin) && policy.admits_method(wanted) && policy.admits_headers(wanted_headers)) {
-                    return Result<Response>.Ok(policy.preflight(origin));
-                }
-                return Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
+                return if (policy.admits_origin(origin) && policy.admits_method(wanted) && policy.admits_headers(wanted_headers)) -> Result<Response>.Ok(policy.preflight(origin))
+                    else -> Result<Response>.Ok(envelope(403, "forbidden", "cross-origin request refused", request.request_id));
             }
             last response = next.call(request)?;
             if (policy.admits_origin(origin)) {
@@ -1718,7 +1700,7 @@ export let Http = module (
         };
 
         /// @brief The text "ClientRequest(METHOD url)".
-        export let.override to_string = func -> string => "ClientRequest(" + method + " " + url + ")";
+        export let.override to_string = func -> string => "ClientRequest(" .. method .. " " .. url .. ")";
     );
 
     /// @brief What carries a client request: the host's `neura.http.fetch`, or a test double.
@@ -1777,11 +1759,11 @@ export let Http = module (
         #NoDiscard
         export let send = func(request: ClientRequest) -> Result<Response> {
             last lower = strings.to_ascii_lower(request.url);
-            if (!strings.starts_with(lower, "http://") && !strings.starts_with(lower, "https://")) {
+            if (not strings.starts_with(lower, "http://") && not strings.starts_with(lower, "https://")) {
                 return Result<Response>.Err(io_error(errors.IoErrorKind.InvalidInput, "URL must be absolute http or https"));
             }
             for (let i = 0; i < defaults.size(); i++) {
-                if (!request.headers.contains(defaults.name_at(i))) {
+                if (not request.headers.contains(defaults.name_at(i))) {
                     request.headers.add(defaults.name_at(i), defaults.value_at(i));
                 }
             }
@@ -1873,7 +1855,7 @@ export let Http = module (
 
     /// @brief Decodes escapes, optionally "+" as a space.
     let decode_escapes = func(text: string, plus_is_space: bool) -> string {
-        if (!strings.contains(text, "%") && !(plus_is_space && strings.contains(text, "+"))) {
+        if (not strings.contains(text, "%") && not (plus_is_space && strings.contains(text, "+"))) {
             return text;
         }
         last out: uint8[list] = new;
@@ -1911,17 +1893,15 @@ export let Http = module (
         if (b >= 65 && b <= 70) {
             return (b as int) - 55;
         }
-        if (b >= 97 && b <= 102) {
-            return (b as int) - 87;
-        }
-        return -1;
+        return if (b >= 97 && b <= 102) -> (b as int) - 87
+            else -> -1;
     };
 
     /// @brief The path of a request target: origin form up to "?", the path of an absolute form, "*" as is.
     let path_of = func(target: string) -> string {
         let start = 0;
         last scheme_end = strings.index_of(target, "://");
-        if (scheme_end > 0 && !strings.starts_with(target, "/")) {
+        if (scheme_end > 0 && not strings.starts_with(target, "/")) {
             last after = scheme_end + 3;
             last slash = strings.index_of_from(target, "/", after);
             if (slash < 0) {
@@ -1930,19 +1910,15 @@ export let Http = module (
             start = slash;
         }
         last question = strings.index_of_from(target, "?", start);
-        if (question < 0) {
-            return target.slice(start, target.byte_length);
-        }
-        return target.slice(start, question);
+        return if (question < 0) -> target.slice(start, target.byte_length)
+            else -> target.slice(start, question);
     };
 
     /// @brief The query of a request target without "?", or "".
     let query_of = func(target: string) -> string {
         last question = strings.index_of(target, "?");
-        if (question < 0) {
-            return "";
-        }
-        return target.slice(question + 1, target.byte_length);
+        return if (question < 0) -> ""
+            else -> target.slice(question + 1, target.byte_length);
     };
 
     /// @brief The segments of a path: "/" has none; "/a/b" has "a" and "b"; "/a/" has "a" and "".
@@ -1975,15 +1951,13 @@ export let Http = module (
             }
             if (segment.byte_at(0) == 123) {
                 if (segment.byte_at(segment.byte_length - 1) != 125 || segment.byte_length < 3) {
-                    return "invalid parameter segment " + segment;
+                    return "invalid parameter segment " .. segment;
                 }
                 last name = segment.slice(1, segment.byte_length - 1);
-                if (!is_identifier(name)) {
-                    return "invalid parameter name " + name;
-                }
+                return "invalid parameter name " .. name unless is_identifier(name);
                 for (let other in names) {
                     if (other == name) {
-                        return "repeated parameter " + name;
+                        return "repeated parameter " .. name;
                     }
                 }
                 names.append(name);
@@ -1992,7 +1966,7 @@ export let Http = module (
                 for (let i = 0; i < segment.byte_length; i++) {
                     last b = segment.byte_at(i);
                     if (b == 123 || b == 125 || b == 63 || b == 35 || b <= 32 || b == 127) {
-                        return "invalid literal segment " + segment;
+                        return "invalid literal segment " .. segment;
                     }
                 }
                 shape.append(segment);
@@ -2009,7 +1983,7 @@ export let Http = module (
         for (let i = 0; i < name.byte_length; i++) {
             last b = name.byte_at(i);
             last letter = (b >= 65 && b <= 90) || (b >= 97 && b <= 122) || b == 95;
-            if (!letter && !(i > 0 && b >= 48 && b <= 57)) {
+            if (not letter && not (i > 0 && b >= 48 && b <= 57)) {
                 return false;
             }
         }
@@ -2030,9 +2004,7 @@ export let Http = module (
         }
         for (let i = 0; i < rest.byte_length; i++) {
             last b = rest.byte_at(i);
-            if (!((b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45 || b == 46)) {
-                return false;
-            }
+            return false unless(b >= 97 && b <= 122) || (b >= 48 && b <= 57) || b == 45 || b == 46;
         }
         return true;
     };
@@ -2075,7 +2047,7 @@ export let Http = module (
                     known = true;
                 }
             }
-            if (!known) {
+            if (not known) {
                 ordered.append(f);
             }
         }
@@ -2094,10 +2066,8 @@ export let Http = module (
         if (strings.starts_with(text, "http://") && strings.ends_with(text, ":80")) {
             return text.slice(0, text.byte_length - 3);
         }
-        if (strings.starts_with(text, "https://") && strings.ends_with(text, ":443")) {
-            return text.slice(0, text.byte_length - 4);
-        }
-        return text;
+        return if (strings.starts_with(text, "https://") && strings.ends_with(text, ":443")) -> text.slice(0, text.byte_length - 4)
+            else -> text;
     };
 
     /// @brief Whether `b` is a b64token character other than "=" (RFC 6750 section 2.1).
@@ -2155,18 +2125,18 @@ export let Http = module (
 
     /// @brief The error for a body over `limit` bytes.
     let too_large = func(limit: int64) -> errors.Error =>
-        errors.custom("http.body_too_large", "request body exceeds " + limit.to_string() + " bytes");
+        errors.custom("http.body_too_large", "request body exceeds " .. limit.to_string() .. " bytes");
 
     /// @brief Traps unless `method` is a token.
     let check_method = func(method: string) {
-        if (!header_maps.is_token(method)) {
+        if (not header_maps.is_token(method)) {
             trap_with_message("invalid argument: method");
         }
     };
 
     /// @brief Traps unless `code` is a status code.
     let check_status = func(code: int) {
-        if (!statuses.is_valid(code)) {
+        if (not statuses.is_valid(code)) {
             trap_with_message("invalid argument: status");
         }
     };

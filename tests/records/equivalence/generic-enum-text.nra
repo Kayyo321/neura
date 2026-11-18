@@ -1,0 +1,37 @@
+// to_string of a generic payload enum's value through a parameter, a lambda
+// parameter, a local, a module binding, a match binding and a generic
+// function. Before payload enums had value members, each call was rejected
+// with a misleading E0427 ("qualify a variant with its enum type").
+let console = import:Std.Io.Console;
+let error = import:Std.Core.Error;
+let program = import:Std.Program;
+let result = import:Std.Core.Result;
+
+let State = enum<O> (Idle, Running, Succeeded(O), Failed(error.PortableError), Cancelled);
+
+let latest: State<int32> = State<int32>.Succeeded(7);
+
+let describe = func(state: State<int32>) -> string => state.to_string();
+
+let generic = func<T>(state: State<T>) -> string => state.to_string();
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        last idle = State<int32>.Idle;
+        console.print_line(describe(idle));
+        last show = new func(state: State<string>) -> string => state.to_string();
+        console.print_line(show(State<string>.Succeeded("done")));
+        console.print_line(latest.to_string());
+        last failed = State<int32>.Failed(error.PortableError.Custom { code: "c", message: "m" });
+        console.print_line(failed.to_string());
+        console.print_line(generic<bool>(State<bool>.Cancelled));
+        last outcome = result.Result<State<int32>>.Ok(State<int32>.Running);
+        match (outcome) {
+            result.Result.Ok(state) => {
+                console.print_line(state.to_string());
+            },
+            result.Result.Err(_) => {},
+        }
+        return program.ExitCode.Ok;
+    };
+);

@@ -34,13 +34,13 @@ The following public declarations are taken from the module source; each links t
   The bytes received after the body, as a new list. Tagged `#NoDiscard`.
 - **Chunked.ChunkedDecoder** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L171)
   The decoder's progress as text.
-- **Chunked** · [`export let encode_chunk = func(data: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L252)
+- **Chunked** · [`export let encode_chunk = func(data: uint8[list]) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L248)
   One chunk holding `data`: its size in lowercase hex, CRLF, the data, CRLF. Empty data gives an empty list, since a zero-size chunk would end the body. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Chunked** · [`export let last_chunk = func(trailer_fields: http_headers.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L270)
+- **Chunked** · [`export let last_chunk = func(trailer_fields: http_headers.Headers) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L266)
   The last chunk "0" CRLF, the trailer fields as "Name: value" CRLF lines, and the final CRLF. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Chunked** · [`export let encode = func(data: uint8[list], chunk_size: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L283)
+- **Chunked** · [`export let encode = func(data: uint8[list], chunk_size: int) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L279)
   The whole chunked body of `data` in chunks of `chunk_size` bytes (the last may be shorter), then the last chunk with no trailer. Traps with "invalid argument: chunk_size" unless it is positive. Tagged `#NoDiscard`, `#Pure`, `#ThreadSafe`.
-- **Chunked** · [`export let decode = func(body: uint8[list], limits: wire.Limits) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L309)
+- **Chunked** · [`export let decode = func(body: uint8[list], limits: wire.Limits) -> Result<uint8[list]>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/http/chunked.nra#L305)
   The data of a complete chunked body. 400 when the body ends early or bytes follow it; other errors as `ChunkedDecoder.feed`. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

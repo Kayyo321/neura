@@ -1,0 +1,119 @@
+// test-options: --gpu=off --deny-all --max-steps 1600000000
+let.promote _ = import:Std.Core.Optional;
+let error = import:Std.Core.Error;
+let hex = import:Std.Encoding.Hex;
+let instant = import:Std.Time.Instant;
+let int32s = import:Std.Core.Int32;
+let int64s = import:Std.Core.Int64;
+let nitro = import:Std.Crypto.Enclave.Nitro;
+let test = import:Std.Test;
+let vectors = import:NitroVectors;
+
+let NitroTests = module (
+    let bytes = func(text: string) -> uint8[list] => test.assert_ok(hex.decode(text));
+    let code = func(e: error.Error) -> string => match (e) {
+        error.Error.Custom(detail) => detail.code(),
+        _ => "",
+    };
+
+    let issued = func(seconds: string, nanos: string) -> instant.Instant =>
+        instant.of_epoch_seconds(test.assert_ok(int64s.parse(seconds)), test.assert_ok(int32s.parse(nanos)));
+
+    let expected_pcrs = func -> nitro.Measurement[list] {
+        last row = vectors.production;
+        return new([new nitro.Measurement(0, bytes(row[6])), new nitro.Measurement(1, bytes(row[7])),
+            new nitro.Measurement(2, bytes(row[8]))]);
+    };
+
+    export let test_vendor_debug_document = func {
+        last row = vectors.debug;
+        last root = bytes(vectors.roots[0]);
+        last sample = bytes(row[0]);
+        last at = issued(row[3], row[4]);
+        last document = test.assert_ok(nitro.verify_signed(sample, root, at));
+        test.assert_equal_string(row[1], document.module_id);
+        test.assert_equal_string(row[2], document.timestamp_millis.to_string());
+        let missing_nonce = false;
+        match (document.nonce()) {
+            Optional.None => {
+                missing_nonce = true;
+            },
+            Optional.Some(_) => {},
+        }
+        test.assert(missing_nonce);
+        test.assert_equal_int32(16, document.pcrs().length);
+        last parsed = test.assert_ok(nitro.parse(document.to_bytes()));
+        test.assert(parsed.equals(document) && parsed.hash_code() == document.hash_code());
+        test.assert_equal_string("crypto.attestation_measurement",
+            code(test.assert_err(nitro.verify(sample, root, at, new([1]), expected_pcrs(), 0))));
+
+        let tagged: uint8[list] = new([210]);
+        for (let b in sample) {
+            tagged.append(b);
+        }
+        let _ = test.assert_ok(nitro.verify_signed(tagged, root, at));
+    };
+
+    export let test_provisioned_report = func {
+        last row = vectors.production;
+        last root = bytes(vectors.roots[0]);
+        last report = bytes(row[0]);
+        last at = issued(row[3], row[4]);
+        last expected_nonce = bytes(row[5]);
+        last expected = expected_pcrs();
+        last document = test.assert_ok(nitro.verify(report, root, at, expected_nonce, expected, 0));
+        test.assert_equal_string(row[1], document.module_id);
+        test.assert_equal_string(row[2], document.timestamp_millis.to_string());
+        test.assert(document.pcrs()[0].equals(expected[0]));
+
+        let wrong_nonce = bytes(row[5]);
+        wrong_nonce[0] = wrong_nonce[0] ^ 1;
+        test.assert_equal_string("crypto.attestation_nonce",
+            code(test.assert_err(nitro.verify(report, root, at, wrong_nonce, expected, 0))));
+        let wrong_bytes = bytes(row[6]);
+        wrong_bytes[0] = wrong_bytes[0] ^ 1;
+        let wrong_measurements = expected_pcrs();
+        wrong_measurements[0] = new nitro.Measurement(0, wrong_bytes);
+        test.assert_equal_string("crypto.attestation_measurement",
+            code(test.assert_err(nitro.verify(report, root, at, expected_nonce, wrong_measurements, 0))));
+
+        last before = instant.of_epoch_seconds(at.epoch_seconds, at.nanos - 1);
+        last after = instant.of_epoch_seconds(at.epoch_seconds + 1, at.nanos);
+        test.assert_equal_string("crypto.attestation_time",
+            code(test.assert_err(nitro.verify(report, root, before, expected_nonce, expected, 0))));
+        test.assert_equal_string("crypto.attestation_time",
+            code(test.assert_err(nitro.verify(report, root, after, expected_nonce, expected, 999))));
+        let _ = test.assert_ok(nitro.verify(report, root, after, expected_nonce, expected, 1000));
+    };
+
+    export let test_trust_and_signed_bytes = func {
+        last row = vectors.production;
+        last root = bytes(vectors.roots[0]);
+        last wrong_root = bytes(vectors.roots[1]);
+        last at = issued(row[3], row[4]);
+        let attestation = bytes(row[0]);
+        let _ = test.assert_err(nitro.verify_signed(attestation, wrong_root, at));
+        attestation[attestation.length - 1] = attestation[attestation.length - 1] ^ 1;
+        test.assert_equal_string("crypto.attestation_signature",
+            code(test.assert_err(nitro.verify_signed(attestation, root, at))));
+
+        last expired = instant.of_epoch_seconds(at.epoch_seconds + 31536000, at.nanos);
+        test.assert_equal_string("pki.validity", code(test.assert_err(nitro.verify_signed(bytes(row[0]), root, expired))));
+    };
+
+    export let test_rejects_malformed_cbor = func {
+        last examples = vectors.malformed;
+        for (let i = 0; i < examples.length; i += 2) {
+            test.assert_equal_string("crypto.malformed_nitro", code(test.assert_err(nitro.parse(bytes(examples[i + 1])))));
+        }
+
+        let report = bytes(vectors.debug[0]);
+        report.append(0);
+        test.assert_equal_string("crypto.malformed_nitro", code(test.assert_err(nitro.parse(report))));
+        report.remove_at(report.length - 1);
+        report.remove_at(report.length - 1);
+        test.assert_equal_string("crypto.malformed_nitro", code(test.assert_err(nitro.parse(report))));
+        report[0] = 159;
+        test.assert_equal_string("crypto.malformed_nitro", code(test.assert_err(nitro.parse(report))));
+    };
+);

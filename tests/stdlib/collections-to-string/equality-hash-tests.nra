@@ -1,0 +1,55 @@
+let array_list = import:Std.Collections.ArrayList;
+let bit_set = import:Std.Collections.BitSet;
+let hash_map = import:Std.Collections.HashMap;
+let hash_set = import:Std.Collections.HashSet;
+let immutable_list = import:Std.Collections.ImmutableList;
+let int_map = import:Std.Collections.IntMap;
+let linked_list = import:Std.Collections.LinkedList;
+let string_map = import:Std.Collections.StringMap;
+let test = import:Std.Test;
+
+let EqualityHashTests = module (
+    let agree = func(a: class, b: class) -> void {
+        test.assert(a.equals(b));
+        test.assert(b.equals(a));
+        test.assert_equal_uint64(a.hash_code() as uint64, b.hash_code() as uint64);
+    };
+
+    export let test_lists_agree = func() -> void {
+        agree(array_list.of<int>(new([1, 2, 3])), array_list.of<int>(new([1, 2, 3])));
+        agree(immutable_list.of<int>(new([1, 2])), immutable_list.of<int>(new([1, 2])));
+        agree(linked_list.of<int>(new([1, 2])), linked_list.of<int>(new([1, 2])));
+        test.assert(not array_list.of<int>(new([1, 2])).equals(array_list.of<int>(new([2, 1]))));
+        test.assert(not array_list.of<int>(new([1])).equals(linked_list.of<int>(new([1]))));
+    };
+
+    export let test_maps_and_sets_agree = func() -> void {
+        last a = hash_map.create<int, int>();
+        last b = hash_map.create<int, int>();
+        a.put(1, 10);
+        a.put(2, 20);
+        b.put(2, 20);
+        b.put(1, 10);
+        agree(a, b);
+        last i = int_map.create<int>();
+        last j = int_map.create<int>();
+        i.put(3, 4);
+        j.put(3, 4);
+        agree(i, j);
+        last s = string_map.create<int>();
+        last t = string_map.create<int>();
+        s.put("k", 1);
+        t.put("k", 1);
+        agree(s, t);
+        last x = hash_set.create<int>();
+        last y = hash_set.create<int>();
+        x.add(1);
+        x.add(2);
+        y.add(2);
+        y.add(1);
+        agree(x, y);
+        agree(bit_set.of(new([1, 5])), bit_set.of(new([5, 1])));
+        y.add(9);
+        test.assert(not x.equals(y));
+    };
+);

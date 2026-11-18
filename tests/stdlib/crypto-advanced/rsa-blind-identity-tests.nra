@@ -1,0 +1,8 @@
+// test-options: --gpu=off --max-steps 15000000000 --deny-entropy
+let blind = import:Std.Crypto.Advanced.RsaBlindSignature;
+let cases = import:RsaBlindTestCases;
+
+let RsaBlindIdentityTests = module (
+    export let test_appendix_a3 = func => cases.verify_case(2, blind.Variant.PssDeterministic);
+    export let test_appendix_a4 = func => cases.verify_case(3, blind.Variant.PssZeroDeterministic);
+);

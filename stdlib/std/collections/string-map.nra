@@ -64,10 +64,7 @@ export let StringMap = module (
         /// @brief Returns the associated value, or `fallback` when the key is absent.
         export let get_or = func(key: string, fallback: V) -> V {
             last slot = find(key, spread(key.hash_code()));
-            if (slot < 0) {
-                return fallback;
-            }
-            return stored_values[core.index[slot]];
+            return if (slot < 0) -> fallback else -> stored_values[core.index[slot]];
         };
 
         /// @brief Returns the associated value. Traps with `no such element` when the key is absent.
@@ -343,10 +340,9 @@ export let StringMap = module (
         /// @brief Another StringMap with the same size in which, for each of its
         /// entries, this map holds an equal value for the key.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is StringMap<V>)) {
+            if (other is not that: StringMap<V>) {
                 return false;
             }
-            last that = other as StringMap<V>;
             if (that.size() != core.count) {
                 return false;
             }
@@ -356,7 +352,7 @@ export let StringMap = module (
             while (i < count) {
                 let [key, value] = items[i];
                 last slot = find(key, spread(key.hash_code()));
-                if (slot < 0 || !(stored_values[core.index[slot]] === value)) {
+                if (slot < 0 || not (stored_values[core.index[slot]] === value)) {
                     return false;
                 }
                 i += 1;
@@ -393,7 +389,7 @@ export let StringMap = module (
             let entry = 0;
             while (entry < live.length) {
                 if (live[entry]) {
-                    parts.append(stored_keys[entry].to_string() + ": " + stored_values[entry].to_string());
+                    parts.append(stored_keys[entry].to_string() .. ": " .. stored_values[entry].to_string());
                 }
                 entry += 1;
             }
@@ -496,7 +492,7 @@ export let StringMap = module (
                 trap_with_message("collection modified during iteration");
             }
             last live = core.live;
-            while (position < live.length && !live[position]) {
+            while (position < live.length && not live[position]) {
                 position += 1;
             }
             return position < live.length;
@@ -504,13 +500,17 @@ export let StringMap = module (
 
         /// @brief Returns the next live `[key, value]` tuple and advances. Traps with `collection modified during iteration` after a structural change. Traps with `no such element` at exhaustion.
         export let next = func -> [string, V] {
-            if (!has_next()) {
+            if (not has_next()) {
                 trap_with_message("no such element");
             }
             last item: [string, V] = [source_keys[position], source_values[position]];
             position += 1;
             return item;
         };
+
+        /// @brief Names the iterator and its position.
+        export let.override to_string = func -> string =>
+            "StringMapIterator(position " .. position.to_string() .. ")";
     );
 
     /// @brief Creates an empty map with the default table size.
@@ -539,6 +539,6 @@ export let StringMap = module (
     /// @brief `[a, b]` text of the parts with braces in place of the brackets.
     let braced = func(parts: string[list]) -> string {
         last text = parts.to_string();
-        return "{" + text.slice(1, text.byte_length - 1) + "}";
+        return "{" .. text.slice(1, text.byte_length - 1) .. "}";
     };
 );

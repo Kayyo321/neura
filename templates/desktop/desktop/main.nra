@@ -1,0 +1,25 @@
+// The native child of a new desktop project: it opens the window over the web bundle and serves one bridge
+// operation, which answers the request's bytes.
+let desktop = import:Std.Desktop;
+let program = import:Std.Program;
+let.promote _ = import:Std.Core.Result;
+let.promote _ = import:Std.Core.Unit;
+
+let Main = module:program.Entry (
+    let echo = func(call: desktop.Call) -> Result<uint8[list]> => Result<uint8[list]>.Ok(call.request());
+
+    let start = func(context: desktop.Context) -> Result<Unit> {
+        match (context.open_window("A new Neura project", 960, 640)) {
+            Result.Ok(_) => {},
+            Result.Err(problem) => {
+                return Result<Unit>.Err(problem);
+            },
+        }
+        last dispatcher = new desktop.Dispatcher(new desktop.Registry(new(["app.echo"])));
+        dispatcher.add("app.echo", echo);
+        return context.run(dispatcher);
+    };
+
+    export let.override main = func(args: string[]) -> program.ExitCode =>
+        desktop.run_application(new desktop.Registry(new(["app.echo"])), start);
+);

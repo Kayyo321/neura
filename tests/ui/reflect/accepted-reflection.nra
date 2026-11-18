@@ -1,0 +1,19 @@
+// Descriptors of arrays, lists of records, proxies of plain interfaces and Strip classes are accepted.
+let policies = import:Std.Reflect.Core.ReflectPolicy;
+let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Point = record (x: int32, y: int32);
+let Secret = class implements policies.Strip ( );
+let Named = interface (
+    export let name = func -> string;
+);
+
+let Handler = class implements proxies.InvocationHandler (
+    export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant => variants.of("n");
+);
+
+let describe = func -> string => types.of<int32[]>().name + types.of<Secret>().name;
+let hold = func(points: Point[list]) -> int => variants.of(points).length();
+let make = func -> Named => proxies.create<Named>(new Handler());

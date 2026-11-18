@@ -83,6 +83,11 @@ export let Parser = module (
             id_buffer = initial_id;
         };
 
+        /// @brief `EventStreamParser(max line N bytes, max event M bytes)`; the buffered text is not shown.
+        export let.override to_string = func -> string =>
+            "EventStreamParser(max line " .. max_line_bytes.to_string() .. " bytes, max event "
+            .. max_event_bytes.to_string() .. " bytes)";
+
         /// @brief Parses the chunk and returns the events it completes, in order, or a `sse.limit` error.
         #NoDiscard
         export let feed = func(chunk: uint8[list]) -> Result<SseEvent[list]> {
@@ -158,7 +163,7 @@ export let Parser = module (
             }
             if (line.length >= max_line_bytes) {
                 if (failure.byte_length == 0) {
-                    failure = "line longer than " + max_line_bytes.to_string() + " bytes";
+                    failure = "line longer than " .. max_line_bytes.to_string() .. " bytes";
                 }
                 return;
             }
@@ -194,7 +199,7 @@ export let Parser = module (
                 data_size = data_size + value.byte_length + 1;
                 if (data_size > max_event_bytes) {
                     if (failure.byte_length == 0) {
-                        failure = "event data longer than " + max_event_bytes.to_string() + " bytes";
+                        failure = "event data longer than " .. max_event_bytes.to_string() .. " bytes";
                     }
                     return;
                 }
@@ -202,7 +207,7 @@ export let Parser = module (
             } else if (name == "event") {
                 type_buffer = value;
             } else if (name == "id") {
-                if (!has_nul(value)) {
+                if (not has_nul(value)) {
                     id_buffer = value;
                 }
             } else if (name == "retry") {

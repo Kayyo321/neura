@@ -1,0 +1,14 @@
+// A zero step traps in a `..=` range as in a `..` range, even when the
+// range is empty (docs/design/Expressions030.md, edge case 33).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line("before");
+        let step = 0;
+        let items = 3 ..= 2 : step;
+        console.print_line(items.length.to_string());
+        return program.ExitCode.Ok;
+    };
+);

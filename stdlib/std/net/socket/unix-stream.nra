@@ -59,10 +59,8 @@ export let UnixStream = module (
         #NoDiscard
         export let receive = func -> Result<Optional<uint8[list]>> {
             last chunk = stream.read(ReceiveChunk)?;
-            if (chunk.length == 0) {
-                return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None);
-            }
-            return Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
+            return if (chunk.length == 0) -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.None)
+                else -> Result<Optional<uint8[list]>>.Ok(Optional<uint8[list]>.Some(chunk));
         };
 
         /// @brief Sends every byte; the `Std.Net.Transport` form of `write`.
@@ -84,9 +82,7 @@ export let UnixStream = module (
         /// Neura 0.3.0 (no local-address service).
         #NoDiscard
         export let local_address = func -> Result<UnixAddr> {
-            if (!open_now) {
-                return Result<UnixAddr>.Err(bytes.closed("socket", label));
-            }
+            return Result<UnixAddr>.Err(bytes.closed("socket", label)) unless open_now;
             return match (known_local) {
                 Optional.Some(address) => Result<UnixAddr>.Ok(address),
                 Optional.None => match (host.local_address(id)) {
@@ -100,9 +96,7 @@ export let UnixStream = module (
         /// @brief Ends reading, writing or both. Traps in Neura 0.3.0: the runtime has no shutdown service.
         #NoDiscard
         export let shutdown = func(how: Shutdown) -> Result<Unit> {
-            if (!open_now) {
-                return Result<Unit>.Err(bytes.closed("socket", label));
-            }
+            return Result<Unit>.Err(bytes.closed("socket", label)) unless open_now;
             last code = how == Shutdown.Read ? 0 : how == Shutdown.Write ? 1 : 2;
             return match (host.shutdown(id, code)) {
                 host.DoneOutcome.Ok => bytes.ok(),
@@ -118,8 +112,8 @@ export let UnixStream = module (
 
         /// @brief Text such as "UnixStream(to /run/app.sock)" or "UnixStream(accepted on @bus)".
         export let.override to_string = func -> string => match (peer) {
-            Optional.Some(address) => "UnixStream(to " + address.to_string() + ")",
-            Optional.None => "UnixStream(accepted on " + label + ")",
+            Optional.Some(address) => "UnixStream(to " .. address.to_string() .. ")",
+            Optional.None => "UnixStream(accepted on " .. label .. ")",
         };
     );
 

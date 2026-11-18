@@ -1,0 +1,14 @@
+// test-options: --gpu=off --max-steps 4000000000
+let algorithm_verifier = import:Std.Crypto.Pki.AlgorithmVerifier;
+let cases = import:SignatureTestCases;
+let vectors = import:SignatureVectors;
+
+let SignatureMlDsaTests = module (
+    export let test_ml_dsa = func {
+        let verifier: algorithm_verifier.AlgorithmVerifier = new;
+        for (let name in ["mldsa44", "mldsa65", "mldsa87"]) {
+            cases.verify(vectors.certificates, name, verifier);
+        }
+        cases.reject_flipped(cases.read(vectors.certificates, "mldsa65"), verifier, "mldsa65");
+    };
+);

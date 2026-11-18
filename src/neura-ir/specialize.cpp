@@ -2,6 +2,8 @@
 #include "any.hpp"
 
 #include "attributes.hpp"
+#include "type_of.hpp"
+#include "reflect.hpp"
 #include "class_hooks.hpp"
 
 #include "monitors.hpp"
@@ -663,6 +665,30 @@ private:
             error.help("hold it in a class and pack the reference");
             throw error;
         }
+        if (node.op == IrOp::Reflect) {
+            // What Std.Reflect can hold and proxy is checked on the specialized
+            // types (docs/design/Reflect030.md, E1300 and E1301), at the call
+            // that instantiated the library function when there is one.
+            const auto at = context.origin.span.file.empty() ? node.span : context.origin.span;
+            if (node.text == "pack" || node.text == "unpack") {
+                std::vector<IrType> held;
+                for (const auto& operand : result.operands) held.push_back(operand.type);
+                for (const auto& argument : result.type_arguments) held.push_back(argument);
+                for (const auto& item : held) {
+                    const auto problem = reflection_hold_problem(program_, item);
+                    if (!problem) continue;
+                    throw Diagnostic(at, *problem + " cannot be held by a Std.Reflect dynamic value")
+                        .with_code("E1301").label("reflects a value of type " + type_text(item))
+                        .help("reflect a value that can be copied out of its scope; copy an array into a list");
+                }
+            }
+            if (node.text == "proxy" && !result.type_arguments.empty()) {
+                const auto& face = result.type_arguments.front();
+                if (const auto problem = reflection_proxy_problem(program_, face))
+                    throw Diagnostic(at, "the type " + type_text(face) + " cannot be proxied").with_code("E1300")
+                        .label(*problem).help("proxy an interface whose requirements are non-generic instance methods");
+            }
+        }
         if (node.op == IrOp::CallClosure) {
             result.op = IrOp::VirtualCall;
             result.symbol = callable_methods_.at(result.operands.front().type.symbol);
@@ -821,7 +847,7 @@ private:
             check_type(node.type, where);
             // A type test names its target, and a typed scheduler operation its
             // element type, as a concrete type argument.
-            if (node.op == IrOp::SchedulerCall) {
+            if (node.op == IrOp::SchedulerCall || node.op == IrOp::TypeOf || node.op == IrOp::Reflect) {
                 for (const auto& argument : node.type_arguments) check_type(argument, where);
             } else if (!node.type_arguments.empty() && node.op != IrOp::ClassIs) {
                 throw std::logic_error("specialization left type arguments in " + where);
@@ -873,7 +899,14 @@ private:
 } // namespace
 
 void specialize(IrProgram& program, const SpecializationLimits& limits) {
+    // Std.Reflect (docs/design/Reflect030.md): calls of the trusted
+    // intrinsics become Reflect nodes, which specialization makes concrete.
+    const bool reflects = prepare_reflection(program);
     Specializer(program, limits).run();
+    // typeof (docs/design/Expressions030.md) needs the concrete types and
+    // the program's classes, which exist only now.
+    expand_type_of(program);
+    if (reflects) expand_reflection(program);
     // Polls are a property of the whole program, and the isolation rules of
     // Concurrency.md section 5 need the concrete types that exist only now:
     // a generic function is checked at each specialization.
@@ -883,6 +916,7 @@ void specialize(IrProgram& program, const SpecializationLimits& limits) {
     // program is checked, so a function whose callee is a specialization, or
     // an implementation in another module, is checked with it too.
     check_pure_tags(program, {}, true);
+    check_render_factories(program, {}, true);
     // Synchronized methods take their receiver's guard only in a program that
     // spawns; the guard operations are then part of what the isolation
     // checks see.

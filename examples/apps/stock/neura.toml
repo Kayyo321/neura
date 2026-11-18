@@ -1,0 +1,53 @@
+# The project manifest (docs/apps/Projects.md). Build a target with `neura build --target <name>`.
+schema = 1
+
+[project]
+name = "stock"
+id = "example.stock"
+version = "0.1.0"
+language = "0.3"
+
+[packages.contracts]
+root = "contracts"
+
+[packages.ui]
+root = "ui"
+depends = ["contracts"]
+
+[packages.server]
+root = "server"
+depends = ["contracts"]
+
+[packages.desktop]
+root = "desktop"
+depends = ["contracts"]
+
+[targets.web]
+kind = "web"
+package = "ui"
+entry = "Ui.Main"
+styles = ["ui/base.css"]
+capabilities = ["ui", "bridge"]
+
+[targets.server]
+kind = "server"
+package = "server"
+entry = "Server.Main"
+capabilities = ["http_server", "app"]
+
+[targets.server.http]
+listen = "127.0.0.1:8080"
+
+[targets.desktop]
+kind = "desktop"
+package = "desktop"
+ui = "web"
+entry = "Desktop.Main"
+capabilities = ["desktop"]
+
+[targets.desktop.bridge]
+operations = ["parts.export"]
+
+[targets.desktop.packaging]
+icon = "desktop/icon.png"
+formats = ["tar.gz", "deb"]

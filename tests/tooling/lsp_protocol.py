@@ -225,6 +225,67 @@ class LanguageServerTests(unittest.TestCase):
         self.assertIn('variant Mode.Quick: "Fast";', pinned[0])
         self.assertEqual(sorted(edit['newText'] for edit in edits if 'annotationId' not in edit), ['Quick', 'Quick'])
 
+    def test_payload_field_rename_reaches_patterns_constructors_and_pins(self):
+        # docs/design/Records030.md, Tooling: a named payload field renames
+        # with its constructor labels, braced patterns and mapping paths, a
+        # field of the same name in another variant stays, and an unpinned
+        # derivation keeps the old wire name.
+        path = self.root / 'payload.nra'
+        source = ('let console = import:Std.Io.Console;\n'
+                  'let json = import:Std.Encoding.Json;\n'
+                  'let program = import:Std.Program;\n'
+                  'let.promote _ = import:Std.Core.Result;\n'
+                  'let Mode = enum (Fast, Slow { speed: int, limit: int }, Odd { speed: int });\n'
+                  'let ModeJson = derive json.Codec<Mode>;\n'
+                  'let Other = derive json.Codec<Mode> { field Mode.Slow.speed: "pace"; };\n'
+                  'let describe = func(mode: Mode) -> int {\n'
+                  '    return match (mode) {\n'
+                  '        Mode.Slow { speed: s, limit: l } => s + l,\n'
+                  '        Mode.Odd { speed: s } => s,\n'
+                  '        _ => 0,\n'
+                  '    };\n'
+                  '};\n'
+                  'let App = module:program.Entry (\n'
+                  '    export let.override main = func(args: string[]) -> program.ExitCode {\n'
+                  '        let slow = Mode.Slow { speed: 3, limit: 4 };\n'
+                  '        console.print_line((describe(slow) + describe(Mode.Odd { speed: 9 })).to_string());\n'
+                  '        match (ModeJson.encode(slow)) { Result.Ok(text) => { console.print_line(text); }, '
+                  'Result.Err(_) => {}, }\n'
+                  '        match (Other.encode(slow)) { Result.Ok(text) => { console.print_line(text); }, '
+                  'Result.Err(_) => {}, }\n'
+                  '        return program.ExitCode.Ok;\n'
+                  '    };\n'
+                  ');\n')
+        self.client.open(path, source)
+        slow_speed = [(4, 30), (6, 54), (9, 20), (16, 31)]
+        for line, character in slow_speed:
+            with self.subTest(at=(line, character)):
+                rename = self.client.request('textDocument/rename',
+                                             {**params(path, line, character), 'newName': 'rate'})
+                edits = rename['documentChanges'][0]['edits']
+                plain = sorted((edit['range']['start']['line'], edit['range']['start']['character'])
+                               for edit in edits if 'annotationId' not in edit)
+                self.assertEqual(plain, slow_speed)
+                pinned = [edit['newText'] for edit in edits if edit.get('annotationId') == 'neura.preserveSchema']
+                self.assertEqual(len(pinned), 1)
+                self.assertIn('field Mode.Slow.rate: "speed";', pinned[0])
+        lines = source.splitlines(keepends=True)
+        for edit in sorted(edits, key=lambda e: (e['range']['start']['line'], e['range']['start']['character']),
+                           reverse=True):
+            start, end = edit['range']['start'], edit['range']['end']
+            line = lines[start['line']]
+            lines[start['line']] = line[:start['character']] + edit['newText'] + line[end['character']:]
+        renamed = ''.join(lines)
+        self.assertIn('Odd { speed: int }', renamed)
+        self.assertIn('Mode.Odd { speed: s }', renamed)
+        for snapshot in (source, renamed):
+            path.write_text(snapshot)
+            image = self.root / 'payload.nvr'
+            subprocess.run([BINARY, 'build', path, '-o', image], check=True, capture_output=True)
+            program = subprocess.run([BINARY, 'run', image], check=True, text=True, capture_output=True)
+            self.assertEqual(program.stdout, '16\n{"variant":"Slow","payload":{"speed":3,"limit":4}}\n'
+                                             '{"variant":"Slow","payload":{"pace":3,"limit":4}}\n')
+
     def test_record_field_rename_reaches_labels_and_copies(self):
         # docs/design/Records030.md, Tooling: the component, the constructor's
         # label, a copy's replacement name and a use rename together.
@@ -271,6 +332,262 @@ class LanguageServerTests(unittest.TestCase):
         reports = [n['params']['diagnostics'] for n in self.client.notifications
                    if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
         self.assertEqual([item['code'] for item in reports[-1]], ['E0203'])
+
+    def test_partial_record_at_the_end_keeps_its_components(self):
+        # Edge case 141: one E0203, and the recovering parser keeps `P` with
+        # the component read so far, so the outline and hover know it.
+        path = self.root / 'partial-record.nra'
+        self.client.open(path, 'let other = 1;\nlet P = record (id: int64,')
+        response = self.client.request('textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        self.assertEqual([symbol['name'] for symbol in response], ['other', 'P'])
+        hover = self.client.request('textDocument/hover', params(path, 1, 4))['contents']['value']
+        self.assertIn('record P (id: int64)', hover)
+        self.assertIn('export let init = func(id: int64) => set;', hover)
+        reports = [n['params']['diagnostics'] for n in self.client.notifications
+                   if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+        self.assertEqual([item['code'] for item in reports[-1]], ['E0203'])
+        path.write_text('let other = 1;\nlet P = record (id: int64,')
+        result = subprocess.run([BINARY, 'check', path], capture_output=True, text=True)
+        self.assertEqual(result.stderr.count('error['), 1, result.stderr)
+        self.assertIn('E0203', result.stderr)
+
+    def test_unfinished_property_clause_keeps_the_interface(self):
+        # Edge case 143: one E0202; the interface keeps its other members,
+        # and completion after the '|' offers the bodyless clauses.
+        path = self.root / 'partial-interface.nra'
+        self.client.open(path, 'let before = 1;\nlet Named = interface (\n    let other = func() -> int;\n'
+                               '    let name: string;\n        |')
+        response = self.client.request('textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        self.assertEqual([symbol['name'] for symbol in response], ['before', 'Named'])
+        self.assertIn('other', [child['name'] for child in response[1].get('children', [])])
+        items = self.client.request('textDocument/completion', params(path, 4, 9))['items']
+        self.assertEqual([item['label'] for item in items], ['get;', 'set;'])
+        reports = [n['params']['diagnostics'] for n in self.client.notifications
+                   if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+        self.assertEqual([item['code'] for item in reports[-1]], ['E0202'])
+        # In a class the same '|' still offers the clause words of a hook or
+        # accessor.
+        other = self.root / 'partial-class.nra'
+        self.client.open(other, 'let Box = class (\n    export let label: string = "";\n        |')
+        items = self.client.request('textDocument/completion', params(other, 2, 9))['items']
+        self.assertEqual([item['label'] for item in items], ['get', 'set'])
+
+    def test_unfinished_member_inside_a_module(self):
+        # Edge cases 141 and 143 one level down: the module around the
+        # unfinished record or interface keeps it, with one error.
+        for name, source, code, path_names in (
+                ('nested-record.nra', 'let before = 1;\nlet M = module (\n    export let P = record (id: int64,',
+                 'E0203', ['M', 'P']),
+                ('nested-interface.nra', 'let before = 1;\nlet M = module (\n    export let Named = interface (\n'
+                 '        let other = func() -> int;\n        let name: string;\n            |', 'E0202',
+                 ['M', 'Named', 'other'])):
+            with self.subTest(name=name):
+                path = self.root / name
+                self.client.open(path, source)
+                symbols = self.client.request('textDocument/documentSymbol',
+                                              {'textDocument': {'uri': path.as_uri()}})
+                self.assertEqual([symbol['name'] for symbol in symbols], ['before', 'M'])
+                found, level = [], symbols[1]
+                while level is not None:
+                    found.append(level['name'])
+                    children = [child for child in level.get('children', []) if child['name'] in path_names]
+                    level = children[0] if children else None
+                self.assertEqual(found, path_names)
+                reports = [n['params']['diagnostics'] for n in self.client.notifications
+                           if n['method'] == 'textDocument/publishDiagnostics' and n['params']['uri'] == path.as_uri()]
+                self.assertEqual([item['code'] for item in reports[-1]], [code])
+
+    def test_property_rename_reaches_requirement_fields_and_overrides(self):
+        # docs/design/Records030.md, Tooling: a property is one name across
+        # its interface requirement, the field that satisfies it, the
+        # `let.override` of that field and every use, from any of them.
+        path = self.root / 'property.nra'
+        source = ('let Named = interface (\n'
+                  '    let name: string;\n'
+                  '        | get;\n'
+                  ');\n'
+                  'let Shape = class implements Named (\n'
+                  '    export let name: string = "shape";\n'
+                  '        | get.virtual: name;\n'
+                  ');\n'
+                  'let Circle = class: Shape (\n'
+                  '    export let.override name: string;\n'
+                  '        | get.override: "circle of " + name;\n'
+                  ');\n'
+                  'let read = func(n: Named) -> string => n.name;\n')
+        self.client.open(path, source)
+        places = [(1, 8), (5, 15), (6, 23), (9, 24), (10, 39), (12, 41)]
+        for line, character in places:
+            with self.subTest(at=(line, character)):
+                rename = self.client.request('textDocument/rename',
+                                             {**params(path, line, character), 'newName': 'title'})
+                edits = [edit for item in rename['documentChanges'] for edit in item['edits']]
+                self.assertEqual(sorted((edit['range']['start']['line'], edit['range']['start']['character'])
+                                        for edit in edits), places)
+                self.assertTrue(all(edit['newText'] == 'title' for edit in edits))
+        # Go to definition on the override and in its body reaches the field.
+        for line, character in ((9, 24), (10, 39)):
+            definition = self.client.request('textDocument/definition', params(path, line, character))
+            self.assertEqual(definition['range']['start'], {'line': 5, 'character': 15})
+        renamed = source.replace('name', 'title')
+        path.write_text(renamed)
+        result = subprocess.run([BINARY, 'check', path], capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stderr)
+
+    def test_record_completion_paths(self):
+        # docs/design/Records030.md, Language server: `let.override` offers
+        # the base's virtual properties, `T.` the static requirements of T's
+        # bounds, and a derivation's mapping paths the fields, variants and
+        # named payload fields of the shapes.
+        path = self.root / 'paths.nra'
+        cases = [
+            ('let Shape = class (\n    export let label: string = "s";\n        | get.virtual: label;\n'
+             '    export let plain: int = 1;\n);\nlet Circle = class: Shape (\n    export let.override ',
+             '\n);\n', {'label'}, {'plain'}),
+            ('let Additive = interface<T> (\n    static let zero = func() -> T;\n'
+             '    static let add = func(a: T, b: T) -> T;\n    let other = func() -> int;\n);\n'
+             'let sum = func<T: Additive<T>>(items: T[]) -> T {\n    let total = T.',
+             '\n};\n', {'zero', 'add'}, {'other'}),
+            ('let json = import:Std.Encoding.Json;\nlet User = record (id: int, name: string);\n'
+             'let UserJson = derive json.Codec<User> {\n    field User.', '\n};\n', {'id', 'name'}, set()),
+            ('let json = import:Std.Encoding.Json;\nlet Mode = enum (Fast, Slow { speed: int }, Odd(int));\n'
+             'let ModeJson = derive json.Codec<Mode> {\n    variant Mode.', '\n};\n', {'Fast', 'Slow', 'Odd'},
+             set()),
+            ('let json = import:Std.Encoding.Json;\nlet Mode = enum (Fast, Slow { speed: int }, Odd(int));\n'
+             'let ModeJson = derive json.Codec<Mode> {\n    field Mode.', '\n};\n', {'Slow'}, {'Fast', 'Odd'}),
+            ('let json = import:Std.Encoding.Json;\nlet Mode = enum (Fast, Slow { speed: int }, Odd(int));\n'
+             'let ModeJson = derive json.Codec<Mode> {\n    field Mode.Slow.', '\n};\n', {'speed'}, set()),
+        ]
+        for source, closing, expected, absent in cases:
+            with self.subTest(source=source.splitlines()[-1]):
+                self.client.open(path, source + closing)
+                line = source.count('\n')
+                character = len(source.rsplit('\n', 1)[-1])
+                labels = {item['label'] for item in
+                          self.client.request('textDocument/completion', params(path, line, character))['items']}
+                self.assertTrue(expected <= labels, labels)
+                self.assertFalse(absent & labels, labels)
+
+    def test_generator_and_using_bindings_in_the_editor(self):
+        # docs/design/Lifetime030.md, Tooling: hover, rename, signature help
+        # and the outline treat a generator as the function it is written
+        # as, and a `using` binding as a local; the generated state class
+        # and its members are not shown.
+        path = self.root / 'lifetime.nra'
+        source = ('let console = import:Std.Io.Console;\n'
+                  'let closeable = import:Std.Io.Closeable;\n'
+                  'let.promote _ = import:Std.Core.Result;\n'
+                  'let.promote _ = import:Std.Core.Unit;\n'
+                  'let Resource = class implements closeable.Closeable (\n'
+                  '    export let close = func -> Result<Unit> => Result<Unit>.Ok(Unit.Value);\n'
+                  ');\n'
+                  'let squares = iterator(count: int) -> int {\n'
+                  '    for (let index = 0; index < count; index++) {\n'
+                  '        let square = index * index;\n'
+                  '        yield square;\n'
+                  '    }\n'
+                  '};\n'
+                  'let used = func() -> Result<int> {\n'
+                  '    using (source = new Resource()) {\n'
+                  '        let again = source;\n'
+                  '    }\n'
+                  '    return Result<int>.Ok(1);\n'
+                  '};\n'
+                  'let first = func() -> int => squares(3).iterator().next();\n')
+        self.client.open(path, source)
+        hover = lambda line, character: self.client.request('textDocument/hover',
+                                                            params(path, line, character))['contents']['value']
+        self.assertIn('squares(count: int32) -> Sequence<int32>', hover(7, 5))
+        self.assertIn('squares(count: int32) -> Sequence<int32>', hover(19, 30))
+        self.assertIn('square: int32', hover(10, 15))
+        self.assertIn('source: Resource', hover(14, 12))
+        self.assertIn('source: Resource', hover(15, 22))
+        for (line, character), expected in (((9, 13), [(9, 12), (10, 14)]), ((14, 12), [(14, 11), (15, 20)]),
+                                            ((7, 5), [(7, 4), (19, 29)])):
+            rename = self.client.request('textDocument/rename', {**params(path, line, character), 'newName': 'other'})
+            self.assertEqual(sorted((edit['range']['start']['line'], edit['range']['start']['character'])
+                                    for item in rename['documentChanges'] for edit in item['edits']), expected)
+        signature = self.client.request('textDocument/signatureHelp', params(path, 19, 37))
+        self.assertEqual(signature['signatures'][0]['label'], 'squares(count: int32) -> Sequence<int32>')
+        symbols = self.client.request('textDocument/documentSymbol', {'textDocument': {'uri': path.as_uri()}})
+        names = []
+        def walk(items):
+            for item in items:
+                names.append(item['name'])
+                walk(item.get('children', []))
+        walk(symbols)
+        self.assertIn('squares', names)
+        self.assertIn('source', names)
+        self.assertFalse({'has_next', 'next', 'init'} & set(names), names)
+        self.assertFalse([name for name in names if name.startswith('$')], names)
+
+    def test_command_line_rename(self):
+        # docs/lang/Tooling.md, `neura rename`: the language server's rename
+        # applied to the files on disk; it inserts the mapping that keeps a
+        # derived wire name and says so, and refuses what the editor refuses.
+        path = self.root / 'cli-model.nra'
+        source = ('let json = import:Std.Encoding.Json;\n'
+                  'let User = record (name: string);\n'
+                  'let UserJson = derive json.Codec<User>;\n'
+                  'let greet = func(u: User) -> string => u.name;\n')
+        path.write_text(source)
+        result = subprocess.run([BINARY, 'rename', path, '2:20', 'display'], capture_output=True, text=True,
+                                cwd=self.root)
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('field User.display: "name";', result.stderr)
+        self.assertIn('so that the JSON wire name does not change', result.stderr)
+        self.assertIn('applied 3 edits to 1 file', result.stderr)
+        renamed = path.read_text()
+        self.assertIn('let User = record (display: string);', renamed)
+        self.assertIn('derive json.Codec<User> { field User.display: "name"; };', renamed)
+        self.assertIn('=> u.display;', renamed)
+        self.assertEqual(subprocess.run([BINARY, 'check', path], capture_output=True).returncode, 0)
+        for arguments, message in ((['2:20', '9bad'], 'must be a Neura identifier'),
+                                   (['1:1', 'other'], 'No resolved symbol'),
+                                   (['9:1', 'other'], 'past the end'),
+                                   (['2', 'other'], 'usage: neura rename')):
+            with self.subTest(arguments=arguments):
+                result = subprocess.run([BINARY, 'rename', path, *arguments], capture_output=True, text=True,
+                                        cwd=self.root)
+                self.assertEqual(result.returncode, 1)
+                self.assertIn(message, result.stderr)
+                self.assertEqual(path.read_text(), renamed)
+
+    def test_command_line_rename_across_files_and_modules(self):
+        # `neura rename` reads the files under the current directory, so a
+        # caller in a subdirectory is renamed with the declaration, and a
+        # module whose file follows its name moves with it, unless the new
+        # file name is taken.
+        project = self.root / 'project'
+        (project / 'sub').mkdir(parents=True)
+        (project / 'lib.nra').write_text('export let Lib = module (\n'
+                                         '    export let plus = func(a: int, b: int) -> int => a + b;\n);\n')
+        (project / 'app.nra').write_text('let lib = import:Lib;\nlet use = func() -> int => lib.plus(1, 2);\n')
+        (project / 'sub' / 'more.nra').write_text('let lib = import:Lib;\n'
+                                                  'let again = func() -> int => lib.plus(3, 4);\n')
+        rename = lambda *arguments: subprocess.run([BINARY, 'rename', *arguments], capture_output=True, text=True,
+                                                   cwd=project)
+        result = rename('app.nra', '2:32', 'add')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('applied 3 edits to 3 files', result.stderr)
+        self.assertIn('export let add = func', (project / 'lib.nra').read_text())
+        self.assertIn('lib.add(1, 2)', (project / 'app.nra').read_text())
+        self.assertIn('lib.add(3, 4)', (project / 'sub' / 'more.nra').read_text())
+        result = rename('lib.nra', '1:12', 'Tools')
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn('moved', result.stderr)
+        self.assertFalse((project / 'lib.nra').exists())
+        self.assertIn('export let Tools = module', (project / 'tools.nra').read_text())
+        self.assertIn('import:Tools;', (project / 'sub' / 'more.nra').read_text())
+        for source in ('app.nra', 'sub/more.nra'):
+            check = subprocess.run([BINARY, 'check', '-I', '.', source], capture_output=True, text=True, cwd=project)
+            self.assertEqual(check.returncode, 0, check.stderr)
+        (project / 'other.nra').write_text('let unrelated = 1;\n')
+        before = {item: item.read_text() for item in project.rglob('*.nra')}
+        result = rename('tools.nra', '1:12', 'Other')
+        self.assertEqual(result.returncode, 1)
+        self.assertIn('already exists', result.stderr)
+        self.assertEqual({item: item.read_text() for item in project.rglob('*.nra')}, before)
 
     def test_accessor_dispatch_word_completion(self):
         # Edge case 144: after `| get.`, `override:` under `let.override`

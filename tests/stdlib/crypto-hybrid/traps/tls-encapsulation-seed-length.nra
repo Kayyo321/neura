@@ -1,0 +1,18 @@
+// test-options: --gpu=off
+// run-options: --gpu=off
+// status: 134
+// stderr: explicit program failure \(trap reason 3\): invalid argument: hybrid KEM encapsulation seed must be 64 bytes
+let hex = import:Std.Encoding.Hex;
+let program = import:Std.Program;
+let test = import:Std.Test;
+let tls = import:Std.Crypto.Pqc.X25519MlKem768;
+let vectors = import:HybridKemVectors;
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        let kem = new tls.X25519MlKem768();
+        last key = test.assert_ok(kem.parse_public_key(test.assert_ok(hex.decode(vectors.cases[1]))));
+        let _ = kem.encapsulate_with(key, new);
+        return program.ExitCode.Ok;
+    };
+);

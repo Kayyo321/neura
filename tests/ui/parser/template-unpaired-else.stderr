@@ -1,0 +1,7 @@
+error[E0249]: malformed template control block
+ --> $DIR/template-unpaired-else.nra:1:21
+  |
+1 | let view = html() { @else { } };
+  |                     ^^^^^^ '@else' must follow an '@if' branch
+
+For more information about this error, try `neura explain E0249`.

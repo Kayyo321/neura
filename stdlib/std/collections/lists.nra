@@ -138,10 +138,8 @@ export let Lists = module (
         last left = a.iterator();
         last right = b.iterator();
         while (left.has_next() && right.has_next()) {
-            if (!left.next().equals(right.next())) {
-                return false;
-            }
+            return false unless left.next().equals(right.next());
         }
-        return !left.has_next() && !right.has_next();
+        return not left.has_next() && not right.has_next();
     };
 );

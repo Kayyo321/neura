@@ -217,6 +217,19 @@ NEURA_TEST(host, ungranted_groups_return_capability_denied) {
     denied("neura.ffi.strlen", {i64(1), i64(1)});
     denied("neura.ffi.call", {i64(1), bytes(""), bytes("")});
     denied("neura.ffi.upcall.create", {i64(0), i64(0), bytes("")});
+    // A browser page serves the ui and history groups; a native run answers them with error 14.
+    denied("neura.ui.root.open", {text("#app")});
+    denied("neura.ui.root.close", {i64(1)});
+    denied("neura.ui.template", {i64(1), text("{}")});
+    denied("neura.ui.commit", {i64(1), bytes("\x01")});
+    denied("neura.ui.event.next", {i64(1), i32(16)});
+    denied("neura.ui.stats", {i64(1)});
+    denied("neura.ui.focus", {i64(1), text("name")});
+    denied("neura.history.current", {});
+    denied("neura.history.push", {text("/")});
+    denied("neura.history.replace", {text("/")});
+    denied("neura.history.next", {});
+    denied("neura.history.link", {text("/")});
     // Denial comes first, whatever the arguments.
     denied("neura.entropy.fill", {i32(-1)});
     // Console output and process exit need no capability.

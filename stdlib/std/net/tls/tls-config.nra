@@ -96,10 +96,9 @@ export let TlsConfig = module (
 
         /// @brief Equal when every setting is.
         export let.override equals = func(other: class) -> bool {
-            if (!(other is TlsConfig)) {
+            if (other is not that: TlsConfig) {
                 return false;
             }
-            last that = other as TlsConfig;
             return role == that.role && min_version == that.min_version && max_version == that.max_version
                 && same_names(protocols, that.protocols) && server_name == that.server_name
                 && ca_file == that.ca_file && certificate_file == that.certificate_file && key_file == that.key_file
@@ -124,18 +123,18 @@ export let TlsConfig = module (
         /// @brief Text such as "TlsConfig(Client, Tls12..Tls13, alpn h2,http/1.1, sni example.com)". File
         /// paths are named; their contents are never read here.
         export let.override to_string = func -> string {
-            let text = "TlsConfig(" + role.to_string() + ", " + min_version.to_string() + ".."
-                + max_version.to_string();
+            let text = "TlsConfig(" .. role.to_string() .. ", " .. min_version.to_string() .. ".."
+                .. max_version.to_string();
             if (protocols.length > 0) {
-                text = text + ", alpn " + strings.join(protocols, ",");
+                text ..= ", alpn " .. strings.join(protocols, ",");
             }
             if (server_name.byte_length > 0) {
-                text = text + ", sni " + server_name;
+                text ..= ", sni " .. server_name;
             }
             if (is_mutual()) {
-                text = text + ", mutual";
+                text ..= ", mutual";
             }
-            return text + ")";
+            return text .. ")";
         };
     );
 
@@ -244,10 +243,8 @@ export let TlsConfig = module (
             if ((certificate.byte_length == 0) != (key.byte_length == 0)) {
                 return problem("a certificate needs its key file and a key its certificate file");
             }
-            if (timeout.to_nanos() < 0) {
-                return problem("the handshake timeout is negative");
-            }
-            return Result<Unit>.Ok(Unit.Value);
+            return if (timeout.to_nanos() < 0) -> problem("the handshake timeout is negative")
+                else -> Result<Unit>.Ok(Unit.Value);
         };
     );
 
@@ -265,10 +262,8 @@ export let TlsConfig = module (
             }
             total += protocol.byte_length + 1;
         }
-        if (total > 65535) {
-            return problem("the ALPN list is longer than 65535 bytes");
-        }
-        return Result<Unit>.Ok(Unit.Value);
+        return if (total > 65535) -> problem("the ALPN list is longer than 65535 bytes")
+            else -> Result<Unit>.Ok(Unit.Value);
     };
 
     /// @brief Ok when `name` is a valid SNI host name (RFC 6066 section 3, see the module documentation), else
@@ -288,9 +283,7 @@ export let TlsConfig = module (
             Result.Err(_) => {},
         }
         for (let label in strings.split(name, ".")) {
-            if (!is_label(label)) {
-                return problem("the server name is not a DNS host name: " + name);
-            }
+            return problem("the server name is not a DNS host name: " .. name) unless is_label(label);
         }
         return Result<Unit>.Ok(Unit.Value);
     };
@@ -322,7 +315,7 @@ export let TlsConfig = module (
         while (i < n) {
             last c = label.byte_at(i);
             last alnum = (c >= 48 && c <= 57) || (c >= 65 && c <= 90) || (c >= 97 && c <= 122);
-            if (!alnum && c != 45) {
+            if (not alnum && c != 45) {
                 return false;
             }
             i++;

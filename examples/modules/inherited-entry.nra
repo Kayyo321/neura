@@ -1,0 +1,20 @@
+// A module can supply main for the modules that inherit it: its main calls
+// `serve`, a requirement, and the program's own module implements it. The
+// image runs main for the one module of that line that no other module
+// inherits, here Site, so the call reaches Site.serve.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let Server = module:program.Entry (
+    export let serve = func(path: string) -> string;
+
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(serve("/"));
+        console.print_line(serve("/about"));
+        return program.ExitCode.Ok;
+    };
+);
+
+let Site = module:Server (
+    export let.override serve = func(path: string) -> string => "served " + path;
+);

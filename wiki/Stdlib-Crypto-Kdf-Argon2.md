@@ -30,11 +30,11 @@ The following public declarations are taken from the module source; each links t
 - **Argon2.Argon2Params** · [`export let init = func(memory: int, passes: int, lanes: int, length: int)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L27)
   Stores the parameters; a value out of range traps with "invalid argument: Argon2 <name>".
 - **Argon2.Argon2Params** · [`export let.override equals = func(other: class) -> bool`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L46)
-- **Argon2.Argon2Params** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L55)
-- **Argon2.Argon2Params** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L59)
-- **Argon2** · [`export let argon2id = func(password: uint8[list], salt: uint8[list], params: Argon2Params) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L65)
+- **Argon2.Argon2Params** · [`export let.override hash_code = func -> uint32`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L54)
+- **Argon2.Argon2Params** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L58)
+- **Argon2** · [`export let argon2id = func(password: uint8[list], salt: uint8[list], params: Argon2Params) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L64)
   The Argon2id tag of the password with the salt (at least 8 bytes) and parameters. Tagged `#NoDiscard`. Since 0.3.0.
-- **Argon2** · [`export let argon2id_with = func(password: uint8[list], salt: uint8[list], secret: uint8[list], associated_data: uint8[list], params: Argon2Params) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L70)
+- **Argon2** · [`export let argon2id_with = func(password: uint8[list], salt: uint8[list], secret: uint8[list], associated_data: uint8[list], params: Argon2Params) -> uint8[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/crypto/kdf/argon2.nra#L69)
   Argon2id with the optional secret value K and associated data X of RFC 9106, section 3.1. Tagged `#NoDiscard`. Since 0.3.0.
 <!-- END SOURCE API -->
 

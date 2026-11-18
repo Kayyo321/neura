@@ -54,13 +54,13 @@ The following public declarations are taken from the module source; each links t
   Caches `records` as the answer to `question` for their smallest TTL, clamped. An empty list stores nothing. Returns the TTL used in seconds, or -1 when nothing was stored.
 - **DnsCache.DnsCache** · [`export let put_negative = func(question: messages.Question, name_error: bool, authority: messages.ResourceRecord[list]) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L178)
   Caches a negative answer from the authority section of a response (RFC 2308 section 5): `name_error` true for NXDOMAIN, false for NODATA. Returns the TTL used, or -1 when the authority section has no SOA and nothing was stored.
-- **DnsCache.DnsCache** · [`export let remove = func(question: messages.Question)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L192)
+- **DnsCache.DnsCache** · [`export let remove = func(question: messages.Question)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L190)
   Drops every entry for the question's name, type and class, and its name error.
-- **DnsCache.DnsCache** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L198)
+- **DnsCache.DnsCache** · [`export let clear = func`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L196)
   Drops everything.
-- **DnsCache.DnsCache** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L204)
+- **DnsCache.DnsCache** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L202)
   Text such as "DnsCache(3 of 1024 entries)".
-- **DnsCache** · [`export let negative_ttl = func(authority: messages.ResourceRecord[list]) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L298)
+- **DnsCache** · [`export let negative_ttl = func(authority: messages.ResourceRecord[list]) -> int64`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/net/dns/dns-cache.nra#L296)
   The negative TTL of an authority section: the smaller of the first SOA record's TTL and its MINIMUM (RFC 2308 sections 3 and 5), or -1 when there is no SOA. Tagged `#NoDiscard`.
 <!-- END SOURCE API -->
 

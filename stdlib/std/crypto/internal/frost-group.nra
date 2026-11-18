@@ -1,0 +1,272 @@
+let.promote _ = import:Std.Core.Optional;
+let.promote _ = import:Std.Crypto.Algorithm;
+let policy = import:Std.Crypto.Core.CryptoPolicy;
+let ed25519 = import:Std.Crypto.Internal.Edwards25519;
+let ed448 = import:Std.Crypto.Internal.Edwards448;
+let mp = import:Std.Crypto.Internal.Mp;
+let ristretto = import:Std.Crypto.Internal.Ristretto255Core;
+let sha2 = import:Std.Crypto.Hash.Sha2;
+let sha3 = import:Std.Crypto.Hash.Sha3;
+let weierstrass = import:Std.Crypto.Internal.Weierstrass;
+let words = import:Std.Crypto.Internal.Words;
+let xmd = import:Std.Crypto.Internal.HashToCurveXmd;
+
+/// @brief Prime-order group and suite transcript primitives for RFC 9591. Internal.
+export let FrostGroup = module (
+    export let Suite = enum (Ristretto255Sha512, Ed25519Sha512, Ed448Shake256, P256Sha256, Secp256k1Sha256);
+
+    let Backend = enum (
+        Ristretto(ristretto.Group), E25519(ed25519.Group), E448(ed448.Group),
+        Weierstrass(weierstrass.Curve)
+    );
+
+    /// @brief A native curve point held by the matching group backend. The protocol checks suite identity.
+    #Final
+    export let Point = class (
+        export last inner: class;
+        export let init = func(value: class) {
+            inner = value;
+        };
+
+        export let.override to_string = func -> string => "FrostGroup.Point";
+    );
+
+    #Final
+    export let Group = class (
+        last suite: Suite;
+        last backend: Backend;
+        last order: mp.Modulus;
+        last context: string;
+        last big_endian: bool;
+        export last scalar_length: int;
+        export last element_length: int;
+        export last limbs: int;
+
+        export let init = func(selected: Suite) {
+            policy.require(Algorithm.Frost);
+            suite = selected;
+            big_endian = suite == Suite.P256Sha256 || suite == Suite.Secp256k1Sha256;
+            scalar_length = suite == Suite.Ed448Shake256 ? 57 : 32;
+            element_length = big_endian ? 33 : scalar_length;
+            match (suite) {
+                Suite.Ristretto255Sha512 => {
+                    policy.require(Algorithm.Sha512);
+                    last group = new ristretto.Group();
+                    backend = Backend.Ristretto(group);
+                    order = group.scalar_order();
+                    context = "FROST-RISTRETTO255-SHA512-v1";
+                },
+                Suite.Ed25519Sha512 => {
+                    policy.require(Algorithm.Ed25519);
+                    policy.require(Algorithm.Sha512);
+                    last group = new ed25519.Group();
+                    backend = Backend.E25519(group);
+                    order = group.order;
+                    context = "FROST-ED25519-SHA512-v1";
+                },
+                Suite.Ed448Shake256 => {
+                    policy.require(Algorithm.Ed448);
+                    policy.require(Algorithm.Shake256);
+                    last group = new ed448.Group();
+                    backend = Backend.E448(group);
+                    order = group.order;
+                    context = "FROST-ED448-SHAKE256-v1";
+                },
+                Suite.P256Sha256 => {
+                    policy.require(Algorithm.P256);
+                    policy.require(Algorithm.Sha256);
+                    last curve = new weierstrass.Curve(weierstrass.CurveId.P256);
+                    backend = Backend.Weierstrass(curve);
+                    order = curve.order;
+                    context = "FROST-P256-SHA256-v1";
+                },
+                Suite.Secp256k1Sha256 => {
+                    policy.require(Algorithm.Secp256k1);
+                    policy.require(Algorithm.Sha256);
+                    last curve = new weierstrass.Curve(weierstrass.CurveId.Secp256k1);
+                    backend = Backend.Weierstrass(curve);
+                    order = curve.order;
+                    context = "FROST-secp256k1-SHA256-v1";
+                },
+            }
+            limbs = order.n;
+        };
+
+        export let identity = func -> Point => match (backend) {
+            Backend.Ristretto(g) => new Point(g.identity()),
+            Backend.E25519(g) => new Point(g.identity()),
+            Backend.E448(g) => new Point(g.identity()),
+            Backend.Weierstrass(g) => new Point(g.identity()),
+        };
+
+        export let is_identity = func(p: Point) -> bool => match (backend) {
+            Backend.Ristretto(g) => g.is_identity(p.inner as ed25519.Point),
+            Backend.E25519(g) => g.is_identity(p.inner as ed25519.Point),
+            Backend.E448(g) => g.is_identity(p.inner as ed448.Point),
+            Backend.Weierstrass(g) => g.is_identity(p.inner as weierstrass.Point),
+        };
+
+        export let add = func(p: Point, q: Point) -> Point => match (backend) {
+            Backend.Ristretto(g) => new Point(g.add(p.inner as ed25519.Point, q.inner as ed25519.Point)),
+            Backend.E25519(g) => new Point(g.add(p.inner as ed25519.Point, q.inner as ed25519.Point)),
+            Backend.E448(g) => new Point(g.add(p.inner as ed448.Point, q.inner as ed448.Point)),
+            Backend.Weierstrass(g) => new Point(g.add(p.inner as weierstrass.Point, q.inner as weierstrass.Point)),
+        };
+
+        export let multiply = func(k: uint32[list], p: Point) -> Point => match (backend) {
+            Backend.Ristretto(g) => new Point(g.multiply(k, p.inner as ed25519.Point)),
+            Backend.E25519(g) => new Point(g.multiply(k, p.inner as ed25519.Point)),
+            Backend.E448(g) => new Point(g.multiply(k, p.inner as ed448.Point)),
+            Backend.Weierstrass(g) => new Point(g.multiply(k, p.inner as weierstrass.Point)),
+        };
+
+        export let multiply_base = func(k: uint32[list]) -> Point => match (backend) {
+            Backend.Ristretto(g) => new Point(g.multiply_base(k)),
+            Backend.E25519(g) => new Point(g.multiply_base(k)),
+            Backend.E448(g) => new Point(g.multiply_base(k)),
+            Backend.Weierstrass(g) => new Point(g.multiply_generator(k)),
+        };
+
+        export let equal = func(p: Point, q: Point) -> bool => match (backend) {
+            Backend.Ristretto(g) => g.equal(p.inner as ed25519.Point, q.inner as ed25519.Point),
+            Backend.E25519(g) => g.equal(p.inner as ed25519.Point, q.inner as ed25519.Point),
+            Backend.E448(g) => g.equal(p.inner as ed448.Point, q.inner as ed448.Point),
+            Backend.Weierstrass(g) => g.equal(p.inner as weierstrass.Point, q.inner as weierstrass.Point),
+        };
+
+        // RFC 9591 sections 6.1 and 6.3 use the RFC 8032 cofactored equations.
+        export let signature_equation = func(z: uint32[list], r: Point, c: uint32[list], pk: Point) -> bool {
+            let left = multiply_base(z);
+            let right = add(r, multiply(c, pk));
+            last doublings = suite == Suite.Ed25519Sha512 ? 3 : (suite == Suite.Ed448Shake256 ? 2 : 0);
+            for (let i = 0; i < doublings; i++) {
+                left = add(left, left);
+                right = add(right, right);
+            }
+            return equal(left, right);
+        };
+
+        export let encode = func(p: Point) -> uint8[list] => match (backend) {
+            Backend.Ristretto(g) => g.encode(p.inner as ed25519.Point),
+            Backend.E25519(g) => g.encode(p.inner as ed25519.Point),
+            Backend.E448(g) => g.encode(p.inner as ed448.Point),
+            Backend.Weierstrass(g) => g.encode(p.inner as weierstrass.Point, true),
+        };
+
+        export let decode = func(bytes: uint8[list]) -> Optional<Point> {
+            if (bytes.length != element_length) {
+                return Optional<Point>.None;
+            }
+            match (backend) {
+                Backend.Ristretto(g) => {
+                    match (g.decode(bytes)) {
+                        Optional.Some(p) => {
+                            if (not g.is_identity(p)) {
+                                return Optional<Point>.Some(new Point(p));
+                            }
+                        },
+                        Optional.None => {},
+                    }
+                },
+                Backend.E25519(g) => {
+                    match (g.decode(bytes)) {
+                        Optional.Some(p) => {
+                            if (not g.is_identity(p) && g.is_identity(g.multiply(order.m, p))) {
+                                return Optional<Point>.Some(new Point(p));
+                            }
+                        },
+                        Optional.None => {},
+                    }
+                },
+                Backend.E448(g) => {
+                    match (g.decode(bytes)) {
+                        Optional.Some(p) => {
+                            if (not g.is_identity(p) && g.is_identity(g.multiply(order.m, p))) {
+                                return Optional<Point>.Some(new Point(p));
+                            }
+                        },
+                        Optional.None => {},
+                    }
+                },
+                Backend.Weierstrass(g) => {
+                    match (g.decode(bytes)) {
+                        Optional.Some(p) => {
+                            if (not g.is_identity(p)) {
+                                return Optional<Point>.Some(new Point(p));
+                            }
+                        },
+                        Optional.None => {},
+                    }
+                },
+            }
+            return Optional<Point>.None;
+        };
+
+        export let scalar_unchecked = func(bytes: uint8[list]) -> uint32[list] =>
+            big_endian ? mp.from_bytes_be(bytes, limbs) : mp.from_bytes_le(bytes, limbs);
+
+        export let scalar_canonical = func(bytes: uint8[list]) -> Optional<uint32[list]> {
+            if (bytes.length != scalar_length || (suite == Suite.Ed448Shake256 && bytes[56] != 0)) {
+                return Optional<uint32[list]>.None;
+            }
+            last scalar = scalar_unchecked(bytes);
+            if (mp.less(scalar, order.m) == 0) {
+                return Optional<uint32[list]>.None;
+            }
+            return Optional<uint32[list]>.Some(scalar);
+        };
+
+        export let scalar_bytes = func(s: uint32[list]) -> uint8[list] =>
+            big_endian ? mp.to_bytes_be(s, scalar_length) : mp.to_bytes_le(s, scalar_length);
+
+        export let scalar_reduce = func(bytes: uint8[list]) -> uint32[list] =>
+            big_endian ? order.reduce_bytes_be(bytes) : order.reduce_bytes_le(bytes);
+
+        export let scalar_add = func(a: uint32[list], b: uint32[list]) -> uint32[list] => order.add(a, b);
+        export let scalar_subtract = func(a: uint32[list], b: uint32[list]) -> uint32[list] => order.sub(a, b);
+        export let scalar_multiply = func(a: uint32[list], b: uint32[list]) -> uint32[list] =>
+            order.mul(order.to_mont(a), b);
+
+        export let scalar_invert = func(s: uint32[list]) -> uint32[list] =>
+            order.from_mont(order.inv(order.to_mont(s)));
+
+        export let domain_hash = func(label: string, bytes: uint8[list]) -> uint8[list] {
+            last input = words.concat(words.utf8(context .. label), bytes);
+            last digest = hash(input);
+            words.wipe(input);
+            return digest;
+        };
+
+        export let hash_scalar = func(label: string, bytes: uint8[list]) -> uint32[list] {
+            let digest: uint8[list] = new;
+            if (big_endian) {
+                digest = xmd.expand<sha2.Sha256>(bytes, words.utf8(context .. label), 48);
+            } else if (label == "chal" && suite == Suite.Ed25519Sha512) {
+                digest = hash(bytes);
+            } else if (label == "chal" && suite == Suite.Ed448Shake256) {
+                // Empty RFC 8032 context, pure mode. The two bytes are the mode and context length.
+                let dom4 = words.utf8("SigEd448");
+                dom4.append(0);
+                dom4.append(0);
+                digest = hash(words.concat(dom4, bytes));
+            } else {
+                digest = domain_hash(label, bytes);
+            }
+            last scalar = scalar_reduce(digest);
+            words.wipe(digest);
+            return scalar;
+        };
+
+        let hash = func(bytes: uint8[list]) -> uint8[list] {
+            if (big_endian) {
+                return sha2.sha256(bytes);
+            }
+            if (suite == Suite.Ed448Shake256) {
+                return sha3.shake256(bytes, 114);
+            }
+            return sha2.sha512(bytes);
+        };
+
+        export let.override to_string = func -> string => "FrostGroup.Group(" .. suite.to_string() .. ")";
+    );
+);
