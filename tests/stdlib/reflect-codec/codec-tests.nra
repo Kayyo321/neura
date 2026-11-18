@@ -1,0 +1,149 @@
+// Std.Reflect.Codec (docs/design/Reflect030.md, edge cases 9 and 10): the JSON bridge, the walk engine and the
+// schema builder, all driven by descriptors.
+let.promote errors = import:Std.Core.Error;
+let.promote optional = import:Std.Core.Optional;
+let.promote _ = import:Std.Core.Result;
+let.promote json = import:Std.Encoding.Json;
+let bridge = import:Std.Reflect.Codec.JsonBridge;
+let schemas = import:Std.Reflect.Codec.SchemaBuilder;
+let walks = import:Std.Reflect.Codec.Walk;
+let members = import:Std.Reflect.Member.Members;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+let test = import:Std.Test;
+
+let Address = record (city: string, zip: int32);
+let User = record (id: int64, name: string, score: float64, active: bool, span: [int32, int32], home: Address,
+                   nickname: Optional<string>);
+let Shape = enum (Dot, Circle { radius: float64 }, Rect(int32, int32));
+
+let Account = class (
+    export let owner: string = "";
+    export let notes: string[list] = new;
+    export let balance: int64 = 0;
+    #Sensitive
+    export let pin: string = "0000";
+    #Skip
+    export let cache: int32 = 9;
+    #SerialName("kind")
+    export let shape: Shape = Shape.Dot;
+    export let small: uint8 = 0;
+    export let init = func { };
+);
+
+let Node = class (
+    export let name: string = "";
+    export let next: Node = nil;
+    export let init = func { };
+);
+
+let Names = class implements walks.ReflectVisitor (
+    export let seen: string[list] = new;
+    export let cycles: int32 = 0;
+    export let enter = func(path: string, value: variants.Variant, control: walks.WalkControl) -> walks.WalkControl {
+        if (control == walks.WalkControl.Cycle) {
+            cycles = cycles + 1;
+            return control;
+        }
+        seen.append(path);
+        return walks.WalkControl.Continue;
+    };
+    export let leave = func(path: string, value: variants.Variant) { };
+);
+
+let Upper = class implements walks.ReflectMutVisitor (
+    export let visit_field = func(owner: variants.Variant, field: members.FieldInfo, value: variants.Variant)
+        -> variants.Variant {
+        if (field.name == "name") {
+            return variants.of(value.get<string>() + "!");
+        }
+        return value;
+    };
+);
+
+let CodecTests = module (
+    export let test_record_round_trip = func() -> void {
+        last user = new User(7, "Ada", 2.5, true, [1, 9], new Address("Paris", 75001), Optional<string>.Some("ace"));
+        last text = bridge.encode(variants.of(user));
+        test.assert_equal_string(
+            "{\"id\":7,\"name\":\"Ada\",\"score\":2.5,\"active\":true,\"span\":[1,9],\"home\":{\"city\":\"Paris\",\"zip\":75001},\"nickname\":\"ace\"}",
+            text);
+        last back: User = bridge.decode_as<User>(text);
+        test.assert(back === user);
+        last plain = new User(1, "B", 0.5, false, [0, 0], new Address("X", 1), Optional<string>.None);
+        last none_text = bridge.encode(variants.of(plain));
+        test.assert(bridge.decode_as<User>(none_text) === plain);
+    };
+
+    export let test_class_round_trip_with_tags = func() -> void {
+        last account = new Account();
+        account.owner = "Bo";
+        account.balance = 42;
+        account.notes.append("a");
+        account.shape = Shape.Rect(3, 4);
+        account.small = 200;
+        account.pin = "1234";
+        account.cache = 1;
+        last text = bridge.encode(variants.of(account));
+        test.assert_equal_string(
+            "{\"owner\":\"Bo\",\"notes\":[\"a\"],\"balance\":42,\"pin\":\"<redacted>\",\"kind\":{\"variant\":\"Rect\",\"payload\":[3,4]},\"small\":200}",
+            text);
+        last copy: Account = bridge.decode_as<Account>(text);
+        test.assert_equal_string("Bo", copy.owner);
+        test.assert(copy.balance == 42);
+        test.assert_equal_string("a", copy.notes[0]);
+        test.assert_equal_string("Rect(3, 4)", copy.shape.to_string());
+        test.assert(copy.small == 200);
+        // Sensitive and skipped fields keep the values the constructor gave them.
+        test.assert_equal_string("0000", copy.pin);
+        test.assert_equal_int32(9, copy.cache);
+    };
+
+    export let test_decode_errors = func() -> void {
+        last missing = test.assert_err(bridge.decode("{\"city\":\"P\"}", types.of<Address>()));
+        test.assert(missing.to_string().contains("reflect.json.missing"));
+        test.assert(missing.to_string().contains("$.zip"));
+        last range = test.assert_err(bridge.decode("{\"owner\":\"x\",\"small\":300}", types.of<Account>()));
+        test.assert(range.to_string().contains("reflect.json.range"));
+        last kind = test.assert_err(bridge.decode("{\"city\":5,\"zip\":1}", types.of<Address>()));
+        test.assert(kind.to_string().contains("reflect.json.type"));
+        last variant = test.assert_err(bridge.decode("{\"variant\":\"Hexagon\"}", types.of<Shape>()));
+        test.assert(variant.to_string().contains("reflect.json.variant"));
+    };
+
+    export let test_walk_reports_cycles = func() -> void {
+        last first = new Node();
+        first.name = "a";
+        last second = new Node();
+        second.name = "b";
+        first.next = second;
+        second.next = first;
+        last names = new Names();
+        last result = new walks.WalkEngine().walk(variants.of(first), names);
+        test.assert(result == walks.WalkControl.Continue);
+        test.assert_equal_int32(1, names.cycles);
+        test.assert_equal_string("$", names.seen[0]);
+        test.assert_equal_string("$.name", names.seen[1]);
+        test.assert_equal_string("$.next.name", names.seen[3]);
+    };
+
+    export let test_mutable_walk = func() -> void {
+        last first = new Node();
+        first.name = "a";
+        first.next = new Node();
+        first.next.name = "b";
+        new walks.WalkEngine().walk_mut(variants.of(first), new Upper());
+        test.assert_equal_string("a!", first.name);
+        test.assert_equal_string("b!", first.next.name);
+    };
+
+    export let test_schema = func() -> void {
+        last text = schemas.json_schema_text(types.of<Address>());
+        test.assert_equal_string(
+            "{\"$schema\":\"https://json-schema.org/draft/2020-12/schema\",\"$ref\":\"#/$defs/Address\",\"$defs\":{\"Address\":{\"type\":\"object\",\"properties\":{\"city\":{\"type\":\"string\"},\"zip\":{\"type\":\"integer\"}},\"required\":[\"city\",\"zip\"]}}}",
+            text);
+        // A type that reaches itself is defined once.
+        last node = schemas.json_schema_text(types.of<Node>());
+        test.assert(node.contains("\"next\":{\"$ref\":\"#/$defs/Node\"}"));
+    };
+);

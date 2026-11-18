@@ -1,0 +1,38 @@
+let model = import:Std.Reflect.Internal.Model;
+let type_info = import:Std.Reflect.Core.TypeInfo;
+
+/// @brief Structural descriptors of the types of a program (docs/design/Reflect030.md, The packages): kind,
+/// names, identity, layout, base, interfaces, generic arguments, fields, variants, constructors and methods.
+/// @see [Std.Reflect.Type.TypeDescriptor](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-TypeDescriptor)
+#Since("0.3.0")
+export let TypeDescriptor = module (
+    /// @brief The descriptor of one type of the program's reflection universe.
+    #Since("0.3.0")
+    export let TypeDescriptor = model.TypeDescriptor;
+
+    /// @brief The descriptor of `T`.
+    #Since("0.3.0")
+    export let of = func<T>() -> TypeDescriptor => model.descriptor_for<T>();
+
+    /// @brief The descriptor of the value's type: the dynamic class of a reference, the static type otherwise. A
+    /// nil reference gives the nil descriptor (ordinal 0).
+    #Since("0.3.0")
+    export let of_value = func<T>(value: T) -> TypeDescriptor => model.variant_of(value).descriptor();
+
+    /// @brief The descriptor at `ordinal` (see TypeDescriptor.ordinal, FieldInfo.type_ordinal).
+    #Since("0.3.0")
+    export let of_ordinal = func(ordinal: int) -> TypeDescriptor => model.descriptor_of(ordinal);
+
+    /// @brief The descriptor whose `typeof` record equals `info`, or nil when the program does not reflect that
+    /// type.
+    #Since("0.3.0")
+    export let of_info = func(info: type_info.TypeInfo) -> TypeDescriptor {
+        for (let i = 0; i < model.count(); i++) {
+            last item = model.descriptor_of(i);
+            if (item.info() === info) {
+                return item;
+            }
+        }
+        return nil;
+    };
+);

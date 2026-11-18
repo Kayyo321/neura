@@ -1,0 +1,14 @@
+// An interface that requires a property cannot be proxied (E1300).
+let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Sized = interface (
+    export let size: int32;
+        | get;
+);
+
+let Handler = class implements proxies.InvocationHandler (
+    export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant => variants.of(0 as int32);
+);
+
+let make = func -> Sized => proxies.create<Sized>(new Handler());

@@ -201,7 +201,14 @@ enum class IrOp {
     // load of a constant local, or with no operand the static type in
     // type_arguments[0]. specialize() expands it into existing operations
     // once types are concrete; none reaches conversion.
-    TypeOf = 74
+    TypeOf = 74,
+    // docs/design/Reflect030.md. Reflect is a call of a function of the trusted
+    // module Std.Reflect.Core.Intrinsics, named by its text, with the call's
+    // operands and type arguments. It exists only inside specialize():
+    // prepare_reflection makes it from the call before specialization and
+    // expand_reflection replaces it with existing operations after it, so it
+    // is never written to .nir and never reaches conversion.
+    Reflect = 75
 };
 
 // A MakeClosure (or its specialized Allocate) carries the written

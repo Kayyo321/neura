@@ -1,0 +1,41 @@
+let sha256 = import:Std.Digest.Sha256;
+let strings = import:Std.Core.String;
+
+/// @brief A deterministic 128-bit type fingerprint (docs/design/Reflect030.md, The descriptor model): the first
+/// 16 bytes of SHA-256 of a type's identity string (`kind:qualified-name@declaring-file`). It is the same for the
+/// same declaration in every build and every program. It is an identifier, not a security boundary.
+/// @see [Std.Reflect.Core.TypeId](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-TypeId)
+#Since("0.3.0")
+export let TypeId = module (
+    /// @brief The fingerprint as two 64-bit halves, most significant first. As a record it compares, hashes and
+    /// prints by value.
+    #Since("0.3.0")
+    export let TypeId = record (high: uint64, low: uint64);
+
+    /// @brief The fingerprint of an identity string.
+    #Since("0.3.0")
+    export let of_identity = func(identity: string) -> TypeId {
+        last digest = sha256.of(strings.get_bytes(identity));
+        let high: uint64 = 0;
+        let low: uint64 = 0;
+        for (let i = 0; i < 8; i++) {
+            high = (high << 8) | (digest[i] as uint64);
+            low = (low << 8) | (digest[i + 8] as uint64);
+        }
+        return new TypeId(high, low);
+    };
+
+    /// @brief The fingerprint as 32 lowercase hexadecimal digits.
+    #Since("0.3.0")
+    export let to_hex = func(id: TypeId) -> string => hex64(id.high) + hex64(id.low);
+
+    let hex64 = func(value: uint64) -> string {
+        const Digits = "0123456789abcdef";
+        let text = "";
+        for (let shift = 60; shift >= 0; shift -= 4) {
+            last digit = ((value >> (shift as uint64)) & 15) as int;
+            text = text + Digits.slice(digit, digit + 1);
+        }
+        return text;
+    };
+);

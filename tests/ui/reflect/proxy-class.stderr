@@ -1,0 +1,9 @@
+error[E1300]: the type Plain cannot be proxied
+  --> $DIR/proxy-class.nra:11:29
+   |
+11 | let make = func -> Plain => proxies.create<Plain>(new Handler());
+   |                             ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ only an interface can be proxied
+   |
+   = help: proxy an interface whose requirements are non-generic instance methods
+
+For more information about this error, try `neura explain E1300`.

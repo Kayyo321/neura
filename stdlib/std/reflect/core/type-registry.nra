@@ -1,0 +1,42 @@
+let model = import:Std.Reflect.Internal.Model;
+let type_ids = import:Std.Reflect.Core.TypeId;
+
+/// @brief Lookup of every type of the program's reflection universe (docs/design/Reflect030.md, The packages):
+/// by ordinal, by `TypeId` and by qualified name. The table is a constant of the program, so lookups need no
+/// lock.
+/// @see [Std.Reflect.Core.TypeRegistry](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-TypeRegistry)
+#Since("0.3.0")
+export let TypeRegistry = module (
+    /// @brief The number of types in the universe; ordinals run from 0 (nil) to `count() - 1`.
+    #Since("0.3.0")
+    export let count = func -> int => model.count();
+
+    /// @brief The descriptor at `ordinal`.
+    #Since("0.3.0")
+    export let at = func(ordinal: int) -> model.TypeDescriptor => model.descriptor_of(ordinal);
+
+    /// @brief The descriptor with this fingerprint, or nil.
+    #Since("0.3.0")
+    export let find_id = func(id: type_ids.TypeId) -> model.TypeDescriptor {
+        for (let i = 0; i < model.count(); i++) {
+            last item = model.descriptor_of(i);
+            if (item.id === id) {
+                return item;
+            }
+        }
+        return nil;
+    };
+
+    /// @brief The first descriptor with this qualified name, or nil. Two files can declare one qualified name;
+    /// `find_id` tells them apart.
+    #Since("0.3.0")
+    export let find_name = func(qualified_name: string) -> model.TypeDescriptor {
+        for (let i = 0; i < model.count(); i++) {
+            last item = model.descriptor_of(i);
+            if (item.qualified_name == qualified_name) {
+                return item;
+            }
+        }
+        return nil;
+    };
+);

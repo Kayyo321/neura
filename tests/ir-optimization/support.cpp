@@ -81,6 +81,7 @@ std::string_view op_name(IrOp op) {
     case IrOp::ConformanceCall: return "conformance_call";
     case IrOp::ConcatText: return "concat_text";
     case IrOp::TypeOf: return "type_of";
+    case IrOp::Reflect: return "reflect";
     }
     return "<invalid>";
 }

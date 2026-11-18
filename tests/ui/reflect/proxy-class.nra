@@ -1,0 +1,11 @@
+// Only an interface can be proxied (E1300).
+let proxies = import:Std.Reflect.Proxy.DynamicProxy;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Plain = class ( );
+
+let Handler = class implements proxies.InvocationHandler (
+    export let invoke = func(context: proxies.MethodCallContext) -> variants.Variant => variants.of(0 as int32);
+);
+
+let make = func -> Plain => proxies.create<Plain>(new Handler());

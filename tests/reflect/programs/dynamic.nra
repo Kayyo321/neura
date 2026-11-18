@@ -1,0 +1,44 @@
+// Descriptors, field reads and writes, invocation and construction (docs/design/Reflect030.md, edge cases 1-8).
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+let types = import:Std.Reflect.Type.TypeDescriptor;
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let Point = record (x: int32, y: int32);
+let Shape = class (
+    export let label: string = "shape";
+    export let area = func -> int32 => 0;
+);
+let Square = class : Shape (
+    export let side: int32 = 2;
+    export let.override area = func -> int32 => side * side;
+    export let scale = func(by: int32) -> int32 => side * by;
+);
+
+let App = module:program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+    let p = new Point(3, 4);
+    let d = types.of_value(p);
+    console.print_line(d.name + " " + d.qualified_name + " fields=" + d.fields.length.to_string());
+    for (let f in d.fields) {
+        console.print_line("  " + f.to_string());
+    }
+    let v = variants.of(p);
+    console.print_line("x=" + v.field(0).to_string() + " y=" + v.field_named("y").to_string());
+    let s: Shape = new Square();
+    let sv = variants.of(s);
+    console.print_line(sv.descriptor().name + " " + sv.field_named("label").to_string());
+    sv.set_field_named("side", variants.of(5 as int32));
+    console.print_line("area " + sv.invoke_named("area", new).to_string());
+    let args: variants.Variant[list] = new;
+    args.append(variants.of(3 as int32));
+    console.print_line("scale " + sv.invoke_named("scale", args).to_string());
+    let parts: variants.Variant[list] = new;
+    parts.append(variants.of(7 as int32));
+    parts.append(variants.of(8 as int32));
+    let made = variants.construct(d, 0, parts);
+    let q: Point = made.get<Point>();
+    console.print_line("made " + q.to_string());
+    return program.ExitCode.Ok;
+    };
+);

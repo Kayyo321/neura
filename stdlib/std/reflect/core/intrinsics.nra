@@ -1,0 +1,35 @@
+/// @brief The compiler's reflection operations (docs/design/Reflect030.md, Lowering). Each call becomes a
+/// NeuraIR `reflect` node that the compiler expands after specialization; the functions have no body. Programs
+/// use the public Std.Reflect modules instead.
+#Internal
+#Since("0.3.0")
+export let Intrinsics = module (
+    /// @brief The ordinal of the value's type: the dynamic class of a reference or any, the static type otherwise.
+    export let ordinal = func<T>(value: T) -> int;
+    /// @brief The ordinal of `T`.
+    export let ordinal_of = func<T>() -> int;
+    /// @brief The descriptor of every type of the program's reflection universe, indexed by ordinal.
+    export let table = func -> string[list];
+    /// @brief The value as an any, in a box when an any cannot hold it.
+    export let pack = func<T>(value: T) -> any;
+    /// @brief The value of type `T` an any holds; another type traps.
+    export let unpack = func<T>(value: any) -> T;
+    /// @brief The field `member` of the object `target` of type `type`.
+    export let get = func(target: any, type: int, member: int) -> any;
+    /// @brief Writes the field `member` of the object `target` of type `type`.
+    export let set = func(target: any, type: int, member: int, value: any) -> void;
+    /// @brief The element count of an array, list or tuple, or the payload count of an enum's variant.
+    export let length = func(target: any, type: int) -> int;
+    /// @brief An element of an array, list or tuple, or a payload of an enum's active variant.
+    export let element = func(target: any, type: int, index: int) -> any;
+    /// @brief The index of an enum value's variant.
+    export let variant = func(target: any, type: int) -> int;
+    /// @brief A new value of type `type`: constructor `selector` of a class, variant `selector` of an enum, or
+    /// a collection or tuple of the arguments.
+    export let construct = func(type: int, selector: int, arguments: any[list]) -> any;
+    /// @brief Calls method `method` of the object `target` of type `type` with the arguments.
+    export let invoke = func(target: any, type: int, method: int, arguments: any[list]) -> any;
+    /// @brief A new object implementing the interface `I` whose every method calls
+    /// Std.Reflect.Internal.Model.proxy_dispatch with `handler`.
+    export let proxy = func<I>(handler: class) -> I;
+);

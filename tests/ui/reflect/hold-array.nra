@@ -1,0 +1,4 @@
+// An array lives in its region, so a Std.Reflect dynamic value cannot hold it (E1301).
+let variants = import:Std.Reflect.Dynamic.Variant;
+
+let hold = func(values: int32[]) -> bool => variants.of(values).is_nil();

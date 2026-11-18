@@ -317,6 +317,7 @@ add_library(neura_compiler STATIC
     src/neura-ir/control_flow.cpp
     src/neura-ir/specialize.cpp
     src/neura-ir/type_of.cpp
+    src/neura-ir/reflect.cpp
     src/neura-ir/containment.cpp
     src/neura-ir/inline_limit.cpp
     src/neura-ir/hook_arguments.cpp
@@ -621,6 +622,11 @@ if(BUILD_TESTING)
     add_test(NAME records-boundary COMMAND "${Python3_EXECUTABLE}"
         "${CMAKE_CURRENT_SOURCE_DIR}/tests/records/records.py" "$<TARGET_FILE:neura>")
     set_tests_properties(records-boundary PROPERTIES TIMEOUT 300)
+    # Std.Reflect (docs/design/Reflect030.md) in every build, from .nir, without
+    # names, deterministically, and across a .nir module.
+    add_test(NAME reflect-boundary COMMAND "${Python3_EXECUTABLE}"
+        "${CMAKE_CURRENT_SOURCE_DIR}/tests/reflect/reflect.py" "$<TARGET_FILE:neura>")
+    set_tests_properties(reflect-boundary PROPERTIES TIMEOUT 900)
     # The compile-time check of interpolated strings agrees with the
     # formatting library on a corpus of specifications (docs/design/Calls030.md).
     add_test(NAME calls-format-corpus COMMAND "${Python3_EXECUTABLE}"

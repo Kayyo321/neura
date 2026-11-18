@@ -270,6 +270,10 @@ NEURA_DIAGNOSTIC(E0921, "#Synchronized on a method without a body to guard")
 NEURA_DIAGNOSTIC(E0922, "override of a synchronized method that is not synchronized")
 NEURA_DIAGNOSTIC(E0923, "#HostEffects on a function that is not a host binding without a body")
 NEURA_DIAGNOSTIC(E1100, "string chain operand that is not a string")
+// Reflection (docs/design/Reflect030.md); E1303-E1319 stay free for it.
+NEURA_DIAGNOSTIC(E1300, "a type that Std.Reflect.Proxy cannot proxy")
+NEURA_DIAGNOSTIC(E1301, "a value a Std.Reflect dynamic value cannot hold")
+NEURA_DIAGNOSTIC(E1302, "a class with two reflection policies")
 
 // Warnings, NEURA_WARNING(code, name, title). The name is what -W<name>,
 // -Wno-<name>, #Allow, and #Deny accept. W0006-W0009 stay free for later

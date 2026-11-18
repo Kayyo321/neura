@@ -1,0 +1,34 @@
+/// @brief How a value is represented by the Neura runtime (docs/design/Reflect030.md, The descriptor model).
+/// Neura values are NVR words, not bytes at addresses, so the layout counts value words; `Std.Reflect.Ffi` gives C
+/// layouts for a declared target.
+/// @see [Std.Reflect.Core.MemoryLayout](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-MemoryLayout)
+#Since("0.3.0")
+export let MemoryLayout = module (
+    /// @brief The shape of a value: one word, an inline tuple, an inline payload enum, a class reference, or an
+    /// `any` (tag, scalar, text and reference words).
+    #Since("0.3.0")
+    export let Form = enum (Word, Tuple, Enum, Reference, Any);
+
+    /// @brief The value words a value occupies, its form, whether it is plain data (no reference, text or `any`
+    /// word), and the bit width of a scalar (0 for other types).
+    #Since("0.3.0")
+    export let MemoryLayout = record (words: int, form: Form, plain: bool, bits: int);
+
+    /// @brief The form a descriptor reports in its text form.
+    #Since("0.3.0")
+    export let form_of_text = func(text: string) -> Form {
+        if (text == "tuple") {
+            return Form.Tuple;
+        }
+        if (text == "enum") {
+            return Form.Enum;
+        }
+        if (text == "reference") {
+            return Form.Reference;
+        }
+        if (text == "any") {
+            return Form.Any;
+        }
+        return Form.Word;
+    };
+);

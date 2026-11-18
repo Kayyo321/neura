@@ -303,6 +303,16 @@ Errors about `#` tags before declarations ([Tags](../lang/Tags.md)).
 | [E0923](E0923.md) | #HostEffects on a function that is not a host binding without a body |
 | [E1100](E1100.md) | string chain operand that is not a string |
 
+## E13xx: Reflection
+
+Codes reported for `Std.Reflect` ([design](../design/Reflect030.md)).
+
+| Code | Error |
+| --- | --- |
+| [E1300](E1300.md) | a type that Std.Reflect.Proxy cannot proxy |
+| [E1301](E1301.md) | a value a Std.Reflect dynamic value cannot hold |
+| [E1302](E1302.md) | a class with two reflection policies |
+
 ## Warnings
 
 Warnings do not stop compilation unless `-Werror` or a `#Deny` tag makes them errors. Warnings in the standard library are hidden unless `--warn-library` is given.

@@ -1,0 +1,168 @@
+let.promote json = import:Std.Encoding.Json;
+let attributes = import:Std.Reflect.Attribute.Attributes;
+let model = import:Std.Reflect.Internal.Model;
+let kinds = import:Std.Reflect.Type.TypeKind;
+
+/// @brief Schemas from type descriptors (docs/design/Reflect030.md, The packages): the JSON Schema (draft 2020-12)
+/// of the JSON that `Std.Reflect.Codec.JsonBridge` writes for a type. Classes, records and enums are defined once
+/// under `$defs` and referenced by `$ref`, so recursive types are described.
+/// @see [Std.Reflect.Codec.SchemaBuilder](https://github.com/Kayyo321/neura/wiki/Stdlib-Reflect-SchemaBuilder)
+#Since("0.3.0")
+export let SchemaBuilder = module (
+    /// @brief The JSON Schema of `type` as a JSON tree.
+    #Since("0.3.0")
+    export let json_schema = func(type: model.TypeDescriptor) -> JsonValue {
+        last definitions: [string, JsonValue][list] = new;
+        last root = schema_of(type, definitions);
+        last members: [string, JsonValue][list] = new;
+        members.append(["$schema", JsonValue.Text("https://json-schema.org/draft/2020-12/schema")]);
+        match (root) {
+            JsonValue.Object(items) => {
+                for (let item in items) {
+                    members.append(item);
+                }
+            },
+            _ => { },
+        }
+        if (definitions.length > 0) {
+            members.append(["$defs", JsonValue.Object(definitions)]);
+        }
+        return JsonValue.Object(members);
+    };
+
+    /// @brief The JSON Schema of `type` as text.
+    #Since("0.3.0")
+    export let json_schema_text = func(type: model.TypeDescriptor) -> string => json.write(json_schema(type));
+
+    let simple = func(name: string) -> JsonValue {
+        last members: [string, JsonValue][list] = new;
+        members.append(["type", JsonValue.Text(name)]);
+        return JsonValue.Object(members);
+    };
+
+    let reference = func(name: string) -> JsonValue {
+        last members: [string, JsonValue][list] = new;
+        members.append(["$ref", JsonValue.Text("#/$defs/" + name)]);
+        return JsonValue.Object(members);
+    };
+
+    let defined = func(definitions: [string, JsonValue][list], name: string) -> bool {
+        for (let item in definitions) {
+            if (item[0] == name) {
+                return true;
+            }
+        }
+        return false;
+    };
+
+    let schema_of = func(type: model.TypeDescriptor, definitions: [string, JsonValue][list]) -> JsonValue {
+        if (type.ordinal == 0) {
+            return simple("null");
+        }
+        if (type.kind == kinds.TypeKind.Bool) {
+            return simple("boolean");
+        }
+        if (type.kind == kinds.TypeKind.Integer) {
+            return simple("integer");
+        }
+        if (type.kind == kinds.TypeKind.Float) {
+            return simple("number");
+        }
+        if (type.kind == kinds.TypeKind.String) {
+            return simple("string");
+        }
+        if (type.kind == kinds.TypeKind.List || type.kind == kinds.TypeKind.Array) {
+            last members: [string, JsonValue][list] = new;
+            members.append(["type", JsonValue.Text("array")]);
+            members.append(["items", schema_of(model.descriptor_of(type.elements[0]), definitions)]);
+            return JsonValue.Object(members);
+        }
+        if (type.kind == kinds.TypeKind.Tuple) {
+            last items: JsonValue[list] = new;
+            for (let element in type.elements) {
+                items.append(schema_of(model.descriptor_of(element), definitions));
+            }
+            last members: [string, JsonValue][list] = new;
+            members.append(["type", JsonValue.Text("array")]);
+            members.append(["prefixItems", JsonValue.Array(items)]);
+            members.append(["minItems", json.number_of_int64(type.elements.length as int64)]);
+            members.append(["maxItems", json.number_of_int64(type.elements.length as int64)]);
+            return JsonValue.Object(members);
+        }
+        if (type.kind == kinds.TypeKind.Enum && type.generic_origin == "Optional") {
+            last choices: JsonValue[list] = new;
+            choices.append(simple("null"));
+            choices.append(schema_of(model.descriptor_of(type.variants[1].payloads[0].type_ordinal), definitions));
+            last members: [string, JsonValue][list] = new;
+            members.append(["anyOf", JsonValue.Array(choices)]);
+            return JsonValue.Object(members);
+        }
+        if (type.kind == kinds.TypeKind.Enum || type.kind == kinds.TypeKind.Class || type.kind == kinds.TypeKind.Record) {
+            last name = type.qualified_name;
+            if (!defined(definitions, name)) {
+                // The name is reserved first, so that a type that reaches itself refers to its own definition.
+                definitions.append([name, JsonValue.Null]);
+                last body = type.kind == kinds.TypeKind.Enum ? enum_schema(type, definitions) : object_schema(type, definitions);
+                for (let i = 0; i < definitions.length; i++) {
+                    if (definitions[i][0] == name) {
+                        definitions[i] = [name, body];
+                    }
+                }
+            }
+            return reference(name);
+        }
+        return JsonValue.Object(new);
+    };
+
+    let object_schema = func(type: model.TypeDescriptor, definitions: [string, JsonValue][list]) -> JsonValue {
+        last properties: [string, JsonValue][list] = new;
+        last required: JsonValue[list] = new;
+        for (let field in type.fields) {
+            if (attributes.skipped(field)) {
+                continue;
+            }
+            last wire = attributes.serial_name(field);
+            last field_type = model.descriptor_of(field.type_ordinal);
+            properties.append([wire, attributes.sensitive(field) ? simple("string") : schema_of(field_type, definitions)]);
+            if (field_type.generic_origin != "Optional") {
+                required.append(JsonValue.Text(wire));
+            }
+        }
+        last members: [string, JsonValue][list] = new;
+        members.append(["type", JsonValue.Text("object")]);
+        members.append(["properties", JsonValue.Object(properties)]);
+        members.append(["required", JsonValue.Array(required)]);
+        return JsonValue.Object(members);
+    };
+
+    let enum_schema = func(type: model.TypeDescriptor, definitions: [string, JsonValue][list]) -> JsonValue {
+        last choices: JsonValue[list] = new;
+        for (let variant in type.variants) {
+            last properties: [string, JsonValue][list] = new;
+            last constant: [string, JsonValue][list] = new;
+            constant.append(["const", JsonValue.Text(variant.name)]);
+            properties.append(["variant", JsonValue.Object(constant)]);
+            last required: JsonValue[list] = new;
+            required.append(JsonValue.Text("variant"));
+            if (variant.payloads.length > 0) {
+                last items: JsonValue[list] = new;
+                for (let payload in variant.payloads) {
+                    items.append(schema_of(model.descriptor_of(payload.type_ordinal), definitions));
+                }
+                last payload_schema: [string, JsonValue][list] = new;
+                payload_schema.append(["type", JsonValue.Text("array")]);
+                payload_schema.append(["prefixItems", JsonValue.Array(items)]);
+                properties.append(["payload", JsonValue.Object(payload_schema)]);
+                required.append(JsonValue.Text("payload"));
+            }
+            last choice: [string, JsonValue][list] = new;
+            choice.append(["type", JsonValue.Text("object")]);
+            choice.append(["properties", JsonValue.Object(properties)]);
+            choice.append(["required", JsonValue.Array(required)]);
+            choices.append(JsonValue.Object(choice));
+        }
+        last members: [string, JsonValue][list] = new;
+        members.append(["oneOf", JsonValue.Array(choices)]);
+        return JsonValue.Object(members);
+    };
+);
