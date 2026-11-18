@@ -7,10 +7,54 @@ let strings = import:Std.Text.Strings;
 let.promote _ = import:Std.Core.Unit;
 
 // The native child of the desktop application fixture (tests/desktop/app_test.js). Its standard output is the
-// channel to the window host, so it logs only to standard error.
+// channel to the window host, so it logs only to standard error; the tests read the "child:" lines.
 let AppChild = module:program.Entry (
-    last registry = new desktop.Registry(new(["fixture.echo", "fixture.fail", "fixture.open", "fixture.quit",
-        "fixture.title", "fixture.trap", "fixture.unserved"]));
+    last registry = new desktop.Registry(new(["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close",
+        "fixture.data_dir", "fixture.echo", "fixture.fail", "fixture.focus", "fixture.notify", "fixture.open",
+        "fixture.open_many", "fixture.quit", "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved"]));
+
+    /// @brief The request as text; the fixture's pages send UTF-8.
+    let text_of = func(call: desktop.Call) -> string {
+        let [valid, text] = string.from_utf8(call.request);
+        return text;
+    };
+
+    /// @brief An Ok reply of `text`.
+    let reply = func(text: string) -> Result<uint8[list]> => Result<uint8[list]>.Ok(strings.to_bytes(text));
+
+    /// @brief The text of a failed host request, as the fixture's pages read it.
+    let failed = func(problem: errors.Error) -> Result<uint8[list]> => Result<uint8[list]>.Err(problem);
+
+    /// @brief The window whose handle is the request's decimal text, open or not.
+    let window_named = func(context: desktop.Context, call: desktop.Call) -> desktop.Window {
+        last wanted = text_of(call);
+        for (let window in context.open_windows()) {
+            if (window.handle.to_string() == wanted) {
+                return window;
+            }
+        }
+        for (let handle: uint32 = 1; handle < 1000; handle++) {
+            if (handle.to_string() == wanted) {
+                return new desktop.Window(handle, context);
+            }
+        }
+        return call.window;
+    };
+
+    /// @brief Logs an event to standard error, where the tests read it.
+    let log_event = func(event: desktop.Event) {
+        match (event) {
+            desktop.Event.Closed(window) => { console.eprintln("child: event Closed {}", window.handle); },
+            desktop.Event.Focused(window) => { console.eprintln("child: event Focused {}", window.handle); },
+            desktop.Event.Blurred(window) => { console.eprintln("child: event Blurred {}", window.handle); },
+            desktop.Event.Resized(window, width, height) => {
+                console.eprintln("child: event Resized {} {}x{}", window.handle, width, height);
+            },
+            desktop.Event.MenuActivated(id, window) => {
+                console.eprintln("child: event MenuActivated {} {}", id, window.handle);
+            },
+        }
+    };
 
     /// @brief Opens the first window and serves the bridge until the application ends.
     let start = func(context: desktop.Context) -> Result<Unit> {
@@ -19,31 +63,106 @@ let AppChild = module:program.Entry (
             Result.Err(problem) => { return Result<Unit>.Err(problem); },
         }
         last dispatcher = new desktop.Dispatcher(registry);
+        dispatcher.on_event(log_event);
         dispatcher.add("fixture.echo", func(call: desktop.Call) -> Result<uint8[list]> =>
             Result<uint8[list]>.Ok(call.request));
         dispatcher.add("fixture.fail", func(call: desktop.Call) -> Result<uint8[list]> =>
             Result<uint8[list]>.Err(errors.Error.Io { kind: errors.IoErrorKind.PermissionDenied, message: "refused by the fixture", path: "" }));
         dispatcher.add("fixture.title", func(call: desktop.Call) -> Result<uint8[list]> {
-            let [valid, title] = string.from_utf8(call.request);
-            match (call.window.set_title(title)) {
-                Result.Ok(_) => { return Result<uint8[list]>.Ok(strings.to_bytes("titled")); },
-                Result.Err(problem) => { return Result<uint8[list]>.Err(problem); },
+            match (call.window.set_title(text_of(call))) {
+                Result.Ok(_) => { return reply("titled"); },
+                Result.Err(problem) => { return failed(problem); },
             }
-            return Result<uint8[list]>.Ok(strings.to_bytes("unreachable"));
+            return reply("unreachable");
         });
         dispatcher.add("fixture.open", new func(call: desktop.Call) -> Result<uint8[list]> {
             match (context.open_window_at("Second", 320, 240, 100, 100, "/second.html")) {
-                Result.Ok(window) => { return Result<uint8[list]>.Ok(strings.to_bytes(window.handle.to_string())); },
-                Result.Err(problem) => { return Result<uint8[list]>.Err(problem); },
+                Result.Ok(window) => { return reply(window.handle.to_string()); },
+                Result.Err(problem) => { return failed(problem); },
             }
-            return Result<uint8[list]>.Ok(strings.to_bytes("unreachable"));
+            return reply("unreachable");
+        });
+        // Opens windows until one is refused; answers how many opened and the refusal.
+        dispatcher.add("fixture.open_many", new func(call: desktop.Call) -> Result<uint8[list]> {
+            let opened = 0;
+            while (true) {
+                match (context.open_window_at("Many", 200, 150, 0, 0, "/second.html")) {
+                    Result.Ok(window) => { opened = opened + 1; },
+                    Result.Err(problem) => {
+                        return reply(opened.to_string() + " then " + errors.message(problem));
+                    },
+                }
+            }
+            return reply("unreachable");
+        });
+        dispatcher.add("fixture.close", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (window_named(context, call).close()) {
+                Result.Ok(_) => { return reply("closed"); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        dispatcher.add("fixture.focus", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (window_named(context, call).focus()) {
+                Result.Ok(_) => { return reply("focused"); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        dispatcher.add("fixture.notify", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (context.notify("Fixture", text_of(call))) {
+                Result.Ok(outcome) => {
+                    return match (outcome) {
+                        desktop.NotifyOutcome.Shown => reply("Shown"),
+                        desktop.NotifyOutcome.Denied => reply("Denied"),
+                        desktop.NotifyOutcome.Unsupported => reply("Unsupported"),
+                    };
+                },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        dispatcher.add("fixture.clipboard_write", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (context.clipboard_write(text_of(call))) {
+                Result.Ok(_) => { return reply("written"); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        dispatcher.add("fixture.clipboard_read", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (context.clipboard_read()) {
+                Result.Ok(text) => { return reply(text); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
+        });
+        dispatcher.add("fixture.data_dir", new func(call: desktop.Call) -> Result<uint8[list]> {
+            match (context.data_directory()) {
+                Result.Ok(path) => { return reply(path); },
+                Result.Err(problem) => { return failed(problem); },
+            }
+            return reply("unreachable");
         });
         dispatcher.add("fixture.quit", new func(call: desktop.Call) -> Result<uint8[list]> {
             match (context.quit(7)) {
                 Result.Ok(_) => {},
-                Result.Err(problem) => { return Result<uint8[list]>.Err(problem); },
+                Result.Err(problem) => { return failed(problem); },
             }
-            return Result<uint8[list]>.Ok(strings.to_bytes("quitting"));
+            return reply("quitting");
+        });
+        // Counts to the request's decimal number; 120,000,000 iterations take the child past the 100,000,000 steps
+        // that `neura run` allows by default, which a desktop child must not be held to.
+        dispatcher.add("fixture.spin", func(call: desktop.Call) -> Result<uint8[list]> {
+            last wanted = text_of(call);
+            let limit: int64 = 0;
+            for (let i = 0; i < wanted.byte_length; i++) {
+                limit = limit * 10 + ((wanted.byte_at(i) - 48) as int64);
+            }
+            let count: int64 = 0;
+            while (count < limit) {
+                count = count + 1;
+            }
+            return reply(count.to_string());
         });
         dispatcher.add("fixture.trap", func(call: desktop.Call) -> Result<uint8[list]> {
             trap_with_message("fixture trap in a bridge operation");

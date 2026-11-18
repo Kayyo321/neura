@@ -28,8 +28,9 @@ from run_shell_test import stop_children
 HERE = Path(__file__).resolve().parent
 ROOT = HERE.parent.parent
 APPLICATION_ID = "example.neura.fixture"
-OPERATIONS = ["fixture.echo", "fixture.fail", "fixture.open", "fixture.quit", "fixture.title", "fixture.trap",
-              "fixture.unserved"]
+OPERATIONS = ["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close", "fixture.data_dir", "fixture.echo",
+              "fixture.fail", "fixture.focus", "fixture.notify", "fixture.open", "fixture.open_many", "fixture.quit",
+              "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved"]
 TITLE = "Packaged ✓"
 CSP = "default-src 'none'; script-src 'self'; style-src 'self'; base-uri 'none'; form-action 'none'"
 

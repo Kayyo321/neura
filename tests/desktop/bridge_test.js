@@ -13,8 +13,9 @@ const {
     BridgeRouter, DesktopStatus, FrameQueue, NativeChildChannel, NativeFrameKind: Kind, desktopLimits, parseRegistry,
 } = require('../../hosts/desktop/main');
 
-const fixtureOperations = ['fixture.echo', 'fixture.fail', 'fixture.open', 'fixture.quit', 'fixture.title', 'fixture.trap',
-    'fixture.unserved'];
+const fixtureOperations = ['fixture.clipboard_read', 'fixture.clipboard_write', 'fixture.close', 'fixture.data_dir',
+    'fixture.echo', 'fixture.fail', 'fixture.focus', 'fixture.notify', 'fixture.open', 'fixture.open_many', 'fixture.quit',
+    'fixture.spin', 'fixture.title', 'fixture.trap', 'fixture.unserved'];
 const fixtureRegistry = Buffer.from(JSON.stringify({ operations: fixtureOperations, schema: 1 }));
 
 function u32(value) {
@@ -80,7 +81,7 @@ test('the registry is canonical and hashed as written', () => {
     const registry = parseRegistry(fixtureRegistry);
     assert.equal(registry.digest, createHash('sha256').update(fixtureRegistry).digest('hex'));
     // The digest Std.Desktop.Registry computes for the same identifiers (tests/stdlib/desktop).
-    assert.equal(registry.digest, 'c382c24eef75233e4501dc8bc8043df62f53406855f3870651b5c1e56c8bbcb0');
+    assert.equal(registry.digest, 'e32b18f656b3c56ca135d92a59bdafc5815ee28e14cbad10eaec78dc7b5f7a3d');
     assert.equal(parseRegistry(Buffer.from('{"operations":[],"schema":1}')).operations.size, 0);
     for (const bad of [
         '{"schema":1,"operations":[]}', '{"operations":["b","a"],"schema":1}', '{"operations":["a","a"],"schema":1}',
@@ -350,4 +351,22 @@ test('the Neura child exits at once when its input closes before any window', { 
     const closed = await channel.closed;
     assert.equal(closed.error, null);
     assert.equal(closed.code, 1);
+});
+
+test('the Neura child runs past the 100,000,000 steps that neura run allows by default', { skip: !child }, async () => {
+    const done = Promise.withResolvers();
+    const { channel, queue } = startChild(async ({ kind, body }, q) => {
+        if (kind === Kind.HostCall) {
+            await answer(q, hostCall(body).id, 0, u32(1));
+        } else {
+            done.resolve({ status: body.readUInt32LE(4), reply: body.subarray(8).toString() });
+        }
+    });
+    await channel.ready;
+    // At least one step per iteration: 120,000,000 iterations are more than 100,000,000 steps.
+    await queue.send(Kind.Call, callBody(1, 1, 'fixture.spin', '120000000'));
+    assert.deepEqual(await done.promise, { status: 0, reply: '120000000' });
+    const closed = await channel.close();
+    assert.equal(closed.error, null);
+    assert.equal(closed.code, 0);
 });

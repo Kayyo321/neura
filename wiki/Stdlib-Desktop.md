@@ -72,47 +72,49 @@ The following public declarations are taken from the module source; each links t
   Maps each operation of a registry to its implementation. An operation without one answers the caller with error 13 (Unsupported). Tagged `#Final`.
 - **Desktop.Dispatcher** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L197)
   The operations this dispatcher serves.
-- **Desktop.Dispatcher** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L202)
+- **Desktop.Dispatcher** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L204)
   A dispatcher for `served`, with no implementation yet.
-- **Desktop.Dispatcher** · [`export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L208)
+- **Desktop.Dispatcher** · [`export let add = func(operation: string, handler: func(Call) -> Result<uint8[list]>) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L210)
   Adds the implementation of `operation`, which must be in the registry and not yet added. Traps with "invalid argument: dispatcher operation" otherwise.
-- **Desktop.Dispatcher** · [`export let dispatch = func(call: Call) -> [uint32, uint8[list]]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L217)
+- **Desktop.Dispatcher** · [`export let on_event = func(handler: func(Event) -> void) -> Dispatcher`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L220)
+  Has `Context.run` call `handler` with every window event, in the order the host observed them, after its own handling (a Closed window is no longer open). Replaces an earlier handler.
+- **Desktop.Dispatcher** · [`export let dispatch = func(call: Call) -> [uint32, uint8[list]]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L232)
   The status and reply bytes of `call`: 0 and the reply, or an error code and the UTF-8 message.
-- **Desktop.Dispatcher** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L238)
-- **Desktop** · [`export let Context = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L244)
+- **Desktop.Dispatcher** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L253)
+- **Desktop** · [`export let Context = class`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L259)
   The connection of the native child to its window host. Tagged `#Final`, `#NotThreadSafe`.
-- **Desktop.Context** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L246)
+- **Desktop.Context** · [`export last registry: Registry`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L261)
   The registry sent in Hello.
-- **Desktop.Context** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L268)
+- **Desktop.Context** · [`export let init = func(served: Registry)`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L283)
   Use `run_application`.
-- **Desktop.Context** · [`export let open_window = func(title: string, width: int, height: int) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L274)
+- **Desktop.Context** · [`export let open_window = func(title: string, width: int, height: int) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L289)
   Opens a window of `width` by `height` pixels that shows the bundle's start route. Busy when D-1 windows are open.
-- **Desktop.Context** · [`export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int, route: string) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L279)
+- **Desktop.Context** · [`export let open_window_at = func(title: string, width: int, height: int, min_width: int, min_height: int, route: string) -> Result<Window>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L294)
   Opens a window with a minimum size and the bundle route it starts on. Sizes are 0 to 65,535; a route starts with `/`. Busy when D-1 windows are open.
-- **Desktop.Context** · [`export let open_windows = func -> Window[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L314)
+- **Desktop.Context** · [`export let open_windows = func -> Window[list]`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L329)
   The windows open now, in the order they opened.
-- **Desktop.Context** · [`export let data_directory = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L317)
+- **Desktop.Context** · [`export let data_directory = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L332)
   The application's own data directory (`$XDG_DATA_HOME/<id>` on Linux).
-- **Desktop.Context** · [`export let notify = func(title: string, body: string) -> Result<NotifyOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L327)
+- **Desktop.Context** · [`export let notify = func(title: string, body: string) -> Result<NotifyOutcome>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L342)
   Shows a system notification: Shown, Denied (notifications turned off), or Unsupported (no notification service).
-- **Desktop.Context** · [`export let clipboard_write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L355)
+- **Desktop.Context** · [`export let clipboard_write = func(text: string) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L370)
   Replaces the clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_write`.
-- **Desktop.Context** · [`export let clipboard_read = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L370)
+- **Desktop.Context** · [`export let clipboard_read = func -> Result<string>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L385)
   The clipboard's text. CapabilityDenied unless the package grants `desktop.clipboard_read`.
-- **Desktop.Context** · [`export let next_event = func -> Result<Event>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L379)
+- **Desktop.Context** · [`export let next_event = func -> Result<Event>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L394)
   The next window event, waiting for one. UnexpectedEnd once the host has closed the channel.
-- **Desktop.Context** · [`export let run = func(dispatcher: Dispatcher) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L394)
-  Answers bridge calls with `dispatcher` and consumes events until the host ends the channel: after the last window closes, after `quit`, or when the host itself ends. A Closed event forgets its window; every other event is ignored. A dispatcher for another registry is InvalidInput.
-- **Desktop.Context** · [`export let quit = func(status: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L425)
+- **Desktop.Context** · [`export let run = func(dispatcher: Dispatcher) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L409)
+  Answers bridge calls with `dispatcher` and consumes events until the host ends the channel: after the last window closes, after `quit`, or when the host itself ends. A Closed event forgets its window; then every event goes to the dispatcher's `on_event` handler. A dispatcher for another registry is InvalidInput.
+- **Desktop.Context** · [`export let quit = func(status: int) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L442)
   Ends the application with `status` (0 to 255). The host closes every window and the channel; `quit` returns when the channel has ended, `run` then returns, and `run_application` answers `status`. Calls and events still in flight are dropped.
-- **Desktop.Context** · [`export let exit_status = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L447)
+- **Desktop.Context** · [`export let exit_status = func -> int`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L464)
   The process status the application ends with.
-- **Desktop.Context** · [`export let connect = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L450)
+- **Desktop.Context** · [`export let connect = func -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L467)
   Sends the Hello frame and waits for the host's. Used once by `run_application`.
-- **Desktop.Context** · [`export let window_request = func(service: string, handle: uint32, title: string, with_title: bool) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L480)
+- **Desktop.Context** · [`export let window_request = func(service: string, handle: uint32, title: string, with_title: bool) -> Result<Unit>`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L497)
   Runs a window request that answers nothing.
-- **Desktop.Context** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L685)
-- **Desktop** · [`export let run_application = func(registry: Registry, start: func(Context) -> Result<Unit>) -> program.ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L692)
+- **Desktop.Context** · [`export let.override to_string = func -> string`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L702)
+- **Desktop** · [`export let run_application = func(registry: Registry, start: func(Context) -> Result<Unit>) -> program.ExitCode`](https://github.com/Kayyo321/neura/blob/main/stdlib/std/desktop.nra#L709)
   Connects to the window host, runs `start`, and answers the process status: the status given to `quit`, 0 when `start` returns Ok, and 1 when it returns an error or the handshake fails. The error goes to standard error.
 <!-- END SOURCE API -->
 
@@ -122,12 +124,12 @@ The following section is the module's part of the standard-library design. The s
 
 ### 11.5 `Std.Desktop`
 
-*Since 0.3.0; Linux x86-64 qualified under Xvfb.* The native child of a desktop application ([Desktop design](https://github.com/Kayyo321/neura/blob/main/docs/design/Desktop030.md)). The child speaks to its window host over standard input and output with the framed protocol of the design, so a desktop child writes its log to standard error and never to standard output. It needs no capability group: the window host performs windows, notifications and the clipboard, and `neura build --native --deny-all` is the intended build of a child.
+*Since 0.3.0; Linux x86-64 qualified under Xvfb.* The native child of a desktop application ([Desktop design](https://github.com/Kayyo321/neura/blob/main/docs/design/Desktop030.md)). The child speaks to its window host over standard input and output with the framed protocol of the design, so a desktop child writes its log to standard error and never to standard output. It needs no capability group: the window host performs windows, notifications and the clipboard, and `neura build --native --deny-all --max-steps 18446744073709551615` is the intended build of a child. The child lives as long as the application, so its policy must not keep the default step limit of `neura run` (100,000,000 steps over the whole run), which a long-lived application reaches.
 
 - **`Registry(operations: string[list])`** lists the bridge operations, each 1 to 128 bytes of `a`–`z`, `0`–`9`, `.`, `_` and `-`, distinct and in ascending byte order (otherwise it traps with `invalid argument: registry operation ...`). `json()` is the canonical text of `registry.json`, `{"operations":[...],"schema":1}`, and `digest()` its SHA-256. The child sends this digest in its Hello; a host whose `registry.json` hashes differently ends the application before any operation runs.
 - **`Dispatcher(registry)`** with `add(operation, handler: func(Call) -> Result<uint8[list]>)` maps operations to implementations; adding an operation outside the registry, or twice, traps. A `Call` carries `id`, `window`, `operation`, `request` (the JSON bytes of the contract operation) and `deadline_nanos`, and nothing of the page.
 - **`run_application(registry, start: func(Context) -> Result<Unit>) -> ExitCode`** connects, calls `start`, and answers 0, the status given to `quit`, or 1 when the handshake or `start` fails.
-- **`Context`**: `open_window(title, width, height)` and `open_window_at(title, width, height, min_width, min_height, route)` answer `Result<Window>` (Busy past the 8 windows of D-1; the child keeps the default D-1 and D-3, and the window host refuses a package that raises them); `open_windows()`; `next_event() -> Result<Event>` with `Event` = `Closed(Window)`, `Focused(Window)`, `Blurred(Window)`, `Resized(Window, int, int)`, `MenuActivated(string, Window)`; `run(dispatcher)` answers bridge calls one at a time, in the order the host sent them, until the host ends the channel; `quit(status)`; `data_directory()`; `notify(title, body) -> Result<NotifyOutcome>` (`Shown`, `Denied`, `Unsupported`); `clipboard_write(text)` and `clipboard_read()`, which answer `CapabilityDenied` unless the package grants `desktop.clipboard_write` or `desktop.clipboard_read`.
+- **`Context`**: `open_window(title, width, height)` and `open_window_at(title, width, height, min_width, min_height, route)` answer `Result<Window>` (Busy past the 8 windows of D-1; the child keeps the default D-1 and D-3, and the window host refuses a package that raises them); `open_windows()`; `next_event() -> Result<Event>` with `Event` = `Closed(Window)`, `Focused(Window)`, `Blurred(Window)`, `Resized(Window, int, int)`, `MenuActivated(string, Window)`; `run(dispatcher)` answers bridge calls one at a time, in the order the host sent them, and passes events to the dispatcher's `on_event` handler, until the host ends the channel; `quit(status)`; `data_directory()`; `notify(title, body) -> Result<NotifyOutcome>` (`Shown`, `Denied`, `Unsupported`); `clipboard_write(text)` and `clipboard_read()`, which answer `CapabilityDenied` unless the package grants `desktop.clipboard_write` or `desktop.clipboard_read`.
 - **`Window`**: `handle`, `close()`, `focus()`, `set_title(title)`.
 - A handler's `Err` reaches the page as status 100 with the error's message; an operation without an implementation as status 13; a reply larger than D-3 as status 16 with no body. A trap in the child ends the application.
 

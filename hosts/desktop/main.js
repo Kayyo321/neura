@@ -204,6 +204,18 @@ const failurePage = '<!doctype html><html lang="en"><meta charset="utf-8"><title
     '<h1>Application unavailable</h1><p>The web bundle failed verification.</p></html>';
 const failureCsp = "default-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
+function escapeHtml(text) {
+    return text.replace(/[&<>"']/g, character => `&#${character.charCodeAt(0)};`);
+}
+
+// Shown once after a window's renderer ends abnormally. The link reloads the
+// window's start route, which is a fresh execution of the bundle.
+function stoppedPage(start) {
+    return '<!doctype html><html lang="en"><meta charset="utf-8"><title>Window stopped</title>' +
+        '<h1>This window stopped</h1><p>Its page ended unexpectedly. The application is still running.</p>' +
+        `<p><a id="neura-reload" href="${escapeHtml(start)}">Reload</a></p></html>`;
+}
+
 function response(body, status, csp, mediaType = 'text/plain', extra = {}) {
     return new Response(body, { status, headers: {
         'Content-Type': mediaType,
@@ -607,7 +619,9 @@ async function launchDesktopShell(configuration, {
     }
 }
 
-async function createDesktopWindow(bundle, applicationId, allowed, { openExternal, log, onWindow, frame = {} }) {
+async function createDesktopWindow(bundle, applicationId, allowed, {
+    openExternal, log, onWindow, onRendererGone, frame = {},
+}) {
     const { session, BrowserWindow, shell } = require('electron');
     const isolated = session.fromPartition(`neura-desktop-${randomUUID()}`, { cache: false });
     isolated.setPermissionCheckHandler(() => false);
@@ -622,12 +636,18 @@ async function createDesktopWindow(bundle, applicationId, allowed, { openExterna
     let window;
     let loaded = false;
     let integrityFailure = false;
+    let rendererStopped = false;
     isolated.protocol.handle('app', async request => {
         const url = parseUrl(request.url);
         const head = request.method === 'HEAD';
         if (!ownOrigin(url, applicationId)) return response(head ? null : 'Forbidden', 403, failureCsp);
         if (request.method !== 'GET' && request.method !== 'HEAD') {
             return response('Method not allowed', 405, failureCsp, 'text/plain', { Allow: 'GET, HEAD' });
+        }
+        if (rendererStopped && !integrityFailure) {
+            // The first document after a renderer ended is the static failure page.
+            rendererStopped = false;
+            return response(head ? null : stoppedPage(start), 200, failureCsp, 'text/html; charset=utf-8');
         }
         if (integrityFailure) {
             return url.pathname === '/'
@@ -705,6 +725,16 @@ async function createDesktopWindow(bundle, applicationId, allowed, { openExterna
     window.webContents.on('did-navigate', (_event, url) => rememberLocalPage(url));
     window.webContents.on('did-navigate-in-page', (_event, url, isMainFrame) => {
         if (isMainFrame) rememberLocalPage(url);
+    });
+    // A renderer that ends abnormally (a crash, a kill, or in future its NVM's
+    // trap) ends that window's page and state only. The window shows the
+    // failure page; its calls in flight are the caller's to cancel.
+    window.webContents.on('render-process-gone', (_event, details) => {
+        if (details.reason === 'clean-exit' || window.isDestroyed()) return;
+        log(`Desktop window renderer ended: ${details.reason}`);
+        onRendererGone?.(details);
+        rendererStopped = true;
+        window.loadURL(start).catch(() => {});
     });
     window.webContents.on('did-fail-load', (_event, _code, _description, url, isMainFrame) => {
         if (!isMainFrame || !loaded || ownOrigin(parseUrl(url), applicationId)) return;
@@ -1106,6 +1136,8 @@ async function runDesktopApplication(configuration, {
             let created;
             const window = await createDesktopWindow(bundle, applicationId, allowed, {
                 openExternal, log, frame: { title, width, height, minWidth, minHeight, route },
+                // The page's calls in flight are cancelled in the child; their replies are dropped.
+                onRendererGone: () => router.closeWindow(handle),
                 onWindow(value) {
                     created = value;
                     const contentsId = value.webContents.id;
@@ -1174,12 +1206,13 @@ async function runDesktopApplication(configuration, {
             const text = cursor.text();
             cursor.end();
             if (!capabilities.has('desktop.clipboard_write')) throw new DesktopServiceError(DesktopStatus.CapabilityDenied, 'denied');
-            clipboard().writeText(text);
+            // Electron 45 answers the clipboard asynchronously.
+            await clipboard().writeText(text);
         },
         async 'neura.desktop.clipboard.read'(cursor) {
             cursor.end();
             if (!capabilities.has('desktop.clipboard_read')) throw new DesktopServiceError(DesktopStatus.CapabilityDenied, 'denied');
-            return wireText(clipboard().readText());
+            return wireText(await clipboard().readText());
         },
         async 'neura.desktop.quit'(cursor) {
             const status = cursor.u32();

@@ -197,6 +197,8 @@ export let Desktop = module (
         export last registry: Registry;
         /// @brief The implementations added so far.
         let routes: Route[list] = new;
+        /// @brief Called by `Context.run` for every window event, in the order the host observed them.
+        let observer: func(Event) -> void = func(event: Event) {};
 
         /// @brief A dispatcher for `served`, with no implementation yet.
         export let init = func(served: Registry) {
@@ -211,6 +213,19 @@ export let Desktop = module (
             }
             routes.append(new Route(operation, handler));
             return instance;
+        };
+
+        /// @brief Has `Context.run` call `handler` with every window event, in the order the host observed them,
+        /// after its own handling (a Closed window is no longer open). Replaces an earlier handler.
+        export let on_event = func(handler: func(Event) -> void) -> Dispatcher {
+            observer = handler;
+            return instance;
+        };
+
+        /// @brief Passes `event` to the handler given to `on_event`. Used by `Context.run`.
+        #Hidden
+        export let notice = func(event: Event) {
+            observer(event);
         };
 
         /// @brief The status and reply bytes of `call`: 0 and the reply, or an error code and the UTF-8 message.
@@ -389,8 +404,8 @@ export let Desktop = module (
         };
 
         /// @brief Answers bridge calls with `dispatcher` and consumes events until the host ends the channel: after
-        /// the last window closes, after `quit`, or when the host itself ends. A Closed event forgets its window; every other
-        /// event is ignored. A dispatcher for another registry is InvalidInput.
+        /// the last window closes, after `quit`, or when the host itself ends. A Closed event forgets its window; then
+        /// every event goes to the dispatcher's `on_event` handler. A dispatcher for another registry is InvalidInput.
         export let run = func(dispatcher: Dispatcher) -> Result<Unit> {
             if (!dispatcher.registry.equals(registry)) {
                 return Result<Unit>.Err(failure(4, "the dispatcher serves another registry"));
@@ -411,7 +426,9 @@ export let Desktop = module (
                     }
                     send(wire.Return, body);
                 } else if (events.length > 0) {
+                    last event = events[0];
                     events.remove_at(0);
+                    dispatcher.notice(event);
                 } else {
                     receive();
                 }

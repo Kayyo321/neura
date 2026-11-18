@@ -7,17 +7,20 @@ let test = import:Std.Test;
 // The native side of the desktop channel without a host: the registry text and digest, and the dispatcher.
 // tests/desktop/bridge_test.js covers the frame codec against the window host with the real child.
 // The registry digest was computed with
-//   printf '%s' '{"operations":["fixture.echo","fixture.fail","fixture.open","fixture.quit","fixture.title","fixture.trap","fixture.unserved"],"schema":1}' | sha256sum
+//   printf '%s' '{"operations":["fixture.clipboard_read","fixture.clipboard_write","fixture.close","fixture.data_dir","fixture.echo","fixture.fail","fixture.focus","fixture.notify","fixture.open","fixture.open_many","fixture.quit","fixture.spin","fixture.title","fixture.trap","fixture.unserved"],"schema":1}' | sha256sum
 // and tests/desktop/bridge_test.js checks the same value against the window host's parser.
 let DesktopTests = module (
-    let fixture_ids = func -> string[list] => new(["fixture.echo", "fixture.fail", "fixture.open", "fixture.quit",
-        "fixture.title", "fixture.trap", "fixture.unserved"]);
+    let fixture_ids = func -> string[list] => new(["fixture.clipboard_read", "fixture.clipboard_write", "fixture.close",
+        "fixture.data_dir", "fixture.echo", "fixture.fail", "fixture.focus", "fixture.notify", "fixture.open",
+        "fixture.open_many", "fixture.quit", "fixture.spin", "fixture.title", "fixture.trap", "fixture.unserved"]);
 
     export let test_registry_text_and_digest = func() -> void {
         last registry = new desktop.Registry(fixture_ids());
-        test.assert_equal_string("{\"operations\":[\"fixture.echo\",\"fixture.fail\",\"fixture.open\",\"fixture.quit\","
-            + "\"fixture.title\",\"fixture.trap\",\"fixture.unserved\"],\"schema\":1}", registry.json());
-        test.assert_equal_string("c382c24eef75233e4501dc8bc8043df62f53406855f3870651b5c1e56c8bbcb0",
+        test.assert_equal_string("{\"operations\":[\"fixture.clipboard_read\",\"fixture.clipboard_write\",\"fixture.close\","
+            + "\"fixture.data_dir\",\"fixture.echo\",\"fixture.fail\",\"fixture.focus\",\"fixture.notify\",\"fixture.open\","
+            + "\"fixture.open_many\",\"fixture.quit\",\"fixture.spin\",\"fixture.title\",\"fixture.trap\",\"fixture.unserved\"],\"schema\":1}",
+            registry.json());
+        test.assert_equal_string("e32b18f656b3c56ca135d92a59bdafc5815ee28e14cbad10eaec78dc7b5f7a3d",
             hex.encode(registry.digest()));
         test.assert(registry.contains("fixture.echo"));
         test.assert(!registry.contains("fixture.missing"));
