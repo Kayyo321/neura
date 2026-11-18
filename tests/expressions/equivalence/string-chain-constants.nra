@@ -1,0 +1,23 @@
+// String chains in module-level and class static constants (docs/design/
+// Expressions030.md, Decisions taken in the implementation, step 5): a chain
+// over constants is a constant expression, as one written with + is.
+let console = import:Std.Io.Console;
+let program = import:Std.Program;
+
+let greeting = "Hello";
+let name = "Ada";
+let banner = greeting .. ", " .. name .. "!";
+let plus = greeting + ", " + name;
+
+let Holder = class (
+    export static let label = banner .. " [" .. name .. "]";
+);
+
+export let Main = module : program.Entry (
+    export let.override main = func(args: string[]) -> program.ExitCode {
+        console.print_line(banner);
+        console.print_line(plus);
+        console.print_line(Holder.label);
+        return program.ExitCode.Ok;
+    };
+);

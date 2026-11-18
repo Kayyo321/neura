@@ -509,6 +509,29 @@ NEURA_TEST(nir, task_files_are_rejected_when_malformed_or_newer) {
     conformance_bytes[6] = 12;
     expect_nir_error(conformance_bytes,
                      "invalid operation tag " + std::to_string(static_cast<int>(IrOp::ConformanceCall)));
+    // The 0.3.0 expression operations (docs/design/Expressions030.md) are
+    // written under 1.15; tags 70-72 belong to the lifetime milestone and
+    // are rejected here, and a 1.13 file cannot hold a concat text.
+    IrProgram chain = above;
+    chain.bodies.front().instructions.front().op = IrOp::ConcatText;
+    auto chain_bytes = write_nir(chain);
+    const auto at = static_cast<std::size_t>(difference.first - above_bytes.begin());
+    check_equal(static_cast<int>(chain_bytes[6]), static_cast<int>(nir_expressions_minor),
+                "a concat text is written under 1.15");
+    check_equal(static_cast<int>(chain_bytes[at]), 73, "the serialized ConcatText ordinal");
+    check(read_nir(chain_bytes, "chain").bodies.front().instructions.front().op == IrOp::ConcatText,
+          "a concat text reads back");
+    for (const auto reserved : {70, 71, 72}) {
+        auto invalid = chain_bytes;
+        invalid[at] = static_cast<std::uint8_t>(reserved);
+        expect_nir_error(invalid, "invalid operation tag " + std::to_string(reserved));
+    }
+    IrProgram both = chain;
+    both.bodies.front().instructions.push_back(conformance.bodies.front().instructions.front());
+    check_equal(static_cast<int>(write_nir(both)[6]), static_cast<int>(nir_expressions_minor),
+                "a conformance call beside a concat text keeps 1.15");
+    chain_bytes[6] = static_cast<std::uint8_t>(nir_records_minor);
+    expect_nir_error(chain_bytes, "invalid operation tag 73");
 
     // A file that claims an older minor cannot use the task operations: 1.8
     // has neither the tags nor the poll bit.
