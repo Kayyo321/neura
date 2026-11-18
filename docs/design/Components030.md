@@ -304,3 +304,29 @@ A program that passed an `ImmutableList` to another task or stored one as shared
 9. 64-bit integers are JSON numbers, with no string form.
 10. One contract version is served at a time; any breaking change needs a new `version`.
 11. `routing = "hash"` is the default for web targets.
+
+## A3 implementation record
+
+*Implemented* 2026-11-17 by autonomous agents, awaiting owner confirmation: steps 2 and 3, and the root half of step 4. Records, `new with`, named arguments, untyped lambda parameters and inference of type arguments are not on this branch, so the library is written with `#Immutable` classes, positional arguments and explicit type arguments, and the examples above stay fragments.
+
+| Edge case | Evidence |
+| --- | --- |
+| 1, 2, 3, 4, 5, 6, 7 | `tests/stdlib/ui-state` (`test_state_values`, `test_notifications`, `test_equality_suppresses`, `test_update_in_subscriber_is_queued`), `tests/ui/components/accepted.nra` |
+| 8, 9, 10, 11, 12, 48 | `tests/stdlib/ui-state` (`test_turn_renders_once`, `test_child_renders_alone`, `test_unmount_discards_events`, `test_coalescing`, `test_overflow`) on the model host |
+| 16, 17, 18, 43 | `tests/stdlib/frozen` (with a model-based test against a list), `tests/stdlib/frozen/traps/get-out-of-range.nra` |
+| 25, 26, 28, 29, 31 | `tests/ui/components`, `tests/ui/frozen`; the storage half of 31 in `tests/apps/frozen/storage.py` |
+| 44 | `tests/stdlib/ui-state/traps/update-loop.nra` |
+| 13 to 15, 19 to 24, 27, 30, 32 to 42, 45 to 47 | Not implemented: commands, codecs, contracts, `neura.http.fetch`, `E1010`, and the transfer of a `FrozenList` |
+
+### Decisions taken without the owner
+
+1. `#Frozen` also marks a class: every type argument it is given must be deeply immutable. `FrozenList` and `ui.State` carry it, so `Std.Ui` may write the tag too. A type parameter given as such an argument inherits the requirement, so the check reaches the outermost written argument; requirements do not cross a prebuilt `.nir` boundary.
+2. The frozen-storage check is an allow-list: after the one constructor assignment, from a fresh list or a local that was only filled, a `#Frozen` field may only be indexed for reading, measured, hashed or printed.
+3. `frozen.copy_of` takes an array and `frozen.copy_of_list` a list, because a generic function cannot be overloaded. `equals`, `hash_code`, `contains` and `index_of` exist for every `T` and compare with `===`.
+4. A `FrozenList` is not transferable in 0.3.0. NVR 1.5 admits no list in a transferable layout, and widening that is a format decision this lane did not take.
+5. `set` during a notification replaces the value at once and queues only the notification, so `get` always returns the latest value. Rounds are counted per outermost notification, which bounds every turn. A subscriber added during a round is first notified in the next.
+6. `equal:` is `ui.with_equality<T>(initial, same)`; `ui.component` takes `(state, render)` without `styles` until a stylesheet value exists.
+7. Mounting is `ui.mount(host, target, component)` over the `ui.Host` interface (`open`, `commit`, `wait`, `resynchronize`, `reset`, `close`); a commit carries the turn's renders as component and view pairs. `Std.Web.mount` keeps its final signature as a stub, and `desktop.mount` waits for the desktop window type.
+8. A change made between turns renders in the next turn. A faulted root ends `run`; `reset` asks the host to empty the root, renders every component again and lets `run` continue.
+9. An event is stale when its component has unmounted or its generation has changed; removing one listener of a still-mounted component is the host's part. The overflow notice is queued as a marker before the next accepted event, and the host resynchronizes controlled values when the marker's turn runs.
+10. When a commit is refused (`Invalid`), components mounted or unmounted by that turn's renders stay so; only the host keeps its previous view. A component embedded by two parents traps with `a component is mounted twice`.
